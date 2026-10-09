@@ -424,24 +424,30 @@ def arrange(sid):
     ws = f"name:{s['workspace']}"
     term = find(term_class(s))
     mc = find(MC_CLASS)
+    claude = find(claude_class(s))
     if cockpit_on():
         width, height, top, bottom = monitor_geometry()
         gap = max((width - ZEN_WIDTH) // 2, 200)
-        # Flush with the bar and the screen edges; the only gap is the one
-        # between each panel and Claude's column.
+        # Everything flush with the bar and the screen edges; the only gaps
+        # are between the panels and Claude's column. All three float so
+        # their borders sit outside them: the focus bars show on the sides,
+        # while the top and bottom edges hide under the bar and off-screen.
         y, h = top, height - top - bottom
         if not mc:
             open_term(MC_CLASS, "Mission Control", HOME, [SELF, "mc"])
             mc = wait_for(MC_CLASS)
-        for win, x in ((mc, 0), (term, width - gap + PAD)):
+        for win, x, w in ((mc, 0, gap - PAD), (term, width - gap + PAD, gap - PAD),
+                          (claude, gap, width - 2 * gap)):
             if win:
                 move_to(win["address"], ws)
-                place(win["address"], x, y, gap - PAD, h)
+                place(win["address"], x, y, w, h)
     else:
         for win in (mc, term):
             if win and win["workspace"]["name"] != HIDDEN:
                 move_to(win["address"], HIDDEN)
-    claude = find(claude_class(s))
+        # Back to tiled: alone on the workspace, the zen rule centers it.
+        if claude and claude["floating"]:
+            hypr(f'hl.dsp.window.float({{ window = "address:{claude["address"]}", action = "disable" }})')
     if claude:
         focus_window(claude["address"])
 
