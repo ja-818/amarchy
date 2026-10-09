@@ -40,7 +40,6 @@ Environment:
 State: ~/.local/state/amarchy/.
 """
 
-import curses
 import json
 import os
 import random
@@ -122,14 +121,27 @@ def wait_for(cls, title=None, timeout=10):
     return None
 
 
+# Set by a running Claude Code for its own children. When an agent drives
+# amarchy, they'd leak into the sessions it opens (e.g. turning off transcript
+# saving), so windows start without them.
+INHERITED_CLAUDE_ENV = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_CHILD_SESSION",
+                        "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT",
+                        "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS")
+
+
+def clean_env():
+    return {k: v for k, v in os.environ.items() if k not in INHERITED_CLAUDE_ENV}
+
+
 def spawn(argv):
     launcher = ["uwsm-app", "--"] if shutil.which("uwsm-app") else []
-    subprocess.Popen([*launcher, *argv], stdin=subprocess.DEVNULL,
+    subprocess.Popen([*launcher, *argv], stdin=subprocess.DEVNULL, env=clean_env(),
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def detach(argv):
-    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, env=clean_env(), stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
 
 
@@ -415,14 +427,16 @@ def arrange(sid):
     if cockpit_on():
         width, height, top, bottom = monitor_geometry()
         gap = max((width - ZEN_WIDTH) // 2, 200)
-        y, h = top + PAD, height - top - bottom - 2 * PAD
+        # Flush with the bar and the screen edges; the only gap is the one
+        # between each panel and Claude's column.
+        y, h = top, height - top - bottom
         if not mc:
             open_term(MC_CLASS, "Mission Control", HOME, [SELF, "mc"])
             mc = wait_for(MC_CLASS)
-        for win, x in ((mc, PAD), (term, width - gap + PAD)):
+        for win, x in ((mc, 0), (term, width - gap + PAD)):
             if win:
                 move_to(win["address"], ws)
-                place(win["address"], x, y, gap - 2 * PAD, h)
+                place(win["address"], x, y, gap - PAD, h)
     else:
         for win in (mc, term):
             if win and win["workspace"]["name"] != HIDDEN:
@@ -753,80 +767,149 @@ def cmd_hook(sid, state):
 
 # ------------------------------------------------------------------ mission control
 
-ICONS = {"working": ("●", "working"), "waiting": ("◆", "needs you"), "idle": ("○", "idle")}
+# Status icons and labels, drawn in the style of the Omarchy menu.
+STATES = {"working": ("󰔟", "working"), "waiting": ("󰂞", "needs you"), "idle": ("󰄬", "idle")}
+
+THEME_DEFAULTS = {"background": "#121212", "foreground": "#bebebe", "accent": "#e68e0d",
+                  "red": "#d35f5f", "dark_foreground": "#555555", "light_foreground": "#8a8a8d"}
 
 
-def mc(stdscr):
-    curses.curs_set(0)
-    curses.use_default_colors()
-    for i, c in enumerate((curses.COLOR_YELLOW, curses.COLOR_RED, curses.COLOR_GREEN, curses.COLOR_CYAN), 1):
-        curses.init_pair(i, c, -1)
-    color = {"working": 1, "waiting": 2, "idle": 3}
-    stdscr.timeout(1000)
+def theme_colors():
+    """The current Omarchy theme's palette (re-read, so theme switches apply live)."""
+    colors = dict(THEME_DEFAULTS)
+    f = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "omarchy/current/theme/colors.toml"
+    try:
+        for m in re.finditer(r'^\s*(\w+)\s*=\s*"(#[0-9a-fA-F]{6})"', f.read_text(), re.M):
+            colors[m[1]] = m[2]
+    except OSError:
+        pass
+    return colors
+
+
+def rgb(hex_color):
+    return tuple(int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def mix(a, b, t):
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(rgb(a), rgb(b)))
+
+
+def fg(hex_color):
+    return "\x1b[38;2;%d;%d;%dm" % rgb(hex_color)
+
+
+def bg(hex_color):
+    return "\x1b[48;2;%d;%d;%dm" % rgb(hex_color)
+
+
+RESET = "\x1b[0m"
+
+
+def mc_frame(ss, current, sel, confirm, msg, width, height):
+    """One screen of Mission Control as a list of (text, style) lines."""
+    c = theme_colors()
+    text, dim, faint = c["foreground"], c["light_foreground"], c["dark_foreground"]
+    # Same as the menu's selected row: foreground at 8% over the background.
+    selected_bg = bg(mix(c["background"], c["foreground"], 0.08))
+    state_color = {"working": c["accent"], "waiting": c["red"], "idle": faint}
+
+    def line(parts, fill=""):
+        """parts: (color, text) pairs; fill: background for the whole row."""
+        plain = "".join(s for _, s in parts)
+        body = "".join(f"{fill}{fg(col)}{s}" for col, s in parts)
+        return body + fill + " " * max(width - len(plain), 0) + RESET
+
+    head = [line([]),
+            line([(text, "  Mission Control…")]),
+            line([(faint, f"  {len(ss)} session{'s' if len(ss) != 1 else ''}"
+                          + "".join(f" · {n} {label}" for n, label in (
+                              (sum(s["status"] == "working" for s in ss), "working"),
+                              (sum(s["status"] == "waiting" for s in ss), "need you")) if n))]),
+            line([])]
+    rows = []
+    for i, s in enumerate(ss):
+        icon, label = STATES.get(s["status"], ("?", s["status"]))
+        chosen = i == sel
+        fill = selected_bg if chosen else ""
+        mark = (c["accent"], "▎") if s["id"] == current else (text, " ")
+        name_color = c["accent"] if chosen else text
+        sub = f"{s['repo']} · {label}"
+        rows.append([
+            line([], fill),
+            line([mark, (state_color.get(s["status"], text), f" {icon}  "), (name_color, s["name"])], fill),
+            line([(text, "     "), (dim, sub)], fill),
+            line([], fill),
+        ])
+    if not ss:
+        rows.append([line([(dim, "  No sessions yet.")]), line([]),
+                     line([(c["accent"], "  n"), (dim, "  start one")])])
+
+    if confirm:
+        foot = [line([(c["red"], f"  {confirm} has uncommitted changes.")]),
+                line([(text, "  Discard and close?  "), (c["accent"], "y"), (dim, " / n")])]
+    else:
+        keys = [("↵", "jump"), ("n", "new"), ("a", "add"), ("x", "close")]
+        foot = [line([(dim, f"  {msg}")]),
+                line([(faint, "  ")] + [p for k, v in keys for p in ((c["accent"], k), (faint, f" {v}   "))])]
+
+    # Scroll so the selected session stays visible.
+    room = max(height - len(head) - len(foot) - 1, 4)
+    per = 4
+    first = max(0, min(sel - room // per + 1, len(rows) - room // per)) if ss else 0
+    body = [l for r in rows[first:] for l in r][:room]
+    body += [line([])] * (room - len(body))
+    return head + body + [line([])] + foot
+
+
+def mission_control():
+    import select
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    out = sys.stdout
+    out.write("\x1b[?1049h\x1b[?25l")
+    tty.setcbreak(fd)
     sel, confirm, msg = 0, None, ""
-    while True:
-        ss = sessions()
-        current = current_session_id()
-        sel = max(0, min(sel, len(ss) - 1))
-        stdscr.erase()
-        h, w = stdscr.getmaxyx()
-        stdscr.addnstr(0, 1, "MISSION CONTROL", w - 2, curses.A_BOLD | curses.color_pair(4))
-        waiting = sum(1 for s in ss if s["status"] == "waiting")
-        working = sum(1 for s in ss if s["status"] == "working")
-        stdscr.addnstr(1, 1, f"{len(ss)} sessions · {working} working · {waiting} need you", w - 2, curses.A_DIM)
-        row, last_repo = 3, None
-        for i, s in enumerate(ss):
-            if row >= h - 4:
-                break
-            if s["repo"] != last_repo:
-                if last_repo is not None:
-                    row += 1
-                stdscr.addnstr(row, 1, s["repo"].upper(), w - 2, curses.A_BOLD)
-                row += 1
-                last_repo = s["repo"]
-            icon, label = ICONS.get(s["status"], ("?", s["status"]))
-            attr = curses.A_REVERSE if i == sel else 0
-            marker = "▸" if s["id"] == current else " "
-            line = f"{marker} {icon} {s['name']}"
-            stdscr.addnstr(row, 1, line.ljust(w - 2), w - 2, attr)
-            stdscr.addnstr(row, 3, icon, 1, attr | curses.color_pair(color.get(s["status"], 0)))
-            stdscr.addnstr(row, max(w - len(label) - 2, len(line) + 2), label, w - 2, attr | curses.A_DIM)
-            row += 1
-        if not ss:
-            stdscr.addnstr(3, 1, "No sessions. Press n to start one.", w - 2, curses.A_DIM)
-        if confirm:
-            stdscr.addnstr(h - 3, 1, f"{confirm} has uncommitted changes.", w - 2, curses.color_pair(2))
-            stdscr.addnstr(h - 2, 1, "Discard and close? y/n", w - 2, curses.A_BOLD)
-        else:
-            stdscr.addnstr(h - 3, 1, msg, w - 2, curses.A_DIM)
-            stdscr.addnstr(h - 2, 1, "↵ jump  n new  a add project  x close  j/k move", w - 2, curses.A_DIM)
-        stdscr.refresh()
+    try:
+        while True:
+            ss = sessions()
+            sel = max(0, min(sel, len(ss) - 1))
+            width, height = shutil.get_terminal_size()
+            frame = mc_frame(ss, current_session_id(), sel, confirm, msg, width, height)
+            out.write("\x1b[H" + "\n".join(frame[:height]) + "\x1b[J")
+            out.flush()
 
-        key = stdscr.getch()
-        if key == -1:
-            continue
-        ch = chr(key) if 0 <= key < 256 else ""
-        if confirm:
-            if ch == "y":
-                close(confirm, force=True)
-            confirm, msg = None, ""
-            continue
-        if ch in ("j",) or key == curses.KEY_DOWN:
-            sel += 1
-        elif ch in ("k",) or key == curses.KEY_UP:
-            sel -= 1
-        elif ch == "n":
-            detach([SELF, "new"])
-        elif ch == "a":
-            detach([SELF, "add"])
-        elif ss and (key in (10, 13, curses.KEY_ENTER)):
-            cmd_jump(ss[sel]["id"])
-        elif ss and ch == "x":
-            target = ss[sel]["id"]
-            if close(target):
-                confirm = target
-            else:
-                msg = f"closed {target}"
+            if not select.select([fd], [], [], 1.0)[0]:
+                continue
+            key = os.read(fd, 16).decode(errors="ignore")
+            if confirm:
+                if key == "y":
+                    close(confirm, force=True)
+                confirm, msg = None, ""
+                continue
+            if key in ("j", "\x1b[B"):
+                sel += 1
+            elif key in ("k", "\x1b[A"):
+                sel -= 1
+            elif key == "n":
+                detach([SELF, "new"])
+            elif key == "a":
+                detach([SELF, "add"])
+            elif ss and key in ("\r", "\n"):
+                cmd_jump(ss[sel]["id"])
+            elif ss and key == "x":
+                target = ss[sel]["id"]
+                if close(target):
+                    confirm = target
+                else:
+                    msg = f"closed {target}"
+    except KeyboardInterrupt:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        out.write("\x1b[?25h\x1b[?1049l")
+        out.flush()
 
 
 # ------------------------------------------------------------------ main
@@ -851,7 +934,7 @@ def main(argv):
     elif cmd == "list":
         print(json.dumps(sessions(), indent=2))
     elif cmd == "mc":
-        curses.wrapper(mc)
+        mission_control()
     elif cmd == "layout":
         cmd_layout()
     elif cmd == "hook" and len(args) == 2:

@@ -28,6 +28,10 @@ if cfg.cockpit_key ~= false then
   o.bind(mod .. " + " .. (cfg.cockpit_key or "M"), "amarchy cockpit", bin .. " cockpit")
 end
 
+-- Cockpit side panels (Mission Control, session terminals): no borders, so
+-- they read as part of the desktop rather than as windows.
+o.window("^amarchy\\.(mc|term\\..+)$", { border_size = 0 })
+
 -- The zen column for Claude on session workspaces; sized for your monitor by
 -- `amarchy layout` (runs on install and before every new session).
 local layout = home .. "/.local/state/amarchy/layout.lua"
