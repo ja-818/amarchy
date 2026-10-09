@@ -8,9 +8,10 @@
 --   mod          modifier for all keys (default "SUPER + ALT")
 --   open_key     go to the last session, or cycle to the next (default "A")
 --   new_key      start a session: pick a project (default "N")
---   cockpit_key  toggle Mission Control + terminal on a session (default "M");
+--   cockpit_key  toggle Mission Control + terminal on a session (default "Z");
 --                false skips the binding, e.g. to call `amarchy cockpit` from
 --                your own zen-mode key instead
+--   focus_key    give Mission Control the keyboard (default "M")
 --   bin          path to the amarchy script (default ~/.local/bin/amarchy)
 
 local cfg = amarchy or {}
@@ -25,7 +26,10 @@ if cfg.new_key ~= false then
   o.bind(mod .. " + " .. (cfg.new_key or "N"), "New amarchy session", bin .. " new")
 end
 if cfg.cockpit_key ~= false then
-  o.bind(mod .. " + " .. (cfg.cockpit_key or "M"), "amarchy cockpit", bin .. " cockpit")
+  o.bind(mod .. " + " .. (cfg.cockpit_key or "Z"), "amarchy cockpit", bin .. " cockpit")
+end
+if cfg.focus_key ~= false then
+  o.bind(mod .. " + " .. (cfg.focus_key or "M"), "amarchy Mission Control", bin .. " focus")
 end
 
 -- Focus in the cockpit uses Omarchy's own active/inactive border. The cockpit

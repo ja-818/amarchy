@@ -5,19 +5,25 @@ Parallel Claude Code agents, one Hyper key away. For [Omarchy](https://omarchy.o
 Every session is its own git worktree and branch off the latest `main`, with a
 Claude Code window and a dev terminal on its own Hyprland workspace. Claude sits
 alone in a centered zen column. One key toggles the cockpit: **Mission Control**
-slides into the left gap and the session's terminal into the right one.
+in the left gap, the session's terminal in the right one.
+
+Mission Control is drawn by the Omarchy shell itself (a shell plugin), so it
+looks like the Omarchy menu: same type, same rows, same selection. Sessions
+are grouped by what they need from you, and the one on screen wears
+Hyprland's focus border:
 
 ```
-┌──────────────┬───────────────────────────┬──────────────┐
-│ MISSION      │                           │ $ npm test   │
-│ CONTROL      │        claude             │              │
-│              │                           │              │
-│ MY-APP       │   (zen column, 900px)     │              │
-│ ▸ ● login    │                           │              │
-│   ◆ billing  │                           │              │
-│   ○ docs     │                           │              │
-└──────────────┴───────────────────────────┴──────────────┘
-  ● working   ◆ needs you   ○ idle
+ Amarchy…                    │                     │
+                             │                     │
+ NEEDS YOU                   │                     │ $ npm test
+ 󰂞  Fix the login redirect 4m│       claude        │
+    my-app · wobbly-bakunin  │  (zen column, 900)  │
+ WORKING                     │                     │
+ ⠋  Billing export       12m │                     │
+    my-app · smug-goldman    │                     │
+ IDLE                        │                     │
+ 󰄬  Docs pass             1h │                     │
+    docs · feral-kropotkin   │                     │
 ```
 
 ## Keys
@@ -26,17 +32,20 @@ slides into the left gap and the session's terminal into the right one.
 | --- | --- |
 | `Super+Alt+A` | Open amarchy: back to your last session, or cycle to the next one if you're already in a session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
-| `Super+Alt+M` | Toggle the cockpit on a session workspace. |
+| `Super+Alt+Z` | Toggle the cockpit on a session workspace. |
+| `Super+Alt+M` | Give Mission Control the keyboard: `j`/`k` move, `↵` jump, `n` new, `a` add project, `x` close, `Esc` back. |
+| `Super+Space` | **Amarchy** is in the Omarchy menu: sessions, new session, add project, close. |
 
-New session opens the Omarchy menu, so it looks and searches like Super+Space.
-The project list ends with **Add project**: pick one of your
-GitHub repos (searchable, most recently pushed first), paste a git URL, or start
-an empty project (optionally with a private GitHub repo), and the session starts
-right on it.
+The **Ⓐ in the bar** lights up when a session needs you; click it for your
+sessions, right click for a new one.
 
-In Mission Control: `↵` jump to a session, `n` new, `a` add project, `x` close (removes the
-worktree, asks first if it has uncommitted changes, deletes the branch if it
-was merged), `j`/`k` move.
+New session opens the Omarchy menu. The project list ends with **Add
+project**: pick one of your GitHub repos (searchable, most recently pushed
+first), paste a git URL, or start an empty project (optionally with a private
+GitHub repo), and the session starts right on it.
+
+Closing a session (`x`) removes its worktree, asks first if it has
+uncommitted changes, and deletes the branch if it was merged.
 
 Windows are disposable, like everywhere else in Omarchy. Close Claude or the
 terminal with `Super+W` (or let Claude exit) and the session just goes to sleep:
@@ -50,7 +59,7 @@ finishes its turn (via Claude Code hooks, nothing to configure).
 
 ## Install
 
-Needs Omarchy 4+ (Hyprland Lua config and the Omarchy menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
+Needs Omarchy 4+ (Hyprland Lua config, the Omarchy shell and menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
 and one of foot, kitty, alacritty or ghostty.
 
 ```sh
@@ -67,7 +76,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 `~/.config/hypr/hyprland.lua`:
 
 ```lua
-amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", cockpit_key = "M" }
+amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", cockpit_key = "Z", focus_key = "M" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -99,6 +108,8 @@ amarchy open                          go to the last session, or the next one if
 amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
 amarchy cockpit                       toggle Mission Control + terminal
+amarchy focus                         give Mission Control the keyboard
+amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy layout                        resize the zen column for the current monitor
 ```
 

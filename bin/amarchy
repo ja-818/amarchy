@@ -24,9 +24,12 @@ Sessions:
   amarchy jump <id>                     go to a session
   amarchy close [id] [--force]          close a session (current one if no id)
   amarchy cockpit                       toggle Mission Control + terminal
+  amarchy focus                         give Mission Control the keyboard (j/k, Enter, n, a, x, Esc)
+  amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 
 Plumbing:
-  amarchy mc                            run Mission Control (TUI)
+  amarchy ui                            state for the Omarchy shell plugin (JSON)
+  amarchy mc                            Mission Control as a terminal app (when the shell plugin isn't installed)
   amarchy layout                        resize the zen column for the current monitor
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle
 
@@ -69,6 +72,10 @@ MC_CLASS = f"{PREFIX}.mc"
 
 # Sessions created by the pre-release "factory" script keep their old window
 # classes and F: workspaces until they're closed.
+# The Omarchy shell plugin (omarchy/plugin in this repo) draws Mission Control
+# natively; without it, a terminal app (amarchy mc) stands in.
+SHELL_PLUGIN = HOME / ".config/omarchy/plugins/amarchy/manifest.json"
+
 LEGACY_STATE = HOME / ".local/state/jaken/factory"
 LEGACY_PREFIX = "factory"
 LEGACY_WS_PREFIX = "F:"
@@ -365,6 +372,17 @@ def cockpit_on():
     return COCKPIT.exists()
 
 
+def native_panel():
+    return SHELL_PLUGIN.exists() and os.environ.get("AMARCHY_PANEL") != "terminal" and shutil.which("omarchy-shell")
+
+
+def tell_shell(*args):
+    """Nudge the shell plugin so it redraws now instead of on its next poll."""
+    if native_panel():
+        subprocess.Popen(["omarchy-shell", "amarchy", *args], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def monitor_geometry():
     for m in json.loads(sh("hyprctl", "monitors", "-j").stdout or "[]"):
         if m.get("focused"):
@@ -433,7 +451,13 @@ def arrange(sid):
         # their borders sit outside them: the focus bars show on the sides,
         # while the top and bottom edges hide under the bar and off-screen.
         y, h = top, height - top - bottom
-        if not mc:
+        if native_panel():
+            # The shell draws Mission Control in the left gap; retire the
+            # terminal one if it's still around.
+            if mc:
+                hypr(f'hl.dsp.window.close({{ window = "address:{mc["address"]}" }})')
+            mc = None
+        elif not mc:
             open_term(MC_CLASS, "Mission Control", HOME, [SELF, "mc"])
             mc = wait_for(MC_CLASS)
         for win, x, w in ((mc, 0, gap - PAD), (term, width - gap + PAD, gap - PAD),
@@ -462,6 +486,7 @@ def cmd_cockpit():
         COCKPIT.touch()
     ensure_windows(session(sid))
     arrange(sid)
+    tell_shell("refresh")
     return 0
 
 
@@ -912,6 +937,40 @@ def session_view():
     return ss
 
 
+def cmd_ui():
+    """Everything the shell plugin draws, in one call."""
+    print(json.dumps({"cockpit": cockpit_on(), "zen_width": ZEN_WIDTH, "sessions": session_view()}))
+
+
+PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
+
+
+def cmd_pick(args):
+    """Choose a session in the Omarchy menu, then jump to it (or close it)."""
+    ss = session_view()
+    if not ss:
+        notify("amarchy", "No sessions yet. Start one with amarchy new.")
+        return 1
+    closing = bool(args) and args[0] == "close"
+    # Rows carry "project · session" as their subtext, which the menu hands
+    # back with the label, so identical task titles still pick the right one.
+    by_sub = {f"{s['repo']} · {s['name']}": s for s in ss}
+    options = [f"{PICK_ICONS.get(s['status'], '󰄬')}\t{s['task'] or 'new session'}\t{sub}"
+               for sub, s in by_sub.items()]
+    r = subprocess.run(["omarchy-menu-select", "Close session" if closing else "Sessions", *options],
+                       capture_output=True, text=True)
+    s = by_sub.get(r.stdout.strip().split("\t")[-1]) if r.returncode == 0 else None
+    if not s:
+        return 1
+    if closing:
+        err = close(s["id"])
+        if err:
+            notify("amarchy", f"{s['id']}: {err}. Close it from Mission Control to confirm.")
+    else:
+        cmd_jump(s["id"])
+    return 0
+
+
 def mc_frame(ss, current, sel, confirm, msg, width, height):
     """One screen of Mission Control. ss must already be in session_order."""
     c = theme_colors()
@@ -1074,6 +1133,21 @@ def main(argv):
         return cmd_cockpit()
     elif cmd == "list":
         print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
+    elif cmd == "focus":
+        # Hand Mission Control (the shell panel) the keyboard.
+        if not native_panel():
+            mc = find(MC_CLASS)
+            if mc:
+                focus_window(mc["address"])
+            return 0
+        if not cockpit_on() and current_session_id():
+            cmd_cockpit()
+            time.sleep(0.3)
+        return subprocess.run(["omarchy-shell", "amarchy", "focus"], stdout=subprocess.DEVNULL).returncode
+    elif cmd == "ui":
+        cmd_ui()
+    elif cmd == "pick":
+        return cmd_pick(args)
     elif cmd == "mc":
         mission_control()
     elif cmd == "layout":

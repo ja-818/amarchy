@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "amarchy",
+  "name": "Amarchy",
+  "version": "0.1.0",
+  "description": "Mission Control for amarchy sessions, drawn by the Omarchy shell, plus a bar widget.",
+  "author": "ja-818",
+  "kinds": ["panel", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "MissionControl.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Amarchy",
+    "description": "Your Claude Code sessions: rings when one needs you, opens Mission Control.",
+    "category": "AI",
+    "aliases": ["amarchy", "sessions"],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
