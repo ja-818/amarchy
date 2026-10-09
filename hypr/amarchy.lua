@@ -7,7 +7,7 @@
 --
 --   mod          modifier for all keys (default "SUPER + ALT")
 --   open_key     go to the last session, or cycle to the next (default "A")
---   new_key      start a session: pick a repo, name it (default "N")
+--   new_key      start a session: pick a project (default "N")
 --   cockpit_key  toggle Mission Control + terminal on a session (default "M");
 --                false skips the binding, e.g. to call `amarchy cockpit` from
 --                your own zen-mode key instead

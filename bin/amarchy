@@ -18,7 +18,7 @@ Projects (git repos directly inside AMARCHY_WORK):
   amarchy add                           add a project interactively
 
 Sessions:
-  amarchy new [project] [name]          create a session (prompts when args are missing)
+  amarchy new [project] [name]          create a session (menu without a project; name like swift-otter if omitted)
   amarchy list                          sessions as JSON
   amarchy open                          go to the last session, or the next one if in one
   amarchy jump <id>                     go to a session
@@ -43,6 +43,7 @@ State: ~/.local/state/amarchy/.
 import curses
 import json
 import os
+import random
 import re
 import shlex
 import shutil
@@ -517,6 +518,25 @@ def hook_settings(sid):
     }})
 
 
+ADJECTIVES = ("amber", "brisk", "calm", "clever", "cosmic", "crisp", "dusty", "eager", "fuzzy", "gentle",
+              "golden", "hidden", "jolly", "lucky", "mellow", "misty", "nimble", "quiet", "rapid", "rusty",
+              "silent", "silver", "sleepy", "snowy", "sunny", "swift", "tidy", "velvet", "wild", "witty")
+ANIMALS = ("badger", "beaver", "bison", "crane", "falcon", "ferret", "fox", "gecko", "heron", "ibis",
+           "koala", "lemur", "lynx", "marmot", "moose", "newt", "otter", "owl", "panda", "puffin",
+           "quail", "raven", "seal", "sloth", "stoat", "tapir", "toad", "walrus", "wombat", "yak")
+
+
+def auto_name(repo):
+    """A free branch name like "swift-otter", so a session needs no naming up front."""
+    taken = set(sh("git", "branch", "--format=%(refname:short)", cwd=WORK / repo).stdout.split())
+    taken |= {s["name"] for s in sessions() if s["repo"] == repo}
+    for _ in range(100):
+        name = f"{random.choice(ADJECTIVES)}-{random.choice(ANIMALS)}"
+        if name not in taken:
+            return name
+    return f"session-{int(time.time())}"
+
+
 def create(repo, name):
     repo_dir = WORK / repo
     name = slug(name)
@@ -566,12 +586,9 @@ def create(repo, name):
 
 
 def cmd_new(args):
-    repo = args[0] if args else None
-    name = args[1] if len(args) > 1 else None
-    if repo and name:
-        create(repo, name)
-        return
-    menu_new(repo)
+    repo = args[0] if args else menu_pick_project()
+    if repo:
+        create(repo, args[1] if len(args) > 1 else auto_name(repo))
 
 
 # ------------------------------------------------------------------ menus
@@ -607,18 +624,11 @@ def project_subtext(p):
     return f"{n} session{'s' if n != 1 else ''} · {where}" if n else where
 
 
-def menu_new(repo=None):
-    if not repo:
-        rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in projects()]
-        rows.append((ICON_ADD, ADD_PROJECT, "GitHub, git URL or new"))
-        repo = menu_select("New session", rows)
-        if repo == ADD_PROJECT:
-            repo = menu_add_project()
-    if not repo:
-        return
-    name = menu_input(f"Session name for {repo}")
-    if name:
-        create(repo, name)
+def menu_pick_project():
+    rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in projects()]
+    rows.append((ICON_ADD, ADD_PROJECT, "GitHub, git URL or new"))
+    repo = menu_select("New session", rows)
+    return menu_add_project() if repo == ADD_PROJECT else repo
 
 
 def menu_add_project():
