@@ -28,7 +28,12 @@ slides into the left gap and the session's terminal into the right one.
 | `Super+Alt+N` | New session: pick a repo, name it. Creates the worktree, branch, Claude and terminal. |
 | `Super+Alt+M` | Toggle the cockpit on a session workspace. |
 
-In Mission Control: `↵` jump to a session, `n` new, `x` close (removes the
+New session's project list ends with **+ Add project**: pick one of your
+GitHub repos (searchable, most recently pushed first), paste a git URL, or start
+an empty project (optionally with a private GitHub repo). Then name the session
+and you're in.
+
+In Mission Control: `↵` jump to a session, `n` new, `a` add project, `x` close (removes the
 worktree, asks first if it has uncommitted changes, deletes the branch if it
 was merged), `j`/`k` move.
 
@@ -69,14 +74,24 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 
 ## CLI
 
+Every action in the UI is a command, in the Omarchy spirit: anything you can
+do with a key, a script or an AI agent can do too. Commands print results to
+stdout (JSON with `--json`) and exit non-zero on failure.
+
 ```
-amarchy open                go to the last session, or the next one
-amarchy new [repo] [name]   create a session (prompts when args are missing)
-amarchy close [id]          close a session (current one if no id)
-amarchy jump <id>           go to a session
-amarchy cockpit             toggle Mission Control + terminal
-amarchy list                sessions as JSON
-amarchy layout              resize the zen column for the current monitor
+amarchy projects [--json]             your projects and their session counts
+amarchy projects --github [--json]    your GitHub repos (✓ = already added)
+amarchy add <owner/repo|git url>      clone a project (prints its path)
+amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
+amarchy add                           add a project interactively
+
+amarchy new [project] [name]          create a session (prompts when args are missing)
+amarchy list                          sessions as JSON
+amarchy open                          go to the last session, or the next one if in one
+amarchy jump <id>                     go to a session
+amarchy close [id] [--force]          close a session (current one if no id)
+amarchy cockpit                       toggle Mission Control + terminal
+amarchy layout                        resize the zen column for the current monitor
 ```
 
 Each new worktree is pre-trusted in `~/.claude.json` so Claude starts without

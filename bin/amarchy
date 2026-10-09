@@ -7,15 +7,28 @@ Claude sits alone in a centered zen column; the cockpit key toggles Mission
 Control into the left gap and the session's terminal into the right gap.
 Hidden windows wait on the special workspace "amarchy".
 
-  amarchy open                go to the last session, or the next one if already in one
-  amarchy new [repo] [name]   create a session (prompts when args are missing)
-  amarchy close [id]          close Claude + terminal, remove worktree (current if no id)
-  amarchy jump <id>           go to a session
-  amarchy cockpit             toggle Mission Control + terminal on a session workspace
-  amarchy list                print sessions as JSON
-  amarchy mc                  run Mission Control (TUI)
-  amarchy layout              regenerate the zen column rule for the current monitor
-  amarchy hook <id> <state>   Claude Code hook: record working/waiting/idle
+Every action in the UI is one of these commands, so scripts and agents can do
+anything you can. Commands print results to stdout and fail with a non-zero exit.
+
+Projects (git repos directly inside AMARCHY_WORK):
+  amarchy projects [--json]             your projects and their session counts
+  amarchy projects --github [--json]    your GitHub repos (✓ = already added)
+  amarchy add <owner/repo|git url>      clone a project (prints its path)
+  amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
+  amarchy add                           add a project interactively
+
+Sessions:
+  amarchy new [project] [name]          create a session (prompts when args are missing)
+  amarchy list                          sessions as JSON
+  amarchy open                          go to the last session, or the next one if in one
+  amarchy jump <id>                     go to a session
+  amarchy close [id] [--force]          close a session (current one if no id)
+  amarchy cockpit                       toggle Mission Control + terminal
+
+Plumbing:
+  amarchy mc                            run Mission Control (TUI)
+  amarchy layout                        resize the zen column for the current monitor
+  amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -167,6 +180,128 @@ def repos():
         return []
     return sorted(p.name for p in WORK.iterdir()
                   if not p.name.startswith(".") and (p / ".git").exists())
+
+
+def fail(msg):
+    print(f"amarchy: {msg}", file=sys.stderr)
+    return 1
+
+
+# ------------------------------------------------------------------ projects
+
+def github_slug(url):
+    """owner/repo (lowercased) for a GitHub remote URL, else None."""
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url or "")
+    return m.group(1).lower() if m else None
+
+
+def projects():
+    counts = {}
+    for s in sessions():
+        counts[s["repo"]] = counts.get(s["repo"], 0) + 1
+    out = []
+    for name in repos():
+        remote = sh("git", "remote", "get-url", "origin", cwd=WORK / name).stdout.strip()
+        out.append({"name": name, "path": str(WORK / name), "remote": remote,
+                    "sessions": counts.get(name, 0)})
+    return out
+
+
+def github_repos():
+    """Your GitHub repos (owned, collaborator, org), most recently pushed first.
+
+    None when gh is missing or not logged in."""
+    if not shutil.which("gh"):
+        return None
+    r = sh("gh", "api", "user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100",
+           "--jq", "[.[] | {name: .full_name, private, pushed: .pushed_at, description}]")
+    if r.returncode != 0:
+        return None
+    added = {github_slug(p["remote"]) for p in projects()}
+    rs = json.loads(r.stdout or "[]")
+    for repo in rs:
+        repo["added"] = repo["name"].lower() in added
+    return rs
+
+
+def add_project(source):
+    """Clone owner/repo, a GitHub URL or any git URL into AMARCHY_WORK.
+
+    Returns (name, error). Adding a project that's already there is not an error."""
+    source = source.strip()
+    url = f"https://github.com/{source}.git" if re.fullmatch(r"[\w.-]+/[\w.-]+", source) else source
+    name = re.sub(r"\.git$", "", re.split(r"[/:]", url.rstrip("/"))[-1])
+    if not name:
+        return None, f"can't tell the project name from {source!r}"
+    gh_slug = github_slug(url)
+    for p in projects():
+        if p["name"] == name and (not gh_slug or github_slug(p["remote"]) == gh_slug):
+            return name, None
+    dest = WORK / name
+    if dest.exists():
+        return None, f"{dest} already exists and isn't {source}"
+    WORK.mkdir(parents=True, exist_ok=True)
+    # Not captured: git's progress shows in the terminal (picker or CLI).
+    if subprocess.run(["git", "clone", url, str(dest)]).returncode != 0:
+        return None, f"git clone {url} failed"
+    return name, None
+
+
+def new_project(name, github=False):
+    """An empty git repo with one commit (worktrees need a base), optionally
+    pushed to a new private GitHub repo. Returns (name, error)."""
+    name = slug(name)
+    if not name:
+        return None, "the project needs a name"
+    dest = WORK / name
+    if dest.exists():
+        return None, f"{dest} already exists"
+    dest.mkdir(parents=True)
+    sh("git", "init", "--quiet", "-b", "main", cwd=dest)
+    sh("git", "commit", "--quiet", "--allow-empty", "-m", "Initial commit", cwd=dest)
+    if github:
+        r = sh("gh", "repo", "create", name, "--private", "--source", str(dest), "--push")
+        if r.returncode != 0:
+            return name, f"created {dest}, but gh repo create failed: {r.stderr.strip()[:200]}"
+    return name, None
+
+
+def cmd_add(args):
+    if not args:
+        open_term(PICKER_CLASS, "Add project", HOME, [SELF, "_picker", "add"])
+        return 0
+    if args[0] == "--new":
+        names = [a for a in args[1:] if not a.startswith("--")]
+        if not names:
+            return fail("usage: amarchy add --new <name> [--github]")
+        name, err = new_project(names[0], github="--github" in args)
+    else:
+        name, err = add_project(args[0])
+    if err:
+        return fail(err)
+    print(WORK / name)
+    return 0
+
+
+def cmd_projects(args):
+    if "--github" in args:
+        rs = github_repos()
+        if rs is None:
+            return fail("gh isn't installed or logged in (gh auth login)")
+        if "--json" in args:
+            print(json.dumps(rs, indent=2))
+        else:
+            for r in rs:
+                print(f"{'✓' if r['added'] else ' '} {r['name']}{'  (private)' if r['private'] else ''}")
+        return 0
+    ps = projects()
+    if "--json" in args:
+        print(json.dumps(ps, indent=2))
+    else:
+        for p in ps:
+            n = p["sessions"]
+            print(f"{p['name']:<30} {n} session{'s' if n != 1 else ''}  {p['remote']}")
+    return 0
 
 
 # ------------------------------------------------------------------ sessions
@@ -387,6 +522,9 @@ def create(repo, name):
     if session(sid):
         cmd_jump(sid)
         return sid
+    if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
+        notify("amarchy", f"{repo} has no commits yet. Commit something to branch off first.")
+        return None
     base = default_base(repo_dir)
     path = WORKTREES / repo / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,18 +570,61 @@ def cmd_new(args):
     open_term(PICKER_CLASS, "New session", HOME, [SELF, "_picker"])
 
 
-def gum(*args):
-    r = subprocess.run(["gum", *args], stdout=subprocess.PIPE, text=True)
+def gum(*args, items=None):
+    r = subprocess.run(["gum", *args], stdout=subprocess.PIPE, text=True,
+                       input="\n".join(items) if items is not None else None)
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def cmd_picker():
-    rs = repos()
-    if not rs:
-        print(f"No git repos in {WORK} yet. Clone one there first.")
-        time.sleep(3)
+def pause(msg):
+    print(msg)
+    time.sleep(3)
+
+
+ADD_PROJECT = "+ Add project"
+
+
+def pick_new_project():
+    """Picker flow for adding a project; returns its name, or None."""
+    how = gum("choose", "--header", "Add project", "From GitHub", "Git URL", "New empty project")
+    if how == "From GitHub":
+        print("Loading your GitHub repos…")
+        rs = github_repos()
+        if rs is None:
+            pause("gh isn't installed or logged in. Run: gh auth login")
+            return None
+        rows = [r["name"] for r in rs if not r["added"]]
+        if not rows:
+            pause("Every one of your GitHub repos is already added.")
+            return None
+        source = gum("filter", "--header", "Your GitHub repos (recently pushed first)",
+                     "--placeholder", "search…", items=rows)
+        name, err = add_project(source) if source else (None, None)
+    elif how == "Git URL":
+        source = gum("input", "--header", "Git URL or owner/repo", "--placeholder", "https://github.com/you/app")
+        name, err = add_project(source) if source else (None, None)
+    elif how == "New empty project":
+        name = gum("input", "--header", "Project name", "--placeholder", "city-builder")
+        if not name:
+            return None
+        github = subprocess.run(["gum", "confirm", "Also create a private GitHub repo?"]).returncode == 0
+        name, err = new_project(name, github)
+    else:
+        return None
+    if err:
+        pause(f"✗ {err}")
+    return name
+
+
+def cmd_picker(mode=None):
+    if mode == "add":
+        name = pick_new_project()
+        if name:
+            notify("amarchy", f"Added {name}")
         return
-    repo = gum("choose", "--header", "Project", *rs)
+    repo = gum("choose", "--header", "Project", *repos(), ADD_PROJECT)
+    if repo == ADD_PROJECT:
+        repo = pick_new_project()
     if not repo:
         return
     name = gum("input", "--header", f"Session name ({repo})", "--placeholder", "fix-login-bug")
@@ -578,7 +759,7 @@ def mc(stdscr):
             stdscr.addnstr(h - 2, 1, "Discard and close? y/n", w - 2, curses.A_BOLD)
         else:
             stdscr.addnstr(h - 3, 1, msg, w - 2, curses.A_DIM)
-            stdscr.addnstr(h - 2, 1, "↵ jump  n new  x close  j/k move", w - 2, curses.A_DIM)
+            stdscr.addnstr(h - 2, 1, "↵ jump  n new  a add project  x close  j/k move", w - 2, curses.A_DIM)
         stdscr.refresh()
 
         key = stdscr.getch()
@@ -596,6 +777,8 @@ def mc(stdscr):
             sel -= 1
         elif ch == "n":
             cmd_new([])
+        elif ch == "a":
+            cmd_add([])
         elif ss and (key in (10, 13, curses.KEY_ENTER)):
             cmd_jump(ss[sel]["id"])
         elif ss and ch == "x":
@@ -614,7 +797,11 @@ def main(argv):
     if cmd == "new":
         cmd_new(args)
     elif cmd == "_picker":
-        cmd_picker()
+        cmd_picker(*args[:1])
+    elif cmd == "add":
+        return cmd_add(args)
+    elif cmd == "projects":
+        return cmd_projects(args)
     elif cmd == "close":
         cmd_close(args)
     elif cmd == "open":
