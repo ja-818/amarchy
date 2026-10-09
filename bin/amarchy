@@ -19,7 +19,7 @@ Projects (git repos directly inside AMARCHY_WORK):
 
 Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-  amarchy list                          sessions as JSON
+  amarchy list [--compact]              sessions as JSON, most urgent first (task, age, current)
   amarchy open                          go to the last session, or the next one if in one
   amarchy jump <id>                     go to a session
   amarchy close [id] [--force]          close a session (current one if no id)
@@ -872,6 +872,46 @@ def age(sid):
     return "now"
 
 
+def saved_title(path):
+    """The title Claude Code gave the latest conversation in this folder (for
+    sessions whose window is closed)."""
+    projects = HOME / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(path))
+    logs = sorted(projects.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not logs:
+        return ""
+    title = ""
+    try:
+        with open(logs[0], errors="ignore") as f:
+            for row in f:
+                if '"ai-title"' in row or '"custom-title"' in row:
+                    try:
+                        d = json.loads(row)
+                    except ValueError:
+                        continue
+                    title = d.get("customTitle") or d.get("aiTitle") or title
+    except OSError:
+        return ""
+    return task_title(title)
+
+
+def session_view():
+    """Sessions as every UI shows them (Mission Control, the shell panel, the
+    bar widget, the Omarchy menu): most urgent first, with what each one is
+    about, how long it has been in its state, and which one is on screen."""
+    titles = {c["class"]: c["title"] for c in clients()}
+    current = current_session_id()
+    ss = sessions()
+    for s in ss:
+        s["awake"] = claude_class(s) in titles
+        if not s["awake"]:
+            s["status"] = "asleep"
+        s["task"] = task_title(titles.get(claude_class(s), "")) or saved_title(s["path"])
+        s["age"] = age(s["id"]) if s["status"] != "asleep" else ""
+        s["current"] = s["id"] == current
+    ss.sort(key=session_order)
+    return ss
+
+
 def mc_frame(ss, current, sel, confirm, msg, width, height):
     """One screen of Mission Control. ss must already be in session_order."""
     c = theme_colors()
@@ -1033,11 +1073,7 @@ def main(argv):
     elif cmd == "cockpit":
         return cmd_cockpit()
     elif cmd == "list":
-        open_classes = {c["class"] for c in clients()}
-        ss = sessions()
-        for s in ss:
-            s["awake"] = claude_class(s) in open_classes
-        print(json.dumps(ss, indent=2))
+        print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
     elif cmd == "mc":
         mission_control()
     elif cmd == "layout":
