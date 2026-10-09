@@ -802,6 +802,10 @@ def cmd_hook(sid, state):
 STATES = {"working": ("󰔟", "working"), "waiting": ("󰂞", "needs you"), "idle": ("󰄬", "idle"),
           "asleep": ("󰒲", "asleep · ↵ to wake")}
 
+# Braille spinner for working sessions, like the OpenClaw TUI's.
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPIN_EVERY = 0.1
+
 THEME_DEFAULTS = {"background": "#121212", "foreground": "#bebebe", "accent": "#e68e0d",
                   "red": "#d35f5f", "dark_foreground": "#555555", "light_foreground": "#8a8a8d"}
 
@@ -861,6 +865,8 @@ def mc_frame(ss, current, sel, confirm, msg, width, height):
     rows = []
     for i, s in enumerate(ss):
         icon, label = STATES.get(s["status"], ("?", s["status"]))
+        if s["status"] == "working":
+            icon = SPINNER[int(time.time() / SPIN_EVERY) % len(SPINNER)]
         chosen = i == sel
         fill = selected_bg if chosen else ""
         mark = (c["accent"], "▎") if s["id"] == current else (text, " ")
@@ -903,21 +909,28 @@ def mission_control():
     out.write("\x1b[?1049h\x1b[?25l")
     tty.setcbreak(fd)
     sel, confirm, msg = 0, None, ""
+    ss, current, read_at = [], None, 0.0
     try:
         while True:
-            ss = sessions()
-            open_classes = {c["class"] for c in clients()}
-            for s in ss:
-                if claude_class(s) not in open_classes:
-                    s["status"] = "asleep"
+            # Session data once a second (or right after a key); the screen
+            # redraws faster only while a spinner is turning.
+            if time.time() - read_at >= 1.0:
+                ss = sessions()
+                open_classes = {c["class"] for c in clients()}
+                for s in ss:
+                    if claude_class(s) not in open_classes:
+                        s["status"] = "asleep"
+                current, read_at = current_session_id(), time.time()
             sel = max(0, min(sel, len(ss) - 1))
             width, height = shutil.get_terminal_size()
-            frame = mc_frame(ss, current_session_id(), sel, confirm, msg, width, height)
+            frame = mc_frame(ss, current, sel, confirm, msg, width, height)
             out.write("\x1b[H" + "\n".join(frame[:height]) + "\x1b[J")
             out.flush()
 
-            if not select.select([fd], [], [], 1.0)[0]:
+            spinning = any(s["status"] == "working" for s in ss)
+            if not select.select([fd], [], [], SPIN_EVERY if spinning else 1.0)[0]:
                 continue
+            read_at = 0.0
             key = os.read(fd, 16).decode(errors="ignore")
             if confirm:
                 if key == "y":
