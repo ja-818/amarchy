@@ -24,6 +24,7 @@ slides into the left gap and the session's terminal into the right one.
 
 | Key | |
 | --- | --- |
+| `Super+Alt+A` | Open amarchy: back to your last session, or cycle to the next one if you're already in a session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a repo, name it. Creates the worktree, branch, Claude and terminal. |
 | `Super+Alt+M` | Toggle the cockpit on a session workspace. |
 
@@ -53,7 +54,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 `~/.config/hypr/hyprland.lua`:
 
 ```lua
-amarchy = { mod = "SUPER + ALT", new_key = "N", cockpit_key = "M" }
+amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", cockpit_key = "M" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -69,6 +70,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 ## CLI
 
 ```
+amarchy open                go to the last session, or the next one
 amarchy new [repo] [name]   create a session (prompts when args are missing)
 amarchy close [id]          close a session (current one if no id)
 amarchy jump <id>           go to a session

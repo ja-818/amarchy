@@ -3,9 +3,10 @@
 -- install.sh loads this from ~/.config/hypr/hyprland.lua. To change the keys,
 -- set a table named `amarchy` before the dofile line, e.g.
 --
---   amarchy = { mod = "MOD3", new_key = "N", cockpit_key = false }
+--   amarchy = { mod = "MOD3", open_key = "A", new_key = "N", cockpit_key = false }
 --
---   mod          modifier for both keys (default "SUPER + ALT")
+--   mod          modifier for all keys (default "SUPER + ALT")
+--   open_key     go to the last session, or cycle to the next (default "A")
 --   new_key      start a session: pick a repo, name it (default "N")
 --   cockpit_key  toggle Mission Control + terminal on a session (default "M");
 --                false skips the binding, e.g. to call `amarchy cockpit` from
@@ -17,6 +18,9 @@ local home = os.getenv("HOME")
 local mod = cfg.mod or "SUPER + ALT"
 local bin = cfg.bin or (home .. "/.local/bin/amarchy")
 
+if cfg.open_key ~= false then
+  o.bind(mod .. " + " .. (cfg.open_key or "A"), "Open amarchy", bin .. " open")
+end
 if cfg.new_key ~= false then
   o.bind(mod .. " + " .. (cfg.new_key or "N"), "New amarchy session", bin .. " new")
 end

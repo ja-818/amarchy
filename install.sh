@@ -56,6 +56,7 @@ fi
 hyprctl reload >/dev/null
 
 say "amarchy installed."
+echo "  Super+Alt+A  open amarchy (last session, or cycle to the next)"
 echo "  Super+Alt+N  new session (repos from ${AMARCHY_WORK:-~/Work})"
 echo "  Super+Alt+M  toggle the cockpit (Mission Control + terminal)"
 echo "Change the keys with an \`amarchy = { ... }\` table, see hypr/amarchy.lua."

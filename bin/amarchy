@@ -7,6 +7,7 @@ Claude sits alone in a centered zen column; the cockpit key toggles Mission
 Control into the left gap and the session's terminal into the right gap.
 Hidden windows wait on the special workspace "amarchy".
 
+  amarchy open                go to the last session, or the next one if already in one
   amarchy new [repo] [name]   create a session (prompts when args are missing)
   amarchy close [id]          close Claude + terminal, remove worktree (current if no id)
   amarchy jump <id>           go to a session
@@ -45,6 +46,7 @@ SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
 COCKPIT = STATE / "cockpit"
 LAYOUT = STATE / "layout.lua"
+LAST = STATE / "last"
 HIDDEN = "special:amarchy"
 SELF = str(Path(__file__).resolve())
 
@@ -305,8 +307,26 @@ def cmd_jump(sid):
     s = session(sid)
     if not s:
         return
+    LAST.write_text(sid)
     focus_workspace(s["workspace"])
     arrange(sid)
+
+
+def cmd_open():
+    """Go to amarchy: the last session you were in, or the next one when already
+    in a session. With no sessions yet, start one."""
+    ss = sessions()
+    if not ss:
+        cmd_new([])
+        return
+    ids = [s["id"] for s in ss]
+    current = current_session_id()
+    if current in ids:
+        sid = ids[(ids.index(current) + 1) % len(ids)]
+    else:
+        last = LAST.read_text().strip() if LAST.exists() else ""
+        sid = last if last in ids else ids[-1]
+    cmd_jump(sid)
 
 
 # ------------------------------------------------------------------ new / close
@@ -385,6 +405,7 @@ def create(repo, name):
          "prefix": PREFIX, "workspace": WS_PREFIX + sid}
     (SESSIONS / f"{sid}.json").write_text(json.dumps(s))
     (STATUS / sid).write_text("idle")
+    LAST.write_text(sid)
 
     set_trust(path, True)
     cmd_layout()
@@ -596,6 +617,8 @@ def main(argv):
         cmd_picker()
     elif cmd == "close":
         cmd_close(args)
+    elif cmd == "open":
+        cmd_open()
     elif cmd == "jump" and args:
         cmd_jump(args[0])
     elif cmd == "cockpit":
