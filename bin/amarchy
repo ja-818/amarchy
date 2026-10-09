@@ -18,7 +18,7 @@ Projects (git repos directly inside AMARCHY_WORK):
   amarchy add                           add a project interactively
 
 Sessions:
-  amarchy new [project] [name]          create a session (menu without a project; name like swift-otter if omitted)
+  amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
   amarchy list                          sessions as JSON
   amarchy open                          go to the last session, or the next one if in one
   amarchy jump <id>                     go to a session
@@ -518,20 +518,23 @@ def hook_settings(sid):
     }})
 
 
-ADJECTIVES = ("amber", "brisk", "calm", "clever", "cosmic", "crisp", "dusty", "eager", "fuzzy", "gentle",
-              "golden", "hidden", "jolly", "lucky", "mellow", "misty", "nimble", "quiet", "rapid", "rusty",
-              "silent", "silver", "sleepy", "snowy", "sunny", "swift", "tidy", "velvet", "wild", "witty")
-ANIMALS = ("badger", "beaver", "bison", "crane", "falcon", "ferret", "fox", "gecko", "heron", "ibis",
-           "koala", "lemur", "lynx", "marmot", "moose", "newt", "otter", "owl", "panda", "puffin",
-           "quail", "raven", "seal", "sloth", "stoat", "tapir", "toad", "walrus", "wombat", "yak")
+# Session names: a silly adjective and a famous anarchist, e.g. "wobbly-bakunin".
+ADJECTIVES = ("bewildered", "caffeinated", "chaotic", "cranky", "crunchy", "disgruntled", "feral",
+              "fluffy", "giddy", "grumpy", "jittery", "mischievous", "rowdy", "sassy", "sleepy",
+              "smug", "sneaky", "soggy", "spicy", "squeaky", "stubborn", "suspicious", "unbothered",
+              "unruly", "wobbly", "wonky", "zesty", "dramatic", "fancy", "rebellious")
+ANARCHISTS = ("bakunin", "berkman", "bookchin", "decleyre", "diogenes", "durruti", "godwin",
+              "goldman", "graeber", "kotoku", "kropotkin", "landauer", "magon", "makhno",
+              "malatesta", "michel", "parsons", "proudhon", "reclus", "rocker", "sacco", "stirner",
+              "tolstoy", "vanzetti", "ward", "ferrer", "steimer", "lum", "fabbri", "ito")
 
 
 def auto_name(repo):
-    """A free branch name like "swift-otter", so a session needs no naming up front."""
+    """A free branch name like "wobbly-bakunin", so a session needs no naming up front."""
     taken = set(sh("git", "branch", "--format=%(refname:short)", cwd=WORK / repo).stdout.split())
     taken |= {s["name"] for s in sessions() if s["repo"] == repo}
     for _ in range(100):
-        name = f"{random.choice(ADJECTIVES)}-{random.choice(ANIMALS)}"
+        name = f"{random.choice(ADJECTIVES)}-{random.choice(ANARCHISTS)}"
         if name not in taken:
             return name
     return f"session-{int(time.time())}"

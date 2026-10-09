@@ -25,7 +25,7 @@ slides into the left gap and the session's terminal into the right one.
 | Key | |
 | --- | --- |
 | `Super+Alt+A` | Open amarchy: back to your last session, or cycle to the next one if you're already in a session. Starts a new one if there are none. |
-| `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch (named like `swift-otter`), Claude and a terminal. |
+| `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Super+Alt+M` | Toggle the cockpit on a session workspace. |
 
 New session opens the Omarchy menu, so it looks and searches like Super+Space.
@@ -86,7 +86,7 @@ amarchy add <owner/repo|git url>      clone a project (prints its path)
 amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
 amarchy add                           add a project interactively
 
-amarchy new [project] [name]          create a session (menu without a project; name like swift-otter if omitted)
+amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
 amarchy list                          sessions as JSON
 amarchy open                          go to the last session, or the next one if in one
 amarchy jump <id>                     go to a session
