@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+"""amarchy: parallel Claude Code sessions, one git worktree each, as part of the desktop.
+
+Every session is a branch + worktree off the latest main, with a Claude Code
+window and a dev terminal, living on its own Hyprland workspace "A:<id>".
+Claude sits alone in a centered zen column; the cockpit key toggles Mission
+Control into the left gap and the session's terminal into the right gap.
+Hidden windows wait on the special workspace "amarchy".
+
+  amarchy new [repo] [name]   create a session (prompts when args are missing)
+  amarchy close [id]          close Claude + terminal, remove worktree (current if no id)
+  amarchy jump <id>           go to a session
+  amarchy cockpit             toggle Mission Control + terminal on a session workspace
+  amarchy list                print sessions as JSON
+  amarchy mc                  run Mission Control (TUI)
+  amarchy layout              regenerate the zen column rule for the current monitor
+  amarchy hook <id> <state>   Claude Code hook: record working/waiting/idle
+
+Environment:
+  AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
+  AMARCHY_WORKTREES    where worktrees go (default $AMARCHY_WORK/.worktrees/<repo>/<name>)
+  AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
+  AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
+  AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
+
+State: ~/.local/state/amarchy/.
+"""
+
+import curses
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+WORK = Path(os.environ.get("AMARCHY_WORK", HOME / "Work")).expanduser()
+WORKTREES = Path(os.environ.get("AMARCHY_WORKTREES", WORK / ".worktrees")).expanduser()
+STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy"
+SESSIONS = STATE / "sessions"
+STATUS = STATE / "status"
+COCKPIT = STATE / "cockpit"
+LAYOUT = STATE / "layout.lua"
+HIDDEN = "special:amarchy"
+SELF = str(Path(__file__).resolve())
+
+PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
+WS_PREFIX = "A:"            # session workspaces: A:<id>
+MC_CLASS = f"{PREFIX}.mc"
+PICKER_CLASS = f"{PREFIX}.picker"
+
+# Sessions created by the pre-release "factory" script keep their old window
+# classes and F: workspaces until they're closed.
+LEGACY_STATE = HOME / ".local/state/jaken/factory"
+LEGACY_PREFIX = "factory"
+LEGACY_WS_PREFIX = "F:"
+
+ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
+CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
+TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
+PAD = 8
+
+
+# ------------------------------------------------------------------ helpers
+
+def sh(*args, check=False, cwd=None):
+    return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
+
+
+def notify(title, body=""):
+    if shutil.which("omarchy-notification-send"):
+        sh("omarchy-notification-send", "-g", "󰡨", title, body)
+    else:
+        sh("notify-send", title, body)
+
+
+def hypr(expr):
+    sh("hyprctl", "dispatch", expr)
+
+
+def clients():
+    return json.loads(sh("hyprctl", "clients", "-j").stdout or "[]")
+
+
+def active_workspace():
+    return json.loads(sh("hyprctl", "activeworkspace", "-j").stdout or "{}")
+
+
+def find(cls, title=None):
+    for c in clients():
+        if c["class"] == cls and (title is None or c["title"] == title):
+            return c
+    return None
+
+
+def wait_for(cls, title=None, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        c = find(cls, title)
+        if c:
+            return c
+        time.sleep(0.15)
+    return None
+
+
+def spawn(argv):
+    launcher = ["uwsm-app", "--"] if shutil.which("uwsm-app") else []
+    subprocess.Popen([*launcher, *argv], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def terminal():
+    choice = os.environ.get("AMARCHY_TERMINAL")
+    if choice:
+        return choice
+    return next((t for t in TERMINALS if shutil.which(t)), "foot")
+
+
+def term_argv(cls, title, cwd, cmd=()):
+    """A terminal window with a given Wayland app-id (that's how we track windows)."""
+    t = terminal()
+    if t == "kitty":
+        return ["kitty", "--class", cls, "--title", title, "--directory", str(cwd), *cmd]
+    if t == "alacritty":
+        return ["alacritty", "--class", cls, "--title", title, "--working-directory", str(cwd),
+                *(["-e", *cmd] if cmd else [])]
+    if t == "ghostty":
+        return ["ghostty", f"--class={cls}", f"--title={title}", f"--working-directory={cwd}",
+                "--gtk-single-instance=false", *(["-e", *cmd] if cmd else [])]
+    return ["foot", "--app-id", cls, "--title", title, "-D", str(cwd), *cmd]
+
+
+def open_term(cls, title, cwd, cmd=()):
+    spawn(term_argv(cls, title, cwd, cmd))
+
+
+def move_to(addr, workspace):
+    hypr(f'hl.dsp.window.move({{ window = "address:{addr}", workspace = "{workspace}", follow = false }})')
+
+
+def place(addr, x, y, w, h):
+    hypr(f'hl.dsp.window.float({{ window = "address:{addr}", action = "enable" }})')
+    hypr(f'hl.dsp.window.resize({{ window = "address:{addr}", x = {w}, y = {h} }})')
+    hypr(f'hl.dsp.window.move({{ window = "address:{addr}", x = {x}, y = {y} }})')
+
+
+def focus_workspace(name):
+    hypr(f'hl.dsp.focus({{ workspace = "name:{name}" }})')
+
+
+def focus_window(addr):
+    hypr(f'hl.dsp.focus({{ window = "address:{addr}" }})')
+
+
+def slug(text):
+    return re.sub(r"[^a-z0-9-]+", "-", text.strip().lower()).strip("-")[:40]
+
+
+def repos():
+    if not WORK.is_dir():
+        return []
+    return sorted(p.name for p in WORK.iterdir()
+                  if not p.name.startswith(".") and (p / ".git").exists())
+
+
+# ------------------------------------------------------------------ sessions
+
+def with_defaults(s):
+    s.setdefault("prefix", PREFIX)
+    s.setdefault("workspace", WS_PREFIX + s["id"])
+    return s
+
+
+def sessions():
+    out = []
+    for f in sorted(SESSIONS.glob("*.json")):
+        try:
+            s = with_defaults(json.loads(f.read_text()))
+        except (ValueError, KeyError):
+            continue
+        st = STATUS / s["id"]
+        s["status"] = st.read_text().strip() if st.exists() else "idle"
+        out.append(s)
+    return out
+
+
+def session(sid):
+    f = SESSIONS / f"{sid}.json"
+    return with_defaults(json.loads(f.read_text())) if f.exists() else None
+
+
+def claude_class(s):
+    return f"{s['prefix']}.claude.{s['id']}"
+
+
+def term_class(s):
+    return f"{s['prefix']}.term.{s['id']}"
+
+
+def current_session_id():
+    name = active_workspace().get("name", "")
+    return next((s["id"] for s in sessions() if s["workspace"] == name), None)
+
+
+def cockpit_on():
+    return COCKPIT.exists()
+
+
+def monitor_geometry():
+    for m in json.loads(sh("hyprctl", "monitors", "-j").stdout or "[]"):
+        if m.get("focused"):
+            scale = m["scale"]
+            _, top, _, bottom = (m.get("reserved") or [0, 0, 0, 0])
+            return int(m["width"] / scale), int(m["height"] / scale), top, bottom
+    return 1728, 1085, 35, 0
+
+
+def migrate_legacy():
+    """Adopt sessions from the pre-release "factory" script, once."""
+    if not (LEGACY_STATE / "sessions").is_dir() or SESSIONS.exists():
+        return
+    SESSIONS.mkdir(parents=True, exist_ok=True)
+    STATUS.mkdir(parents=True, exist_ok=True)
+    for f in (LEGACY_STATE / "sessions").glob("*.json"):
+        s = json.loads(f.read_text())
+        s.update(prefix=LEGACY_PREFIX, workspace=LEGACY_WS_PREFIX + s["id"])
+        (SESSIONS / f.name).write_text(json.dumps(s))
+        st = LEGACY_STATE / "status" / s["id"]
+        if st.exists():
+            (STATUS / s["id"]).write_text(st.read_text())
+    if (LEGACY_STATE / "cockpit").exists():
+        COCKPIT.touch()
+    old_mc = find(f"{LEGACY_PREFIX}.mc")
+    if old_mc:
+        hypr(f'hl.dsp.window.close({{ window = "address:{old_mc["address"]}" }})')
+    LEGACY_STATE.rename(LEGACY_STATE.with_name("factory.migrated"))
+
+
+# ------------------------------------------------------------------ layout
+
+def cmd_layout():
+    """Write the Hyprland rule that keeps a lone Claude window in a centered column.
+
+    Loaded by hypr/amarchy.lua; only rewritten (and Hyprland reloaded) on change."""
+    width, *_ = monitor_geometry()
+    side = max((width - ZEN_WIDTH) // 2, 0)
+    prefixes = {WS_PREFIX} | {s["workspace"][:2] for s in sessions()}
+    rules = "".join(
+        f'hl.workspace_rule({{ workspace = "n[s:{p}] w[t1]", '
+        f'gaps_out = {{ top = 0, right = {side}, bottom = 0, left = {side} }} }})\n'
+        for p in sorted(prefixes))
+    text = f"-- Generated by `amarchy layout` ({width}px wide monitor, {ZEN_WIDTH}px column)\n{rules}"
+    if LAYOUT.exists() and LAYOUT.read_text() == text:
+        return
+    STATE.mkdir(parents=True, exist_ok=True)
+    LAYOUT.write_text(text)
+    sh("hyprctl", "reload")
+
+
+def arrange(sid):
+    """Put the cockpit windows where the current mode says they belong."""
+    s = session(sid)
+    if not s:
+        return
+    ws = f"name:{s['workspace']}"
+    term = find(term_class(s))
+    mc = find(MC_CLASS)
+    if cockpit_on():
+        width, height, top, bottom = monitor_geometry()
+        gap = max((width - ZEN_WIDTH) // 2, 200)
+        y, h = top + PAD, height - top - bottom - 2 * PAD
+        if not mc:
+            open_term(MC_CLASS, "Mission Control", HOME, [SELF, "mc"])
+            mc = wait_for(MC_CLASS)
+        for win, x in ((mc, PAD), (term, width - gap + PAD)):
+            if win:
+                move_to(win["address"], ws)
+                place(win["address"], x, y, gap - 2 * PAD, h)
+    else:
+        for win in (mc, term):
+            if win and win["workspace"]["name"] != HIDDEN:
+                move_to(win["address"], HIDDEN)
+    claude = find(claude_class(s))
+    if claude:
+        focus_window(claude["address"])
+
+
+def cmd_cockpit():
+    sid = current_session_id()
+    if not sid:
+        return 1
+    if cockpit_on():
+        COCKPIT.unlink()
+    else:
+        COCKPIT.touch()
+    arrange(sid)
+    return 0
+
+
+def cmd_jump(sid):
+    s = session(sid)
+    if not s:
+        return
+    focus_workspace(s["workspace"])
+    arrange(sid)
+
+
+# ------------------------------------------------------------------ new / close
+
+def default_base(repo_dir):
+    if sh("git", "remote", cwd=repo_dir).stdout.strip():
+        sh("git", "fetch", "--quiet", "origin", cwd=repo_dir)
+        head = sh("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=repo_dir).stdout.strip()
+        if head:
+            return head
+        for b in ("origin/main", "origin/master"):
+            if sh("git", "rev-parse", "--verify", "--quiet", b, cwd=repo_dir).returncode == 0:
+                return b
+    for b in ("main", "master"):
+        if sh("git", "rev-parse", "--verify", "--quiet", b, cwd=repo_dir).returncode == 0:
+            return b
+    return "HEAD"
+
+
+def set_trust(path, trusted):
+    """Pre-accept (or forget) Claude Code's per-folder trust prompt for a worktree.
+
+    Written atomically; ~/.claude.json is shared with running Claude processes."""
+    cfg = HOME / ".claude.json"
+    try:
+        data = json.loads(cfg.read_text())
+    except (OSError, ValueError):
+        return
+    projects = data.setdefault("projects", {})
+    if trusted:
+        projects.setdefault(str(path), {})["hasTrustDialogAccepted"] = True
+    else:
+        projects.pop(str(path), None)
+    tmp = cfg.with_name(".claude.json.amarchy-tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, cfg)
+
+
+def hook_settings(sid):
+    def h(state):
+        return [{"hooks": [{"type": "command", "command": f"{shlex.quote(SELF)} hook {sid} {state}"}]}]
+    return json.dumps({"hooks": {
+        "SessionStart": h("idle"),
+        "UserPromptSubmit": h("working"),
+        "PreToolUse": h("working"),
+        "Notification": h("waiting"),
+        "Stop": h("idle"),
+    }})
+
+
+def create(repo, name):
+    repo_dir = WORK / repo
+    name = slug(name)
+    if not name or not (repo_dir / ".git").exists():
+        notify("amarchy", f"Can't create session: bad repo or name ({repo}/{name})")
+        return None
+    sid = f"{repo}-{name}"
+    if session(sid):
+        cmd_jump(sid)
+        return sid
+    base = default_base(repo_dir)
+    path = WORKTREES / repo / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    r = sh("git", "worktree", "add", "-b", name, str(path), base, cwd=repo_dir)
+    if r.returncode != 0:
+        # Branch already exists (e.g. a kept, unmerged one): reuse it.
+        r = sh("git", "worktree", "add", str(path), name, cwd=repo_dir)
+    if r.returncode != 0:
+        notify("amarchy", f"git worktree failed: {r.stderr.strip()[:200]}")
+        return None
+
+    SESSIONS.mkdir(parents=True, exist_ok=True)
+    STATUS.mkdir(parents=True, exist_ok=True)
+    s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": base,
+         "path": str(path), "created": int(time.time()),
+         "prefix": PREFIX, "workspace": WS_PREFIX + sid}
+    (SESSIONS / f"{sid}.json").write_text(json.dumps(s))
+    (STATUS / sid).write_text("idle")
+
+    set_trust(path, True)
+    cmd_layout()
+    focus_workspace(s["workspace"])
+    open_term(claude_class(s), f"amarchy:{sid}", path,
+              ["claude", *CLAUDE_ARGS, "--settings", hook_settings(sid)])
+    open_term(term_class(s), f"amarchy:{sid}:term", path)
+    for cls in (claude_class(s), term_class(s)):
+        win = wait_for(cls)
+        if win:
+            move_to(win["address"], f"name:{s['workspace']}")
+    arrange(sid)
+    notify("amarchy", f"{repo} · {name} is ready (branch off {base})")
+    return sid
+
+
+def cmd_new(args):
+    repo = args[0] if args else None
+    name = args[1] if len(args) > 1 else None
+    if repo and name:
+        create(repo, name)
+        return
+    # Interactive: run the picker in a small floating terminal.
+    open_term(PICKER_CLASS, "New session", HOME, [SELF, "_picker"])
+
+
+def gum(*args):
+    r = subprocess.run(["gum", *args], stdout=subprocess.PIPE, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def cmd_picker():
+    rs = repos()
+    if not rs:
+        print(f"No git repos in {WORK} yet. Clone one there first.")
+        time.sleep(3)
+        return
+    repo = gum("choose", "--header", "Project", *rs)
+    if not repo:
+        return
+    name = gum("input", "--header", f"Session name ({repo})", "--placeholder", "fix-login-bug")
+    if not name:
+        return
+    print(f"Creating {repo} · {slug(name)} …")
+    # Detach so this picker window can close while windows get arranged.
+    subprocess.Popen([SELF, "new", repo, name], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+
+
+def dirty(path):
+    return bool(sh("git", "status", "--porcelain", cwd=path).stdout.strip())
+
+
+def close(sid, force=False):
+    """Close Claude and the terminal, remove the worktree, drop the branch if merged.
+
+    Returns an error string instead of closing when the worktree has
+    uncommitted changes and force is False."""
+    s = session(sid)
+    if not s:
+        return None
+    path = Path(s["path"])
+    if path.exists() and dirty(path) and not force:
+        return "uncommitted changes"
+    was_current = current_session_id() == sid
+    for cls in (claude_class(s), term_class(s)):
+        win = find(cls)
+        if win:
+            hypr(f'hl.dsp.window.close({{ window = "address:{win["address"]}" }})')
+    time.sleep(0.5)
+    repo_dir = WORK / s["repo"]
+    sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
+    sh("git", "worktree", "prune", cwd=repo_dir)
+    kept = sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
+    (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
+    (STATUS / sid).unlink(missing_ok=True)
+    set_trust(path, False)
+    # Don't strand Mission Control on the emptied workspace: follow the cockpit
+    # to the next session, or tuck it away when none are left.
+    if was_current:
+        rest = sessions()
+        if rest:
+            cmd_jump(rest[-1]["id"])
+        else:
+            mc = find(MC_CLASS)
+            if mc:
+                move_to(mc["address"], HIDDEN)
+    note = f"branch {s['branch']} kept (not merged)" if kept else "branch deleted"
+    notify("amarchy", f"Closed {s['repo']} · {s['name']} ({note})")
+    return None
+
+
+def cmd_close(args):
+    sid = args[0] if args and not args[0].startswith("-") else current_session_id()
+    if not sid:
+        return
+    err = close(sid, force="--force" in args)
+    if err:
+        notify("amarchy", f"{sid}: {err}. Close it from Mission Control to confirm.")
+
+
+def cmd_hook(sid, state):
+    # Claude Code passes the event JSON on stdin; we only need the state.
+    try:
+        sys.stdin.read()
+    except Exception:
+        pass
+    s = session(sid)
+    if not s:
+        return
+    prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
+    (STATUS / sid).write_text(state)
+    if state == prev:
+        return
+    claude = find(claude_class(s))
+    focused = claude and claude.get("focusHistoryID") == 0
+    if not focused:
+        if state == "waiting":
+            notify(f"{sid} needs you", "Claude is waiting for input")
+        elif state == "idle" and prev == "working":
+            notify(f"{sid} is done", "Claude finished its turn")
+
+
+# ------------------------------------------------------------------ mission control
+
+ICONS = {"working": ("●", "working"), "waiting": ("◆", "needs you"), "idle": ("○", "idle")}
+
+
+def mc(stdscr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    for i, c in enumerate((curses.COLOR_YELLOW, curses.COLOR_RED, curses.COLOR_GREEN, curses.COLOR_CYAN), 1):
+        curses.init_pair(i, c, -1)
+    color = {"working": 1, "waiting": 2, "idle": 3}
+    stdscr.timeout(1000)
+    sel, confirm, msg = 0, None, ""
+    while True:
+        ss = sessions()
+        current = current_session_id()
+        sel = max(0, min(sel, len(ss) - 1))
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        stdscr.addnstr(0, 1, "MISSION CONTROL", w - 2, curses.A_BOLD | curses.color_pair(4))
+        waiting = sum(1 for s in ss if s["status"] == "waiting")
+        working = sum(1 for s in ss if s["status"] == "working")
+        stdscr.addnstr(1, 1, f"{len(ss)} sessions · {working} working · {waiting} need you", w - 2, curses.A_DIM)
+        row, last_repo = 3, None
+        for i, s in enumerate(ss):
+            if row >= h - 4:
+                break
+            if s["repo"] != last_repo:
+                if last_repo is not None:
+                    row += 1
+                stdscr.addnstr(row, 1, s["repo"].upper(), w - 2, curses.A_BOLD)
+                row += 1
+                last_repo = s["repo"]
+            icon, label = ICONS.get(s["status"], ("?", s["status"]))
+            attr = curses.A_REVERSE if i == sel else 0
+            marker = "▸" if s["id"] == current else " "
+            line = f"{marker} {icon} {s['name']}"
+            stdscr.addnstr(row, 1, line.ljust(w - 2), w - 2, attr)
+            stdscr.addnstr(row, 3, icon, 1, attr | curses.color_pair(color.get(s["status"], 0)))
+            stdscr.addnstr(row, max(w - len(label) - 2, len(line) + 2), label, w - 2, attr | curses.A_DIM)
+            row += 1
+        if not ss:
+            stdscr.addnstr(3, 1, "No sessions. Press n to start one.", w - 2, curses.A_DIM)
+        if confirm:
+            stdscr.addnstr(h - 3, 1, f"{confirm} has uncommitted changes.", w - 2, curses.color_pair(2))
+            stdscr.addnstr(h - 2, 1, "Discard and close? y/n", w - 2, curses.A_BOLD)
+        else:
+            stdscr.addnstr(h - 3, 1, msg, w - 2, curses.A_DIM)
+            stdscr.addnstr(h - 2, 1, "↵ jump  n new  x close  j/k move", w - 2, curses.A_DIM)
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == -1:
+            continue
+        ch = chr(key) if 0 <= key < 256 else ""
+        if confirm:
+            if ch == "y":
+                close(confirm, force=True)
+            confirm, msg = None, ""
+            continue
+        if ch in ("j",) or key == curses.KEY_DOWN:
+            sel += 1
+        elif ch in ("k",) or key == curses.KEY_UP:
+            sel -= 1
+        elif ch == "n":
+            cmd_new([])
+        elif ss and (key in (10, 13, curses.KEY_ENTER)):
+            cmd_jump(ss[sel]["id"])
+        elif ss and ch == "x":
+            target = ss[sel]["id"]
+            if close(target):
+                confirm = target
+            else:
+                msg = f"closed {target}"
+
+
+# ------------------------------------------------------------------ main
+
+def main(argv):
+    cmd, args = (argv[0], argv[1:]) if argv else ("help", [])
+    migrate_legacy()
+    if cmd == "new":
+        cmd_new(args)
+    elif cmd == "_picker":
+        cmd_picker()
+    elif cmd == "close":
+        cmd_close(args)
+    elif cmd == "jump" and args:
+        cmd_jump(args[0])
+    elif cmd == "cockpit":
+        return cmd_cockpit()
+    elif cmd == "list":
+        print(json.dumps(sessions(), indent=2))
+    elif cmd == "mc":
+        curses.wrapper(mc)
+    elif cmd == "layout":
+        cmd_layout()
+    elif cmd == "hook" and len(args) == 2:
+        cmd_hook(*args)
+    else:
+        print(__doc__)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
