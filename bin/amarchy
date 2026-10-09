@@ -910,8 +910,15 @@ def mission_control():
     tty.setcbreak(fd)
     sel, confirm, msg = 0, None, ""
     ss, current, read_at = [], None, 0.0
+    started = os.stat(SELF).st_mtime
     try:
         while True:
+            # Picks up amarchy updates by itself: restart when the script changes.
+            if os.stat(SELF).st_mtime != started:
+                termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+                out.write("\x1b[?25h\x1b[?1049l")
+                out.flush()
+                os.execv(SELF, [SELF, "mc"])
             # Session data once a second (or right after a key); the screen
             # redraws faster only while a spinner is turning.
             if time.time() - read_at >= 1.0:
