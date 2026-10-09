@@ -841,17 +841,15 @@ def bg(hex_color):
 RESET = "\x1b[0m"
 
 
-# The amarchy mark: Omarchy's square, with the anarchy A breaking out of it.
-LOGO = (
-    "██████████████████",
-    "██      ▄▄      ██",
-    "██     ▄██▄     ██",
-    "██    ██  ██    ██",
-    "██   ▄██▄▄██▄   ██",
-    "██  ██      ██  ██",
-    "██████████████████",
-    "    ██      ██    ",
-)
+def task_title(window_title):
+    """What a session is about, from the title Claude Code gives its window
+    (a short slug like "fix-login-redirect", after a status glyph)."""
+    title = re.sub(r"^[^\w]+", "", window_title or "").strip()
+    if not title or title.startswith("amarchy:") or title == "Claude Code":
+        return ""
+    if " " not in title:
+        title = title.replace("-", " ").replace("_", " ")
+    return title[:1].upper() + title[1:]
 
 # Sections, most urgent first. Mission Control lists sessions in this order.
 SECTIONS = (("waiting", "NEEDS YOU"), ("working", "WORKING"), ("idle", "IDLE"), ("asleep", "ASLEEP"))
@@ -877,7 +875,11 @@ def age(sid):
 def mc_frame(ss, current, sel, confirm, msg, width, height):
     """One screen of Mission Control. ss must already be in session_order."""
     c = theme_colors()
-    text, dim, faint = c["foreground"], c["light_foreground"], c["dark_foreground"]
+    # Dim and faint are mixed from the theme's own foreground: themes don't
+    # agree on what their "light"/"dark" foreground means.
+    text = c["foreground"]
+    dim = mix(c["foreground"], c["background"], 0.4)
+    faint = mix(c["foreground"], c["background"], 0.6)
     # Same as the menu's selected row: foreground at 8% over the background.
     selected_bg = bg(mix(c["background"], c["foreground"], 0.08))
     state_color = {"working": c["accent"], "waiting": c["accent"], "idle": faint, "asleep": faint}
@@ -888,16 +890,7 @@ def mc_frame(ss, current, sel, confirm, msg, width, height):
         body = "".join(f"{fill}{fg(col)}{s}" for col, s in parts)
         return body + fill + " " * max(width - len(plain), 0) + RESET
 
-    def centered(color, s):
-        return line([(color, " " * max((width - len(s)) // 2, 0) + s)])
-
-    head = [line([])]
-    if height >= 30:
-        head += [centered(c["accent"], row) for row in LOGO] + [line([])]
-    counts = [(sum(s["status"] == state for s in ss), label.lower()) for state, label in SECTIONS[:2]]
-    summary = f"{len(ss)} agent{'s' if len(ss) != 1 else ''}" + "".join(
-        f" · {n} {label}" for n, label in counts if n)
-    head += [centered(text, "a m a r c h y"), centered(faint, summary), line([])]
+    head = [line([]), line([(text, "  Amarchy")]), line([])]
 
     # Body: section headers and two-line session rows, as lines; remember
     # where the selected row is so we can scroll to it.
@@ -915,11 +908,18 @@ def mc_frame(ss, current, sel, confirm, msg, width, height):
         when = age(s["id"]) if s["status"] != "asleep" else ""
         if chosen:
             sel_line = len(body)
+        # What (the task), when (right-aligned), and where (project · branch).
+        task = s.get("task") or "new session"
+        room_for_task = max(width - 5 - len(when) - 3, 8)
+        if len(task) > room_for_task:
+            task = task[:room_for_task - 1] + "…"
+        gap = " " * max(width - 5 - len(task) - len(when) - 2, 1)
         body += [
             line([], fill),
             line([mark, (state_color.get(s["status"], text), f" {icon}  "),
-                  (c["accent"] if chosen else text, s["name"])], fill),
-            line([(text, "     "), (dim, s["repo"] + (f" · {when}" if when else ""))], fill),
+                  (c["accent"] if chosen else (text if s.get("task") else dim), task),
+                  (text, gap), (faint, when)], fill),
+            line([(text, "     "), (dim, f"{s['repo']} · {s['name']}")], fill),
             line([], fill),
         ]
     if not ss:
@@ -966,10 +966,11 @@ def mission_control():
             # redraws faster only while a spinner is turning.
             if time.time() - read_at >= 1.0:
                 ss = sessions()
-                open_classes = {c["class"] for c in clients()}
+                titles = {c["class"]: c["title"] for c in clients()}
                 for s in ss:
-                    if claude_class(s) not in open_classes:
+                    if claude_class(s) not in titles:
                         s["status"] = "asleep"
+                    s["task"] = task_title(titles.get(claude_class(s), ""))
                 ss.sort(key=session_order)
                 current, read_at = current_session_id(), time.time()
             sel = max(0, min(sel, len(ss) - 1))
