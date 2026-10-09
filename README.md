@@ -38,6 +38,13 @@ In Mission Control: `↵` jump to a session, `n` new, `a` add project, `x` close
 worktree, asks first if it has uncommitted changes, deletes the branch if it
 was merged), `j`/`k` move.
 
+Windows are disposable, like everywhere else in Omarchy. Close Claude or the
+terminal with `Super+W` (or let Claude exit) and the session just goes to sleep:
+Mission Control shows it as asleep, and jumping to it reopens what's missing,
+with Claude picking its last conversation back up (`claude --continue`). A
+session only really ends with `x` in Mission Control or `amarchy close`, which
+also removes the worktree.
+
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure).
 

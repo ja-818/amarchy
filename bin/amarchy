@@ -460,6 +460,7 @@ def cmd_cockpit():
         COCKPIT.unlink()
     else:
         COCKPIT.touch()
+    ensure_windows(session(sid))
     arrange(sid)
     return 0
 
@@ -470,6 +471,7 @@ def cmd_jump(sid):
         return
     LAST.write_text(sid)
     focus_workspace(s["workspace"])
+    ensure_windows(s)
     arrange(sid)
 
 
@@ -596,16 +598,39 @@ def create(repo, name):
     set_trust(path, True)
     cmd_layout()
     focus_workspace(s["workspace"])
-    open_term(claude_class(s), f"amarchy:{sid}", path,
-              ["claude", *CLAUDE_ARGS, "--settings", hook_settings(sid)])
-    open_term(term_class(s), f"amarchy:{sid}:term", path)
-    for cls in (claude_class(s), term_class(s)):
-        win = wait_for(cls)
-        if win:
-            move_to(win["address"], f"name:{s['workspace']}")
+    ensure_windows(s)
     arrange(sid)
     notify("amarchy", f"{repo} · {name} is ready (branch off {base})")
     return sid
+
+
+def has_conversation(path):
+    """Whether Claude Code has a saved conversation for this folder."""
+    projects = HOME / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(path))
+    return any(projects.glob("*.jsonl"))
+
+
+def ensure_windows(s):
+    """Open whatever a session is missing: Claude (picking its conversation back
+    up) and the dev terminal. Windows are disposable, like any other window in
+    Omarchy: close one with Super+W and the next jump brings it back. The
+    session itself only ends with close."""
+    path = Path(s["path"])
+    if not path.is_dir():
+        return
+    opened = []
+    if not find(claude_class(s)):
+        resume = ["--continue"] if has_conversation(path) else []
+        open_term(claude_class(s), f"amarchy:{s['id']}", path,
+                  ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])])
+        opened.append(claude_class(s))
+    if not find(term_class(s)):
+        open_term(term_class(s), f"amarchy:{s['id']}:term", path)
+        opened.append(term_class(s))
+    for cls in opened:
+        win = wait_for(cls)
+        if win:
+            move_to(win["address"], f"name:{s['workspace']}")
 
 
 def cmd_new(args):
@@ -774,7 +799,8 @@ def cmd_hook(sid, state):
 # ------------------------------------------------------------------ mission control
 
 # Status icons and labels, drawn in the style of the Omarchy menu.
-STATES = {"working": ("󰔟", "working"), "waiting": ("󰂞", "needs you"), "idle": ("󰄬", "idle")}
+STATES = {"working": ("󰔟", "working"), "waiting": ("󰂞", "needs you"), "idle": ("󰄬", "idle"),
+          "asleep": ("󰒲", "asleep · ↵ to wake")}
 
 THEME_DEFAULTS = {"background": "#121212", "foreground": "#bebebe", "accent": "#e68e0d",
                   "red": "#d35f5f", "dark_foreground": "#555555", "light_foreground": "#8a8a8d"}
@@ -817,7 +843,7 @@ def mc_frame(ss, current, sel, confirm, msg, width, height):
     text, dim, faint = c["foreground"], c["light_foreground"], c["dark_foreground"]
     # Same as the menu's selected row: foreground at 8% over the background.
     selected_bg = bg(mix(c["background"], c["foreground"], 0.08))
-    state_color = {"working": c["accent"], "waiting": c["red"], "idle": faint}
+    state_color = {"working": c["accent"], "waiting": c["red"], "idle": faint, "asleep": faint}
 
     def line(parts, fill=""):
         """parts: (color, text) pairs; fill: background for the whole row."""
@@ -880,6 +906,10 @@ def mission_control():
     try:
         while True:
             ss = sessions()
+            open_classes = {c["class"] for c in clients()}
+            for s in ss:
+                if claude_class(s) not in open_classes:
+                    s["status"] = "asleep"
             sel = max(0, min(sel, len(ss) - 1))
             width, height = shutil.get_terminal_size()
             frame = mc_frame(ss, current_session_id(), sel, confirm, msg, width, height)
@@ -938,7 +968,11 @@ def main(argv):
     elif cmd == "cockpit":
         return cmd_cockpit()
     elif cmd == "list":
-        print(json.dumps(sessions(), indent=2))
+        open_classes = {c["class"] for c in clients()}
+        ss = sessions()
+        for s in ss:
+            s["awake"] = claude_class(s) in open_classes
+        print(json.dumps(ss, indent=2))
     elif cmd == "mc":
         mission_control()
     elif cmd == "layout":
