@@ -28,7 +28,8 @@ slides into the left gap and the session's terminal into the right one.
 | `Super+Alt+N` | New session: pick a repo, name it. Creates the worktree, branch, Claude and terminal. |
 | `Super+Alt+M` | Toggle the cockpit on a session workspace. |
 
-New session's project list ends with **+ Add project**: pick one of your
+New session opens the Omarchy menu, so it looks and searches like Super+Space.
+The project list ends with **Add project**: pick one of your
 GitHub repos (searchable, most recently pushed first), paste a git URL, or start
 an empty project (optionally with a private GitHub repo). Then name the session
 and you're in.
@@ -42,8 +43,8 @@ finishes its turn (via Claude Code hooks, nothing to configure).
 
 ## Install
 
-Needs Omarchy (Hyprland Lua config), [Claude Code](https://docs.claude.com/en/docs/claude-code),
-`gum`, and one of foot, kitty, alacritty or ghostty.
+Needs Omarchy 4+ (Hyprland Lua config and the Omarchy menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
+and one of foot, kitty, alacritty or ghostty.
 
 ```sh
 git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy

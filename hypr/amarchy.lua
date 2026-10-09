@@ -28,8 +28,6 @@ if cfg.cockpit_key ~= false then
   o.bind(mod .. " + " .. (cfg.cockpit_key or "M"), "amarchy cockpit", bin .. " cockpit")
 end
 
-o.window("^amarchy\\.picker$", { float = true, center = true, size = { 640, 420 } })
-
 -- The zen column for Claude on session workspaces; sized for your monitor by
 -- `amarchy layout` (runs on install and before every new session).
 local layout = home .. "/.local/state/amarchy/layout.lua"

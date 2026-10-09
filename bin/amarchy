@@ -66,7 +66,6 @@ SELF = str(Path(__file__).resolve())
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
 WS_PREFIX = "A:"            # session workspaces: A:<id>
 MC_CLASS = f"{PREFIX}.mc"
-PICKER_CLASS = f"{PREFIX}.picker"
 
 # Sessions created by the pre-release "factory" script keep their old window
 # classes and F: workspaces until they're closed.
@@ -126,6 +125,11 @@ def spawn(argv):
     launcher = ["uwsm-app", "--"] if shutil.which("uwsm-app") else []
     subprocess.Popen([*launcher, *argv], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def detach(argv):
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def terminal():
@@ -241,8 +245,9 @@ def add_project(source):
     if dest.exists():
         return None, f"{dest} already exists and isn't {source}"
     WORK.mkdir(parents=True, exist_ok=True)
-    # Not captured: git's progress shows in the terminal (picker or CLI).
-    if subprocess.run(["git", "clone", url, str(dest)]).returncode != 0:
+    # Not captured: git's progress shows when run from a terminal.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}  # fail instead of hanging on a password prompt
+    if subprocess.run(["git", "clone", url, str(dest)], env=env).returncode != 0:
         return None, f"git clone {url} failed"
     return name, None
 
@@ -268,7 +273,7 @@ def new_project(name, github=False):
 
 def cmd_add(args):
     if not args:
-        open_term(PICKER_CLASS, "Add project", HOME, [SELF, "_picker", "add"])
+        menu_add_project()
         return 0
     if args[0] == "--new":
         names = [a for a in args[1:] if not a.startswith("--")]
@@ -566,75 +571,97 @@ def cmd_new(args):
     if repo and name:
         create(repo, name)
         return
-    # Interactive: run the picker in a small floating terminal.
-    open_term(PICKER_CLASS, "New session", HOME, [SELF, "_picker"])
+    menu_new(repo)
 
 
-def gum(*args, items=None):
-    r = subprocess.run(["gum", *args], stdout=subprocess.PIPE, text=True,
-                       input="\n".join(items) if items is not None else None)
+# ------------------------------------------------------------------ menus
+#
+# The interactive flows use Omarchy's own menu (the one behind Super+Space), so
+# they look and search like the rest of the desktop. Each one ends in a plain
+# CLI call (create, add_project, new_project).
+
+ICON_PROJECT = "󰉋"
+ICON_ADD = "󰐕"
+ICON_GITHUB = ""
+ICON_LINK = "󰌷"
+ICON_NEW = "󰝒"
+ICON_LOCK = "󰌾"
+ADD_PROJECT = "Add project"
+
+
+def menu_select(prompt, rows):
+    """Pick one of rows (icon, label, subtext). Returns the label, or None."""
+    options = ["\t".join(str(x) for x in row if x) for row in rows]
+    r = subprocess.run(["omarchy-menu-select", prompt, *options], capture_output=True, text=True)
+    return r.stdout.split("\t")[0].strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def menu_input(prompt):
+    r = subprocess.run(["omarchy-menu-input", prompt], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def pause(msg):
-    print(msg)
-    time.sleep(3)
+def project_subtext(p):
+    n = p["sessions"]
+    where = github_slug(p["remote"]) or p["remote"] or "local only"
+    return f"{n} session{'s' if n != 1 else ''} · {where}" if n else where
 
 
-ADD_PROJECT = "+ Add project"
-
-
-def pick_new_project():
-    """Picker flow for adding a project; returns its name, or None."""
-    how = gum("choose", "--header", "Add project", "From GitHub", "Git URL", "New empty project")
-    if how == "From GitHub":
-        print("Loading your GitHub repos…")
-        rs = github_repos()
-        if rs is None:
-            pause("gh isn't installed or logged in. Run: gh auth login")
-            return None
-        rows = [r["name"] for r in rs if not r["added"]]
-        if not rows:
-            pause("Every one of your GitHub repos is already added.")
-            return None
-        source = gum("filter", "--header", "Your GitHub repos (recently pushed first)",
-                     "--placeholder", "search…", items=rows)
-        name, err = add_project(source) if source else (None, None)
-    elif how == "Git URL":
-        source = gum("input", "--header", "Git URL or owner/repo", "--placeholder", "https://github.com/you/app")
-        name, err = add_project(source) if source else (None, None)
-    elif how == "New empty project":
-        name = gum("input", "--header", "Project name", "--placeholder", "city-builder")
-        if not name:
-            return None
-        github = subprocess.run(["gum", "confirm", "Also create a private GitHub repo?"]).returncode == 0
-        name, err = new_project(name, github)
-    else:
-        return None
-    if err:
-        pause(f"✗ {err}")
-    return name
-
-
-def cmd_picker(mode=None):
-    if mode == "add":
-        name = pick_new_project()
-        if name:
-            notify("amarchy", f"Added {name}")
-        return
-    repo = gum("choose", "--header", "Project", *repos(), ADD_PROJECT)
-    if repo == ADD_PROJECT:
-        repo = pick_new_project()
+def menu_new(repo=None):
+    if not repo:
+        rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in projects()]
+        rows.append((ICON_ADD, ADD_PROJECT, "GitHub, git URL or new"))
+        repo = menu_select("New session", rows)
+        if repo == ADD_PROJECT:
+            repo = menu_add_project()
     if not repo:
         return
-    name = gum("input", "--header", f"Session name ({repo})", "--placeholder", "fix-login-bug")
-    if not name:
-        return
-    print(f"Creating {repo} · {slug(name)} …")
-    # Detach so this picker window can close while windows get arranged.
-    subprocess.Popen([SELF, "new", repo, name], start_new_session=True,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(0.3)
+    name = menu_input(f"Session name for {repo}")
+    if name:
+        create(repo, name)
+
+
+def menu_add_project():
+    """Add a project through the menu; returns its name, or None."""
+    how = menu_select(ADD_PROJECT, [
+        (ICON_GITHUB, "From GitHub", "Your repos, most recently pushed first"),
+        (ICON_LINK, "Git URL", "Any git remote, or owner/repo"),
+        (ICON_NEW, "New empty project", "Optionally with a private GitHub repo"),
+    ])
+    if how == "From GitHub":
+        rs = github_repos()
+        if rs is None:
+            notify("amarchy", "gh isn't installed or logged in. Run: gh auth login")
+            return None
+        rows = [(ICON_LOCK if r["private"] else ICON_GITHUB, r["name"], r["description"])
+                for r in rs if not r["added"]]
+        if not rows:
+            notify("amarchy", "All your GitHub repos are already added")
+            return None
+        source = menu_select("From GitHub", rows)
+    elif how == "Git URL":
+        source = menu_input("Git URL or owner/repo")
+    elif how == "New empty project":
+        name = menu_input("Project name")
+        if not name:
+            return None
+        where = menu_select(f"Create {slug(name)}", [
+            (ICON_LOCK, "Local + private GitHub repo", "Pushed to your GitHub account"),
+            (ICON_PROJECT, "Local only", f"Just {WORK / slug(name)}"),
+        ])
+        if not where:
+            return None
+        name, err = new_project(name, github=where.startswith("Local +"))
+        notify("amarchy", f"✗ {err}" if err else f"Created {name}")
+        return name
+    else:
+        return None
+    if not source:
+        return None
+    notify("amarchy", f"Cloning {source}…")
+    name, err = add_project(source)
+    notify("amarchy", f"✗ {err}" if err else f"Added {name}")
+    return name
 
 
 def dirty(path):
@@ -776,9 +803,9 @@ def mc(stdscr):
         elif ch in ("k",) or key == curses.KEY_UP:
             sel -= 1
         elif ch == "n":
-            cmd_new([])
+            detach([SELF, "new"])
         elif ch == "a":
-            cmd_add([])
+            detach([SELF, "add"])
         elif ss and (key in (10, 13, curses.KEY_ENTER)):
             cmd_jump(ss[sel]["id"])
         elif ss and ch == "x":
@@ -796,8 +823,6 @@ def main(argv):
     migrate_legacy()
     if cmd == "new":
         cmd_new(args)
-    elif cmd == "_picker":
-        cmd_picker(*args[:1])
     elif cmd == "add":
         return cmd_add(args)
     elif cmd == "projects":

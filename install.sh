@@ -24,7 +24,7 @@ if [[ ${1:-} == --uninstall ]]; then
 fi
 
 missing=()
-for cmd in python3 git hyprctl gum claude; do
+for cmd in python3 git hyprctl omarchy-menu-select claude; do
   command -v "$cmd" >/dev/null || missing+=("$cmd")
 done
 if ! command -v foot >/dev/null && ! command -v kitty >/dev/null &&
@@ -33,7 +33,7 @@ if ! command -v foot >/dev/null && ! command -v kitty >/dev/null &&
 fi
 if ((${#missing[@]})); then
   say "Missing: ${missing[*]}"
-  echo "Claude Code: https://docs.claude.com/en/docs/claude-code  ·  others: sudo pacman -S <name>"
+  echo "amarchy needs Omarchy 4+ (omarchy-menu-select). Claude Code: https://docs.claude.com/en/docs/claude-code"
   exit 1
 fi
 
