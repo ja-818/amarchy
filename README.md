@@ -33,7 +33,7 @@ Hyprland's focus border:
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Super+Alt+Z` | Toggle the cockpit on a session workspace. |
-| `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in Mission Control. |
+| `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in Mission Control, wrapping around. With the cockpit off, Mission Control peeks in for a moment so you see where you landed. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -109,7 +109,7 @@ amarchy add                           add a project interactively
 amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
 amarchy list                          sessions as JSON
 amarchy open                          go to the last session you were in
-amarchy next | prev                   go down | up one session in Mission Control's order
+amarchy next | prev                   go down | up one session in Mission Control's order (wraps around)
 amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
 amarchy close [id] --confirm          the same, asking first in the Omarchy menu

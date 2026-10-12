@@ -21,7 +21,7 @@ Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
   amarchy list [--compact]              sessions as JSON, most urgent first (task, age, current)
   amarchy open                          go to the last session you were in (nothing if already in one)
-  amarchy next | prev                   go down | up one session in Mission Control's order
+  amarchy next | prev                   go down | up one session in Mission Control's order (wraps around)
   amarchy jump <id>                     go to a session
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
   amarchy close [id] --confirm          the same, asking first in the Omarchy menu
@@ -518,20 +518,18 @@ def cmd_open():
 
 
 def cmd_step(delta):
-    """Move down (+1) or up (-1) Mission Control's list, stopping at the ends.
-    From outside amarchy, go to the last session you were in."""
+    """Move down (+1) or up (-1) Mission Control's list, wrapping around.
+    From outside amarchy, go to the last session you were in. With the cockpit
+    off, Mission Control peeks in for a moment to show where you landed."""
     ids = [s["id"] for s in session_view()]
     if not ids:
         return 1
     current = current_session_id()
     if current not in ids:
         cmd_jump(last_session_id(ids))
-        return 0
-    i = ids.index(current) + delta
-    if not 0 <= i < len(ids):
-        return 1
-    cmd_jump(ids[i])
-    tell_shell("refresh")
+    else:
+        cmd_jump(ids[(ids.index(current) + delta) % len(ids)])
+    tell_shell("refresh" if cockpit_on() else "peek")
     return 0
 
 

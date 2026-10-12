@@ -8,13 +8,14 @@ import qs.Ui
 
 // Mission Control: the left side of the amarchy cockpit, drawn by the Omarchy
 // shell so it looks like the rest of Omarchy. Shows while the cockpit is on
-// and an amarchy session workspace (A:...) is on screen.
+// and an amarchy session workspace (A:...) is on screen. With the cockpit off
+// it peeks in for a moment when you move between sessions (`amarchy next`).
 //
 // Click a session to jump to it. The keyboard goes through Hyprland (see
 // hypr/amarchy.lua), so the panel never has to take focus; the hints at the
 // bottom show those keys. `amarchy focus` can still hand it the keyboard:
 // j/k or arrows to move, Enter to jump, n new, a add, x close, Esc to leave.
-// IPC: omarchy-shell amarchy refresh|focus|blur
+// IPC: omarchy-shell amarchy refresh|peek|focus|blur
 Item {
   id: root
 
@@ -28,10 +29,11 @@ Item {
   property int cursor: 0
   property bool focused: false
   property int spinnerFrame: 0
+  property bool peeking: false
 
   readonly property string workspaceName: Hyprland.focusedWorkspace ? String(Hyprland.focusedWorkspace.name) : ""
   readonly property bool onSession: workspaceName.indexOf("A:") === 0 || workspaceName.indexOf("F:") === 0
-  readonly property bool shown: store.cockpit && onSession && !!screenForPanel
+  readonly property bool shown: (store.cockpit || peeking) && onSession && !!screenForPanel
   readonly property var screenForPanel: {
     var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     for (var i = 0; i < Quickshell.screens.length; i++)
@@ -80,9 +82,21 @@ Item {
     onTriggered: root.spinnerFrame++
   }
 
+  Timer {
+    id: peekTimer
+    interval: 1500
+    onTriggered: root.peeking = false
+  }
+
   IpcHandler {
     target: "amarchy"
     function refresh(): string { store.refresh(); return "ok" }
+    function peek(): string {
+      store.refresh()
+      root.peeking = true
+      peekTimer.restart()
+      return "ok"
+    }
     function focus(): string {
       if (!root.shown) return "hidden"
       var i = store.sessions.findIndex(function(s) { return s.current })
