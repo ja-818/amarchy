@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
@@ -95,21 +96,110 @@ Panel {
     function ping(): string { return "ok" }
   }
 
-  // The peek: a passive card under the Ⓐ, so the keyboard stays where it is.
-  PopupCard {
-    anchorItem: button
-    bar: root.bar
-    triggerMode: "hover"
-    open: root.peeking && !root.opened && store.sessions.length > 0
-    contentWidth: fittedContentWidth(Style.space(380))
-    contentHeight: fittedContentHeight(peekList.implicitHeight, Style.space(640))
+  // What the popup shows; the peek draws the very same thing, just passively.
+  component Content: Column {
+    id: content
+    property int cursor: -1
+    signal activated(int index)
+    signal hovered(int index)
+
+    spacing: Style.spacing.panelGap
+
+    PanelHero {
+      width: parent.width
+      title: "Amarchy"
+      meta: root.summary
+      iconComponent: Component {
+        Text {
+          text: "Ⓐ"
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.displayLarge
+          color: store.waiting > 0 ? Color.urgent : Color.menu.selectedText
+        }
+      }
+    }
 
     SessionList {
-      id: peekList
       width: parent.width
+      visible: store.sessions.length > 0
       sessions: store.sessions
-      cursor: root.currentIndex
+      cursor: content.cursor
       spinnerFrame: root.spinnerFrame
+      onActivated: function(index) { content.activated(index) }
+      onHovered: function(index) { content.hovered(index) }
+    }
+
+    PanelSeparator { width: parent.width }
+
+    Row {
+      spacing: Style.spacing.controlGap
+      Button {
+        iconText: "󰐕"
+        text: "New session"
+        bordered: true
+        onClicked: { root.close(); store.run(["new"]) }
+      }
+      Button {
+        iconText: "󰉋"
+        text: "Add project"
+        bordered: true
+        onClicked: { root.close(); store.run(["add"]) }
+      }
+    }
+
+    Row {
+      visible: root.hintRows.length > 0
+      spacing: Style.spacing.xl
+      opacity: 0.5
+      Text {
+        text: store.keys.mod || ""
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.caption
+        color: Color.menu.text
+      }
+      Repeater {
+        model: root.hintRows
+        Row {
+          required property var modelData
+          spacing: Style.spacing.sm
+          Text {
+            text: modelData[0]
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+            color: Color.menu.selectedText
+          }
+          Text {
+            text: modelData[1]
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+            color: Color.menu.text
+          }
+        }
+      }
+    }
+  }
+
+  // The peek: the same panel, but it never takes the keyboard, so you can
+  // keep typing where you are.
+  QtObject {
+    id: peekOwner
+    function close() { root.peeking = false }
+  }
+
+  KeyboardPanel {
+    id: peek
+    anchorItem: button
+    owner: peekOwner
+    bar: root.bar
+    open: root.peeking && !root.opened && store.sessions.length > 0
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    contentWidth: peek.fittedContentWidth(Style.space(380))
+    contentHeight: peek.fittedContentHeight(peekContent.implicitHeight, Style.space(640))
+
+    Content {
+      id: peekContent
+      width: parent.width
+      cursor: root.currentIndex
     }
   }
 
@@ -155,83 +245,12 @@ Panel {
         else if (t === "a") { root.close(); store.run(["add"]) }
       }
 
-      Column {
+      Content {
         id: column
         width: parent.width
-        spacing: Style.spacing.panelGap
-
-        PanelHero {
-          width: parent.width
-          title: "Amarchy"
-          meta: root.summary
-          iconComponent: Component {
-            Text {
-              text: "Ⓐ"
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.displayLarge
-              color: store.waiting > 0 ? Color.urgent : Color.menu.selectedText
-            }
-          }
-        }
-
-        SessionList {
-          width: parent.width
-          visible: store.sessions.length > 0
-          sessions: store.sessions
-          cursor: root.cursor
-          spinnerFrame: root.spinnerFrame
-          onActivated: function(index) { root.activate(index) }
-          onHovered: function(index) { root.cursor = index }
-        }
-
-        PanelSeparator { width: parent.width }
-
-        Row {
-          spacing: Style.spacing.controlGap
-          Button {
-            iconText: "󰐕"
-            text: "New session"
-            bordered: true
-            onClicked: { root.close(); store.run(["new"]) }
-          }
-          Button {
-            iconText: "󰉋"
-            text: "Add project"
-            bordered: true
-            onClicked: { root.close(); store.run(["add"]) }
-          }
-        }
-
-        Row {
-          visible: root.hintRows.length > 0
-          spacing: Style.spacing.xl
-          opacity: 0.5
-          Text {
-            text: store.keys.mod || ""
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            color: Color.menu.text
-          }
-          Repeater {
-            model: root.hintRows
-            Row {
-              required property var modelData
-              spacing: Style.spacing.sm
-              Text {
-                text: modelData[0]
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
-                color: Color.menu.selectedText
-              }
-              Text {
-                text: modelData[1]
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
-                color: Color.menu.text
-              }
-            }
-          }
-        }
+        cursor: root.cursor
+        onActivated: function(index) { root.activate(index) }
+        onHovered: function(index) { root.cursor = index }
       }
     }
   }
