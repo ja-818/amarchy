@@ -84,7 +84,7 @@ Item {
 
   Timer {
     id: peekTimer
-    interval: 1500
+    interval: 800
     onTriggered: root.peeking = false
   }
 
