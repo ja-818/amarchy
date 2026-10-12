@@ -31,6 +31,7 @@ Panel {
     function key(name) { return k[name] === "RETURN" ? "↵" : String(k[name]).toLowerCase() }
     if (k.next && k.prev) rows.push([key("next") + "/" + key("prev"), "move"])
     if (k.terminal) rows.push([key("terminal"), "terminal"])
+    if (k.run) rows.push([key("run"), "run"])
     if (k["new"]) rows.push([key("new"), "new"])
     if (k.add) rows.push([key("add"), "add"])
     if (k.close) rows.push([key("close"), "close"])

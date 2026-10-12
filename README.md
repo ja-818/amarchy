@@ -28,9 +28,11 @@ the list drops for a moment when you move between sessions:
 | Key | |
 | --- | --- |
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
+| `Super+Alt+L` | Drop the session list from the Ⓐ, from anywhere: see what every agent is up to at a glance, `j`/`k` and `↵` to jump to one, `Esc` to dismiss. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. The list drops from the Ⓐ for a moment so you see where you landed. |
 | `Ctrl+Alt+Return` | Toggle the session's terminal under Claude (it opens in the worktree). On puts the keyboard in it, off gives it back to Claude. |
+| `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -76,8 +78,9 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 `~/.config/hypr/hyprland.lua`:
 
 ```lua
-amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N",
-            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", nav_new_key = "N", add_key = "A", close_key = "X" }
+amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
+            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R",
+            nav_new_key = "N", add_key = "A", close_key = "X" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -111,6 +114,9 @@ amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
 amarchy close [id] --confirm          the same, asking first in the Omarchy menu
 amarchy terminal [on|off]             toggle the session's terminal under Claude
+amarchy run                           run the project in the session's terminal (again: restart it)
+amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
+amarchy show                          open the session list under the Ⓐ in the bar
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy layout                        resize the zen column for the current monitor
 ```

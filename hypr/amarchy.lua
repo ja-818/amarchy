@@ -9,12 +9,14 @@
 --   mod          modifier for these keys (default "SUPER + ALT")
 --   open_key     go to the last session you were in (default "A")
 --   new_key      start a session: pick a project (default "N")
+--   list_key     drop the session list from the Ⓐ in the bar (default "L")
 --
 -- Moving around inside it:
 --   nav_mod      modifier for these keys (default "CTRL + ALT")
 --   next_key     the session below in the list (default "J")
 --   prev_key     the session above (default "K")
 --   terminal_key toggle the session's terminal under Claude (default "RETURN")
+--   run_key      run the project in that terminal; again restarts it (default "R")
 --   nav_new_key  start a session (default "N")
 --   add_key      add a project (default "A")
 --   close_key    close this session, after asking (default "X")
@@ -36,6 +38,9 @@ end
 if cfg.new_key ~= false then
   o.bind(mod .. " + " .. (cfg.new_key or "N"), "New amarchy session", bin .. " new")
 end
+if cfg.list_key ~= false then
+  o.bind(mod .. " + " .. (cfg.list_key or "L"), "amarchy sessions", bin .. " show")
+end
 
 -- The descriptions are how `amarchy ui` finds these keys for the hints under
 -- the session list.
@@ -48,6 +53,7 @@ end
 nav(cfg.next_key, "J", "Next amarchy session", "next")
 nav(cfg.prev_key, "K", "Previous amarchy session", "prev")
 nav(cfg.terminal_key, "RETURN", "Toggle amarchy terminal", "terminal")
+nav(cfg.run_key, "R", "Run amarchy project", "run")
 nav(cfg.nav_new_key, "N", "New amarchy session here", "new")
 nav(cfg.add_key, "A", "Add amarchy project", "add")
 nav(cfg.close_key, "X", "Close amarchy session", "close --confirm")

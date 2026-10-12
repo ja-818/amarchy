@@ -26,6 +26,9 @@ Sessions:
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
   amarchy close [id] --confirm          the same, asking first in the Omarchy menu
   amarchy terminal [on|off]             toggle the session's terminal under Claude
+  amarchy run                           run the project in the session's terminal (again: restart it)
+  amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
+  amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 
 Plumbing:
@@ -61,6 +64,7 @@ WORKTREES = Path(os.environ.get("AMARCHY_WORKTREES", WORK / ".worktrees")).expan
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy"
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
+RUN = STATE / "run"             # one file per project: its run command
 TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is showing
 LAYOUT = STATE / "layout.lua"
 LAST = STATE / "last"
@@ -483,6 +487,92 @@ def cmd_terminal(args):
     ensure_windows(session(sid))
     arrange(sid, focus="terminal" if on else "claude")
     return 0
+
+
+# ------------------------------------------------------------------ run
+
+def guess_run(path):
+    """A project's usual "start the app" command, from what's in the repo."""
+    path = Path(path)
+    if (path / "bin/dev").exists():
+        return "bin/dev"
+    if (path / "package.json").exists():
+        try:
+            scripts = json.loads((path / "package.json").read_text()).get("scripts", {})
+        except ValueError:
+            scripts = {}
+        pm = next((pm for lock, pm in (("bun.lock", "bun"), ("bun.lockb", "bun"), ("pnpm-lock.yaml", "pnpm"),
+                                       ("yarn.lock", "yarn")) if (path / lock).exists()), "npm")
+        for script in ("dev", "start"):
+            if script in scripts:
+                return f"{pm} run {script}"
+    if (path / "Cargo.toml").exists():
+        return "cargo run"
+    if (path / "go.mod").exists():
+        return "go run ."
+    if (path / "manage.py").exists():
+        return "python manage.py runserver"
+    if (path / "Makefile").exists() and re.search(r"^run:", (path / "Makefile").read_text(errors="ignore"), re.M):
+        return "make run"
+    return ""
+
+
+def run_command(s):
+    saved = RUN / s["repo"]
+    return saved.read_text().strip() if saved.exists() else guess_run(s["path"])
+
+
+def set_run_command(repo, command):
+    RUN.mkdir(parents=True, exist_ok=True)
+    (RUN / repo).write_text(command.strip() + "\n")
+
+
+def cmd_run(args):
+    """Run the project in the session's terminal: the command shows, runs, and
+    leaves you in a shell when it ends. Running again restarts it."""
+    sid = current_session_id()
+    s = session(sid) if sid else None
+    if not s:
+        return 1
+    if args and args[0] == "--set":
+        command = " ".join(args[1:]) or menu_input(f"Run command for {s['repo']}")
+        if not command:
+            return 1
+        set_run_command(s["repo"], command)
+        return 0
+    command = run_command(s)
+    if args and args[0] == "--show":
+        print(command)
+        return 0 if command else 1
+    if not command:
+        command = menu_input(f"Run command for {s['repo']}")
+        if not command:
+            return 1
+        set_run_command(s["repo"], command)
+    old = find(term_class(s))
+    if old:
+        hypr(f'hl.dsp.window.close({{ window = "address:{old["address"]}" }})')
+        for _ in range(40):
+            if not find(term_class(s)):
+                break
+            time.sleep(0.05)
+    TERMINAL.mkdir(parents=True, exist_ok=True)
+    (TERMINAL / sid).touch()
+    shell = os.environ.get("SHELL", "bash")
+    script = f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; {command}; exec {shlex.quote(shell)}"
+    open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", s["path"], [shell, "-ic", script])
+    win = wait_for(term_class(s))
+    if win:
+        move_to(win["address"], HIDDEN)
+    arrange(sid, focus="claude")
+    return 0
+
+
+def cmd_show():
+    """Open the session list under the Ⓐ in the bar (the Omarchy menu without the plugin)."""
+    if native_panel():
+        return subprocess.run(["omarchy-shell", "amarchy-bar", "toggle"], stdout=subprocess.DEVNULL).returncode
+    return cmd_pick([])
 
 
 def cmd_jump(sid):
@@ -933,7 +1023,7 @@ def session_view():
 
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
 NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
-             ("Toggle amarchy terminal", "terminal"),
+             ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
              ("Close amarchy session", "close"))
 
@@ -1007,6 +1097,10 @@ def main(argv):
         cmd_jump(args[0])
     elif cmd in ("terminal", "cockpit"):   # cockpit: the old name, still bound in some configs
         return cmd_terminal(args)
+    elif cmd == "run":
+        return cmd_run(args)
+    elif cmd == "show":
+        return cmd_show()
     elif cmd == "ui":
         cmd_ui()
     elif cmd == "pick":
