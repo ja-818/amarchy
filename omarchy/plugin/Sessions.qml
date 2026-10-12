@@ -10,8 +10,6 @@ Item {
   property int interval: 1000
   property bool active: true
   property var sessions: []
-  property bool cockpit: false
-  property int zenWidth: 900
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
 
@@ -43,8 +41,6 @@ Item {
         try {
           var d = JSON.parse(text)
           root.sessions = d.sessions || []
-          root.cockpit = !!d.cockpit
-          root.zenWidth = d.zen_width || 900
           root.keys = d.keys || {}
         } catch (e) {}
       }

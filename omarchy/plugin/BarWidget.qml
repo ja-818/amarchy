@@ -5,8 +5,11 @@ import qs.Commons
 import qs.Ui
 
 // The amarchy bar widget: an anarchy A that lights up (urgent) when a session
-// needs you. Click opens your sessions; right click starts a new one.
+// needs you. Click opens your sessions; right click starts a new one. Moving
+// between sessions from the keyboard (`amarchy next`) drops the list for a
+// moment, without taking the keyboard, to show where you landed.
 // IPC: omarchy-shell amarchy-bar toggle|open|close
+//      omarchy-shell amarchy refresh|peek
 Panel {
   id: root
   moduleName: "amarchy"
@@ -15,6 +18,24 @@ Panel {
 
   property int cursor: 0
   property int spinnerFrame: 0
+  property bool peeking: false
+
+  readonly property int currentIndex: {
+    for (var i = 0; i < store.sessions.length; i++) if (store.sessions[i].current) return i
+    return -1
+  }
+
+  // The session keys bound in Hyprland (hypr/amarchy.lua), for the hints.
+  readonly property var hintRows: {
+    var k = store.keys, rows = []
+    function key(name) { return k[name] === "RETURN" ? "↵" : String(k[name]).toLowerCase() }
+    if (k.next && k.prev) rows.push([key("next") + "/" + key("prev"), "move"])
+    if (k.terminal) rows.push([key("terminal"), "terminal"])
+    if (k["new"]) rows.push([key("new"), "new"])
+    if (k.add) rows.push([key("add"), "add"])
+    if (k.close) rows.push([key("close"), "close"])
+    return rows
+  }
 
   readonly property string summary: {
     var n = store.sessions.length
@@ -37,8 +58,9 @@ Panel {
 
   onOpenedChanged: {
     if (!opened) return
+    root.peeking = false
     store.refresh()
-    root.cursor = 0
+    root.cursor = Math.max(0, root.currentIndex)
     Qt.callLater(function() { keys.forceActiveFocus() })
   }
 
@@ -50,8 +72,44 @@ Panel {
   Timer {
     interval: 100
     repeat: true
-    running: root.opened && store.working > 0
+    running: (root.opened || root.peeking) && store.working > 0
     onTriggered: root.spinnerFrame++
+  }
+
+  Timer {
+    id: peekTimer
+    interval: 450
+    onTriggered: root.peeking = false
+  }
+
+  IpcHandler {
+    target: "amarchy"
+    function refresh(): string { store.refresh(); return "ok" }
+    function peek(): string {
+      store.refresh()
+      if (!root.opened) root.peeking = true
+      peekTimer.restart()
+      return "ok"
+    }
+    function ping(): string { return "ok" }
+  }
+
+  // The peek: a passive card under the Ⓐ, so the keyboard stays where it is.
+  PopupCard {
+    anchorItem: button
+    bar: root.bar
+    triggerMode: "hover"
+    open: root.peeking && !root.opened && store.sessions.length > 0
+    contentWidth: fittedContentWidth(Style.space(380))
+    contentHeight: fittedContentHeight(peekList.implicitHeight, Style.space(640))
+
+    SessionList {
+      id: peekList
+      width: parent.width
+      sessions: store.sessions
+      cursor: root.currentIndex
+      spinnerFrame: root.spinnerFrame
+    }
   }
 
   BarIconButton {
@@ -140,6 +198,37 @@ Panel {
             text: "Add project"
             bordered: true
             onClicked: { root.close(); store.run(["add"]) }
+          }
+        }
+
+        Row {
+          visible: root.hintRows.length > 0
+          spacing: Style.spacing.xl
+          opacity: 0.5
+          Text {
+            text: store.keys.mod || ""
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+            color: Color.menu.text
+          }
+          Repeater {
+            model: root.hintRows
+            Row {
+              required property var modelData
+              spacing: Style.spacing.sm
+              Text {
+                text: modelData[0]
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                color: Color.menu.selectedText
+              }
+              Text {
+                text: modelData[1]
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                color: Color.menu.text
+              }
+            }
           }
         }
       }

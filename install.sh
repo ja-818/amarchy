@@ -4,8 +4,8 @@
 #
 #   - links bin/amarchy into ~/.local/bin
 #   - loads hypr/amarchy.lua from your Hyprland config (keys, zen column)
-#   - installs the Omarchy shell plugin (omarchy/plugin): Mission Control drawn
-#     by the shell, and the Ⓐ bar widget
+#   - installs the Omarchy shell plugin (omarchy/plugin): your sessions under
+#     an Ⓐ in the bar
 #   - adds Amarchy to the Omarchy menu (Super+Space), from omarchy/menu.jsonc
 #
 #   ./install.sh             install / update
@@ -95,7 +95,7 @@ if ! grep -qF "$load_line" "$hypr_conf"; then
   printf '\n%s\n' "$load_line" >>"$hypr_conf"
 fi
 
-# Shell plugin: Mission Control panel + bar widget (next to the tray).
+# Shell plugin: the Ⓐ bar widget (next to the tray).
 omarchy-plugin-validate "$repo/omarchy/plugin" >/dev/null
 mkdir -p "$(dirname "$plugin_dir")"
 ln -sfn "$repo/omarchy/plugin" "$plugin_dir"
@@ -114,7 +114,7 @@ hyprctl reload >/dev/null
 say "amarchy installed."
 echo "  Super+Alt+A  open amarchy (your last session)"
 echo "  Super+Alt+N  new session (projects from ${AMARCHY_WORK:-~/Work})"
-echo "  Super+Alt+Z  toggle the cockpit (Mission Control + terminal)"
+echo "  Ctrl+Alt+Return  toggle the session terminal"
 echo "  Ctrl+Alt+J/K move between sessions · N new · A add project · X close"
 echo "  Super+Space  Amarchy menu · Ⓐ in the bar"
 echo "Change the keys with an \`amarchy = { ... }\` table, see hypr/amarchy.lua."

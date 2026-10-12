@@ -5,8 +5,8 @@ import qs.Ui
 // One session, drawn like a row of the Omarchy menu: icon column, label
 // (what the session is about), subtext (project · branch), time on the right.
 // Same anatomy at the shell's body size, so a screenful of sessions fits.
-// The keyboard cursor uses the menu's selected treatment; the session that's
-// on screen gets Hyprland's active border, like the focused window.
+// The cursor (which starts on the session you're in) uses the menu's selected
+// treatment.
 BorderSurface {
   id: row
 
@@ -25,8 +25,7 @@ BorderSurface {
   implicitHeight: Math.max(Style.space(38), content.implicitHeight + Style.spacing.controlPaddingY * 2)
   radius: Style.cornerRadius
   color: cursor ? Color.menu.selectedBackground : "transparent"
-  borderSpec: session.current ? Border.hyprlandActiveSpec(Color.accent, Math.max(1, Style.space(2)))
-                              : Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
+  borderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
 
   Text {
     id: icon

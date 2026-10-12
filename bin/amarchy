@@ -3,9 +3,9 @@
 
 Every session is a branch + worktree off the latest main, with a Claude Code
 window and a dev terminal, living on its own Hyprland workspace "A:<id>".
-Claude sits alone in a centered zen column; the cockpit key toggles Mission
-Control into the left gap and the session's terminal into the right gap.
-Hidden windows wait on the special workspace "amarchy".
+Claude sits alone in a centered zen column; the terminal key slides the
+session's terminal in underneath it, like the panel in an editor. Your
+sessions are listed under the Ⓐ in the Omarchy bar.
 
 Every action in the UI is one of these commands, so scripts and agents can do
 anything you can. Commands print results to stdout and fail with a non-zero exit.
@@ -21,17 +21,15 @@ Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
   amarchy list [--compact]              sessions as JSON, most urgent first (task, age, current)
   amarchy open                          go to the last session you were in (nothing if already in one)
-  amarchy next | prev                   go down | up one session in Mission Control's order (wraps around)
+  amarchy next | prev                   go down | up one session in the list (wraps around)
   amarchy jump <id>                     go to a session
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
   amarchy close [id] --confirm          the same, asking first in the Omarchy menu
-  amarchy cockpit                       toggle Mission Control + terminal
-  amarchy focus                         give Mission Control the keyboard (j/k, Enter, n, a, x, Esc)
+  amarchy terminal [on|off]             toggle the session's terminal under Claude
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
-  amarchy mc                            Mission Control as a terminal app (when the shell plugin isn't installed)
   amarchy layout                        resize the zen column for the current monitor
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle
 
@@ -40,6 +38,7 @@ Environment:
   AMARCHY_WORKTREES    where worktrees go (default $AMARCHY_WORK/.worktrees/<repo>/<name>)
   AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
+  AMARCHY_TERMINAL_HEIGHT  share of the column the terminal takes, in percent (default 32)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
 
 State: ~/.local/state/amarchy/.
@@ -62,7 +61,7 @@ WORKTREES = Path(os.environ.get("AMARCHY_WORKTREES", WORK / ".worktrees")).expan
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy"
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
-COCKPIT = STATE / "cockpit"
+TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is showing
 LAYOUT = STATE / "layout.lua"
 LAST = STATE / "last"
 HIDDEN = "special:amarchy"
@@ -70,12 +69,11 @@ SELF = str(Path(__file__).resolve())
 
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
 WS_PREFIX = "A:"            # session workspaces: A:<id>
-MC_CLASS = f"{PREFIX}.mc"
 
 # Sessions created by the pre-release "factory" script keep their old window
 # classes and F: workspaces until they're closed.
-# The Omarchy shell plugin (omarchy/plugin in this repo) draws Mission Control
-# natively; without it, a terminal app (amarchy mc) stands in.
+# The Omarchy shell plugin (omarchy/plugin in this repo) lists the sessions
+# under the Ⓐ in the bar.
 SHELL_PLUGIN = HOME / ".config/omarchy/plugins/amarchy/manifest.json"
 
 LEGACY_STATE = HOME / ".local/state/jaken/factory"
@@ -84,8 +82,8 @@ LEGACY_WS_PREFIX = "F:"
 
 ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
 CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
+TERMINAL_HEIGHT = min(max(int(os.environ.get("AMARCHY_TERMINAL_HEIGHT") or 32), 10), 80) / 100
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
-PAD = 8
 
 
 # ------------------------------------------------------------------ helpers
@@ -370,12 +368,12 @@ def current_session_id():
     return next((s["id"] for s in sessions() if s["workspace"] == name), None)
 
 
-def cockpit_on():
-    return COCKPIT.exists()
+def terminal_on(sid):
+    return (TERMINAL / sid).exists()
 
 
 def native_panel():
-    return SHELL_PLUGIN.exists() and os.environ.get("AMARCHY_PANEL") != "terminal" and shutil.which("omarchy-shell")
+    return SHELL_PLUGIN.exists() and shutil.which("omarchy-shell")
 
 
 def tell_shell(*args):
@@ -407,8 +405,6 @@ def migrate_legacy():
         st = LEGACY_STATE / "status" / s["id"]
         if st.exists():
             (STATUS / s["id"]).write_text(st.read_text())
-    if (LEGACY_STATE / "cockpit").exists():
-        COCKPIT.touch()
     old_mc = find(f"{LEGACY_PREFIX}.mc")
     if old_mc:
         hypr(f'hl.dsp.window.close({{ window = "address:{old_mc["address"]}" }})')
@@ -418,14 +414,14 @@ def migrate_legacy():
 # ------------------------------------------------------------------ layout
 
 def cmd_layout():
-    """Write the Hyprland rule that keeps a lone Claude window in a centered column.
+    """Write the Hyprland rule that keeps a session's windows in a centered column.
 
     Loaded by hypr/amarchy.lua; only rewritten (and Hyprland reloaded) on change."""
     width, *_ = monitor_geometry()
     side = max((width - ZEN_WIDTH) // 2, 0)
     prefixes = {WS_PREFIX} | {s["workspace"][:2] for s in sessions()}
     rules = "".join(
-        f'hl.workspace_rule({{ workspace = "n[s:{p}] w[t1]", '
+        f'hl.workspace_rule({{ workspace = "n[s:{p}]", '
         f'gaps_out = {{ top = 0, right = {side}, bottom = 0, left = {side} }} }})\n'
         for p in sorted(prefixes))
     text = f"-- Generated by `amarchy layout` ({width}px wide monitor, {ZEN_WIDTH}px column)\n{rules}"
@@ -436,59 +432,56 @@ def cmd_layout():
     sh("hyprctl", "reload")
 
 
-def arrange(sid):
-    """Put the cockpit windows where the current mode says they belong."""
+def arrange(sid, focus="claude"):
+    """Put a session's windows where they belong: Claude in the column, and
+    the terminal tiled underneath it when it's toggled on (otherwise waiting
+    on the hidden workspace). Both are ordinary tiled windows, so Omarchy's
+    own keys move between them and resize them."""
     s = session(sid)
     if not s:
         return
     ws = f"name:{s['workspace']}"
-    term = find(term_class(s))
-    mc = find(MC_CLASS)
     claude = find(claude_class(s))
-    if cockpit_on():
-        width, height, top, bottom = monitor_geometry()
-        gap = max((width - ZEN_WIDTH) // 2, 200)
-        # Everything flush with the bar and the screen edges; the only gaps
-        # are between the panels and Claude's column. All three float so
-        # their borders sit outside them: the focus bars show on the sides,
-        # while the top and bottom edges hide under the bar and off-screen.
-        y, h = top, height - top - bottom
-        if native_panel():
-            # The shell draws Mission Control in the left gap; retire the
-            # terminal one if it's still around.
-            if mc:
-                hypr(f'hl.dsp.window.close({{ window = "address:{mc["address"]}" }})')
-            mc = None
-        elif not mc:
-            open_term(MC_CLASS, "Mission Control", HOME, [SELF, "mc"])
-            mc = wait_for(MC_CLASS)
-        for win, x, w in ((mc, 0, gap - PAD), (term, width - gap + PAD, gap - PAD),
-                          (claude, gap, width - 2 * gap)):
-            if win:
-                move_to(win["address"], ws)
-                place(win["address"], x, y, w, h)
-    else:
-        for win in (mc, term):
-            if win and win["workspace"]["name"] != HIDDEN:
-                move_to(win["address"], HIDDEN)
-        # Back to tiled: alone on the workspace, the zen rule centers it.
-        if claude and claude["floating"]:
-            hypr(f'hl.dsp.window.float({{ window = "address:{claude["address"]}", action = "disable" }})')
-    if claude:
-        focus_window(claude["address"])
+    term = find(term_class(s))
+    for win in (claude, term):
+        if win and win["floating"]:
+            hypr(f'hl.dsp.window.float({{ window = "address:{win["address"]}", action = "disable" }})')
+    if term and not terminal_on(sid):
+        if term["workspace"]["name"] != HIDDEN:
+            move_to(term["address"], HIDDEN)
+    elif term and term["workspace"]["name"] != s["workspace"]:
+        # Split off the bottom of Claude: the column is taller than wide, so
+        # the new window lands underneath, and then takes its share.
+        if claude:
+            focus_window(claude["address"])
+        move_to(term["address"], ws)
+        time.sleep(0.1)
+        term = find(term_class(s))
+        _, height, top, bottom = monitor_geometry()
+        want = int((height - top - bottom) * TERMINAL_HEIGHT)
+        if term and claude and term["at"][1] > claude["at"][1]:
+            # Resizing moves the split under the top window, so grow Claude.
+            hypr(f'hl.dsp.window.resize({{ window = "address:{claude["address"]}", '
+                 f'x = 0, y = {term["size"][1] - want}, relative = true }})')
+    target = term if focus == "terminal" and term and terminal_on(sid) else claude
+    if target:
+        focus_window(target["address"])
 
 
-def cmd_cockpit():
+def cmd_terminal(args):
+    """Toggle the current session's terminal (or turn it on|off). Turning it
+    on puts the keyboard in it; turning it off gives it back to Claude."""
     sid = current_session_id()
     if not sid:
         return 1
-    if cockpit_on():
-        COCKPIT.unlink()
+    on = args[0] == "on" if args and args[0] in ("on", "off") else not terminal_on(sid)
+    TERMINAL.mkdir(parents=True, exist_ok=True)
+    if on:
+        (TERMINAL / sid).touch()
     else:
-        COCKPIT.touch()
+        (TERMINAL / sid).unlink(missing_ok=True)
     ensure_windows(session(sid))
-    arrange(sid)
-    tell_shell("refresh")
+    arrange(sid, focus="terminal" if on else "claude")
     return 0
 
 
@@ -518,9 +511,9 @@ def cmd_open():
 
 
 def cmd_step(delta):
-    """Move down (+1) or up (-1) Mission Control's list, wrapping around.
-    From outside amarchy, go to the last session you were in. With the cockpit
-    off, Mission Control peeks in for a moment to show where you landed."""
+    """Move down (+1) or up (-1) the session list, wrapping around.
+    From outside amarchy, go to the last session you were in. The list peeks
+    out of the bar for a moment to show where you landed."""
     ids = [s["id"] for s in session_view()]
     if not ids:
         return 1
@@ -529,7 +522,7 @@ def cmd_step(delta):
         cmd_jump(last_session_id(ids))
     else:
         cmd_jump(ids[(ids.index(current) + delta) % len(ids)])
-    tell_shell("refresh" if cockpit_on() else "peek")
+    tell_shell("peek")
     return 0
 
 
@@ -653,9 +646,9 @@ def has_conversation(path):
 
 def ensure_windows(s):
     """Open whatever a session is missing: Claude (picking its conversation back
-    up) and the dev terminal. Windows are disposable, like any other window in
-    Omarchy: close one with Super+W and the next jump brings it back. The
-    session itself only ends with close."""
+    up) and, when it's toggled on, the terminal. Windows are disposable, like
+    any other window in Omarchy: close one with Super+W and the next jump (or
+    terminal toggle) brings it back. The session itself only ends with close."""
     path = Path(s["path"])
     if not path.is_dir():
         return
@@ -665,13 +658,14 @@ def ensure_windows(s):
         open_term(claude_class(s), f"amarchy:{s['id']}", path,
                   ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])])
         opened.append(claude_class(s))
-    if not find(term_class(s)):
-        open_term(term_class(s), f"amarchy:{s['id']}:term", path)
+    if terminal_on(s["id"]) and not find(term_class(s)):
+        open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path)
         opened.append(term_class(s))
     for cls in opened:
         win = wait_for(cls)
+        # The terminal starts hidden; arrange() tiles it under Claude.
         if win:
-            move_to(win["address"], f"name:{s['workspace']}")
+            move_to(win["address"], HIDDEN if cls == term_class(s) else f"name:{s['workspace']}")
 
 
 def cmd_new(args):
@@ -790,17 +784,13 @@ def close(sid, force=False):
     kept = sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
     (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
     (STATUS / sid).unlink(missing_ok=True)
+    (TERMINAL / sid).unlink(missing_ok=True)
     set_trust(path, False)
-    # Don't strand Mission Control on the emptied workspace: follow the cockpit
-    # to the next session, or tuck it away when none are left.
+    # Don't leave you on the emptied workspace: go to another session.
     if was_current:
         rest = sessions()
         if rest:
             cmd_jump(rest[-1]["id"])
-        else:
-            mc = find(MC_CLASS)
-            if mc:
-                move_to(mc["address"], HIDDEN)
     note = f"branch {s['branch']} kept (not merged)" if kept else "branch deleted"
     notify("amarchy", f"Closed {s['repo']} · {s['name']} ({note})")
     return None
@@ -871,49 +861,6 @@ def cmd_hook(sid, state):
 
 # ------------------------------------------------------------------ mission control
 
-# Status icons and labels, drawn in the style of the Omarchy menu.
-STATES = {"working": ("󰔟", "working"), "waiting": ("󰂞", "needs you"), "idle": ("󰄬", "idle"),
-          "asleep": ("󰒲", "asleep")}
-
-# Braille spinner for working sessions, like the OpenClaw TUI's.
-SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-SPIN_EVERY = 0.1
-
-THEME_DEFAULTS = {"background": "#121212", "foreground": "#bebebe", "accent": "#e68e0d",
-                  "red": "#d35f5f", "dark_foreground": "#555555", "light_foreground": "#8a8a8d"}
-
-
-def theme_colors():
-    """The current Omarchy theme's palette (re-read, so theme switches apply live)."""
-    colors = dict(THEME_DEFAULTS)
-    f = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "omarchy/current/theme/colors.toml"
-    try:
-        for m in re.finditer(r'^\s*(\w+)\s*=\s*"(#[0-9a-fA-F]{6})"', f.read_text(), re.M):
-            colors[m[1]] = m[2]
-    except OSError:
-        pass
-    return colors
-
-
-def rgb(hex_color):
-    return tuple(int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-
-
-def mix(a, b, t):
-    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(rgb(a), rgb(b)))
-
-
-def fg(hex_color):
-    return "\x1b[38;2;%d;%d;%dm" % rgb(hex_color)
-
-
-def bg(hex_color):
-    return "\x1b[48;2;%d;%d;%dm" % rgb(hex_color)
-
-
-RESET = "\x1b[0m"
-
-
 def task_title(window_title):
     """What a session is about, from the title Claude Code gives its window
     (a short slug like "fix-login-redirect", after a status glyph)."""
@@ -924,7 +871,7 @@ def task_title(window_title):
         title = title.replace("-", " ").replace("_", " ")
     return title[:1].upper() + title[1:]
 
-# Sections, most urgent first. Mission Control lists sessions in this order.
+# Sections, most urgent first. Every list of sessions is in this order.
 SECTIONS = (("waiting", "NEEDS YOU"), ("working", "WORKING"), ("idle", "IDLE"), ("asleep", "ASLEEP"))
 ORDER = {state: i for i, (state, _) in enumerate(SECTIONS)}
 
@@ -968,8 +915,7 @@ def saved_title(path):
 
 
 def session_view():
-    """Sessions as every UI shows them (Mission Control, the shell panel, the
-    bar widget, the Omarchy menu): most urgent first, with what each one is
+    """Sessions as every UI shows them (the bar widget, the Omarchy menu): most urgent first, with what each one is
     about, how long it has been in its state, and which one is on screen."""
     titles = {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
@@ -987,13 +933,14 @@ def session_view():
 
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
 NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
+             ("Toggle amarchy terminal", "terminal"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
              ("Close amarchy session", "close"))
 
 
 def nav_keys():
     """The session keys as bound in Hyprland (hypr/amarchy.lua), for the hints
-    under Mission Control: {"mod": "Ctrl+Alt", "next": "J", ...}."""
+    under the session list: {"mod": "Ctrl+Alt", "next": "J", ...}."""
     try:
         binds = {b.get("description"): b for b in json.loads(sh("hyprctl", "binds", "-j").stdout)}
     except ValueError:
@@ -1009,8 +956,7 @@ def nav_keys():
 
 def cmd_ui():
     """Everything the shell plugin draws, in one call."""
-    print(json.dumps({"cockpit": cockpit_on(), "zen_width": ZEN_WIDTH, "keys": nav_keys(),
-                      "sessions": session_view()}))
+    print(json.dumps({"keys": nav_keys(), "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
@@ -1040,147 +986,6 @@ def cmd_pick(args):
     return 0
 
 
-def mc_frame(ss, current, sel, confirm, msg, width, height):
-    """One screen of Mission Control. ss must already be in session_order."""
-    c = theme_colors()
-    # Dim and faint are mixed from the theme's own foreground: themes don't
-    # agree on what their "light"/"dark" foreground means.
-    text = c["foreground"]
-    dim = mix(c["foreground"], c["background"], 0.4)
-    faint = mix(c["foreground"], c["background"], 0.6)
-    # Same as the menu's selected row: foreground at 8% over the background.
-    selected_bg = bg(mix(c["background"], c["foreground"], 0.08))
-    state_color = {"working": c["accent"], "waiting": c["accent"], "idle": faint, "asleep": faint}
-
-    def line(parts, fill=""):
-        """parts: (color, text) pairs; fill: background for the whole row."""
-        plain = "".join(s for _, s in parts)
-        body = "".join(f"{fill}{fg(col)}{s}" for col, s in parts)
-        return body + fill + " " * max(width - len(plain), 0) + RESET
-
-    head = [line([]), line([(text, "  Amarchy")]), line([])]
-
-    # Body: section headers and two-line session rows, as lines; remember
-    # where the selected row is so we can scroll to it.
-    body, sel_line, last_state = [], 0, None
-    for i, s in enumerate(ss):
-        if s["status"] != last_state:
-            body.append(line([(faint, "  " + dict(SECTIONS).get(s["status"], s["status"].upper()))]))
-            last_state = s["status"]
-        icon, label = STATES.get(s["status"], ("?", s["status"]))
-        if s["status"] == "working":
-            icon = SPINNER[int(time.time() / SPIN_EVERY) % len(SPINNER)]
-        chosen = i == sel
-        fill = selected_bg if chosen else ""
-        mark = (c["accent"], "▎") if s["id"] == current else (text, " ")
-        when = age(s["id"]) if s["status"] != "asleep" else ""
-        if chosen:
-            sel_line = len(body)
-        # What (the task), when (right-aligned), and where (project · branch).
-        task = s.get("task") or "new session"
-        room_for_task = max(width - 5 - len(when) - 3, 8)
-        if len(task) > room_for_task:
-            task = task[:room_for_task - 1] + "…"
-        gap = " " * max(width - 5 - len(task) - len(when) - 2, 1)
-        body += [
-            line([], fill),
-            line([mark, (state_color.get(s["status"], text), f" {icon}  "),
-                  (c["accent"] if chosen else (text if s.get("task") else dim), task),
-                  (text, gap), (faint, when)], fill),
-            line([(text, "     "), (dim, f"{s['repo']} · {s['name']}")], fill),
-            line([], fill),
-        ]
-    if not ss:
-        body += [line([(dim, "  No agents running.")]), line([]),
-                 line([(c["accent"], "  n"), (dim, "  start one")])]
-
-    if confirm:
-        foot = [line([(c["red"], f"  {confirm} has uncommitted changes.")]),
-                line([(text, "  Discard and close?  "), (c["accent"], "y"), (dim, " / n")])]
-    else:
-        keys = [("↵", "jump"), ("n", "new"), ("a", "add"), ("x", "close")]
-        foot = [line([(dim, f"  {msg}")]),
-                line([(faint, "  ")] + [p for k, v in keys for p in ((c["accent"], k), (faint, f" {v}   "))])]
-
-    # Scroll so the selected row stays visible.
-    room = max(height - len(head) - len(foot) - 1, 4)
-    first = max(0, min(sel_line - room + 4, len(body) - room)) if len(body) > room else 0
-    view = body[first:first + room]
-    view += [line([])] * (room - len(view))
-    return head + view + [line([])] + foot
-
-
-def mission_control():
-    import select
-    import termios
-    import tty
-    fd = sys.stdin.fileno()
-    saved = termios.tcgetattr(fd)
-    out = sys.stdout
-    out.write("\x1b[?1049h\x1b[?25l")
-    tty.setcbreak(fd)
-    sel, confirm, msg = 0, None, ""
-    ss, current, read_at = [], None, 0.0
-    started = os.stat(SELF).st_mtime
-    try:
-        while True:
-            # Picks up amarchy updates by itself: restart when the script changes.
-            if os.stat(SELF).st_mtime != started:
-                termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-                out.write("\x1b[?25h\x1b[?1049l")
-                out.flush()
-                os.execv(SELF, [SELF, "mc"])
-            # Session data once a second (or right after a key); the screen
-            # redraws faster only while a spinner is turning.
-            if time.time() - read_at >= 1.0:
-                ss = sessions()
-                titles = {c["class"]: c["title"] for c in clients()}
-                for s in ss:
-                    if claude_class(s) not in titles:
-                        s["status"] = "asleep"
-                    s["task"] = task_title(titles.get(claude_class(s), ""))
-                ss.sort(key=session_order)
-                current, read_at = current_session_id(), time.time()
-            sel = max(0, min(sel, len(ss) - 1))
-            width, height = shutil.get_terminal_size()
-            frame = mc_frame(ss, current, sel, confirm, msg, width, height)
-            out.write("\x1b[H" + "\n".join(frame[:height]) + "\x1b[J")
-            out.flush()
-
-            spinning = any(s["status"] == "working" for s in ss)
-            if not select.select([fd], [], [], SPIN_EVERY if spinning else 1.0)[0]:
-                continue
-            read_at = 0.0
-            key = os.read(fd, 16).decode(errors="ignore")
-            if confirm:
-                if key == "y":
-                    close(confirm, force=True)
-                confirm, msg = None, ""
-                continue
-            if key in ("j", "\x1b[B"):
-                sel += 1
-            elif key in ("k", "\x1b[A"):
-                sel -= 1
-            elif key == "n":
-                detach([SELF, "new"])
-            elif key == "a":
-                detach([SELF, "add"])
-            elif ss and key in ("\r", "\n"):
-                cmd_jump(ss[sel]["id"])
-            elif ss and key == "x":
-                target = ss[sel]["id"]
-                if close(target):
-                    confirm = target
-                else:
-                    msg = f"closed {target}"
-    except KeyboardInterrupt:
-        pass
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-        out.write("\x1b[?25h\x1b[?1049l")
-        out.flush()
-
-
 # ------------------------------------------------------------------ main
 
 def main(argv):
@@ -1200,27 +1005,12 @@ def main(argv):
         return cmd_step(1 if cmd == "next" else -1)
     elif cmd == "jump" and args:
         cmd_jump(args[0])
-    elif cmd == "cockpit":
-        return cmd_cockpit()
-    elif cmd == "list":
-        print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
-    elif cmd == "focus":
-        # Hand Mission Control (the shell panel) the keyboard.
-        if not native_panel():
-            mc = find(MC_CLASS)
-            if mc:
-                focus_window(mc["address"])
-            return 0
-        if not cockpit_on() and current_session_id():
-            cmd_cockpit()
-            time.sleep(0.3)
-        return subprocess.run(["omarchy-shell", "amarchy", "focus"], stdout=subprocess.DEVNULL).returncode
+    elif cmd in ("terminal", "cockpit"):   # cockpit: the old name, still bound in some configs
+        return cmd_terminal(args)
     elif cmd == "ui":
         cmd_ui()
     elif cmd == "pick":
         return cmd_pick(args)
-    elif cmd == "mc":
-        mission_control()
     elif cmd == "layout":
         cmd_layout()
     elif cmd == "hook" and len(args) == 2:

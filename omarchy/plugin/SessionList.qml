@@ -3,8 +3,7 @@ import qs.Commons
 import qs.Ui
 
 // Sessions grouped by urgency (the CLI already sorts them that way), with a
-// section header where the state changes. Shared by Mission Control and the
-// bar popup.
+// section header where the state changes.
 Column {
   id: list
 
