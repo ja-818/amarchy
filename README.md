@@ -30,10 +30,13 @@ Hyprland's focus border:
 
 | Key | |
 | --- | --- |
-| `Super+Alt+A` | Open amarchy: back to your last session, or cycle to the next one if you're already in a session. Starts a new one if there are none. |
+| `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Super+Alt+Z` | Toggle the cockpit on a session workspace. |
-| `Super+Alt+M` | Give Mission Control the keyboard: `j`/`k` move, `↵` jump, `n` new, `a` add project, `x` close, `Esc` back. |
+| `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in Mission Control. |
+| `Ctrl+Alt+N` / `A` | New session / add project. |
+| `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
+| `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
 | `Super+Space` | **Amarchy** is in the Omarchy menu: sessions, new session, add project, close. |
 
 The **Ⓐ in the bar** lights up when a session needs you; click it for your
@@ -76,7 +79,8 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 `~/.config/hypr/hyprland.lua`:
 
 ```lua
-amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", cockpit_key = "Z", focus_key = "M" }
+amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", cockpit_key = "Z",
+            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", nav_new_key = "N", add_key = "A", close_key = "X" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -104,9 +108,11 @@ amarchy add                           add a project interactively
 
 amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
 amarchy list                          sessions as JSON
-amarchy open                          go to the last session, or the next one if in one
+amarchy open                          go to the last session you were in
+amarchy next | prev                   go down | up one session in Mission Control's order
 amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
+amarchy close [id] --confirm          the same, asking first in the Omarchy menu
 amarchy cockpit                       toggle Mission Control + terminal
 amarchy focus                         give Mission Control the keyboard
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)

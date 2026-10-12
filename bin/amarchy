@@ -20,9 +20,11 @@ Projects (git repos directly inside AMARCHY_WORK):
 Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
   amarchy list [--compact]              sessions as JSON, most urgent first (task, age, current)
-  amarchy open                          go to the last session, or the next one if in one
+  amarchy open                          go to the last session you were in (nothing if already in one)
+  amarchy next | prev                   go down | up one session in Mission Control's order
   amarchy jump <id>                     go to a session
-  amarchy close [id] [--force]          close a session (current one if no id)
+  amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
+  amarchy close [id] --confirm          the same, asking first in the Omarchy menu
   amarchy cockpit                       toggle Mission Control + terminal
   amarchy focus                         give Mission Control the keyboard (j/k, Enter, n, a, x, Esc)
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
@@ -500,21 +502,37 @@ def cmd_jump(sid):
     arrange(sid)
 
 
+def last_session_id(ids):
+    last = LAST.read_text().strip() if LAST.exists() else ""
+    return last if last in ids else ids[-1]
+
+
 def cmd_open():
-    """Go to amarchy: the last session you were in, or the next one when already
-    in a session. With no sessions yet, start one."""
-    ss = sessions()
-    if not ss:
+    """Go to amarchy: the last session you were in. Already in a session, this
+    does nothing (next/prev move between them). With no sessions yet, start one."""
+    ids = [s["id"] for s in sessions()]
+    if not ids:
         cmd_new([])
-        return
-    ids = [s["id"] for s in ss]
+    elif current_session_id() not in ids:
+        cmd_jump(last_session_id(ids))
+
+
+def cmd_step(delta):
+    """Move down (+1) or up (-1) Mission Control's list, stopping at the ends.
+    From outside amarchy, go to the last session you were in."""
+    ids = [s["id"] for s in session_view()]
+    if not ids:
+        return 1
     current = current_session_id()
-    if current in ids:
-        sid = ids[(ids.index(current) + 1) % len(ids)]
-    else:
-        last = LAST.read_text().strip() if LAST.exists() else ""
-        sid = last if last in ids else ids[-1]
-    cmd_jump(sid)
+    if current not in ids:
+        cmd_jump(last_session_id(ids))
+        return 0
+    i = ids.index(current) + delta
+    if not 0 <= i < len(ids):
+        return 1
+    cmd_jump(ids[i])
+    tell_shell("refresh")
+    return 0
 
 
 # ------------------------------------------------------------------ new / close
@@ -790,13 +808,45 @@ def close(sid, force=False):
     return None
 
 
+ICON_CLOSE = "󰆴"
+ICON_CANCEL = "󰜺"
+
+
+def confirm_close(s):
+    """Ask in the Omarchy menu before closing. Returns "close", "force" (throw
+    away uncommitted changes too) or None."""
+    path = Path(s["path"])
+    changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.exists() else 0
+    if changes:
+        yes = "Close and discard changes"
+        detail = f"{changes} uncommitted file{'s' if changes != 1 else ''} lost"
+    else:
+        yes, detail = "Close session", "Removes its worktree"
+    picked = menu_select(f"Close {s['repo']} · {s['name']}?", [
+        (ICON_CLOSE, yes, detail),
+        (ICON_CANCEL, "Cancel", "Keep the session"),
+    ])
+    if picked != yes:
+        return None
+    return "force" if changes else "close"
+
+
 def cmd_close(args):
     sid = args[0] if args and not args[0].startswith("-") else current_session_id()
-    if not sid:
-        return
-    err = close(sid, force="--force" in args)
+    s = session(sid) if sid else None
+    if not s:
+        return 1
+    force = "--force" in args
+    if "--confirm" in args:
+        answer = confirm_close(s)
+        if not answer:
+            return 1
+        force = force or answer == "force"
+    err = close(sid, force=force)
     if err:
-        notify("amarchy", f"{sid}: {err}. Close it from Mission Control to confirm.")
+        notify("amarchy", f"{sid}: {err}. Use amarchy close {sid} --confirm to discard them.")
+        return 1
+    return 0
 
 
 def cmd_hook(sid, state):
@@ -937,9 +987,32 @@ def session_view():
     return ss
 
 
+MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
+NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
+             ("New amarchy session here", "new"), ("Add amarchy project", "add"),
+             ("Close amarchy session", "close"))
+
+
+def nav_keys():
+    """The session keys as bound in Hyprland (hypr/amarchy.lua), for the hints
+    under Mission Control: {"mod": "Ctrl+Alt", "next": "J", ...}."""
+    try:
+        binds = {b.get("description"): b for b in json.loads(sh("hyprctl", "binds", "-j").stdout)}
+    except ValueError:
+        return {}
+    keys = {}
+    for description, action in NAV_BINDS:
+        b = binds.get(description)
+        if b:
+            keys[action] = b["key"]
+            keys.setdefault("mod", "+".join(n for bit, n in MOD_NAMES if b["modmask"] & bit))
+    return keys
+
+
 def cmd_ui():
     """Everything the shell plugin draws, in one call."""
-    print(json.dumps({"cockpit": cockpit_on(), "zen_width": ZEN_WIDTH, "sessions": session_view()}))
+    print(json.dumps({"cockpit": cockpit_on(), "zen_width": ZEN_WIDTH, "keys": nav_keys(),
+                      "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
@@ -963,9 +1036,7 @@ def cmd_pick(args):
     if not s:
         return 1
     if closing:
-        err = close(s["id"])
-        if err:
-            notify("amarchy", f"{s['id']}: {err}. Close it from Mission Control to confirm.")
+        return cmd_close([s["id"], "--confirm"])
     else:
         cmd_jump(s["id"])
     return 0
@@ -1124,9 +1195,11 @@ def main(argv):
     elif cmd == "projects":
         return cmd_projects(args)
     elif cmd == "close":
-        cmd_close(args)
+        return cmd_close(args)
     elif cmd == "open":
         cmd_open()
+    elif cmd in ("next", "prev"):
+        return cmd_step(1 if cmd == "next" else -1)
     elif cmd == "jump" and args:
         cmd_jump(args[0])
     elif cmd == "cockpit":

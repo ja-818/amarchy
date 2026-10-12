@@ -87,7 +87,9 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onDeleteRequested: {
         var s = store.sessions[root.cursor]
-        if (s) store.run(["close", s.id])
+        if (!s) return
+        root.close()
+        store.run(["close", s.id, "--confirm"])
       }
       onTextKey: function(t) {
         if (t === "n") { root.close(); store.run(["new"]) }

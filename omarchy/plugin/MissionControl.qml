@@ -10,9 +10,10 @@ import qs.Ui
 // shell so it looks like the rest of Omarchy. Shows while the cockpit is on
 // and an amarchy session workspace (A:...) is on screen.
 //
-// Click a session to jump to it. From the keyboard, `amarchy focus` (bound to
-// the panel key) hands it the keyboard: j/k or arrows to move, Enter to jump,
-// n new session, a add project, x close, Esc to give the keyboard back.
+// Click a session to jump to it. The keyboard goes through Hyprland (see
+// hypr/amarchy.lua), so the panel never has to take focus; the hints at the
+// bottom show those keys. `amarchy focus` can still hand it the keyboard:
+// j/k or arrows to move, Enter to jump, n new, a add, x close, Esc to leave.
 // IPC: omarchy-shell amarchy refresh|focus|blur
 Item {
   id: root
@@ -44,6 +45,19 @@ Item {
 
   function clampCursor() {
     root.cursor = Math.max(0, Math.min(root.cursor, store.sessions.length - 1))
+  }
+
+  // What to show under the list: the panel's own keys while it has the
+  // keyboard, otherwise the Hyprland keys (prefixed by their modifier).
+  readonly property var hintRows: {
+    if (root.focused) return [["↵", "jump"], ["n", "new"], ["a", "add"], ["x", "close"]]
+    var k = store.keys, rows = []
+    function key(name) { return String(k[name]).toLowerCase() }
+    if (k.next && k.prev) rows.push([key("next") + "/" + key("prev"), "move"])
+    if (k["new"]) rows.push([key("new"), "new"])
+    if (k.add) rows.push([key("add"), "add"])
+    if (k.close) rows.push([key("close"), "close"])
+    return rows
   }
 
   function activate(index) {
@@ -110,7 +124,9 @@ Item {
       onCloseRequested: root.focused = false
       onDeleteRequested: {
         var s = store.sessions[root.cursor]
-        if (s) store.run(["close", s.id])
+        if (!s) return
+        root.focused = false
+        store.run(["close", s.id, "--confirm"])
       }
       onTextKey: function(t) {
         if (t === "n") { root.focused = false; store.run(["new"]) }
@@ -185,8 +201,15 @@ Item {
           anchors.leftMargin: Style.space(8)
           spacing: Style.spacing.xl
           opacity: root.focused ? 0.7 : 0.4
+          Text {
+            visible: !root.focused && !!store.keys.mod && root.hintRows.length > 0
+            text: store.keys.mod || ""
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+            color: Color.menu.text
+          }
           Repeater {
-            model: [["↵", "jump"], ["n", "new"], ["a", "add"], ["x", "close"]]
+            model: root.hintRows
             Row {
               required property var modelData
               spacing: Style.spacing.sm

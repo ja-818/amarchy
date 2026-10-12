@@ -112,9 +112,9 @@ edit_menu "$repo/omarchy/menu.jsonc"
 hyprctl reload >/dev/null
 
 say "amarchy installed."
-echo "  Super+Alt+A  open amarchy (last session, or cycle to the next)"
+echo "  Super+Alt+A  open amarchy (your last session)"
 echo "  Super+Alt+N  new session (projects from ${AMARCHY_WORK:-~/Work})"
 echo "  Super+Alt+Z  toggle the cockpit (Mission Control + terminal)"
-echo "  Super+Alt+M  give Mission Control the keyboard"
+echo "  Ctrl+Alt+J/K move between sessions · N new · A add project · X close"
 echo "  Super+Space  Amarchy menu · Ⓐ in the bar"
 echo "Change the keys with an \`amarchy = { ... }\` table, see hypr/amarchy.lua."

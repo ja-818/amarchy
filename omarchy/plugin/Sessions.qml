@@ -12,6 +12,8 @@ Item {
   property var sessions: []
   property bool cockpit: false
   property int zenWidth: 900
+  // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
+  property var keys: ({})
 
   readonly property int waiting: count("waiting")
   readonly property int working: count("working")
@@ -43,6 +45,7 @@ Item {
           root.sessions = d.sessions || []
           root.cockpit = !!d.cockpit
           root.zenWidth = d.zen_width || 900
+          root.keys = d.keys || {}
         } catch (e) {}
       }
     }
