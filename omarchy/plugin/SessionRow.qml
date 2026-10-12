@@ -4,6 +4,7 @@ import qs.Ui
 
 // One session, drawn like a row of the Omarchy menu: icon column, label
 // (what the session is about), subtext (project · branch), time on the right.
+// Same anatomy at the shell's body size, so a screenful of sessions fits.
 // The keyboard cursor uses the menu's selected treatment; the session that's
 // on screen gets Hyprland's active border, like the focused window.
 BorderSurface {
@@ -21,7 +22,7 @@ BorderSurface {
   readonly property bool urgent: status === "waiting" || status === "working"
   readonly property color ink: cursor ? Color.menu.selectedText : Color.menu.text
 
-  implicitHeight: Math.max(Style.space(58), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
+  implicitHeight: Math.max(Style.space(38), content.implicitHeight + Style.spacing.controlPaddingY * 2)
   radius: Style.cornerRadius
   color: cursor ? Color.menu.selectedBackground : "transparent"
   borderSpec: session.current ? Border.hyprlandActiveSpec(Color.accent, Math.max(1, Style.space(2)))
@@ -29,16 +30,16 @@ BorderSurface {
 
   Text {
     id: icon
-    width: Style.space(36)
+    width: Style.space(24)
     anchors.left: parent.left
-    anchors.leftMargin: row.borderLeft + Style.space(8)
+    anchors.leftMargin: row.borderLeft + Style.spacing.sm
     y: content.y + label.y + (label.height - height) / 2
     horizontalAlignment: Text.AlignHCenter
     textFormat: Text.PlainText
     text: row.status === "working" ? row.spinner[row.spinnerFrame % row.spinner.length]
                                    : (row.icons[row.status] || "󰄬")
     font.family: Style.font.menuFamily
-    font.pixelSize: Style.font.iconLarge
+    font.pixelSize: Style.font.icon
     color: row.cursor || row.urgent ? Color.menu.selectedText : Color.menu.text
     opacity: row.cursor || row.urgent ? 1 : 0.52
   }
@@ -46,11 +47,11 @@ BorderSurface {
   Column {
     id: content
     anchors.left: icon.right
-    anchors.leftMargin: Style.space(6)
+    anchors.leftMargin: Style.spacing.sm
     anchors.right: when.left
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
-    spacing: Style.space(3)
+    spacing: Style.spacing.hairline
 
     Text {
       id: label
@@ -59,7 +60,7 @@ BorderSurface {
       elide: Text.ElideRight
       text: row.session.task || "new session"
       font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.heading
+      font.pixelSize: Style.font.body
       font.weight: Font.Medium
       color: row.ink
       opacity: row.session.task || row.cursor ? 1 : 0.52
@@ -71,7 +72,7 @@ BorderSurface {
       elide: Text.ElideRight
       text: (row.session.repo || "") + " · " + (row.session.name || "")
       font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: Style.font.caption
       color: Color.menu.text
       opacity: 0.52
     }
@@ -80,7 +81,7 @@ BorderSurface {
   Text {
     id: when
     anchors.right: parent.right
-    anchors.rightMargin: row.borderRight + Style.space(12)
+    anchors.rightMargin: row.borderRight + Style.spacing.lg
     y: content.y + label.y + (label.height - height) / 2
     textFormat: Text.PlainText
     text: row.session.age || ""

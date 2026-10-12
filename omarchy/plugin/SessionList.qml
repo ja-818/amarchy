@@ -16,7 +16,7 @@ Column {
 
   readonly property var sectionNames: ({ waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" })
 
-  spacing: Style.spacing.xs
+  spacing: Style.spacing.xxs
 
   Repeater {
     model: list.sessions
@@ -26,7 +26,7 @@ Column {
       required property var modelData
       required property int index
       width: list.width
-      spacing: Style.spacing.xs
+      spacing: Style.spacing.xxs
 
       readonly property bool firstOfSection: index === 0 || list.sessions[index - 1].status !== modelData.status
 
@@ -35,7 +35,7 @@ Column {
         text: list.sectionNames[entry.modelData.status] || entry.modelData.status
         foreground: Color.menu.text
         fontFamily: Style.font.menuFamily
-        topPadding: (entry.index === 0 ? 0 : Style.spacing.lg) + Math.ceil(fontSize * 0.15)
+        topPadding: (entry.index === 0 ? 0 : Style.spacing.md) + Math.ceil(fontSize * 0.15)
         leftPadding: Style.space(8)
       }
 
