@@ -36,6 +36,7 @@ the list drops for a moment when you move between sessions:
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
+| `Ctrl+Alt+E` | Name this session yourself. The name sits in the strip above Claude and in the list, in place of the title Claude came up with. |
 | `Ctrl+Alt+M` | The amarchy menu: everything here in one list, each with its key next to it. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -105,7 +106,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
             nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R", commands_key = "C",
-            nav_new_key = "N", add_key = "A", theme_key = "T", close_key = "X", menu_key = "M" }
+            nav_new_key = "N", add_key = "A", theme_key = "T", rename_key = "E", close_key = "X", menu_key = "M" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -116,6 +117,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_WORKTREES` | `$AMARCHY_WORK/.worktrees` | Worktrees go to `<this>/<repo>/<name>`. |
 | `AMARCHY_TERMINAL` | first installed | `foot`, `kitty`, `alacritty` or `ghostty`. |
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels. Run `amarchy layout` after changing it. |
+| `AMARCHY_HEADER_HEIGHT` | `28` | Height of the strip above Claude with the session's name, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 
 ## CLI
@@ -138,6 +140,8 @@ amarchy next | prev                   go down | up one session in the list (wrap
 amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
 amarchy close [id] --confirm          the same, asking first in the Omarchy menu
+amarchy rename [title]                name the current session (asks in the Omarchy menu if omitted)
+amarchy rename --id <id> [title]      the same for another session; --reset goes back to Claude's own title
 amarchy terminal [on|off]             toggle the session's terminal under Claude
 amarchy run                           run the project in the session's terminal (again: restart it)
 amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)

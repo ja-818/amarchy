@@ -12,6 +12,8 @@ Item {
   property var sessions: []
   // Width of the zen column on session workspaces, in logical pixels.
   property int zenWidth: 900
+  // Height of the strip kept free above it for the session's name (0: none).
+  property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
 
@@ -45,6 +47,7 @@ Item {
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
           root.zenWidth = d.zen_width || 900
+          root.headerHeight = d.header_height || 0
         } catch (e) {}
       }
     }

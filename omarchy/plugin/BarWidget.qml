@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -44,6 +45,7 @@ Panel {
     if (k["new"]) rows.push([key("new"), "new"])
     if (k.add) rows.push([key("add"), "add"])
     if (k.theme) rows.push([key("theme"), "theme"])
+    if (k.rename) rows.push([key("rename"), "rename"])
     if (k.close) rows.push([key("close"), "close"])
     if (k.menu) rows.push([key("menu"), "menu"])
     return rows
@@ -219,6 +221,14 @@ Panel {
       width: parent.width
       cursor: root.currentIndex
     }
+  }
+
+  SessionHeader {
+    screen: button.QsWindow.window ? button.QsWindow.window.screen : null
+    sessions: store.sessions
+    zenWidth: store.zenWidth
+    stripHeight: store.headerHeight
+    onRenameRequested: store.run(["rename"])
   }
 
   BarIconButton {

@@ -21,6 +21,7 @@
 --   nav_new_key  start a session (default "N")
 --   add_key      add a project (default "A")
 --   theme_key    pick the theme amarchy wears (default "T")
+--   rename_key   name this session yourself (default "E")
 --   close_key    close this session, after asking (default "X")
 --   menu_key     everything above in one menu, each with its key (default "M")
 --
@@ -61,6 +62,7 @@ nav(cfg.commands_key, "C", "Run amarchy command", "run --pick")
 nav(cfg.nav_new_key, "N", "New amarchy session here", "new")
 nav(cfg.add_key, "A", "Add amarchy project", "add")
 nav(cfg.theme_key, "T", "Pick amarchy theme", "theme")
+nav(cfg.rename_key, "E", "Rename amarchy session", "rename")
 nav(cfg.close_key, "X", "Close amarchy session", "close --confirm")
 nav(cfg.menu_key, "M", "amarchy menu", "menu")
 
