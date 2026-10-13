@@ -37,8 +37,8 @@ Sessions:
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 
 Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
-  amarchy theme                         pick it in Omarchy's theme switcher (the one with previews)
-  amarchy theme <name> | off            set it (any theme from `omarchy theme list`) or turn it off
+  amarchy theme                         pick it in Omarchy's theme switcher (the one with previews); System comes first
+  amarchy theme <name> | system         set it (any theme from `omarchy theme list`), or look like the rest of the desktop
   amarchy theme --show                  print it
 
 Plumbing:
@@ -534,6 +534,9 @@ def cmd_terminal(args):
 # so it happens in the time it takes to switch workspace. The session windows
 # themselves (Claude, the terminal) simply stay in the amarchy theme.
 
+SYSTEM = "system"       # no theme of its own: amarchy looks like the rest of the desktop
+
+
 def theme_name():
     f = THEME / "name"
     return f.read_text().strip() if f.exists() else ""
@@ -729,12 +732,12 @@ def cmd_watch():
 
 def cmd_theme(args):
     if args and args[0] == "--show":
-        print(theme_name() or "off")
+        print(theme_name() or SYSTEM)
         return 0
     name = args[0] if args else menu_pick_theme()
     if not name:
         return 1
-    if name.lower() == "off":
+    if name.lower() in (SYSTEM, "off"):
         (THEME / "name").unlink(missing_ok=True)
         theme_sync()
         retint(sh("omarchy-theme-osc", str(DESKTOP / "theme/colors.toml")).stdout)
@@ -1133,6 +1136,7 @@ ICON_LINK = "󰌷"
 ICON_NEW = "󰝒"
 ICON_LOCK = "󰌾"
 ICON_THEME = "󰏘"
+ICON_CHECK = "󰄬"
 ADD_PROJECT = "Add project"
 
 
@@ -1149,22 +1153,31 @@ def menu_input(prompt):
 
 
 def menu_pick_theme():
-    """Omarchy's own theme switcher (the previews), opened on the amarchy
-    theme. Returns the theme picked, or None."""
+    """Omarchy's own theme switcher (the previews), with System first and
+    opened on what amarchy wears now. Returns the theme picked, or None."""
+    current = theme_key(theme_name()) or SYSTEM
     if not shutil.which("omarchy-theme-switcher"):
-        return menu_select("Amarchy theme", [(ICON_THEME, t, "") for t in sh("omarchy-theme-list").stdout.splitlines()])
-    # The switcher opens on your desktop's theme. To open it on ours, let it
-    # build its previews (--preload shows nothing) and call its menu ourselves.
-    previews = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "omarchy/theme-selector/previews"
-    current = theme_key(theme_name())
-    if current:
-        sh("omarchy-theme-switcher", "--preload")
-    selected = next(iter(sorted(previews.glob(current + ".*"))), None) if current else None
-    if selected:
-        r = sh("omarchy-menu-images", "--print-name", "--show-labels", "--filterable", "--lazy-thumbnails",
-               "--selected", str(selected), str(previews))
-    else:
-        r = sh("omarchy-theme-switcher")
+        names = ["System", *sh("omarchy-theme-list").stdout.splitlines()]
+        return menu_select("Amarchy theme", [(ICON_CHECK if theme_key(t) == current else ICON_THEME, t, "")
+                                             for t in names])
+    # The switcher only lists themes and opens on your desktop's. So let it
+    # build its previews (--preload shows nothing) and call its menu ourselves,
+    # with a System tile in front that looks like your desktop does.
+    sh("omarchy-theme-switcher", "--preload")
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache")
+    previews = cache / "omarchy/theme-selector/previews"
+    desktop = (DESKTOP / "theme.name").read_text().strip() if (DESKTOP / "theme.name").exists() else ""
+    look = next(iter(sorted(previews.glob(desktop + ".*"))), None) if desktop else None
+    first = cache / "amarchy/theme-picker"
+    tile = first / (SYSTEM + look.suffix) if look else None
+    if not tile or not tile.is_symlink() or os.readlink(tile) != str(look.resolve()):
+        shutil.rmtree(first, ignore_errors=True)
+        first.mkdir(parents=True)
+        if tile:
+            tile.symlink_to(look.resolve())
+    selected = tile if current == SYSTEM else next(iter(sorted(previews.glob(current + ".*"))), None)
+    r = sh("omarchy-menu-images", "--print-name", "--show-labels", "--filterable", "--lazy-thumbnails",
+           *(["--selected", str(selected)] if selected else []), str(first), str(previews))
     return r.stdout.strip() or None
 
 
@@ -1446,7 +1459,6 @@ MENU = (
     ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
     ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
     ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
-    ("󰜺", "Theme off", ["theme", "off"], (), True, True),
     ("󰆴", "Close session", ["close", "--confirm"], ("Close amarchy session",), True, False),
 )
 
@@ -1457,7 +1469,7 @@ def menu_rows():
     inside = current_session_id() is not None
     rows = []
     for icon, label, command, descriptions, in_session, outside in MENU:
-        if not (in_session if inside else outside) or (command == ["theme", "off"] and not theme_name()):
+        if not (in_session if inside else outside):
             continue
         b = next((binds[d] for d in descriptions if d in binds), None)
         key = "+".join([*mod_names(b), b["key"].capitalize()]) if b else ""

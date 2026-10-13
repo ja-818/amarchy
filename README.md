@@ -72,11 +72,12 @@ session terminal stay in the amarchy theme.
 ```sh
 amarchy theme              # pick one: Ctrl+Alt+T, the Theme button under the Ⓐ, or Super+Space → Amarchy → Theme
 amarchy theme "Tokyo Night"
-amarchy theme off          # also Super+Space → Amarchy → Theme off
+amarchy theme system       # back to looking like the rest of the desktop
 ```
 
 The picker is Omarchy's own theme switcher, previews and all; it just sets
-amarchy's theme instead of your desktop's.
+amarchy's theme instead of your desktop's. **System** comes first: no theme of
+its own, amarchy follows your desktop.
 
 Any theme from `omarchy theme list` works. Your Omarchy theme is never
 switched: amarchy paints over it and paints it back, so nothing is rewritten or
@@ -147,7 +148,7 @@ amarchy run --pick                    choose one in the Omarchy menu, or save a 
 amarchy show                          open the session list under the Ⓐ in the bar
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
-amarchy theme [name|off]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
 amarchy layout                        resize the zen column for the current monitor
 ```
 

@@ -58,7 +58,7 @@ EOF
 
 if [[ ${1:-} == --uninstall ]]; then
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
-  [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme off || true
+  [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy"
   [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
   rm -f "$plugin_dir"
@@ -116,7 +116,7 @@ hyprctl reload >/dev/null
 # The amarchy theme, if one is set: render it again for this Omarchy and
 # monitor, and make sure its watcher is running.
 theme=$("$bin_dir/amarchy" theme --show)
-[[ $theme == off ]] || "$bin_dir/amarchy" theme "$theme"
+[[ $theme == system ]] || "$bin_dir/amarchy" theme "$theme"
 
 say "amarchy installed."
 echo "  Super+Alt+A  open amarchy (your last session)"
