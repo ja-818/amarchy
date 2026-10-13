@@ -21,6 +21,13 @@ Panel {
   property int spinnerFrame: 0
   property bool peeking: false
 
+  // As wide as the gap beside the zen column, so on a session the panel sits
+  // next to Claude instead of over it. Same width everywhere else.
+  readonly property int panelWidth: {
+    var gap = panel.screenW > 0 ? Math.floor((panel.screenW - store.zenWidth) / 2) - Style.gapsOut : 0
+    return Math.max(Style.space(240), gap > 0 ? gap : Style.space(380))
+  }
+
   readonly property int currentIndex: {
     for (var i = 0; i < store.sessions.length; i++) if (store.sessions[i].current) return i
     return -1
@@ -136,7 +143,8 @@ Panel {
       }
     }
 
-    Row {
+    Flow {
+      width: parent.width
       visible: root.hintRows.length > 0
       spacing: Style.spacing.xl
       opacity: 0.5
@@ -194,7 +202,7 @@ Panel {
     bar: root.bar
     open: root.peeking && !root.opened && store.sessions.length > 0
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    contentWidth: peek.fittedContentWidth(Style.space(380))
+    contentWidth: peek.fittedContentWidth(root.panelWidth)
     contentHeight: peek.fittedContentHeight(peekContent.implicitHeight, Style.space(640))
 
     Content {
@@ -223,7 +231,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keys
-    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentWidth: panel.fittedContentWidth(root.panelWidth)
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(640))
 
     PanelKeyCatcher {

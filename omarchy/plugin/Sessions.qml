@@ -10,6 +10,8 @@ Item {
   property int interval: 1000
   property bool active: true
   property var sessions: []
+  // Width of the zen column on session workspaces, in logical pixels.
+  property int zenWidth: 900
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
 
@@ -42,6 +44,7 @@ Item {
           var d = JSON.parse(text)
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
+          root.zenWidth = d.zen_width || 900
         } catch (e) {}
       }
     }

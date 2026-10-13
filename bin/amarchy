@@ -1046,7 +1046,7 @@ def nav_keys():
 
 def cmd_ui():
     """Everything the shell plugin draws, in one call."""
-    print(json.dumps({"keys": nav_keys(), "sessions": session_view()}))
+    print(json.dumps({"zen_width": ZEN_WIDTH, "keys": nav_keys(), "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
