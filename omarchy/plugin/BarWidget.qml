@@ -119,18 +119,7 @@ Panel {
       }
     }
 
-    SessionList {
-      width: parent.width
-      visible: store.sessions.length > 0
-      sessions: store.sessions
-      cursor: content.cursor
-      spinnerFrame: root.spinnerFrame
-      onActivated: function(index) { content.activated(index) }
-      onHovered: function(index) { content.hovered(index) }
-    }
-
-    PanelSeparator { width: parent.width }
-
+    // Quick actions and the keys stay put at the top; the list grows below.
     Row {
       spacing: Style.spacing.controlGap
       Button {
@@ -176,6 +165,18 @@ Panel {
           }
         }
       }
+    }
+
+    PanelSeparator { width: parent.width }
+
+    SessionList {
+      width: parent.width
+      visible: store.sessions.length > 0
+      sessions: store.sessions
+      cursor: content.cursor
+      spinnerFrame: root.spinnerFrame
+      onActivated: function(index) { content.activated(index) }
+      onHovered: function(index) { content.hovered(index) }
     }
   }
 

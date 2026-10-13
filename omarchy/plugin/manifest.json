@@ -16,6 +16,6 @@
     "category": "AI",
     "aliases": ["amarchy", "sessions"],
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "left"
   }
 }

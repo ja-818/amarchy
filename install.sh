@@ -95,13 +95,13 @@ if ! grep -qF "$load_line" "$hypr_conf"; then
   printf '\n%s\n' "$load_line" >>"$hypr_conf"
 fi
 
-# Shell plugin: the Ⓐ bar widget (next to the tray).
+# Shell plugin: the Ⓐ bar widget (at the end of the bar's left section).
 omarchy-plugin-validate "$repo/omarchy/plugin" >/dev/null
 mkdir -p "$(dirname "$plugin_dir")"
 ln -sfn "$repo/omarchy/plugin" "$plugin_dir"
 edit_shell_json '.plugins = ((.plugins // []) + [{"id":"amarchy"}] | unique_by(.id))
   | if ([.bar.layout[]?[]?.id] | index("amarchy")) then .
-    else .bar.layout.right = ((.bar.layout.right // [])[:1] + [{"id":"amarchy"}] + (.bar.layout.right // [])[1:]) end'
+    else .bar.layout.left = ((.bar.layout.left // []) + [{"id":"amarchy"}]) end'
 omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 
 # Omarchy menu entries.
