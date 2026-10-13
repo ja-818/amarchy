@@ -87,8 +87,13 @@ its own, amarchy follows your desktop.
 
 Any theme from `omarchy theme list` works. Your Omarchy theme is never
 switched: amarchy paints over it and paints it back, so nothing is rewritten or
-reloaded. Claude windows that were already open take the new colors fully the
-next time they start.
+reloaded. Switch your desktop's theme, restart the shell or reload Hyprland
+while you're in a session and amarchy puts its own back on. Claude windows that
+are already open take the new colors as they are.
+
+If a piece of the desktop ever stays in the wrong theme, every repaint and how
+each step of it went (shell, wallpaper, borders) is in
+`~/.local/state/amarchy/theme.log`.
 
 ## Install
 
