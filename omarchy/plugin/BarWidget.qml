@@ -87,7 +87,7 @@ Panel {
 
   Timer {
     id: peekTimer
-    interval: 450
+    interval: 1500
     onTriggered: root.peeking = false
   }
 
