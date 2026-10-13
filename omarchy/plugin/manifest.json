@@ -3,7 +3,7 @@
   "id": "amarchy",
   "name": "Amarchy",
   "version": "0.1.0",
-  "description": "Your amarchy sessions under an Ⓐ in the bar.",
+  "description": "Your amarchy sessions under an Ⓐ in the bar and beside Claude.",
   "author": "ja-818",
   "kinds": ["bar-widget"],
   "keepLoaded": true,

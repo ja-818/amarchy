@@ -3,9 +3,10 @@
 
 Every session is a branch + worktree off the latest main, with a Claude Code
 window and a dev terminal, living on its own Hyprland workspace "A:<id>".
-Claude sits alone in a centered zen column; the terminal key slides the
-session's terminal in underneath it, like the panel in an editor. Your
-sessions are listed under the Ⓐ in the Omarchy bar.
+Claude sits in a centered column with your sessions listed in the gap to its
+left and the session's terminal in the gap to its right. Zen mode (amarchy
+zen) leaves Claude alone in the column, with the sessions under the Ⓐ in the
+Omarchy bar; asking for the terminal brings the panels back.
 
 Every action in the UI is one of these commands, so scripts and agents can do
 anything you can. Commands print results to stdout and fail with a non-zero exit.
@@ -27,8 +28,9 @@ Sessions:
   amarchy close [id] --confirm          the same, asking first in the Omarchy menu
   amarchy rename [title]                name the current session (asks in the Omarchy menu if omitted)
   amarchy rename --id <id> [title]      the same for another session; --reset goes back to Claude's own title
-  amarchy terminal [on|off]             toggle the session's terminal under Claude
-  amarchy run                           run the project in the session's terminal (again: restart it)
+  amarchy zen [on|off]                  toggle zen mode: Claude alone, without the sessions and the terminal beside it
+  amarchy terminal [on|off]             move the keyboard between Claude and the terminal (leaves zen mode)
+  amarchy run                           run the project in the session's terminal (again: restart it; leaves zen mode)
   amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
   amarchy run <name>                    run another saved command of the project, the same way
   amarchy run --save <name> [command]   save one (asks for the command if omitted); --forget <name> drops it
@@ -57,7 +59,6 @@ Environment:
   AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name (default 28, 0 for none)
-  AMARCHY_TERMINAL_HEIGHT  share of the column the terminal takes, in percent (default 32)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
 
 Run commands are saved per project and start in the session's worktree. They can use
@@ -91,7 +92,7 @@ STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
 RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
-TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is showing
+ZEN = STATE / "zen"             # exists while zen mode is on
 LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 LAST = STATE / "last"
@@ -123,10 +124,11 @@ LEGACY_WS_PREFIX = "F:"
 
 ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
 CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
-TERMINAL_HEIGHT = min(max(int(os.environ.get("AMARCHY_TERMINAL_HEIGHT") or 32), 10), 80) / 100
 # The strip above the zen column where the shell plugin writes the session's name.
 HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 28), 0)
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
+PAD = 8                 # between Claude's column and the panels beside it
+MIN_SIDE = 200          # narrower than this beside the column and there's no room for them
 IMAGES = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
 
 
@@ -201,6 +203,26 @@ def terminal():
     if choice:
         return choice
     return next((t for t in TERMINALS if shutil.which(t)), "foot")
+
+
+# Where each terminal keeps how see-through its background is.
+TERMINAL_ALPHA = {"foot": (".config/foot/foot.ini", r"^\s*alpha\s*=\s*([\d.]+)"),
+                  "kitty": (".config/kitty/kitty.conf", r"^\s*background_opacity\s+([\d.]+)"),
+                  "alacritty": (".config/alacritty/alacritty.toml", r"^\s*opacity\s*=\s*([\d.]+)"),
+                  "ghostty": (".config/ghostty/config", r"^\s*background-opacity\s*=\s*([\d.]+)")}
+WINDOW_OPACITY = 0.96   # what Omarchy's Hyprland config gives a window without the keyboard
+
+
+def terminal_alpha():
+    """How opaque the session terminal's background ends up on screen, so the
+    session list on the other side of Claude can match it."""
+    path, pattern = TERMINAL_ALPHA.get(terminal(), ("", ""))
+    try:
+        found = re.findall(pattern, (HOME / path).read_text(), re.M) if path else []
+        alpha = min(max(float(found[-1]), 0.0), 1.0) if found else 1.0
+    except (OSError, ValueError):
+        alpha = 1.0
+    return round(alpha * WINDOW_OPACITY, 3)
 
 
 def term_argv(cls, title, cwd, cmd=()):
@@ -416,8 +438,18 @@ def current_session_id():
     return next((s["id"] for s in sessions() if s["workspace"] == name), None)
 
 
-def terminal_on(sid):
-    return (TERMINAL / sid).exists()
+def zen(width=None):
+    """Whether Claude is alone in its column: zen mode is on, or the monitor
+    has no room beside the column for the sessions and the terminal."""
+    if ZEN.exists():
+        return True
+    if width is None:
+        width = monitor_geometry()[0]
+    return (width - ZEN_WIDTH) // 2 < MIN_SIDE
+
+
+def active_class():
+    return json.loads(sh("hyprctl", "activewindow", "-j").stdout or "{}").get("class")
 
 
 def native_panel():
@@ -488,54 +520,87 @@ def cmd_layout():
 
 
 def arrange(sid, focus="claude"):
-    """Put a session's windows where they belong: Claude in the column, and
-    the terminal tiled underneath it when it's toggled on (otherwise waiting
-    on the hidden workspace). Both are ordinary tiled windows, so Omarchy's
-    own keys move between them and resize them."""
+    """Put a session's windows where they belong. Claude is always tiled in
+    the column, so it never moves. The terminal floats in the gap to its
+    right, and waits on the hidden workspace in zen mode."""
     s = session(sid)
     if not s:
         return
-    ws = f"name:{s['workspace']}"
     claude = find(claude_class(s))
     term = find(term_class(s))
-    for win in (claude, term):
-        if win and win["floating"]:
-            hypr(f'hl.dsp.window.float({{ window = "address:{win["address"]}", action = "disable" }})')
-    if term and not terminal_on(sid):
-        if term["workspace"]["name"] != HIDDEN:
-            move_to(term["address"], HIDDEN)
-    elif term and term["workspace"]["name"] != s["workspace"]:
-        # Split off the bottom of Claude: the column is taller than wide, so
-        # the new window lands underneath, and then takes its share.
-        if claude:
-            focus_window(claude["address"])
-        move_to(term["address"], ws)
-        term = find(term_class(s))
-        _, height, top, bottom = monitor_geometry()
-        want = int((height - top - bottom - header_height()) * TERMINAL_HEIGHT)
-        if term and claude and term["at"][1] > claude["at"][1]:
-            # Resizing moves the split under the top window, so grow Claude.
-            hypr(f'hl.dsp.window.resize({{ window = "address:{claude["address"]}", '
-                 f'x = 0, y = {term["size"][1] - want}, relative = true }})')
-    target = term if focus == "terminal" and term and terminal_on(sid) else claude
+    width, height, top, bottom = monitor_geometry()
+    beside = not zen(width)
+
+    def floating(win, on):
+        hypr(f'hl.dsp.window.float({{ window = "address:{win["address"]}", '
+             f'action = "{"enable" if on else "disable"}" }})')
+
+    if claude and claude["floating"]:
+        floating(claude, False)
+    if term and beside:
+        # Floated before it gets to the workspace, so Claude isn't pushed around.
+        if not term["floating"]:
+            floating(term, True)
+        if term["workspace"]["name"] != s["workspace"]:
+            move_to(term["address"], f"name:{s['workspace']}")
+        side = (width - ZEN_WIDTH) // 2
+        box = [width - side + PAD, top, side - PAD, height - top - bottom]
+        if not term["floating"] or [*term["at"], *term["size"]] != box:
+            place(term["address"], *box)
+    elif term and term["workspace"]["name"] != HIDDEN:
+        move_to(term["address"], HIDDEN)
+    target = term if focus == "terminal" and term and beside else claude
     if target:
         focus_window(target["address"])
 
 
+def leave_zen():
+    """Bring the panels back for something that needs the terminal. False
+    when the monitor has no room beside Claude for it."""
+    if ZEN.exists():
+        ZEN.unlink()
+        tell_shell("refresh")
+    if zen():
+        notify("amarchy", "No room for the terminal beside Claude on this monitor.")
+        return False
+    return True
+
+
 def cmd_terminal(args):
-    """Toggle the current session's terminal (or turn it on|off). Turning it
-    on puts the keyboard in it; turning it off gives it back to Claude."""
+    """The terminal key: move the keyboard between Claude and the terminal
+    beside it (on: to the terminal, off: back to Claude). The terminal is
+    only ever beside Claude, so asking for it in zen mode leaves zen mode."""
     sid = current_session_id()
     if not sid:
         return 1
-    on = args[0] == "on" if args and args[0] in ("on", "off") else not terminal_on(sid)
-    TERMINAL.mkdir(parents=True, exist_ok=True)
-    if on:
-        (TERMINAL / sid).touch()
+    s = session(sid)
+    if args and args[0] in ("on", "off"):
+        on = args[0] == "on"
     else:
-        (TERMINAL / sid).unlink(missing_ok=True)
-    ensure_windows(session(sid))
+        on = zen() or active_class() != term_class(s)
+    if on and not leave_zen():
+        return 1
+    ensure_windows(s)
     arrange(sid, focus="terminal" if on else "claude")
+    return 0
+
+
+def cmd_zen(args):
+    """Toggle zen mode (or turn it on|off): Claude alone in its column,
+    without the sessions and the terminal beside it. It holds for every
+    session until you toggle it back, or ask for the terminal."""
+    on = args[0] == "on" if args and args[0] in ("on", "off") else not ZEN.exists()
+    STATE.mkdir(parents=True, exist_ok=True)
+    if on:
+        ZEN.touch()
+    else:
+        ZEN.unlink(missing_ok=True)
+    tell_shell("refresh")
+    sid = current_session_id()
+    if sid:
+        s = session(sid)
+        ensure_windows(s)
+        arrange(sid)
     return 0
 
 
@@ -843,8 +908,8 @@ def run_in_terminal(s, command):
             if not find(term_class(s)):
                 break
             time.sleep(0.05)
-    TERMINAL.mkdir(parents=True, exist_ok=True)
-    (TERMINAL / s["id"]).touch()
+    if not leave_zen():
+        return 1
     shell = os.environ.get("SHELL", "bash")
     exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in run_env(s).items())
     script = (f"export {exports}; printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
@@ -972,8 +1037,8 @@ def cmd_open():
 
 def cmd_step(delta):
     """Move down (+1) or up (-1) the session list, wrapping around.
-    From outside amarchy, go to the last session you were in. The list peeks
-    out of the bar for a moment to show where you landed."""
+    From outside amarchy, go to the last session you were in. In zen mode the
+    list peeks out of the bar for a moment to show where you landed."""
     ids = [s["id"] for s in session_view()]
     if not ids:
         return 1
@@ -1110,9 +1175,9 @@ def has_conversation(path):
 
 def ensure_windows(s):
     """Open whatever a session is missing: Claude (picking its conversation back
-    up) and, when it's toggled on, the terminal. Windows are disposable, like
+    up) and, outside zen mode, the terminal. Windows are disposable, like
     any other window in Omarchy: close one with Super+W and the next jump (or
-    terminal toggle) brings it back. The session itself only ends with close."""
+    terminal key) brings it back. The session itself only ends with close."""
     path = Path(s["path"])
     if not path.is_dir():
         return
@@ -1122,12 +1187,12 @@ def ensure_windows(s):
         open_term(claude_class(s), f"amarchy:{s['id']}", path,
                   ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])])
         opened.append(claude_class(s))
-    if terminal_on(s["id"]) and not find(term_class(s)):
+    if not zen() and not find(term_class(s)):
         open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path)
         opened.append(term_class(s))
     for cls in opened:
         win = wait_for(cls)
-        # The terminal starts hidden; arrange() tiles it under Claude.
+        # The terminal starts hidden; arrange() puts it beside Claude.
         if win:
             move_to(win["address"], HIDDEN if cls == term_class(s) else f"name:{s['workspace']}")
 
@@ -1279,7 +1344,6 @@ def close(sid, force=False):
     kept = sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
     (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
     (STATUS / sid).unlink(missing_ok=True)
-    (TERMINAL / sid).unlink(missing_ok=True)
     set_trust(path, False)
     # Don't leave you on the emptied workspace: go to another session.
     if was_current:
@@ -1484,6 +1548,7 @@ def session_view():
 
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
 NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
+             ("Toggle amarchy zen", "zen"),
              ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
              ("Run amarchy command", "commands"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
@@ -1525,7 +1590,8 @@ MENU = (
     ("󰉹", "Sessions", ["show"], ("amarchy sessions",), True, True),
     ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
     ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
-    ("󰆍", "Toggle terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
+    ("󰊓", "Toggle zen mode", ["zen"], ("Toggle amarchy zen",), True, False),
+    ("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
     ("󰐊", "Run project", ["run"], ("Run amarchy project",), True, False),
     ("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",), True, False),
     ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
@@ -1561,7 +1627,8 @@ def cmd_menu():
 
 def cmd_ui():
     """Everything the shell plugin draws, in one call."""
-    print(json.dumps({"zen_width": ZEN_WIDTH, "header_height": header_height(), "keys": nav_keys(),
+    print(json.dumps({"zen": zen(), "zen_width": ZEN_WIDTH, "panel_gap": PAD, "terminal_alpha": terminal_alpha(),
+                      "header_height": header_height(), "keys": nav_keys(),
                       "order": list_order(), "sessions": session_view()}))
 
 
@@ -1617,6 +1684,8 @@ def main(argv):
         print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
     elif cmd in ("terminal", "cockpit"):   # cockpit: the old name, still bound in some configs
         return cmd_terminal(args)
+    elif cmd == "zen":
+        return cmd_zen(args)
     elif cmd == "run":
         return cmd_run(args)
     elif cmd == "show":

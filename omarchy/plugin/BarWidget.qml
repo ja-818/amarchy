@@ -7,9 +7,11 @@ import qs.Commons
 import qs.Ui
 
 // The amarchy bar widget: an anarchy A that lights up (urgent) when a session
-// needs you. Click opens your sessions; right click starts a new one. Moving
-// between sessions from the keyboard (`amarchy next`) drops the list for a
-// moment, without taking the keyboard, to show where you landed.
+// needs you. Click opens your sessions; right click starts a new one. On a
+// session the same list sits in the gap left of Claude. In zen mode (`amarchy
+// zen`) it doesn't, and moving between sessions from the keyboard (`amarchy
+// next`) drops the list for a moment, without taking the keyboard, to show
+// where you landed.
 // IPC: omarchy-shell amarchy-bar toggle|open|close
 //      omarchy-shell amarchy refresh|peek
 Panel {
@@ -41,6 +43,7 @@ Panel {
     var k = store.keys, rows = []
     function key(name) { return k[name] === "RETURN" ? "↵" : String(k[name]).toLowerCase() }
     if (k.next && k.prev) rows.push([key("next") + "/" + key("prev"), "move"])
+    if (k.zen) rows.push([key("zen"), "zen"])
     if (k.terminal) rows.push([key("terminal"), "terminal"])
     if (k.run) rows.push([key("run"), "run"])
     if (k.commands) rows.push([key("commands"), "commands"])
@@ -82,13 +85,13 @@ Panel {
 
   Sessions {
     id: store
-    interval: root.opened ? 1000 : 3000
+    interval: root.opened || side.visible ? 1000 : 3000
   }
 
   Timer {
     interval: 100
     repeat: true
-    running: (root.opened || root.peeking) && store.working > 0
+    running: (root.opened || root.peeking || side.visible) && store.working > 0
     onTriggered: root.spinnerFrame++
   }
 
@@ -103,7 +106,8 @@ Panel {
     function refresh(): string { store.refresh(); return "ok" }
     function peek(): string {
       store.refresh()
-      if (!root.opened) root.peeking = true
+      // No need when the list is already on screen beside Claude.
+      if (!root.opened && !side.visible) root.peeking = true
       peekTimer.restart()
       return "ok"
     }
@@ -231,6 +235,23 @@ Panel {
       id: peekContent
       width: parent.width
       cursor: root.currentIndex
+    }
+  }
+
+  // The list beside Claude; the session on screen wears the cursor.
+  SessionPanel {
+    id: side
+    screen: button.QsWindow.window ? button.QsWindow.window.screen : null
+    sessions: store.sessions
+    zen: store.zen
+    zenWidth: store.zenWidth
+    gap: store.panelGap
+    alpha: store.terminalAlpha
+
+    Content {
+      width: parent.width
+      cursor: root.currentIndex
+      onActivated: function(index) { root.activate(index) }
     }
   }
 

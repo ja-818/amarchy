@@ -15,7 +15,10 @@
 --   nav_mod      modifier for these keys (default "CTRL + ALT")
 --   next_key     the session below in the list (default "J")
 --   prev_key     the session above (default "K")
---   terminal_key toggle the session's terminal under Claude (default "RETURN")
+--   zen_key      toggle zen mode: Claude alone, without the sessions and the
+--                terminal beside it (default "Z")
+--   terminal_key move the keyboard between Claude and the terminal; leaves
+--                zen mode (default "RETURN")
 --   run_key      run the project in that terminal; again restarts it (default "R")
 --   commands_key choose another saved command of the project to run there (default "C")
 --   nav_new_key  start a session (default "N")
@@ -56,6 +59,7 @@ local function nav(key, default, description, command)
 end
 nav(cfg.next_key, "J", "Next amarchy session", "next")
 nav(cfg.prev_key, "K", "Previous amarchy session", "prev")
+nav(cfg.zen_key, "Z", "Toggle amarchy zen", "zen")
 nav(cfg.terminal_key, "RETURN", "Toggle amarchy terminal", "terminal")
 nav(cfg.run_key, "R", "Run amarchy project", "run")
 nav(cfg.commands_key, "C", "Run amarchy command", "run --pick")
@@ -70,7 +74,7 @@ nav(cfg.menu_key, "M", "amarchy menu", "menu")
 -- and leave a session. Exits right away when no theme is set.
 o.launch_on_start(bin .. " watch")
 
--- Session windows snap into place: the terminal toggles in and out under
+-- Session windows snap into place: the terminal lands beside
 -- Claude without Hyprland animating the move and then the resize.
 o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
 
@@ -78,7 +82,7 @@ o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
 -- say so, so Omarchy's Super+C/V copy and paste in them.
 o.window("amarchy\\.(claude|term)\\..*", { tag = "+terminal" })
 
--- The zen column on session workspaces; sized for your monitor by
+-- Claude's column on session workspaces; sized for your monitor by
 -- `amarchy layout` (runs on install and before every new session).
 local layout = home .. "/.local/state/amarchy/layout.lua"
 local f = io.open(layout)

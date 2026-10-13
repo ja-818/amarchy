@@ -3,9 +3,9 @@
 # Install amarchy from this checkout. Safe to run again.
 #
 #   - links bin/amarchy into ~/.local/bin
-#   - loads hypr/amarchy.lua from your Hyprland config (keys, zen column)
-#   - installs the Omarchy shell plugin (omarchy/plugin): your sessions under
-#     an Ⓐ in the bar
+#   - loads hypr/amarchy.lua from your Hyprland config (keys, Claude's column)
+#   - installs the Omarchy shell plugin (omarchy/plugin): your sessions beside
+#     Claude and under an Ⓐ in the bar
 #   - adds Amarchy to the Omarchy menu (Super+Space), from omarchy/menu.jsonc
 #
 #   ./install.sh             install / update
@@ -121,7 +121,8 @@ theme=$("$bin_dir/amarchy" theme --show)
 say "amarchy installed."
 echo "  Super+Alt+A  open amarchy (your last session)"
 echo "  Super+Alt+N  new session (projects from ${AMARCHY_WORK:-~/Work})"
-echo "  Ctrl+Alt+Return  toggle the session terminal"
+echo "  Ctrl+Alt+Z   zen mode: Claude alone, without the sessions and the terminal beside it"
+echo "  Ctrl+Alt+Return  between Claude and the terminal (leaves zen mode)"
 echo "  Ctrl+Alt+J/K move between sessions · N new · A add project · T theme · E rename · X close"
 echo "  Ctrl+Alt+M   the amarchy menu: every action with its key"
 echo "  Super+Space  Amarchy menu · Ⓐ in the bar"

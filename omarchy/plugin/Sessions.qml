@@ -10,8 +10,14 @@ Item {
   property int interval: 1000
   property bool active: true
   property var sessions: []
-  // Width of the zen column on session workspaces, in logical pixels.
+  // Zen mode: Claude alone in its column, nothing beside it.
+  property bool zen: true
+  // Width of Claude's column on session workspaces, in logical pixels.
   property int zenWidth: 900
+  // Space between the column and the panels beside it.
+  property int panelGap: 8
+  // How opaque the session terminal's background is; the list beside Claude matches it.
+  property real terminalAlpha: 1
   // Height of the strip kept free above it for the session's name (0: none).
   property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
@@ -49,7 +55,10 @@ Item {
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
           root.order = d.order || "opened"
+          root.zen = d.zen !== false
           root.zenWidth = d.zen_width || 900
+          root.panelGap = d.panel_gap || 8
+          root.terminalAlpha = d.terminal_alpha > 0 ? d.terminal_alpha : 1
           root.headerHeight = d.header_height || 0
         } catch (e) {}
       }

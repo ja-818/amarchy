@@ -2,15 +2,33 @@
 
 Parallel Claude Code agents, one Hyper key away. For [Omarchy](https://omarchy.org).
 
-Every session is its own git worktree and branch off the latest `main`, with
-Claude Code alone in a centered zen column on its own Hyprland workspace. One
-key slides the session's terminal in underneath, like the panel in an editor.
+Every session is its own git worktree and branch off the latest `main`, on its
+own Hyprland workspace: Claude Code in a centered column, your sessions in the
+gap to its left and the session's terminal (it opens in the worktree) in the
+gap to its right:
 
-Your sessions live under the **Ⓐ in the bar**, drawn by the Omarchy shell (a
-shell plugin) with the same type, rows and selection as the Omarchy menu, in
-the order you opened them, so a session keeps its place.
-The Ⓐ lights up when one needs you, and the list drops for a moment when you
-move between sessions:
+```
+ Ⓐ Amarchy                   │                     │
+ 3 agents · 1 needs you      │                     │ $ npm run dev
+                             │                     │
+ 󰂞  Fix the login redirect 4m│       claude        │
+    my-app · wobbly-bakunin  │    (column, 900)    │
+ ⠋  Billing export       12m │                     │
+    my-app · smug-goldman    │                     │
+ 󰄬  Tidy the README       1h │                     │
+    docs · sleepy-kropotkin  │                     │
+```
+
+The list is drawn by the Omarchy shell (a shell plugin) with the same type,
+rows and selection as the Omarchy menu, in the order you opened them, so a
+session keeps its place. Click one to jump to it.
+
+**Zen mode** (`Ctrl+Alt+Z`) leaves Claude alone in the column. Claude doesn't
+move: the panels beside it just step away, for every session, until you press
+it again or ask for the terminal (`Ctrl+Alt+Return`, or running something in
+it). Your sessions are still under the **Ⓐ in the bar**, which lights up when
+one needs you, and the list drops from it for a moment when you move between
+sessions:
 
 ```
                                               Ⓐ
@@ -19,10 +37,13 @@ move between sessions:
               │       claude        │   │    my-app · wobbly-bakunin   │
               │  (zen column, 900)  │   │ ⠋  Billing export        12m │
               │                     │   │    my-app · smug-goldman     │
-              ├─────────────────────┤   │ 󰄬  Tidy the README        1h │
-              │ $ npm run dev       │   │    docs · sleepy-kropotkin   │
+              │                     │   │ 󰄬  Tidy the README        1h │
+              │                     │   │    docs · sleepy-kropotkin   │
               └─────────────────────┘   └──────────────────────────────┘
 ```
+
+On a monitor too narrow for anything beside the column, amarchy is always in
+zen mode, without a terminal.
 
 Prefer them grouped by what they need from you (Needs you, Working, Idle,
 Asleep)? Press `g` in the list, click **By activity**, or run `amarchy order
@@ -35,8 +56,9 @@ activity`. The same switches back, and the choice sticks.
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
 | `Super+Alt+L` | Drop the session list from the Ⓐ, from anywhere: see what every agent is up to at a glance, `j`/`k` and `↵` to jump to one, `g` to switch between opened order and grouped by activity, `Esc` to dismiss. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
-| `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. The list drops from the Ⓐ for a moment so you see where you landed. |
-| `Ctrl+Alt+Return` | Toggle the session's terminal under Claude (it opens in the worktree). On puts the keyboard in it, off gives it back to Claude. |
+| `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. |
+| `Ctrl+Alt+Z` | Zen mode: Claude alone, without the sessions and the terminal beside it. Again brings them back. |
+| `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
@@ -110,7 +132,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
-            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R", commands_key = "C",
+            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", zen_key = "Z", terminal_key = "RETURN", run_key = "R", commands_key = "C",
             nav_new_key = "N", add_key = "A", theme_key = "T", rename_key = "E", close_key = "X", menu_key = "M" }
 ```
 
@@ -121,7 +143,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_WORK` | `~/Work` | Every git repo directly inside is offered. |
 | `AMARCHY_WORKTREES` | `$AMARCHY_WORK/.worktrees` | Worktrees go to `<this>/<repo>/<name>`. |
 | `AMARCHY_TERMINAL` | first installed | `foot`, `kitty`, `alacritty` or `ghostty`. |
-| `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels. Run `amarchy layout` after changing it. |
+| `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
 | `AMARCHY_HEADER_HEIGHT` | `28` | Height of the strip above Claude with the session's name, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 
@@ -147,7 +169,8 @@ amarchy close [id] [--force]          close a session (current one if no id)
 amarchy close [id] --confirm          the same, asking first in the Omarchy menu
 amarchy rename [title]                name the current session (asks in the Omarchy menu if omitted)
 amarchy rename --id <id> [title]      the same for another session; --reset goes back to Claude's own title
-amarchy terminal [on|off]             toggle the session's terminal under Claude
+amarchy zen [on|off]                  toggle zen mode: Claude alone, nothing beside it
+amarchy terminal [on|off]             between Claude and the terminal (leaves zen mode)
 amarchy run                           run the project in the session's terminal (again: restart it)
 amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
 amarchy run <name>                    run another saved command of the project, the same way
@@ -159,7 +182,7 @@ amarchy pick [close]                  choose a session in the Omarchy menu, jump
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
 amarchy order [opened|activity]       list order: as opened (default) or grouped by activity
-amarchy layout                        resize the zen column for the current monitor
+amarchy layout                        resize Claude's column for the current monitor
 ```
 
 The run command is saved per project and starts in the session's worktree. It
