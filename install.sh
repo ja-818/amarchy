@@ -7,6 +7,8 @@
 #   - installs the Omarchy shell plugin (omarchy/plugin): your sessions beside
 #     Claude and under an Ⓐ in the bar
 #   - adds Amarchy to the Omarchy menu (Super+Space), from omarchy/menu.jsonc
+#   - adds an Omarchy theme-set hook, so amarchy keeps its own theme when you
+#     switch your desktop's
 #
 #   ./install.sh             install / update
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
@@ -20,6 +22,7 @@ load_line="dofile(\"$repo/hypr/amarchy.lua\") -- amarchy"
 plugin_dir="$HOME/.config/omarchy/plugins/amarchy"
 shell_json="$HOME/.config/omarchy/shell.json"
 menu_ext="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+theme_hook="$HOME/.config/omarchy/hooks/theme-set.d/amarchy"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -61,7 +64,7 @@ if [[ ${1:-} == --uninstall ]]; then
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy"
   [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
-  rm -f "$plugin_dir"
+  rm -f "$plugin_dir" "$theme_hook"
   edit_shell_json '.plugins |= map(select(.id != "amarchy")) | .bar.layout |= with_entries(.value |= map(select(.id != "amarchy")))'
   [[ -f $menu_ext ]] && edit_menu ""
   hyprctl reload >/dev/null 2>&1 || true
@@ -108,6 +111,16 @@ omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 
 # Omarchy menu entries.
 edit_menu "$repo/omarchy/menu.jsonc"
+
+# Omarchy runs this once it has finished switching your desktop's theme, which
+# repaints the shell and recolors every terminal, amarchy's included.
+mkdir -p "$(dirname "$theme_hook")"
+cat >"$theme_hook" <<HOOK
+#!/bin/bash
+# Installed by amarchy ($repo/install.sh); removed by its --uninstall.
+[[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme --refresh
+exit 0
+HOOK
 
 # Sizes the zen column for this monitor and reloads Hyprland.
 "$bin_dir/amarchy" layout

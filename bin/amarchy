@@ -46,6 +46,7 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme                         pick it in Omarchy's theme switcher (the one with previews); System comes first
   amarchy theme <name> | system         set it (any theme from `omarchy theme list`), or look like the rest of the desktop
   amarchy theme --show                  print it
+  amarchy theme --refresh               put it back after something else repainted (Omarchy's theme-set hook runs this)
 
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
@@ -71,6 +72,7 @@ State: ~/.local/state/amarchy/.
 
 import base64
 import fcntl
+import hashlib
 import json
 import os
 import random
@@ -95,6 +97,7 @@ RUN = STATE / "run"             # per project: <repo> its run command, <repo>.js
 ZEN = STATE / "zen"             # exists while zen mode is on
 LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
+THEME_LOG = STATE / "theme.log" # every repaint and how each step of it went
 LAST = STATE / "last"
 ORDER_FILE = STATE / "order"    # "activity" when the list is grouped by activity
 HIDDEN = "special:amarchy"
@@ -666,20 +669,31 @@ def theme_render(name):
         images.update({f.name: f for f in (src / "backgrounds").glob("*") if f.suffix.lower() in IMAGES})
     own = HOME / ".config/omarchy/backgrounds" / key
     images = sorted(f for f in own.glob("*") if f.suffix.lower() in IMAGES) + [images[n] for n in sorted(images)]
-    sized = THEME / "wallpaper.jpg"
-    sized.unlink(missing_ok=True)
+    # It's named after the image it was made from: the shell leaves a path it
+    # already shows alone and keeps its pixels cached, so one wallpaper.jpg for
+    # every theme would go on showing the first.
+    sized = None
     if images and shutil.which("magick"):
         mon = next((m for m in json.loads(sh("hyprctl", "monitors", "-j").stdout or "[]") if m.get("focused")), {})
         size = f"{mon.get('width', 3840)}x{mon.get('height', 2160)}"
-        sh("magick", f"{images[0]}[0]", "-resize", size + "^", "-gravity", "center", "-extent", size,
-           "-quality", "90", "-strip", str(sized))
-    (THEME / "background").write_text(str(sized if sized.exists() else images[0] if images else ""))
+        stat = images[0].stat()
+        stamp = hashlib.sha1(f"{images[0]} {stat.st_mtime_ns} {stat.st_size} {size}".encode()).hexdigest()[:12]
+        sized = THEME / f"wallpaper-{stamp}.jpg"
+        if not sized.exists():
+            sh("magick", f"{images[0]}[0]", "-resize", size + "^", "-gravity", "center", "-extent", size,
+               "-quality", "90", "-strip", str(sized))
+    for old in THEME.glob("wallpaper*.jpg"):
+        if old != sized:
+            old.unlink(missing_ok=True)
+    (THEME / "background").write_text(str(sized if sized and sized.exists() else images[0] if images else ""))
     return None
 
 
 def claude_theme(source):
     """Claude Code's side of the theme: sessions start with "custom:amarchy"
-    (see hook_settings), and Claude reloads the file when it changes."""
+    (see hook_settings), and Claude reloads the file when it changes. On
+    System it's a copy of your Omarchy theme's, so a session started then
+    still follows a theme picked later."""
     try:
         data = json.loads(source.read_text())
     except (OSError, ValueError):
@@ -691,19 +705,34 @@ def claude_theme(source):
     os.replace(tmp, CLAUDE_THEME)
 
 
+def theme_log(msg):
+    try:
+        if THEME_LOG.exists() and THEME_LOG.stat().st_size > 200_000:
+            THEME_LOG.write_text("".join(THEME_LOG.read_text().splitlines(True)[-500:]))
+        with open(THEME_LOG, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{os.getpid()}] {msg}\n")
+    except OSError:
+        pass
+
+
 def paint(theme_dir, background):
     """Show a rendered theme and a wallpaper: the shell (bar, menus,
-    notifications) takes the palette over IPC, Hyprland the border colors."""
+    notifications) takes the palette over IPC, Hyprland the border colors.
+    False when any of them didn't take it (a shell that's still starting)."""
     def b64(f):
         return base64.b64encode(f.read_bytes()).decode() if f.is_file() else ""
-    calls = [["omarchy-shell", "shell", "applyTheme", b64(theme_dir / "colors.toml"), b64(theme_dir / "shell.toml")]]
+    calls = {"shell": ["omarchy-shell", "shell", "applyTheme",
+                       b64(theme_dir / "colors.toml"), b64(theme_dir / "shell.toml")]}
     if background and Path(background).is_file():
-        calls.append(["omarchy-shell", "background", "setInstant", str(background)])
+        calls["wallpaper"] = ["omarchy-shell", "background", "setInstant", str(background)]
     if (theme_dir / "hyprland.lua").is_file():
-        calls.append(["hyprctl", "eval", f'dofile("{theme_dir / "hyprland.lua"}")'])
-    for p in [subprocess.Popen(["timeout", "2", *c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              for c in calls]:
-        p.wait()
+        calls["borders"] = ["hyprctl", "eval", f'dofile("{theme_dir / "hyprland.lua"}")']
+    procs = {step: subprocess.Popen(["timeout", "2", *c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+             for step, c in calls.items()}
+    failed = [step for step, p in procs.items() if p.wait() != 0]
+    theme_log(f"paint {theme_dir} wallpaper={background or '-'}: "
+              + (f"FAILED {', '.join(failed)}" if failed else f"ok ({', '.join(calls)})"))
+    return not failed
 
 
 def retint(osc):
@@ -727,7 +756,8 @@ def themed_workspace(name):
 
 def theme_sync(workspace=None, force=False):
     """Make the desktop wear what the workspace on screen calls for: the
-    amarchy theme on a session, your Omarchy theme everywhere else."""
+    amarchy theme on a session, your Omarchy theme everywhere else. False
+    when the paint didn't take, so the desktop is not what it should be yet."""
     if workspace is None:
         workspace = active_workspace().get("name", "")
     inside = bool(theme_name()) and themed_workspace(workspace)
@@ -736,18 +766,21 @@ def theme_sync(workspace=None, force=False):
         layer.seek(0)
         ours = layer.read().strip() == PREFIX
         if inside and (force or not ours):
-            paint(THEME, (THEME / "background").read_text().strip())
+            painted = paint(THEME, (THEME / "background").read_text().strip())
             # Whatever painted before us (Omarchy's own theme switch included)
             # recolors every terminal, ours too.
             retint((THEME / "osc").read_text())
         elif ours and not inside:
             background = DESKTOP / "background"
-            paint(DESKTOP / "theme", os.path.realpath(background) if background.exists() else None)
+            painted = paint(DESKTOP / "theme", os.path.realpath(background) if background.exists() else None)
         else:
-            return
+            return True
+        if not painted:
+            return False    # the layer keeps saying what's really there
         layer.seek(0)
         layer.truncate()
         layer.write(PREFIX if inside else "")
+        return True
 
 
 def ensure_watcher():
@@ -764,6 +797,30 @@ def ensure_watcher():
 # go straight to another workspace with a coat of its own, that one gets there
 # first and the desktop doesn't flash your Omarchy theme in between.
 PAINT_IN, PAINT_OUT = 0.02, 0.07
+# A shell that just started comes up in your Omarchy theme and wallpaper, and
+# takes a moment to finish loading them; a paint that failed is tried again.
+PAINT_SHELL, PAINT_RETRY, PAINT_RETRIES = 0.4, 0.5, 8
+# ...and once more when it has settled, in case it was still loading your
+# wallpaper when the first paint landed.
+PAINT_SETTLE = 1.5
+SHELL_LAYERS = ("omarchy-background", "omarchy-bar")
+
+
+def watch_restart_if_updated(version):
+    """Run the amarchy that's on disk now (an install or a pull changed it),
+    unless it's half-written. Returns the version the watcher is on."""
+    try:
+        if os.stat(SELF).st_mtime_ns == version:
+            return version
+        compile(Path(SELF).read_text(), SELF, "exec")
+    except (OSError, ValueError, SyntaxError):
+        return version      # gone or mid-save; look again after the next paint
+    theme_log("amarchy was updated, starting again")
+    try:
+        os.execv(sys.executable, [sys.executable, SELF, "watch"])
+    except OSError as e:
+        theme_log(f"couldn't start again: {e!r}")
+        return os.stat(SELF).st_mtime_ns
 
 
 def cmd_watch():
@@ -783,16 +840,31 @@ def cmd_watch():
                            / ".socket2.sock"))
     except (KeyError, OSError):
         return fail("can't reach Hyprland's event socket")
-    workspace, force, due, buf = None, False, time.monotonic(), b""
+    # Starts with a repaint: whatever happened while no watcher ran (a shell
+    # restart, say), the desktop is right again.
+    workspace, force, due, settle, retries, buf = None, True, time.monotonic(), None, 0, b""
+    version = os.stat(SELF).st_mtime_ns
+    theme_log(f"watch started ({SELF})")
     while True:
-        if not select.select([events], [], [], None if due is None else max(due - time.monotonic(), 0))[0]:
+        timers = [t for t in (due, settle) if t is not None]
+        if not select.select([events], [], [], max(min(timers) - time.monotonic(), 0) if timers else None)[0]:
+            if settle is not None and settle <= time.monotonic():
+                force, settle = True, None
             try:
-                theme_sync(workspace, force)
-            except (OSError, ValueError):
-                pass    # Hyprland or the shell didn't answer; the next event paints
-            force, due = False, None
+                painted = theme_sync(workspace, force)
+            except Exception as e:      # Hyprland or the shell didn't answer; never worth dying over
+                theme_log(f"sync failed: {e!r}")
+                painted = False
             if not theme_name():
                 return 0
+            if painted or retries >= PAINT_RETRIES:
+                if not painted:
+                    theme_log(f"gave up after {retries} retries; the next event paints")
+                force, due, retries = False, None, 0
+                if settle is None:
+                    version = watch_restart_if_updated(version)
+            else:
+                due, retries = time.monotonic() + PAINT_RETRY, retries + 1
             continue
         chunk = events.recv(4096)
         if not chunk:
@@ -800,38 +872,59 @@ def cmd_watch():
         *lines, buf = (buf + chunk).split(b"\n")
         for line in lines:
             event, _, data = line.decode(errors="replace").partition(">>")
+            now = time.monotonic()
             if event == "workspacev2":          # ID,NAME
                 workspace = data.split(",", 1)[-1]
-                due = time.monotonic() + (PAINT_IN if themed_workspace(workspace) else PAINT_OUT)
+                try:
+                    inside = themed_workspace(workspace)
+                except Exception:
+                    inside = True
+                due = now + (PAINT_IN if inside else PAINT_OUT)
             elif event == "focusedmonv2":       # MONITOR,WORKSPACEID: ask which workspace that is
-                workspace, due = None, time.monotonic() + PAINT_IN
+                workspace, due = None, now + PAINT_IN
             elif event == "configreloaded":     # Hyprland is back on your theme's border colors
-                force, due = True, time.monotonic() + PAINT_IN
+                force, due = True, now + PAINT_IN
+            elif event == "openlayer" and data in SHELL_LAYERS:    # the shell restarted
+                force, due, settle = True, now + PAINT_SHELL, now + PAINT_SHELL + PAINT_SETTLE
 
 
 def cmd_theme(args):
     if args and args[0] == "--show":
         print(theme_name() or SYSTEM)
         return 0
+    if args and args[0] == "--refresh":
+        return theme_refresh()
     name = args[0] if args else menu_pick_theme()
     if not name:
         return 1
     if name.lower() in (SYSTEM, "off"):
         (THEME / "name").unlink(missing_ok=True)
-        theme_sync()
+        painted = theme_sync()
         retint(sh("omarchy-theme-osc", str(DESKTOP / "theme/colors.toml")).stdout)
-        if CLAUDE_THEME.exists():
-            claude_theme(DESKTOP / "theme/claude.json")
-        return 0
+        claude_theme(DESKTOP / "theme/claude.json")
+        return 0 if painted else fail(f"the desktop didn't take your Omarchy theme back (see {THEME_LOG})")
     err = theme_render(name)
     if err:
         return fail(err)
     (THEME / "name").write_text(theme_key(name).replace("-", " ").title() + "\n")
     claude_theme(THEME / "claude.json")
-    theme_sync(force=True)
+    painted = theme_sync(force=True)
     retint((THEME / "osc").read_text())
+    ensure_watcher()    # it tries again if this paint didn't take
+    return 0 if painted else fail(f"the desktop didn't take the theme yet (see {THEME_LOG})")
+
+
+def theme_refresh():
+    """Something else repainted the desktop and recolored every terminal
+    (Omarchy switching your theme, mostly): put amarchy's own look back. On
+    System, hand Claude your new Omarchy theme."""
+    if not theme_name():
+        claude_theme(DESKTOP / "theme/claude.json")
+        return 0
+    painted = theme_sync(force=True)
+    retint((THEME / "osc").read_text())     # also when no session is on screen
     ensure_watcher()
-    return 0
+    return 0 if painted else 1
 
 
 # ------------------------------------------------------------------ run
@@ -1097,7 +1190,9 @@ def hook_settings(sid):
         "Notification": h("waiting"),
         "Stop": h("idle"),
     }}
-    if theme_name() and CLAUDE_THEME.exists():
+    if not theme_name():
+        claude_theme(DESKTOP / "theme/claude.json")
+    if CLAUDE_THEME.exists():
         settings["theme"] = "custom:amarchy"
     return json.dumps(settings)
 
