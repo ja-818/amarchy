@@ -507,7 +507,6 @@ def arrange(sid, focus="claude"):
         if claude:
             focus_window(claude["address"])
         move_to(term["address"], ws)
-        time.sleep(0.1)
         term = find(term_class(s))
         _, height, top, bottom = monitor_geometry()
         want = int((height - top - bottom - header_height()) * TERMINAL_HEIGHT)
