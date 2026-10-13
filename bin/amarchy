@@ -1584,6 +1584,8 @@ def main(argv):
         return cmd_step(1 if cmd == "next" else -1)
     elif cmd == "jump" and args:
         cmd_jump(args[0])
+    elif cmd == "list":
+        print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
     elif cmd in ("terminal", "cockpit"):   # cockpit: the old name, still bound in some configs
         return cmd_terminal(args)
     elif cmd == "run":
