@@ -7,28 +7,33 @@ Claude Code alone in a centered zen column on its own Hyprland workspace. One
 key slides the session's terminal in underneath, like the panel in an editor.
 
 Your sessions live under the **Ⓐ in the bar**, drawn by the Omarchy shell (a
-shell plugin) with the same type, rows and selection as the Omarchy menu, and
-grouped by what they need from you. The Ⓐ lights up when one needs you, and
-the list drops for a moment when you move between sessions:
+shell plugin) with the same type, rows and selection as the Omarchy menu, in
+the order you opened them, so a session keeps its place.
+The Ⓐ lights up when one needs you, and the list drops for a moment when you
+move between sessions:
 
 ```
                                               Ⓐ
               ┌─────────────────────┐   ┌──────────────────────────────┐
-              │                     │   │ NEEDS YOU                    │
-              │       claude        │   │ 󰂞  Fix the login redirect 4m │
-              │  (zen column, 900)  │   │    my-app · wobbly-bakunin   │
-              │                     │   │ WORKING                      │
-              ├─────────────────────┤   │ ⠋  Billing export        12m │
-              │ $ npm run dev       │   │    my-app · smug-goldman     │
+              │                     │   │ 󰂞  Fix the login redirect 4m │
+              │       claude        │   │    my-app · wobbly-bakunin   │
+              │  (zen column, 900)  │   │ ⠋  Billing export        12m │
+              │                     │   │    my-app · smug-goldman     │
+              ├─────────────────────┤   │ 󰄬  Tidy the README        1h │
+              │ $ npm run dev       │   │    docs · sleepy-kropotkin   │
               └─────────────────────┘   └──────────────────────────────┘
 ```
+
+Prefer them grouped by what they need from you (Needs you, Working, Idle,
+Asleep)? Press `g` in the list, click **By activity**, or run `amarchy order
+activity`. The same switches back, and the choice sticks.
 
 ## Keys
 
 | Key | |
 | --- | --- |
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
-| `Super+Alt+L` | Drop the session list from the Ⓐ, from anywhere: see what every agent is up to at a glance, `j`/`k` and `↵` to jump to one, `Esc` to dismiss. |
+| `Super+Alt+L` | Drop the session list from the Ⓐ, from anywhere: see what every agent is up to at a glance, `j`/`k` and `↵` to jump to one, `g` to switch between opened order and grouped by activity, `Esc` to dismiss. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. The list drops from the Ⓐ for a moment so you see where you landed. |
 | `Ctrl+Alt+Return` | Toggle the session's terminal under Claude (it opens in the worktree). On puts the keyboard in it, off gives it back to Claude. |
@@ -153,6 +158,7 @@ amarchy show                          open the session list under the Ⓐ in the
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+amarchy order [opened|activity]       list order: as opened (default) or grouped by activity
 amarchy layout                        resize the zen column for the current monitor
 ```
 

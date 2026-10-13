@@ -16,6 +16,8 @@ Item {
   property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
+  // How the list is ordered: "opened" (as opened) or "activity".
+  property string order: "opened"
 
   readonly property int waiting: count("waiting")
   readonly property int working: count("working")
@@ -46,6 +48,7 @@ Item {
           var d = JSON.parse(text)
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
+          root.order = d.order || "opened"
           root.zenWidth = d.zen_width || 900
           root.headerHeight = d.header_height || 0
         } catch (e) {}

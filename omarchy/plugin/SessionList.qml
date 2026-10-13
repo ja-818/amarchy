@@ -2,12 +2,13 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Sessions grouped by urgency (the CLI already sorts them that way), with a
-// section header where the state changes.
+// Sessions in the order the CLI gives them: as they were opened, or grouped
+// by activity with a section header where the state changes.
 Column {
   id: list
 
   property var sessions: []
+  property bool grouped: false
   property int cursor: -1
   property int spinnerFrame: 0
   signal activated(int index)
@@ -27,7 +28,7 @@ Column {
       width: list.width
       spacing: Style.spacing.xxs
 
-      readonly property bool firstOfSection: index === 0 || list.sessions[index - 1].status !== modelData.status
+      readonly property bool firstOfSection: list.grouped && (index === 0 || list.sessions[index - 1].status !== modelData.status)
 
       PanelSectionHeader {
         visible: entry.firstOfSection

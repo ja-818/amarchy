@@ -19,7 +19,7 @@ Projects (git repos directly inside AMARCHY_WORK):
 
 Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-  amarchy list [--compact]              sessions as JSON, most urgent first (task, age, current)
+  amarchy list [--compact]              sessions as JSON, in list order (task, age, current)
   amarchy open                          go to the last session you were in (nothing if already in one)
   amarchy next | prev                   go down | up one session in the list (wraps around)
   amarchy jump <id>                     go to a session
@@ -37,6 +37,8 @@ Sessions:
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
+  amarchy order [opened|activity]       how the list is ordered: as opened (default) or grouped by
+                                        activity; no argument switches between the two
 
 Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme                         pick it in Omarchy's theme switcher (the one with previews); System comes first
@@ -93,6 +95,7 @@ TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is s
 LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 LAST = STATE / "last"
+ORDER_FILE = STATE / "order"    # "activity" when the list is grouped by activity
 HIDDEN = "special:amarchy"
 SELF = str(Path(__file__).resolve())
 
@@ -1393,13 +1396,38 @@ def task_title(window_title):
         title = title.replace("-", " ").replace("_", " ")
     return title[:1].upper() + title[1:]
 
-# Sections, most urgent first. Every list of sessions is in this order.
+# Sections, most urgent first, for the list grouped by activity.
 SECTIONS = (("waiting", "NEEDS YOU"), ("working", "WORKING"), ("idle", "IDLE"), ("asleep", "ASLEEP"))
 ORDER = {state: i for i, (state, _) in enumerate(SECTIONS)}
+ORDERS = ("opened", "activity")
+
+
+def list_order():
+    """How every list of sessions is ordered: "opened" (the order you opened
+    them in, so a session keeps its place) or "activity"."""
+    try:
+        order = ORDER_FILE.read_text().strip()
+    except OSError:
+        return ORDERS[0]
+    return order if order in ORDERS else ORDERS[0]
 
 
 def session_order(s):
+    if list_order() == "opened":
+        return (s.get("created", 0), s["id"])
     return (ORDER.get(s["status"], len(ORDER)), s["repo"], s["name"])
+
+
+def cmd_order(args):
+    """Set how the session list is ordered, or switch between the two."""
+    order = args[0] if args else ORDERS[1 - ORDERS.index(list_order())]
+    if order not in ORDERS:
+        return fail(f"unknown order {order!r} (opened or activity)")
+    STATE.mkdir(parents=True, exist_ok=True)
+    ORDER_FILE.write_text(order)
+    tell_shell("refresh")
+    print(order)
+    return 0
 
 
 def age(sid):
@@ -1437,7 +1465,7 @@ def saved_title(path):
 
 
 def session_view():
-    """Sessions as every UI shows them (the bar widget, the Omarchy menu): most urgent first, with what each one is
+    """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
     titles = {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
@@ -1533,7 +1561,8 @@ def cmd_menu():
 
 def cmd_ui():
     """Everything the shell plugin draws, in one call."""
-    print(json.dumps({"zen_width": ZEN_WIDTH, "header_height": header_height(), "keys": nav_keys(), "sessions": session_view()}))
+    print(json.dumps({"zen_width": ZEN_WIDTH, "header_height": header_height(), "keys": nav_keys(),
+                      "order": list_order(), "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
@@ -1602,6 +1631,8 @@ def main(argv):
         return cmd_theme(args)
     elif cmd == "watch":
         return cmd_watch()
+    elif cmd == "order":
+        return cmd_order(args)
     elif cmd == "layout":
         cmd_layout()
     elif cmd == "hook" and len(args) == 2:

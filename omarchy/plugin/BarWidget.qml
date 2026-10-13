@@ -29,6 +29,8 @@ Panel {
     return Math.max(Style.space(240), gap > 0 ? gap : Style.space(380))
   }
 
+  readonly property bool grouped: store.order === "activity"
+
   readonly property int currentIndex: {
     for (var i = 0; i < store.sessions.length; i++) if (store.sessions[i].current) return i
     return -1
@@ -132,7 +134,8 @@ Panel {
     }
 
     // Quick actions and the keys stay put at the top; the list grows below.
-    Row {
+    Flow {
+      width: parent.width
       spacing: Style.spacing.controlGap
       Button {
         iconText: "󰐕"
@@ -151,6 +154,13 @@ Panel {
         text: "Theme"
         bordered: true
         onClicked: { root.close(); store.run(["theme"]) }
+      }
+      Button {
+        iconText: root.grouped ? "󰒺" : "󰉹"
+        text: root.grouped ? "In order" : "By activity"
+        tooltipText: root.grouped ? "List sessions in the order you opened them (g)" : "Group sessions by activity (g)"
+        bordered: true
+        onClicked: store.run(["order"])
       }
     }
 
@@ -192,6 +202,7 @@ Panel {
       width: parent.width
       visible: store.sessions.length > 0
       sessions: store.sessions
+      grouped: root.grouped
       cursor: content.cursor
       spinnerFrame: root.spinnerFrame
       onActivated: function(index) { content.activated(index) }
@@ -271,6 +282,7 @@ Panel {
       onTextKey: function(t) {
         if (t === "n") { root.close(); store.run(["new"]) }
         else if (t === "a") { root.close(); store.run(["add"]) }
+        else if (t === "g") store.run(["order"])
       }
 
       Content {
