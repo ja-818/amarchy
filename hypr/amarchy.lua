@@ -74,6 +74,10 @@ o.launch_on_start(bin .. " watch")
 -- Claude without Hyprland animating the move and then the resize.
 o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
 
+-- Claude and the session terminal are terminals under amarchy's own classes;
+-- say so, so Omarchy's Super+C/V copy and paste in them.
+o.window("amarchy\\.(claude|term)\\..*", { tag = "+terminal" })
+
 -- The zen column on session workspaces; sized for your monitor by
 -- `amarchy layout` (runs on install and before every new session).
 local layout = home .. "/.local/state/amarchy/layout.lua"
