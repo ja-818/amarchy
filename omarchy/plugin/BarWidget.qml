@@ -43,7 +43,9 @@ Panel {
     if (k.commands) rows.push([key("commands"), "commands"])
     if (k["new"]) rows.push([key("new"), "new"])
     if (k.add) rows.push([key("add"), "add"])
+    if (k.theme) rows.push([key("theme"), "theme"])
     if (k.close) rows.push([key("close"), "close"])
+    if (k.menu) rows.push([key("menu"), "menu"])
     return rows
   }
 
@@ -141,6 +143,12 @@ Panel {
         text: "Add project"
         bordered: true
         onClicked: { root.close(); store.run(["add"]) }
+      }
+      Button {
+        iconText: "󰏘"
+        text: "Theme"
+        bordered: true
+        onClicked: { root.close(); store.run(["theme"]) }
       }
     }
 

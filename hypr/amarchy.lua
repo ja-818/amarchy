@@ -20,7 +20,9 @@
 --   commands_key choose another saved command of the project to run there (default "C")
 --   nav_new_key  start a session (default "N")
 --   add_key      add a project (default "A")
+--   theme_key    pick the theme amarchy wears (default "T")
 --   close_key    close this session, after asking (default "X")
+--   menu_key     everything above in one menu, each with its key (default "M")
 --
 -- Moving between Claude and the terminal is Omarchy's own Super+arrows.
 --
@@ -58,7 +60,13 @@ nav(cfg.run_key, "R", "Run amarchy project", "run")
 nav(cfg.commands_key, "C", "Run amarchy command", "run --pick")
 nav(cfg.nav_new_key, "N", "New amarchy session here", "new")
 nav(cfg.add_key, "A", "Add amarchy project", "add")
+nav(cfg.theme_key, "T", "Pick amarchy theme", "theme")
 nav(cfg.close_key, "X", "Close amarchy session", "close --confirm")
+nav(cfg.menu_key, "M", "amarchy menu", "menu")
+
+-- amarchy in its own theme (`amarchy theme`): repaints the desktop as you enter
+-- and leave a session. Exits right away when no theme is set.
+o.launch_on_start(bin .. " watch")
 
 -- The zen column on session workspaces; sized for your monitor by
 -- `amarchy layout` (runs on install and before every new session).

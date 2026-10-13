@@ -34,11 +34,18 @@ Sessions:
   amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
+  amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
+
+Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
+  amarchy theme                         pick it in Omarchy's theme switcher (the one with previews)
+  amarchy theme <name> | off            set it (any theme from `omarchy theme list`) or turn it off
+  amarchy theme --show                  print it
 
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle
+  amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -56,14 +63,19 @@ $AMARCHY_ROOT (the project's main checkout). Quote them when setting from a shel
 State: ~/.local/state/amarchy/.
 """
 
+import base64
+import fcntl
 import json
 import os
 import random
 import re
+import select
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -76,6 +88,7 @@ STATUS = STATE / "status"
 RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
 TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is showing
 LAYOUT = STATE / "layout.lua"
+THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 LAST = STATE / "last"
 HIDDEN = "special:amarchy"
 SELF = str(Path(__file__).resolve())
@@ -89,6 +102,15 @@ WS_PREFIX = "A:"            # session workspaces: A:<id>
 # under the Ⓐ in the bar.
 SHELL_PLUGIN = HOME / ".config/omarchy/plugins/amarchy/manifest.json"
 
+OMARCHY = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
+DESKTOP = HOME / ".local/state/omarchy/current"     # the Omarchy theme the rest of the desktop wears
+CLAUDE_THEME = HOME / ".claude/themes/amarchy.json"
+# Who last painted over the Omarchy theme ("amarchy" while ours shows, empty
+# when nobody has). Any tool that themes a workspace this way can share it:
+# take the lock, paint, write your name; only repaint the desktop on leaving
+# if the name is still yours, so two of them never undo each other.
+LAYER = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "theme-layer"
+
 LEGACY_STATE = HOME / ".local/state/jaken/factory"
 LEGACY_PREFIX = "factory"
 LEGACY_WS_PREFIX = "F:"
@@ -97,6 +119,7 @@ ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_W
 CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
 TERMINAL_HEIGHT = min(max(int(os.environ.get("AMARCHY_TERMINAL_HEIGHT") or 32), 10), 80) / 100
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
+IMAGES = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
 
 
 # ------------------------------------------------------------------ helpers
@@ -187,6 +210,10 @@ def term_argv(cls, title, cwd, cmd=()):
 
 
 def open_term(cls, title, cwd, cmd=()):
+    osc = THEME / "osc"
+    if theme_name() and osc.exists():
+        # Start in the amarchy theme's colors rather than the desktop's.
+        cmd = ["sh", "-c", 'cat "$0"; exec "$@"', str(osc), *(cmd or [os.environ.get("SHELL", "bash")])]
     spawn(term_argv(cls, title, cwd, cmd))
 
 
@@ -498,6 +525,233 @@ def cmd_terminal(args):
     return 0
 
 
+# ------------------------------------------------------------------ theme
+#
+# amarchy can wear its own Omarchy theme: the bar, menus, notifications,
+# wallpaper and window borders change while a session is on screen and change
+# back when you leave. It's a coat of paint over the desktop, not a theme
+# switch: your Omarchy theme never changes, nothing is rewritten or reloaded,
+# so it happens in the time it takes to switch workspace. The session windows
+# themselves (Claude, the terminal) simply stay in the amarchy theme.
+
+def theme_name():
+    f = THEME / "name"
+    return f.read_text().strip() if f.exists() else ""
+
+
+def theme_key(name):
+    return name.strip().lower().replace(" ", "-")
+
+
+def theme_render(name):
+    """Snapshot a theme into THEME exactly as Omarchy would render it, without
+    applying it. Returns an error, or None.
+
+    Omarchy's template step always works in ~/.local/state/omarchy/current/next-theme,
+    so it runs with a scratch HOME. Lua a theme ships is left out: the border
+    colors come from Omarchy's own template."""
+    key = theme_key(name)
+    sources = [d for d in (OMARCHY / "themes" / key, HOME / ".config/omarchy/themes" / key) if d.is_dir()]
+    if not key or not sources:
+        return f"no Omarchy theme called {name!r} (see omarchy theme list)"
+    with tempfile.TemporaryDirectory() as tmp:
+        stage = Path(tmp) / ".local/state/omarchy/current/next-theme"
+        for src in sources:     # the user's copy of a theme goes over Omarchy's, like omarchy-theme-set
+            shutil.copytree(src, stage, dirs_exist_ok=True, ignore_dangling_symlinks=True,
+                            ignore=shutil.ignore_patterns("backgrounds", "*.lua", ".git"))
+        templates = HOME / ".config/omarchy/themed"
+        if templates.is_dir():
+            (Path(tmp) / ".config/omarchy").mkdir(parents=True)
+            (Path(tmp) / ".config/omarchy/themed").symlink_to(templates)
+        if not (stage / "colors.toml").exists() and (stage / "alacritty.toml").exists():
+            sh("omarchy-theme-colors-from-alacritty", str(stage))
+        subprocess.run(["omarchy-theme-set-templates"], capture_output=True,
+                       env={**os.environ, "HOME": tmp, "OMARCHY_PATH": str(OMARCHY)})
+        if not (stage / "colors.toml").exists() or not (stage / "shell.toml").exists():
+            return f"couldn't render {name} (omarchy-theme-set-templates gave no shell.toml)"
+        THEME.mkdir(parents=True, exist_ok=True)
+        for f in ("colors.toml", "shell.toml", "hyprland.lua", "claude.json"):
+            if (stage / f).exists():
+                shutil.copy(stage / f, THEME / f)
+            else:
+                (THEME / f).unlink(missing_ok=True)
+    (THEME / "osc").write_text(sh("omarchy-theme-osc", str(THEME / "colors.toml")).stdout)
+
+    # The wallpaper Omarchy would start the theme on. A screen-sized copy
+    # decodes much faster than a 4K original, so it doesn't blink on the way in.
+    images = {}
+    for src in sources:
+        images.update({f.name: f for f in (src / "backgrounds").glob("*") if f.suffix.lower() in IMAGES})
+    own = HOME / ".config/omarchy/backgrounds" / key
+    images = sorted(f for f in own.glob("*") if f.suffix.lower() in IMAGES) + [images[n] for n in sorted(images)]
+    sized = THEME / "wallpaper.jpg"
+    sized.unlink(missing_ok=True)
+    if images and shutil.which("magick"):
+        mon = next((m for m in json.loads(sh("hyprctl", "monitors", "-j").stdout or "[]") if m.get("focused")), {})
+        size = f"{mon.get('width', 3840)}x{mon.get('height', 2160)}"
+        sh("magick", f"{images[0]}[0]", "-resize", size + "^", "-gravity", "center", "-extent", size,
+           "-quality", "90", "-strip", str(sized))
+    (THEME / "background").write_text(str(sized if sized.exists() else images[0] if images else ""))
+    return None
+
+
+def claude_theme(source):
+    """Claude Code's side of the theme: sessions start with "custom:amarchy"
+    (see hook_settings), and Claude reloads the file when it changes."""
+    try:
+        data = json.loads(source.read_text())
+    except (OSError, ValueError):
+        return
+    data["name"] = "Amarchy"
+    CLAUDE_THEME.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CLAUDE_THEME.with_name(".amarchy.json.tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, CLAUDE_THEME)
+
+
+def paint(theme_dir, background):
+    """Show a rendered theme and a wallpaper: the shell (bar, menus,
+    notifications) takes the palette over IPC, Hyprland the border colors."""
+    def b64(f):
+        return base64.b64encode(f.read_bytes()).decode() if f.is_file() else ""
+    calls = [["omarchy-shell", "shell", "applyTheme", b64(theme_dir / "colors.toml"), b64(theme_dir / "shell.toml")]]
+    if background and Path(background).is_file():
+        calls.append(["omarchy-shell", "background", "setInstant", str(background)])
+    if (theme_dir / "hyprland.lua").is_file():
+        calls.append(["hyprctl", "eval", f'dofile("{theme_dir / "hyprland.lua"}")'])
+    for p in [subprocess.Popen(["timeout", "2", *c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              for c in calls]:
+        p.wait()
+
+
+def retint(osc):
+    """Recolor the session windows that are already open (terminal colors as
+    OSC sequences, the way omarchy-theme-set-foot does it)."""
+    pids = [str(c["pid"]) for c in clients() if c["class"].startswith((PREFIX + ".", LEGACY_PREFIX + "."))]
+    if not osc or not pids:
+        return
+    for child in sh("pgrep", "-P", ",".join(pids)).stdout.split():
+        try:
+            tty = os.readlink(f"/proc/{child}/fd/1")
+            if tty.startswith("/dev/pts/"):
+                Path(tty).write_text(osc)
+        except OSError:
+            pass
+
+
+def themed_workspace(name):
+    return name.startswith(WS_PREFIX) or any(s["workspace"] == name for s in sessions())
+
+
+def theme_sync(workspace=None, force=False):
+    """Make the desktop wear what the workspace on screen calls for: the
+    amarchy theme on a session, your Omarchy theme everywhere else."""
+    if workspace is None:
+        workspace = active_workspace().get("name", "")
+    inside = bool(theme_name()) and themed_workspace(workspace)
+    with open(LAYER, "a+") as layer:
+        fcntl.flock(layer, fcntl.LOCK_EX)
+        layer.seek(0)
+        ours = layer.read().strip() == PREFIX
+        if inside and (force or not ours):
+            paint(THEME, (THEME / "background").read_text().strip())
+            # Whatever painted before us (Omarchy's own theme switch included)
+            # recolors every terminal, ours too.
+            retint((THEME / "osc").read_text())
+        elif ours and not inside:
+            background = DESKTOP / "background"
+            paint(DESKTOP / "theme", os.path.realpath(background) if background.exists() else None)
+        else:
+            return
+        layer.seek(0)
+        layer.truncate()
+        layer.write(PREFIX if inside else "")
+
+
+def ensure_watcher():
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "watch.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return  # it's running
+    detach([SELF, "watch"])
+
+
+# Coming in paints right away. Leaving waits a moment longer, so that when you
+# go straight to another workspace with a coat of its own, that one gets there
+# first and the desktop doesn't flash your Omarchy theme in between.
+PAINT_IN, PAINT_OUT = 0.02, 0.07
+
+
+def cmd_watch():
+    """Follow Hyprland's events and repaint as sessions come on and go off
+    screen. One per desktop; it ends when the theme is turned off."""
+    if not theme_name():
+        return 0
+    STATE.mkdir(parents=True, exist_ok=True)
+    lock = open(STATE / "watch.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0
+    try:
+        events = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        events.connect(str(Path(os.environ["XDG_RUNTIME_DIR"]) / "hypr" / os.environ["HYPRLAND_INSTANCE_SIGNATURE"]
+                           / ".socket2.sock"))
+    except (KeyError, OSError):
+        return fail("can't reach Hyprland's event socket")
+    workspace, force, due, buf = None, False, time.monotonic(), b""
+    while True:
+        if not select.select([events], [], [], None if due is None else max(due - time.monotonic(), 0))[0]:
+            try:
+                theme_sync(workspace, force)
+            except (OSError, ValueError):
+                pass    # Hyprland or the shell didn't answer; the next event paints
+            force, due = False, None
+            if not theme_name():
+                return 0
+            continue
+        chunk = events.recv(4096)
+        if not chunk:
+            return 0
+        *lines, buf = (buf + chunk).split(b"\n")
+        for line in lines:
+            event, _, data = line.decode(errors="replace").partition(">>")
+            if event == "workspacev2":          # ID,NAME
+                workspace = data.split(",", 1)[-1]
+                due = time.monotonic() + (PAINT_IN if themed_workspace(workspace) else PAINT_OUT)
+            elif event == "focusedmonv2":       # MONITOR,WORKSPACEID: ask which workspace that is
+                workspace, due = None, time.monotonic() + PAINT_IN
+            elif event == "configreloaded":     # Hyprland is back on your theme's border colors
+                force, due = True, time.monotonic() + PAINT_IN
+
+
+def cmd_theme(args):
+    if args and args[0] == "--show":
+        print(theme_name() or "off")
+        return 0
+    name = args[0] if args else menu_pick_theme()
+    if not name:
+        return 1
+    if name.lower() == "off":
+        (THEME / "name").unlink(missing_ok=True)
+        theme_sync()
+        retint(sh("omarchy-theme-osc", str(DESKTOP / "theme/colors.toml")).stdout)
+        if CLAUDE_THEME.exists():
+            claude_theme(DESKTOP / "theme/claude.json")
+        return 0
+    err = theme_render(name)
+    if err:
+        return fail(err)
+    (THEME / "name").write_text(theme_key(name).replace("-", " ").title() + "\n")
+    claude_theme(THEME / "claude.json")
+    theme_sync(force=True)
+    retint((THEME / "osc").read_text())
+    ensure_watcher()
+    return 0
+
+
 # ------------------------------------------------------------------ run
 
 def guess_run(path):
@@ -677,6 +931,8 @@ def cmd_jump(sid):
     if not s:
         return
     LAST.write_text(sid)
+    if theme_name():
+        ensure_watcher()
     focus_workspace(s["workspace"])
     ensure_windows(s)
     arrange(sid)
@@ -752,13 +1008,16 @@ def set_trust(path, trusted):
 def hook_settings(sid):
     def h(state):
         return [{"hooks": [{"type": "command", "command": f"{shlex.quote(SELF)} hook {sid} {state}"}]}]
-    return json.dumps({"hooks": {
+    settings = {"hooks": {
         "SessionStart": h("idle"),
         "UserPromptSubmit": h("working"),
         "PreToolUse": h("working"),
         "Notification": h("waiting"),
         "Stop": h("idle"),
-    }})
+    }}
+    if theme_name() and CLAUDE_THEME.exists():
+        settings["theme"] = "custom:amarchy"
+    return json.dumps(settings)
 
 
 # Session names: a silly adjective and a famous anarchist, e.g. "wobbly-bakunin".
@@ -873,6 +1132,7 @@ ICON_GITHUB = ""
 ICON_LINK = "󰌷"
 ICON_NEW = "󰝒"
 ICON_LOCK = "󰌾"
+ICON_THEME = "󰏘"
 ADD_PROJECT = "Add project"
 
 
@@ -886,6 +1146,26 @@ def menu_select(prompt, rows):
 def menu_input(prompt):
     r = subprocess.run(["omarchy-menu-input", prompt], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def menu_pick_theme():
+    """Omarchy's own theme switcher (the previews), opened on the amarchy
+    theme. Returns the theme picked, or None."""
+    if not shutil.which("omarchy-theme-switcher"):
+        return menu_select("Amarchy theme", [(ICON_THEME, t, "") for t in sh("omarchy-theme-list").stdout.splitlines()])
+    # The switcher opens on your desktop's theme. To open it on ours, let it
+    # build its previews (--preload shows nothing) and call its menu ourselves.
+    previews = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "omarchy/theme-selector/previews"
+    current = theme_key(theme_name())
+    if current:
+        sh("omarchy-theme-switcher", "--preload")
+    selected = next(iter(sorted(previews.glob(current + ".*"))), None) if current else None
+    if selected:
+        r = sh("omarchy-menu-images", "--print-name", "--show-labels", "--filterable", "--lazy-thumbnails",
+               "--selected", str(selected), str(previews))
+    else:
+        r = sh("omarchy-theme-switcher")
+    return r.stdout.strip() or None
 
 
 def project_subtext(p):
@@ -1123,23 +1403,75 @@ NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "pre
              ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
              ("Run amarchy command", "commands"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
-             ("Close amarchy session", "close"))
+             ("Pick amarchy theme", "theme"), ("Close amarchy session", "close"),
+             ("amarchy menu", "menu"))
+
+
+def hypr_binds():
+    """What's bound in Hyprland, by description (hypr/amarchy.lua names ours)."""
+    try:
+        return {b.get("description"): b for b in json.loads(sh("hyprctl", "binds", "-j").stdout)}
+    except ValueError:
+        return {}
+
+
+def mod_names(bind):
+    return [n for bit, n in MOD_NAMES if bind["modmask"] & bit]
 
 
 def nav_keys():
     """The session keys as bound in Hyprland (hypr/amarchy.lua), for the hints
     under the session list: {"mod": "Ctrl+Alt", "next": "J", ...}."""
-    try:
-        binds = {b.get("description"): b for b in json.loads(sh("hyprctl", "binds", "-j").stdout)}
-    except ValueError:
-        return {}
+    binds = hypr_binds()
     keys = {}
     for description, action in NAV_BINDS:
         b = binds.get(description)
         if b:
             keys[action] = b["key"]
-            keys.setdefault("mod", "+".join(n for bit, n in MOD_NAMES if b["modmask"] & bit))
+            keys.setdefault("mod", "+".join(mod_names(b)))
     return keys
+
+
+# The amarchy menu: icon, label, the command it runs, and the descriptions its
+# key may be bound under (hypr/amarchy.lua). The last two say where it shows:
+# in a session, outside one.
+MENU = (
+    ("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), False, True),
+    ("󰉹", "Sessions", ["show"], ("amarchy sessions",), True, True),
+    ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
+    ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
+    ("󰆍", "Toggle terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
+    ("󰐊", "Run project", ["run"], ("Run amarchy project",), True, False),
+    ("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",), True, False),
+    ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
+    ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
+    ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
+    ("󰜺", "Theme off", ["theme", "off"], (), True, True),
+    ("󰆴", "Close session", ["close", "--confirm"], ("Close amarchy session",), True, False),
+)
+
+
+def menu_rows():
+    """The menu for where you are: (icon, label, key, command)."""
+    binds = hypr_binds()
+    inside = current_session_id() is not None
+    rows = []
+    for icon, label, command, descriptions, in_session, outside in MENU:
+        if not (in_session if inside else outside) or (command == ["theme", "off"] and not theme_name()):
+            continue
+        b = next((binds[d] for d in descriptions if d in binds), None)
+        key = "+".join([*mod_names(b), b["key"].capitalize()]) if b else ""
+        rows.append((icon, label, key, command))
+    return rows
+
+
+def cmd_menu():
+    """Everything amarchy does from where you are, each with the key that does
+    it without the menu."""
+    rows = menu_rows()
+    choice = menu_select("Amarchy", [row[:3] for row in rows])
+    command = next((row[3] for row in rows if row[1] == choice), None)
+    return main(command) if command else 1
 
 
 def cmd_ui():
@@ -1203,6 +1535,12 @@ def main(argv):
         cmd_ui()
     elif cmd == "pick":
         return cmd_pick(args)
+    elif cmd == "menu":
+        return cmd_menu()
+    elif cmd == "theme":
+        return cmd_theme(args)
+    elif cmd == "watch":
+        return cmd_watch()
     elif cmd == "layout":
         cmd_layout()
     elif cmd == "hook" and len(args) == 2:

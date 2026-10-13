@@ -35,6 +35,8 @@ the list drops for a moment when you move between sessions:
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
+| `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
+| `Ctrl+Alt+M` | The amarchy menu: everything here in one list, each with its key next to it. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
 | `Super+Space` | **Amarchy** is in the Omarchy menu: sessions, new session, add project, close. |
@@ -60,6 +62,27 @@ also removes the worktree.
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure).
 
+## Theme
+
+amarchy can wear its own Omarchy theme. Step into a session and the bar,
+menus, notifications, wallpaper and window borders change with it; step out and
+your desktop is back, in the time it takes to switch workspace. Claude and the
+session terminal stay in the amarchy theme.
+
+```sh
+amarchy theme              # pick one: Ctrl+Alt+T, the Theme button under the Ⓐ, or Super+Space → Amarchy → Theme
+amarchy theme "Tokyo Night"
+amarchy theme off          # also Super+Space → Amarchy → Theme off
+```
+
+The picker is Omarchy's own theme switcher, previews and all; it just sets
+amarchy's theme instead of your desktop's.
+
+Any theme from `omarchy theme list` works. Your Omarchy theme is never
+switched: amarchy paints over it and paints it back, so nothing is rewritten or
+reloaded. Claude windows that were already open take the new colors fully the
+next time they start.
+
 ## Install
 
 Needs Omarchy 4+ (Hyprland Lua config, the Omarchy shell and menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
@@ -81,7 +104,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
             nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R", commands_key = "C",
-            nav_new_key = "N", add_key = "A", close_key = "X" }
+            nav_new_key = "N", add_key = "A", theme_key = "T", close_key = "X", menu_key = "M" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -123,6 +146,8 @@ amarchy run --list                    the project's saved commands
 amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
 amarchy show                          open the session list under the Ⓐ in the bar
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
+amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
+amarchy theme [name|off]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
 amarchy layout                        resize the zen column for the current monitor
 ```
 

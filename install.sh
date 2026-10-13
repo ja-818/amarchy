@@ -57,6 +57,8 @@ EOF
 }
 
 if [[ ${1:-} == --uninstall ]]; then
+  # Back to your Omarchy theme everywhere (the watcher then ends on its own).
+  [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme off || true
   rm -f "$bin_dir/amarchy"
   [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
   rm -f "$plugin_dir"
@@ -111,10 +113,16 @@ edit_menu "$repo/omarchy/menu.jsonc"
 "$bin_dir/amarchy" layout
 hyprctl reload >/dev/null
 
+# The amarchy theme, if one is set: render it again for this Omarchy and
+# monitor, and make sure its watcher is running.
+theme=$("$bin_dir/amarchy" theme --show)
+[[ $theme == off ]] || "$bin_dir/amarchy" theme "$theme"
+
 say "amarchy installed."
 echo "  Super+Alt+A  open amarchy (your last session)"
 echo "  Super+Alt+N  new session (projects from ${AMARCHY_WORK:-~/Work})"
 echo "  Ctrl+Alt+Return  toggle the session terminal"
-echo "  Ctrl+Alt+J/K move between sessions · N new · A add project · X close"
+echo "  Ctrl+Alt+J/K move between sessions · N new · A add project · T theme · X close"
+echo "  Ctrl+Alt+M   the amarchy menu: every action with its key"
 echo "  Super+Space  Amarchy menu · Ⓐ in the bar"
 echo "Change the keys with an \`amarchy = { ... }\` table, see hypr/amarchy.lua."
