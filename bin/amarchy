@@ -28,6 +28,10 @@ Sessions:
   amarchy terminal [on|off]             toggle the session's terminal under Claude
   amarchy run                           run the project in the session's terminal (again: restart it)
   amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
+  amarchy run <name>                    run another saved command of the project, the same way
+  amarchy run --save <name> [command]   save one (asks for the command if omitted); --forget <name> drops it
+  amarchy run --list                    the project's saved commands, name and command
+  amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 
@@ -43,6 +47,11 @@ Environment:
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_TERMINAL_HEIGHT  share of the column the terminal takes, in percent (default 32)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
+
+Run commands are saved per project and start in the session's worktree. They can use
+$AMARCHY_PATH (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and
+$AMARCHY_ROOT (the project's main checkout). Quote them when setting from a shell:
+  amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'
 
 State: ~/.local/state/amarchy/.
 """
@@ -64,7 +73,7 @@ WORKTREES = Path(os.environ.get("AMARCHY_WORKTREES", WORK / ".worktrees")).expan
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy"
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
-RUN = STATE / "run"             # one file per project: its run command
+RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
 TERMINAL = STATE / "terminal"   # one empty file per session whose terminal is showing
 LAYOUT = STATE / "layout.lua"
 LAST = STATE / "last"
@@ -527,28 +536,35 @@ def set_run_command(repo, command):
     (RUN / repo).write_text(command.strip() + "\n")
 
 
-def cmd_run(args):
-    """Run the project in the session's terminal: the command shows, runs, and
-    leaves you in a shell when it ends. Running again restarts it."""
-    sid = current_session_id()
-    s = session(sid) if sid else None
-    if not s:
-        return 1
-    if args and args[0] == "--set":
-        command = " ".join(args[1:]) or menu_input(f"Run command for {s['repo']}")
-        if not command:
-            return 1
-        set_run_command(s["repo"], command)
-        return 0
-    command = run_command(s)
-    if args and args[0] == "--show":
-        print(command)
-        return 0 if command else 1
-    if not command:
-        command = menu_input(f"Run command for {s['repo']}")
-        if not command:
-            return 1
-        set_run_command(s["repo"], command)
+def run_env(s):
+    """What a run command can refer to, as $AMARCHY_PATH and so on. One command
+    is saved per project, these make it fit each of its sessions."""
+    return {"AMARCHY_PATH": s["path"], "AMARCHY_NAME": s["name"], "AMARCHY_REPO": s["repo"],
+            "AMARCHY_BRANCH": s["branch"], "AMARCHY_ROOT": str(WORK / s["repo"])}
+
+
+def saved_commands(repo):
+    """The project's other saved commands, {name: command}."""
+    try:
+        return json.loads((RUN / f"{repo}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_command(repo, name, command):
+    """Save a named command, or drop it when command is empty."""
+    commands = saved_commands(repo)
+    if command:
+        commands[name] = command.strip()
+    else:
+        commands.pop(name, None)
+    RUN.mkdir(parents=True, exist_ok=True)
+    (RUN / f"{repo}.json").write_text(json.dumps(commands, indent=2) + "\n")
+
+
+def run_in_terminal(s, command):
+    """Restart the session's terminal on command: it shows, runs, and leaves
+    you in a shell when it ends."""
     old = find(term_class(s))
     if old:
         hypr(f'hl.dsp.window.close({{ window = "address:{old["address"]}" }})')
@@ -557,15 +573,96 @@ def cmd_run(args):
                 break
             time.sleep(0.05)
     TERMINAL.mkdir(parents=True, exist_ok=True)
-    (TERMINAL / sid).touch()
+    (TERMINAL / s["id"]).touch()
     shell = os.environ.get("SHELL", "bash")
-    script = f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; {command}; exec {shlex.quote(shell)}"
+    exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in run_env(s).items())
+    script = (f"export {exports}; printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
+              f"{command}; exec {shlex.quote(shell)}")
     open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", s["path"], [shell, "-ic", script])
     win = wait_for(term_class(s))
     if win:
         move_to(win["address"], HIDDEN)
-    arrange(sid, focus="claude")
+    arrange(s["id"], focus="claude")
     return 0
+
+
+ICON_RUN = "󰐊"
+RUN_DEFAULT = "run"
+SAVE_COMMAND = "Save a command"
+
+
+def pick_command(s):
+    """Choose one of the project's commands in the Omarchy menu and run it."""
+    commands = saved_commands(s["repo"])
+    rows = [(ICON_RUN, RUN_DEFAULT, run_command(s) or "Not set yet")]
+    rows += [(ICON_RUN, name, command) for name, command in commands.items() if name != RUN_DEFAULT]
+    rows.append((ICON_ADD, SAVE_COMMAND, "Name it, then type it"))
+    choice = menu_select(f"Run in {s['repo']}", rows)
+    if not choice:
+        return 1
+    if choice == RUN_DEFAULT:
+        return cmd_run([])
+    if choice != SAVE_COMMAND:
+        return run_in_terminal(s, commands[choice])
+    name = menu_input("Name for the command")
+    command = name and menu_input(f"Command for {name}")
+    if not command:
+        return 1
+    save_command(s["repo"], name, command)
+    notify("amarchy", f"Saved {name} for {s['repo']}")
+    return 0
+
+
+def cmd_run(args):
+    """Run the project in the session's terminal: the command shows, runs, and
+    leaves you in a shell when it ends. Running again restarts it. A name runs
+    one of the project's other saved commands instead."""
+    sid = current_session_id()
+    s = session(sid) if sid else None
+    if not s:
+        return 1
+    flag = args[0] if args else ""
+    if flag == "--set":
+        command = " ".join(args[1:]) or menu_input(f"Run command for {s['repo']}")
+        if not command:
+            return 1
+        set_run_command(s["repo"], command)
+        return 0
+    if flag == "--save":
+        if len(args) < 2 or args[1] == RUN_DEFAULT:
+            return fail("Usage: amarchy run --save <name> [command] (the run command itself: amarchy run --set)")
+        command = " ".join(args[2:]) or menu_input(f"Command for {args[1]}")
+        if not command:
+            return 1
+        save_command(s["repo"], args[1], command)
+        return 0
+    if flag == "--forget":
+        if len(args) < 2 or args[1] not in saved_commands(s["repo"]):
+            return fail(f"No saved command {' '.join(args[1:])!r} for {s['repo']}")
+        save_command(s["repo"], args[1], "")
+        return 0
+    if flag == "--pick":
+        return pick_command(s)
+    command = run_command(s)
+    if flag == "--list":
+        for name, saved in {RUN_DEFAULT: command, **saved_commands(s["repo"])}.items():
+            if saved:
+                print(f"{name}\t{saved}")
+        return 0
+    if flag == "--show":
+        print(command)
+        return 0 if command else 1
+    if flag:
+        command = saved_commands(s["repo"]).get(flag)
+        if not command:
+            return fail(f"No saved command {flag!r} for {s['repo']}. Save it: amarchy run --save {flag} <command>")
+        return run_in_terminal(s, command)
+    if not command:
+        command = menu_input(f"Run command for {s['repo']}")
+        if not command:
+            return 1
+        set_run_command(s["repo"], command)
+    return run_in_terminal(s, command)
 
 
 def cmd_show():
@@ -1024,6 +1121,7 @@ def session_view():
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
 NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
              ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
+             ("Run amarchy command", "commands"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
              ("Close amarchy session", "close"))
 

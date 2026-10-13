@@ -33,6 +33,7 @@ the list drops for a moment when you move between sessions:
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. The list drops from the Ⓐ for a moment so you see where you landed. |
 | `Ctrl+Alt+Return` | Toggle the session's terminal under Claude (it opens in the worktree). On puts the keyboard in it, off gives it back to Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
+| `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -79,7 +80,7 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
-            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R",
+            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", terminal_key = "RETURN", run_key = "R", commands_key = "C",
             nav_new_key = "N", add_key = "A", close_key = "X" }
 ```
 
@@ -116,9 +117,32 @@ amarchy close [id] --confirm          the same, asking first in the Omarchy menu
 amarchy terminal [on|off]             toggle the session's terminal under Claude
 amarchy run                           run the project in the session's terminal (again: restart it)
 amarchy run --show | --set [command]  the project's run command (guessed from the repo until you set one)
+amarchy run <name>                    run another saved command of the project, the same way
+amarchy run --save <name> [command]   save one; --forget <name> drops it
+amarchy run --list                    the project's saved commands
+amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
 amarchy show                          open the session list under the Ⓐ in the bar
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy layout                        resize the zen column for the current monitor
+```
+
+The run command is saved per project and starts in the session's worktree. It
+can use `$AMARCHY_PATH` (the worktree), `$AMARCHY_NAME`, `$AMARCHY_BRANCH`,
+`$AMARCHY_REPO` and `$AMARCHY_ROOT` (the project's main checkout), so one command
+fits every session of the project. amarchy's own, to try a worktree as the
+installed copy:
+
+```
+amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'
+```
+
+A project can have more saved commands next to its run command, each with a
+name: `Ctrl+Alt+C` lists them (and saves new ones), `amarchy run <name>` runs
+one. amarchy's own, to put the installed copy back on the main checkout once a
+change is done:
+
+```
+amarchy run --save main '$AMARCHY_ROOT/install.sh && omarchy-restart-shell'
 ```
 
 Each new worktree is pre-trusted in `~/.claude.json` so Claude starts without
