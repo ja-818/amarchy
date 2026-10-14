@@ -9,7 +9,7 @@ gap to its right:
 
 ```
  [Ⓐ Amarchy] [󰐕 New session] │                     │
- [󰍉 Search sessions    ] [󰒺] │                     │ $ npm run dev
+ [󰍉 Search sessions] [󰉋] [󰉹] │                     │ $ npm run dev
                              │                     │
  󰂞  Fix the login redirect 4m│       claude        │
     my-app · wobbly-bakunin  │    (column, 900)    │
@@ -52,10 +52,13 @@ sessions:
 On a monitor too narrow for anything beside the column, amarchy is always in
 zen mode, without a terminal.
 
-Prefer them grouped by what they need from you (Needs you, Working, Idle,
-Asleep)? Click the button next to the search, press `g` in the list under the
-Ⓐ, or run `amarchy order activity`. The same switches back, and the choice
-sticks.
+Next to the search are two switches for grouping the list, lit while on:
+**by project** (󰉋, one section per project, each row showing just its branch)
+and **by status** (󰉹, by what they need from you: Needs you, Working, Idle,
+Asleep). Use either one, or both for the status sections inside each project.
+With neither, they're in the order you opened them. In the list under the Ⓐ,
+`p` and `s` do the same; from a script, `amarchy group project` and `amarchy
+group status`. The choice sticks.
 
 ## Keys
 
@@ -64,7 +67,7 @@ sticks.
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. |
-| `Ctrl+Alt+S` | Search: the list drops from the Ⓐ with the keyboard in its search. Type to find a session by name, `↵` jumps to it, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `g` to switch between opened order and grouped by activity, `Esc` to dismiss. |
+| `Ctrl+Alt+S` | Search: the list drops from the Ⓐ with the keyboard in its search. Type to find a session by name, `↵` jumps to it, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `p` / `s` to switch grouping by project / by status, `Esc` to dismiss. |
 | `Ctrl+Alt+Z` | Zen mode: Claude alone, without the sessions and the terminal beside it. Again brings them back. |
 | `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
@@ -98,7 +101,7 @@ also removes the worktree.
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
 the session's row in the list: a bell or a check, what the session is about,
-and project · branch under it. It comes with a chime: two notes going up when
+and project · branch under it. Click it to go to that session. It comes with a chime: two notes going up when
 the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
 none; they are the two files in `sounds/`, replace them with your own).
 
@@ -200,7 +203,8 @@ amarchy search                        type to find a session by name, in the lis
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
-amarchy order [opened|activity]       list order: as opened (default) or grouped by activity
+amarchy group [project|status] [on|off]  group the list by project and/or status (switches without on|off)
+amarchy group none                    no grouping: the order you opened them in (the default)
 amarchy layout                        resize Claude's column for the current monitor
 ```
 

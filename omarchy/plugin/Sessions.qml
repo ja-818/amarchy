@@ -22,8 +22,10 @@ Item {
   property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
-  // How the list is ordered: "opened" (as opened) or "activity".
-  property string order: "opened"
+  // How the list is grouped: by project, by status (Needs you, Working...),
+  // both (status inside each project) or neither (the order they were opened).
+  property bool byProject: false
+  property bool byStatus: false
 
   readonly property int waiting: count("waiting")
   readonly property int working: count("working")
@@ -54,7 +56,9 @@ Item {
           var d = JSON.parse(text)
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
-          root.order = d.order || "opened"
+          var groups = d.group || []
+          root.byProject = groups.indexOf("project") >= 0
+          root.byStatus = groups.indexOf("status") >= 0
           root.zen = d.zen !== false
           root.zenWidth = d.zen_width || 900
           root.panelGap = d.panel_gap || 8

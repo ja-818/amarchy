@@ -15,6 +15,8 @@ BorderSurface {
   property var session: ({})
   property bool cursor: false
   property int spinnerFrame: 0
+  // "project · branch" under the title; just the branch under a project header.
+  property bool showRepo: true
   signal activated()
   signal hovered()
 
@@ -75,7 +77,7 @@ BorderSurface {
       width: parent.width
       textFormat: Text.PlainText
       elide: Text.ElideRight
-      text: ((row.session.repo || "") + " · " + (row.session.name || "")).toUpperCase()
+      text: ((row.showRepo ? (row.session.repo || "") + " · " : "") + (row.session.name || "")).toUpperCase()
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * row.zoom)
       font.bold: true
