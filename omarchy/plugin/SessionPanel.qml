@@ -7,8 +7,9 @@ import qs.Commons
 // Your sessions in the gap left of Claude's column, the way the terminal
 // fills the one on the right. `amarchy layout` keeps that gap free on session
 // workspaces, so it only shows there, and not in zen mode (`amarchy zen`).
-// It never takes the keyboard: the session keys go through Hyprland. Whatever
-// is declared inside is laid out in the panel, scrolling when it's too tall.
+// It doesn't take the keyboard (the session keys go through Hyprland) until
+// you click its search: `keyboard` hands it over. Whatever is declared inside
+// is laid out in the panel, scrolling when it's too tall.
 PanelWindow {
   id: root
 
@@ -18,6 +19,9 @@ PanelWindow {
   property int gap: 8
   // As see-through as the terminal on the other side of Claude.
   property real alpha: 1
+  // Take the keyboard, for the search.
+  property bool keyboard: false
+  property bool focusPrimed: false
   default property alias content: holder.data
 
   readonly property var monitor: screen ? Hyprland.monitorFor(screen) : null
@@ -37,7 +41,24 @@ PanelWindow {
 
   WlrLayershell.namespace: "amarchy-sessions"
   WlrLayershell.layer: WlrLayer.Bottom
-  WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+  // Like the shell's own panels: Exclusive for a moment, since Hyprland only
+  // hands the keyboard to an already mapped surface that way, then OnDemand so
+  // Claude or the terminal take it back as soon as the pointer is on them.
+  WlrLayershell.keyboardFocus: keyboard
+    ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+    : WlrKeyboardFocus.None
+
+  onKeyboardChanged: {
+    focusPrimed = false
+    if (keyboard) focusPrimeTimer.restart()
+    else focusPrimeTimer.stop()
+  }
+
+  Timer {
+    id: focusPrimeTimer
+    interval: 75
+    onTriggered: if (root.keyboard) root.focusPrimed = true
+  }
 
   Rectangle {
     anchors.fill: parent

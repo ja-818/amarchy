@@ -8,8 +8,8 @@ gap to its left and the session's terminal (it opens in the worktree) in the
 gap to its right:
 
 ```
- Ⓐ Amarchy                   │                     │
- 3 agents · 1 needs you      │                     │ $ npm run dev
+ [Ⓐ Amarchy] [󰐕 New session] │                     │
+ [󰍉 Search sessions    ] [󰒺] │                     │ $ npm run dev
                              │                     │
  󰂞  Fix the login redirect 4m│       claude        │
     my-app · wobbly-bakunin  │    (column, 900)    │
@@ -22,6 +22,13 @@ gap to its right:
 The list is drawn by the Omarchy shell (a shell plugin) with the same type,
 rows and selection as the Omarchy menu, in the order you opened them, so a
 session keeps its place. Click one to jump to it.
+
+Above it there is only what you reach for: **Ⓐ Amarchy** (the menu: everything
+else amarchy does, each with its key), **New session** and a **search**. Click it
+and type a few letters of a session's name (what it's about, its project or its
+branch): the list narrows as you type, `↑`/`↓` move, `↵` jumps there, `Esc`
+brings the whole list back. `Ctrl+Alt+S` does the same without the mouse, in
+the list under the Ⓐ.
 
 **Zen mode** (`Ctrl+Alt+Z`) leaves Claude alone in the column. Claude doesn't
 move: the panels beside it just step away, for every session, until you press
@@ -46,17 +53,18 @@ On a monitor too narrow for anything beside the column, amarchy is always in
 zen mode, without a terminal.
 
 Prefer them grouped by what they need from you (Needs you, Working, Idle,
-Asleep)? Press `g` in the list, click **By activity**, or run `amarchy order
-activity`. The same switches back, and the choice sticks.
+Asleep)? Click the button next to the search, press `g` in the list under the
+Ⓐ, or run `amarchy order activity`. The same switches back, and the choice
+sticks.
 
 ## Keys
 
 | Key | |
 | --- | --- |
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
-| `Super+Alt+L` | Drop the session list from the Ⓐ, from anywhere: see what every agent is up to at a glance, `j`/`k` and `↵` to jump to one, `g` to switch between opened order and grouped by activity, `Esc` to dismiss. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. |
+| `Ctrl+Alt+S` | Search: the list drops from the Ⓐ with the keyboard in its search. Type to find a session by name, `↵` jumps to it, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `g` to switch between opened order and grouped by activity, `Esc` to dismiss. |
 | `Ctrl+Alt+Z` | Zen mode: Claude alone, without the sessions and the terminal beside it. Again brings them back. |
 | `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
@@ -98,7 +106,7 @@ your desktop is back, in the time it takes to switch workspace. Claude and the
 session terminal stay in the amarchy theme.
 
 ```sh
-amarchy theme              # pick one: Ctrl+Alt+T, the Theme button under the Ⓐ, or Super+Space → Amarchy → Theme
+amarchy theme              # pick one: Ctrl+Alt+T, Theme in the amarchy menu (Ctrl+Alt+M), or Super+Space → Amarchy → Theme
 amarchy theme "Tokyo Night"
 amarchy theme system       # back to looking like the rest of the desktop
 ```
@@ -136,8 +144,8 @@ Keys: set a table before the `dofile(... amarchy.lua)` line in
 `~/.config/hypr/hyprland.lua`:
 
 ```lua
-amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N", list_key = "L",
-            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", zen_key = "Z", terminal_key = "RETURN", run_key = "R", commands_key = "C",
+amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N",
+            nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", search_key = "S", zen_key = "Z", terminal_key = "RETURN", run_key = "R", commands_key = "C",
             nav_new_key = "N", add_key = "A", theme_key = "T", rename_key = "E", close_key = "X", menu_key = "M" }
 ```
 
@@ -183,6 +191,7 @@ amarchy run --save <name> [command]   save one; --forget <name> drops it
 amarchy run --list                    the project's saved commands
 amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
 amarchy show                          open the session list under the Ⓐ in the bar
+amarchy search                        type to find a session by name, in the list under the Ⓐ
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)

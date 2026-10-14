@@ -9,12 +9,12 @@
 --   mod          modifier for these keys (default "SUPER + ALT")
 --   open_key     go to the last session you were in (default "A")
 --   new_key      start a session: pick a project (default "N")
---   list_key     drop the session list from the Ⓐ in the bar (default "L")
 --
 -- Moving around inside it:
 --   nav_mod      modifier for these keys (default "CTRL + ALT")
 --   next_key     the session below in the list (default "J")
 --   prev_key     the session above (default "K")
+--   search_key   type to find a session by name, in the list under the Ⓐ (default "S")
 --   zen_key      toggle zen mode: Claude alone, without the sessions and the
 --                terminal beside it (default "Z")
 --   terminal_key move the keyboard between Claude and the terminal; leaves
@@ -45,12 +45,9 @@ end
 if cfg.new_key ~= false then
   o.bind(mod .. " + " .. (cfg.new_key or "N"), "New amarchy session", bin .. " new")
 end
-if cfg.list_key ~= false then
-  o.bind(mod .. " + " .. (cfg.list_key or "L"), "amarchy sessions", bin .. " show")
-end
 
--- The descriptions are how `amarchy ui` finds these keys for the hints under
--- the session list.
+-- The descriptions are how `amarchy ui` and `amarchy menu` find these keys, to
+-- show each next to what it does.
 local nav_mod = cfg.nav_mod or "CTRL + ALT"
 local function nav(key, default, description, command)
   if key ~= false then
@@ -59,6 +56,7 @@ local function nav(key, default, description, command)
 end
 nav(cfg.next_key, "J", "Next amarchy session", "next")
 nav(cfg.prev_key, "K", "Previous amarchy session", "prev")
+nav(cfg.search_key, "S", "Search amarchy sessions", "search")
 nav(cfg.zen_key, "Z", "Toggle amarchy zen", "zen")
 nav(cfg.terminal_key, "RETURN", "Toggle amarchy terminal", "terminal")
 nav(cfg.run_key, "R", "Run amarchy project", "run")
@@ -77,6 +75,11 @@ o.launch_on_start(bin .. " watch")
 -- Session windows snap into place: the terminal lands beside
 -- Claude without Hyprland animating the move and then the resize.
 o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
+
+-- So do the list beside Claude and the strip above it: zen mode (and moving
+-- between sessions) shows and hides them at once, together with the terminal,
+-- instead of Hyprland fading them in after it.
+hl.layer_rule({ match = { namespace = "^amarchy-(sessions|header)$" }, no_anim = true, animation = "none" })
 
 -- Claude and the session terminal are terminals under amarchy's own classes;
 -- say so, so Omarchy's Super+C/V copy and paste in them.
