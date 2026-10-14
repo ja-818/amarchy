@@ -37,6 +37,7 @@ Sessions:
   amarchy run --list                    the project's saved commands, name and command
   amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
+  amarchy search                        type to find a session by name, in the list under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
   amarchy order [opened|activity]       how the list is ordered: as opened (default) or grouped by
@@ -557,12 +558,18 @@ def arrange(sid, focus="claude"):
         focus_window(target["address"])
 
 
+def tell_shell_zen():
+    """Tell the shell plugin whether Claude is alone right now, so the list
+    beside it comes and goes with the terminal instead of a poll later."""
+    tell_shell("zen", "true" if zen() else "false")
+
+
 def leave_zen():
     """Bring the panels back for something that needs the terminal. False
     when the monitor has no room beside Claude for it."""
     if ZEN.exists():
         ZEN.unlink()
-        tell_shell("refresh")
+        tell_shell_zen()
     if zen():
         notify("amarchy", "No room for the terminal beside Claude on this monitor.")
         return False
@@ -598,7 +605,7 @@ def cmd_zen(args):
         ZEN.touch()
     else:
         ZEN.unlink(missing_ok=True)
-    tell_shell("refresh")
+    tell_shell_zen()
     sid = current_session_id()
     if sid:
         s = session(sid)
@@ -1101,6 +1108,14 @@ def cmd_show():
     return cmd_pick([])
 
 
+def cmd_search():
+    """Open the session list under the Ⓐ with the keyboard in its search (the
+    Omarchy menu, which searches as you type, without the plugin)."""
+    if native_panel():
+        return subprocess.run(["omarchy-shell", "amarchy", "search"], stdout=subprocess.DEVNULL).returncode
+    return cmd_pick([])
+
+
 def cmd_jump(sid):
     s = session(sid)
     if not s:
@@ -1306,7 +1321,7 @@ def cmd_new(args):
 
 ICON_PROJECT = "󰉋"
 ICON_ADD = "󰐕"
-ICON_GITHUB = ""
+ICON_GITHUB = "󰊤"
 ICON_LINK = "󰌷"
 ICON_NEW = "󰝒"
 ICON_LOCK = "󰌾"
@@ -1316,8 +1331,9 @@ ADD_PROJECT = "Add project"
 
 
 def menu_select(prompt, rows):
-    """Pick one of rows (icon, label, subtext). Returns the label, or None."""
-    options = ["\t".join(str(x) for x in row if x) for row in rows]
+    """Pick one of rows (icon, label[, subtext]). Returns the label, or None."""
+    # Always icon<TAB>label: without an icon the menu would take the label for one.
+    options = ["\t".join([row[0] or " ", *(str(x) for x in row[1:] if x)]) for row in rows]
     r = subprocess.run(["omarchy-menu-select", prompt, *options], capture_output=True, text=True)
     return r.stdout.split("\t")[0].strip() if r.returncode == 0 and r.stdout.strip() else None
 
@@ -1364,7 +1380,7 @@ def project_subtext(p):
 
 def menu_pick_project():
     rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in projects()]
-    rows.append((ICON_ADD, ADD_PROJECT, "GitHub, git URL or new"))
+    rows.append((ICON_ADD, ADD_PROJECT))
     repo = menu_select("New session", rows)
     return menu_add_project() if repo == ADD_PROJECT else repo
 
@@ -1372,9 +1388,9 @@ def menu_pick_project():
 def menu_add_project():
     """Add a project through the menu; returns its name, or None."""
     how = menu_select(ADD_PROJECT, [
-        (ICON_GITHUB, "From GitHub", "Your repos, most recently pushed first"),
-        (ICON_LINK, "Git URL", "Any git remote, or owner/repo"),
-        (ICON_NEW, "New empty project", "Optionally with a private GitHub repo"),
+        (ICON_GITHUB, "From GitHub"),
+        (ICON_LINK, "Git URL"),
+        (ICON_NEW, "New empty project"),
     ])
     if how == "From GitHub":
         rs = github_repos()
@@ -1394,8 +1410,8 @@ def menu_add_project():
         if not name:
             return None
         where = menu_select(f"Create {slug(name)}", [
-            (ICON_LOCK, "Local + private GitHub repo", "Pushed to your GitHub account"),
-            (ICON_PROJECT, "Local only", f"Just {WORK / slug(name)}"),
+            (ICON_LOCK, "Local + private GitHub repo"),
+            (ICON_PROJECT, "Local only"),
         ])
         if not where:
             return None
@@ -1643,7 +1659,7 @@ def session_view():
 
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
 NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "prev"),
-             ("Toggle amarchy zen", "zen"),
+             ("Search amarchy sessions", "search"), ("Toggle amarchy zen", "zen"),
              ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
              ("Run amarchy command", "commands"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
@@ -1665,8 +1681,8 @@ def mod_names(bind):
 
 
 def nav_keys():
-    """The session keys as bound in Hyprland (hypr/amarchy.lua), for the hints
-    under the session list: {"mod": "Ctrl+Alt", "next": "J", ...}."""
+    """The session keys as bound in Hyprland (hypr/amarchy.lua), for the
+    tooltips of the session list: {"mod": "Ctrl+Alt", "next": "J", ...}."""
     binds = hypr_binds()
     keys = {}
     for description, action in NAV_BINDS:
@@ -1682,9 +1698,9 @@ def nav_keys():
 # in a session, outside one.
 MENU = (
     ("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), False, True),
-    ("󰉹", "Sessions", ["show"], ("amarchy sessions",), True, True),
     ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
     ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
+    ("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",), True, True),
     ("󰊓", "Toggle zen mode", ["zen"], ("Toggle amarchy zen",), True, False),
     ("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
     ("󰐊", "Run project", ["run"], ("Run amarchy project",), True, False),
@@ -1785,6 +1801,8 @@ def main(argv):
         return cmd_run(args)
     elif cmd == "show":
         return cmd_show()
+    elif cmd == "search":
+        return cmd_search()
     elif cmd == "ui":
         cmd_ui()
     elif cmd == "pick":

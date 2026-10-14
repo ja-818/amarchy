@@ -12,8 +12,11 @@ import qs.Ui
 // zen`) it doesn't, and moving between sessions from the keyboard (`amarchy
 // next`) drops the list for a moment, without taking the keyboard, to show
 // where you landed.
+// Above the list there is only the Ⓐ Amarchy button (the menu: everything else
+// amarchy does), New session and a search by name, with the list order next
+// to it.
 // IPC: omarchy-shell amarchy-bar toggle|open|close
-//      omarchy-shell amarchy refresh|peek
+//      omarchy-shell amarchy refresh|peek|search|zen <true|false>
 Panel {
   id: root
   moduleName: "amarchy"
@@ -23,6 +26,12 @@ Panel {
   property int cursor: 0
   property int spinnerFrame: 0
   property bool peeking: false
+  // What's typed in the search; the popup and the list beside Claude share it.
+  property string query: ""
+  // The list beside Claude has the keyboard: its search was clicked.
+  property bool searching: false
+  // Open the popup with the keyboard in its search (`amarchy search`).
+  property bool searchOnOpen: false
 
   // As wide as the gap beside the zen column, so on a session the panel sits
   // next to Claude instead of over it. Same width everywhere else.
@@ -33,54 +42,88 @@ Panel {
 
   readonly property bool grouped: store.order === "activity"
 
+  // The sessions on the list: all of them, or the ones the search matches by
+  // name (what the session is about, its project and its branch), every word
+  // of it.
+  readonly property var shown: {
+    var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w !== "" })
+    if (words.length === 0) return store.sessions
+    return store.sessions.filter(function(s) {
+      var name = ((s.task || "") + " " + (s.repo || "") + " " + (s.name || "")).toLowerCase()
+      return words.every(function(w) { return name.indexOf(w) >= 0 })
+    })
+  }
+
   readonly property int currentIndex: {
-    for (var i = 0; i < store.sessions.length; i++) if (store.sessions[i].current) return i
+    for (var i = 0; i < shown.length; i++) if (shown[i].current) return i
     return -1
-  }
-
-  // The session keys bound in Hyprland (hypr/amarchy.lua), for the hints.
-  readonly property var hintRows: {
-    var k = store.keys, rows = []
-    function key(name) { return k[name] === "RETURN" ? "↵" : String(k[name]).toLowerCase() }
-    if (k.next && k.prev) rows.push([key("next") + "/" + key("prev"), "move"])
-    if (k.zen) rows.push([key("zen"), "zen"])
-    if (k.terminal) rows.push([key("terminal"), "terminal"])
-    if (k.run) rows.push([key("run"), "run"])
-    if (k.commands) rows.push([key("commands"), "commands"])
-    if (k["new"]) rows.push([key("new"), "new"])
-    if (k.add) rows.push([key("add"), "add"])
-    if (k.theme) rows.push([key("theme"), "theme"])
-    if (k.rename) rows.push([key("rename"), "rename"])
-    if (k.close) rows.push([key("close"), "close"])
-    if (k.menu) rows.push([key("menu"), "menu"])
-    return rows
-  }
-
-  readonly property string summary: {
-    var n = store.sessions.length
-    if (n === 0) return "No agents running"
-    var parts = [n + (n === 1 ? " agent" : " agents")]
-    if (store.waiting) parts.push(store.waiting + " needs you")
-    if (store.working) parts.push(store.working + " working")
-    return parts.join(" · ")
   }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  // "Ctrl+Alt+N": the key bound in Hyprland (hypr/amarchy.lua), as a tooltip.
+  // Short, so it fits the list beside Claude.
+  function keyHint(name) {
+    var k = store.keys[name]
+    if (!k) return ""
+    return (store.keys.mod ? store.keys.mod + "+" : "") + k.charAt(0) + k.slice(1).toLowerCase()
+  }
+
   function activate(index) {
-    var s = store.sessions[index]
+    var s = root.shown[index]
     if (!s) return
     root.close()
+    root.endSearch()
     store.run(["jump", s.id])
   }
 
+  function moveCursor(dy) {
+    root.cursor = Math.max(0, Math.min(root.cursor + dy, root.shown.length - 1))
+  }
+
+  // Run something from the buttons: the list steps out of its way.
+  function act(args) {
+    root.close()
+    root.endSearch()
+    store.run(args)
+  }
+
+  // Put the keyboard in the search, from the keyboard: always under the Ⓐ.
+  // The list beside Claude only keeps the keyboard while the pointer is on it
+  // (Hyprland hands it back to the window under the pointer), so its search is
+  // for the mouse.
+  function search() {
+    if (root.opened) {
+      column.focusSearch()
+    } else {
+      root.searchOnOpen = true
+      root.open()
+    }
+  }
+
+  // Back to the whole list, and the keyboard back to where it was.
+  function endSearch() {
+    root.query = ""
+    root.searching = false
+  }
+
+  // The cursor follows the search: on the first match while typing, back on
+  // the session on screen once it's cleared.
+  onQueryChanged: root.cursor = query !== "" ? 0 : Math.max(0, root.currentIndex)
+  onShownChanged: if (root.cursor >= shown.length) root.cursor = Math.max(0, shown.length - 1)
+
   onOpenedChanged: {
-    if (!opened) return
+    if (!opened) {
+      root.searchOnOpen = false
+      root.query = ""
+      return
+    }
     root.peeking = false
+    root.searching = false
     store.refresh()
+    root.query = ""
     root.cursor = Math.max(0, root.currentIndex)
-    Qt.callLater(function() { keys.forceActiveFocus() })
   }
 
   Sessions {
@@ -106,111 +149,158 @@ Panel {
     function refresh(): string { store.refresh(); return "ok" }
     function peek(): string {
       store.refresh()
+      // Moving between sessions walks all of them, so show all of them.
+      root.endSearch()
       // No need when the list is already on screen beside Claude.
       if (!root.opened && !side.visible) root.peeking = true
       peekTimer.restart()
       return "ok"
     }
+    function search(): string { root.search(); return "ok" }
+    // Zen mode was toggled: the list beside Claude follows right away.
+    function zen(on: bool): string { store.zen = on; store.refresh(); return "ok" }
     function ping(): string { return "ok" }
   }
 
-  // What the popup shows; the peek draws the very same thing, just passively.
+  // What the popup and the list beside Claude show: the menu and New session,
+  // the search with the list order next to it, and the sessions. The peek is
+  // `passive`: the sessions alone.
   component Content: Column {
     id: content
     property int cursor: -1
+    property bool passive: false
+    readonly property Item searchField: search
+    readonly property bool searchFocused: search.activeFocus
     signal activated(int index)
     signal hovered(int index)
+    signal moved(int dy)
+    // The search was clicked / is done with (Esc).
+    signal searchRequested()
+    signal searchEnded()
+
+    function focusSearch() { search.forceActiveFocus() }
 
     spacing: Style.spacing.panelGap
 
-    PanelHero {
-      width: parent.width
-      title: "Amarchy"
-      meta: root.summary
-      iconComponent: Component {
-        Text {
-          text: "Ⓐ"
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.displayLarge
-          color: store.waiting > 0 ? Color.urgent : Color.menu.selectedText
-        }
+    Row {
+      visible: !content.passive
+      spacing: Style.spacing.controlGap
+      // The name on the door is the menu: everything else amarchy does.
+      Button {
+        id: brand
+        iconText: "Ⓐ"
+        text: "Amarchy"
+        tooltipText: root.keyHint("menu")
+        bordered: true
+        onClicked: root.act(["menu"])
+      }
+      Button {
+        // The Ⓐ is a tall glyph; keep the two the same height.
+        height: brand.height
+        iconText: "󰐕"
+        text: "New session"
+        tooltipText: root.keyHint("new")
+        bordered: true
+        onClicked: root.act(["new"])
       }
     }
 
-    // Quick actions and the keys stay put at the top; the list grows below.
-    Flow {
+    Row {
       width: parent.width
+      visible: !content.passive && store.sessions.length > 0
       spacing: Style.spacing.controlGap
-      Button {
-        iconText: "󰐕"
-        text: "New session"
-        bordered: true
-        onClicked: { root.close(); store.run(["new"]) }
+
+      TextField {
+        id: search
+        width: parent.width - order.width - parent.spacing
+        anchors.verticalCenter: parent.verticalCenter
+        placeholderText: "󰍉  Search sessions"
+        rightPadding: horizontalPadding + clear.width + Style.spacing.sm
+
+        // Two fields (popup, beside Claude), one query.
+        onTextEdited: root.query = text
+        onPressed: content.searchRequested()
+        // The keyboard went elsewhere (a click on Claude, say).
+        onActiveFocusChanged: if (!activeFocus) content.searchEnded()
+
+        Connections {
+          target: root
+          function onQueryChanged() { if (search.text !== root.query) search.text = root.query }
+        }
+        Component.onCompleted: text = root.query
+
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape) {
+            root.query = ""
+            content.searchEnded()
+          } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+            content.moved(1)
+          } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
+            content.moved(-1)
+          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            content.activated(content.cursor)
+          } else {
+            return
+          }
+          event.accepted = true
+        }
+
+        Text {
+          id: clear
+          visible: search.text !== ""
+          anchors.right: parent.right
+          anchors.rightMargin: search.horizontalPadding
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: "󰅖"
+          font.family: search.font.family
+          font.pixelSize: Style.font.body
+          color: search.foreground
+          opacity: clearArea.containsMouse ? 1 : 0.52
+
+          MouseArea {
+            id: clearArea
+            anchors.fill: parent
+            anchors.margins: -Style.spacing.sm
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.query = ""
+          }
+        }
       }
+
       Button {
-        iconText: "󰉋"
-        text: "Add project"
-        bordered: true
-        onClicked: { root.close(); store.run(["add"]) }
-      }
-      Button {
-        iconText: "󰏘"
-        text: "Theme"
-        bordered: true
-        onClicked: { root.close(); store.run(["theme"]) }
-      }
-      Button {
-        iconText: root.grouped ? "󰒺" : "󰉹"
-        text: root.grouped ? "In order" : "By activity"
-        tooltipText: root.grouped ? "List sessions in the order you opened them (g)" : "Group sessions by activity (g)"
+        id: order
+        anchors.verticalCenter: parent.verticalCenter
+        // The icon is the order the list is in.
+        iconText: root.grouped ? "󰉹" : "󰒺"
+        tooltipText: root.grouped ? "Back to opened order" : "Group by activity"
         bordered: true
         onClicked: store.run(["order"])
       }
     }
 
-    Flow {
-      width: parent.width
-      visible: root.hintRows.length > 0
-      spacing: Style.spacing.xl
-      opacity: 0.5
-      Text {
-        text: store.keys.mod || ""
-        font.family: Style.font.menuFamily
-        font.pixelSize: Style.font.caption
-        color: Color.menu.text
-      }
-      Repeater {
-        model: root.hintRows
-        Row {
-          required property var modelData
-          spacing: Style.spacing.sm
-          Text {
-            text: modelData[0]
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            color: Color.menu.selectedText
-          }
-          Text {
-            text: modelData[1]
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            color: Color.menu.text
-          }
-        }
-      }
-    }
-
-    PanelSeparator { width: parent.width }
-
     SessionList {
       width: parent.width
-      visible: store.sessions.length > 0
-      sessions: store.sessions
+      visible: root.shown.length > 0
+      sessions: root.shown
       grouped: root.grouped
       cursor: content.cursor
       spinnerFrame: root.spinnerFrame
       onActivated: function(index) { content.activated(index) }
       onHovered: function(index) { content.hovered(index) }
+    }
+
+    Text {
+      width: parent.width
+      visible: !content.passive && root.shown.length === 0
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.body
+      color: Color.menu.text
+      opacity: 0.52
     }
   }
 
@@ -226,7 +316,7 @@ Panel {
     anchorItem: button
     owner: peekOwner
     bar: root.bar
-    open: root.peeking && !root.opened && store.sessions.length > 0
+    open: root.peeking && !root.opened && root.shown.length > 0
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     contentWidth: peek.fittedContentWidth(root.panelWidth)
     contentHeight: peek.fittedContentHeight(peekContent.implicitHeight, Style.space(640))
@@ -234,11 +324,13 @@ Panel {
     Content {
       id: peekContent
       width: parent.width
+      passive: true
       cursor: root.currentIndex
     }
   }
 
-  // The list beside Claude; the session on screen wears the cursor.
+  // The list beside Claude; the session on screen wears the cursor, until
+  // you click its search: then the keyboard is here and the cursor is yours.
   SessionPanel {
     id: side
     screen: button.QsWindow.window ? button.QsWindow.window.screen : null
@@ -247,11 +339,21 @@ Panel {
     zenWidth: store.zenWidth
     gap: store.panelGap
     alpha: store.terminalAlpha
+    keyboard: root.searching
+    onVisibleChanged: if (!visible && root.searching) root.endSearch()
 
     Content {
       width: parent.width
-      cursor: root.currentIndex
+      cursor: root.searching ? root.cursor : root.currentIndex
       onActivated: function(index) { root.activate(index) }
+      onMoved: function(dy) { root.moveCursor(dy) }
+      onSearchRequested: {
+        if (root.opened || root.searching) return
+        root.cursor = Math.max(0, root.currentIndex)
+        root.searching = true
+      }
+      // Esc, or the keyboard left: what's typed stays until it's cleared.
+      onSearchEnded: root.searching = false
     }
   }
 
@@ -281,29 +383,32 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: keys
+    // The keyboard starts on the list, or in the search when that's what was
+    // asked for (`amarchy search`).
+    focusTarget: root.searchOnOpen && store.sessions.length > 0 ? column.searchField : keys
     contentWidth: panel.fittedContentWidth(root.panelWidth)
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(640))
 
     PanelKeyCatcher {
       id: keys
       anchors.fill: parent
-      onMoveRequested: function(dx, dy) {
-        root.cursor = Math.max(0, Math.min(root.cursor + dy, store.sessions.length - 1))
-      }
+      // The search has the keys while you type in it.
+      blocked: column.searchFocused
+      onMoveRequested: function(dx, dy) { root.moveCursor(dy) }
       onActivateRequested: root.activate(root.cursor)
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onDeleteRequested: {
-        var s = store.sessions[root.cursor]
+        var s = root.shown[root.cursor]
         if (!s) return
-        root.close()
-        store.run(["close", s.id, "--confirm"])
+        root.act(["close", s.id, "--confirm"])
       }
       onTextKey: function(t) {
-        if (t === "n") { root.close(); store.run(["new"]) }
-        else if (t === "a") { root.close(); store.run(["add"]) }
+        if (t === "n") root.act(["new"])
+        else if (t === "a") root.act(["add"])
+        else if (t === "m") root.act(["menu"])
         else if (t === "g") store.run(["order"])
+        else if (t === "/") column.focusSearch()
       }
 
       Content {
@@ -312,6 +417,8 @@ Panel {
         cursor: root.cursor
         onActivated: function(index) { root.activate(index) }
         onHovered: function(index) { root.cursor = index }
+        onMoved: function(dy) { root.moveCursor(dy) }
+        onSearchEnded: if (root.opened) keys.forceActiveFocus()
       }
     }
   }
