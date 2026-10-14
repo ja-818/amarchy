@@ -62,6 +62,7 @@ Environment:
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name (default 28, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
+  AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
 
 Run commands are saved per project and start in the session's worktree. They can use
 $AMARCHY_PATH (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and
@@ -103,6 +104,8 @@ LAST = STATE / "last"
 ORDER_FILE = STATE / "order"    # "activity" when the list is grouped by activity
 HIDDEN = "special:amarchy"
 SELF = str(Path(__file__).resolve())
+SOUNDS = Path(SELF).parent.parent / "sounds"       # <state>.wav, played with a session's notification
+SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
 WS_PREFIX = "A:"            # session workspaces: A:<id>
@@ -142,11 +145,20 @@ def sh(*args, check=False, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
 
 
-def notify(title, body=""):
+def notify(title, body="", glyph="Ⓐ"):
     if shutil.which("omarchy-notification-send"):
-        sh("omarchy-notification-send", "-g", "󰡨", title, body)
+        sh("omarchy-notification-send", "-g", glyph, title, body)
     else:
         sh("notify-send", title, body)
+
+
+def chime(state):
+    """The sound of a session's notification: two notes going up when it
+    needs you, one settled note when it's done. AMARCHY_SOUND=off for none."""
+    sound = SOUNDS / f"{state}.wav"
+    player = shutil.which("pw-play") or shutil.which("paplay")
+    if SOUND and player and sound.exists():
+        detach([player, str(sound)])
 
 
 def hypr(expr):
@@ -1552,11 +1564,15 @@ def cmd_hook(sid, state):
         return
     claude = find(claude_class(s))
     focused = claude and claude.get("focusHistoryID") == 0
-    if not focused:
-        if state == "waiting":
-            notify(f"{sid} needs you", "Claude is waiting for input")
-        elif state == "idle" and prev == "working":
-            notify(f"{sid} is done", "Claude finished its turn")
+    if focused:
+        return
+    # The session's row in the list, as a notification: the icon of its state,
+    # what it's about, and project · branch under it.
+    if state == "waiting" or (state == "idle" and prev == "working"):
+        task = session_task(s, claude["title"] if claude else "")
+        where = f"{s['repo']} · {s['name']}"
+        notify(task or where, where if task else "", PICK_ICONS[state])
+        chime(state)
 
 
 # ------------------------------------------------------------------ mission control
@@ -1639,6 +1655,12 @@ def saved_title(path):
     return task_title(title)
 
 
+def session_task(s, window_title):
+    """What a session is about: your own name for it (amarchy rename), else
+    Claude's, from its window or its latest conversation."""
+    return s.get("title") or task_title(window_title) or saved_title(s["path"])
+
+
 def session_view():
     """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
@@ -1649,8 +1671,7 @@ def session_view():
         s["awake"] = claude_class(s) in titles
         if not s["awake"]:
             s["status"] = "asleep"
-        # Your own name for it (amarchy rename) wins over Claude's.
-        s["task"] = s.get("title") or task_title(titles.get(claude_class(s), "")) or saved_title(s["path"])
+        s["task"] = session_task(s, titles.get(claude_class(s), ""))
         s["age"] = age(s["id"]) if s["status"] != "asleep" else ""
         s["current"] = s["id"] == current
     ss.sort(key=session_order)

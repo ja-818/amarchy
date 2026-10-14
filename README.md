@@ -96,7 +96,11 @@ session only really ends with `Ctrl+Alt+X` or `amarchy close`, which
 also removes the worktree.
 
 You get a notification when a session you're not looking at needs input or
-finishes its turn (via Claude Code hooks, nothing to configure).
+finishes its turn (via Claude Code hooks, nothing to configure). It reads like
+the session's row in the list: a bell or a check, what the session is about,
+and project · branch under it. It comes with a chime: two notes going up when
+the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
+none; they are the two files in `sounds/`, replace them with your own).
 
 ## Theme
 
@@ -159,6 +163,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
 | `AMARCHY_HEADER_HEIGHT` | `28` | Height of the strip above Claude with the session's name, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
+| `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
 
 ## CLI
 
