@@ -40,8 +40,11 @@ Sessions:
   amarchy search                        type to find a session by name, in the list under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
-  amarchy order [opened|activity]       how the list is ordered: as opened (default) or grouped by
-                                        activity; no argument switches between the two
+  amarchy group [project|status] [on|off]
+                                        group the list by project and/or status (Needs you, Working,
+                                        Idle, Asleep; inside each project with both); without on|off
+                                        switches it, without anything prints the grouping; `group
+                                        none` is the order you opened them in
 
 Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme                         pick it in Omarchy's theme switcher (the one with previews); System comes first
@@ -101,9 +104,15 @@ LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 THEME_LOG = STATE / "theme.log" # every repaint and how each step of it went
 LAST = STATE / "last"
-ORDER_FILE = STATE / "order"    # "activity" when the list is grouped by activity
+GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "status", both or neither
+ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
 HIDDEN = "special:amarchy"
 SELF = str(Path(__file__).resolve())
+# What runs later, after this has exited (Claude's hooks, a click on a
+# notification), goes through the installed amarchy: it follows install.sh
+# instead of staying on the copy that set it up, a worktree maybe long gone.
+INSTALLED = Path.home() / ".local/bin/amarchy"
+ENTRY = str(INSTALLED) if INSTALLED.exists() else SELF
 SOUNDS = Path(SELF).parent.parent / "sounds"       # <state>.wav, played with a session's notification
 SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
@@ -145,9 +154,10 @@ def sh(*args, check=False, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
 
 
-def notify(title, body="", glyph="Ⓐ"):
+def notify(title, body="", glyph="Ⓐ", click=()):
+    """A notification; click is the amarchy command a click on it runs."""
     if shutil.which("omarchy-notification-send"):
-        sh("omarchy-notification-send", "-g", glyph, title, body)
+        sh("omarchy-notification-send", "-g", glyph, title, body, *(["--exec", ENTRY, *click] if click else []))
     else:
         sh("notify-send", title, body)
 
@@ -180,13 +190,16 @@ def find(cls, title=None):
     return None
 
 
-def wait_for(cls, title=None, timeout=10):
+def wait_for(cls, title=None, timeout=10, besides=None):
+    """The window of a class once it's there; with besides, one other than
+    the window at that address."""
     end = time.time() + timeout
     while time.time() < end:
-        c = find(cls, title)
+        c = next((c for c in clients() if c["class"] == cls and (title is None or c["title"] == title)
+                  and c["address"] != besides), None)
         if c:
             return c
-        time.sleep(0.15)
+        time.sleep(0.05 if besides else 0.15)
     return None
 
 
@@ -535,15 +548,16 @@ def cmd_layout():
     sh("hyprctl", "reload")
 
 
-def arrange(sid, focus="claude"):
+def arrange(sid, focus="claude", term=None):
     """Put a session's windows where they belong. Claude is always tiled in
-    the column, so it never moves. The terminal floats in the gap to its
-    right, and waits on the hidden workspace in zen mode."""
+    the column, so it never moves. The terminal (this one, when there are two
+    for a moment) floats in the gap to its right, and waits on the hidden
+    workspace in zen mode."""
     s = session(sid)
     if not s:
         return
     claude = find(claude_class(s))
-    term = find(term_class(s))
+    term = term or find(term_class(s))
     width, height, top, bottom = monitor_geometry()
     beside = not zen(width)
 
@@ -557,11 +571,15 @@ def arrange(sid, focus="claude"):
         # Floated before it gets to the workspace, so Claude isn't pushed around.
         if not term["floating"]:
             floating(term, True)
-        if term["workspace"]["name"] != s["workspace"]:
-            move_to(term["address"], f"name:{s['workspace']}")
+        # Sized and placed where it is (out of sight, usually), then brought
+        # over, so it shows up already in place.
         side = (width - ZEN_WIDTH) // 2
         box = [width - side + PAD, top, side - PAD, height - top - bottom]
         if not term["floating"] or [*term["at"], *term["size"]] != box:
+            place(term["address"], *box)
+        if term["workspace"]["name"] != s["workspace"]:
+            move_to(term["address"], f"name:{s['workspace']}")
+            # Hyprland shifts a window by its border on the way over.
             place(term["address"], *box)
     elif term and term["workspace"]["name"] != HIDDEN:
         move_to(term["address"], HIDDEN)
@@ -1012,25 +1030,26 @@ def save_command(repo, name, command):
 
 def run_in_terminal(s, command):
     """Restart the session's terminal on command: it shows, runs, and leaves
-    you in a shell when it ends."""
-    old = find(term_class(s))
-    if old:
-        hypr(f'hl.dsp.window.close({{ window = "address:{old["address"]}" }})')
-        for _ in range(40):
-            if not find(term_class(s)):
-                break
-            time.sleep(0.05)
+    you in a shell when it ends. The new terminal opens out of sight, takes
+    the old one's place beside Claude and only then is the old one closed, so
+    the terminal on the right just starts over."""
     if not leave_zen():
         return 1
+    old = find(term_class(s))
     shell = os.environ.get("SHELL", "bash")
     exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in run_env(s).items())
     script = (f"export {exports}; printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
               f"{command}; exec {shlex.quote(shell)}")
     open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", s["path"], [shell, "-ic", script])
-    win = wait_for(term_class(s))
-    if win:
-        move_to(win["address"], HIDDEN)
-    arrange(s["id"], focus="claude")
+    new = wait_for(term_class(s), besides=old and old["address"])
+    if not new:
+        return fail("the terminal didn't open")
+    if new["workspace"]["name"] != HIDDEN:     # without amarchy's window rule (an old Hyprland config)
+        move_to(new["address"], HIDDEN)
+    # Over the old one, which then goes.
+    arrange(s["id"], focus="claude", term=new)
+    if old:
+        hypr(f'hl.dsp.window.close({{ window = "address:{old["address"]}" }})')
     return 0
 
 
@@ -1209,7 +1228,7 @@ def set_trust(path, trusted):
 
 def hook_settings(sid):
     def h(state):
-        return [{"hooks": [{"type": "command", "command": f"{shlex.quote(SELF)} hook {sid} {state}"}]}]
+        return [{"hooks": [{"type": "command", "command": f"{shlex.quote(ENTRY)} hook {sid} {state}"}]}]
     settings = {"hooks": {
         "SessionStart": h("idle"),
         "UserPromptSubmit": h("working"),
@@ -1567,11 +1586,11 @@ def cmd_hook(sid, state):
     if focused:
         return
     # The session's row in the list, as a notification: the icon of its state,
-    # what it's about, and project · branch under it.
+    # what it's about, and project · branch under it. A click takes you there.
     if state == "waiting" or (state == "idle" and prev == "working"):
         task = session_task(s, claude["title"] if claude else "")
         where = f"{s['repo']} · {s['name']}"
-        notify(task or where, where if task else "", PICK_ICONS[state])
+        notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", sid))
         chime(state)
 
 
@@ -1587,38 +1606,69 @@ def task_title(window_title):
         title = title.replace("-", " ").replace("_", " ")
     return title[:1].upper() + title[1:]
 
-# Sections, most urgent first, for the list grouped by activity.
-SECTIONS = (("waiting", "NEEDS YOU"), ("working", "WORKING"), ("idle", "IDLE"), ("asleep", "ASLEEP"))
-ORDER = {state: i for i, (state, _) in enumerate(SECTIONS)}
-ORDERS = ("opened", "activity")
+# States, most urgent first, for the list grouped by status.
+ORDER = {state: i for i, state in enumerate(("waiting", "working", "idle", "asleep"))}
+# How the list can be grouped, outermost first; each one on its own or both.
+GROUPS = ("project", "status")
 
 
-def list_order():
-    """How every list of sessions is ordered: "opened" (the order you opened
-    them in, so a session keeps its place) or "activity"."""
+def list_groups():
+    """How every list of sessions is grouped: by project, by status, both
+    (status inside each project) or neither (the order you opened them in)."""
     try:
-        order = ORDER_FILE.read_text().strip()
+        return [g for g in GROUPS if g in GROUP_FILE.read_text().split()]
     except OSError:
-        return ORDERS[0]
-    return order if order in ORDERS else ORDERS[0]
+        pass
+    # `amarchy order activity`, from before there was more than one grouping.
+    try:
+        return ["status"] if ORDER_FILE.read_text().strip() == "activity" else []
+    except OSError:
+        return []
 
 
-def session_order(s):
-    if list_order() == "opened":
-        return (s.get("created", 0), s["id"])
-    return (ORDER.get(s["status"], len(ORDER)), s["repo"], s["name"])
+def session_order(s, groups=None):
+    """Within a group, and with no grouping at all, sessions keep the order you
+    opened them in, so each one keeps its place."""
+    groups = list_groups() if groups is None else groups
+    return (s["repo"].lower() if "project" in groups else "",
+            ORDER.get(s["status"], len(ORDER)) if "status" in groups else 0,
+            s.get("created", 0), s["id"])
+
+
+def set_groups(groups):
+    STATE.mkdir(parents=True, exist_ok=True)
+    GROUP_FILE.write_text(" ".join(g for g in GROUPS if g in groups) + "\n")
+    ORDER_FILE.unlink(missing_ok=True)
+    tell_shell("refresh")
+
+
+def cmd_group(args):
+    """Group the list by project and/or status: `group project` switches it,
+    `group project on|off` sets it, `group none` drops both. Prints what the
+    list is grouped by now."""
+    groups = list_groups()
+    if args == ["none"]:
+        groups = []
+    elif args:
+        what, *how = args
+        if what not in GROUPS or len(how) > 1 or how and how[0] not in ("on", "off"):
+            return fail("usage: amarchy group [project|status [on|off] | none]")
+        on = how[0] == "on" if how else what not in groups
+        groups = [g for g in GROUPS if g != what and g in groups or g == what and on]
+    if args:
+        set_groups(groups)
+    print(" ".join(groups) or "none")
+    return 0
 
 
 def cmd_order(args):
-    """Set how the session list is ordered, or switch between the two."""
-    order = args[0] if args else ORDERS[1 - ORDERS.index(list_order())]
-    if order not in ORDERS:
+    """`amarchy order opened|activity`, from before `amarchy group`: activity
+    is grouped by status. Grouping by project is left as it is."""
+    groups = list_groups()
+    order = args[0] if args else ("opened" if "status" in groups else "activity")
+    if order not in ("opened", "activity"):
         return fail(f"unknown order {order!r} (opened or activity)")
-    STATE.mkdir(parents=True, exist_ok=True)
-    ORDER_FILE.write_text(order)
-    tell_shell("refresh")
-    print(order)
-    return 0
+    return cmd_group(["status", "on" if order == "activity" else "off"])
 
 
 def age(sid):
@@ -1674,7 +1724,8 @@ def session_view():
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
         s["age"] = age(s["id"]) if s["status"] != "asleep" else ""
         s["current"] = s["id"] == current
-    ss.sort(key=session_order)
+    groups = list_groups()
+    ss.sort(key=lambda s: session_order(s, groups))
     return ss
 
 
@@ -1761,7 +1812,7 @@ def cmd_ui():
     """Everything the shell plugin draws, in one call."""
     print(json.dumps({"zen": zen(), "zen_width": ZEN_WIDTH, "panel_gap": PAD, "terminal_alpha": terminal_alpha(),
                       "header_height": header_height(), "keys": nav_keys(),
-                      "order": list_order(), "sessions": session_view()}))
+                      "group": list_groups(), "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
@@ -1834,6 +1885,8 @@ def main(argv):
         return cmd_theme(args)
     elif cmd == "watch":
         return cmd_watch()
+    elif cmd == "group":
+        return cmd_group(args)
     elif cmd == "order":
         return cmd_order(args)
     elif cmd == "layout":

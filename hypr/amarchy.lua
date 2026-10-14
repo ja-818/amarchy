@@ -76,6 +76,11 @@ o.launch_on_start(bin .. " watch")
 -- Claude without Hyprland animating the move and then the resize.
 o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
 
+-- A session terminal opens out of sight, floating on amarchy's hidden
+-- workspace, and only comes beside Claude once it's in place: it never tiles
+-- under Claude first, so nothing on screen moves.
+o.window("^amarchy\\.term\\..+$", { float = true, workspace = "special:amarchy silent" })
+
 -- So do the list beside Claude and the strip above it: zen mode (and moving
 -- between sessions) shows and hides them at once, together with the terminal,
 -- instead of Hyprland fading them in after it.

@@ -13,8 +13,8 @@ import qs.Ui
 // next`) drops the list for a moment, without taking the keyboard, to show
 // where you landed.
 // Above the list there is only the Ⓐ Amarchy button (the menu: everything else
-// amarchy does), New session and a search by name, with the list order next
-// to it.
+// amarchy does), New session and a search by name, with the grouping (by
+// project, by status) next to it.
 // IPC: omarchy-shell amarchy-bar toggle|open|close
 //      omarchy-shell amarchy refresh|peek|search|zen <true|false>
 Panel {
@@ -39,8 +39,6 @@ Panel {
     var gap = panel.screenW > 0 ? Math.floor((panel.screenW - store.zenWidth) / 2) - Style.gapsOut : 0
     return Math.max(Style.space(240), gap > 0 ? gap : Style.space(380))
   }
-
-  readonly property bool grouped: store.order === "activity"
 
   // The sessions on the list: all of them, or the ones the search matches by
   // name (what the session is about, its project and its branch), every word
@@ -87,6 +85,14 @@ Panel {
     root.close()
     root.endSearch()
     store.run(args)
+  }
+
+  // Switch a grouping ("project", "status"). The buttons light up at once;
+  // the list follows when the CLI has it in its new order.
+  function group(what) {
+    if (what === "project") store.byProject = !store.byProject
+    else store.byStatus = !store.byStatus
+    store.run(["group", what, (what === "project" ? store.byProject : store.byStatus) ? "on" : "off"])
   }
 
   // Put the keyboard in the search, from the keyboard: always under the Ⓐ.
@@ -163,7 +169,7 @@ Panel {
   }
 
   // What the popup and the list beside Claude show: the menu and New session,
-  // the search with the list order next to it, and the sessions. The peek is
+  // the search with the grouping next to it, and the sessions. The peek is
   // `passive`: the sessions alone.
   component Content: Column {
     id: content
@@ -212,7 +218,7 @@ Panel {
 
       TextField {
         id: search
-        width: parent.width - order.width - parent.spacing
+        width: parent.width - byProject.width - byStatus.width - parent.spacing * 2
         anchors.verticalCenter: parent.verticalCenter
         placeholderText: "󰍉  Search sessions"
         rightPadding: horizontalPadding + clear.width + Style.spacing.sm
@@ -269,14 +275,26 @@ Panel {
         }
       }
 
+      // Two switches, lit while on: each groups the list on its own, both
+      // group it by project with the status inside each.
       Button {
-        id: order
+        id: byProject
         anchors.verticalCenter: parent.verticalCenter
-        // The icon is the order the list is in.
-        iconText: root.grouped ? "󰉹" : "󰒺"
-        tooltipText: root.grouped ? "Back to opened order" : "Group by activity"
+        iconText: "󰉋"
+        tooltipText: store.byProject ? "Stop grouping by project" : "Group by project"
         bordered: true
-        onClicked: store.run(["order"])
+        selected: store.byProject
+        onClicked: root.group("project")
+      }
+
+      Button {
+        id: byStatus
+        anchors.verticalCenter: parent.verticalCenter
+        iconText: "󰉹"
+        tooltipText: store.byStatus ? "Stop grouping by status" : "Group by status"
+        bordered: true
+        selected: store.byStatus
+        onClicked: root.group("status")
       }
     }
 
@@ -284,7 +302,8 @@ Panel {
       width: parent.width
       visible: root.shown.length > 0
       sessions: root.shown
-      grouped: root.grouped
+      byProject: store.byProject
+      byStatus: store.byStatus
       cursor: content.cursor
       spinnerFrame: root.spinnerFrame
       onActivated: function(index) { content.activated(index) }
@@ -407,7 +426,8 @@ Panel {
         if (t === "n") root.act(["new"])
         else if (t === "a") root.act(["add"])
         else if (t === "m") root.act(["menu"])
-        else if (t === "g") store.run(["order"])
+        else if (t === "p") root.group("project")
+        else if (t === "s") root.group("status")
         else if (t === "/") column.focusSearch()
       }
 
