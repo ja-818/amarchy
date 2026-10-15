@@ -8,8 +8,8 @@ import qs.Ui
 // under it (project · branch), plus the time on the right. Everything is the
 // hero's size times `zoom`, so a screenful of sessions fits.
 // The cursor (which starts on the session you're in) uses the menu's selected
-// treatment. A high-priority session has a flag next to its time, in the
-// theme's accent; a low one steps back, dimmed.
+// treatment. Under the time sits the priority: a flag for high, in the
+// theme's accent, an arrow down for low (which also steps back, dimmed).
 BorderSurface {
   id: row
 
@@ -18,7 +18,7 @@ BorderSurface {
   property int spinnerFrame: 0
   // "project · branch" under the title; just the branch under a project header.
   property bool showRepo: true
-  // The flag on a high-priority session; not under a "High priority" header.
+  // The priority under the time; not under a "High/Low priority" header.
   property bool showPriority: true
   signal activated()
   signal hovered()
@@ -60,8 +60,10 @@ BorderSurface {
     id: content
     anchors.left: icon.right
     anchors.leftMargin: Math.round(Style.space(14) * row.zoom)
-    anchors.right: flag.visible ? flag.left : when.left
-    anchors.rightMargin: Style.space(8)
+    // Clear of the time and the priority under it, whichever is wider.
+    anchors.right: parent.right
+    anchors.rightMargin: row.borderRight + Style.spacing.lg + Style.space(8)
+                         + Math.max(when.implicitWidth, prio.visible ? prio.implicitWidth : 0)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
 
@@ -79,6 +81,7 @@ BorderSurface {
     }
 
     Text {
+      id: meta
       width: parent.width
       textFormat: Text.PlainText
       elide: Text.ElideRight
@@ -92,19 +95,6 @@ BorderSurface {
   }
 
   Text {
-    id: flag
-    visible: row.showPriority && row.priority === "high"
-    anchors.right: when.left
-    anchors.rightMargin: row.session.age ? Style.space(6) : 0
-    y: when.y + (when.height - height) / 2
-    textFormat: Text.PlainText
-    text: "󰈻"
-    font.family: Style.font.menuFamily
-    font.pixelSize: Style.font.caption
-    color: row.cursor ? Color.menu.selectedText : Color.accent
-  }
-
-  Text {
     id: when
     anchors.right: parent.right
     anchors.rightMargin: row.borderRight + Style.spacing.lg
@@ -115,6 +105,19 @@ BorderSurface {
     font.pixelSize: Style.font.caption
     color: Color.menu.text
     opacity: 0.45
+  }
+
+  // On the second line, under the time.
+  Text {
+    id: prio
+    visible: row.showPriority && row.priority !== "normal"
+    anchors.right: when.right
+    y: content.y + meta.y + (meta.height - height) / 2
+    textFormat: Text.PlainText
+    text: row.priority === "high" ? "󰈻" : "󰁅"
+    font.family: Style.font.menuFamily
+    font.pixelSize: Style.font.caption
+    color: row.cursor ? Color.menu.selectedText : (row.priority === "high" ? Color.accent : Color.menu.text)
   }
 
   MouseArea {

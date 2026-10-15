@@ -56,8 +56,9 @@ Start everything at once, then say what matters: every session has a
 **priority**, High, Normal (what a new one gets) or Low. `Ctrl+Alt+Up` /
 `Ctrl+Alt+Down` raise and lower the one you're in; in the list under the Ⓐ,
 `+` / `-` do it to the one under the cursor. The list always puts higher
-priority first (and `Ctrl+Alt+J/K` walk it in that order): a high-priority
-session wears a flag next to its time, a low one is dimmed. Every one of them
+priority first (and `Ctrl+Alt+J/K` walk it in that order). Under a session's
+time sits its priority: a flag (󰈻) for high, an arrow down (󰁅) for low, which
+is also dimmed. Every one of them
 still notifies you. From a script: `amarchy priority high|normal|low|up|down
 [--id <id>]`.
 
