@@ -40,11 +40,14 @@ Sessions:
   amarchy search                        type to find a session by name, in the list under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
-  amarchy group [project|status] [on|off]
-                                        group the list by project and/or status (Needs you, Working,
-                                        Idle, Asleep; inside each project with both); without on|off
-                                        switches it, without anything prints the grouping; `group
-                                        none` is the order you opened them in
+  amarchy priority [high|normal|low|up|down] [--id <id>]
+                                        how much the session matters (prints it without a level): the
+                                        list always puts higher priority first; new sessions are normal
+  amarchy group [project|priority|status] [on|off]
+                                        group the list by project, priority (High, Normal, Low) and/or
+                                        status (Needs you, Working, Idle, Asleep), nested in that order;
+                                        without on|off switches it, without anything prints the
+                                        grouping; `group none` drops them all
 
 Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme                         pick it in Omarchy's theme switcher (the one with previews); System comes first
@@ -1673,13 +1676,17 @@ def task_title(window_title):
 
 # States, most urgent first, for the list grouped by status.
 ORDER = {state: i for i, state in enumerate(("waiting", "working", "idle", "asleep"))}
-# How the list can be grouped, outermost first; each one on its own or both.
-GROUPS = ("project", "status")
+# How much a session matters to you, most first (`amarchy priority`). New
+# sessions are normal; the list always puts the higher ones first.
+PRIORITIES = ("high", "normal", "low")
+RANK = {p: i for i, p in enumerate(PRIORITIES)}
+# How the list can be grouped, outermost first; any of them, on its own or together.
+GROUPS = ("project", "priority", "status")
 
 
 def list_groups():
-    """How every list of sessions is grouped: by project, by status, both
-    (status inside each project) or neither (the order you opened them in)."""
+    """How every list of sessions is grouped: by project, priority and/or
+    status (nested in that order), or none of them."""
     try:
         return [g for g in GROUPS if g in GROUP_FILE.read_text().split()]
     except OSError:
@@ -1691,13 +1698,21 @@ def list_groups():
         return []
 
 
+def priority(s):
+    p = s.get("priority")
+    return p if p in RANK else "normal"
+
+
 def session_order(s, groups=None):
-    """Within a group, and with no grouping at all, sessions keep the order you
-    opened them in, so each one keeps its place."""
+    """Higher priority first, always: within each group, and with no grouping
+    at all. Among the same priority sessions keep the order you opened them
+    in, so each one keeps its place."""
     groups = list_groups() if groups is None else groups
+    rank = RANK[priority(s)]
     return (s["repo"].lower() if "project" in groups else "",
+            rank if "priority" in groups else 0,
             ORDER.get(s["status"], len(ORDER)) if "status" in groups else 0,
-            s.get("created", 0), s["id"])
+            rank, s.get("created", 0), s["id"])
 
 
 def set_groups(groups):
@@ -1708,16 +1723,16 @@ def set_groups(groups):
 
 
 def cmd_group(args):
-    """Group the list by project and/or status: `group project` switches it,
-    `group project on|off` sets it, `group none` drops both. Prints what the
-    list is grouped by now."""
+    """Group the list by project, priority and/or status: `group project`
+    switches one, `group project on|off` sets it, `group none` drops them all.
+    Prints what the list is grouped by now."""
     groups = list_groups()
     if args == ["none"]:
         groups = []
     elif args:
         what, *how = args
         if what not in GROUPS or len(how) > 1 or how and how[0] not in ("on", "off"):
-            return fail("usage: amarchy group [project|status [on|off] | none]")
+            return fail("usage: amarchy group [project|priority|status [on|off] | none]")
         on = how[0] == "on" if how else what not in groups
         groups = [g for g in GROUPS if g != what and g in groups or g == what and on]
     if args:
@@ -1734,6 +1749,39 @@ def cmd_order(args):
     if order not in ("opened", "activity"):
         return fail(f"unknown order {order!r} (opened or activity)")
     return cmd_group(["status", "on" if order == "activity" else "off"])
+
+
+def cmd_priority(args):
+    """`amarchy priority high|normal|low|up|down [--id <id>]`: how much a
+    session matters, for the order of the list. Without a level, prints it."""
+    sid = None
+    if "--id" in args:
+        i = args.index("--id")
+        if i + 1 >= len(args):
+            return fail("usage: amarchy priority [high|normal|low|up|down] [--id <id>]")
+        sid = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    sid = sid or own_session_id()
+    s = session(sid) if sid else None
+    if not s:
+        return fail(f"No session {sid!r}" if sid else "Not in a session (name one with --id <id>)")
+    now = priority(s)
+    if not args:
+        print(now)
+        return 0
+    level = args[0]
+    if level in ("up", "down"):
+        level = PRIORITIES[max(0, min(len(PRIORITIES) - 1, RANK[now] + (-1 if level == "up" else 1)))]
+    if len(args) > 1 or level not in RANK:
+        return fail("usage: amarchy priority [high|normal|low|up|down] [--id <id>]")
+    if level == "normal":
+        s.pop("priority", None)
+    else:
+        s["priority"] = level
+    (SESSIONS / f"{s['id']}.json").write_text(json.dumps(s))
+    tell_shell("refresh")
+    print(level)
+    return 0
 
 
 def age(sid):
@@ -1789,6 +1837,7 @@ def session_view():
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
         s["age"] = age(s["id"]) if s["status"] != "asleep" else ""
         s["current"] = s["id"] == current
+        s["priority"] = priority(s)
     groups = list_groups()
     ss.sort(key=lambda s: session_order(s, groups))
     return ss
@@ -1801,6 +1850,7 @@ NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "pre
              ("Run amarchy command", "commands"),
              ("New amarchy session here", "new"), ("Add amarchy project", "add"),
              ("Pick amarchy theme", "theme"), ("Rename amarchy session", "rename"),
+             ("Raise amarchy priority", "raise"), ("Lower amarchy priority", "lower"),
              ("Close amarchy session", "close"),
              ("amarchy menu", "menu"))
 
@@ -1846,6 +1896,8 @@ MENU = (
     ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
     ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
     ("󰏫", "Rename session", ["rename"], ("Rename amarchy session",), True, False),
+    ("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",), True, False),
+    ("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",), True, False),
     ("󰆴", "Close session", ["close", "--confirm"], ("Close amarchy session",), True, False),
 )
 
@@ -1922,6 +1974,8 @@ def main(argv):
         return cmd_close(args)
     elif cmd == "rename":
         return cmd_rename(args)
+    elif cmd == "priority":
+        return cmd_priority(args)
     elif cmd == "open":
         cmd_open()
     elif cmd in ("next", "prev"):

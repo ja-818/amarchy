@@ -50,8 +50,8 @@ Every command prints its result to stdout and exits non-zero on failure.
 
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
-  `idle`, `asleep` = window closed), `task` (what it's about), `current` (on
-  screen).
+  `idle`, `asleep` = window closed), `priority` (`high`, `normal`, `low`),
+  `task` (what it's about), `current` (on screen).
 - `amarchy projects --json`: the user's projects and how many sessions each has.
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
   its saved commands (`name<TAB>command`).
@@ -68,6 +68,9 @@ dev server). Restart the terminal so the user sees the result too.
 
 ### Only when the user asks
 
+- `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session
+  matters to the user. The list puts higher priority first. Without a level it
+  prints it (that you can do freely); only set it when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
   strip above you. Claude Code's own title is shown until then, so don't rename
   unprompted. Never overwrite a name the user gave (`title` in `amarchy list`).

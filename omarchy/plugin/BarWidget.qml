@@ -87,12 +87,21 @@ Panel {
     store.run(args)
   }
 
-  // Switch a grouping ("project", "status"). The buttons light up at once;
-  // the list follows when the CLI has it in its new order.
+  // Switch a grouping ("project", "priority", "status"). The buttons light up
+  // at once; the list follows when the CLI has it in its new order.
   function group(what) {
-    if (what === "project") store.byProject = !store.byProject
-    else store.byStatus = !store.byStatus
-    store.run(["group", what, (what === "project" ? store.byProject : store.byStatus) ? "on" : "off"])
+    var on
+    if (what === "project") on = store.byProject = !store.byProject
+    else if (what === "priority") on = store.byPriority = !store.byPriority
+    else on = store.byStatus = !store.byStatus
+    store.run(["group", what, on ? "on" : "off"])
+  }
+
+  // Raise ("up") or lower ("down") the priority of the session under the
+  // cursor; the list reorders and the cursor goes with it.
+  function prioritize(direction) {
+    var s = root.shown[root.cursor]
+    if (s) store.run(["priority", direction, "--id", s.id])
   }
 
   // Put the keyboard in the search, from the keyboard: always under the Ⓐ.
@@ -117,7 +126,16 @@ Panel {
   // The cursor follows the search: on the first match while typing, back on
   // the session on screen once it's cleared.
   onQueryChanged: root.cursor = query !== "" ? 0 : Math.max(0, root.currentIndex)
-  onShownChanged: if (root.cursor >= shown.length) root.cursor = Math.max(0, shown.length - 1)
+  // When the list reorders (a priority, a status changing), the cursor stays
+  // on its session rather than on its old place.
+  property string cursorId: ""
+  onCursorChanged: cursorId = shown[cursor] ? shown[cursor].id : ""
+  onShownChanged: {
+    for (var i = 0; i < shown.length; i++) {
+      if (shown[i].id === cursorId) { root.cursor = i; return }
+    }
+    if (root.cursor >= shown.length) root.cursor = Math.max(0, shown.length - 1)
+  }
 
   onOpenedChanged: {
     if (!opened) {
@@ -218,7 +236,7 @@ Panel {
 
       TextField {
         id: search
-        width: parent.width - byProject.width - byStatus.width - parent.spacing * 2
+        width: parent.width - byProject.width - byPriority.width - byStatus.width - parent.spacing * 3
         anchors.verticalCenter: parent.verticalCenter
         placeholderText: "󰍉  Search sessions"
         rightPadding: horizontalPadding + clear.width + Style.spacing.sm
@@ -275,8 +293,8 @@ Panel {
         }
       }
 
-      // Two switches, lit while on: each groups the list on its own, both
-      // group it by project with the status inside each.
+      // Three switches, lit while on: each groups the list on its own, and
+      // together they nest: project, then priority, then status.
       Button {
         id: byProject
         anchors.verticalCenter: parent.verticalCenter
@@ -285,6 +303,16 @@ Panel {
         bordered: true
         selected: store.byProject
         onClicked: root.group("project")
+      }
+
+      Button {
+        id: byPriority
+        anchors.verticalCenter: parent.verticalCenter
+        iconText: "󰈻"
+        tooltipText: store.byPriority ? "Stop grouping by priority" : "Group by priority"
+        bordered: true
+        selected: store.byPriority
+        onClicked: root.group("priority")
       }
 
       Button {
@@ -303,6 +331,7 @@ Panel {
       visible: root.shown.length > 0
       sessions: root.shown
       byProject: store.byProject
+      byPriority: store.byPriority
       byStatus: store.byStatus
       cursor: content.cursor
       spinnerFrame: root.spinnerFrame
@@ -432,7 +461,10 @@ Panel {
         else if (t === "a") root.act(["add"])
         else if (t === "m") root.act(["menu"])
         else if (t === "p") root.group("project")
+        else if (t === "f") root.group("priority")
         else if (t === "s") root.group("status")
+        else if (t === "+" || t === "=") root.prioritize("up")
+        else if (t === "-") root.prioritize("down")
         else if (t === "/") column.focusSearch()
       }
 

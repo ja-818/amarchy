@@ -8,7 +8,8 @@ import qs.Ui
 // under it (project · branch), plus the time on the right. Everything is the
 // hero's size times `zoom`, so a screenful of sessions fits.
 // The cursor (which starts on the session you're in) uses the menu's selected
-// treatment.
+// treatment. A high-priority session has a flag next to its time, in the
+// theme's accent; a low one steps back, dimmed.
 BorderSurface {
   id: row
 
@@ -17,6 +18,8 @@ BorderSurface {
   property int spinnerFrame: 0
   // "project · branch" under the title; just the branch under a project header.
   property bool showRepo: true
+  // The flag on a high-priority session; not under a "High priority" header.
+  property bool showPriority: true
   signal activated()
   signal hovered()
 
@@ -24,6 +27,7 @@ BorderSurface {
   readonly property var icons: ({ waiting: "󰂞", idle: "󰄬", asleep: "󰒲" })
   readonly property string status: session.status || "idle"
   readonly property bool urgent: status === "waiting" || status === "working"
+  readonly property string priority: session.priority || "normal"
   readonly property color ink: cursor ? Color.menu.selectedText : Color.menu.text
   readonly property color dim: Qt.darker(Color.menu.text, 1.4)
   readonly property real zoom: 0.85
@@ -32,6 +36,7 @@ BorderSurface {
   implicitHeight: Math.max(icon.implicitHeight, content.implicitHeight) + Style.spacing.controlPaddingY * 2
   radius: Style.cornerRadius
   color: cursor ? Color.menu.selectedBackground : "transparent"
+  opacity: priority === "low" && !cursor ? 0.6 : 1
   borderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
 
   Text {
@@ -55,7 +60,7 @@ BorderSurface {
     id: content
     anchors.left: icon.right
     anchors.leftMargin: Math.round(Style.space(14) * row.zoom)
-    anchors.right: when.left
+    anchors.right: flag.visible ? flag.left : when.left
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
@@ -84,6 +89,19 @@ BorderSurface {
       font.letterSpacing: 1.2 * row.zoom
       color: row.dim
     }
+  }
+
+  Text {
+    id: flag
+    visible: row.showPriority && row.priority === "high"
+    anchors.right: when.left
+    anchors.rightMargin: row.session.age ? Style.space(6) : 0
+    y: when.y + (when.height - height) / 2
+    textFormat: Text.PlainText
+    text: "󰈻"
+    font.family: Style.font.menuFamily
+    font.pixelSize: Style.font.caption
+    color: row.cursor ? Color.menu.selectedText : Color.accent
   }
 
   Text {
