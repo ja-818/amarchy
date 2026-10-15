@@ -386,7 +386,6 @@ Panel {
     zenWidth: store.zenWidth
     stripHeight: store.headerHeight
     spinnerFrame: root.spinnerFrame
-    renameKey: root.keyHint("rename")
     onRenameRequested: store.run(["rename"])
   }
 

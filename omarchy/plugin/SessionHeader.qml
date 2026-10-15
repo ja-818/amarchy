@@ -6,12 +6,11 @@ import qs.Commons
 
 // The strip above Claude in zen mode, where the list that shows the session
 // you're in has stepped away. It says the session the way its row does, as an
-// Omarchy panel hero, in the bar's colors: the status glyph, what it's about
-// in bold with PROJECT · BRANCH in small caps under it, and on the right how
-// it's doing (NEEDS YOU · 4M), the bell and its words in the theme's accent.
-// `amarchy layout` makes room for it above Claude in zen mode only.
-// Click the name to rename the session: hovering fills it like any Omarchy
-// control, with a pencil, and the right side says the key that does the same.
+// Omarchy panel hero, in the bar's colors: the status glyph (the bell in the
+// theme's accent), and what it's about in bold with PROJECT · BRANCH in small
+// caps under it. `amarchy layout` makes room for it above Claude in zen mode
+// only. Click the name to rename the session: hovering fills it like any
+// Omarchy control, with a pencil.
 PanelWindow {
   id: root
 
@@ -20,8 +19,6 @@ PanelWindow {
   property int zenWidth: 900
   property int stripHeight: 0
   property int spinnerFrame: 0
-  // "Ctrl+Alt+E", the rename key bound in Hyprland ("" when unbound).
-  property string renameKey: ""
   signal renameRequested()
 
   readonly property var monitor: screen ? Hyprland.monitorFor(screen) : null
@@ -35,10 +32,9 @@ PanelWindow {
 
   readonly property var spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property var icons: ({ waiting: "󰂞", idle: "󰄬", asleep: "󰒲" })
-  readonly property var words: ({ waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" })
   readonly property color ink: Color.bar.text
   readonly property color dim: Qt.darker(Color.bar.text, 1.4)
-  // What the status says, in color: the theme's accent when it needs you.
+  // The glyph's color: the theme's accent when it needs you.
   readonly property color statusInk: status === "waiting" ? Color.accent : (status === "working" ? ink : dim)
 
   visible: zen && stripHeight > 0 && session !== null
@@ -72,7 +68,7 @@ PanelWindow {
       readonly property real natural: Style.spacing.lg * 2 + glyph.width + Style.space(14)
                                       + Math.max(title.implicitWidth + (pencil.visible ? Style.spacing.lg + pencil.implicitWidth : 0),
                                                  meta.implicitWidth)
-      width: Math.min(natural, parent.width - where.width - Style.spacing.rowPaddingX * 3)
+      width: Math.min(natural, parent.width - Style.spacing.rowPaddingX * 2)
       radius: Style.cornerRadius
       color: root.hot ? Style.hoverFillFor(root.ink, Color.accent) : "transparent"
       border.width: root.hot ? Style.hoverBorderWidth : 0
@@ -153,37 +149,6 @@ PanelWindow {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.renameRequested()
-      }
-    }
-
-    // How it's doing (NEEDS YOU · 4M), or while the name is hovered, how to
-    // rename it. As wide as the wider of the two, so hovering never moves the
-    // name's edge.
-    Text {
-      id: where
-      width: Math.max(statusText.advanceWidth, renameText.advanceWidth) + font.letterSpacing
-      horizontalAlignment: Text.AlignRight
-      anchors.right: parent.right
-      anchors.rightMargin: Style.spacing.rowPaddingX
-      anchors.verticalCenter: parent.verticalCenter
-      textFormat: Text.PlainText
-      text: !root.session ? "" : root.hot ? renameText.text : statusText.text
-      font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.caption
-      font.bold: true
-      font.letterSpacing: 1.2
-      color: root.hot ? root.dim : root.statusInk
-
-      TextMetrics {
-        id: statusText
-        font: where.font
-        text: root.session ? ((root.words[root.status] || root.status)
-                              + (root.session.age ? " · " + root.session.age : "")).toUpperCase() : ""
-      }
-      TextMetrics {
-        id: renameText
-        font: where.font
-        text: ("Rename" + (root.renameKey ? " · " + root.renameKey : "")).toUpperCase()
       }
     }
   }

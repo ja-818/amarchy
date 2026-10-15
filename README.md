@@ -107,8 +107,8 @@ none; they are the two files in `sounds/`, replace them with your own).
 
 In zen mode, with the list out of the way, a strip above Claude says which
 session this is, the way its row does: the status glyph, what it's about in
-bold with `PROJECT · BRANCH` under it, and how it's doing on the right
-(`NEEDS YOU · 4M`, in the theme's accent). Click the name to rename it.
+bold with `PROJECT · BRANCH` under it (the bell in the theme's accent). Click
+the name to rename it.
 
 ## Claude knows it's in amarchy
 
