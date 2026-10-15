@@ -17,7 +17,7 @@ import qs.Ui
 // that puts the keyboard in it), with one 󰒼 button next to it that opens how
 // the list is grouped (by project, priority, status).
 // IPC: omarchy-shell amarchy-bar toggle|open|close
-//      omarchy-shell amarchy refresh|peek|search|zen <true|false>
+//      omarchy-shell amarchy refresh|peek|search|sounds|zen <true|false>
 Panel {
   id: root
   moduleName: "amarchy"
@@ -200,6 +200,8 @@ Panel {
       return "ok"
     }
     function search(): string { root.search(); return "ok" }
+    // The notification sound, picked by ear (`amarchy sound`).
+    function sounds(): string { root.close(); soundPicker.open(); return "ok" }
     // Zen mode was toggled: the list beside Claude follows right away.
     function zen(on: bool): string { store.zen = on; store.refresh(); return "ok" }
     function ping(): string { return "ok" }
@@ -608,6 +610,12 @@ Panel {
     stripHeight: store.headerHeight
     spinnerFrame: root.spinnerFrame
     onRenameRequested: store.run(["rename"])
+  }
+
+  SoundPicker {
+    id: soundPicker
+    anchorItem: button
+    bar: root.bar
   }
 
   BarIconButton {

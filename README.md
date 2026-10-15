@@ -246,13 +246,14 @@ each step of it went (shell, wallpaper, borders) is in
 
 ## Sound
 
-Pick the chime in the Omarchy menu: **Sound** in the amarchy menu
-(`Ctrl+Alt+M`), or Super+Space → Amarchy → Sound. Each one plays as you pick
-it and the menu stays up, so you can try them in a row; `Esc` keeps the last
-one. **Off** for none.
+Pick the chime by ear: **Sound** in the amarchy menu (`Ctrl+Alt+M`), or
+Super+Space → Amarchy → Sound, drops the sounds from the Ⓐ in the bar. Each
+one plays as the cursor lands on it, with the arrows (or `j`/`k`, or the
+pointer), cutting off the one before, so you hear them as you go down the
+list. `Enter` or a click sets it, `Esc` leaves it as it was. **Off** for none.
 
 ```sh
-amarchy sound              # the menu
+amarchy sound              # the picker
 amarchy sound tine         # set one: kalimba (the default), vibraphone, tine, fairy, ocean, elementary
 amarchy sound --play fairy # hear one
 amarchy sound off
@@ -260,7 +261,7 @@ amarchy sound off
 
 Any sound of your own works: put a `.wav`, `.ogg`, `.oga`, `.opus`, `.flac` or
 `.mp3` in `~/.config/amarchy/sounds/` and it shows up in the menu under its file
-name (**Add your own** in the menu opens that folder). One named like one of
+name (**Add your own** at the bottom of the list, or `amarchy sound --add`, opens that folder). One named like one of
 amarchy's replaces it. Keep it short: it plays in full with every notification.
 
 `sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
@@ -345,7 +346,7 @@ amarchy sleep --after [minutes|off]   how long an idle session waits off screen 
 amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
-amarchy sound [name|off]              the notification chime (the menu without a name; --show, --list, --play [name])
+amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add)
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
 amarchy group [project|priority|status] [on|off]  group the list, nested in that order (switches without on|off)
 amarchy group none                    no grouping (the default): priority, then the order you opened them in

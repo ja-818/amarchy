@@ -68,11 +68,12 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme --refresh               put it back after something else repainted (Omarchy's theme-set hook runs this)
 
 Sound (the chime of a notification, when a session needs you or is done):
-  amarchy sound                         pick it in the Omarchy menu: each one plays as you pick it
+  amarchy sound                         pick it under the Ⓐ in the bar: each one plays as the cursor lands on it
   amarchy sound <name> | off            set it (one of --list, or off for none)
   amarchy sound --show                  print it
-  amarchy sound --list                  every sound: amarchy's, then yours from ~/.config/amarchy/sounds
-  amarchy sound --play [name]           hear one (the one set now without a name)
+  amarchy sound --list [--json]         every sound: amarchy's, then yours from ~/.config/amarchy/sounds
+  amarchy sound --play [name] | --stop  hear one (the one set now without a name), cutting off the one before
+  amarchy sound --add                   open the folder your own sounds go in
 
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
@@ -1096,33 +1097,32 @@ def theme_refresh():
 
 # amarchy's own chimes (sounds/, where sounds/CREDITS says where each is from),
 # in the order the menu offers them; the first is the default.
-CHIMES = (
-    ("kalimba", "Two plucks going up"),
-    ("vibraphone", "Three soft notes rising into a chord"),
-    ("tine", "One bright bell"),
-    ("fairy", "A twinkle, then a brighter run: hey… listen!"),
-    ("ocean", "From KDE's Ocean sounds"),
-    ("elementary", "From elementary OS"),
-)
+CHIMES = ("kalimba", "vibraphone", "tine", "fairy", "ocean", "elementary")
 USER_SOUNDS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/sounds"
 AUDIO = (".wav", ".oga", ".ogg", ".opus", ".flac", ".mp3")   # what pw-play and paplay read
+PREVIEW = STATE / "preview"     # the pid of the sound playing in the picker, so the next one cuts it off
 ICON_SOUND = "󰕾"
 ICON_MUTE = "󰖁"
 ADD_SOUND = "Add your own"
 
 
 def sounds():
-    """Every sound to pick from, {name: (file, about)}: amarchy's, then the
-    files in ~/.config/amarchy/sounds, named after the file. One of yours
-    with the name of one of amarchy's replaces it."""
-    found = {name: (SOUNDS / f"{name}.oga" if (SOUNDS / f"{name}.oga").exists() else SOUNDS / f"{name}.wav", about)
-             for name, about in CHIMES}
+    """Every sound to pick from, {name: file}: amarchy's, then the files in
+    ~/.config/amarchy/sounds, named after the file. One of yours with the
+    name of one of amarchy's replaces it."""
+    found = {name: SOUNDS / f"{name}.oga" if (SOUNDS / f"{name}.oga").exists() else SOUNDS / f"{name}.wav"
+             for name in CHIMES}
     mine = sorted(f for f in USER_SOUNDS.glob("*") if f.suffix.lower() in AUDIO and f.is_file()) \
         if USER_SOUNDS.is_dir() else []
     for f in mine:
         found.pop(f.stem.lower(), None)
-        found[f.stem] = (f, f"Yours · {f.name}")
+        found[f.stem] = f
     return found
+
+
+def sound_label(name):
+    """How a sound is called in the menu: amarchy's capitalized, yours as you named the file."""
+    return name.capitalize() if name in CHIMES else name
 
 
 def sound_key(name, found=None):
@@ -1137,19 +1137,44 @@ def sound_name():
     picked = SOUND_FILE.read_text().strip() if SOUND_FILE.exists() else ""
     if picked == "off":
         return picked
-    return (sound_key(picked) if picked else None) or CHIMES[0][0]
+    return (sound_key(picked) if picked else None) or CHIMES[0]
 
 
 def sound_file(name):
     found = sounds()
     key = sound_key(name, found) if name != "off" else None
-    return found[key][0] if key else None
+    return found[key] if key else None
+
+
+def player():
+    return shutil.which("pw-play") or shutil.which("paplay")
 
 
 def play(path):
-    player = shutil.which("pw-play") or shutil.which("paplay")
-    if player and path and path.exists():
-        detach([player, str(path)])
+    if player() and path and path.exists():
+        detach([player(), str(path)])
+
+
+def stop_preview():
+    """Cut off the sound the picker is playing, if it's still ours."""
+    try:
+        pid = int(PREVIEW.read_text())
+        if Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[0] == player().encode():
+            os.kill(pid, 15)
+    except (OSError, ValueError, AttributeError):
+        pass
+    PREVIEW.unlink(missing_ok=True)
+
+
+def preview(path):
+    """Play a sound in the picker: one at a time, the last one picked cutting
+    the one before it off, as the cursor runs down the list."""
+    stop_preview()
+    if player() and path and path.exists():
+        p = subprocess.Popen([player(), str(path)], stdin=subprocess.DEVNULL, env=clean_env(),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        STATE.mkdir(parents=True, exist_ok=True)
+        PREVIEW.write_text(str(p.pid))
 
 
 def set_sound(name):
@@ -1157,24 +1182,28 @@ def set_sound(name):
     SOUND_FILE.write_text(name + "\n")
 
 
+def add_sound():
+    """Open the folder your own sounds go in."""
+    USER_SOUNDS.mkdir(parents=True, exist_ok=True)
+    if shutil.which("xdg-open"):
+        detach(["xdg-open", str(USER_SOUNDS)])
+    notify("amarchy", f"Put a sound file in {USER_SOUNDS}, then pick it in Sound.", ICON_SOUND)
+
+
 def menu_pick_sound():
-    """The sounds in the Omarchy menu, the one set now checked. Picking one
-    sets it and plays it, and the menu comes back to try another; Escape
-    keeps the last one picked."""
+    """The sounds in the Omarchy menu, for when the shell plugin isn't there:
+    picking one sets it and plays it, and the menu comes back to try another;
+    Escape keeps the last one picked."""
     while True:
         found, now = sounds(), sound_name()
-        rows = [(ICON_CHECK if name == now else ICON_SOUND, name.capitalize() if name in dict(CHIMES) else name, about)
-                for name, (_, about) in found.items()]
-        rows.append((ICON_CHECK if now == "off" else ICON_MUTE, "Off", "Notifications without a chime"))
-        rows.append((ICON_ADD, ADD_SOUND, f"A .wav, .ogg or .mp3 in {str(USER_SOUNDS).replace(str(HOME), '~')}"))
+        rows = [(ICON_CHECK if name == now else ICON_SOUND, sound_label(name)) for name in found]
+        rows.append((ICON_CHECK if now == "off" else ICON_MUTE, "Off"))
+        rows.append((ICON_ADD, ADD_SOUND))
         choice = menu_select("Sound", rows)
         if not choice:
             return 0
         if choice == ADD_SOUND:
-            USER_SOUNDS.mkdir(parents=True, exist_ok=True)
-            if shutil.which("xdg-open"):
-                detach(["xdg-open", str(USER_SOUNDS)])
-            notify("amarchy", f"Put a sound file in {USER_SOUNDS}, then pick it in Sound.", ICON_SOUND)
+            add_sound()
             return 0
         if choice == "Off":
             set_sound("off")
@@ -1182,16 +1211,24 @@ def menu_pick_sound():
         name = sound_key(choice, found)
         if name:
             set_sound(name)
-            play(found[name][0])
+            preview(found[name])
 
 
 def cmd_sound(args):
+    """`amarchy sound`: the picker (under the Ⓐ, each sound playing as the
+    cursor lands on it). With a name, set it; --show, --list [--json],
+    --play [name], --stop and --add for the rest."""
     if args and args[0] == "--show":
         print(sound_name())
         return 0
     if args and args[0] == "--list":
-        for name, (path, about) in sounds().items():
-            print(f"{name}\t{about}\t{path}")
+        found = sounds()
+        if "--json" in args:
+            print(json.dumps({"current": sound_name(), "sounds": [
+                {"name": name, "label": sound_label(name), "path": str(path)} for name, path in found.items()]}))
+        else:
+            for name, path in found.items():
+                print(f"{name}\t{path}")
         return 0
     if args and args[0] == "--play":
         name = " ".join(args[1:]) or sound_name()
@@ -1200,9 +1237,18 @@ def cmd_sound(args):
         path = sound_file(name)
         if not path:
             return fail(f"no sound {name!r} (see amarchy sound --list)")
-        play(path)
+        preview(path)
+        return 0
+    if args and args[0] == "--stop":
+        stop_preview()
+        return 0
+    if args and args[0] == "--add":
+        add_sound()
         return 0
     if not args:
+        if native_panel():
+            tell_shell("sounds")
+            return 0
         return menu_pick_sound()
     name = " ".join(args)
     if name.lower() == "off":
