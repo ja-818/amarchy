@@ -37,9 +37,23 @@
 --   bin          path to the amarchy script (default ~/.local/bin/amarchy)
 --
 -- Any key set to false is left unbound.
+--
+-- The two modifiers can also be picked in amarchy's menu (Keys, or `amarchy
+-- keys`), which writes them to ~/.local/state/amarchy/keys.lua. What's picked
+-- there wins over this table; `amarchy keys reset` drops it.
 
-local cfg = amarchy or {}
 local home = os.getenv("HOME")
+local cfg = {}
+for k, v in pairs(amarchy or {}) do cfg[k] = v end
+local picked_file = home .. "/.local/state/amarchy/keys.lua"
+local pf = io.open(picked_file)
+if pf then
+  pf:close()
+  local ok, picked = pcall(dofile, picked_file)
+  if ok and type(picked) == "table" then
+    for k, v in pairs(picked) do cfg[k] = v end
+  end
+end
 local mod = cfg.mod or "SUPER + ALT"
 local bin = cfg.bin or (home .. "/.local/bin/amarchy")
 

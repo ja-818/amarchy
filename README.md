@@ -282,8 +282,18 @@ Remove with `install.sh --uninstall`.
 
 ## Configure
 
-Keys: set a table before the `dofile(... amarchy.lua)` line in
-`~/.config/hypr/hyprland.lua`:
+**Keys** in the amarchy menu (`Ctrl+Alt+M`, or `amarchy keys`) picks the two
+modifiers: **Inside amarchy**, for every key that works in it (`Ctrl+Alt` by
+default), and **From anywhere**, for Open and New session (`Super+Alt`). Each
+choice says whether it's free or what it would clash with (Omarchy's keys,
+yours, amarchy's other modifier), and the keys move as soon as you pick: no
+restart, and every hint (the search reads its key, the menu lists them)
+follows. From a script: `amarchy keys inside "CTRL + SHIFT"`, `amarchy keys
+anywhere MOD3`, `amarchy keys --show`, `amarchy keys reset`.
+
+For the keys themselves, set a table before the `dofile(... amarchy.lua)` line
+in `~/.config/hypr/hyprland.lua` (a modifier picked in the menu wins over the
+one there, until `amarchy keys reset`):
 
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N",
@@ -347,6 +357,7 @@ amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
 amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add)
+amarchy keys [inside|anywhere <mod>]  the modifiers of amarchy's keys (the picker without one; --show, reset)
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
 amarchy group [project|priority|status] [on|off]  group the list, nested in that order (switches without on|off)
 amarchy group none                    no grouping (the default): priority, then the order you opened them in
