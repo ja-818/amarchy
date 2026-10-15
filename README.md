@@ -106,8 +106,13 @@ one, and making the worktree), then becomes Claude, and the terminal slides in
 beside it. If it can't (say, a bad base branch), it says why there and the
 session goes away; without the network it starts from what was fetched last.
 
-Closing a session (`Ctrl+Alt+X`) removes its worktree, asks first if it has
-uncommitted changes, and deletes the branch if it was merged.
+Closing a session (`Ctrl+Alt+X`) asks first if it has uncommitted changes,
+then takes you straight to the next session in the list, and its row goes.
+The rest happens out of sight: its Claude Code exits as if you'd quit it, its
+background sessions stop, its windows close, the worktree is removed and the
+branch deleted if it was merged. A notification says when it's done (or, if
+the worktree changed meanwhile, why it couldn't, and the session is back in
+the list).
 
 Windows are disposable, like everywhere else in Omarchy. Close Claude or the
 terminal with `Super+W` (or let Claude exit) and the session just goes to sleep

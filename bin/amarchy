@@ -142,6 +142,7 @@ THEME_LOG = STATE / "theme.log" # every repaint and how each step of it went
 LAST = STATE / "last"
 GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "status", both or neither
 ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
+CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
 CLAUDE_STATE = STATE / "claude" # per session: its conversation, and what sleep keeps for it (see "sleep")
 SLEEP_AFTER = STATE / "sleep-after"     # minutes idle and off screen before a session sleeps, or "off"
 HIDDEN = "special:amarchy"
@@ -1625,6 +1626,8 @@ def make_worktree(s):
             if r.returncode != 0:
                 st.fail()
                 return r.stderr.strip() or "git worktree add failed"
+    if (CLOSING / f"{s['id']}.json").exists():
+        return "closed"           # meanwhile: leave it gone
     s = session(s["id"]) or s     # as it is now: it may have been renamed meanwhile
     s.pop("setup", None)
     s["base"] = base
@@ -1687,6 +1690,8 @@ def setup_session(sid):
         return f"no session {sid!r}"
     print(f"\n  \033[1m{s['repo']} · {s['name']}\033[0m\n", flush=True)
     error = make_worktree(s)
+    if error and (CLOSING / f"{sid}.json").exists():
+        return error        # closed meanwhile: its reap is cleaning up
     if error:
         print(f"\n  \033[31m{error}\033[0m\n", flush=True)
         (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
@@ -1699,6 +1704,8 @@ def setup_session(sid):
             pass
         return error
     s = session(sid)
+    if not s:
+        return "closed"     # while it was being set up
     set_trust(Path(s["path"]), True)
     tell_shell("refresh")
     with step("Starting Claude Code"):
@@ -2660,7 +2667,10 @@ def dirty(path):
 
 
 def close(sid, force=False):
-    """Close Claude and the terminal, remove the worktree, drop the branch if merged.
+    """Close a session: you're taken to the next one in the list and its row
+    goes at once; then, out of sight, its Claude Code exits the way it would
+    on its own, its windows close, the worktree is removed and the branch
+    dropped if merged (reap).
 
     Returns an error string instead of closing when the worktree has
     uncommitted changes and force is False."""
@@ -2670,33 +2680,127 @@ def close(sid, force=False):
     path = Path(s["path"])
     if path.exists() and dirty(path) and not force:
         return "uncommitted changes"
-    was_current = current_session_id() == sid
+    # Don't make you watch it go: go to the session after it in the list
+    # (before it, when it was the last) first.
+    if current_session_id() == sid:
+        ids = [x["id"] for x in session_view()]
+        i = ids.index(sid) if sid in ids else len(ids)
+        rest = ids[i + 1:] + ids[:i][::-1]
+        if rest:
+            cmd_jump(rest[0])
+    # Out of the list, and out of reach of everything that reads it (a jump,
+    # its Claude's hooks, the window loop, which then lets the window close).
+    # The file waits in CLOSING until reap is done with it.
+    CLOSING.mkdir(parents=True, exist_ok=True)
+    keep = {k: v for k, v in s.items() if k not in VIEW_FIELDS}
+    if force:
+        keep["force"] = True
+    write_file(CLOSING / f"{sid}.json", json.dumps(keep))
+    (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
+    (STATUS / sid).unlink(missing_ok=True)
+    if LAST.exists() and LAST.read_text().strip() == sid:
+        LAST.unlink(missing_ok=True)
+    tell_shell("refresh")
+    detach([ENTRY, "reap", sid])
+    return None
+
+
+def resume_closing():
+    """Finish closing the sessions a reap was cut short on (a crash, a
+    reboot): those in CLOSING that nothing is reaping."""
+    for f in CLOSING.glob("*.json") if CLOSING.is_dir() else ():
+        lock = reap_lock(f.stem)
+        if lock:
+            lock.close()
+            detach([ENTRY, "reap", f.stem])
+
+
+def reap_lock(sid):
+    """The lock of a session's reap, held while it lasts: the open file, or
+    None when another reap has it."""
+    CLOSING.mkdir(parents=True, exist_ok=True)
+    lock = open(CLOSING / f"{sid}.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return None
+    return lock
+
+
+def stop_claude(win):
+    """End the Claude Code in a session's window as quitting it would (its
+    SessionEnd hooks run, the conversation is saved): SIGTERM, and SIGKILL
+    only if it's still there after a while."""
+    procs = processes()
+    pid = window_claude(win, procs)
+    if not pid:
+        return
+    try:
+        os.kill(pid, 15)
+    except ProcessLookupError:
+        return
+    end = time.time() + 8
+    while time.time() < end and Path(f"/proc/{pid}").exists():
+        time.sleep(0.1)
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
+
+
+def cmd_reap(sid):
+    """The rest of close, detached from whatever asked for it (a key, the
+    list, a terminal that's about to close): the session's Claude Code and
+    its background sessions stop, its windows close, then the worktree goes."""
+    f = CLOSING / f"{sid}.json"
+    lock = reap_lock(sid) if f.exists() else None
+    if not lock or not f.exists():     # another reap has it, or had it and is done
+        return 0
+    try:
+        s = with_defaults(json.loads(f.read_text()))
+    except (OSError, ValueError):
+        return 0
+    force = bool(s.pop("force", False))
+    path = Path(s["path"])
     # Its background sessions (/bg) would go on working in a worktree that's gone.
     stop_background(s, only_idle=False)
+    claude = find(claude_class(s))
+    if claude:
+        stop_claude(claude)
     for cls in (claude_class(s), term_class(s)):
         win = find(cls)
         if win:
             hypr(f'hl.dsp.window.close({{ window = "address:{win["address"]}" }})')
-    time.sleep(0.5)
+    # Let what ran in them (the dev server, a setup still cloning) let go of
+    # the worktree before it's removed.
+    end = time.time() + 5
+    while time.time() < end and (find(claude_class(s)) or find(term_class(s))):
+        time.sleep(0.1)
     repo_dir = WORK / s["repo"]
-    sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
+    removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
     sh("git", "worktree", "prune", cwd=repo_dir)
+    if path.exists() and removed.returncode != 0:
+        # Changed after close looked (something still running wrote to it):
+        # back in the list rather than lost, with why.
+        save_session(s)
+        f.unlink(missing_ok=True)
+        (CLOSING / f"{sid}.lock").unlink(missing_ok=True)
+        tell_shell("refresh")
+        why = (removed.stderr.strip().splitlines() or ["git worktree remove failed"])[-1]
+        notify("amarchy", f"Couldn't close {s['repo']} · {s['name']}: {why}. It's back in your list.")
+        return 1
     had_branch = sh("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{s['branch']}",
                     cwd=repo_dir).returncode == 0
     kept = had_branch and sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
-    (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
-    (STATUS / sid).unlink(missing_ok=True)
     shutil.rmtree(claude_dir(sid), ignore_errors=True)
     set_trust(path, False)
-    # Don't leave you on the emptied workspace: go to another session.
-    if was_current:
-        rest = sessions()
-        if rest:
-            cmd_jump(rest[-1]["id"])
+    f.unlink(missing_ok=True)
+    (CLOSING / f"{sid}.lock").unlink(missing_ok=True)
     note = (f"branch {s['branch']} kept (not merged)" if kept else
             "branch deleted" if had_branch else "it was still being set up")
     notify("amarchy", f"Closed {s['repo']} · {s['name']} ({note})")
-    return None
+    return 0
 
 
 ICON_CLOSE = "󰆴"
@@ -3068,6 +3172,7 @@ def claude_agents():
 def session_view():
     """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
+    resume_closing()
     titles = {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
     agents = claude_agents()
@@ -3273,6 +3378,8 @@ def main(argv):
         return cmd_sleep(args)
     elif cmd == "wake":
         return cmd_wake(args)
+    elif cmd == "reap" and len(args) == 1:
+        return cmd_reap(args[0])
     elif cmd == "claude" and len(args) == 1:
         return cmd_claude(args[0])
     elif cmd == "asleep" and len(args) == 1:
