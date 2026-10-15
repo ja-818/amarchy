@@ -189,7 +189,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_WORKTREES` | `$AMARCHY_WORK/.worktrees` | Worktrees go to `<this>/<repo>/<name>`. |
 | `AMARCHY_TERMINAL` | first installed | `foot`, `kitty`, `alacritty` or `ghostty`. |
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
-| `AMARCHY_HEADER_HEIGHT` | `56` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
+| `AMARCHY_HEADER_HEIGHT` | `48` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 | `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
 

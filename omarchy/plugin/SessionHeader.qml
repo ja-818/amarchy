@@ -115,7 +115,7 @@ PanelWindow {
             elide: Text.ElideRight
             text: root.session ? (root.session.task || "New session") : ""
             font.family: Style.font.menuFamily
-            font.pixelSize: Math.round(Style.font.title * 1.15)
+            font.pixelSize: Style.font.title
             font.bold: true
             color: root.ink
             opacity: root.session && root.session.task ? 1 : 0.52
