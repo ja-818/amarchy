@@ -41,7 +41,7 @@ Sessions:
   amarchy run --list                    the project's saved commands, name and command
   amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
-  amarchy search                        type to find a session by name, in the list under the Ⓐ
+  amarchy search                        type to find a session by name: the list beside Claude, or under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
   amarchy priority [high|normal|low|up|down] [--id <id>]
@@ -1406,8 +1406,9 @@ def cmd_show():
 
 
 def cmd_search():
-    """Open the session list under the Ⓐ with the keyboard in its search (the
-    Omarchy menu, which searches as you type, without the plugin)."""
+    """Put the keyboard in the session search, as a click on it would: the
+    list beside Claude on a session, else the list under the Ⓐ (the Omarchy
+    menu, which searches as you type, without the plugin)."""
     if native_panel():
         return subprocess.run(["omarchy-shell", "amarchy", "search"], stdout=subprocess.DEVNULL).returncode
     return cmd_pick([])

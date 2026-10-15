@@ -8,8 +8,9 @@ import qs.Commons
 // fills the one on the right. `amarchy layout` keeps that gap free on session
 // workspaces, so it only shows there, and not in zen mode (`amarchy zen`).
 // It doesn't take the keyboard (the session keys go through Hyprland) until
-// you click its search: `keyboard` hands it over. Whatever is declared inside
-// is laid out in the panel, scrolling when it's too tall.
+// you click its search, or `amarchy search` asks for it: `keyboard` hands it
+// over. Whatever is declared inside is laid out in the panel, scrolling when
+// it's too tall.
 PanelWindow {
   id: root
 
@@ -21,7 +22,13 @@ PanelWindow {
   property real alpha: 1
   // Take the keyboard, for the search.
   property bool keyboard: false
+  // Asked for from the keyboard (`amarchy search`): the pointer is still on
+  // Claude, and on OnDemand Hyprland would hand the keyboard straight back to
+  // it. So keep it Exclusive until the pointer comes onto the list; from then
+  // on it's as if the search was clicked.
+  property bool holdKeyboard: false
   property bool focusPrimed: false
+  property bool pointerSeen: false
   default property alias content: holder.data
 
   readonly property var monitor: screen ? Hyprland.monitorFor(screen) : null
@@ -45,11 +52,12 @@ PanelWindow {
   // hands the keyboard to an already mapped surface that way, then OnDemand so
   // Claude or the terminal take it back as soon as the pointer is on them.
   WlrLayershell.keyboardFocus: keyboard
-    ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+    ? (focusPrimed && (!holdKeyboard || pointerSeen || hover.hovered) ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
     : WlrKeyboardFocus.None
 
   onKeyboardChanged: {
     focusPrimed = false
+    pointerSeen = false
     if (keyboard) focusPrimeTimer.restart()
     else focusPrimeTimer.stop()
   }
@@ -63,6 +71,11 @@ PanelWindow {
   Rectangle {
     anchors.fill: parent
     color: Util.alpha(Color.menu.background, root.alpha)
+
+    HoverHandler {
+      id: hover
+      onHoveredChanged: if (hovered) root.pointerSeen = true
+    }
   }
 
   Flickable {

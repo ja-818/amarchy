@@ -13,8 +13,9 @@ import qs.Ui
 // next`) drops the list for a moment, without taking the keyboard, to show
 // where you landed.
 // Above the list there is only the Ⓐ Amarchy button (the menu: everything else
-// amarchy does), New session and a search by name, with the grouping (by
-// project, by status) next to it.
+// amarchy does), New session and a search by name (its placeholder is the key
+// that puts the keyboard in it), with one 󰒼 button next to it that opens how
+// the list is grouped (by project, priority, status).
 // IPC: omarchy-shell amarchy-bar toggle|open|close
 //      omarchy-shell amarchy refresh|peek|search|zen <true|false>
 Panel {
@@ -28,8 +29,10 @@ Panel {
   property bool peeking: false
   // What's typed in the search; the popup and the list beside Claude share it.
   property string query: ""
-  // The list beside Claude has the keyboard: its search was clicked.
+  // The list beside Claude has the keyboard: its search was clicked, or asked
+  // for from the keyboard (searchFromKeys).
   property bool searching: false
+  property bool searchFromKeys: false
   // Open the popup with the keyboard in its search (`amarchy search`).
   property bool searchOnOpen: false
 
@@ -87,9 +90,15 @@ Panel {
     store.run(args)
   }
 
-  // Switch a grouping ("project", "priority", "status"). The buttons light up
-  // at once; the list follows when the CLI has it in its new order.
+  // Switch a grouping ("project", "priority", "status"), or drop them all
+  // ("none"). The menu checks it at once; the list follows when the CLI has
+  // it in its new order.
   function group(what) {
+    if (what === "none") {
+      store.byProject = store.byPriority = store.byStatus = false
+      store.run(["group", "none"])
+      return
+    }
     var on
     if (what === "project") on = store.byProject = !store.byProject
     else if (what === "priority") on = store.byPriority = !store.byPriority
@@ -104,13 +113,20 @@ Panel {
     if (s) store.run(["priority", direction, "--id", s.id])
   }
 
-  // Put the keyboard in the search, from the keyboard: always under the Ⓐ.
-  // The list beside Claude only keeps the keyboard while the pointer is on it
-  // (Hyprland hands it back to the window under the pointer), so its search is
-  // for the mouse.
+  // Put the keyboard in the search, from the keyboard: the same as clicking
+  // it. On a session that's the list beside Claude, which holds the keyboard
+  // until Esc or ↵ (or, once the pointer has been on it, a click on Claude);
+  // elsewhere, and in zen mode, the list under the Ⓐ.
   function search() {
     if (root.opened) {
       column.focusSearch()
+    } else if (side.visible) {
+      if (!root.searching) {
+        root.cursor = Math.max(0, root.currentIndex)
+        root.searchFromKeys = true
+      }
+      root.searching = true
+      sideContent.focusSearch()
     } else {
       root.searchOnOpen = true
       root.open()
@@ -121,6 +137,7 @@ Panel {
   function endSearch() {
     root.query = ""
     root.searching = false
+    root.searchFromKeys = false
   }
 
   // The cursor follows the search: on the first match while typing, back on
@@ -138,6 +155,7 @@ Panel {
   }
 
   onOpenedChanged: {
+    column.closeMenu()
     if (!opened) {
       root.searchOnOpen = false
       root.query = ""
@@ -145,6 +163,7 @@ Panel {
     }
     root.peeking = false
     root.searching = false
+    root.searchFromKeys = false
     store.refresh()
     root.query = ""
     root.cursor = Math.max(0, root.currentIndex)
@@ -187,12 +206,18 @@ Panel {
   }
 
   // What the popup and the list beside Claude show: the menu and New session,
-  // the search with the grouping next to it, and the sessions. The peek is
-  // `passive`: the sessions alone.
-  component Content: Column {
+  // the search with the grouping button next to it, and the sessions. The peek
+  // is `passive`: the sessions alone. The grouping menu drops over the list.
+  component Content: Item {
     id: content
     property int cursor: -1
     property bool passive: false
+    // The grouping menu is open; menuCursor is its row under the keyboard
+    // (the popup's j/k), -1 for none.
+    property bool menuOpen: false
+    property int menuCursor: -1
+    // The popup has keys for each grouping; the menu shows them.
+    property bool showKeys: false
     readonly property Item searchField: search
     readonly property bool searchFocused: search.activeFocus
     signal activated(int index)
@@ -202,153 +227,311 @@ Panel {
     signal searchRequested()
     signal searchEnded()
 
-    function focusSearch() { search.forceActiveFocus() }
+    // What the grouping menu offers, in the order they nest. "none" is the
+    // plain list.
+    readonly property var groupings: [
+      { what: "project", icon: "󰉋", label: "Project", key: "P" },
+      { what: "priority", icon: "󰈻", label: "Priority", key: "F" },
+      { what: "status", icon: "󰉹", label: "Status", key: "S" },
+      { what: "none", icon: "󰒼", label: "Not grouped", key: "" }
+    ]
 
-    spacing: Style.spacing.panelGap
+    function grouped(what) {
+      if (what === "project") return store.byProject
+      if (what === "priority") return store.byPriority
+      if (what === "status") return store.byStatus
+      return !store.byProject && !store.byPriority && !store.byStatus
+    }
 
-    Row {
-      visible: !content.passive
-      spacing: Style.spacing.controlGap
-      // The name on the door is the menu: everything else amarchy does.
-      Button {
-        id: brand
-        iconText: "Ⓐ"
-        text: "Amarchy"
-        tooltipText: root.keyHint("menu")
-        bordered: true
-        onClicked: root.act(["menu"])
+    function focusSearch() {
+      content.closeMenu()
+      search.forceActiveFocus()
+    }
+    function openMenu(withKeyboard) {
+      content.menuOpen = true
+      content.menuCursor = withKeyboard ? 0 : -1
+    }
+    function closeMenu() {
+      content.menuOpen = false
+      content.menuCursor = -1
+    }
+    function moveMenu(dy) {
+      content.menuCursor = Math.max(0, Math.min(content.menuCursor + dy, content.groupings.length - 1))
+    }
+    // Switch the grouping under the menu's cursor; the menu stays open, to
+    // set more than one.
+    function pickMenu() {
+      var g = content.groupings[content.menuCursor]
+      if (g) root.group(g.what)
+    }
+
+    implicitHeight: Math.max(stack.implicitHeight, content.menuOpen ? menu.y + menu.height : 0)
+
+    Column {
+      id: stack
+      width: parent.width
+      spacing: Style.spacing.panelGap
+
+      Row {
+        visible: !content.passive
+        spacing: Style.spacing.controlGap
+        // The name on the door is the menu: everything else amarchy does.
+        Button {
+          id: brand
+          iconText: "Ⓐ"
+          text: "Amarchy"
+          tooltipText: root.keyHint("menu")
+          bordered: true
+          onClicked: root.act(["menu"])
+        }
+        Button {
+          // The Ⓐ is a tall glyph; keep the two the same height.
+          height: brand.height
+          iconText: "󰐕"
+          text: "New session"
+          tooltipText: root.keyHint("new")
+          bordered: true
+          onClicked: root.act(["new"])
+        }
       }
-      Button {
-        // The Ⓐ is a tall glyph; keep the two the same height.
-        height: brand.height
-        iconText: "󰐕"
-        text: "New session"
-        tooltipText: root.keyHint("new")
-        bordered: true
-        onClicked: root.act(["new"])
+
+      Row {
+        id: toolbar
+        width: parent.width
+        visible: !content.passive && store.sessions.length > 0
+        spacing: Style.spacing.controlGap
+
+        TextField {
+          id: search
+          width: parent.width - organize.width - parent.spacing
+          anchors.verticalCenter: parent.verticalCenter
+          // The key that puts the keyboard here; what it's for is plain enough.
+          placeholderText: "󰍉  " + (root.keyHint("search") || "Search sessions")
+          rightPadding: horizontalPadding + clear.width + Style.spacing.sm
+
+          // Two fields (popup, beside Claude), one query.
+          onTextEdited: root.query = text
+          onPressed: {
+            content.closeMenu()
+            content.searchRequested()
+          }
+          // The keyboard went elsewhere (a click on Claude, say).
+          onActiveFocusChanged: if (!activeFocus) content.searchEnded()
+
+          Connections {
+            target: root
+            function onQueryChanged() { if (search.text !== root.query) search.text = root.query }
+          }
+          Component.onCompleted: text = root.query
+
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape) {
+              root.query = ""
+              content.searchEnded()
+            } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+              content.moved(1)
+            } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
+              content.moved(-1)
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              content.activated(content.cursor)
+            } else {
+              return
+            }
+            event.accepted = true
+          }
+
+          Text {
+            id: clear
+            visible: search.text !== ""
+            anchors.right: parent.right
+            anchors.rightMargin: search.horizontalPadding
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "󰅖"
+            font.family: search.font.family
+            font.pixelSize: Style.font.body
+            color: search.foreground
+            opacity: clearArea.containsMouse ? 1 : 0.52
+
+            MouseArea {
+              id: clearArea
+              anchors.fill: parent
+              anchors.margins: -Style.spacing.sm
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.query = ""
+            }
+          }
+        }
+
+        // How the list is grouped, in a menu; lit while it's grouped at all.
+        Button {
+          id: organize
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "󰒼"
+          tooltipText: content.menuOpen ? "" : "Group the list"
+          bordered: true
+          selected: content.menuOpen || !content.grouped("none")
+          onClicked: content.menuOpen ? content.closeMenu() : content.openMenu(false)
+        }
+      }
+
+      SessionList {
+        width: parent.width
+        visible: root.shown.length > 0
+        sessions: root.shown
+        byProject: store.byProject
+        byPriority: store.byPriority
+        byStatus: store.byStatus
+        cursor: content.cursor
+        spinnerFrame: root.spinnerFrame
+        onActivated: function(index) { content.activated(index) }
+        onHovered: function(index) { content.hovered(index) }
+      }
+
+      Text {
+        width: parent.width
+        visible: !content.passive && root.shown.length === 0
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.body
+        color: Color.menu.text
+        opacity: 0.52
       }
     }
 
-    Row {
-      width: parent.width
-      visible: !content.passive && store.sessions.length > 0
-      spacing: Style.spacing.controlGap
+    // A click anywhere off the menu closes it.
+    MouseArea {
+      anchors.fill: parent
+      visible: content.menuOpen
+      z: 1
+      onClicked: content.closeMenu()
+    }
 
-      TextField {
-        id: search
-        width: parent.width - byProject.width - byPriority.width - byStatus.width - parent.spacing * 3
-        anchors.verticalCenter: parent.verticalCenter
-        placeholderText: "󰍉  Search sessions"
-        rightPadding: horizontalPadding + clear.width + Style.spacing.sm
+    // The grouping menu: each switch on its own, checked while on; together
+    // they nest in the order they're listed. It stays open to set several.
+    BorderSurface {
+      id: menu
+      visible: content.menuOpen
+      z: 2
+      width: Math.min(parent.width, Style.space(200))
+      x: parent.width - width
+      y: toolbar.y + toolbar.height + Style.spacing.xxs
+      height: menuItems.implicitHeight + topPadding + bottomPadding + borderTop + borderBottom
+      radius: Style.cornerRadius
+      // Solid, whatever the theme's alpha: the list is right under it.
+      color: Util.alpha(Color.popups.background, 1)
+      borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Style.normalBorderWidth)
+      padding: Style.spacing.xs
 
-        // Two fields (popup, beside Claude), one query.
-        onTextEdited: root.query = text
-        onPressed: content.searchRequested()
-        // The keyboard went elsewhere (a click on Claude, say).
-        onActiveFocusChanged: if (!activeFocus) content.searchEnded()
+      // Clicks between the rows stay on the menu.
+      MouseArea { anchors.fill: parent }
 
-        Connections {
-          target: root
-          function onQueryChanged() { if (search.text !== root.query) search.text = root.query }
-        }
-        Component.onCompleted: text = root.query
-
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
-            root.query = ""
-            content.searchEnded()
-          } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
-            content.moved(1)
-          } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
-            content.moved(-1)
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            content.activated(content.cursor)
-          } else {
-            return
-          }
-          event.accepted = true
-        }
+      Column {
+        id: menuItems
+        x: menu.contentLeftInset
+        y: menu.contentTopInset
+        width: menu.width - menu.contentLeftInset - menu.contentRightInset
 
         Text {
-          id: clear
-          visible: search.text !== ""
-          anchors.right: parent.right
-          anchors.rightMargin: search.horizontalPadding
-          anchors.verticalCenter: parent.verticalCenter
+          width: parent.width
+          leftPadding: Style.spacing.sm
+          topPadding: Style.spacing.xs
+          bottomPadding: Style.spacing.xs
           textFormat: Text.PlainText
-          text: "󰅖"
-          font.family: search.font.family
-          font.pixelSize: Style.font.body
-          color: search.foreground
-          opacity: clearArea.containsMouse ? 1 : 0.52
+          text: "GROUP BY"
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          font.letterSpacing: 1.2
+          color: Qt.darker(Color.popups.text, 1.4)
+        }
 
-          MouseArea {
-            id: clearArea
-            anchors.fill: parent
-            anchors.margins: -Style.spacing.sm
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.query = ""
+        Repeater {
+          model: content.groupings
+
+          BorderSurface {
+            id: item
+            required property var modelData
+            required property int index
+            readonly property bool on: content.grouped(modelData.what)
+            readonly property bool hot: content.menuCursor === index || itemArea.containsMouse
+
+            width: menuItems.width
+            height: Style.spacing.popupRowHeight
+            radius: Style.cornerRadius
+            color: hot ? Color.menu.selectedBackground : "transparent"
+
+            Text {
+              id: itemIcon
+              width: Style.font.icon + Style.spacing.sm
+              anchors.left: parent.left
+              anchors.leftMargin: Style.spacing.sm
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: item.modelData.icon
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.icon
+              color: item.on ? Color.menu.selectedText : Color.popups.text
+              opacity: item.on || item.hot ? 1 : 0.6
+            }
+
+            Text {
+              anchors.left: itemIcon.right
+              anchors.right: itemKey.left
+              anchors.rightMargin: Style.spacing.sm
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              text: item.modelData.label
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.body
+              font.bold: item.on
+              color: item.on || item.hot ? Color.menu.selectedText : Color.popups.text
+            }
+
+            // Its key in the popup, the way the Ⓐ menu shows them.
+            Text {
+              id: itemKey
+              anchors.right: check.left
+              anchors.rightMargin: Style.spacing.sm
+              anchors.verticalCenter: parent.verticalCenter
+              visible: content.showKeys && item.modelData.key !== ""
+              width: visible ? implicitWidth : 0
+              textFormat: Text.PlainText
+              text: item.modelData.key
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+              color: Color.popups.text
+              opacity: 0.45
+            }
+
+            Text {
+              id: check
+              width: Style.font.icon
+              anchors.right: parent.right
+              anchors.rightMargin: Style.spacing.sm
+              anchors.verticalCenter: parent.verticalCenter
+              horizontalAlignment: Text.AlignHCenter
+              textFormat: Text.PlainText
+              text: item.on ? "󰄬" : ""
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.icon
+              color: Color.menu.selectedText
+            }
+
+            MouseArea {
+              id: itemArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.group(item.modelData.what)
+            }
           }
         }
       }
-
-      // Three switches, lit while on: each groups the list on its own, and
-      // together they nest: project, then priority, then status.
-      Button {
-        id: byProject
-        anchors.verticalCenter: parent.verticalCenter
-        iconText: "󰉋"
-        tooltipText: store.byProject ? "Stop grouping by project" : "Group by project"
-        bordered: true
-        selected: store.byProject
-        onClicked: root.group("project")
-      }
-
-      Button {
-        id: byPriority
-        anchors.verticalCenter: parent.verticalCenter
-        iconText: "󰈻"
-        tooltipText: store.byPriority ? "Stop grouping by priority" : "Group by priority"
-        bordered: true
-        selected: store.byPriority
-        onClicked: root.group("priority")
-      }
-
-      Button {
-        id: byStatus
-        anchors.verticalCenter: parent.verticalCenter
-        iconText: "󰉹"
-        tooltipText: store.byStatus ? "Stop grouping by status" : "Group by status"
-        bordered: true
-        selected: store.byStatus
-        onClicked: root.group("status")
-      }
-    }
-
-    SessionList {
-      width: parent.width
-      visible: root.shown.length > 0
-      sessions: root.shown
-      byProject: store.byProject
-      byPriority: store.byPriority
-      byStatus: store.byStatus
-      cursor: content.cursor
-      spinnerFrame: root.spinnerFrame
-      onActivated: function(index) { content.activated(index) }
-      onHovered: function(index) { content.hovered(index) }
-    }
-
-    Text {
-      width: parent.width
-      visible: !content.passive && root.shown.length === 0
-      textFormat: Text.PlainText
-      elide: Text.ElideRight
-      text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
-      font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.body
-      color: Color.menu.text
-      opacity: 0.52
     }
   }
 
@@ -388,9 +571,14 @@ Panel {
     gap: store.panelGap
     alpha: store.terminalAlpha
     keyboard: root.searching
-    onVisibleChanged: if (!visible && root.searching) root.endSearch()
+    holdKeyboard: root.searchFromKeys
+    onVisibleChanged: {
+      if (!visible && root.searching) root.endSearch()
+      if (!visible) sideContent.closeMenu()
+    }
 
     Content {
+      id: sideContent
       width: parent.width
       cursor: root.searching ? root.cursor : root.currentIndex
       onActivated: function(index) { root.activate(index) }
@@ -398,10 +586,14 @@ Panel {
       onSearchRequested: {
         if (root.opened || root.searching) return
         root.cursor = Math.max(0, root.currentIndex)
+        root.searchFromKeys = false
         root.searching = true
       }
       // Esc, or the keyboard left: what's typed stays until it's cleared.
-      onSearchEnded: root.searching = false
+      onSearchEnded: {
+        root.searching = false
+        root.searchFromKeys = false
+      }
     }
   }
 
@@ -447,11 +639,23 @@ Panel {
       anchors.fill: parent
       // The search has the keys while you type in it.
       blocked: column.searchFocused
-      onMoveRequested: function(dx, dy) { root.moveCursor(dy) }
-      onActivateRequested: root.activate(root.cursor)
-      onCloseRequested: root.close()
+      // While the grouping menu is open the keys move in it: Esc closes it,
+      // Enter or Space switch the grouping under its cursor.
+      onMoveRequested: function(dx, dy) {
+        if (column.menuOpen) column.moveMenu(dy)
+        else root.moveCursor(dy)
+      }
+      onActivateRequested: {
+        if (column.menuOpen) column.pickMenu()
+        else root.activate(root.cursor)
+      }
+      onCloseRequested: {
+        if (column.menuOpen) column.closeMenu()
+        else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onDeleteRequested: {
+        if (column.menuOpen) return
         var s = root.shown[root.cursor]
         if (!s) return
         root.act(["close", s.id, "--confirm"])
@@ -463,6 +667,7 @@ Panel {
         else if (t === "p") root.group("project")
         else if (t === "f") root.group("priority")
         else if (t === "s") root.group("status")
+        else if (t === "g") column.menuOpen ? column.closeMenu() : column.openMenu(true)
         else if (t === "+" || t === "=") root.prioritize("up")
         else if (t === "-") root.prioritize("down")
         else if (t === "/") column.focusSearch()
@@ -471,6 +676,7 @@ Panel {
       Content {
         id: column
         width: parent.width
+        showKeys: true
         cursor: root.cursor
         onActivated: function(index) { root.activate(index) }
         onHovered: function(index) { root.cursor = index }
