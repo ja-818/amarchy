@@ -49,11 +49,12 @@ Sessions:
                                         list always puts higher priority first; new sessions are normal
   amarchy group [project|priority|status] [on|off]
                                         group the list by project, priority (High, Normal, Low) and/or
-                                        status (Needs you, Working, Idle, Asleep), nested in that order;
+                                        status (Needs you, Working, Idle), nested in that order;
                                         without on|off switches it, without anything prints the
                                         grouping; `group none` drops them all
 
-Sleep (a session you're not using lets go of its Claude Code, and its memory, until you type in it):
+Sleep (a session you're not using lets go of its Claude Code, and its memory, until you type in it;
+nothing on screen changes, and what you type goes to Claude when it's back):
   amarchy sleep [id] [--force]          put a session to sleep (current one if no id); it says why not when
                                         something would be lost, and --force does it anyway
   amarchy sleep --all [--force]         every session that can sleep, except the one on screen
@@ -80,7 +81,8 @@ Plumbing:
   amarchy layout                        resize the zen column for the current monitor
   amarchy setup <id>                    make a new session's worktree, then start Claude (old windows)
   amarchy claude | asleep | woke <id>   the steps of the loop in a session's Claude window: set up and
-                                        start Claude; show the session asleep; wake it with a key
+                                        start Claude; keep the session on screen asleep; the prompt
+                                        you type in while it sleeps
   amarchy sleep --idle                  put the sessions idle long enough to sleep (the timer runs it)
   amarchy editor <file>                 Claude's $VISUAL in a session (bin/amarchy-editor)
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
@@ -125,6 +127,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import threading
 import time
 from pathlib import Path
@@ -562,7 +565,7 @@ def save_session(s):
 
 
 # What session_view() adds for the UIs, never saved.
-VIEW_FIELDS = ("status", "awake", "task", "age", "current", "background")
+VIEW_FIELDS = ("status", "awake", "sleeping", "task", "age", "current", "background", "agent")
 
 
 def claude_class(s):
@@ -1832,11 +1835,11 @@ def claude_argv(s, prefill="", prompt=None):
             "--settings", hook_settings(s["id"]), *first]
 
 
-# What runs in a session's Claude window. Claude, and when it's put to sleep
-# (Claude has exited, the window stays): the conversation, and a wait for the
-# key that wakes it, which then goes to Claude. Quitting Claude yourself closes
-# the window, as it always did. A shell rather than amarchy, because it's what
-# stays while the session sleeps; amarchy itself only runs in between.
+# What runs in a session's Claude window: Claude, and while the session sleeps
+# (Claude has exited, the window stays) a wait for the first key, which then
+# goes to a stand-in for Claude's prompt (woke). Quitting Claude yourself
+# closes the window, as it always did. A shell rather than amarchy, because
+# it's what stays while the session sleeps; amarchy itself only runs in between.
 WINDOW_LOOP = ('while :; do "$0" claude "$1"; "$0" asleep "$1" || exit; '
                '"$0" woke "$1" "$(stty -icanon -echo -isig -ixon min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1)"; '
                'done')
@@ -1858,18 +1861,49 @@ def window_claude(win, procs):
     return next((p for p in descendants(win["pid"], procs) if procs[p][1] == "claude"), None)
 
 
-def editor_shim():
+def your_editor():
+    """The editor you set for Claude Code's Ctrl+G, as a command line."""
+    visual = os.environ.get("VISUAL", "")
+    if visual.startswith(str(STATE / "editor")):    # ours, from a Claude it started
+        visual = ""
+    return os.environ.get("AMARCHY_VISUAL") or visual or os.environ.get("EDITOR") or "vi"
+
+
+def editor_shim(editor):
     """What Claude runs as $VISUAL (Ctrl+G, "edit the prompt in your editor"):
-    hands the prompt to amarchy when it's putting the session to sleep, else
-    opens your editor. A file of its own, since Claude takes $VISUAL as one
-    command, without arguments."""
-    return Path(SELF).parent / "amarchy-editor"
+    bin/amarchy-editor, which hands the prompt to amarchy when it's putting
+    the session to sleep, and opens your editor any other time. Claude takes
+    $VISUAL as one command, without arguments, and names it in a hint ("ctrl+g
+    to edit in Nvim"), so it's a link named after your editor."""
+    name = Path(shlex.split(editor)[0] if editor.strip() else "vi").name
+    link = STATE / "editor" / name
+    target = Path(SELF).parent / "amarchy-editor"
+    try:
+        if not link.is_symlink() or os.readlink(link) != str(target):
+            link.parent.mkdir(parents=True, exist_ok=True)
+            tmp = link.with_name(f".{name}.{os.getpid()}")
+            tmp.unlink(missing_ok=True)
+            tmp.symlink_to(target)
+            os.replace(tmp, link)
+    except OSError:
+        return None
+    return link
+
+
+def take(f):
+    """A file's text, removing the file (a prompt meant for Claude once)."""
+    try:
+        text = f.read_text()
+    except OSError:
+        return None
+    f.unlink(missing_ok=True)
+    return text
 
 
 def cmd_claude(sid):
     """The window loop's first step: set a new session up, then become Claude
-    Code, with the prompt it had when it went to sleep (and the key that woke
-    it) typed back in. Asleep, it does nothing: the loop shows the session."""
+    Code: with the message you sent while it slept, or what you had typed in
+    its prompt. Asleep, it does nothing: the loop shows the session."""
     s = session(sid)
     if not s:
         return fail(f"No session {sid!r}")
@@ -1884,20 +1918,18 @@ def cmd_claude(sid):
     prompt = s.pop("prompt", None)
     if prompt is not None:
         save_session(s)
+    sent = take(claude_dir(sid) / "send")
+    prompt = sent if sent is not None and prompt is None else prompt
+    prefill = take(claude_dir(sid) / "draft") or ""
     path = Path(s["path"])
     os.chdir(path)
     os.environ["PWD"] = str(path)
-    shim = editor_shim()
-    if shim.exists() and os.environ.get("VISUAL") != str(shim):
-        os.environ["AMARCHY_VISUAL"] = os.environ.get("VISUAL", "")
+    editor = your_editor()
+    shim = editor_shim(editor)
+    if shim:
+        os.environ["AMARCHY_VISUAL"] = editor
         os.environ["VISUAL"] = str(shim)
-    draft = claude_dir(sid) / "draft"
-    try:
-        prefill = draft.read_text()
-    except OSError:
-        prefill = ""
     argv = claude_argv(s, prefill.strip("\n"), prompt)
-    draft.unlink(missing_ok=True)
     try:
         os.execvp(argv[0], argv)
     except OSError as e:
@@ -1973,14 +2005,23 @@ def cmd_new(args):
 
 # ------------------------------------------------------------------ sleep
 #
-# A session you're not using sleeps: its Claude Code exits, so it holds no
-# memory, but the session stays where it was, workspace, place in the list and
-# window included. The window shows the conversation, and the first key you
-# press in it wakes Claude (`claude --resume`, the same conversation) with that
-# key already typed in its prompt. Whatever was typed in the prompt and not
-# sent yet comes back too: before Claude exits, amarchy asks it for the prompt
-# with Ctrl+G (Claude's "edit the prompt in your editor"), with amarchy-editor
-# as the editor.
+# A session you're not using sleeps, without anything showing it: its Claude
+# Code exits, so it holds no memory, and everything else stays as it was. Claude
+# is stopped outright (SIGKILL), so it never gets to put the terminal back: its
+# last screen stays in the window, the conversation, its prompt and the cursor
+# in it. Type there and a stand-in for that prompt (woke) shows what you type
+# right where Claude would; send it (Enter) and Claude comes back with it
+# (`claude --resume <conversation> -- <message>`), its first screen replacing
+# the old one in a single repaint. Anything the stand-in doesn't do (arrows,
+# Ctrl keys, a new line, scrolling, a line too long) brings Claude back at
+# once, with what you typed already in its prompt (--prefill). Whatever was
+# typed in the prompt and not sent yet comes back too: before Claude exits,
+# amarchy asks it for the prompt with Ctrl+G (Claude's "edit the prompt in your
+# editor"), with amarchy-editor as the editor.
+#
+# A window that was closed comes back asleep as well: there's no screen of
+# Claude's to keep then, so amarchy draws the conversation and a prompt like
+# Claude's, and the stand-in works the same.
 #
 # What would be lost with Claude's process keeps a session awake: a turn in
 # progress, a question waiting for you, commands running in the background,
@@ -1994,6 +2035,7 @@ QUIET = 30                      # seconds the conversation has to have been stil
 BUSY_CPU = 0.05                 # share of a core above which an idle-looking Claude is still doing something
 HANDOVER_TIMEOUT = 3            # seconds Claude has to hand its prompt over
 HANDOVER_STALE = 15             # seconds a request for the prompt counts
+REPAINT = 0.3                   # seconds Claude gets to draw its prompt again after handing it over
 
 
 def sleep_after():
@@ -2018,8 +2060,21 @@ def asleep_since(sid):
         return None
 
 
-def mark_asleep(sid):
-    write_file(claude_dir(sid) / "asleep", time.strftime("%Y-%m-%d %H:%M:%S\n"))
+# How a sleeping session's window looks: Claude's own last screen, still there
+# ("frozen"), or one amarchy draws (a window that opened with Claude asleep).
+FROZEN, DRAWN = "frozen", "drawn"
+
+
+def mark_asleep(sid, look=DRAWN):
+    write_file(claude_dir(sid) / "asleep", f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{look}\n")
+
+
+def asleep_look(sid):
+    try:
+        lines = (claude_dir(sid) / "asleep").read_text().split("\n")
+    except OSError:
+        return None
+    return lines[1] if len(lines) > 1 and lines[1] in (FROZEN, DRAWN) else DRAWN
 
 
 def clear_asleep(sid):
@@ -2112,6 +2167,18 @@ def hand_over_prompt(s, win):
         time.sleep(0.05)
     handed = not (d / "handover").exists()
     (d / "handover").unlink(missing_ok=True)
+    # Claude reads its prompt back from the file it gave the editor, deletes
+    # the file, then draws its prompt again where it said "Save and close
+    # editor to continue": that last screen is the one that stays.
+    try:
+        given = Path((d / "handover-file").read_text())
+    except OSError:
+        given = None
+    while handed and given and given.exists() and time.time() < end:
+        time.sleep(0.03)
+    (d / "handover-file").unlink(missing_ok=True)
+    if handed:
+        time.sleep(REPAINT)
     return handed
 
 
@@ -2128,9 +2195,10 @@ def cmd_editor(args):
         except OSError:
             text = ""
         write_file(claude_dir(sid) / "draft", text if text.strip() else "")
+        write_file(claude_dir(sid) / "handover-file", files[-1])
         request.unlink(missing_ok=True)
         return 0
-    editor = shlex.split(os.environ.get("AMARCHY_VISUAL") or os.environ.get("EDITOR") or "vi")
+    editor = shlex.split(your_editor())
     try:
         os.execvp(editor[0], [*editor, *args])
     except OSError as e:
@@ -2257,31 +2325,55 @@ def put_to_sleep(s, auto=False, force=False):
     if auto and current_session_id() == sid:
         (claude_dir(sid) / "draft").unlink(missing_ok=True)    # it's still in Claude's prompt
         return "you came back to it"
-    conversation = ""
     try:
-        conversation = json.loads((HOME / f".claude/sessions/{pid}.json").read_text()).get("sessionId", "")
+        set_conversation_id(sid, json.loads((HOME / f".claude/sessions/{pid}.json").read_text()).get("sessionId", ""))
     except (OSError, ValueError, TypeError):
         pass
-    set_conversation_id(sid, conversation)
-    mark_asleep(sid)
-    stop_background(s)
-    if pid:
-        try:
-            os.kill(pid, 15)
-        except ProcessLookupError:
-            pass
-        end = time.time() + 8
-        while time.time() < end and Path(f"/proc/{pid}").exists():
-            time.sleep(0.1)
-        try:
-            os.kill(pid, 9)
-        except ProcessLookupError:
-            pass
+    mark_asleep(sid, FROZEN if loop else DRAWN)
+    try:
+        stop_background(s)
+        if pid:
+            freeze_claude(pid, procs)
+    except BaseException:
+        clear_asleep(sid)       # it isn't asleep: say so, for whoever tries next
+        raise
     if not loop:
         # Its window went with it: it opens again, asleep, when you go there.
         hypr(f'hl.dsp.window.close({{ window = "address:{win["address"]}" }})')
     tell_shell("refresh")
     return None
+
+
+def freeze_claude(pid, procs):
+    """Stop a Claude Code at once, before it can put the terminal back (its
+    last screen stays), then what it ran (MCP servers) and what it leaves in
+    ~/.claude/sessions. Not the windows it may have opened, nor what runs in
+    them. It's idle: its conversation is all written already."""
+    windows = [p for p in descendants(pid, procs) if procs[p][1] in TERMINALS]
+    spared = {q for w in windows for q in (w, *descendants(w, procs))}
+    children = [p for p in descendants(pid, procs) if p not in spared]
+    try:
+        info = json.loads((HOME / f".claude/sessions/{pid}.json").read_text())
+    except (OSError, ValueError):
+        info = {}
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
+    end = time.time() + 3
+    while time.time() < end and Path(f"/proc/{pid}").exists():
+        time.sleep(0.05)
+    for p in children:
+        try:
+            os.kill(p, 15)
+        except ProcessLookupError:
+            pass
+    if info.get("pid") == pid:
+        (HOME / f".claude/sessions/{pid}.json").unlink(missing_ok=True)
+        for key in (HOME / ".claude/sessions").glob(f"{pid}.*.key"):
+            key.unlink(missing_ok=True)
+        if info.get("messagingSocketPath"):
+            Path(info["messagingSocketPath"]).unlink(missing_ok=True)
 
 
 def wake(s):
@@ -2363,7 +2455,7 @@ def cmd_sleep(args):
         if rest[:1] == ["--all"]:
             current, slept, kept = current_session_id(), [], []
             for s in session_view():
-                if s["awake"] and s["id"] != current and s["status"] in ("idle", "waiting"):
+                if s["awake"] and not s["sleeping"] and s["id"] != current and s["status"] in ("idle", "waiting"):
                     err = put_to_sleep(session(s["id"]), force=force)
                     (kept if err else slept).append((s, err))
             for s, err in kept:
@@ -2392,7 +2484,7 @@ def sleep_idle():
         return 0
     current = current_session_id()
     for s in session_view():
-        if not s["awake"] or s["current"] or s["id"] == current or s["status"] not in ("idle", "waiting"):
+        if not s["awake"] or s["sleeping"] or s["current"] or s["id"] == current or s["status"] not in ("idle", "waiting"):
             continue
         try:
             idle = time.time() - (STATUS / s["id"]).stat().st_mtime
@@ -2413,67 +2505,169 @@ def cmd_wake(args):
 
 
 def cmd_asleep(sid):
-    """The window loop, once Claude has exited: 0 and the conversation on
-    screen if the session sleeps, 1 if Claude was quit (the window closes)."""
+    """The window loop, once Claude has exited: 0 if the session sleeps (the
+    window keeps showing it), 1 if Claude was quit (the window closes)."""
     s = session(sid)
     if not s or asleep_since(sid) is None:
         return 1
+    out = sys.stdout
+    if asleep_look(sid) == FROZEN:
+        # Claude's screen stays as it was. Only what would now come in without
+        # Claude to take it is turned off: mouse movement and focus changes.
+        # The wheel and clicks still report, as they did to Claude.
+        out.write("\033[?1003l\033[?1002l\033[?1004l\033[?2004h")
+        out.flush()
+        return 0
     sh("stty", "sane")
     try:
         width = os.get_terminal_size().columns
     except OSError:
         width = 100
-    sys.stdout.write("\033[H\033[2J\033[3J")
-    title = session_task(s, "") or f"{s['repo']} · {s['name']}"
-    sys.stdout.write(f"\033]0;{title}\007")
-    sys.stdout.write("".join(line + "\n" for line in conversation_lines(s, width)))
-    try:
-        draft = (claude_dir(sid) / "draft").read_text().strip("\n")
-    except OSError:
-        draft = ""
-    since = time.strftime("%H:%M", time.localtime(asleep_since(sid)))
-    rule = "─" * width
-    sys.stdout.write(f"\n\033[2m{rule}\033[0m\n")
-    if draft:
-        lines = draft.splitlines()
-        sys.stdout.write(f"\033[1m❯\033[0m {lines[0][:width - 4]}\n")
-        for line in lines[1:4]:
-            sys.stdout.write(f"  {line[:width - 4]}\n")
-        if len(lines) > 4:
-            sys.stdout.write(f"\033[2m  … {len(lines) - 4} more lines\033[0m\n")
-        sys.stdout.write(f"\033[2m{rule}\033[0m\n")
-    sys.stdout.write(f"  \033[1m󰒲 Asleep\033[0m\033[2m since {since} · type to wake Claude up, "
-                     f"{'right where you left your prompt' if draft else 'what you type goes to it'}\033[0m")
-    sys.stdout.flush()
+    draft = (claude_dir(sid) / "draft").read_text() if (claude_dir(sid) / "draft").exists() else ""
+    lines = draft.rstrip("\n").split("\n")
+    rule = f"\033[2m{'─' * width}\033[0m"
+    out.write("\033[H\033[2J\033[3J")
+    out.write(f"\033]0;{session_task(s, '') or s['repo'] + ' · ' + s['name']}\007")
+    out.write("".join(line + "\n" for line in conversation_lines(s, width)))
+    out.write(f"\n{rule}\n\033[1m❯\033[0m {lines[0]}\n" + "".join(f"  {line}\n" for line in lines[1:]))
+    out.write(f"{rule}\n\033[2m  ? for shortcuts\033[0m")
+    # The cursor where Claude's would be, at the end of the prompt; keys come
+    # in the way Claude asks for them (kitty's protocol, pastes bracketed).
+    out.write(f"\033[2A\r\033[{2 + text_width(lines[-1])}C\033[>5u\033[?2004h")
+    out.flush()
     return 0
+
+
+def text_width(text):
+    """Columns a text takes in a terminal."""
+    return sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in "WF" else 1
+               for c in text)
+
+
+def next_key(buf):
+    """The first key in what the terminal sent: (kind, bytes), and the rest.
+    kind is None when the key isn't all there yet."""
+    if not buf:
+        return None, buf
+    if buf.startswith(b"\x1b[200~"):
+        end = buf.find(b"\x1b[201~")
+        return (("paste", buf[6:end]), buf[end + 6:]) if end >= 0 else (None, buf)
+    if buf.startswith(b"\x1b["):
+        m = re.match(rb"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]", buf)
+        return (("csi", m.group()), buf[m.end():]) if m else (None, buf)
+    if buf.startswith(b"\x1b"):
+        return (("esc", buf[:2]), buf[2:]) if len(buf) > 1 else (None, buf)
+    size = 1 if buf[0] < 0xc0 else 2 if buf[0] < 0xe0 else 3 if buf[0] < 0xf0 else 4
+    if len(buf) < size:
+        return None, buf
+    return ("char", buf[:size]), buf[size:]
+
+
+TYPING_IDLE = 120       # seconds typing in a sleeping session can pause before it sleeps on
 
 
 def cmd_woke(sid, key):
-    """The window loop, once a key came (or `amarchy wake`): the key, and
-    whatever else arrived with it (the rest of a paste), goes in front of
-    Claude's prompt; the session is awake again."""
-    data = bytes.fromhex(key.replace(" ", "").strip()) if key.strip() else b""
-    if data:
-        # The rest of a key that's more than one byte (an arrow, an accent) or a paste.
-        while select.select([0], [], [], 0.05)[0]:
-            chunk = os.read(0, 4096)
-            if not chunk:
-                break
-            data += chunk
-    text = re.sub(r"\x1b(\[[0-9;?]*[ -/]*[@-~]|O.|.)", "", data.decode(errors="ignore"))
-    text = "".join(c for c in text.replace("\r\n", "\n").replace("\r", "\n") if c.isprintable() or c == "\n")
-    if text.strip():
-        draft = claude_dir(sid) / "draft"
-        try:
-            before = draft.read_text().rstrip("\n")
-        except OSError:
-            before = ""
-        write_file(draft, before + text.rstrip("\n"))
-    clear_asleep(sid)
-    sys.stdout.write("\r\n\n  \033[2mWaking up…\033[0m")
-    sys.stdout.flush()
-    tell_shell("refresh")
-    return 0
+    """The window loop, once a key came in a sleeping session (or `amarchy
+    wake`): a stand-in for Claude's prompt. What you type shows where Claude
+    would show it, and Enter brings Claude back with it, sent. Anything else
+    (arrows, Ctrl keys, a new line, the wheel, a line too long for the box)
+    brings Claude back with what you typed in its prompt. Returns 0 to start
+    Claude, 3 to go on sleeping (nothing typed, or a long pause)."""
+    d = claude_dir(sid)
+    if asleep_since(sid) is None:
+        return 0                # woken from outside
+    buf = bytes.fromhex(key.replace(" ", "").strip()) if key.strip() else b""
+    if not buf:
+        return 3
+    draft = (d / "draft").read_text() if (d / "draft").exists() else ""
+    text = draft.rstrip("\n")
+
+    def read(timeout):
+        if not select.select([0], [], [], timeout)[0]:
+            return None
+        return os.read(0, 4096) or None
+
+    # Where the cursor is (Claude leaves it at the end of its prompt): the
+    # terminal's answer comes in among the keys.
+    os.write(1, b"\033[6n")
+    where, end = None, time.time() + 0.5
+    while time.time() < end:
+        m = re.search(rb"\x1b\[(\d+);(\d+)R", buf)
+        if m:
+            where, buf = int(m.group(2)), buf[:m.start()] + buf[m.end():]
+            break
+        more = read(0.05)
+        if more:
+            buf += more
+    try:
+        width = os.get_terminal_size(1).columns
+    except OSError:
+        width = 100
+    # Typing goes on in place only where amarchy knows what's on the line:
+    # the cursor right after the prompt's last line ("❯ " or "  " before it).
+    in_place = where == 3 + text_width(text.split("\n")[-1])
+    edited = False
+
+    def wake(typed):
+        if typed:
+            write_file(d / "draft", typed)
+        else:
+            (d / "draft").unlink(missing_ok=True)
+        clear_asleep(sid)
+        tell_shell("refresh")
+        return 0
+
+    while True:
+        token, buf = next_key(buf)
+        if token is None:
+            more = read(TYPING_IDLE if edited else 0.3)
+            if more:
+                buf += more
+                continue
+            if buf == b"\x1b":
+                token, buf = ("esc", buf), b""
+            else:
+                # A pause: what's typed stays, as Claude's prompt, until it wakes.
+                if edited:
+                    write_file(d / "draft", text)
+                return 3
+        kind, raw = token
+        if kind == "paste" or kind == "char" and (raw.decode(errors="ignore").isprintable() or raw == b"\r"):
+            typed = raw.decode(errors="ignore").replace("\r\n", "\n").replace("\r", "\n" if kind == "paste" else "\r")
+            if typed == "\r":
+                if text.strip():
+                    write_file(d / "send", text)
+                    (d / "draft").unlink(missing_ok=True)
+                    clear_asleep(sid)
+                    tell_shell("refresh")
+                    return 0
+                continue
+            if not in_place or "\n" in typed or 3 + text_width(text.split("\n")[-1] + typed) >= width:
+                return wake(text + typed)
+            if not edited:
+                os.write(1, b"\033[K")      # a suggestion Claude showed in the empty prompt
+                edited = True
+            os.write(1, typed.encode())
+            text += typed
+        elif kind == "char" and raw in (b"\x7f", b"\x08"):
+            line = text.split("\n")[-1]
+            if not in_place or not line and "\n" in text:
+                return wake(text)
+            if line:
+                cols = text_width(line[-1])
+                os.write(1, b"\b" * cols + b" " * cols + b"\b" * cols)
+                text, edited = text[:-1], True
+        elif kind == "csi" and raw[-1:] in b"Mm" and raw.startswith(b"\x1b[<"):
+            if int(raw[3:].split(b";")[0] or 0) & 64:
+                return wake(text)       # the wheel: Claude scrolls its conversation
+        elif kind == "csi" and raw in (b"\x1b[I", b"\x1b[O") or raw.endswith(b"R"):
+            continue                    # focus, a late cursor report
+        elif kind == "csi" and raw == b"\x1b[13u":
+            buf = b"\r" + buf           # Enter, the kitty way
+        elif kind == "csi" and re.fullmatch(rb"\x1b\[13;\d+u", raw):
+            return wake(text + "\n")    # Shift+Enter and the like: a new line
+        else:
+            return wake(text)
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -2986,6 +3180,8 @@ def cmd_hook(sid, state):
     if asleep_since(sid) is not None and state != "idle":
         clear_asleep(sid)   # it's running after all (woken some other way)
     prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
+    if state == prev == "idle":
+        return      # Claude coming back from sleep: idle all along, since when it was
     (STATUS / sid).write_text(state)
     if state == prev:
         return
@@ -3226,16 +3422,17 @@ def session_view():
     ss = sessions()
     background = all_background_sessions()
     for s in ss:
-        since = asleep_since(s["id"])
-        # Asleep: Claude isn't running, its window showing the conversation
-        # (or closed, which is how sessions slept before).
-        s["awake"] = claude_class(s) in titles and since is None
-        s["agent"] = agents.get(s["path"], "") if s["awake"] else ""
+        # Sleeping (its Claude stopped until you type in it) looks just as it
+        # did, idle. So does a session whose window was closed: it opens again
+        # asleep, and looks the same.
+        s["awake"] = claude_class(s) in titles
+        s["sleeping"] = asleep_since(s["id"]) is not None or not s["awake"]
+        s["agent"] = agents.get(s["path"], "") if not s["sleeping"] else ""
         s.pop("prompt", None)
-        if not s["awake"]:
-            s["status"] = "asleep"
+        if s["sleeping"] and not s.get("setup"):
+            s["status"] = "idle"    # only an idle session sleeps (or one left from before)
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
-        s["age"] = age(s["id"]) if s["awake"] else since_age(since) if since else ""
+        s["age"] = age(s["id"]) if s["awake"] else ""
         # Claude Code background sessions (/bg) still running in its worktree.
         s["background"] = len(background_sessions(s, background))
         s["current"] = s["id"] == current

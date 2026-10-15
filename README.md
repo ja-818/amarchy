@@ -67,7 +67,7 @@ still notifies you. From a script: `amarchy priority high|normal|low|up|down
 Next to the search, the 󰒼 button (lit while the list is grouped) opens how the
 list is grouped: **by project** (󰉋, one section per project, each row showing
 just its branch), **by priority** (󰈻, High, Normal, Low) and **by status** (󰉹,
-by what they need from you: Needs you, Working, Idle, Asleep), each checked
+by what they need from you: Needs you, Working, Idle), each checked
 while on, or **Not grouped**. Use any of them; together they nest in that
 order, e.g. the priorities inside each project. The menu stays open to set
 several; a click off it closes it. In the list under the Ⓐ, `g` opens it
@@ -127,26 +127,26 @@ terminal with `Super+W` (or let Claude exit) and the session just goes to sleep
 ## Sleep
 
 Every Claude Code holds a few hundred MB of memory, also while it waits for
-you. So a session you're not using **sleeps**: once it has been idle and off
-screen for a minute, its Claude exits and lets go of all of it. The session
-stays exactly where it was: its workspace, its place in the list (with the moon,
-󰒲, and how long it has slept), and its window, which shows the conversation:
+you. So a session you're not using **sleeps**, without anything showing it:
+once it has been idle and off screen for a minute, its Claude exits and lets go
+of all of it, and everything else stays exactly as it was. Its workspace, its
+place in the list (idle, like before), and its window: Claude's own last screen
+stays up, the conversation, the prompt and the cursor in it.
 
-```
-● Done: the redirect now keeps the query string. Tests pass.
-  ⎿ Bash(npm test)
+Go there and type as you would: what you type shows in the prompt, where
+Claude would show it. Press **Enter** and Claude comes back with your message
+already sent (`claude --resume`, the same conversation); its screen takes over
+from the old one in a single repaint, about a second later. Anything else
+(arrows, Ctrl keys, Shift+Enter, the wheel, a line longer than the box)
+brings Claude back at once, with what you typed already in its prompt. Moving
+through your sessions doesn't wake them; only typing does. A half-written
+prompt survives too: before Claude exits, amarchy asks it for its prompt
+(Claude's Ctrl+G, "edit in your editor", answered by `bin/amarchy-editor`), and
+it's back in the prompt when Claude is.
 
-❯ also check the logout flow
-────────────────────────────────────────────────────────────
-  󰒲 Asleep since 14:02 · type to wake Claude up, right where you left your prompt
-```
-
-Go there and **type**: Claude comes back in a second or two
-(`claude --resume`, the same conversation), with what you typed already in its
-prompt. Moving through your sessions doesn't wake them, only typing does. What
-you had typed in Claude's prompt and not sent yet survives it too: before
-Claude exits, amarchy asks it for its prompt (Claude's Ctrl+G, "edit in your
-editor", answered by `bin/amarchy-editor`) and types it back in when it wakes.
+A window you closed comes back asleep the same way, with the conversation and
+a prompt amarchy draws like Claude's, since there's no screen of Claude's left
+to keep.
 
 A session never sleeps while something would be lost with its Claude:
 
@@ -172,12 +172,13 @@ amarchy sleep --after 5    # minutes before an idle session sleeps on its own (d
 amarchy wake [id]          # without typing in it
 ```
 
-**Sleep session** and **Sleep idle sessions** are in the amarchy menu
-(`Ctrl+Alt+M`). The timer is a systemd user timer that `install.sh` adds
-(`amarchy-sleep.timer`); it checks every 30 seconds and runs nothing in between.
-Windows from before amarchy could do this can't hand their prompt over:
-`amarchy sleep --force` sleeps them anyway (closing the window, which opens
-again asleep), so anything typed and not sent there is lost.
+`amarchy list` says which ones sleep (`sleeping`). **Sleep session** and
+**Sleep idle sessions** are in the amarchy menu (`Ctrl+Alt+M`). The timer is a
+systemd user timer that `install.sh` adds (`amarchy-sleep.timer`); it checks
+every 30 seconds and runs nothing in between. Windows from before amarchy
+could do this can't hand their prompt over: `amarchy sleep --force` sleeps them
+anyway (closing the window, which opens again asleep), so anything typed and
+not sent there is lost.
 
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
