@@ -91,7 +91,7 @@ directly; from a script, `amarchy group project`, `amarchy group priority`,
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower this session's priority (High, Normal, Low): higher ones come first in the list. |
 | `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the title Claude came up with. |
-| `Ctrl+Alt+M` | The amarchy menu: everything here in one list, each with its key next to it. The one to remember. |
+| `Ctrl+Alt+M` | The amarchy menu: everything here, each with its key next to it. New session, Search sessions and Add project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones) and **Settings** (theme, sound, keys), where `Esc` goes back. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
 | `Super+Space` | **Amarchy** is in the Omarchy menu: sessions, new session, add project, close. |
@@ -173,7 +173,7 @@ amarchy wake [id]          # without typing in it
 ```
 
 `amarchy list` says which ones sleep (`sleeping`). **Sleep session** and
-**Sleep idle sessions** are in the amarchy menu (`Ctrl+Alt+M`). The timer is a
+**Sleep idle sessions** is under Sessions in the amarchy menu (`Ctrl+Alt+M`). The timer is a
 systemd user timer that `install.sh` adds (`amarchy-sleep.timer`); it checks
 every 30 seconds and runs nothing in between. Windows from before amarchy
 could do this can't hand their prompt over: `amarchy sleep --force` sleeps them
@@ -226,7 +226,7 @@ your desktop is back, in the time it takes to switch workspace. Claude and the
 session terminal stay in the amarchy theme.
 
 ```sh
-amarchy theme              # pick one: Ctrl+Alt+T, Theme in the amarchy menu (Ctrl+Alt+M), or Super+Space → Amarchy → Theme
+amarchy theme              # pick one: Ctrl+Alt+T, Settings → Theme in the amarchy menu (Ctrl+Alt+M), or Super+Space → Amarchy → Theme
 amarchy theme "Tokyo Night"
 amarchy theme system       # back to looking like the rest of the desktop
 ```
@@ -247,7 +247,7 @@ each step of it went (shell, wallpaper, borders) is in
 
 ## Sound
 
-Pick the chime by ear: **Sound** in the amarchy menu (`Ctrl+Alt+M`), or
+Pick the chime by ear: **Settings → Sound** in the amarchy menu (`Ctrl+Alt+M`), or
 Super+Space → Amarchy → Sound, opens the sounds in the middle of the screen,
 like the Omarchy menu. Each
 one plays as the cursor lands on it, with the arrows (or `j`/`k`, or the
@@ -284,7 +284,7 @@ Remove with `install.sh --uninstall`.
 
 ## Configure
 
-**Keys** in the amarchy menu (`Ctrl+Alt+M`, or `amarchy keys`) picks the two
+**Settings → Keys** in the amarchy menu (`Ctrl+Alt+M`, or `amarchy keys`) picks the two
 modifiers: **Inside amarchy**, for every key that works in it (`Ctrl+Alt` by
 default), and **From anywhere**, for Open and New session (`Super+Alt`). Each
 choice says whether it's free or what it would clash with (Omarchy's keys,

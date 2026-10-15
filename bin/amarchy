@@ -3651,37 +3651,59 @@ def cmd_keys(args):
 
 # The amarchy menu: icon, label, the command it runs, and the descriptions its
 # key may be bound under (hypr/amarchy.lua). The last two say where it shows:
-# in a session, outside one.
-MENU = (
-    ("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), False, True),
-    ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
-    ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
-    ("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",), True, True),
-    ("󰊓", "Toggle zen mode", ["zen"], ("Toggle amarchy zen",), True, False),
-    ("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
+# in a session, outside one. A submenu has its rows where the command goes and
+# a line saying what's in it where the descriptions go.
+RUN_MENU = (
     ("󰐊", "Run project", ["run"], ("Run amarchy project",), True, False),
     ("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",), True, False),
-    ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
-    ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
-    ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
-    ("󰕾", "Sound", ["sound"], (), True, True),
-    (ICON_KEYS, "Keys", ["keys"], (), True, True),
+    ("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
+)
+SESSION_MENU = (
     ("󰏫", "Rename session", ["rename"], ("Rename amarchy session",), True, False),
     ("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",), True, False),
     ("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",), True, False),
     ("󰒲", "Sleep session", ["sleep"], ("Sleep amarchy session",), True, False),
-    ("󰒲", "Sleep idle sessions", ["sleep", "--all"], ("Sleep idle amarchy sessions",), True, True),
     ("󰆴", "Close session", ["close", "--confirm"], ("Close amarchy session",), True, False),
+)
+SESSIONS_MENU = (
+    ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
+    ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
+    ("󰊓", "Toggle zen mode", ["zen"], ("Toggle amarchy zen",), True, False),
+    ("󰒲", "Sleep idle sessions", ["sleep", "--all"], ("Sleep idle amarchy sessions",), True, True),
+)
+SETTINGS_MENU = (
+    ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
+    ("󰕾", "Sound", ["sound"], (), True, True),
+    (ICON_KEYS, "Keys", ["keys"], (), True, True),
+)
+MENU = (
+    ("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), False, True),
+    ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
+    ("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",), True, True),
+    ("󰐊", "Run", RUN_MENU, "Project, terminal", True, False),
+    ("󰘔", "This session", SESSION_MENU, "Rename, priority, close", True, False),
+    ("󰕰", "Sessions", SESSIONS_MENU, "Next, zen mode, sleep", True, True),
+    ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
+    ("󰒓", "Settings", SETTINGS_MENU, "Theme, sound, keys", True, True),
 )
 
 
-def menu_rows():
-    """The menu for where you are: (icon, label, key, command)."""
-    binds = hypr_binds()
-    inside = current_session_id() is not None
+def menu_rows(menu=MENU, binds=None, inside=None):
+    """The menu for where you are: (icon, label, key or what's in it, command
+    or the rows of a submenu, as a tuple). A submenu left with one row is
+    that row."""
+    binds = hypr_binds() if binds is None else binds
+    inside = current_session_id() is not None if inside is None else inside
     rows = []
-    for icon, label, command, descriptions, in_session, outside in MENU:
+    for icon, label, command, descriptions, in_session, outside in menu:
         if not (in_session if inside else outside):
+            continue
+        if isinstance(command, tuple):
+            children = menu_rows(command, binds, inside)
+            if len(children) > 1:
+                rows.append((icon, label, descriptions, tuple(children)))
+            else:
+                rows.extend(children)
             continue
         b = next((binds[d] for d in descriptions if d in binds), None)
         key = "+".join([*mod_names(b), b["key"].capitalize()]) if b else ""
@@ -3691,11 +3713,22 @@ def menu_rows():
 
 def cmd_menu():
     """Everything amarchy does from where you are, each with the key that does
-    it without the menu."""
-    rows = menu_rows()
-    choice = menu_select("Amarchy", [row[:3] for row in rows])
-    command = next((row[3] for row in rows if row[1] == choice), None)
-    return main(command) if command else 1
+    it without the menu; the less frequent things in submenus, where Escape
+    goes back."""
+    top = menu_rows()
+    while True:
+        choice = menu_select("Amarchy", [row[:3] for row in top])
+        row = next((r for r in top if r[1] == choice), None)
+        if not row:
+            return 1
+        if not isinstance(row[3], tuple):
+            return main(row[3])
+        sub = row[3]
+        choice = menu_select(row[1], [r[:3] for r in sub])
+        picked = next((r[3] for r in sub if r[1] == choice), None)
+        if picked:
+            return main(picked)
+        # Escape: back to the top.
 
 
 def cmd_ui():
