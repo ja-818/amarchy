@@ -74,7 +74,7 @@ group status`. The choice sticks.
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
-| `Ctrl+Alt+E` | Name this session yourself. The name sits in the strip above Claude and in the list, in place of the title Claude came up with. |
+| `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the title Claude came up with. |
 | `Ctrl+Alt+M` | The amarchy menu: everything here in one list, each with its key next to it. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -105,9 +105,10 @@ and project · branch under it. Click it to go to that session. It comes with a 
 the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
 none; they are the two files in `sounds/`, replace them with your own).
 
-The strip above Claude says the session the way its row does, in the bar's
-colors: its status (bell, spinner, check), what it's about in bold, and
-`PROJECT · BRANCH` on the right. Click the name to rename it.
+In zen mode, with the list out of the way, a strip above Claude says which
+session this is, the way its row does: the status glyph, what it's about in
+bold with `PROJECT · BRANCH` under it, and how it's doing on the right
+(`NEEDS YOU · 4M`, in the theme's accent). Click the name to rename it.
 
 ## Claude knows it's in amarchy
 
@@ -188,7 +189,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_WORKTREES` | `$AMARCHY_WORK/.worktrees` | Worktrees go to `<this>/<repo>/<name>`. |
 | `AMARCHY_TERMINAL` | first installed | `foot`, `kitty`, `alacritty` or `ghostty`. |
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
-| `AMARCHY_HEADER_HEIGHT` | `28` | Height of the strip above Claude with the session's name, `0` for none. Run `amarchy layout` after changing it. |
+| `AMARCHY_HEADER_HEIGHT` | `56` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 | `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
 

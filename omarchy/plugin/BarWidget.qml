@@ -382,6 +382,7 @@ Panel {
     readonly property bool spinning: visible && status === "working"
     screen: button.QsWindow.window ? button.QsWindow.window.screen : null
     sessions: store.sessions
+    zen: store.zen
     zenWidth: store.zenWidth
     stripHeight: store.headerHeight
     spinnerFrame: root.spinnerFrame

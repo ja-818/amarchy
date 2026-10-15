@@ -18,7 +18,7 @@ Item {
   property int panelGap: 8
   // How opaque the session terminal's background is; the list beside Claude matches it.
   property real terminalAlpha: 1
-  // Height of the strip kept free above it for the session's name (0: none).
+  // Height of the strip above it with the session's name, in zen mode (0: none).
   property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})

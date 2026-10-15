@@ -64,7 +64,7 @@ Environment:
   AMARCHY_WORKTREES    where worktrees go (default $AMARCHY_WORK/.worktrees/<repo>/<name>)
   AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
-  AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name (default 28, 0 for none)
+  AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 56, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
   AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
 
@@ -147,7 +147,7 @@ LEGACY_WS_PREFIX = "F:"
 ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
 CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
 # The strip above the zen column where the shell plugin writes the session's name.
-HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 28), 0)
+HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 56), 0)
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
 PAD = 8                 # between Claude's column and the panels beside it
 MIN_SIDE = 200          # narrower than this beside the column and there's no room for them
@@ -516,9 +516,15 @@ def tell_shell(*args):
 
 
 def header_height():
-    """Room kept above the zen column for the session's name; the shell plugin
-    draws it, so there's none without the plugin."""
+    """How tall the strip with the session's name is; the shell plugin draws
+    it, so there's none without the plugin."""
     return HEADER_HEIGHT if native_panel() else 0
+
+
+def header_room(width=None):
+    """Room kept above Claude for that strip: only in zen mode, where the list
+    (which shows the session you're in) isn't beside it."""
+    return header_height() if zen(width) else 0
 
 
 def monitor_geometry():
@@ -552,12 +558,14 @@ def migrate_legacy():
 # ------------------------------------------------------------------ layout
 
 def cmd_layout():
-    """Write the Hyprland rule that keeps a session's windows in a centered column.
+    """Write the Hyprland rule that keeps a session's windows in a centered column,
+    with room above it for the session's name in zen mode.
 
-    Loaded by hypr/amarchy.lua; only rewritten (and Hyprland reloaded) on change."""
+    Loaded by hypr/amarchy.lua; only rewritten on change, and then applied live
+    (no reload), so entering zen mode just opens the strip above Claude."""
     width, *_ = monitor_geometry()
     side = max((width - ZEN_WIDTH) // 2, 0)
-    top = header_height()
+    top = header_room(width)
     prefixes = {WS_PREFIX} | {s["workspace"][:2] for s in sessions()}
     rules = "".join(
         f'hl.workspace_rule({{ workspace = "n[s:{p}]", '
@@ -568,7 +576,8 @@ def cmd_layout():
         return
     STATE.mkdir(parents=True, exist_ok=True)
     LAYOUT.write_text(text)
-    sh("hyprctl", "reload")
+    for rule in rules.splitlines():
+        sh("hyprctl", "eval", rule)
 
 
 def arrange(sid, focus="claude", term=None):
@@ -623,6 +632,7 @@ def leave_zen():
     if ZEN.exists():
         ZEN.unlink()
         tell_shell_zen()
+        cmd_layout()
     if zen():
         notify("amarchy", "No room for the terminal beside Claude on this monitor.")
         return False
@@ -659,6 +669,7 @@ def cmd_zen(args):
     else:
         ZEN.unlink(missing_ok=True)
     tell_shell_zen()
+    cmd_layout()
     sid = current_session_id()
     if sid:
         s = session(sid)
