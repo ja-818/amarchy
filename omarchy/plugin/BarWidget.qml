@@ -614,8 +614,6 @@ Panel {
 
   SoundPicker {
     id: soundPicker
-    anchorItem: button
-    bar: root.bar
   }
 
   BarIconButton {

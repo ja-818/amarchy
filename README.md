@@ -248,7 +248,8 @@ each step of it went (shell, wallpaper, borders) is in
 ## Sound
 
 Pick the chime by ear: **Sound** in the amarchy menu (`Ctrl+Alt+M`), or
-Super+Space → Amarchy → Sound, drops the sounds from the Ⓐ in the bar. Each
+Super+Space → Amarchy → Sound, opens the sounds in the middle of the screen,
+like the Omarchy menu. Each
 one plays as the cursor lands on it, with the arrows (or `j`/`k`, or the
 pointer), cutting off the one before, so you hear them as you go down the
 list. `Enter` or a click sets it, `Esc` leaves it as it was. **Off** for none.

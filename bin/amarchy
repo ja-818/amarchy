@@ -69,7 +69,7 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme --refresh               put it back after something else repainted (Omarchy's theme-set hook runs this)
 
 Sound (the chime of a notification, when a session needs you or is done):
-  amarchy sound                         pick it under the Ⓐ in the bar: each one plays as the cursor lands on it
+  amarchy sound                         pick it in a menu where each one plays as the cursor lands on it
   amarchy sound <name> | off            set it (one of --list, or off for none)
   amarchy sound --show                  print it
   amarchy sound --list [--json]         every sound: amarchy's, then yours from ~/.config/amarchy/sounds
@@ -1218,7 +1218,7 @@ def menu_pick_sound():
 
 
 def cmd_sound(args):
-    """`amarchy sound`: the picker (under the Ⓐ, each sound playing as the
+    """`amarchy sound`: the picker (a menu with each sound playing as the
     cursor lands on it). With a name, set it; --show, --list [--json],
     --play [name], --stop and --add for the rest."""
     if args and args[0] == "--show":
