@@ -99,6 +99,13 @@ project**: pick one of your GitHub repos (searchable, most recently pushed
 first), paste a git URL, or start an empty project (optionally with a private
 GitHub repo), and the session starts right on it.
 
+A new session shows up at once: its row spins in the list, and you land on
+its workspace with Claude's window already in the column. That window sets the
+session up in front of you (fetching the latest of the base branch, only that
+one, and making the worktree), then becomes Claude, and the terminal slides in
+beside it. If it can't (say, a bad base branch), it says why there and the
+session goes away; without the network it starts from what was fetched last.
+
 Closing a session (`Ctrl+Alt+X`) removes its worktree, asks first if it has
 uncommitted changes, and deletes the branch if it was merged.
 

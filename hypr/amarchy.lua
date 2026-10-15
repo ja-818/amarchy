@@ -86,6 +86,11 @@ o.window("^(amarchy|factory)\\.(claude|term)\\..+$", { no_anim = true })
 -- under Claude first, so nothing on screen moves.
 o.window("^amarchy\\.term\\..+$", { float = true, workspace = "special:amarchy silent" })
 
+-- Claude's window opens out of sight too, and amarchy moves it to the session's
+-- workspace once it's there, before going to it: you land on the session
+-- with Claude already in place, not on an empty workspace that fills in.
+o.window("^amarchy\\.claude\\..+$", { workspace = "special:amarchy silent" })
+
 -- So do the list beside Claude and the strip above it: zen mode (and moving
 -- between sessions) shows and hides them at once, together with the terminal,
 -- instead of Hyprland fading them in after it.

@@ -58,6 +58,7 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
+  amarchy setup <id>                    make a new session's worktree, then start Claude (runs in its window)
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle (start: idle, and
                                         tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
@@ -98,6 +99,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -135,6 +137,12 @@ WS_PREFIX = "A:"            # session workspaces: A:<id>
 SHELL_PLUGIN = HOME / ".config/omarchy/plugins/amarchy/manifest.json"
 
 OMARCHY = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
+# Hyprland runs amarchy's keys without Omarchy's own commands on PATH (the shell
+# and the terminals have them). Without them amarchy can't nudge the shell
+# plugin, and it sizes Claude's column as if there were no plugin, so the next
+# command run from elsewhere resizes it all again.
+if (OMARCHY / "bin").is_dir() and str(OMARCHY / "bin") not in os.environ.get("PATH", "").split(os.pathsep):
+    os.environ["PATH"] = os.pathsep.join(filter(None, (os.environ.get("PATH"), str(OMARCHY / "bin"))))
 DESKTOP = HOME / ".local/state/omarchy/current"     # the Omarchy theme the rest of the desktop wears
 CLAUDE_THEME = HOME / ".claude/themes/amarchy.json"
 # Who last painted over the Omarchy theme ("amarchy" while ours shows, empty
@@ -1137,6 +1145,8 @@ def cmd_run(args):
     s = session(sid) if sid else None
     if not s:
         return 1
+    if s.get("setup") and (not args or not args[0].startswith("--") or args[0] == "--pick"):
+        return fail(f"{s['name']} is still being set up: run it once Claude has started")
     flag = args[0] if args else ""
     if flag == "--set":
         command = " ".join(args[1:]) or menu_input(f"Run command for {s['repo']}")
@@ -1203,8 +1213,10 @@ def cmd_jump(sid):
     LAST.write_text(sid)
     if theme_name():
         ensure_watcher()
-    focus_workspace(s["workspace"])
+    # The windows open out of sight and go over first, so you land on the
+    # session as it is rather than watching it fill in.
     ensure_windows(s)
+    focus_workspace(s["workspace"])
     arrange(sid)
 
 
@@ -1241,9 +1253,14 @@ def cmd_step(delta):
 
 # ------------------------------------------------------------------ new / close
 
+def has_origin(repo_dir):
+    return "origin" in sh("git", "remote", cwd=repo_dir).stdout.split()
+
+
 def default_base(repo_dir):
-    if sh("git", "remote", cwd=repo_dir).stdout.strip():
-        sh("git", "fetch", "--quiet", "origin", cwd=repo_dir)
+    """What a new session branches off: origin's default branch, else the
+    local main or master. From what's already fetched, so it's instant."""
+    if has_origin(repo_dir):
         head = sh("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=repo_dir).stdout.strip()
         if head:
             return head
@@ -1254,6 +1271,29 @@ def default_base(repo_dir):
         if sh("git", "rev-parse", "--verify", "--quiet", b, cwd=repo_dir).returncode == 0:
             return b
     return "HEAD"
+
+
+FETCH_TIMEOUT = 30
+
+
+def fetch_base(repo_dir, base):
+    """Bring base up to date from origin, and return it (it can change when
+    origin's branches were never fetched). Only that branch when base is on
+    origin, which is much quicker than fetching everything in a big repo.
+    The error, if any, comes second: without the network the session still
+    starts, from what was fetched last."""
+    if not has_origin(repo_dir):
+        return base, None
+    branch = base.removeprefix("origin/") if base.startswith("origin/") else None
+    try:
+        r = subprocess.run(["git", "fetch", "--quiet", "origin", *([branch] if branch else [])], cwd=repo_dir,
+                           capture_output=True, text=True, timeout=FETCH_TIMEOUT, stdin=subprocess.DEVNULL,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get(
+                               "GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
+        error = r.stderr.strip() if r.returncode else None
+    except subprocess.TimeoutExpired:
+        error = f"no answer from origin in {FETCH_TIMEOUT}s"
+    return (base if branch else default_base(repo_dir)), error
 
 
 def set_trust(path, trusted):
@@ -1315,6 +1355,9 @@ def auto_name(repo):
 
 
 def create(repo, name):
+    """Start a session, and show it right away: its row in the list, its
+    workspace, and Claude's window, where `amarchy setup` makes the worktree
+    in front of you and then becomes Claude. Returns the session id."""
     repo_dir = WORK / repo
     name = slug(name)
     if not name or not (repo_dir / ".git").exists():
@@ -1327,34 +1370,133 @@ def create(repo, name):
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
         notify("amarchy", f"{repo} has no commits yet. Commit something to branch off first.")
         return None
-    base = default_base(repo_dir)
-    path = WORKTREES / repo / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    r = sh("git", "worktree", "add", "-b", name, str(path), base, cwd=repo_dir)
-    if r.returncode != 0:
-        # Branch already exists (e.g. a kept, unmerged one): reuse it.
-        r = sh("git", "worktree", "add", str(path), name, cwd=repo_dir)
-    if r.returncode != 0:
-        notify("amarchy", f"git worktree failed: {r.stderr.strip()[:200]}")
-        return None
 
     SESSIONS.mkdir(parents=True, exist_ok=True)
     STATUS.mkdir(parents=True, exist_ok=True)
-    s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": base,
-         "path": str(path), "created": int(time.time()),
-         "prefix": PREFIX, "workspace": WS_PREFIX + sid}
+    # "setup" until the worktree is there. Working meanwhile, so the list
+    # spins on it; Claude's SessionStart hook settles it.
+    s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
+         "path": str(WORKTREES / repo / name), "created": int(time.time()),
+         "prefix": PREFIX, "workspace": WS_PREFIX + sid, "setup": True}
     (SESSIONS / f"{sid}.json").write_text(json.dumps(s))
-    (STATUS / sid).write_text("idle")
-    LAST.write_text(sid)
+    (STATUS / sid).write_text("working")
     tell_shell("refresh")
-
-    set_trust(path, True)
     cmd_layout()
-    focus_workspace(s["workspace"])
-    ensure_windows(s)
-    arrange(sid)
-    notify("amarchy", f"{repo} · {name} is ready (branch off {base})")
+    cmd_jump(sid)
     return sid
+
+
+def make_worktree(s):
+    """Fetch the session's base and add its worktree, saying how it goes.
+    Returns an error message, or None once the worktree is there (and the
+    session no longer being set up)."""
+    repo_dir, path, name = WORK / s["repo"], Path(s["path"]), s["branch"]
+    base = s["base"]
+    # Already there when the window was closed before Claude started.
+    if not (path / ".git").exists():
+        with step(f"Fetching the latest {base}") as st:
+            base, error = fetch_base(repo_dir, base)
+            if error:
+                st.warn(f"Couldn't fetch, so from what was fetched last: {gist(error)}")
+        with step(f"Making the worktree, branch {name} off {base}") as st:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            r = sh("git", "worktree", "add", "-b", name, str(path), base, cwd=repo_dir)
+            if r.returncode != 0 and sh("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{name}",
+                                        cwd=repo_dir).returncode == 0:
+                # The branch is already there (e.g. a kept, unmerged one): pick it back up.
+                st.note(f"Branch {name} was already there: picked it back up")
+                sh("git", "worktree", "prune", cwd=repo_dir)
+                r = sh("git", "worktree", "add", str(path), name, cwd=repo_dir)
+            if r.returncode != 0:
+                st.fail()
+                return r.stderr.strip() or "git worktree add failed"
+    s = session(s["id"]) or s     # as it is now: it may have been renamed meanwhile
+    s.pop("setup", None)
+    s["base"] = base
+    (SESSIONS / f"{s['id']}.json").write_text(json.dumps(s))
+    return None
+
+
+def gist(error):
+    """The line of git's error that says what went wrong."""
+    lines = [l.strip() for l in error.splitlines() if l.strip()]
+    return next((l for l in lines if l.lower().startswith(("fatal:", "error:"))), lines[0] if lines else "")[:200]
+
+
+class step:
+    """One line of `amarchy setup`: a spinner while it runs, then ✓ (or ✗)."""
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, text):
+        self.text, self.mark, self.notes = text, "\033[32m✓\033[0m", []
+
+    def __enter__(self):
+        self.started, self.done = time.time(), False
+
+        def spin():
+            i = 0
+            while not self.done and sys.stdout.isatty():
+                print(f"\r\033[K  {self.FRAMES[i % len(self.FRAMES)]} {self.text}…", end="", flush=True)
+                i += 1
+                time.sleep(0.08)
+        self.thread = threading.Thread(target=spin, daemon=True)
+        self.thread.start()
+        return self
+
+    def warn(self, text):
+        self.mark = "\033[33m!\033[0m"
+        self.notes.append(text)
+
+    def note(self, text):
+        self.notes.append(text)
+
+    def fail(self):
+        self.mark = "\033[31m✗\033[0m"
+
+    def __exit__(self, *exc):
+        self.done = True
+        self.thread.join()
+        took = time.time() - self.started
+        print(f"\r\033[K  {self.mark} {self.text} \033[2m{took:.1f}s\033[0m", flush=True)
+        for n in self.notes:
+            print(f"    \033[2m{n}\033[0m", flush=True)
+
+
+def cmd_setup(sid):
+    """What runs in a new session's Claude window: make its worktree, then
+    open the terminal beside it and become Claude Code. On failure, say why
+    and drop the session."""
+    s = session(sid)
+    if not s:
+        return fail(f"No session {sid!r}")
+    print(f"\n  \033[1m{s['repo']} · {s['name']}\033[0m\n", flush=True)
+    error = make_worktree(s)
+    if error:
+        print(f"\n  \033[31m{error}\033[0m\n", flush=True)
+        (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
+        (STATUS / sid).unlink(missing_ok=True)
+        tell_shell("refresh")
+        notify("amarchy", f"Couldn't start {s['repo']} · {s['name']}: {gist(error)}")
+        try:
+            input("  Press Enter to close this window. ")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        return 1
+    s = session(sid)
+    path = Path(s["path"])
+    set_trust(path, True)
+    tell_shell("refresh")
+    with step("Starting Claude Code"):
+        # The terminal beside it, out of sight until it's in place. Nothing
+        # takes the keyboard: you may have gone somewhere else meanwhile.
+        ensure_windows(s)
+        arrange(sid, focus=None)
+    if current_session_id() != sid:
+        notify("amarchy", f"{s['repo']} · {s['name']} is ready", click=("jump", sid))
+    os.chdir(path)
+    os.environ["PWD"] = str(path)
+    argv = claude_argv(s)
+    os.execvp(argv[0], argv)
 
 
 def has_conversation(path):
@@ -1363,28 +1505,42 @@ def has_conversation(path):
     return any(projects.glob("*.jsonl"))
 
 
+def claude_argv(s):
+    """Claude Code for a session, picking its conversation back up if it has one."""
+    resume = ["--continue"] if has_conversation(s["path"]) else []
+    return ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])]
+
+
 def ensure_windows(s):
     """Open whatever a session is missing: Claude (picking its conversation back
-    up) and, outside zen mode, the terminal. Windows are disposable, like
-    any other window in Omarchy: close one with Super+W and the next jump (or
-    terminal key) brings it back. The session itself only ends with close."""
+    up, or setting the session up first) and, outside zen mode, the terminal.
+    Both open out of sight and are moved over once there, so nothing lands on
+    whatever workspace you're on. Windows are disposable, like any other window
+    in Omarchy: close one with Super+W and the next jump (or terminal key)
+    brings it back. The session itself only ends with close."""
     path = Path(s["path"])
-    if not path.is_dir():
+    setting_up = bool(s.get("setup"))
+    if not setting_up and not path.is_dir():
         return
     opened = []
     if not find(claude_class(s)):
-        resume = ["--continue"] if has_conversation(path) else []
-        open_term(claude_class(s), f"amarchy:{s['id']}", path,
-                  ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])], env=session_env(s))
+        if setting_up:
+            # The worktree isn't there yet: start in the project's checkout.
+            open_term(claude_class(s), f"amarchy:{s['id']}", WORK / s["repo"], [ENTRY, "setup", s["id"]],
+                      env=session_env(s))
+        else:
+            open_term(claude_class(s), f"amarchy:{s['id']}", path, claude_argv(s), env=session_env(s))
         opened.append(claude_class(s))
-    if not zen() and not find(term_class(s)):
+    if not setting_up and not zen() and not find(term_class(s)):
         open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path, env=session_env(s))
         opened.append(term_class(s))
     for cls in opened:
         win = wait_for(cls)
-        # The terminal starts hidden; arrange() puts it beside Claude.
-        if win:
-            move_to(win["address"], HIDDEN if cls == term_class(s) else f"name:{s['workspace']}")
+        # The terminal stays hidden; arrange() puts it beside Claude.
+        if win and cls == claude_class(s) and win["workspace"]["name"] != s["workspace"]:
+            move_to(win["address"], f"name:{s['workspace']}")
+        elif win and cls == term_class(s) and win["workspace"]["name"] != HIDDEN:
+            move_to(win["address"], HIDDEN)
 
 
 def cmd_new(args):
@@ -1532,7 +1688,9 @@ def close(sid, force=False):
     repo_dir = WORK / s["repo"]
     sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
     sh("git", "worktree", "prune", cwd=repo_dir)
-    kept = sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
+    had_branch = sh("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{s['branch']}",
+                    cwd=repo_dir).returncode == 0
+    kept = had_branch and sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
     (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
     (STATUS / sid).unlink(missing_ok=True)
     set_trust(path, False)
@@ -1541,7 +1699,8 @@ def close(sid, force=False):
         rest = sessions()
         if rest:
             cmd_jump(rest[-1]["id"])
-    note = f"branch {s['branch']} kept (not merged)" if kept else "branch deleted"
+    note = (f"branch {s['branch']} kept (not merged)" if kept else
+            "branch deleted" if had_branch else "it was still being set up")
     notify("amarchy", f"Closed {s['repo']} · {s['name']} ({note})")
     return None
 
@@ -1821,6 +1980,8 @@ def saved_title(path):
 def session_task(s, window_title):
     """What a session is about: your own name for it (amarchy rename), else
     Claude's, from its window or its latest conversation."""
+    if s.get("setup"):
+        return s.get("title") or "Setting up the worktree"
     return s.get("title") or task_title(window_title) or saved_title(s["path"])
 
 
@@ -2010,6 +2171,8 @@ def main(argv):
         return cmd_order(args)
     elif cmd == "layout":
         cmd_layout()
+    elif cmd == "setup" and len(args) == 1:
+        return cmd_setup(args[0])
     elif cmd == "hook" and len(args) == 2:
         cmd_hook(*args)
     else:
