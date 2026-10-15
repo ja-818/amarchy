@@ -24,11 +24,13 @@ rows and selection as the Omarchy menu, in the order you opened them, so a
 session keeps its place. Click one to jump to it.
 
 Above it there is only what you reach for: **Ⓐ Amarchy** (the menu: everything
-else amarchy does, each with its key), **New session** and a **search**. Click it
-and type a few letters of a session's name (what it's about, its project or its
-branch): the list narrows as you type, `↑`/`↓` move, `↵` jumps there, `Esc`
-brings the whole list back. `Ctrl+Alt+S` does the same without the mouse, in
-the list under the Ⓐ.
+else amarchy does, each with its key), **New session** and a **search**, which
+reads `Ctrl+Alt+S`: the key that does the same as clicking it. Type a few
+letters of a session's name (what it's about, its project or its branch): the
+list narrows as you type, `↑`/`↓` move, `↵` jumps there, `Esc` brings the whole
+list back. On a session that's the list beside Claude (moving the pointer onto
+Claude or the terminal hands them the keyboard back, as after a click); in zen
+mode and outside amarchy, the list under the Ⓐ.
 
 **Zen mode** (`Ctrl+Alt+Z`) leaves Claude alone in the column. Claude doesn't
 move: the panels beside it just step away, for every session, until you press
@@ -62,13 +64,16 @@ is also dimmed. Every one of them
 still notifies you. From a script: `amarchy priority high|normal|low|up|down
 [--id <id>]`.
 
-Next to the search are three switches for grouping the list, lit while on:
-**by project** (󰉋, one section per project, each row showing just its branch),
-**by priority** (󰈻, High, Normal, Low) and **by status** (󰉹, by what they need
-from you: Needs you, Working, Idle, Asleep). Use any of them; together they
-nest in that order, e.g. the priorities inside each project. In the list under
-the Ⓐ, `p`, `f` and `s` do the same; from a script, `amarchy group project`,
-`amarchy group priority` and `amarchy group status`. The choice sticks.
+Next to the search, the 󰒼 button (lit while the list is grouped) opens how the
+list is grouped: **by project** (󰉋, one section per project, each row showing
+just its branch), **by priority** (󰈻, High, Normal, Low) and **by status** (󰉹,
+by what they need from you: Needs you, Working, Idle, Asleep), each checked
+while on, or **Not grouped**. Use any of them; together they nest in that
+order, e.g. the priorities inside each project. The menu stays open to set
+several; a click off it closes it. In the list under the Ⓐ, `g` opens it
+(`j`/`k`, `↵` to switch, `Esc` to close) and `p`, `f` and `s` switch one
+directly; from a script, `amarchy group project`, `amarchy group priority`,
+`amarchy group status` and `amarchy group none`. The choice sticks.
 
 ## Keys
 
@@ -77,7 +82,7 @@ the Ⓐ, `p`, `f` and `s` do the same; from a script, `amarchy group project`,
 | `Super+Alt+A` | Open amarchy: back to your last session. Starts a new one if there are none. |
 | `Super+Alt+N` | New session: pick a project, that's it. Creates a worktree on a fresh branch named after a famous anarchist with a silly adjective (`wobbly-bakunin`, `caffeinated-goldman`), Claude and a terminal. |
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. |
-| `Ctrl+Alt+S` | Search: the list drops from the Ⓐ with the keyboard in its search. Type to find a session by name, `↵` jumps to it, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `+` / `-` to raise / lower a session's priority, `p` / `f` / `s` to switch grouping by project / priority / status, `Esc` to dismiss. |
+| `Ctrl+Alt+S` | Search, the same as clicking the search: on a session, the list beside Claude; in zen mode, the list drops from the Ⓐ. Type to find a session by name, `↵` jumps to it, `Esc` leaves the search. Under the Ⓐ, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `+` / `-` to raise / lower a session's priority, `g` for the grouping menu, `p` / `f` / `s` to switch grouping by project / priority / status, `Esc` to dismiss. |
 | `Ctrl+Alt+Z` | Zen mode: Claude alone, without the sessions and the terminal beside it. Again brings them back. |
 | `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
@@ -327,7 +332,7 @@ amarchy run --save <name> [command]   save one; --forget <name> drops it
 amarchy run --list                    the project's saved commands
 amarchy run --pick                    choose one in the Omarchy menu, or save a new one there
 amarchy show                          open the session list under the Ⓐ in the bar
-amarchy search                        type to find a session by name, in the list under the Ⓐ
+amarchy search                        type to find a session by name, the list beside Claude, or under the Ⓐ
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy sleep [id] [--force]          put a session to sleep (says why not when something would be lost)
 amarchy sleep --all [--force]         every session that can sleep, except the one on screen

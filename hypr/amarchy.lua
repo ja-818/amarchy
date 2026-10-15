@@ -14,7 +14,8 @@
 --   nav_mod      modifier for these keys (default "CTRL + ALT")
 --   next_key     the session below in the list (default "J")
 --   prev_key     the session above (default "K")
---   search_key   type to find a session by name, in the list under the Ⓐ (default "S")
+--   search_key   type to find a session by name, as if you clicked the search: in
+--                the list beside Claude, or under the Ⓐ in zen mode (default "S")
 --   zen_key      toggle zen mode: Claude alone, without the sessions and the
 --                terminal beside it (default "Z")
 --   terminal_key move the keyboard between Claude and the terminal; leaves
