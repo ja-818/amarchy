@@ -3,13 +3,14 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
+import qs.Ui
 
 // The session's name above Claude in zen mode, where the list that shows the
-// session you're in has stepped away: a bar as wide as Claude's column, its
-// name centered, on the wallpaper with a gap above Claude, so it reads as the desktop's and
-// not as part of Claude's window. The status glyph (the bell in the theme's
-// accent) and what the session is about; hovering fills it like any Omarchy
-// control and adds project · branch and a pencil: click to rename.
+// session you're in has stepped away: a bar as wide as Claude's column, right
+// on top of it, its name centered, and a divider under it so it reads as its
+// own thing and not as Claude's first line. The status glyph (the bell in the
+// theme's accent) and what the session is about; hovering fills it like any
+// Omarchy control and adds project · branch and a pencil: click to rename.
 // `amarchy layout` makes room for it above Claude in zen mode only.
 PanelWindow {
   id: root
@@ -50,15 +51,19 @@ PanelWindow {
 
   Rectangle {
     id: pill
-    anchors.centerIn: parent
-    height: row.implicitHeight + Style.spacing.xs * 2
+    anchors.horizontalCenter: parent.horizontalCenter
+    height: parent.height
     // As wide as Claude's column below it.
     width: Math.min(root.zenWidth, parent.width)
-    radius: Style.cornerRadius
     color: root.hot ? Qt.tint(Color.bar.background, Style.hoverFillFor(root.ink, Color.accent)) : Color.bar.background
-    border.width: Style.hoverBorderWidth
-    border.color: root.hot ? Style.hoverBorderFor(root.ink, Color.accent) : Util.alpha(root.ink, 0.12)
     clip: true
+
+    // Where it ends and Claude begins: Omarchy's panel divider, a touch firmer.
+    PanelSeparator {
+      anchors.bottom: parent.bottom
+      foreground: root.ink
+      strength: 0.2
+    }
 
     Row {
       id: row
