@@ -98,8 +98,9 @@ dev server). Restart the terminal so the user sees the result too.
 - `amarchy close` with no id closes **this** session: your own window and your
   worktree. Don't.
 - `jump`, `next`, `prev`, `open`, `show`, `search`, `pick`, `menu`, `zen`,
-  `terminal`, `theme`, `group`, `layout`: these move or repaint what the user is
-  looking at. Run them only when asked, as the action itself.
+  `terminal`, `theme`, `sound`, `group`, `layout`: these move or repaint what the
+  user is looking at (or change what they hear). Run them only when asked, as
+  the action itself.
 - `hook`, `ui`, `watch` are amarchy's own plumbing. Don't edit
   `~/.local/state/amarchy/` either.
 

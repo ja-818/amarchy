@@ -59,6 +59,13 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme --show                  print it
   amarchy theme --refresh               put it back after something else repainted (Omarchy's theme-set hook runs this)
 
+Sound (the chime of a notification, when a session needs you or is done):
+  amarchy sound                         pick it in the Omarchy menu: each one plays as you pick it
+  amarchy sound <name> | off            set it (one of --list, or off for none)
+  amarchy sound --show                  print it
+  amarchy sound --list                  every sound: amarchy's, then yours from ~/.config/amarchy/sounds
+  amarchy sound --play [name]           hear one (the one set now without a name)
+
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
@@ -74,7 +81,7 @@ Environment:
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 30, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
-  AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
+  AMARCHY_SOUND        off for silent notifications, whatever `amarchy sound` picked
 
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
@@ -129,7 +136,8 @@ SELF = str(Path(__file__).resolve())
 # instead of staying on the copy that set it up, a worktree maybe long gone.
 INSTALLED = Path.home() / ".local/bin/amarchy"
 ENTRY = str(INSTALLED) if INSTALLED.exists() else SELF
-SOUNDS = Path(SELF).parent.parent / "sounds"       # <state>.wav, played with a session's notification
+SOUNDS = Path(SELF).parent.parent / "sounds"       # amarchy's chimes, one played with a session's notification
+SOUND_FILE = STATE / "sound"                       # the one picked (its name, or "off")
 SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
@@ -184,13 +192,11 @@ def notify(title, body="", glyph="Ⓐ", click=()):
         sh("notify-send", title, body)
 
 
-def chime(state):
-    """The sound of a session's notification: two notes going up when it
-    needs you, one settled note when it's done. AMARCHY_SOUND=off for none."""
-    sound = SOUNDS / f"{state}.wav"
-    player = shutil.which("pw-play") or shutil.which("paplay")
-    if SOUND and player and sound.exists():
-        detach([player, str(sound)])
+def chime():
+    """The sound of a session's notification, the same whether it needs you or
+    is done: the one `amarchy sound` picked. AMARCHY_SOUND=off for none."""
+    if SOUND:
+        play(sound_file(sound_name()))
 
 
 def hypr(expr):
@@ -1014,6 +1020,130 @@ def theme_refresh():
     return 0 if painted else 1
 
 
+# ------------------------------------------------------------------ sound
+
+# amarchy's own chimes (sounds/, where sounds/CREDITS says where each is from),
+# in the order the menu offers them; the first is the default.
+CHIMES = (
+    ("kalimba", "Two plucks going up"),
+    ("vibraphone", "Three soft notes rising into a chord"),
+    ("tine", "One bright bell"),
+    ("fairy", "A twinkle, then a brighter run: hey… listen!"),
+    ("ocean", "From KDE's Ocean sounds"),
+    ("elementary", "From elementary OS"),
+)
+USER_SOUNDS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/sounds"
+AUDIO = (".wav", ".oga", ".ogg", ".opus", ".flac", ".mp3")   # what pw-play and paplay read
+ICON_SOUND = "󰕾"
+ICON_MUTE = "󰖁"
+ADD_SOUND = "Add your own"
+
+
+def sounds():
+    """Every sound to pick from, {name: (file, about)}: amarchy's, then the
+    files in ~/.config/amarchy/sounds, named after the file. One of yours
+    with the name of one of amarchy's replaces it."""
+    found = {name: (SOUNDS / f"{name}.oga" if (SOUNDS / f"{name}.oga").exists() else SOUNDS / f"{name}.wav", about)
+             for name, about in CHIMES}
+    mine = sorted(f for f in USER_SOUNDS.glob("*") if f.suffix.lower() in AUDIO and f.is_file()) \
+        if USER_SOUNDS.is_dir() else []
+    for f in mine:
+        found.pop(f.stem.lower(), None)
+        found[f.stem] = (f, f"Yours · {f.name}")
+    return found
+
+
+def sound_key(name, found=None):
+    """The name of a sound as sounds() has it, whatever its case; None if there's none."""
+    found = sounds() if found is None else found
+    return next((n for n in found if n.lower() == name.strip().lower()), None)
+
+
+def sound_name():
+    """The sound picked: its name, "off", or the default when nothing (or a
+    file since removed) was picked."""
+    picked = SOUND_FILE.read_text().strip() if SOUND_FILE.exists() else ""
+    if picked == "off":
+        return picked
+    return (sound_key(picked) if picked else None) or CHIMES[0][0]
+
+
+def sound_file(name):
+    found = sounds()
+    key = sound_key(name, found) if name != "off" else None
+    return found[key][0] if key else None
+
+
+def play(path):
+    player = shutil.which("pw-play") or shutil.which("paplay")
+    if player and path and path.exists():
+        detach([player, str(path)])
+
+
+def set_sound(name):
+    STATE.mkdir(parents=True, exist_ok=True)
+    SOUND_FILE.write_text(name + "\n")
+
+
+def menu_pick_sound():
+    """The sounds in the Omarchy menu, the one set now checked. Picking one
+    sets it and plays it, and the menu comes back to try another; Escape
+    keeps the last one picked."""
+    while True:
+        found, now = sounds(), sound_name()
+        rows = [(ICON_CHECK if name == now else ICON_SOUND, name.capitalize() if name in dict(CHIMES) else name, about)
+                for name, (_, about) in found.items()]
+        rows.append((ICON_CHECK if now == "off" else ICON_MUTE, "Off", "Notifications without a chime"))
+        rows.append((ICON_ADD, ADD_SOUND, f"A .wav, .ogg or .mp3 in {str(USER_SOUNDS).replace(str(HOME), '~')}"))
+        choice = menu_select("Sound", rows)
+        if not choice:
+            return 0
+        if choice == ADD_SOUND:
+            USER_SOUNDS.mkdir(parents=True, exist_ok=True)
+            if shutil.which("xdg-open"):
+                detach(["xdg-open", str(USER_SOUNDS)])
+            notify("amarchy", f"Put a sound file in {USER_SOUNDS}, then pick it in Sound.", ICON_SOUND)
+            return 0
+        if choice == "Off":
+            set_sound("off")
+            return 0
+        name = sound_key(choice, found)
+        if name:
+            set_sound(name)
+            play(found[name][0])
+
+
+def cmd_sound(args):
+    if args and args[0] == "--show":
+        print(sound_name())
+        return 0
+    if args and args[0] == "--list":
+        for name, (path, about) in sounds().items():
+            print(f"{name}\t{about}\t{path}")
+        return 0
+    if args and args[0] == "--play":
+        name = " ".join(args[1:]) or sound_name()
+        if name == "off":
+            return fail("the sound is off (name one to hear it: amarchy sound --play <name>)")
+        path = sound_file(name)
+        if not path:
+            return fail(f"no sound {name!r} (see amarchy sound --list)")
+        play(path)
+        return 0
+    if not args:
+        return menu_pick_sound()
+    name = " ".join(args)
+    if name.lower() == "off":
+        set_sound("off")
+    else:
+        key = sound_key(name)
+        if not key:
+            return fail(f"no sound {name!r} (see amarchy sound --list)")
+        set_sound(key)
+    print(sound_name())
+    return 0
+
+
 # ------------------------------------------------------------------ run
 
 def guess_run(path):
@@ -1835,14 +1965,23 @@ def agent_context(s):
             f"work involves other sessions, worktrees, that terminal or merging back into main.")
 
 
+# The notifications of Claude Code that mean it's blocked on you. Others aren't
+# a question: "idle_prompt" comes a minute after it finished, if you haven't
+# answered, and would ring a session that's done a second time, as needing you.
+NEEDS_YOU = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input")
+
+
 def cmd_hook(sid, state):
-    # Claude Code passes the event JSON on stdin; we only need the state.
+    # Claude Code passes the event as JSON on stdin.
     try:
-        sys.stdin.read()
+        event = json.loads(sys.stdin.read() or "{}")
     except Exception:
-        pass
+        event = {}
     s = session(sid)
     if not s:
+        return
+    kind = event.get("notification_type") if isinstance(event, dict) else None
+    if state == "waiting" and kind and kind not in NEEDS_YOU:
         return
     if state == "start":
         # SessionStart: Claude is ready (idle), and learns where it is.
@@ -1863,7 +2002,7 @@ def cmd_hook(sid, state):
         task = session_task(s, claude["title"] if claude else "")
         where = f"{s['repo']} · {s['name']}"
         notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", sid))
-        chime(state)
+        chime()
 
 
 # ------------------------------------------------------------------ mission control
@@ -2125,6 +2264,7 @@ MENU = (
     ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
     ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
     ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
+    ("󰕾", "Sound", ["sound"], (), True, True),
     ("󰏫", "Rename session", ["rename"], ("Rename amarchy session",), True, False),
     ("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",), True, False),
     ("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",), True, False),
@@ -2232,6 +2372,8 @@ def main(argv):
         return cmd_menu()
     elif cmd == "theme":
         return cmd_theme(args)
+    elif cmd == "sound":
+        return cmd_sound(args)
     elif cmd == "watch":
         return cmd_watch()
     elif cmd == "group":

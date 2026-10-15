@@ -119,9 +119,11 @@ also removes the worktree.
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
 the session's row in the list: a bell or a check, what the session is about,
-and project · branch under it. Click it to go to that session. It comes with a chime: two notes going up when
-the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
-none; they are the two files in `sounds/`, replace them with your own).
+and project · branch under it. Click it to go to that session. It comes with a
+chime, the same one either way; pick it in [Sound](#sound). The bell only rings
+when Claude is actually blocked on you (a permission, a question): the reminder
+Claude Code sends a minute after a turn you haven't answered doesn't count, so
+a finished session never chimes twice.
 
 In zen mode, with the list out of the way, a bar as wide as Claude's
 column, divided from it by a line, says which session this is: the status glyph (the
@@ -179,6 +181,28 @@ If a piece of the desktop ever stays in the wrong theme, every repaint and how
 each step of it went (shell, wallpaper, borders) is in
 `~/.local/state/amarchy/theme.log`.
 
+## Sound
+
+Pick the chime in the Omarchy menu: **Sound** in the amarchy menu
+(`Ctrl+Alt+M`), or Super+Space → Amarchy → Sound. Each one plays as you pick
+it and the menu stays up, so you can try them in a row; `Esc` keeps the last
+one. **Off** for none.
+
+```sh
+amarchy sound              # the menu
+amarchy sound tine         # set one: kalimba (the default), vibraphone, tine, fairy, ocean, elementary
+amarchy sound --play fairy # hear one
+amarchy sound off
+```
+
+Any sound of your own works: put a `.wav`, `.ogg`, `.oga`, `.opus`, `.flac` or
+`.mp3` in `~/.config/amarchy/sounds/` and it shows up in the menu under its file
+name (**Add your own** in the menu opens that folder). One named like one of
+amarchy's replaces it. Keep it short: it plays in full with every notification.
+
+`sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
+ones again.
+
 ## Install
 
 Needs Omarchy 4+ (Hyprland Lua config, the Omarchy shell and menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
@@ -213,7 +237,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
 | `AMARCHY_HEADER_HEIGHT` | `30` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
-| `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
+| `AMARCHY_SOUND` | `on` | `off` for notifications without the chime, whatever [Sound](#sound) picked. |
 
 ## CLI
 
@@ -251,6 +275,7 @@ amarchy search                        type to find a session by name, in the lis
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+amarchy sound [name|off]              the notification chime (the menu without a name; --show, --list, --play [name])
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
 amarchy group [project|priority|status] [on|off]  group the list, nested in that order (switches without on|off)
 amarchy group none                    no grouping (the default): priority, then the order you opened them in
