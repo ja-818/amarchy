@@ -4,13 +4,13 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
 
-// The strip above Claude in zen mode, where the list that shows the session
-// you're in has stepped away. It says the session the way its row does, as an
-// Omarchy panel hero, in the bar's colors: the status glyph (the bell in the
-// theme's accent), and what it's about in bold with PROJECT · BRANCH in small
-// caps under it. `amarchy layout` makes room for it above Claude in zen mode
-// only. Click the name to rename the session: hovering fills it like any
-// Omarchy control, with a pencil.
+// The session's name above Claude in zen mode, where the list that shows the
+// session you're in has stepped away: a small pill centered over the column,
+// on the wallpaper with a gap above Claude, so it reads as the desktop's and
+// not as part of Claude's window. The status glyph (the bell in the theme's
+// accent) and what the session is about; hovering fills it like any Omarchy
+// control and adds project · branch and a pencil: click to rename.
+// `amarchy layout` makes room for it above Claude in zen mode only.
 PanelWindow {
   id: root
 
@@ -34,8 +34,6 @@ PanelWindow {
   readonly property var icons: ({ waiting: "󰂞", idle: "󰄬", asleep: "󰒲" })
   readonly property color ink: Color.bar.text
   readonly property color dim: Qt.darker(Color.bar.text, 1.4)
-  // The glyph's color: the theme's accent when it needs you.
-  readonly property color statusInk: status === "waiting" ? Color.accent : (status === "working" ? ink : dim)
 
   visible: zen && stripHeight > 0 && session !== null
   color: "transparent"
@@ -47,109 +45,74 @@ PanelWindow {
   WlrLayershell.namespace: "amarchy-header"
   WlrLayershell.layer: WlrLayer.Bottom
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-  // Only the name takes clicks; the rest falls through to the desktop.
-  mask: Region { item: name }
+  // Only the pill takes clicks; the rest falls through to the desktop.
+  mask: Region { item: pill }
 
   Rectangle {
-    id: strip
-    width: Math.min(root.zenWidth, parent.width)
-    height: parent.height
-    anchors.horizontalCenter: parent.horizontalCenter
-    color: Color.bar.background
+    id: pill
+    anchors.centerIn: parent
+    height: row.implicitHeight + Style.spacing.xs * 2
+    width: Math.min(row.implicitWidth + Style.spacing.controlPaddingX * 2, Math.min(root.zenWidth, parent.width))
+    radius: Style.cornerRadius
+    color: root.hot ? Qt.tint(Color.bar.background, Style.hoverFillFor(root.ink, Color.accent)) : Color.bar.background
+    border.width: Style.hoverBorderWidth
+    border.color: root.hot ? Style.hoverBorderFor(root.ink, Color.accent) : Util.alpha(root.ink, 0.12)
+    clip: true
 
-    // The name, as a control: status glyph, then title over PROJECT · BRANCH.
-    Rectangle {
-      id: name
-      anchors.left: parent.left
-      anchors.leftMargin: Style.spacing.rowPaddingX - Style.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      height: labels.implicitHeight + Style.spacing.sm * 2
-      // From the parts: the labels' own width depends on this.
-      readonly property real natural: Style.spacing.lg * 2 + glyph.width + Style.space(14)
-                                      + Math.max(title.implicitWidth + (pencil.visible ? Style.spacing.lg + pencil.implicitWidth : 0),
-                                                 meta.implicitWidth)
-      width: Math.min(natural, parent.width - Style.spacing.rowPaddingX * 2)
-      radius: Style.cornerRadius
-      color: root.hot ? Style.hoverFillFor(root.ink, Color.accent) : "transparent"
-      border.width: root.hot ? Style.hoverBorderWidth : 0
-      border.color: Style.hoverBorderFor(root.ink, Color.accent)
-      clip: true
+    Row {
+      id: row
+      anchors.centerIn: parent
+      spacing: Style.spacing.md
 
       Text {
         id: glyph
         // A fixed slot, so the title doesn't shift as the spinner turns.
-        width: Style.font.iconLarge
-        anchors.left: parent.left
-        anchors.leftMargin: Style.spacing.lg
+        width: Style.font.body
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignHCenter
         textFormat: Text.PlainText
         text: root.status === "working" ? root.spinner[root.spinnerFrame % root.spinner.length]
                                         : (root.icons[root.status] || "󰄬")
         font.family: Style.font.menuFamily
-        font.pixelSize: Style.font.iconLarge
-        color: root.statusInk
+        font.pixelSize: Style.font.body
+        color: root.status === "waiting" ? Color.accent : root.ink
+        opacity: root.status === "waiting" || root.status === "working" ? 1 : 0.52
       }
 
-      Column {
-        id: labels
-        anchors.left: glyph.right
-        anchors.leftMargin: Style.space(14)
-        anchors.right: parent.right
-        anchors.rightMargin: Style.spacing.lg
+      Text {
+        id: title
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.space(2)
-
-        Row {
-          width: parent.width
-          spacing: Style.spacing.lg
-
-          Text {
-            id: title
-            width: Math.min(implicitWidth, parent.width - (pencil.visible ? pencil.width + parent.spacing : 0))
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            text: root.session ? (root.session.task || "New session") : ""
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
-            color: root.ink
-            opacity: root.session && root.session.task ? 1 : 0.52
-          }
-
-          Text {
-            id: pencil
-            visible: root.hot
-            anchors.verticalCenter: title.verticalCenter
-            textFormat: Text.PlainText
-            text: "󰏫"
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.title
-            color: root.dim
-          }
-        }
-
-        Text {
-          id: meta
-          width: parent.width
-          textFormat: Text.PlainText
-          elide: Text.ElideRight
-          text: root.session ? (root.session.repo + " · " + root.session.name).toUpperCase() : ""
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          font.letterSpacing: 1.2
-          color: root.dim
-        }
+        // Leaves room for the rest of the row inside the column.
+        width: Math.min(implicitWidth, Math.min(root.zenWidth, root.width) - Style.spacing.controlPaddingX * 2
+                        - glyph.width - row.spacing - (more.visible ? more.implicitWidth + row.spacing : 0))
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        text: root.session ? (root.session.task || "New session") : ""
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+        color: root.ink
+        opacity: root.session && root.session.task ? 1 : 0.52
       }
 
-      MouseArea {
-        id: nameMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.renameRequested()
+      Text {
+        id: more
+        visible: root.hot
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: root.session ? root.session.repo + " · " + root.session.name + "  󰏫" : ""
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.body
+        color: root.dim
       }
+    }
+
+    MouseArea {
+      id: nameMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.renameRequested()
     }
   }
 }

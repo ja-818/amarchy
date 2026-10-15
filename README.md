@@ -105,10 +105,10 @@ and project · branch under it. Click it to go to that session. It comes with a 
 the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
 none; they are the two files in `sounds/`, replace them with your own).
 
-In zen mode, with the list out of the way, a strip above Claude says which
-session this is, the way its row does: the status glyph, what it's about in
-bold with `PROJECT · BRANCH` under it (the bell in the theme's accent). Click
-the name to rename it.
+In zen mode, with the list out of the way, a small pill centered above
+Claude, on the wallpaper, says which session this is: the status glyph (the
+bell in the theme's accent) and what it's about. Hover it for project · branch,
+click it to rename the session.
 
 ## Claude knows it's in amarchy
 
@@ -189,7 +189,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_WORKTREES` | `$AMARCHY_WORK/.worktrees` | Worktrees go to `<this>/<repo>/<name>`. |
 | `AMARCHY_TERMINAL` | first installed | `foot`, `kitty`, `alacritty` or `ghostty`. |
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
-| `AMARCHY_HEADER_HEIGHT` | `48` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
+| `AMARCHY_HEADER_HEIGHT` | `36` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 | `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
 

@@ -64,7 +64,7 @@ Environment:
   AMARCHY_WORKTREES    where worktrees go (default $AMARCHY_WORK/.worktrees/<repo>/<name>)
   AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
-  AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 48, 0 for none)
+  AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 36, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
   AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
 
@@ -147,7 +147,7 @@ LEGACY_WS_PREFIX = "F:"
 ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
 CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
 # The strip above the zen column where the shell plugin writes the session's name.
-HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 48), 0)
+HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 36), 0)
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
 PAD = 8                 # between Claude's column and the panels beside it
 MIN_SIDE = 200          # narrower than this beside the column and there's no room for them
