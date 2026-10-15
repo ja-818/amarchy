@@ -267,6 +267,13 @@ Panel {
       if (g) root.group(g.what)
     }
 
+    // One height for every control up top: the buttons size from their
+    // glyphs (the Ⓐ is tall, the group button has no label) and the search
+    // from its own padding and a border that changes with hover and focus,
+    // so left alone no two would agree. The buttons reserve their largest
+    // border, so theirs is steady.
+    readonly property real controlHeight: Math.max(brand.implicitHeight, newSession.implicitHeight, organize.implicitHeight)
+
     implicitHeight: Math.max(stack.implicitHeight, content.menuOpen ? menu.y + menu.height : 0)
 
     Column {
@@ -274,12 +281,19 @@ Panel {
       width: parent.width
       spacing: Style.spacing.panelGap
 
+      // The two share the row in halves, so it's as wide as the search under
+      // it; when the popup is too narrow for that, a label never gets cut:
+      // the wider one keeps its size and the other takes what's left.
       Row {
+        width: parent.width
         visible: !content.passive
         spacing: Style.spacing.controlGap
         // The name on the door is the menu: everything else amarchy does.
         Button {
           id: brand
+          width: Math.max(implicitWidth, Math.min((parent.width - parent.spacing) / 2,
+                                                  parent.width - parent.spacing - newSession.implicitWidth))
+          height: content.controlHeight
           iconText: "Ⓐ"
           text: "Amarchy"
           tooltipText: root.keyHint("menu")
@@ -287,8 +301,9 @@ Panel {
           onClicked: root.act(["menu"])
         }
         Button {
-          // The Ⓐ is a tall glyph; keep the two the same height.
-          height: brand.height
+          id: newSession
+          width: Math.max(implicitWidth, parent.width - parent.spacing - brand.width)
+          height: content.controlHeight
           iconText: "󰐕"
           text: "New session"
           tooltipText: root.keyHint("new")
@@ -306,7 +321,8 @@ Panel {
         TextField {
           id: search
           width: parent.width - organize.width - parent.spacing
-          anchors.verticalCenter: parent.verticalCenter
+          height: content.controlHeight
+          verticalAlignment: TextInput.AlignVCenter
           // The key that puts the keyboard here; what it's for is plain enough.
           placeholderText: "󰍉  " + (root.keyHint("search") || "Search sessions")
           rightPadding: horizontalPadding + clear.width + Style.spacing.sm
@@ -369,7 +385,9 @@ Panel {
         // How the list is grouped, in a menu; lit while it's grouped at all.
         Button {
           id: organize
-          anchors.verticalCenter: parent.verticalCenter
+          // Square, at the height of everything else.
+          width: Math.max(implicitWidth, content.controlHeight)
+          height: content.controlHeight
           iconText: "󰒼"
           tooltipText: content.menuOpen ? "" : "Group the list"
           bordered: true
