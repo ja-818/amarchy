@@ -50,8 +50,9 @@ Every command prints its result to stdout and exits non-zero on failure.
 
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
-  `idle`, `asleep` = window closed), `priority` (`high`, `normal`, `low`),
-  `task` (what it's about), `current` (on screen).
+  `idle`, `asleep` = its Claude Code isn't running), `priority` (`high`,
+  `normal`, `low`), `task` (what it's about), `current` (on screen),
+  `background` (Claude Code background sessions running in its worktree).
 - `amarchy projects --json`: the user's projects and how many sessions each has.
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
   its saved commands (`name<TAB>command`).
@@ -67,6 +68,17 @@ something works, run it yourself in your own shell (tests, a build, `curl` the
 dev server). Restart the terminal so the user sees the result too.
 
 ### Only when the user asks
+
+- `amarchy sleep [id]` / `amarchy sleep --all` / `amarchy wake [id]`: a
+  sleeping session's Claude Code isn't running (it holds no memory); its
+  window shows the conversation, and typing there wakes it with
+  `claude --resume`. Idle sessions off screen sleep on their own after
+  `amarchy sleep --after` minutes (default 1), so you rarely need these. A
+  session never sleeps while it's working, asking the user something, or
+  running background commands or agents. Never add `--force` without
+  explicit approval: it sleeps a session even when something is lost.
+  You can be put to sleep too, between turns: nothing you'd need is lost,
+  the conversation resumes as it was.
 
 - `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session
   matters to the user. The list puts higher priority first. Without a level it

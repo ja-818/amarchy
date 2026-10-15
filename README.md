@@ -110,11 +110,64 @@ Closing a session (`Ctrl+Alt+X`) removes its worktree, asks first if it has
 uncommitted changes, and deletes the branch if it was merged.
 
 Windows are disposable, like everywhere else in Omarchy. Close Claude or the
-terminal with `Super+W` (or let Claude exit) and the session just goes to sleep:
-the list shows it as asleep, and jumping to it reopens what's missing,
-with Claude picking its last conversation back up (`claude --continue`). A
-session only really ends with `Ctrl+Alt+X` or `amarchy close`, which
-also removes the worktree.
+terminal with `Super+W` (or let Claude exit) and the session just goes to sleep
+(below): jumping to it reopens what's missing. A session only really ends with
+`Ctrl+Alt+X` or `amarchy close`, which also removes the worktree.
+
+## Sleep
+
+Every Claude Code holds a few hundred MB of memory, also while it waits for
+you. So a session you're not using **sleeps**: once it has been idle and off
+screen for a minute, its Claude exits and lets go of all of it. The session
+stays exactly where it was: its workspace, its place in the list (with the moon,
+󰒲, and how long it has slept), and its window, which shows the conversation:
+
+```
+● Done: the redirect now keeps the query string. Tests pass.
+  ⎿ Bash(npm test)
+
+❯ also check the logout flow
+────────────────────────────────────────────────────────────
+  󰒲 Asleep since 14:02 · type to wake Claude up, right where you left your prompt
+```
+
+Go there and **type**: Claude comes back in a second or two
+(`claude --resume`, the same conversation), with what you typed already in its
+prompt. Moving through your sessions doesn't wake them, only typing does. What
+you had typed in Claude's prompt and not sent yet survives it too: before
+Claude exits, amarchy asks it for its prompt (Claude's Ctrl+G, "edit in your
+editor", answered by `bin/amarchy-editor`) and types it back in when it wakes.
+
+A session never sleeps while something would be lost with its Claude:
+
+- it's working, or it's asking you something (a permission, a question);
+- a command Claude started is still running in the background (a dev server,
+  a build);
+- background agents are still at it (its conversation is still moving, or
+  Claude is busy);
+- a `/loop` or a scheduled task is due to wake it;
+- Remote Control is on;
+- you're looking at it.
+
+Claude Code **background sessions** (`/bg`) started from a session show as
+`+1 BG` in its row. When the session sleeps, those with nothing left to do are
+stopped as well (Claude Code keeps their conversations: `claude attach <id>`
+brings one back); close stops them all, since their worktree goes away. Running
+ones are left alone.
+
+```sh
+amarchy sleep              # this session, now (it says why not, if something would be lost)
+amarchy sleep --all        # every session that can, except the one on screen
+amarchy sleep --after 5    # minutes before an idle session sleeps on its own (default 1, or off)
+amarchy wake [id]          # without typing in it
+```
+
+**Sleep session** and **Sleep idle sessions** are in the amarchy menu
+(`Ctrl+Alt+M`). The timer is a systemd user timer that `install.sh` adds
+(`amarchy-sleep.timer`); it checks every 30 seconds and runs nothing in between.
+Windows from before amarchy could do this can't hand their prompt over:
+`amarchy sleep --force` sleeps them anyway (closing the window, which opens
+again asleep), so anything typed and not sent there is lost.
 
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
@@ -211,6 +264,9 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 | `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
 
+How long an idle session waits before it sleeps isn't a variable: `amarchy
+sleep --after <minutes>|off`, kept with amarchy's state.
+
 ## CLI
 
 Every action in the UI is a command, in the Omarchy spirit: anything you can
@@ -244,6 +300,10 @@ amarchy run --pick                    choose one in the Omarchy menu, or save a 
 amarchy show                          open the session list under the Ⓐ in the bar
 amarchy search                        type to find a session by name, in the list under the Ⓐ
 amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
+amarchy sleep [id] [--force]          put a session to sleep (says why not when something would be lost)
+amarchy sleep --all [--force]         every session that can sleep, except the one on screen
+amarchy sleep --after [minutes|off]   how long an idle session waits off screen before it sleeps (default 1)
+amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list

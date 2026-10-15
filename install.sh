@@ -11,6 +11,8 @@
 #     switch your desktop's
 #   - installs the amarchy skill for Claude Code (skill/), so the Claude in a
 #     session knows it's in amarchy and how to use the CLI
+#   - adds a systemd user timer that puts idle sessions to sleep (their Claude
+#     Code exits until you type in them again; amarchy sleep --after)
 #
 #   ./install.sh             install / update
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
@@ -26,6 +28,7 @@ shell_json="$HOME/.config/omarchy/shell.json"
 menu_ext="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
 theme_hook="$HOME/.config/omarchy/hooks/theme-set.d/amarchy"
 skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -68,6 +71,9 @@ if [[ ${1:-} == --uninstall ]]; then
   rm -f "$bin_dir/amarchy"
   [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
   rm -f "$plugin_dir" "$theme_hook"
+  systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
+  rm -f "$units/amarchy-sleep.timer" "$units/amarchy-sleep.service"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
   # Only our own link: a skill of the same name the user wrote stays.
   [[ -L $skill_link && $(readlink "$skill_link") == "$repo/skill" ]] && rm -f "$skill_link"
   edit_shell_json '.plugins |= map(select(.id != "amarchy")) | .bar.layout |= with_entries(.value |= map(select(.id != "amarchy")))'
@@ -136,6 +142,36 @@ else
   ln -sfn "$repo/skill" "$skill_link"
 fi
 
+# Sessions sleep once they've been idle and off screen for a while (`amarchy
+# sleep --after`): Claude Code exits and lets go of its memory, and comes back
+# when you type in the session. The timer only checks; nothing stays running.
+mkdir -p "$units"
+cat >"$units/amarchy-sleep.service" <<UNIT
+# Installed by amarchy ($repo/install.sh); removed by its --uninstall.
+[Unit]
+Description=Put idle amarchy sessions to sleep
+
+[Service]
+Type=oneshot
+ExecStart=$bin_dir/amarchy sleep --idle
+UNIT
+cat >"$units/amarchy-sleep.timer" <<UNIT
+# Installed by amarchy ($repo/install.sh); removed by its --uninstall.
+[Unit]
+Description=Put idle amarchy sessions to sleep, every 30 seconds
+
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl --user daemon-reload
+systemctl --user enable --now amarchy-sleep.timer >/dev/null 2>&1 ||
+  say "Couldn't start the sleep timer (systemctl --user enable --now amarchy-sleep.timer)"
+
 # Sizes the zen column for this monitor and reloads Hyprland.
 "$bin_dir/amarchy" layout
 hyprctl reload >/dev/null
@@ -153,5 +189,6 @@ echo "  Ctrl+Alt+Return  between Claude and the terminal (leaves zen mode)"
 echo "  Ctrl+Alt+J/K move between sessions · S search · N new · A add project · T theme · E rename · X close"
 echo "  Ctrl+Alt+Up/Down  raise / lower this session's priority (higher ones come first)"
 echo "  Ctrl+Alt+M   the amarchy menu: every action with its key"
+echo "  Idle sessions off screen sleep after $("$bin_dir/amarchy" sleep --after) min (amarchy sleep --after <min>|off); type in one to wake it"
 echo "  Super+Space  Amarchy menu · Ⓐ in the bar"
 echo "Change the keys with an \`amarchy = { ... }\` table, see hypr/amarchy.lua."

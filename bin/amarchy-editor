@@ -1,0 +1,6 @@
+#!/bin/sh
+# Claude Code's $VISUAL in an amarchy session (Ctrl+G edits the prompt in your
+# editor). Claude runs $VISUAL as a single command, so this is a file of its
+# own: it hands the prompt to amarchy when amarchy is putting the session to
+# sleep, and opens your own editor any other time. See "sleep" in amarchy.
+exec "$(dirname "$(readlink -f "$0")")/amarchy" editor "$@"

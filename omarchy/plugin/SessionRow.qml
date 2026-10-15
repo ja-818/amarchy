@@ -7,6 +7,9 @@ import qs.Ui
 // on the row, a bold title (what the session is about) and a small-caps line
 // under it (project · branch), plus the time on the right. Everything is the
 // hero's size times `zoom`, so a screenful of sessions fits.
+// A session asleep (its Claude Code stopped until you type in it) shows the
+// moon and how long it has slept; "+1 BG" after the branch counts Claude Code
+// background sessions still running in its worktree.
 // The cursor (which starts on the session you're in) uses the menu's selected
 // treatment. Under the time sits the priority: a flag for high, in the
 // theme's accent, an arrow down for low (which also steps back, dimmed).
@@ -85,7 +88,9 @@ BorderSurface {
       width: parent.width
       textFormat: Text.PlainText
       elide: Text.ElideRight
-      text: ((row.showRepo ? (row.session.repo || "") + " · " : "") + (row.session.name || "")).toUpperCase()
+      // Claude Code background sessions (/bg) still running in its worktree.
+      text: ((row.showRepo ? (row.session.repo || "") + " · " : "") + (row.session.name || "")
+             + (row.session.background > 0 ? " · +" + row.session.background + " bg" : "")).toUpperCase()
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * row.zoom)
       font.bold: true

@@ -4,5 +4,6 @@
   "amarchy.new": {"icon":"󰐕","label":"New session","action":"~/.local/bin/amarchy new"},
   "amarchy.add": {"icon":"󰉋","label":"Add project","action":"~/.local/bin/amarchy add"},
   "amarchy.theme": {"icon":"󰏘","label":"Theme","action":"~/.local/bin/amarchy theme"},
+  "amarchy.sleep": {"icon":"󰒲","label":"Sleep idle sessions","action":"~/.local/bin/amarchy sleep --all"},
   "amarchy.close": {"icon":"󰅖","label":"Close session","action":"~/.local/bin/amarchy pick close"},
   // <<< amarchy
