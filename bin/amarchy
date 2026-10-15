@@ -55,7 +55,8 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
-  amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle
+  amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle (start: idle, and
+                                        tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
 
 Environment:
@@ -67,9 +68,14 @@ Environment:
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
   AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
 
-Run commands are saved per project and start in the session's worktree. They can use
-$AMARCHY_PATH (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and
-$AMARCHY_ROOT (the project's main checkout). Quote them when setting from a shell:
+A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
+(the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
+project's main checkout). From there, run, rename and close act on that session, whatever
+is on screen. Claude is told it's in amarchy when it starts, and the amarchy skill
+(skill/, linked into ~/.claude/skills by install.sh) has the rest.
+
+Run commands are saved per project, start in the session's worktree and can use the same
+variables. Quote them when setting from a shell:
   amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'
 
 State: ~/.local/state/amarchy/.
@@ -212,8 +218,14 @@ INHERITED_CLAUDE_ENV = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_COD
                         "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS")
 
 
+# A session's own environment (session_env), when amarchy runs inside one: what
+# it opens belongs to whatever session it opens it for, if any.
+SESSION_ENV = ("AMARCHY", "AMARCHY_SESSION", "AMARCHY_PATH", "AMARCHY_NAME", "AMARCHY_REPO",
+               "AMARCHY_BRANCH", "AMARCHY_ROOT")
+
+
 def clean_env():
-    return {k: v for k, v in os.environ.items() if k not in INHERITED_CLAUDE_ENV}
+    return {k: v for k, v in os.environ.items() if k not in INHERITED_CLAUDE_ENV + SESSION_ENV}
 
 
 def spawn(argv):
@@ -268,7 +280,11 @@ def term_argv(cls, title, cwd, cmd=()):
     return ["foot", "--app-id", cls, "--title", title, "-D", str(cwd), *cmd]
 
 
-def open_term(cls, title, cwd, cmd=()):
+def open_term(cls, title, cwd, cmd=(), env=None):
+    if env:
+        # Through env(1), inside the terminal: a terminal server or uwsm's
+        # launcher would drop it from our own environment.
+        cmd = ["env", *(f"{k}={v}" for k, v in env.items()), *(cmd or [os.environ.get("SHELL", "bash")])]
     osc = THEME / "osc"
     if theme_name() and osc.exists():
         # Start in the amarchy theme's colors rather than the desktop's.
@@ -467,6 +483,13 @@ def current_session_id():
     return next((s["id"] for s in sessions() if s["workspace"] == name), None)
 
 
+def own_session_id():
+    """The session a command is about when none is named: the one it runs in
+    (from its Claude or its terminal, $AMARCHY_SESSION), else the one on screen."""
+    sid = os.environ.get("AMARCHY_SESSION", "")
+    return sid if session(sid) else current_session_id()
+
+
 def zen(width=None):
     """Whether Claude is alone in its column: zen mode is on, or the monitor
     has no room beside the column for the sessions and the terminal."""
@@ -584,7 +607,7 @@ def arrange(sid, focus="claude", term=None):
     elif term and term["workspace"]["name"] != HIDDEN:
         move_to(term["address"], HIDDEN)
     target = term if focus == "terminal" and term and beside else claude
-    if target:
+    if target and focus:
         focus_window(target["address"])
 
 
@@ -1009,6 +1032,14 @@ def run_env(s):
             "AMARCHY_BRANCH": s["branch"], "AMARCHY_ROOT": str(WORK / s["repo"])}
 
 
+def session_env(s):
+    """The environment of a session's windows, Claude and the terminal: AMARCHY=1
+    says it's amarchy, AMARCHY_SESSION which session (what `amarchy run`,
+    `rename` and `close` act on from there, whatever is on screen), plus what
+    a run command can refer to."""
+    return {"AMARCHY": "1", "AMARCHY_SESSION": s["id"], **run_env(s)}
+
+
 def saved_commands(repo):
     """The project's other saved commands, {name: command}."""
     try:
@@ -1033,21 +1064,25 @@ def run_in_terminal(s, command):
     you in a shell when it ends. The new terminal opens out of sight, takes
     the old one's place beside Claude and only then is the old one closed, so
     the terminal on the right just starts over."""
-    if not leave_zen():
+    # From the session on screen it shows (leaving zen mode). An agent in
+    # another session restarts its terminal where it is, out of sight in zen
+    # mode, and leaves the keyboard alone.
+    on_screen = current_session_id() == s["id"]
+    if on_screen and not leave_zen():
         return 1
     old = find(term_class(s))
     shell = os.environ.get("SHELL", "bash")
-    exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in run_env(s).items())
-    script = (f"export {exports}; printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
+    script = (f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
               f"{command}; exec {shlex.quote(shell)}")
-    open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", s["path"], [shell, "-ic", script])
+    open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", s["path"], [shell, "-ic", script],
+              env=session_env(s))
     new = wait_for(term_class(s), besides=old and old["address"])
     if not new:
         return fail("the terminal didn't open")
     if new["workspace"]["name"] != HIDDEN:     # without amarchy's window rule (an old Hyprland config)
         move_to(new["address"], HIDDEN)
     # Over the old one, which then goes.
-    arrange(s["id"], focus="claude", term=new)
+    arrange(s["id"], focus="claude" if on_screen else None, term=new)
     if old:
         hypr(f'hl.dsp.window.close({{ window = "address:{old["address"]}" }})')
     return 0
@@ -1084,7 +1119,7 @@ def cmd_run(args):
     """Run the project in the session's terminal: the command shows, runs, and
     leaves you in a shell when it ends. Running again restarts it. A name runs
     one of the project's other saved commands instead."""
-    sid = current_session_id()
+    sid = own_session_id()
     s = session(sid) if sid else None
     if not s:
         return 1
@@ -1230,7 +1265,7 @@ def hook_settings(sid):
     def h(state):
         return [{"hooks": [{"type": "command", "command": f"{shlex.quote(ENTRY)} hook {sid} {state}"}]}]
     settings = {"hooks": {
-        "SessionStart": h("idle"),
+        "SessionStart": h("start"),
         "UserPromptSubmit": h("working"),
         "PreToolUse": h("working"),
         "Notification": h("waiting"),
@@ -1326,10 +1361,10 @@ def ensure_windows(s):
     if not find(claude_class(s)):
         resume = ["--continue"] if has_conversation(path) else []
         open_term(claude_class(s), f"amarchy:{s['id']}", path,
-                  ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])])
+                  ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])], env=session_env(s))
         opened.append(claude_class(s))
     if not zen() and not find(term_class(s)):
-        open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path)
+        open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path, env=session_env(s))
         opened.append(term_class(s))
     for cls in opened:
         win = wait_for(cls)
@@ -1521,7 +1556,7 @@ def confirm_close(s):
 
 
 def cmd_close(args):
-    sid = args[0] if args and not args[0].startswith("-") else current_session_id()
+    sid = args[0] if args and not args[0].startswith("-") else own_session_id()
     s = session(sid) if sid else None
     if not s:
         return 1
@@ -1551,7 +1586,7 @@ def cmd_rename(args):
         del args[i:i + 2]
     reset = "--reset" in args
     title = " ".join(a for a in args if a != "--reset").strip()
-    sid = sid or current_session_id()
+    sid = sid or own_session_id()
     s = session(sid) if sid else None
     if not s:
         return fail(f"No session {sid!r}" if sid else "Not in a session (name one with --id <id>)")
@@ -1568,6 +1603,20 @@ def cmd_rename(args):
     return 0
 
 
+def agent_context(s):
+    """What Claude is told when its session starts (and again after a /clear or a
+    compaction): that it runs in amarchy, which session it is, and where the rest
+    is (the amarchy skill, installed with amarchy, has the details)."""
+    return (f"This Claude Code session runs inside amarchy, the user's parallel Claude Code sessions on "
+            f"their Omarchy desktop. You are session {s['name']}: a git worktree of {s['repo']} at "
+            f"{s['path']}, on branch {s['branch']} (made from {s['base']}). The project's main checkout "
+            f"is {WORK / s['repo']}; other sessions work in worktrees of their own. On screen you sit in "
+            f"a column, with the user's sessions on your left and this session's terminal on your right, "
+            f"where the project runs. The `amarchy` CLI drives all of it and acts on this session "
+            f"(AMARCHY_SESSION={s['id']} in your environment). Use the amarchy skill before running it, "
+            f"or when the work involves sessions, worktrees, that terminal or merging back into main.")
+
+
 def cmd_hook(sid, state):
     # Claude Code passes the event JSON on stdin; we only need the state.
     try:
@@ -1577,6 +1626,11 @@ def cmd_hook(sid, state):
     s = session(sid)
     if not s:
         return
+    if state == "start":
+        # SessionStart: Claude is ready (idle), and learns where it is.
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": agent_context(s)}}))
+        state = "idle"
     prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
     (STATUS / sid).write_text(state)
     if state == prev:

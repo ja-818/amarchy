@@ -40,9 +40,10 @@ Item {
     if (!proc.running) proc.running = true
   }
 
-  // Runs `amarchy <args...>` detached, e.g. run(["jump", id]).
+  // Runs `amarchy <args...>` detached, e.g. run(["jump", id]), about the
+  // session on screen even if the shell was started from inside one.
   function run(args) {
-    Quickshell.execDetached(["sh", "-c", 'exec "$HOME/.local/bin/amarchy" "$@"', "amarchy"].concat(args))
+    Quickshell.execDetached(["sh", "-c", 'unset AMARCHY_SESSION; exec "$HOME/.local/bin/amarchy" "$@"', "amarchy"].concat(args))
     refreshSoon.restart()
   }
 

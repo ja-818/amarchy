@@ -134,13 +134,13 @@ Panel {
 
   Sessions {
     id: store
-    interval: root.opened || side.visible ? 1000 : 3000
+    interval: root.opened || side.visible || header.visible ? 1000 : 3000
   }
 
   Timer {
     interval: 100
     repeat: true
-    running: (root.opened || root.peeking || side.visible) && store.working > 0
+    running: (root.opened || root.peeking || side.visible || header.spinning) && store.working > 0
     onTriggered: root.spinnerFrame++
   }
 
@@ -377,10 +377,15 @@ Panel {
   }
 
   SessionHeader {
+    id: header
+    // Its glyph turns while the session on screen works, even in zen mode.
+    readonly property bool spinning: visible && status === "working"
     screen: button.QsWindow.window ? button.QsWindow.window.screen : null
     sessions: store.sessions
     zenWidth: store.zenWidth
     stripHeight: store.headerHeight
+    spinnerFrame: root.spinnerFrame
+    renameKey: root.keyHint("rename")
     onRenameRequested: store.run(["rename"])
   }
 

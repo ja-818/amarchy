@@ -105,6 +105,30 @@ and project · branch under it. Click it to go to that session. It comes with a 
 the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
 none; they are the two files in `sounds/`, replace them with your own).
 
+The strip above Claude says the session the way its row does, in the bar's
+colors: its status (bell, spinner, check), what it's about in bold, and
+`PROJECT · BRANCH` on the right. Click the name to rename it.
+
+## Claude knows it's in amarchy
+
+Each session's Claude starts knowing where it is: which session, worktree and
+branch it's on, where the project's main checkout is, and that the terminal on
+its right runs the project. amarchy's `SessionStart` hook tells it, and does
+so again after a `/clear` or a compaction. The **amarchy skill**
+(`skill/SKILL.md`, which `install.sh` links into `~/.claude/skills`) has the
+rest, loaded only when the work calls for it:
+
+- what it can do with the CLI: restart the dev server with `amarchy run`, see
+  the other sessions;
+- what it leaves to you: anything that moves your screen, and closing its own
+  session;
+- how to merge back into main.
+
+Claude and the terminal also carry the session in their environment:
+`AMARCHY=1`, `AMARCHY_SESSION` (its id) and the variables run commands get
+(below). So scripts can tell too, and from there `amarchy run`, `rename` and
+`close` act on that session, even when another one is on screen.
+
 ## Theme
 
 amarchy can wear its own Omarchy theme. Step into a session and the bar,

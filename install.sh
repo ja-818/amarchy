@@ -9,6 +9,8 @@
 #   - adds Amarchy to the Omarchy menu (Super+Space), from omarchy/menu.jsonc
 #   - adds an Omarchy theme-set hook, so amarchy keeps its own theme when you
 #     switch your desktop's
+#   - installs the amarchy skill for Claude Code (skill/), so the Claude in a
+#     session knows it's in amarchy and how to use the CLI
 #
 #   ./install.sh             install / update
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
@@ -23,6 +25,7 @@ plugin_dir="$HOME/.config/omarchy/plugins/amarchy"
 shell_json="$HOME/.config/omarchy/shell.json"
 menu_ext="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
 theme_hook="$HOME/.config/omarchy/hooks/theme-set.d/amarchy"
+skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -65,6 +68,8 @@ if [[ ${1:-} == --uninstall ]]; then
   rm -f "$bin_dir/amarchy"
   [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
   rm -f "$plugin_dir" "$theme_hook"
+  # Only our own link: a skill of the same name the user wrote stays.
+  [[ -L $skill_link && $(readlink "$skill_link") == "$repo/skill" ]] && rm -f "$skill_link"
   edit_shell_json '.plugins |= map(select(.id != "amarchy")) | .bar.layout |= with_entries(.value |= map(select(.id != "amarchy")))'
   [[ -f $menu_ext ]] && edit_menu ""
   hyprctl reload >/dev/null 2>&1 || true
@@ -121,6 +126,15 @@ cat >"$theme_hook" <<HOOK
 [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme --refresh
 exit 0
 HOOK
+
+# The amarchy skill: Claude Code finds it in every session (their SessionStart
+# hook points it there). A link, so it follows this checkout.
+if [[ -e $skill_link && ! -L $skill_link ]]; then
+  say "Left $skill_link alone (not amarchy's link); the amarchy skill isn't installed."
+else
+  mkdir -p "$(dirname "$skill_link")"
+  ln -sfn "$repo/skill" "$skill_link"
+fi
 
 # Sizes the zen column for this monitor and reloads Hyprland.
 "$bin_dir/amarchy" layout
