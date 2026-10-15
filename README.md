@@ -105,8 +105,8 @@ and project · branch under it. Click it to go to that session. It comes with a 
 the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
 none; they are the two files in `sounds/`, replace them with your own).
 
-In zen mode, with the list out of the way, a small pill centered above
-Claude, on the wallpaper, says which session this is: the status glyph (the
+In zen mode, with the list out of the way, a bar as wide as Claude's
+column, with a gap above it, says which session this is: the status glyph (the
 bell in the theme's accent) and what it's about. Hover it for project · branch,
 click it to rename the session.
 

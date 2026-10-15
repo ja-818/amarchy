@@ -5,8 +5,8 @@ import Quickshell.Wayland
 import qs.Commons
 
 // The session's name above Claude in zen mode, where the list that shows the
-// session you're in has stepped away: a small pill centered over the column,
-// on the wallpaper with a gap above Claude, so it reads as the desktop's and
+// session you're in has stepped away: a bar as wide as Claude's column, its
+// name centered, on the wallpaper with a gap above Claude, so it reads as the desktop's and
 // not as part of Claude's window. The status glyph (the bell in the theme's
 // accent) and what the session is about; hovering fills it like any Omarchy
 // control and adds project · branch and a pencil: click to rename.
@@ -52,7 +52,8 @@ PanelWindow {
     id: pill
     anchors.centerIn: parent
     height: row.implicitHeight + Style.spacing.xs * 2
-    width: Math.min(row.implicitWidth + Style.spacing.controlPaddingX * 2, Math.min(root.zenWidth, parent.width))
+    // As wide as Claude's column below it.
+    width: Math.min(root.zenWidth, parent.width)
     radius: Style.cornerRadius
     color: root.hot ? Qt.tint(Color.bar.background, Style.hoverFillFor(root.ink, Color.accent)) : Color.bar.background
     border.width: Style.hoverBorderWidth
@@ -83,7 +84,7 @@ PanelWindow {
         id: title
         anchors.verticalCenter: parent.verticalCenter
         // Leaves room for the rest of the row inside the column.
-        width: Math.min(implicitWidth, Math.min(root.zenWidth, root.width) - Style.spacing.controlPaddingX * 2
+        width: Math.min(implicitWidth, pill.width - Style.spacing.controlPaddingX * 2
                         - glyph.width - row.spacing - (more.visible ? more.implicitWidth + row.spacing : 0))
         textFormat: Text.PlainText
         elide: Text.ElideRight
