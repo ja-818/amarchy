@@ -172,9 +172,11 @@ again asleep), so anything typed and not sent there is lost.
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
 the session's row in the list: a bell or a check, what the session is about,
-and project · branch under it. Click it to go to that session. It comes with a chime: two notes going up when
-the session needs you, one settled note when it's done (`AMARCHY_SOUND=off` for
-none; they are the two files in `sounds/`, replace them with your own).
+and project · branch under it. Click it to go to that session. It comes with a
+chime, the same one either way; pick it in [Sound](#sound). The bell only rings
+when Claude is actually blocked on you (a permission, a question): the reminder
+Claude Code sends a minute after a turn you haven't answered doesn't count, so
+a finished session never chimes twice.
 
 In zen mode, with the list out of the way, a bar as wide as Claude's
 column, divided from it by a line, says which session this is: the status glyph (the
@@ -194,7 +196,11 @@ rest, loaded only when the work calls for it:
   the other sessions;
 - what it leaves to you: anything that moves your screen, and closing its own
   session;
-- how to merge back into main.
+- how to merge back into main;
+- how to talk to the other sessions: they are Claude Code instances too, so
+  Claude can message them with Claude Code's `ListAgents` and `SendMessage`
+  (`amarchy list` gives each session's `agent` name for that), and start a new
+  session with a task of its own (`amarchy new <project> --prompt "..."`).
 
 Claude and the terminal also carry the session in their environment:
 `AMARCHY=1`, `AMARCHY_SESSION` (its id) and the variables run commands get
@@ -227,6 +233,28 @@ are already open take the new colors as they are.
 If a piece of the desktop ever stays in the wrong theme, every repaint and how
 each step of it went (shell, wallpaper, borders) is in
 `~/.local/state/amarchy/theme.log`.
+
+## Sound
+
+Pick the chime in the Omarchy menu: **Sound** in the amarchy menu
+(`Ctrl+Alt+M`), or Super+Space → Amarchy → Sound. Each one plays as you pick
+it and the menu stays up, so you can try them in a row; `Esc` keeps the last
+one. **Off** for none.
+
+```sh
+amarchy sound              # the menu
+amarchy sound tine         # set one: kalimba (the default), vibraphone, tine, fairy, ocean, elementary
+amarchy sound --play fairy # hear one
+amarchy sound off
+```
+
+Any sound of your own works: put a `.wav`, `.ogg`, `.oga`, `.opus`, `.flac` or
+`.mp3` in `~/.config/amarchy/sounds/` and it shows up in the menu under its file
+name (**Add your own** in the menu opens that folder). One named like one of
+amarchy's replaces it. Keep it short: it plays in full with every notification.
+
+`sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
+ones again.
 
 ## Install
 
@@ -262,7 +290,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_ZEN_WIDTH` | `900` | Claude column width in logical pixels; the sessions and the terminal share what's left. Run `amarchy layout` after changing it. |
 | `AMARCHY_HEADER_HEIGHT` | `30` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
-| `AMARCHY_SOUND` | `on` | `off` for notifications without the chime. |
+| `AMARCHY_SOUND` | `on` | `off` for notifications without the chime, whatever [Sound](#sound) picked. |
 
 How long an idle session waits before it sleeps isn't a variable: `amarchy
 sleep --after <minutes>|off`, kept with amarchy's state.
@@ -280,8 +308,9 @@ amarchy add <owner/repo|git url>      clone a project (prints its path)
 amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
 amarchy add                           add a project interactively
 
-amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-amarchy list                          sessions as JSON
+amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted); prints its id
+amarchy new <project> [name] --prompt <text|->  the same, with the first thing its Claude is asked (- reads stdin)
+amarchy list                          sessions as JSON (agent: the name its Claude has for other sessions' SendMessage)
 amarchy open                          go to the last session you were in
 amarchy next | prev                   go down | up one session in the list (wraps around)
 amarchy jump <id>                     go to a session
@@ -306,6 +335,7 @@ amarchy sleep --after [minutes|off]   how long an idle session waits off screen 
 amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+amarchy sound [name|off]              the notification chime (the menu without a name; --show, --list, --play [name])
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
 amarchy group [project|priority|status] [on|off]  group the list, nested in that order (switches without on|off)
 amarchy group none                    no grouping (the default): priority, then the order you opened them in

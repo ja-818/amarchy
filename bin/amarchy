@@ -19,8 +19,12 @@ Projects (git repos directly inside AMARCHY_WORK):
   amarchy add                           add a project interactively
 
 Sessions:
-  amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-  amarchy list [--compact]              sessions as JSON, in list order (task, age, current)
+  amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted);
+                                        prints its id
+  amarchy new <project> [name] --prompt <text|->
+                                        the same, with the first thing its Claude is asked (- reads it from stdin)
+  amarchy list [--compact]              sessions as JSON, in list order (task, age, current, and agent: the
+                                        name its Claude goes by for other Claude sessions' SendMessage)
   amarchy open                          go to the last session you were in (nothing if already in one)
   amarchy next | prev                   go down | up one session in the list (wraps around)
   amarchy jump <id>                     go to a session
@@ -63,6 +67,13 @@ Theme (amarchy in its own Omarchy theme, the rest of the desktop in yours):
   amarchy theme --show                  print it
   amarchy theme --refresh               put it back after something else repainted (Omarchy's theme-set hook runs this)
 
+Sound (the chime of a notification, when a session needs you or is done):
+  amarchy sound                         pick it in the Omarchy menu: each one plays as you pick it
+  amarchy sound <name> | off            set it (one of --list, or off for none)
+  amarchy sound --show                  print it
+  amarchy sound --list                  every sound: amarchy's, then yours from ~/.config/amarchy/sounds
+  amarchy sound --play [name]           hear one (the one set now without a name)
+
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
@@ -82,13 +93,14 @@ Environment:
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 30, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
-  AMARCHY_SOUND        off for silent notifications (default on: a chime when a session needs you or is done)
+  AMARCHY_SOUND        off for silent notifications, whatever `amarchy sound` picked
 
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
 project's main checkout). From there, run, rename and close act on that session, whatever
-is on screen. Claude is told it's in amarchy when it starts, and the amarchy skill
-(skill/, linked into ~/.claude/skills by install.sh) has the rest.
+is on screen. Claude is told it's in amarchy when it starts (and that it can message the
+other sessions' Claude), and the amarchy skill (skill/, linked into ~/.claude/skills by
+install.sh) has the rest.
 
 Run commands are saved per project, start in the session's worktree and can use the same
 variables. Quote them when setting from a shell:
@@ -139,7 +151,8 @@ SELF = str(Path(__file__).resolve())
 # instead of staying on the copy that set it up, a worktree maybe long gone.
 INSTALLED = Path.home() / ".local/bin/amarchy"
 ENTRY = str(INSTALLED) if INSTALLED.exists() else SELF
-SOUNDS = Path(SELF).parent.parent / "sounds"       # <state>.wav, played with a session's notification
+SOUNDS = Path(SELF).parent.parent / "sounds"       # amarchy's chimes, one played with a session's notification
+SOUND_FILE = STATE / "sound"                       # the one picked (its name, or "off")
 SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
@@ -194,13 +207,11 @@ def notify(title, body="", glyph="Ⓐ", click=()):
         sh("notify-send", title, body)
 
 
-def chime(state):
-    """The sound of a session's notification: two notes going up when it
-    needs you, one settled note when it's done. AMARCHY_SOUND=off for none."""
-    sound = SOUNDS / f"{state}.wav"
-    player = shutil.which("pw-play") or shutil.which("paplay")
-    if SOUND and player and sound.exists():
-        detach([player, str(sound)])
+def chime():
+    """The sound of a session's notification, the same whether it needs you or
+    is done: the one `amarchy sound` picked. AMARCHY_SOUND=off for none."""
+    if SOUND:
+        play(sound_file(sound_name()))
 
 
 def hypr(expr):
@@ -1080,6 +1091,130 @@ def theme_refresh():
     return 0 if painted else 1
 
 
+# ------------------------------------------------------------------ sound
+
+# amarchy's own chimes (sounds/, where sounds/CREDITS says where each is from),
+# in the order the menu offers them; the first is the default.
+CHIMES = (
+    ("kalimba", "Two plucks going up"),
+    ("vibraphone", "Three soft notes rising into a chord"),
+    ("tine", "One bright bell"),
+    ("fairy", "A twinkle, then a brighter run: hey… listen!"),
+    ("ocean", "From KDE's Ocean sounds"),
+    ("elementary", "From elementary OS"),
+)
+USER_SOUNDS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/sounds"
+AUDIO = (".wav", ".oga", ".ogg", ".opus", ".flac", ".mp3")   # what pw-play and paplay read
+ICON_SOUND = "󰕾"
+ICON_MUTE = "󰖁"
+ADD_SOUND = "Add your own"
+
+
+def sounds():
+    """Every sound to pick from, {name: (file, about)}: amarchy's, then the
+    files in ~/.config/amarchy/sounds, named after the file. One of yours
+    with the name of one of amarchy's replaces it."""
+    found = {name: (SOUNDS / f"{name}.oga" if (SOUNDS / f"{name}.oga").exists() else SOUNDS / f"{name}.wav", about)
+             for name, about in CHIMES}
+    mine = sorted(f for f in USER_SOUNDS.glob("*") if f.suffix.lower() in AUDIO and f.is_file()) \
+        if USER_SOUNDS.is_dir() else []
+    for f in mine:
+        found.pop(f.stem.lower(), None)
+        found[f.stem] = (f, f"Yours · {f.name}")
+    return found
+
+
+def sound_key(name, found=None):
+    """The name of a sound as sounds() has it, whatever its case; None if there's none."""
+    found = sounds() if found is None else found
+    return next((n for n in found if n.lower() == name.strip().lower()), None)
+
+
+def sound_name():
+    """The sound picked: its name, "off", or the default when nothing (or a
+    file since removed) was picked."""
+    picked = SOUND_FILE.read_text().strip() if SOUND_FILE.exists() else ""
+    if picked == "off":
+        return picked
+    return (sound_key(picked) if picked else None) or CHIMES[0][0]
+
+
+def sound_file(name):
+    found = sounds()
+    key = sound_key(name, found) if name != "off" else None
+    return found[key][0] if key else None
+
+
+def play(path):
+    player = shutil.which("pw-play") or shutil.which("paplay")
+    if player and path and path.exists():
+        detach([player, str(path)])
+
+
+def set_sound(name):
+    STATE.mkdir(parents=True, exist_ok=True)
+    SOUND_FILE.write_text(name + "\n")
+
+
+def menu_pick_sound():
+    """The sounds in the Omarchy menu, the one set now checked. Picking one
+    sets it and plays it, and the menu comes back to try another; Escape
+    keeps the last one picked."""
+    while True:
+        found, now = sounds(), sound_name()
+        rows = [(ICON_CHECK if name == now else ICON_SOUND, name.capitalize() if name in dict(CHIMES) else name, about)
+                for name, (_, about) in found.items()]
+        rows.append((ICON_CHECK if now == "off" else ICON_MUTE, "Off", "Notifications without a chime"))
+        rows.append((ICON_ADD, ADD_SOUND, f"A .wav, .ogg or .mp3 in {str(USER_SOUNDS).replace(str(HOME), '~')}"))
+        choice = menu_select("Sound", rows)
+        if not choice:
+            return 0
+        if choice == ADD_SOUND:
+            USER_SOUNDS.mkdir(parents=True, exist_ok=True)
+            if shutil.which("xdg-open"):
+                detach(["xdg-open", str(USER_SOUNDS)])
+            notify("amarchy", f"Put a sound file in {USER_SOUNDS}, then pick it in Sound.", ICON_SOUND)
+            return 0
+        if choice == "Off":
+            set_sound("off")
+            return 0
+        name = sound_key(choice, found)
+        if name:
+            set_sound(name)
+            play(found[name][0])
+
+
+def cmd_sound(args):
+    if args and args[0] == "--show":
+        print(sound_name())
+        return 0
+    if args and args[0] == "--list":
+        for name, (path, about) in sounds().items():
+            print(f"{name}\t{about}\t{path}")
+        return 0
+    if args and args[0] == "--play":
+        name = " ".join(args[1:]) or sound_name()
+        if name == "off":
+            return fail("the sound is off (name one to hear it: amarchy sound --play <name>)")
+        path = sound_file(name)
+        if not path:
+            return fail(f"no sound {name!r} (see amarchy sound --list)")
+        play(path)
+        return 0
+    if not args:
+        return menu_pick_sound()
+    name = " ".join(args)
+    if name.lower() == "off":
+        set_sound("off")
+    else:
+        key = sound_key(name)
+        if not key:
+            return fail(f"no sound {name!r} (see amarchy sound --list)")
+        set_sound(key)
+    print(sound_name())
+    return 0
+
+
 # ------------------------------------------------------------------ run
 
 def guess_run(path):
@@ -1425,10 +1560,11 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name):
+def create(repo, name, prompt=None):
     """Start a session, and show it right away: its row in the list, its
     workspace, and Claude's window, where `amarchy setup` makes the worktree
-    in front of you and then becomes Claude. Returns the session id."""
+    in front of you and then becomes Claude, asked prompt first if given.
+    Returns the session id."""
     repo_dir = WORK / repo
     name = slug(name)
     if not name or not (repo_dir / ".git").exists():
@@ -1436,6 +1572,12 @@ def create(repo, name):
         return None
     sid = f"{repo}-{name}"
     if session(sid):
+        if prompt is not None:
+            # Its Claude is already running: a first prompt can't reach it.
+            notify("amarchy", f"{repo} · {name} is already open, so it can't take a first prompt")
+            print(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)",
+                  file=sys.stderr)
+            return None
         cmd_jump(sid)
         return sid
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
@@ -1449,6 +1591,8 @@ def create(repo, name):
     s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
          "path": str(WORKTREES / repo / name), "created": int(time.time()),
          "prefix": PREFIX, "workspace": WS_PREFIX + sid, "setup": True}
+    if prompt is not None:
+        s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
     (STATUS / sid).write_text("working")
     tell_shell("refresh")
@@ -1620,16 +1764,18 @@ def transcript(s):
     return f if f and f.exists() else None
 
 
-def claude_argv(s, prefill=""):
+def claude_argv(s, prefill="", prompt=None):
     """Claude Code for a session, picking its conversation back up: the one it
     was in, else the latest in its folder (sessions from before amarchy kept
-    track), with prefill already typed in the prompt."""
+    track), with prefill already typed in the prompt, or asked prompt first
+    (after --, so it may start with a dash)."""
     if transcript(s):
         resume = ["--resume", conversation_id(s["id"])]
     else:
         resume = ["--continue"] if has_conversation(s["path"]) else []
-    return ["claude", *CLAUDE_ARGS, *resume, *(["--prefill", prefill] if prefill else []),
-            "--settings", hook_settings(s["id"])]
+    first = ["--", prompt] if prompt is not None else []
+    return ["claude", *CLAUDE_ARGS, *resume, *(["--prefill", prefill] if prefill and prompt is None else []),
+            "--settings", hook_settings(s["id"]), *first]
 
 
 # What runs in a session's Claude window. Claude, and when it's put to sleep
@@ -1679,6 +1825,11 @@ def cmd_claude(sid):
         s = session(sid)
     if asleep_since(sid) is not None:
         return 0
+    # The first prompt (amarchy new --prompt) goes to Claude once: if the window
+    # is closed and comes back, Claude picks the conversation up instead.
+    prompt = s.pop("prompt", None)
+    if prompt is not None:
+        save_session(s)
     path = Path(s["path"])
     os.chdir(path)
     os.environ["PWD"] = str(path)
@@ -1691,7 +1842,7 @@ def cmd_claude(sid):
         prefill = draft.read_text()
     except OSError:
         prefill = ""
-    argv = claude_argv(s, prefill.strip("\n"))
+    argv = claude_argv(s, prefill.strip("\n"), prompt)
     draft.unlink(missing_ok=True)
     try:
         os.execvp(argv[0], argv)
@@ -1739,9 +1890,31 @@ def ensure_windows(s, wake=False):
 
 
 def cmd_new(args):
-    repo = args[0] if args else menu_pick_project()
-    if repo:
-        create(repo, args[1] if len(args) > 1 else auto_name(repo))
+    """amarchy new [project] [name] [--prompt <text>|-]: the new session's id on
+    stdout. --prompt is the first thing its Claude is asked (- reads it from stdin)."""
+    prompt, rest = None, []
+    it = iter(args)
+    for a in it:
+        if a == "--prompt":
+            prompt = next(it, None)
+            if prompt is None:
+                return fail("--prompt needs the text, or - to read it from stdin")
+        elif a.startswith("--prompt="):
+            prompt = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+    if prompt == "-":
+        prompt = sys.stdin.read()
+    if prompt is not None and not prompt.strip():
+        return fail("--prompt is empty")
+    repo = rest[0] if rest else menu_pick_project()
+    if not repo:
+        return 1
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
+    if not sid:
+        return 1
+    print(sid)
+    return 0
 
 
 # ------------------------------------------------------------------ sleep
@@ -1951,10 +2124,9 @@ def sleep_blockers(s, win, procs, auto):
     sid = s["id"]
     pid = window_claude(win, procs)
     status = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else "idle"
-    notice = (claude_dir(sid) / "notice").read_text().strip() if (claude_dir(sid) / "notice").exists() else ""
     if status == "working":
         reasons.append("it's working")
-    elif status == "waiting" and notice != "idle_prompt":
+    elif status == "waiting":
         reasons.append("it's waiting for your answer")
     if not window_loop(win, procs):
         reasons.append("its window is from before sessions could sleep, so its prompt can't be kept "
@@ -2172,9 +2344,6 @@ def sleep_idle():
             idle = time.time() - (STATUS / s["id"]).stat().st_mtime
         except OSError:
             idle = float("inf")
-        notice = claude_dir(s["id"]) / "notice"
-        if s["status"] == "waiting" and notice.exists() and notice.read_text().strip() == "idle_prompt":
-            idle += 60      # Claude says so once it has been idle for a minute
         if idle >= after * 60:
             put_to_sleep(session(s["id"]), auto=True)
     return 0
@@ -2611,8 +2780,16 @@ def agent_context(s):
             f"is {WORK / s['repo']}; other sessions work in worktrees of their own. On screen you sit in "
             f"a column, with the user's sessions on your left and this session's terminal on your right, "
             f"where the project runs. The `amarchy` CLI drives all of it and acts on this session "
-            f"(AMARCHY_SESSION={s['id']} in your environment). Use the amarchy skill before running it, "
-            f"or when the work involves sessions, worktrees, that terminal or merging back into main.")
+            f"(AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
+            f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
+            f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the "
+            f"work involves other sessions, worktrees, that terminal or merging back into main.")
+
+
+# The notifications of Claude Code that mean it's blocked on you. Others aren't
+# a question: "idle_prompt" comes a minute after it finished, if you haven't
+# answered, and would ring a session that's done a second time, as needing you.
+NEEDS_YOU = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input")
 
 
 def hook_claude():
@@ -2634,14 +2811,16 @@ def hook_claude():
 
 
 def cmd_hook(sid, state):
-    # Claude Code passes the event on stdin: which conversation, and for a
-    # notification, what kind.
+    # Claude Code passes the event as JSON on stdin.
     try:
         event = json.loads(sys.stdin.read() or "{}")
-    except (ValueError, OSError):
+    except Exception:
         event = {}
     s = session(sid)
     if not s:
+        return
+    kind = event.get("notification_type") if isinstance(event, dict) else None
+    if state == "waiting" and kind and kind not in NEEDS_YOU:
         return
     if state == "start":
         # SessionStart: Claude is ready (idle), and learns where it is.
@@ -2653,10 +2832,6 @@ def cmd_hook(sid, state):
     if hook_claude().get("kind") == "bg":
         return
     set_conversation_id(sid, event.get("session_id", ""))
-    if state == "waiting":
-        # A question for you (a permission, a choice) or just Claude idle for
-        # a while: only the second lets the session sleep.
-        write_file(claude_dir(sid) / "notice", event.get("notification_type") or "")
     if asleep_since(sid) is not None and state != "idle":
         clear_asleep(sid)   # it's running after all (woken some other way)
     prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
@@ -2673,7 +2848,7 @@ def cmd_hook(sid, state):
         task = session_task(s, claude["title"] if claude else "")
         where = f"{s['repo']} · {s['name']}"
         notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", sid))
-        chime(state)
+        chime()
 
 
 # ------------------------------------------------------------------ mission control
@@ -2869,11 +3044,33 @@ def session_task(s, window_title):
     return s.get("title") or task_title(window_title) or saved_title(s)
 
 
+def claude_agents():
+    """The name each running Claude Code goes by for ListAgents and SendMessage
+    (what other Claude sessions message it as), by its folder. Claude Code keeps
+    one ~/.claude/sessions/<pid>.json per running instance; an interactive one
+    wins over a background job in the same folder, unless it has handed its
+    conversation over to that job (parked: ListAgents then shows only the job)."""
+    agents = {}
+    for f in (HOME / ".claude/sessions").glob("*.json"):
+        try:
+            d = json.loads(f.read_text())
+            os.kill(int(d["pid"]), 0)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if not d.get("name") or not d.get("cwd") or d.get("parkedJobId"):
+            continue
+        rank = (d.get("kind") == "interactive", d.get("startedAt") or 0)
+        if d["cwd"] not in agents or rank > agents[d["cwd"]][0]:
+            agents[d["cwd"]] = (rank, d["name"])
+    return {cwd: name for cwd, (_, name) in agents.items()}
+
+
 def session_view():
     """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
     titles = {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
+    agents = claude_agents()
     ss = sessions()
     background = all_background_sessions()
     for s in ss:
@@ -2881,6 +3078,8 @@ def session_view():
         # Asleep: Claude isn't running, its window showing the conversation
         # (or closed, which is how sessions slept before).
         s["awake"] = claude_class(s) in titles and since is None
+        s["agent"] = agents.get(s["path"], "") if s["awake"] else ""
+        s.pop("prompt", None)
         if not s["awake"]:
             s["status"] = "asleep"
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
@@ -2946,6 +3145,7 @@ MENU = (
     ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
     ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
     ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
+    ("󰕾", "Sound", ["sound"], (), True, True),
     ("󰏫", "Rename session", ["rename"], ("Rename amarchy session",), True, False),
     ("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",), True, False),
     ("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",), True, False),
@@ -3018,7 +3218,7 @@ def main(argv):
     cmd, args = (argv[0], argv[1:]) if argv else ("help", [])
     migrate_legacy()
     if cmd == "new":
-        cmd_new(args)
+        return cmd_new(args)
     elif cmd == "add":
         return cmd_add(args)
     elif cmd == "projects":
@@ -3055,6 +3255,8 @@ def main(argv):
         return cmd_menu()
     elif cmd == "theme":
         return cmd_theme(args)
+    elif cmd == "sound":
+        return cmd_sound(args)
     elif cmd == "watch":
         return cmd_watch()
     elif cmd == "group":

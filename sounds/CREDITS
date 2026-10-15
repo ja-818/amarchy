@@ -1,0 +1,16 @@
+The chimes amarchy plays with a notification (pick one with `amarchy sound`).
+
+kalimba.wav, vibraphone.wav, tine.wav, fairy.wav
+  amarchy's own, made by make.py from sine waves. Run it to make them again.
+
+ocean.oga
+  "message-new-instant" from KDE's Ocean sound theme (ocean-sound-theme),
+  by Guilherme Marçal Silva, 2023. CC-BY-SA-4.0:
+  https://creativecommons.org/licenses/by-sa/4.0/
+  https://invent.kde.org/plasma/ocean-sound-theme
+
+elementary.oga
+  "dialog-information" from elementary OS's sound theme (sound-theme-elementary),
+  by elementary, Inc. GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
+  https://github.com/elementary/sound-theme
+  Made 11 dB louder, to sit with the others.
