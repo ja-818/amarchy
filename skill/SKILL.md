@@ -51,7 +51,8 @@ Every command prints its result to stdout and exits non-zero on failure.
 
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
-  `idle`, `asleep` = its Claude Code isn't running), `priority` (`high`,
+  `idle`), `sleeping` (its Claude Code isn't running until the user types
+  in it; it still shows as idle), `priority` (`high`,
   `normal`, `low`), `task` (what it's about), `current` (on screen), `agent`
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
   Claude runs), `background` (Claude Code background sessions running in its
@@ -74,8 +75,9 @@ dev server). Restart the terminal so the user sees the result too.
 
 - `amarchy sleep [id]` / `amarchy sleep --all` / `amarchy wake [id]`: a
   sleeping session's Claude Code isn't running (it holds no memory); its
-  window shows the conversation, and typing there wakes it with
-  `claude --resume`. Idle sessions off screen sleep on their own after
+  window keeps Claude's last screen, and what the user types there goes to
+  Claude when it comes back (`claude --resume`). A sleeping session's Claude
+  can't be messaged (its `agent` is empty). Idle sessions off screen sleep on their own after
   `amarchy sleep --after` minutes (default 1), so you rarely need these. A
   session never sleeps while it's working, asking the user something, or
   running background commands or agents. Never add `--force` without
