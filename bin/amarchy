@@ -19,8 +19,12 @@ Projects (git repos directly inside AMARCHY_WORK):
   amarchy add                           add a project interactively
 
 Sessions:
-  amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-  amarchy list [--compact]              sessions as JSON, in list order (task, age, current)
+  amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted);
+                                        prints its id
+  amarchy new <project> [name] --prompt <text|->
+                                        the same, with the first thing its Claude is asked (- reads it from stdin)
+  amarchy list [--compact]              sessions as JSON, in list order (task, age, current, and agent: the
+                                        name its Claude goes by for other Claude sessions' SendMessage)
   amarchy open                          go to the last session you were in (nothing if already in one)
   amarchy next | prev                   go down | up one session in the list (wraps around)
   amarchy jump <id>                     go to a session
@@ -75,8 +79,9 @@ Environment:
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
 project's main checkout). From there, run, rename and close act on that session, whatever
-is on screen. Claude is told it's in amarchy when it starts, and the amarchy skill
-(skill/, linked into ~/.claude/skills by install.sh) has the rest.
+is on screen. Claude is told it's in amarchy when it starts (and that it can message the
+other sessions' Claude), and the amarchy skill (skill/, linked into ~/.claude/skills by
+install.sh) has the rest.
 
 Run commands are saved per project, start in the session's worktree and can use the same
 variables. Quote them when setting from a shell:
@@ -1354,10 +1359,11 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name):
+def create(repo, name, prompt=None):
     """Start a session, and show it right away: its row in the list, its
     workspace, and Claude's window, where `amarchy setup` makes the worktree
-    in front of you and then becomes Claude. Returns the session id."""
+    in front of you and then becomes Claude, asked prompt first if given.
+    Returns the session id."""
     repo_dir = WORK / repo
     name = slug(name)
     if not name or not (repo_dir / ".git").exists():
@@ -1365,6 +1371,12 @@ def create(repo, name):
         return None
     sid = f"{repo}-{name}"
     if session(sid):
+        if prompt is not None:
+            # Its Claude is already running: a first prompt can't reach it.
+            notify("amarchy", f"{repo} · {name} is already open, so it can't take a first prompt")
+            print(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)",
+                  file=sys.stderr)
+            return None
         cmd_jump(sid)
         return sid
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
@@ -1378,6 +1390,8 @@ def create(repo, name):
     s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
          "path": str(WORKTREES / repo / name), "created": int(time.time()),
          "prefix": PREFIX, "workspace": WS_PREFIX + sid, "setup": True}
+    if prompt is not None:
+        s["prompt"] = prompt      # taken (once) by `amarchy setup` when Claude starts
     (SESSIONS / f"{sid}.json").write_text(json.dumps(s))
     (STATUS / sid).write_text("working")
     tell_shell("refresh")
@@ -1493,9 +1507,14 @@ def cmd_setup(sid):
         arrange(sid, focus=None)
     if current_session_id() != sid:
         notify("amarchy", f"{s['repo']} · {s['name']} is ready", click=("jump", sid))
+    # The first prompt goes to Claude once: if this window is closed and comes
+    # back, Claude picks the conversation up instead of being asked again.
+    prompt = s.pop("prompt", None)
+    if prompt is not None:
+        (SESSIONS / f"{sid}.json").write_text(json.dumps(s))
     os.chdir(path)
     os.environ["PWD"] = str(path)
-    argv = claude_argv(s)
+    argv = claude_argv(s, prompt)
     os.execvp(argv[0], argv)
 
 
@@ -1505,10 +1524,12 @@ def has_conversation(path):
     return any(projects.glob("*.jsonl"))
 
 
-def claude_argv(s):
-    """Claude Code for a session, picking its conversation back up if it has one."""
+def claude_argv(s, prompt=None):
+    """Claude Code for a session, picking its conversation back up if it has one,
+    and asked prompt first if given (after --, so it may start with a dash)."""
     resume = ["--continue"] if has_conversation(s["path"]) else []
-    return ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"])]
+    first = ["--", prompt] if prompt is not None else []
+    return ["claude", *CLAUDE_ARGS, *resume, "--settings", hook_settings(s["id"]), *first]
 
 
 def ensure_windows(s):
@@ -1544,9 +1565,31 @@ def ensure_windows(s):
 
 
 def cmd_new(args):
-    repo = args[0] if args else menu_pick_project()
-    if repo:
-        create(repo, args[1] if len(args) > 1 else auto_name(repo))
+    """amarchy new [project] [name] [--prompt <text>|-]: the new session's id on
+    stdout. --prompt is the first thing its Claude is asked (- reads it from stdin)."""
+    prompt, rest = None, []
+    it = iter(args)
+    for a in it:
+        if a == "--prompt":
+            prompt = next(it, None)
+            if prompt is None:
+                return fail("--prompt needs the text, or - to read it from stdin")
+        elif a.startswith("--prompt="):
+            prompt = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+    if prompt == "-":
+        prompt = sys.stdin.read()
+    if prompt is not None and not prompt.strip():
+        return fail("--prompt is empty")
+    repo = rest[0] if rest else menu_pick_project()
+    if not repo:
+        return 1
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
+    if not sid:
+        return 1
+    print(sid)
+    return 0
 
 
 # ------------------------------------------------------------------ menus
@@ -1786,8 +1829,10 @@ def agent_context(s):
             f"is {WORK / s['repo']}; other sessions work in worktrees of their own. On screen you sit in "
             f"a column, with the user's sessions on your left and this session's terminal on your right, "
             f"where the project runs. The `amarchy` CLI drives all of it and acts on this session "
-            f"(AMARCHY_SESSION={s['id']} in your environment). Use the amarchy skill before running it, "
-            f"or when the work involves sessions, worktrees, that terminal or merging back into main.")
+            f"(AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
+            f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
+            f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the "
+            f"work involves other sessions, worktrees, that terminal or merging back into main.")
 
 
 def cmd_hook(sid, state):
@@ -1985,14 +2030,38 @@ def session_task(s, window_title):
     return s.get("title") or task_title(window_title) or saved_title(s["path"])
 
 
+def claude_agents():
+    """The name each running Claude Code goes by for ListAgents and SendMessage
+    (what other Claude sessions message it as), by its folder. Claude Code keeps
+    one ~/.claude/sessions/<pid>.json per running instance; an interactive one
+    wins over a background job in the same folder, unless it has handed its
+    conversation over to that job (parked: ListAgents then shows only the job)."""
+    agents = {}
+    for f in (HOME / ".claude/sessions").glob("*.json"):
+        try:
+            d = json.loads(f.read_text())
+            os.kill(int(d["pid"]), 0)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if not d.get("name") or not d.get("cwd") or d.get("parkedJobId"):
+            continue
+        rank = (d.get("kind") == "interactive", d.get("startedAt") or 0)
+        if d["cwd"] not in agents or rank > agents[d["cwd"]][0]:
+            agents[d["cwd"]] = (rank, d["name"])
+    return {cwd: name for cwd, (_, name) in agents.items()}
+
+
 def session_view():
     """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
     titles = {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
+    agents = claude_agents()
     ss = sessions()
     for s in ss:
         s["awake"] = claude_class(s) in titles
+        s["agent"] = agents.get(s["path"], "") if s["awake"] else ""
+        s.pop("prompt", None)
         if not s["awake"]:
             s["status"] = "asleep"
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
@@ -2126,7 +2195,7 @@ def main(argv):
     cmd, args = (argv[0], argv[1:]) if argv else ("help", [])
     migrate_legacy()
     if cmd == "new":
-        cmd_new(args)
+        return cmd_new(args)
     elif cmd == "add":
         return cmd_add(args)
     elif cmd == "projects":

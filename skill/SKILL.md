@@ -4,7 +4,8 @@ description: >
   You are running inside amarchy when AMARCHY=1 / AMARCHY_SESSION is set or your
   session started with "This Claude Code session runs inside amarchy". Use this
   skill before running any `amarchy` command, and whenever the work involves this
-  session's worktree or branch, other sessions, the dev terminal beside you
+  session's worktree or branch, other sessions (starting one with a task,
+  messaging another session's Claude), the dev terminal beside you
   (running, restarting or saving the project's commands), naming the session, or
   merging the work back into main ("ship it").
 ---
@@ -51,7 +52,8 @@ Every command prints its result to stdout and exits non-zero on failure.
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
   `idle`, `asleep` = window closed), `priority` (`high`, `normal`, `low`),
-  `task` (what it's about), `current` (on screen).
+  `task` (what it's about), `current` (on screen), `agent` (the name its Claude
+  goes by in `ListAgents` / `SendMessage`, empty until its Claude runs).
 - `amarchy projects --json`: the user's projects and how many sessions each has.
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
   its saved commands (`name<TAB>command`).
@@ -80,8 +82,11 @@ dev server). Restart the terminal so the user sees the result too.
   all its sessions). Commands start in the worktree and can use the variables
   above. Single-quote them so they expand per session, e.g.
   `amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'`.
-- `amarchy new <project> [name]`: start another session. **It takes the user's
-  screen to it.**
+- `amarchy new <project> [name] [--prompt "<brief>"]`: start another session
+  and print its id. With `--prompt` (or `--prompt -` to read it from stdin), its
+  Claude starts with that as its first message: the way to hand a new session
+  a task. **It takes the user's screen to it.** See "Talking to other
+  sessions".
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
 - `amarchy close <id>`: close **another** session. It removes that worktree and
@@ -97,6 +102,38 @@ dev server). Restart the terminal so the user sees the result too.
   looking at. Run them only when asked, as the action itself.
 - `hook`, `ui`, `watch` are amarchy's own plumbing. Don't edit
   `~/.local/state/amarchy/` either.
+
+## Talking to other sessions
+
+Every session is a Claude Code of its own, and you can message it. Never tell
+the user to paste something into another session: send it yourself.
+
+- **`ListAgents`** lists the Claude sessions running on this machine. An
+  amarchy session shows under its own name plus a short suffix, e.g.
+  `rebellious-parsons-34 [ab8910]` for session `amarchy-rebellious-parsons`.
+  The `agent` field of `amarchy list --compact` gives that name for each
+  session, so you can match ids to names without guessing.
+- **`SendMessage`** (a deferred tool: load it first with ToolSearch
+  `select:SendMessage`) delivers a message into that session's conversation:
+  `{"to": "rebellious-parsons-34", "message": "..."}`. Make the first line a
+  self-contained sentence (it's the preview). A reply comes back as a
+  `<cross-session-message from="...">`; answer it with that `from` as `to`.
+- **`notify_when_idle: true`** on a send (or a send with no message, just to
+  subscribe) gets you one notice when that session finishes its turn. Use it to
+  hear back instead of polling `ListAgents` or asking "are you done?".
+
+To give a **new** session a task (only when the user asks for a session):
+
+1. `amarchy new <project> [name] --prompt "<the whole brief>"`. The brief is
+   all it gets, so make it self-contained: what to do, why, where things are,
+   and to report back to you by name (yours is in `ListAgents`' first line).
+2. Once its Claude is up (`agent` set in `amarchy list --compact`), subscribe
+   with `SendMessage` + `notify_when_idle: true` if you want to know when it's
+   done.
+
+For a session that is already running, message it. Each session keeps its own
+permissions: never ask another session to do something that was denied or
+blocked here; take it back to the user instead.
 
 ## Git in a session
 

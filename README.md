@@ -141,7 +141,11 @@ rest, loaded only when the work calls for it:
   the other sessions;
 - what it leaves to you: anything that moves your screen, and closing its own
   session;
-- how to merge back into main.
+- how to merge back into main;
+- how to talk to the other sessions: they are Claude Code instances too, so
+  Claude can message them with Claude Code's `ListAgents` and `SendMessage`
+  (`amarchy list` gives each session's `agent` name for that), and start a new
+  session with a task of its own (`amarchy new <project> --prompt "..."`).
 
 Claude and the terminal also carry the session in their environment:
 `AMARCHY=1`, `AMARCHY_SESSION` (its id) and the variables run commands get
@@ -224,8 +228,9 @@ amarchy add <owner/repo|git url>      clone a project (prints its path)
 amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
 amarchy add                           add a project interactively
 
-amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted)
-amarchy list                          sessions as JSON
+amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted); prints its id
+amarchy new <project> [name] --prompt <text|->  the same, with the first thing its Claude is asked (- reads stdin)
+amarchy list                          sessions as JSON (agent: the name its Claude has for other sessions' SendMessage)
 amarchy open                          go to the last session you were in
 amarchy next | prev                   go down | up one session in the list (wraps around)
 amarchy jump <id>                     go to a session
