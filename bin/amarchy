@@ -43,7 +43,8 @@ Sessions:
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy search                        type to find a session by name: the list beside Claude, or under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
-  amarchy menu                          everything you can do from here: Amarchy in the Omarchy menu
+  amarchy menu                          everything you can do from here, in a menu (Amarchy in Super+Space too)
+  amarchy menu --json | --omarchy       that menu as the card under the Ⓐ draws it / as Omarchy menu entries
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
                                         list puts higher priority first, unless it's sorted by date;
@@ -3638,8 +3639,8 @@ KEY_SCOPES = {
     "anywhere": ("mod", "From anywhere", "SUPER + ALT", ("Open amarchy", "New amarchy session")),
 }
 # What it offers, in Hyprland's spelling: never a lone modifier, which apps
-# (and Omarchy, for Super) use for themselves. omarchy/menu.jsonc lists the
-# same under Settings → Keys.
+# (and Omarchy, for Super) use for themselves. The menu lists them under
+# Settings → Keys.
 KEY_MODS = ("CTRL + ALT", "CTRL + SHIFT", "ALT + SHIFT", "CTRL + ALT + SHIFT",
             "SUPER + ALT", "SUPER + CTRL", "SUPER + SHIFT", "SUPER + CTRL + ALT", "MOD3")
 MOD_BITS = {"SHIFT": 1, "CTRL": 4, "CONTROL": 4, "ALT": 8, "MOD1": 8, "MOD3": 32, "HYPER": 32,
@@ -3755,6 +3756,9 @@ def cmd_keys(args):
     <mod>` sets one (what the menu runs), `--show` prints them, `reset` goes
     back to hypr/amarchy.lua."""
     if not args:
+        if native_panel():
+            tell_shell("menuAt", "Settings/Keys")
+            return 0
         return subprocess.run(["omarchy-menu", "summon", "amarchy.settings.keys"], stdout=subprocess.DEVNULL).returncode
     if args == ["--show"]:
         binds = hypr_binds()
@@ -3774,10 +3778,132 @@ def cmd_keys(args):
     return fail("usage: amarchy keys [inside|anywhere <mod> | --show | reset]")
 
 
-def cmd_menu():
-    """Everything amarchy does from where you are: Amarchy in the Omarchy menu
-    (omarchy/menu.jsonc, which install.sh adds to it), opened right there. Its
-    groups open with →/↵ and close with ←, like the rest of that menu."""
+# The amarchy menu, in one place: the card the shell plugin opens
+# (`amarchy menu`, Ctrl+Alt+M) and Amarchy in the Omarchy menu (Super+Space,
+# written by `amarchy menu --omarchy` when installing) are both made from it.
+# A row runs an amarchy command or holds rows of its own; `where` keeps it to
+# a session's workspace ("in") or off one ("out"); `binds` are the
+# descriptions its key may be bound under (hypr/amarchy.lua), for the
+# shortcut the card shows on the selected row.
+
+def menu_item(icon, label, command=None, binds=(), where=None, children=None, check=None):
+    return {"icon": icon, "label": label, "command": command, "binds": binds, "where": where,
+            "children": children, "check": check}
+
+
+def menu_keys(scope):
+    return [menu_item(ICON_KEYS, mod_label(mod_mask(mod)), ["keys", scope, mod], check=(scope, mod_mask(mod)))
+            for mod in KEY_MODS]
+
+
+MENU = [
+    menu_item("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), where="out"),
+    menu_item("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session")),
+    menu_item("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",)),
+    menu_item("󰐊", "Run", where="in", children=[
+        menu_item("󰐊", "Run project", ["run"], ("Run amarchy project",)),
+        menu_item("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",)),
+        menu_item("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",)),
+    ]),
+    menu_item("󰘔", "This session", where="in", children=[
+        menu_item("󰏫", "Rename", ["rename"], ("Rename amarchy session",)),
+        menu_item("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",)),
+        menu_item("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",)),
+        menu_item("󰒲", "Sleep", ["sleep"], ("Sleep amarchy session",)),
+        menu_item("󰆴", "Close", ["close", "--confirm"], ("Close amarchy session",)),
+    ]),
+    menu_item("󰕰", "Sessions", children=[
+        menu_item("󰁅", "Next session", ["next"], ("Next amarchy session",), where="in"),
+        menu_item("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), where="in"),
+        menu_item("󰊓", "Zen mode", ["zen"], ("Toggle amarchy zen",), where="in"),
+        menu_item("󰒲", "Sleep idle sessions", ["sleep", "--all"], ("Sleep idle amarchy sessions",)),
+        menu_item("󰅖", "Close a session", ["pick", "close"]),
+    ]),
+    menu_item("󰉋", "Add project", ["add"], ("Add amarchy project",)),
+    menu_item("󰒓", "Settings", children=[
+        menu_item("󰏘", "Theme", ["theme"], ("Pick amarchy theme",)),
+        menu_item("󰕾", "Sound", ["sound"]),
+        menu_item(ICON_KEYS, "Keys", children=[
+            menu_item(ICON_KEYS, KEY_SCOPES[scope][1], children=menu_keys(scope)) for scope in KEY_SCOPES
+        ]),
+    ]),
+]
+
+
+def menu_tree(items=MENU, inside=None, binds=None):
+    """The menu for where you are, for the card: [{icon, label, key, command,
+    checked, children}]. A group left empty goes."""
+    binds = hypr_binds() if binds is None else binds
+    inside = current_session_id() is not None if inside is None else inside
+    rows = []
+    for it in items:
+        if it["where"] == ("out" if inside else "in"):
+            continue
+        row = {"icon": it["icon"], "label": it["label"]}
+        if it["children"] is not None:
+            row["children"] = menu_tree(it["children"], inside, binds)
+            if not row["children"]:
+                continue
+        else:
+            b = next((binds[d] for d in it["binds"] if d in binds), None)
+            row["key"] = "+".join([*mod_names(b), b["key"].capitalize()]) if b else ""
+            row["command"] = it["command"]
+        if it["check"]:
+            row["checked"] = bound_mask(it["check"][0], binds) == it["check"][1]
+        rows.append(row)
+    return rows
+
+
+def menu_slug(label):
+    return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+
+
+# What a row's `when` asks in the Omarchy menu: is the screen on a session's
+# workspace (amarchy's A:, or the old factory F:)? Cheap, since the menu asks
+# every time it opens.
+ON_SESSION = "hyprctl activeworkspace | grep -q '^workspace ID .* ([AF]:'"
+
+
+def menu_omarchy(items=MENU, parent="amarchy"):
+    """The menu as entries of the Omarchy menu's JSONC, under Amarchy."""
+    lines = []
+    if parent == "amarchy":
+        lines = ["  // >>> amarchy (managed by amarchy/install.sh, from `amarchy menu --omarchy`)",
+                 '  "amarchy": {"icon":"Ⓐ","label":"Amarchy","aliases":["agents","sessions"]},']
+    for it in items:
+        key = f"{parent}.{menu_slug(it['label'])}"
+        row = {"icon": it["icon"], "label": it["label"]}
+        if it["where"]:
+            row["when"] = ON_SESSION if it["where"] == "in" else f"! {ON_SESSION}"
+        if it["check"]:
+            scope, mask = it["check"]
+            row["checked"] = f"grep -qx '{scope} {mod_label(mask)}' ~/.local/state/amarchy/keys.bound"
+        if it["command"]:
+            row["action"] = "~/.local/bin/amarchy " + shlex.join(it["command"])
+        lines.append(f"  {json.dumps(key)}: {json.dumps(row, ensure_ascii=False, separators=(',', ':'))},")
+        if it["children"]:
+            lines += menu_omarchy(it["children"], key)
+    if parent == "amarchy":
+        lines.append("  // <<< amarchy")
+    return lines
+
+
+def cmd_menu(args):
+    """`amarchy menu`: everything amarchy does from where you are, in a card
+    like the Omarchy menu's (from the shell plugin; without it, Amarchy in the
+    Omarchy menu). --json is what the card shows, --omarchy the entries for
+    the Omarchy menu."""
+    if args == ["--json"]:
+        print(json.dumps({"title": "Amarchy", "items": menu_tree()}, ensure_ascii=False))
+        return 0
+    if args == ["--omarchy"]:
+        print("\n".join(menu_omarchy()))
+        return 0
+    if args:
+        return fail("usage: amarchy menu [--json | --omarchy]")
+    if native_panel():
+        tell_shell("menu")
+        return 0
     return subprocess.run(["omarchy-menu", "summon", "amarchy"], stdout=subprocess.DEVNULL).returncode
 
 
@@ -3858,7 +3984,7 @@ def main(argv):
     elif cmd == "pick":
         return cmd_pick(args)
     elif cmd == "menu":
-        return cmd_menu()
+        return cmd_menu(args)
     elif cmd == "theme":
         return cmd_theme(args)
     elif cmd == "sound":

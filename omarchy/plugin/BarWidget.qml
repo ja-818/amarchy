@@ -128,6 +128,13 @@ Panel {
     if (s) store.run(["priority", direction, "--id", s.id])
   }
 
+  // The amarchy menu, in its card; the list steps out of its way.
+  function openMenu(path) {
+    root.close()
+    root.endSearch()
+    amarchyMenu.open(path)
+  }
+
   // Put the keyboard in the search, from the keyboard: the same as clicking
   // it. On a session that's the list beside Claude, which holds the keyboard
   // until Esc or ↵ (or, once the pointer has been on it, a click on Claude);
@@ -217,6 +224,9 @@ Panel {
     function search(): string { root.search(); return "ok" }
     // The notification sound, picked by ear (`amarchy sound`).
     function sounds(): string { root.close(); soundPicker.open(); return "ok" }
+    // The amarchy menu (`amarchy menu`), or one of its groups ("Settings/Keys").
+    function menu(): string { root.openMenu(""); return "ok" }
+    function menuAt(path: string): string { root.openMenu(path); return "ok" }
     // Zen mode was toggled: the list beside Claude follows right away.
     function zen(on: bool): string { store.zen = on; store.refresh(); return "ok" }
     function ping(): string { return "ok" }
@@ -322,7 +332,7 @@ Panel {
           text: "Amarchy"
           tooltipText: root.keyHint("menu")
           bordered: true
-          onClicked: root.act(["menu"])
+          onClicked: root.openMenu("")
         }
         Button {
           id: newSession
@@ -732,6 +742,10 @@ Panel {
     id: soundPicker
   }
 
+  AmarchyMenu {
+    id: amarchyMenu
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
@@ -786,7 +800,7 @@ Panel {
       onTextKey: function(t) {
         if (t === "n") root.act(["new"])
         else if (t === "a") root.act(["add"])
-        else if (t === "m") root.act(["menu"])
+        else if (t === "m") root.openMenu("")
         else if (t === "p") root.group("project")
         else if (t === "f") root.group("priority")
         else if (t === "s") root.group("status")

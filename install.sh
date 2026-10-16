@@ -6,7 +6,8 @@
 #   - loads hypr/amarchy.lua from your Hyprland config (keys, Claude's column)
 #   - installs the Omarchy shell plugin (omarchy/plugin): your sessions beside
 #     Claude and under an Ⓐ in the bar
-#   - adds Amarchy to the Omarchy menu (Super+Space), from omarchy/menu.jsonc
+#   - adds Amarchy to the Omarchy menu (Super+Space): the amarchy menu, from
+#     `amarchy menu --omarchy`
 #   - adds an Omarchy theme-set hook, so amarchy keeps its own theme when you
 #     switch your desktop's
 #   - installs the amarchy skill for Claude Code (skill/), so the Claude in a
@@ -120,8 +121,12 @@ edit_shell_json '.plugins = ((.plugins // []) + [{"id":"amarchy"}] | unique_by(.
     else .bar.layout.left = ((.bar.layout.left // []) + [{"id":"amarchy"}]) end'
 omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 
-# Omarchy menu entries.
-edit_menu "$repo/omarchy/menu.jsonc"
+# Omarchy menu entries: the amarchy menu, as `amarchy menu` defines it.
+menu_block=$(mktemp)
+"$repo/bin/amarchy" menu --omarchy >"$menu_block"
+edit_menu "$menu_block"
+rm -f "$menu_block"
+omarchy-menu refresh >/dev/null 2>&1 || true
 
 # Omarchy runs this once it has finished switching your desktop's theme, which
 # repaints the shell and recolors every terminal, amarchy's included.
