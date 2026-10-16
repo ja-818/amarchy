@@ -141,19 +141,25 @@ terminal with `Super+W` (or let Claude exit) and the session just goes to sleep
 ## Sleep
 
 Every Claude Code holds a few hundred MB of memory, also while it waits for
-you. So a session you're not using **sleeps**, without anything showing it:
-once it has been idle and off screen for a minute, its Claude exits and lets go
-of all of it, and everything else stays exactly as it was. Its workspace, its
-place in the list (idle, like before), and its window: Claude's own last screen
-stays up, the conversation, the prompt and the cursor in it.
+you. So a session you're not using **sleeps**: once it has been idle and off
+screen for a minute, its Claude exits and lets go of all of it, and everything
+else stays exactly as it was. Its workspace, its place in the list (idle, like
+before: the list's glyphs keep saying what the session is doing), and its
+window: Claude's own last screen stays up, the conversation, the prompt and the
+cursor in it. Only a quiet badge in the window's top right corner says it's
+asleep, `󰒲 Asleep, its memory freed · type to wake`.
 
 Go there and type as you would: what you type shows in the prompt, where
 Claude would show it. Press **Enter** and Claude comes back with your message
 already sent (`claude --resume`, the same conversation); its screen takes over
 from the old one in a single repaint, about a second later. Anything else
 (arrows, Ctrl keys, Shift+Enter, the wheel, a line longer than the box)
-brings Claude back at once, with what you typed already in its prompt. Moving
-through your sessions doesn't wake them; only typing does. A half-written
+brings Claude back at once, with what you typed already in its prompt. The
+moment it starts waking, the badge turns to `󰒲 Waking Claude…` until Claude's
+screen is back. A scroll wakes it without reaching Claude: the rest of the
+scroll is dropped rather than landing in Claude's prompt (where the wheel would
+page through your earlier prompts); scroll again once Claude is up. Moving
+through your sessions doesn't wake them; only typing (or scrolling) does. A half-written
 prompt survives too: before Claude exits, amarchy asks it for its prompt
 (Claude's Ctrl+G, "edit in your editor", answered by `bin/amarchy-editor`), and
 it's back in the prompt when Claude is.

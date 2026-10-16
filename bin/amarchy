@@ -2020,9 +2020,9 @@ def cmd_new(args):
 
 # ------------------------------------------------------------------ sleep
 #
-# A session you're not using sleeps, without anything showing it: its Claude
-# Code exits, so it holds no memory, and everything else stays as it was. Claude
-# is stopped outright (SIGKILL), so it never gets to put the terminal back: its
+# A session you're not using sleeps, with only a badge in its window saying so
+# (sleep_badge): its Claude Code exits, so it holds no memory, and everything
+# else stays as it was. Claude is stopped outright (SIGKILL), so it never gets to put the terminal back: its
 # last screen stays in the window, the conversation, its prompt and the cursor
 # in it. Type there and a stand-in for that prompt (woke) shows what you type
 # right where Claude would; send it (Enter) and Claude comes back with it
@@ -2519,6 +2519,38 @@ def cmd_wake(args):
     return 0
 
 
+# The badge in the top right corner of a sleeping session's window: what you
+# see instead of a status glyph (the list keeps showing the session as idle).
+# It says the session is asleep, and the moment a key wakes it, that Claude
+# is on its way, for the second or so until Claude's first screen covers it.
+ASLEEP_BADGE = "Asleep, its memory freed · type to wake"
+TYPING_BADGE = "Asleep · Enter wakes Claude with this"
+WAKING_BADGE = "Waking Claude…"
+
+
+def sleep_badge(text, loud=False):
+    """Draw the badge, leaving the cursor where it was: dim while the session
+    sleeps, in reverse video while it wakes."""
+    try:
+        width = os.get_terminal_size(1).columns
+    except OSError:
+        return
+    label = f" 󰒲 {text} "
+    if text_width(label) + 2 > width:
+        label = " 󰒲 "
+    col = max(width - text_width(label), 1)
+    style = "\033[1;7m" if loud else "\033[2;7m"
+    os.write(1, f"\0337\033[1;{col}H{style}{label}\033[0m\0338".encode())
+
+
+# What a waking window turns off for the second before Claude is back:
+# mouse reports (the rest of a scroll would pile up and land in Claude as keys)
+# and the alternate scroll mode a terminal falls back to without them (the
+# wheel as arrow keys, which Claude's prompt takes for its history). Claude
+# turns the mouse back on as it starts.
+MOUSE_OFF = b"\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l\033[?1007l"
+
+
 def cmd_asleep(sid):
     """The window loop, once Claude has exited: 0 if the session sleeps (the
     window keeps showing it), 1 if Claude was quit (the window closes)."""
@@ -2529,9 +2561,10 @@ def cmd_asleep(sid):
     if asleep_look(sid) == FROZEN:
         # Claude's screen stays as it was. Only what would now come in without
         # Claude to take it is turned off: mouse movement and focus changes.
-        # The wheel and clicks still report, as they did to Claude.
+        # The wheel and clicks still report, as they did to Claude: they wake it.
         out.write("\033[?1003l\033[?1002l\033[?1004l\033[?2004h")
         out.flush()
+        sleep_badge(ASLEEP_BADGE)
         return 0
     sh("stty", "sane")
     try:
@@ -2550,6 +2583,7 @@ def cmd_asleep(sid):
     # in the way Claude asks for them (kitty's protocol, pastes bracketed).
     out.write(f"\033[2A\r\033[{2 + text_width(lines[-1])}C\033[>5u\033[?2004h")
     out.flush()
+    sleep_badge(ASLEEP_BADGE)
     return 0
 
 
@@ -2581,6 +2615,33 @@ def next_key(buf):
 TYPING_IDLE = 120       # seconds typing in a sleeping session can pause before it sleeps on
 
 
+def waking(keep_typing=False):
+    """A sleeping window, the moment it starts waking: the badge says so, the
+    mouse stops reporting until Claude is back, and what came in meanwhile
+    is taken off the terminal so Claude doesn't get it as keys. What was typed
+    there (the text, if keep_typing) is returned to go in Claude's prompt;
+    a scroll or a click is dropped (Claude's own screen takes the next one)."""
+    os.write(1, MOUSE_OFF)
+    sleep_badge(WAKING_BADGE, loud=True)
+    time.sleep(0.03)            # what was already on its way
+    buf, typed = b"", ""
+    while select.select([0], [], [], 0)[0]:
+        more = os.read(0, 4096)
+        if not more:
+            break
+        buf += more
+    while buf:
+        token, buf = next_key(buf)
+        if token is None:
+            break
+        kind, raw = token
+        if kind == "paste":
+            typed += raw.decode(errors="ignore").replace("\r\n", "\n").replace("\r", "\n")
+        elif kind == "char" and raw.decode(errors="ignore").isprintable():
+            typed += raw.decode(errors="ignore")
+    return typed if keep_typing else ""
+
+
 def cmd_woke(sid, key):
     """The window loop, once a key came in a sleeping session (or `amarchy
     wake`): a stand-in for Claude's prompt. What you type shows where Claude
@@ -2590,7 +2651,8 @@ def cmd_woke(sid, key):
     Claude, 3 to go on sleeping (nothing typed, or a long pause)."""
     d = claude_dir(sid)
     if asleep_since(sid) is None:
-        return 0                # woken from outside
+        waking()                # woken from outside
+        return 0
     buf = bytes.fromhex(key.replace(" ", "").strip()) if key.strip() else b""
     if not buf:
         return 3
@@ -2624,6 +2686,7 @@ def cmd_woke(sid, key):
     edited = False
 
     def wake(typed):
+        typed += waking(keep_typing=True)
         if typed:
             write_file(d / "draft", typed)
         else:
@@ -2651,6 +2714,7 @@ def cmd_woke(sid, key):
             typed = raw.decode(errors="ignore").replace("\r\n", "\n").replace("\r", "\n" if kind == "paste" else "\r")
             if typed == "\r":
                 if text.strip():
+                    waking()
                     write_file(d / "send", text)
                     (d / "draft").unlink(missing_ok=True)
                     clear_asleep(sid)
@@ -2661,6 +2725,7 @@ def cmd_woke(sid, key):
                 return wake(text + typed)
             if not edited:
                 os.write(1, b"\033[K")      # a suggestion Claude showed in the empty prompt
+                sleep_badge(TYPING_BADGE)
                 edited = True
             os.write(1, typed.encode())
             text += typed
