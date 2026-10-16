@@ -2,10 +2,10 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Sessions in the order the CLI gives them (higher priority first, then as
-// they were opened), grouped by project, priority and/or status with a
-// section header where the group changes. Groups nest in that order, each
-// level a step in from the one above and quieter.
+// Sessions in the order the CLI gives them (`amarchy sort`: higher priority
+// first, or newest or oldest first), grouped by project, priority and/or
+// status with a section header where the group changes. Groups nest in that
+// order, each level a step in from the one above and quieter.
 Column {
   id: list
 
