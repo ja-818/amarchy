@@ -31,7 +31,7 @@ Sessions:
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
   amarchy close [id] --confirm          the same, asking first in the Omarchy menu
   amarchy rename [title]                name the current session (asks in the Omarchy menu if omitted)
-  amarchy rename --id <id> [title]      the same for another session; --reset goes back to Claude's own title
+  amarchy rename --id <id> [title]      the same for another session; --reset goes back to the one made from Claude's title
   amarchy zen [on|off]                  toggle zen mode: Claude alone, without the sessions and the terminal beside it
   amarchy terminal [on|off]             move the keyboard between Claude and the terminal (leaves zen mode)
   amarchy run                           run the project in the session's terminal (again: restart it; leaves zen mode)
@@ -104,6 +104,7 @@ Environment:
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 30, 0 for none)
   AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
   AMARCHY_SOUND        off for silent notifications, whatever `amarchy sound` picked
+  AMARCHY_SHORT_NAMES  off to show Claude Code's titles as they are, not cut down to "Keyword: a few words"
 
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
@@ -573,7 +574,7 @@ def save_session(s):
 
 
 # What session_view() adds for the UIs, never saved.
-VIEW_FIELDS = ("status", "awake", "sleeping", "task", "age", "current", "background", "agent")
+VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent")
 
 
 def claude_class(s):
@@ -3095,7 +3096,7 @@ def cmd_close(args):
 
 def cmd_rename(args):
     """Give a session a name of your own, shown above Claude and in every list
-    instead of the title Claude came up with. The branch and worktree keep theirs."""
+    instead of the one made from Claude's title. The branch and worktree keep theirs."""
     args = list(args)
     sid = None
     if "--id" in args:
@@ -3393,10 +3394,116 @@ def saved_title(s):
 
 def session_task(s, window_title):
     """What a session is about: your own name for it (amarchy rename), else
-    Claude's, from its window or its latest conversation."""
+    Claude's, from its window or its latest conversation, cut down to
+    "Keyword: a few words" (short_title) once that's ready."""
     if s.get("setup"):
         return s.get("title") or "Setting up the worktree"
-    return s.get("title") or task_title(window_title) or saved_title(s)
+    if s.get("title"):
+        return s["title"]
+    title = claude_title(s, window_title)
+    return short_title(s["repo"], title) or title
+
+
+def claude_title(s, window_title):
+    """The title Claude Code gave the session, whole: from its window, else its latest conversation."""
+    return task_title(window_title) or saved_title(s)
+
+
+SHORT_NAMES = os.environ.get("AMARCHY_SHORT_NAMES", "on").lower() not in ("0", "off", "no", "false")
+SHORT = STATE / "short.json"         # Claude's title (with its project) → the short name for it
+SHORTENING = STATE / "shortening"    # one file per title being cut down right now
+SHORT_RETRY = 600                    # how long a title that couldn't be cut down waits to try again
+SHORT_PROMPT = """Name a coding session for a narrow sidebar list, so it can be told apart from the others at a glance.
+
+Format: Keyword: a few words
+- Keyword: one word, two at most: the thing being worked on, the word you'd look for in the list. Capitalized.
+- After the colon: one to three lowercase words on what about it. Only what the title says; don't invent.
+- 26 characters at most in all. In English, whatever the title's language.
+- Leave out the project's name ({repo}) and filler like session, setup, analysis, implementation.
+- Reply with the name only: no quotes, no period, nothing else.
+
+Examples:
+Fix login redirect loop after OAuth callback -> Login: redirect loop
+Add dark mode toggle to settings page -> Dark mode: toggle
+Investigate flaky CI tests in payments module -> CI: flaky payment tests
+Configurar notificaciones push en Android -> Push: Android
+
+Session title: {title}"""
+
+
+def short_key(repo, title):
+    return f"{repo}\t{title}"
+
+
+def short_title(repo, title):
+    """Claude's title for a session cut down to "Keyword: a few words", the
+    keyword first so a list of them reads at a glance. Claude Code's titles
+    are a sentence each; Haiku cuts each one down once, in the background
+    (amarchy shorten), and until then (or without claude) there's none."""
+    if not SHORT_NAMES or not title:
+        return ""
+    try:
+        short = json.loads(SHORT.read_text()).get(short_key(repo, title))
+    except (OSError, ValueError):
+        short = None
+    if short is not None:
+        return short
+    marker = SHORTENING / hashlib.sha1(short_key(repo, title).encode()).hexdigest()
+    try:
+        if time.time() - marker.stat().st_mtime < SHORT_RETRY:
+            return ""     # on its way, or it failed a moment ago
+    except OSError:
+        pass
+    if shutil.which("claude"):
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        detach([ENTRY, "shorten", repo, title])
+    return ""
+
+
+def shorten(repo, title):
+    """Ask Haiku for the short name of a title: one line, Keyword: words, short
+    enough for the list. None if it couldn't give one."""
+    for _ in range(2):
+        try:
+            r = subprocess.run(
+                ["claude", "-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", "",
+                 "--tools", "", "--strict-mcp-config", SHORT_PROMPT.format(repo=repo, title=title)],
+                capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+                env=clean_env(), cwd=STATE)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        lines = [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
+        name = lines[0].strip("\"'`*. ") if len(lines) == 1 else ""
+        m = re.fullmatch(r"([^:]{1,20}):\s*([^:]{1,26})", name)
+        if r.returncode == 0 and m and len(name) <= 34:
+            return f"{m.group(1).strip()}: {m.group(2).strip()}"
+    return None
+
+
+def cmd_shorten(repo, title):
+    """amarchy shorten <repo> <title>: cut a Claude title down (short_title
+    starts it), keep it, and redraw the list with it."""
+    key = short_key(repo, title)
+    marker = SHORTENING / hashlib.sha1(key.encode()).hexdigest()
+    name = shorten(repo, title)
+    if not name:
+        return 1          # the marker stays, so it's tried again in a while
+    with open(STATE / "short.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            cache = json.loads(SHORT.read_text())
+        except (OSError, ValueError):
+            cache = {}
+        cache[key] = name
+        # Only the titles of sessions still around, and the one just made.
+        windows = {c["class"]: c["title"] for c in clients()}
+        keep = {short_key(s["repo"], t) for s in sessions()
+                for t in (claude_title(s, windows.get(claude_class(s), "")),)}
+        write_file(SHORT, json.dumps({k: v for k, v in cache.items() if k in keep or k == key}))
+    marker.unlink(missing_ok=True)
+    tell_shell("refresh")
+    return 0
 
 
 def claude_agents():
@@ -3440,6 +3547,8 @@ def session_view():
         if s["sleeping"] and not s.get("setup"):
             s["status"] = "idle"    # only an idle session sleeps (or one left from before)
         s["task"] = session_task(s, titles.get(claude_class(s), ""))
+        # Claude's whole title, so a search finds a session by any word of it.
+        s["claude_title"] = "" if s.get("setup") else claude_title(s, titles.get(claude_class(s), ""))
         s["age"] = age(s["id"]) if s["awake"] else ""
         # Claude Code background sessions (/bg) still running in its worktree.
         s["background"] = len(background_sessions(s, background))
@@ -3832,6 +3941,8 @@ def main(argv):
         return cmd_reap(args[0])
     elif cmd == "claude" and len(args) == 1:
         return cmd_claude(args[0])
+    elif cmd == "shorten" and len(args) == 2:
+        return cmd_shorten(*args)
     elif cmd == "asleep" and len(args) == 1:
         return cmd_asleep(args[0])
     elif cmd == "woke" and len(args) in (1, 2):

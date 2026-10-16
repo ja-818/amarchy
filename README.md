@@ -11,13 +11,22 @@ gap to its right:
  [Ⓐ Amarchy] [󰐕 New session] │                     │
  [󰍉 Search sessions] [󰉋] [󰉹] │                     │ $ npm run dev
                              │                     │
- 󰂞  Fix the login redirect 4m│       claude        │
+ 󰂞  Login: redirect loop   4m│       claude        │
     my-app · wobbly-bakunin  │    (column, 900)    │
- ⠋  Billing export       12m │                     │
+ ⠋  Billing: CSV export  12m │                     │
     my-app · smug-goldman    │                     │
- 󰄬  Tidy the README       1h │                     │
+ 󰄬  README: tidy up       1h │                     │
     docs · sleepy-kropotkin  │                     │
 ```
+
+Each row says what the session is about in a few words, keyword first, so you
+find the one you want by the word in bold: Claude Code's title for the
+conversation ("Fix login redirect loop after OAuth callback") cut down by
+Haiku to **Login:** redirect loop. It happens once per title, in the
+background, through your own `claude` login; until it's done, and with
+`AMARCHY_SHORT_NAMES=off`, Claude's title shows as it is. A name you give the
+session yourself (`Ctrl+Alt+E`) always wins, and the search still finds a
+session by any word of Claude's whole title.
 
 The list is drawn by the Omarchy shell (a shell plugin) with the same type,
 rows and selection as the Omarchy menu, in the order you opened them, so a
@@ -90,7 +99,7 @@ directly; from a script, `amarchy group project`, `amarchy group priority`,
 | `Ctrl+Alt+N` / `A` | New session / add project. |
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower this session's priority (High, Normal, Low): higher ones come first in the list. |
-| `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the title Claude came up with. |
+| `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the short one made from Claude's title. |
 | `Ctrl+Alt+M` | The amarchy menu: everything here, each with its key next to it. New session, Search sessions and Add project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones) and **Settings** (theme, sound, keys), where `Esc` goes back. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
@@ -314,6 +323,7 @@ Everything else is environment variables (set them in `~/.config/uwsm/env`):
 | `AMARCHY_HEADER_HEIGHT` | `30` | Height of the strip above Claude with the session's name in zen mode, `0` for none. Run `amarchy layout` after changing it. |
 | `AMARCHY_CLAUDE_ARGS` | `--permission-mode auto` | Extra arguments for `claude`. |
 | `AMARCHY_SOUND` | `on` | `off` for notifications without the chime, whatever [Sound](#sound) picked. |
+| `AMARCHY_SHORT_NAMES` | `on` | `off` to list sessions by Claude Code's titles as they are, not cut down to "Keyword: a few words". |
 
 How long an idle session waits before it sleeps isn't a variable: `amarchy
 sleep --after <minutes>|off`, kept with amarchy's state.
@@ -340,7 +350,7 @@ amarchy jump <id>                     go to a session
 amarchy close [id] [--force]          close a session (current one if no id)
 amarchy close [id] --confirm          the same, asking first in the Omarchy menu
 amarchy rename [title]                name the current session (asks in the Omarchy menu if omitted)
-amarchy rename --id <id> [title]      the same for another session; --reset goes back to Claude's own title
+amarchy rename --id <id> [title]      the same for another session; --reset goes back to the one made from Claude's title
 amarchy zen [on|off]                  toggle zen mode: Claude alone, nothing beside it
 amarchy terminal [on|off]             between Claude and the terminal (leaves zen mode)
 amarchy run                           run the project in the session's terminal (again: restart it)
