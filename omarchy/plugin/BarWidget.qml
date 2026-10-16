@@ -15,7 +15,8 @@ import qs.Ui
 // Above the list there is only the Ⓐ Amarchy button (the menu: everything else
 // amarchy does), New session and a search by name (its placeholder is the key
 // that puts the keyboard in it), with one 󰒼 button next to it that opens how
-// the list is grouped (by project, priority, status).
+// the list is grouped (by project, priority, status) and sorted inside its
+// groups (by priority, newest or oldest first).
 // IPC: omarchy-shell amarchy-bar toggle|open|close
 //      omarchy-shell amarchy refresh|peek|search|sounds|zen <true|false>
 Panel {
@@ -104,6 +105,20 @@ Panel {
     else if (what === "priority") on = store.byPriority = !store.byPriority
     else on = store.byStatus = !store.byStatus
     store.run(["group", what, on ? "on" : "off"])
+  }
+
+  // Sort the list inside its groups: "priority", "newest" or "oldest". The
+  // menu checks it at once, like the groupings.
+  function sortBy(how) {
+    if (store.sortBy === how) return
+    store.sortBy = how
+    store.run(["sort", how])
+  }
+
+  // The next sort, from the keyboard (o in the popup).
+  function nextSort() {
+    var sorts = ["priority", "newest", "oldest"]
+    root.sortBy(sorts[(sorts.indexOf(store.sortBy) + 1) % sorts.length])
   }
 
   // Raise ("up") or lower ("down") the priority of the session under the
@@ -208,17 +223,17 @@ Panel {
   }
 
   // What the popup and the list beside Claude show: the menu and New session,
-  // the search with the grouping button next to it, and the sessions. The peek
-  // is `passive`: the sessions alone. The grouping menu drops over the list.
+  // the search with the group & sort button next to it, and the sessions. The peek
+  // is `passive`: the sessions alone. The group & sort menu drops over the list.
   component Content: Item {
     id: content
     property int cursor: -1
     property bool passive: false
-    // The grouping menu is open; menuCursor is its row under the keyboard
-    // (the popup's j/k), -1 for none.
+    // The group & sort menu is open; menuCursor is its row under the keyboard
+    // (the popup's j/k), -1 for none: the groupings first, then the sorts.
     property bool menuOpen: false
     property int menuCursor: -1
-    // The popup has keys for each grouping; the menu shows them.
+    // The popup has keys for each grouping and for the sort; the menu shows them.
     property bool showKeys: false
     readonly property Item searchField: search
     readonly property bool searchFocused: search.activeFocus
@@ -229,13 +244,19 @@ Panel {
     signal searchRequested()
     signal searchEnded()
 
-    // What the grouping menu offers, in the order they nest. "none" is the
+    // The groupings the menu offers, in the order they nest. "none" is the
     // plain list.
     readonly property var groupings: [
       { what: "project", icon: "󰉋", label: "Project", key: "P" },
       { what: "priority", icon: "󰈻", label: "Priority", key: "F" },
       { what: "status", icon: "󰉹", label: "Status", key: "S" },
       { what: "none", icon: "󰒼", label: "Not grouped", key: "" }
+    ]
+    // How it's sorted inside the groups: one of these, always.
+    readonly property var sorts: [
+      { what: "priority", icon: "󰈻", label: "Priority" },
+      { what: "newest", icon: "󱕈", label: "Newest first" },
+      { what: "oldest", icon: "󱕇", label: "Oldest first" }
     ]
 
     function grouped(what) {
@@ -258,13 +279,16 @@ Panel {
       content.menuCursor = -1
     }
     function moveMenu(dy) {
-      content.menuCursor = Math.max(0, Math.min(content.menuCursor + dy, content.groupings.length - 1))
+      var last = content.groupings.length + content.sorts.length - 1
+      content.menuCursor = Math.max(0, Math.min(content.menuCursor + dy, last))
     }
-    // Switch the grouping under the menu's cursor; the menu stays open, to
-    // set more than one.
+    // Switch the grouping, or pick the sort, under the menu's cursor; the
+    // menu stays open, to set more than one.
     function pickMenu() {
       var g = content.groupings[content.menuCursor]
-      if (g) root.group(g.what)
+      if (g) { root.group(g.what); return }
+      var o = content.sorts[content.menuCursor - content.groupings.length]
+      if (o) root.sortBy(o.what)
     }
 
     // One height for every control up top: the buttons size from their
@@ -382,16 +406,17 @@ Panel {
           }
         }
 
-        // How the list is grouped, in a menu; lit while it's grouped at all.
+        // How the list is grouped and sorted, in a menu. Lit only while the
+        // menu is open: the headers in the list already say how it's grouped.
         Button {
           id: organize
           // Square, at the height of everything else.
           width: Math.max(implicitWidth, content.controlHeight)
           height: content.controlHeight
           iconText: "󰒼"
-          tooltipText: content.menuOpen ? "" : "Group the list"
+          tooltipText: content.menuOpen ? "" : "Group and sort the list"
           bordered: true
-          selected: content.menuOpen || !content.grouped("none")
+          selected: content.menuOpen
           onClicked: content.menuOpen ? content.closeMenu() : content.openMenu(false)
         }
       }
@@ -430,8 +455,10 @@ Panel {
       onClicked: content.closeMenu()
     }
 
-    // The grouping menu: each switch on its own, checked while on; together
-    // they nest in the order they're listed. It stays open to set several.
+    // The group & sort menu. The groupings are switches, each on its own,
+    // checked while on; together they nest in the order they're listed. Under
+    // them, how the list is sorted inside its groups: one of them, checked.
+    // It stays open to set several.
     BorderSurface {
       id: menu
       visible: content.menuOpen
@@ -455,103 +482,174 @@ Panel {
         y: menu.contentTopInset
         width: menu.width - menu.contentLeftInset - menu.contentRightInset
 
-        Text {
+        MenuHeader {
           width: parent.width
-          leftPadding: Style.spacing.sm
-          topPadding: Style.spacing.xs
-          bottomPadding: Style.spacing.xs
-          textFormat: Text.PlainText
           text: "GROUP BY"
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          font.letterSpacing: 1.2
-          color: Qt.darker(Color.popups.text, 1.4)
         }
 
         Repeater {
           model: content.groupings
 
-          BorderSurface {
-            id: item
+          MenuRow {
             required property var modelData
             required property int index
-            readonly property bool on: content.grouped(modelData.what)
-            readonly property bool hot: content.menuCursor === index || itemArea.containsMouse
-
             width: menuItems.width
-            height: Style.spacing.popupRowHeight
-            radius: Style.cornerRadius
-            color: hot ? Color.menu.selectedBackground : "transparent"
+            icon: modelData.icon
+            label: modelData.label
+            keyText: content.showKeys ? modelData.key : ""
+            on: content.grouped(modelData.what)
+            hasCursor: content.menuCursor === index
+            onPicked: root.group(modelData.what)
+          }
+        }
 
-            Text {
-              id: itemIcon
-              width: Style.font.icon + Style.spacing.sm
-              anchors.left: parent.left
-              anchors.leftMargin: Style.spacing.sm
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: item.modelData.icon
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.icon
-              color: item.on ? Color.menu.selectedText : Color.popups.text
-              opacity: item.on || item.hot ? 1 : 0.6
-            }
+        MenuHeader {
+          width: parent.width
+          text: "SORT BY"
+          gapAbove: Style.spacing.sm
+          // o goes to the next one.
+          keyText: content.showKeys ? "O" : ""
+        }
 
-            Text {
-              anchors.left: itemIcon.right
-              anchors.right: itemKey.left
-              anchors.rightMargin: Style.spacing.sm
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              text: item.modelData.label
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.body
-              font.bold: item.on
-              color: item.on || item.hot ? Color.menu.selectedText : Color.popups.text
-            }
+        Repeater {
+          model: content.sorts
 
-            // Its key in the popup, the way the Ⓐ menu shows them.
-            Text {
-              id: itemKey
-              anchors.right: check.left
-              anchors.rightMargin: Style.spacing.sm
-              anchors.verticalCenter: parent.verticalCenter
-              visible: content.showKeys && item.modelData.key !== ""
-              width: visible ? implicitWidth : 0
-              textFormat: Text.PlainText
-              text: item.modelData.key
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
-              color: Color.popups.text
-              opacity: 0.45
-            }
-
-            Text {
-              id: check
-              width: Style.font.icon
-              anchors.right: parent.right
-              anchors.rightMargin: Style.spacing.sm
-              anchors.verticalCenter: parent.verticalCenter
-              horizontalAlignment: Text.AlignHCenter
-              textFormat: Text.PlainText
-              text: item.on ? "󰄬" : ""
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.icon
-              color: Color.menu.selectedText
-            }
-
-            MouseArea {
-              id: itemArea
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.group(item.modelData.what)
-            }
+          MenuRow {
+            required property var modelData
+            required property int index
+            width: menuItems.width
+            icon: modelData.icon
+            label: modelData.label
+            on: store.sortBy === modelData.what
+            hasCursor: content.menuCursor === content.groupings.length + index
+            onPicked: root.sortBy(modelData.what)
           }
         }
       }
+    }
+  }
+
+  // A section of the group & sort menu: its name, small and quiet, and the
+  // key for it on the right in the popup.
+  component MenuHeader: Item {
+    id: header
+    property string text: ""
+    property string keyText: ""
+    // Room above it, setting it apart from the section before.
+    property real gapAbove: 0
+
+    implicitHeight: headerText.implicitHeight
+
+    Text {
+      id: headerText
+      width: parent.width
+      leftPadding: Style.spacing.sm
+      rightPadding: Style.spacing.sm
+      topPadding: Style.spacing.xs + header.gapAbove
+      bottomPadding: Style.spacing.xs
+      textFormat: Text.PlainText
+      text: header.text
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      font.letterSpacing: 1.2
+      color: Qt.darker(Color.popups.text, 1.4)
+
+      Text {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.spacing.sm
+        anchors.baseline: parent.baseline
+        visible: header.keyText !== ""
+        textFormat: Text.PlainText
+        text: header.keyText
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.caption
+        color: Color.popups.text
+        opacity: 0.45
+      }
+    }
+  }
+
+  // A row of the group & sort menu: icon, label, its key in the popup (the
+  // way the Ⓐ menu shows them) and a check while it's on.
+  component MenuRow: BorderSurface {
+    id: item
+    property string icon: ""
+    property string label: ""
+    property string keyText: ""
+    property bool on: false
+    // Under the menu's keyboard cursor.
+    property bool hasCursor: false
+    readonly property bool hot: hasCursor || itemArea.containsMouse
+    signal picked()
+
+    height: Style.spacing.popupRowHeight
+    radius: Style.cornerRadius
+    color: hot ? Color.menu.selectedBackground : "transparent"
+
+    Text {
+      id: itemIcon
+      width: Style.font.icon + Style.spacing.sm
+      anchors.left: parent.left
+      anchors.leftMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: item.icon
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.icon
+      color: item.on ? Color.menu.selectedText : Color.popups.text
+      opacity: item.on || item.hot ? 1 : 0.6
+    }
+
+    Text {
+      anchors.left: itemIcon.right
+      anchors.right: itemKey.left
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      text: item.label
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.body
+      font.bold: item.on
+      color: item.on || item.hot ? Color.menu.selectedText : Color.popups.text
+    }
+
+    Text {
+      id: itemKey
+      anchors.right: check.left
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      visible: item.keyText !== ""
+      width: visible ? implicitWidth : 0
+      textFormat: Text.PlainText
+      text: item.keyText
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.caption
+      color: Color.popups.text
+      opacity: 0.45
+    }
+
+    Text {
+      id: check
+      width: Style.font.icon
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      horizontalAlignment: Text.AlignHCenter
+      textFormat: Text.PlainText
+      text: item.on ? "󰄬" : ""
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.icon
+      color: Color.menu.selectedText
+    }
+
+    MouseArea {
+      id: itemArea
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: item.picked()
     }
   }
 
@@ -663,8 +761,9 @@ Panel {
       anchors.fill: parent
       // The search has the keys while you type in it.
       blocked: column.searchFocused
-      // While the grouping menu is open the keys move in it: Esc closes it,
-      // Enter or Space switch the grouping under its cursor.
+      // While the group & sort menu is open the keys move in it: Esc closes
+      // it, Enter or Space switch the grouping (or pick the sort) under its
+      // cursor.
       onMoveRequested: function(dx, dy) {
         if (column.menuOpen) column.moveMenu(dy)
         else root.moveCursor(dy)
@@ -691,6 +790,7 @@ Panel {
         else if (t === "p") root.group("project")
         else if (t === "f") root.group("priority")
         else if (t === "s") root.group("status")
+        else if (t === "o") root.nextSort()
         else if (t === "g") column.menuOpen ? column.closeMenu() : column.openMenu(true)
         else if (t === "+" || t === "=") root.prioritize("up")
         else if (t === "-") root.prioritize("down")

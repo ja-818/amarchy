@@ -46,12 +46,15 @@ Sessions:
   amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
-                                        list always puts higher priority first; new sessions are normal
+                                        list puts higher priority first, unless it's sorted by date;
+                                        new sessions are normal
   amarchy group [project|priority|status] [on|off]
                                         group the list by project, priority (High, Normal, Low) and/or
                                         status (Needs you, Working, Idle), nested in that order;
                                         without on|off switches it, without anything prints the
                                         grouping; `group none` drops them all
+  amarchy sort [priority|newest|oldest] sort the list inside its groups: by priority (the default),
+                                        or by when the session was opened; prints it without one
 
 Sleep (a session you're not using lets go of its Claude Code, and its memory, until you type in it;
 nothing on screen changes, and what you type goes to Claude when it's back):
@@ -144,7 +147,8 @@ LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 THEME_LOG = STATE / "theme.log" # every repaint and how each step of it went
 LAST = STATE / "last"
-GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "status", both or neither
+GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "priority", "status", any or none
+SORT_FILE = STATE / "sort"      # how it's sorted inside its groups: "priority", "newest" or "oldest"
 ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
 CLAUDE_STATE = STATE / "claude" # per session: its conversation, and what sleep keeps for it (see "sleep")
@@ -3218,6 +3222,8 @@ PRIORITIES = ("high", "normal", "low")
 RANK = {p: i for i, p in enumerate(PRIORITIES)}
 # How the list can be grouped, outermost first; any of them, on its own or together.
 GROUPS = ("project", "priority", "status")
+# How it's sorted inside its groups (or all of it, ungrouped); priority is the default.
+SORTS = ("priority", "newest", "oldest")
 
 
 def list_groups():
@@ -3239,16 +3245,29 @@ def priority(s):
     return p if p in RANK else "normal"
 
 
-def session_order(s, groups=None):
-    """Higher priority first, always: within each group, and with no grouping
-    at all. Among the same priority sessions keep the order you opened them
-    in, so each one keeps its place."""
+def list_sort():
+    """How the list is sorted inside its groups: by priority (higher first,
+    then the order you opened them in), newest first or oldest first."""
+    try:
+        how = SORT_FILE.read_text().strip()
+    except OSError:
+        return "priority"
+    return how if how in SORTS else "priority"
+
+
+def session_order(s, groups=None, how=None):
+    """Grouped first (project, priority, status, outermost first), then sorted
+    inside each group: by priority, higher first, or by when it was opened.
+    Ties keep the order you opened them in, so each one keeps its place."""
     groups = list_groups() if groups is None else groups
+    how = list_sort() if how is None else how
     rank = RANK[priority(s)]
+    created = s.get("created", 0)
     return (s["repo"].lower() if "project" in groups else "",
             rank if "priority" in groups else 0,
             ORDER.get(s["status"], len(ORDER)) if "status" in groups else 0,
-            rank, s.get("created", 0), s["id"])
+            rank if how == "priority" else 0,
+            -created if how == "newest" else created, s["id"])
 
 
 def set_groups(groups):
@@ -3274,6 +3293,19 @@ def cmd_group(args):
     if args:
         set_groups(groups)
     print(" ".join(groups) or "none")
+    return 0
+
+
+def cmd_sort(args):
+    """`amarchy sort priority|newest|oldest`: how the list is sorted inside its
+    groups. Prints how it's sorted now."""
+    if len(args) > 1 or args and args[0] not in SORTS:
+        return fail("usage: amarchy sort [priority|newest|oldest]")
+    if args:
+        STATE.mkdir(parents=True, exist_ok=True)
+        SORT_FILE.write_text(args[0] + "\n")
+        tell_shell("refresh")
+    print(list_sort())
     return 0
 
 
@@ -3437,8 +3469,8 @@ def session_view():
         s["background"] = len(background_sessions(s, background))
         s["current"] = s["id"] == current
         s["priority"] = priority(s)
-    groups = list_groups()
-    ss.sort(key=lambda s: session_order(s, groups))
+    groups, how = list_groups(), list_sort()
+    ss.sort(key=lambda s: session_order(s, groups, how))
     return ss
 
 
@@ -3531,7 +3563,7 @@ def cmd_ui():
     """Everything the shell plugin draws, in one call."""
     print(json.dumps({"zen": zen(), "zen_width": ZEN_WIDTH, "panel_gap": PAD, "terminal_alpha": terminal_alpha(),
                       "header_height": header_height(), "keys": nav_keys(),
-                      "group": list_groups(), "sessions": session_view()}))
+                      "group": list_groups(), "sort": list_sort(), "sessions": session_view()}))
 
 
 PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
@@ -3610,6 +3642,8 @@ def main(argv):
         return cmd_watch()
     elif cmd == "group":
         return cmd_group(args)
+    elif cmd == "sort":
+        return cmd_sort(args)
     elif cmd == "order":
         return cmd_order(args)
     elif cmd == "layout":

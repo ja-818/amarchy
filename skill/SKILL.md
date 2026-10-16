@@ -86,8 +86,9 @@ dev server). Restart the terminal so the user sees the result too.
   the conversation resumes as it was.
 
 - `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session
-  matters to the user. The list puts higher priority first. Without a level it
-  prints it (that you can do freely); only set it when asked.
+  matters to the user. The list puts higher priority first (unless the user
+  sorts it by date, `amarchy sort`). Without a level it prints it (that you
+  can do freely); only set it when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
   strip above you. Claude Code's own title is shown until then, so don't rename
   unprompted. Never overwrite a name the user gave (`title` in `amarchy list`).
@@ -113,9 +114,9 @@ dev server). Restart the terminal so the user sees the result too.
 - `amarchy close` with no id closes **this** session: your own window and your
   worktree. Don't.
 - `jump`, `next`, `prev`, `open`, `show`, `search`, `pick`, `menu`, `zen`,
-  `terminal`, `theme`, `sound`, `group`, `layout`: these move or repaint what the
-  user is looking at (or change what they hear). Run them only when asked, as
-  the action itself.
+  `terminal`, `theme`, `sound`, `group`, `sort`, `layout`: these move or
+  repaint what the user is looking at (or change what they hear). Run them
+  only when asked, as the action itself.
 - `hook`, `ui`, `watch` are amarchy's own plumbing. Don't edit
   `~/.local/state/amarchy/` either.
 
