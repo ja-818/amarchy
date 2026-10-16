@@ -3799,7 +3799,6 @@ def menu_keys(scope):
 MENU = [
     menu_item("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), where="out"),
     menu_item("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session")),
-    menu_item("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",)),
     menu_item("󰐊", "Run", where="in", children=[
         menu_item("󰐊", "Run project", ["run"], ("Run amarchy project",)),
         menu_item("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",)),
