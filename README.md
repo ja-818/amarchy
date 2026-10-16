@@ -101,11 +101,11 @@ priority|newest|oldest`. The choices stick.
 | `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
-| `Ctrl+Alt+N` / `A` | New session / add project. |
+| `Ctrl+Alt+N` / `P` | New session / new project. |
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower this session's priority (High, Normal, Low): higher ones come first in the list. |
 | `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the short one made from Claude's title. |
-| `Ctrl+Alt+M` | The amarchy menu, in a card like the Omarchy menu's: New session and Add project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones, close one) and **Settings** (theme, sound, keys). A group has a chevron: `→` or `↵` opens it, `←` goes back (never out of amarchy). The selected row shows its key; typing searches all of it. What only makes sense on a session shows only there. The one to remember. |
+| `Ctrl+Alt+M` | The amarchy menu, in a card like the Omarchy menu's: New session and New project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones, close one) and **Settings** (theme, sound, keys). A group has a chevron: `→` or `↵` opens it, `←` goes back (never out of amarchy). The selected row shows its key; typing searches all of it. What only makes sense on a session shows only there. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
 | `Super+Space` | **Amarchy** is in the Omarchy menu too: the same rows as `Ctrl+Alt+M`. |
@@ -113,8 +113,8 @@ priority|newest|oldest`. The choices stick.
 The **Ⓐ in the bar** lights up when a session needs you; click it for your
 sessions, right click for a new one.
 
-New session opens the Omarchy menu. The project list ends with **Add
-project**: pick one of your GitHub repos (searchable, most recently pushed
+New session opens the Omarchy menu. The project list ends with **New
+project** (also `Ctrl+Alt+P`): pick one of your GitHub repos (searchable, most recently pushed
 first), paste a git URL, or start an empty project (optionally with a private
 GitHub repo), and the session starts right on it.
 
@@ -314,7 +314,7 @@ one there, until `amarchy keys reset`):
 ```lua
 amarchy = { mod = "SUPER + ALT", open_key = "A", new_key = "N",
             nav_mod = "CTRL + ALT", next_key = "J", prev_key = "K", search_key = "S", zen_key = "Z", terminal_key = "RETURN", run_key = "R", commands_key = "C",
-            nav_new_key = "N", add_key = "A", theme_key = "T", rename_key = "E", close_key = "X", menu_key = "M" }
+            nav_new_key = "N", project_key = "P", theme_key = "T", rename_key = "E", close_key = "X", menu_key = "M" }
 ```
 
 Everything else is environment variables (set them in `~/.config/uwsm/env`):
@@ -344,7 +344,7 @@ amarchy projects [--json]             your projects and their session counts
 amarchy projects --github [--json]    your GitHub repos (✓ = already added)
 amarchy add <owner/repo|git url>      clone a project (prints its path)
 amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
-amarchy add                           add a project interactively
+amarchy add                           start a new project interactively (New project in the menu)
 
 amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted); prints its id
 amarchy new <project> [name] --prompt <text|->  the same, with the first thing its Claude is asked (- reads stdin)

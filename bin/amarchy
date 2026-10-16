@@ -16,7 +16,7 @@ Projects (git repos directly inside AMARCHY_WORK):
   amarchy projects --github [--json]    your GitHub repos (✓ = already added)
   amarchy add <owner/repo|git url>      clone a project (prints its path)
   amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
-  amarchy add                           add a project interactively
+  amarchy add                           start a new project interactively (New project in the menu)
 
 Sessions:
   amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted);
@@ -2817,7 +2817,7 @@ ICON_NEW = "󰝒"
 ICON_LOCK = "󰌾"
 ICON_THEME = "󰏘"
 ICON_CHECK = "󰄬"
-ADD_PROJECT = "Add project"
+ADD_PROJECT = "New project"
 
 
 def menu_select(prompt, rows):
@@ -3598,7 +3598,7 @@ NAV_BINDS = (("Next amarchy session", "next"), ("Previous amarchy session", "pre
              ("Search amarchy sessions", "search"), ("Toggle amarchy zen", "zen"),
              ("Toggle amarchy terminal", "terminal"), ("Run amarchy project", "run"),
              ("Run amarchy command", "commands"),
-             ("New amarchy session here", "new"), ("Add amarchy project", "add"),
+             ("New amarchy session here", "new"), ("New amarchy project", "add"),
              ("Pick amarchy theme", "theme"), ("Rename amarchy session", "rename"),
              ("Raise amarchy priority", "raise"), ("Lower amarchy priority", "lower"),
              ("Close amarchy session", "close"),
@@ -3799,6 +3799,7 @@ def menu_keys(scope):
 MENU = [
     menu_item("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), where="out"),
     menu_item("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session")),
+    menu_item("󰉋", "New project", ["add"], ("New amarchy project",)),
     menu_item("󰐊", "Run", where="in", children=[
         menu_item("󰐊", "Run project", ["run"], ("Run amarchy project",)),
         menu_item("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",)),
@@ -3818,7 +3819,6 @@ MENU = [
         menu_item("󰒲", "Sleep idle sessions", ["sleep", "--all"], ("Sleep idle amarchy sessions",)),
         menu_item("󰅖", "Close a session", ["pick", "close"]),
     ]),
-    menu_item("󰉋", "Add project", ["add"], ("Add amarchy project",)),
     menu_item("󰒓", "Settings", children=[
         menu_item("󰏘", "Theme", ["theme"], ("Pick amarchy theme",)),
         menu_item("󰕾", "Sound", ["sound"]),

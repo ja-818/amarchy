@@ -23,7 +23,8 @@
 --   run_key      run the project in that terminal; again restarts it (default "R")
 --   commands_key choose another saved command of the project to run there (default "C")
 --   nav_new_key  start a session (default "N")
---   add_key      add a project (default "A")
+--   project_key  start a new project: one of your GitHub repos, a git URL or an
+--                empty one (default "P"; add_key, its old name, still works)
 --   theme_key    pick the theme amarchy wears (default "T")
 --   rename_key   name this session yourself (default "E")
 --   raise_key    raise this session's priority: higher ones come first in the
@@ -80,7 +81,9 @@ nav(cfg.terminal_key, "RETURN", "Toggle amarchy terminal", "terminal")
 nav(cfg.run_key, "R", "Run amarchy project", "run")
 nav(cfg.commands_key, "C", "Run amarchy command", "run --pick")
 nav(cfg.nav_new_key, "N", "New amarchy session here", "new")
-nav(cfg.add_key, "A", "Add amarchy project", "add")
+local project_key = cfg.project_key
+if project_key == nil then project_key = cfg.add_key end
+nav(project_key, "P", "New amarchy project", "add")
 nav(cfg.theme_key, "T", "Pick amarchy theme", "theme")
 nav(cfg.rename_key, "E", "Rename amarchy session", "rename")
 nav(cfg.raise_key, "UP", "Raise amarchy priority", "priority up")
