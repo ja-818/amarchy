@@ -27,6 +27,9 @@ Item {
   property bool byProject: false
   property bool byPriority: false
   property bool byStatus: false
+  // How it's sorted inside its groups: "priority" (higher first), "newest"
+  // or "oldest" (when the session was opened).
+  property string sortBy: "priority"
 
   readonly property int waiting: count("waiting")
   readonly property int working: count("working")
@@ -62,6 +65,7 @@ Item {
           root.byProject = groups.indexOf("project") >= 0
           root.byPriority = groups.indexOf("priority") >= 0
           root.byStatus = groups.indexOf("status") >= 0
+          root.sortBy = d.sort || "priority"
           root.zen = d.zen !== false
           root.zenWidth = d.zen_width || 900
           root.panelGap = d.panel_gap || 8
