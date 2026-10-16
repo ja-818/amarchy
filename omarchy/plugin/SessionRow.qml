@@ -59,6 +59,15 @@ BorderSurface {
     opacity: row.cursor || row.urgent ? 1 : 0.52
   }
 
+  // What a session is about, as rich text: the keyword before ": " in bold,
+  // the few words after it in the regular weight, so a list of them reads by
+  // the keyword. A name without one is bold all through.
+  function taskText(task) {
+    var esc = function(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    var i = task.indexOf(": ")
+    return i > 0 ? "<b>" + esc(task.slice(0, i + 1)) + "</b> " + esc(task.slice(i + 2)) : "<b>" + esc(task) + "</b>"
+  }
+
   Column {
     id: content
     anchors.left: icon.right
@@ -73,12 +82,11 @@ BorderSurface {
     Text {
       id: label
       width: parent.width
-      textFormat: Text.PlainText
+      textFormat: Text.StyledText
       elide: Text.ElideRight
-      text: row.session.task || "new session"
+      text: row.taskText(row.session.task || "new session")
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.title * row.zoom)
-      font.bold: true
       color: row.ink
       opacity: row.session.task || row.cursor ? 1 : 0.52
     }

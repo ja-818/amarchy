@@ -36,6 +36,13 @@ PanelWindow {
   readonly property color ink: Color.bar.text
   readonly property color dim: Qt.darker(Color.bar.text, 1.4)
 
+  // The keyword before ": " in bold, the rest in the regular weight (as in the list).
+  function taskText(task) {
+    var esc = function(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    var i = task.indexOf(": ")
+    return i > 0 ? "<b>" + esc(task.slice(0, i + 1)) + "</b> " + esc(task.slice(i + 2)) : "<b>" + esc(task) + "</b>"
+  }
+
   visible: zen && stripHeight > 0 && session !== null
   color: "transparent"
   implicitHeight: Math.max(1, stripHeight)
@@ -91,12 +98,11 @@ PanelWindow {
         // Leaves room for the rest of the row inside the column.
         width: Math.min(implicitWidth, pill.width - Style.spacing.controlPaddingX * 2
                         - glyph.width - row.spacing - (more.visible ? more.implicitWidth + row.spacing : 0))
-        textFormat: Text.PlainText
+        textFormat: Text.StyledText
         elide: Text.ElideRight
-        text: root.session ? (root.session.task || "New session") : ""
+        text: root.session ? root.taskText(root.session.task || "New session") : ""
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.body
-        font.bold: true
         color: root.ink
         opacity: root.session && root.session.task ? 1 : 0.52
       }

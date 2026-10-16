@@ -53,7 +53,7 @@ Every command prints its result to stdout and exits non-zero on failure.
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
   `idle`), `sleeping` (its Claude Code isn't running until the user types
   in it; it still shows as idle), `priority` (`high`,
-  `normal`, `low`), `task` (what it's about), `current` (on screen), `agent`
+  `normal`, `low`), `task` (what it's about: the user's name for it, else Claude Code's title cut down to "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current` (on screen), `agent`
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
   Claude runs), `background` (Claude Code background sessions running in its
   worktree).
@@ -89,7 +89,7 @@ dev server). Restart the terminal so the user sees the result too.
   matters to the user. The list puts higher priority first. Without a level it
   prints it (that you can do freely); only set it when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
-  strip above you. Claude Code's own title is shown until then, so don't rename
+  strip above you. Claude Code's own title (cut down to "Keyword: a few words") is shown until then, so don't rename
   unprompted. Never overwrite a name the user gave (`title` in `amarchy list`).
   `amarchy rename --reset` goes back to Claude's title.
 - `amarchy run --set '<command>'` / `amarchy run --save <name> '<command>'` /

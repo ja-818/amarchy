@@ -50,7 +50,7 @@ Panel {
     var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w !== "" })
     if (words.length === 0) return store.sessions
     return store.sessions.filter(function(s) {
-      var name = ((s.task || "") + " " + (s.repo || "") + " " + (s.name || "")).toLowerCase()
+      var name = ((s.task || "") + " " + (s.claude_title || "") + " " + (s.repo || "") + " " + (s.name || "")).toLowerCase()
       return words.every(function(w) { return name.indexOf(w) >= 0 })
     })
   }
