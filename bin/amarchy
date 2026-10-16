@@ -51,9 +51,13 @@ Sessions:
                                         new sessions are normal
   amarchy group [project|priority|status] [on|off]
                                         group the list by project, priority (High, Normal, Low) and/or
-                                        status (Needs you, Working, Idle), nested in that order;
-                                        without on|off switches it, without anything prints the
-                                        grouping; `group none` drops them all
+                                        status (Needs you, Working, Idle), nested in the order you
+                                        turn them on (a new one goes inside the others); without
+                                        on|off switches it, without anything prints the grouping
+                                        outermost first; `group none` drops them all
+  amarchy group <grouping> <grouping>...
+                                        group by these, nested in this order, outermost first, e.g.
+                                        `group priority project`: each priority, its projects inside
   amarchy sort [priority|newest|oldest] sort the list inside its groups: by priority (the default),
                                         or by when the session was opened; prints it without one
 
@@ -156,7 +160,7 @@ LAYOUT = STATE / "layout.lua"
 THEME = STATE / "theme"         # the amarchy theme: its name and a rendered snapshot
 THEME_LOG = STATE / "theme.log" # every repaint and how each step of it went
 LAST = STATE / "last"
-GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "priority", "status", any or none
+GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "priority", "status", any or none, outermost first
 SORT_FILE = STATE / "sort"      # how it's sorted inside its groups: "priority", "newest" or "oldest"
 ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
@@ -3231,7 +3235,8 @@ ORDER = {state: i for i, state in enumerate(("waiting", "working", "idle", "asle
 # sessions are normal; the list always puts the higher ones first.
 PRIORITIES = ("high", "normal", "low")
 RANK = {p: i for i, p in enumerate(PRIORITIES)}
-# How the list can be grouped, outermost first; any of them, on its own or together.
+# How the list can be grouped: any of them, on its own or together, nested in
+# whatever order you pick (`amarchy group priority project`).
 GROUPS = ("project", "priority", "status")
 # How it's sorted inside its groups (or all of it, ungrouped); priority is the default.
 SORTS = ("priority", "newest", "oldest")
@@ -3239,9 +3244,13 @@ SORTS = ("priority", "newest", "oldest")
 
 def list_groups():
     """How every list of sessions is grouped: by project, priority and/or
-    status (nested in that order), or none of them."""
+    status, outermost first, or none of them."""
     try:
-        return [g for g in GROUPS if g in GROUP_FILE.read_text().split()]
+        groups = []
+        for g in GROUP_FILE.read_text().split():
+            if g in GROUPS and g not in groups:
+                groups.append(g)
+        return groups
     except OSError:
         pass
     # `amarchy order activity`, from before there was more than one grouping.
@@ -3267,40 +3276,50 @@ def list_sort():
 
 
 def session_order(s, groups=None, how=None):
-    """Grouped first (project, priority, status, outermost first), then sorted
-    inside each group: by priority, higher first, or by when it was opened.
-    Ties keep the order you opened them in, so each one keeps its place."""
+    """Grouped first (outermost first, in the order the groupings nest), then
+    sorted inside each group: by priority, higher first, or by when it was
+    opened. Ties keep the order you opened them in, so each one keeps its place."""
     groups = list_groups() if groups is None else groups
     how = list_sort() if how is None else how
     rank = RANK[priority(s)]
     created = s.get("created", 0)
-    return (s["repo"].lower() if "project" in groups else "",
-            rank if "priority" in groups else 0,
-            ORDER.get(s["status"], len(ORDER)) if "status" in groups else 0,
+    by = {"project": s["repo"].lower(), "priority": rank,
+          "status": ORDER.get(s["status"], len(ORDER))}
+    return (*(by[g] for g in groups),
             rank if how == "priority" else 0,
             -created if how == "newest" else created, s["id"])
 
 
 def set_groups(groups):
     STATE.mkdir(parents=True, exist_ok=True)
-    GROUP_FILE.write_text(" ".join(g for g in GROUPS if g in groups) + "\n")
+    GROUP_FILE.write_text(" ".join(groups) + "\n")
     ORDER_FILE.unlink(missing_ok=True)
     tell_shell("refresh")
 
 
 def cmd_group(args):
     """Group the list by project, priority and/or status: `group project`
-    switches one, `group project on|off` sets it, `group none` drops them all.
-    Prints what the list is grouped by now."""
+    switches one, `group project on|off` sets it, `group none` drops them all,
+    `group priority project` sets them all, nested in that order. One turned
+    on goes inside the ones already on; one already on keeps its place.
+    Prints what the list is grouped by now, outermost first."""
     groups = list_groups()
+    usage = "usage: amarchy group [project|priority|status [on|off] | <grouping> <grouping>... | none]"
     if args == ["none"]:
         groups = []
+    elif len(args) > 1 and all(a in GROUPS for a in args):
+        if len(set(args)) < len(args):
+            return fail(usage)
+        groups = list(args)
     elif args:
         what, *how = args
         if what not in GROUPS or len(how) > 1 or how and how[0] not in ("on", "off"):
-            return fail("usage: amarchy group [project|priority|status [on|off] | none]")
+            return fail(usage)
         on = how[0] == "on" if how else what not in groups
-        groups = [g for g in GROUPS if g != what and g in groups or g == what and on]
+        if not on:
+            groups = [g for g in groups if g != what]
+        elif what not in groups:
+            groups = groups + [what]
     if args:
         set_groups(groups)
     print(" ".join(groups) or "none")

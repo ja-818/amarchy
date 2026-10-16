@@ -22,11 +22,10 @@ Item {
   property int headerHeight: 0
   // The session keys bound in Hyprland: { mod: "Ctrl+Alt", next: "J", ... }
   property var keys: ({})
-  // How the list is grouped: by project, priority and/or status (Needs you,
-  // Working...), nested in that order, or none of them.
-  property bool byProject: false
-  property bool byPriority: false
-  property bool byStatus: false
+  // How the list is grouped: by "project", "priority" and/or "status" (Needs
+  // you, Working...), outermost first, in whatever order you nested them; []
+  // for none.
+  property var groups: []
   // How it's sorted inside its groups: "priority" (higher first), "newest"
   // or "oldest" (when the session was opened).
   property string sortBy: "priority"
@@ -62,9 +61,7 @@ Item {
           root.sessions = d.sessions || []
           root.keys = d.keys || {}
           var groups = d.group || []
-          root.byProject = groups.indexOf("project") >= 0
-          root.byPriority = groups.indexOf("priority") >= 0
-          root.byStatus = groups.indexOf("status") >= 0
+          if (groups.join(" ") !== root.groups.join(" ")) root.groups = groups
           root.sortBy = d.sort || "priority"
           root.zen = d.zen !== false
           root.zenWidth = d.zen_width || 900

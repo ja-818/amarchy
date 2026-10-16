@@ -77,8 +77,12 @@ Next to the search, the 󰒼 button opens how the list is grouped and sorted.
 **Group by** puts sessions in sections: **by project** (󰉋, one section per
 project, each row showing just its branch), **by priority** (󰈻, High, Normal,
 Low) and **by status** (󰉹, by what they need from you: Needs you, Working,
-Idle), each checked while on, or **Not grouped**. Use any of them; together
-they nest in that order, e.g. the priorities inside each project. **Sort by**
+Idle), or **Not grouped**. Use any of them; together they nest in the order
+you turn them on, each one inside the ones already on, and the menu numbers
+them (1 outermost) in place of the check. Turn on priority and then project
+for High, Normal and Low with each one's projects inside; project and then
+priority for the priorities inside each project. To change the nesting, turn
+one off and on again: it goes innermost. **Sort by**
 orders the sessions inside each section (or the whole list, ungrouped): by
 **priority** (the default: higher first, then the order you opened them in),
 **newest first** or **oldest first**. Grouped by project and sorted by
@@ -86,7 +90,8 @@ priority, each project's sessions show the ones that matter most on top. The
 menu stays open to set several; a click off it closes it. In the list under
 the Ⓐ, `g` opens it (`j`/`k`, `↵` to switch, `Esc` to close), `p`, `f` and
 `s` switch a grouping directly and `o` goes to the next sort; from a script,
-`amarchy group project|priority|status|none` and `amarchy sort
+`amarchy group project|priority|status|none`, `amarchy group priority project`
+(all of them at once, outermost first) and `amarchy sort
 priority|newest|oldest`. The choices stick.
 
 ## Keys
@@ -376,7 +381,9 @@ amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarc
 amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add)
 amarchy keys [inside|anywhere <mod>]  the modifiers of amarchy's keys (the picker without one; --show, reset)
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
-amarchy group [project|priority|status] [on|off]  group the list, nested in that order (switches without on|off)
+amarchy group [project|priority|status] [on|off]  group the list (switches without on|off); one turned on nests
+                                      inside the ones already on
+amarchy group <grouping> <grouping>...  group by these, nested in this order, e.g. `group priority project`
 amarchy group none                    no grouping (the default)
 amarchy sort [priority|newest|oldest] how the list is sorted inside its groups (priority, the default:
                                       higher first, then the order you opened them in)
