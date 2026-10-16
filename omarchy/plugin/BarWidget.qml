@@ -92,18 +92,18 @@ Panel {
   }
 
   // Switch a grouping ("project", "priority", "status"), or drop them all
-  // ("none"). The menu checks it at once; the list follows when the CLI has
-  // it in its new order.
+  // ("none"). One turned on goes inside the ones already on, so the order you
+  // pick them in is how they nest: priority, then project, puts each
+  // priority's projects inside it. The menu shows it at once; the list
+  // follows when the CLI has it in its new order.
   function group(what) {
     if (what === "none") {
-      store.byProject = store.byPriority = store.byStatus = false
+      store.groups = []
       store.run(["group", "none"])
       return
     }
-    var on
-    if (what === "project") on = store.byProject = !store.byProject
-    else if (what === "priority") on = store.byPriority = !store.byPriority
-    else on = store.byStatus = !store.byStatus
+    var on = store.groups.indexOf(what) < 0
+    store.groups = on ? store.groups.concat([what]) : store.groups.filter(function(g) { return g !== what })
     store.run(["group", what, on ? "on" : "off"])
   }
 
@@ -254,8 +254,8 @@ Panel {
     signal searchRequested()
     signal searchEnded()
 
-    // The groupings the menu offers, in the order they nest. "none" is the
-    // plain list.
+    // The groupings the menu offers; they nest in the order you turn them
+    // on, and each one on shows its level. "none" is the plain list.
     readonly property var groupings: [
       { what: "project", icon: "󰉋", label: "Project", key: "P" },
       { what: "priority", icon: "󰈻", label: "Priority", key: "F" },
@@ -270,10 +270,11 @@ Panel {
     ]
 
     function grouped(what) {
-      if (what === "project") return store.byProject
-      if (what === "priority") return store.byPriority
-      if (what === "status") return store.byStatus
-      return !store.byProject && !store.byPriority && !store.byStatus
+      return what === "none" ? store.groups.length === 0 : store.groups.indexOf(what) >= 0
+    }
+    // How deep a grouping that's on sits: 1 outermost; 0 when it's off.
+    function level(what) {
+      return store.groups.indexOf(what) + 1
     }
 
     function focusSearch() {
@@ -435,9 +436,7 @@ Panel {
         width: parent.width
         visible: root.shown.length > 0
         sessions: root.shown
-        byProject: store.byProject
-        byPriority: store.byPriority
-        byStatus: store.byStatus
+        groups: store.groups
         cursor: content.cursor
         spinnerFrame: root.spinnerFrame
         onActivated: function(index) { content.activated(index) }
@@ -466,7 +465,8 @@ Panel {
     }
 
     // The group & sort menu. The groupings are switches, each on its own,
-    // checked while on; together they nest in the order they're listed. Under
+    // checked while on; together they nest in the order you turned them on,
+    // and each shows its level (1 outermost) instead of the check. Under
     // them, how the list is sorted inside its groups: one of them, checked.
     // It stays open to set several.
     BorderSurface {
@@ -508,6 +508,8 @@ Panel {
             label: modelData.label
             keyText: content.showKeys ? modelData.key : ""
             on: content.grouped(modelData.what)
+            // With more than one on, the check says where it nests.
+            level: store.groups.length > 1 ? content.level(modelData.what) : 0
             hasCursor: content.menuCursor === index
             onPicked: root.group(modelData.what)
           }
@@ -588,6 +590,8 @@ Panel {
     property string label: ""
     property string keyText: ""
     property bool on: false
+    // Where it nests, 1 outermost, shown in place of the check; 0 for the check.
+    property int level: 0
     // Under the menu's keyboard cursor.
     property bool hasCursor: false
     readonly property bool hot: hasCursor || itemArea.containsMouse
@@ -648,9 +652,10 @@ Panel {
       anchors.verticalCenter: parent.verticalCenter
       horizontalAlignment: Text.AlignHCenter
       textFormat: Text.PlainText
-      text: item.on ? "󰄬" : ""
+      text: !item.on ? "" : item.level > 0 ? String(item.level) : "󰄬"
       font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.icon
+      font.pixelSize: item.level > 0 ? Style.font.body : Style.font.icon
+      font.bold: item.level > 0
       color: Color.menu.selectedText
     }
 
