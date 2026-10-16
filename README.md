@@ -100,10 +100,10 @@ directly; from a script, `amarchy group project`, `amarchy group priority`,
 | `Ctrl+Alt+T` | Pick the theme amarchy wears (see [Theme](#theme)). |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower this session's priority (High, Normal, Low): higher ones come first in the list. |
 | `Ctrl+Alt+E` | Name this session yourself. The name sits in the list (and in zen mode in the strip above Claude), in place of the short one made from Claude's title. |
-| `Ctrl+Alt+M` | The amarchy menu: everything here, each with its key next to it. New session, Search sessions and Add project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones) and **Settings** (theme, sound, keys), where `Esc` goes back. The one to remember. |
+| `Ctrl+Alt+M` | The amarchy menu: Amarchy in the Omarchy menu, opened right there. New session, Search sessions and Add project on top; the rest in **Run** (the project, a command, the terminal), **This session** (rename, priority, sleep, close), **Sessions** (next, previous, zen mode, sleep the idle ones, close one) and **Settings** (theme, sound, keys). Groups open with `→` and close with `←`, like the rest of that menu; what only makes sense on a session shows only there. The one to remember. |
 | `Ctrl+Alt+X` | Close this session. Asks first: it removes the worktree (and says so when uncommitted changes would be lost). |
 | `Super+arrows` | Between Claude and the terminal, like any Omarchy windows. |
-| `Super+Space` | **Amarchy** is in the Omarchy menu: sessions, new session, add project, close. |
+| `Super+Space` | **Amarchy** is in the Omarchy menu: the same menu as `Ctrl+Alt+M`. |
 
 The **Ⓐ in the bar** lights up when a session needs you; click it for your
 sessions, right click for a new one.
@@ -295,11 +295,11 @@ Remove with `install.sh --uninstall`.
 
 **Settings → Keys** in the amarchy menu (`Ctrl+Alt+M`, or `amarchy keys`) picks the two
 modifiers: **Inside amarchy**, for every key that works in it (`Ctrl+Alt` by
-default), and **From anywhere**, for Open and New session (`Super+Alt`). Each
-choice says whether it's free or what it would clash with (Omarchy's keys,
-yours, amarchy's other modifier), and the keys move as soon as you pick: no
-restart, and every hint (the search reads its key, the menu lists them)
-follows. From a script: `amarchy keys inside "CTRL + SHIFT"`, `amarchy keys
+default), and **From anywhere**, for Open and New session (`Super+Alt`); the
+one bound now has a ✓. The keys move as soon as you pick: no restart, and
+every hint (the search reads its key) follows. A notification says what the
+new keys land on, if anything does (Omarchy's keys, yours, amarchy's other
+modifier, or apps that use Ctrl+Shift themselves). From a script: `amarchy keys inside "CTRL + SHIFT"`, `amarchy keys
 anywhere MOD3`, `amarchy keys --show`, `amarchy keys reset`.
 
 For the keys themselves, set a table before the `dofile(... amarchy.lua)` line

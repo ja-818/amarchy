@@ -43,7 +43,7 @@ Sessions:
   amarchy show                          open the session list under the Ⓐ in the bar, from anywhere
   amarchy search                        type to find a session by name: the list beside Claude, or under the Ⓐ
   amarchy pick [close]                  choose a session in the Omarchy menu, jump to it (or close it)
-  amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
+  amarchy menu                          everything you can do from here: Amarchy in the Omarchy menu
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
                                         list always puts higher priority first; new sessions are normal
@@ -166,6 +166,7 @@ INSTALLED = Path.home() / ".local/bin/amarchy"
 ENTRY = str(INSTALLED) if INSTALLED.exists() else SELF
 SOUNDS = Path(SELF).parent.parent / "sounds"       # amarchy's chimes, one played with a session's notification
 KEYS_FILE = STATE / "keys.lua"                     # the modifiers picked in `amarchy keys`
+KEYS_BOUND = STATE / "keys.bound"                  # the modifiers bound now, for the menu's ✓
 SOUND_FILE = STATE / "sound"                       # the one picked (its name, or "off")
 SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
@@ -3583,10 +3584,10 @@ def mod_names(bind):
     return [n for bit, n in MOD_NAMES if bind["modmask"] & bit]
 
 
-def nav_keys():
+def nav_keys(binds=None):
     """The session keys as bound in Hyprland (hypr/amarchy.lua), for the
     tooltips of the session list: {"mod": "Ctrl+Alt", "next": "J", ...}."""
-    binds = hypr_binds()
+    binds = hypr_binds() if binds is None else binds
     keys = {}
     for description, action in NAV_BINDS:
         b = binds.get(description)
@@ -3605,7 +3606,8 @@ KEY_SCOPES = {
     "anywhere": ("mod", "From anywhere", "SUPER + ALT", ("Open amarchy", "New amarchy session")),
 }
 # What it offers, in Hyprland's spelling: never a lone modifier, which apps
-# (and Omarchy, for Super) use for themselves.
+# (and Omarchy, for Super) use for themselves. omarchy/menu.jsonc lists the
+# same under Settings → Keys.
 KEY_MODS = ("CTRL + ALT", "CTRL + SHIFT", "ALT + SHIFT", "CTRL + ALT + SHIFT",
             "SUPER + ALT", "SUPER + CTRL", "SUPER + SHIFT", "SUPER + CTRL + ALT", "MOD3")
 MOD_BITS = {"SHIFT": 1, "CTRL": 4, "CONTROL": 4, "ALT": 8, "MOD1": 8, "MOD3": 32, "HYPER": 32,
@@ -3649,6 +3651,20 @@ def key_clashes(scope, mask, binds):
             if d not in ours and b["modmask"] == mask and b["key"].upper() in keys and not b.get("mouse")]
 
 
+def note_bound_keys(binds):
+    """Keep KEYS_BOUND ("inside Ctrl+Alt" per line) up to date: the menu's ✓
+    reads it, since its checks have to be cheap."""
+    text = "".join(f"{scope} {mod_label(m) if (m := bound_mask(scope, binds)) is not None else 'none'}\n"
+                   for scope in KEY_SCOPES)
+    try:
+        if KEYS_BOUND.read_text() == text:
+            return
+    except OSError:
+        pass
+    STATE.mkdir(parents=True, exist_ok=True)
+    KEYS_BOUND.write_text(text)
+
+
 def write_keys(keys):
     STATE.mkdir(parents=True, exist_ok=True)
     if not keys:
@@ -3673,6 +3689,7 @@ def apply_keys(keys):
         time.sleep(0.1)
     else:
         return "Hyprland didn't take the new keys (is hypr/amarchy.lua loaded from hyprland.lua?)"
+    note_bound_keys(binds)
     tell_shell("refresh")
     return None
 
@@ -3691,58 +3708,22 @@ def set_key_mod(scope, mod):
     err = apply_keys(keys)
     if err:
         return err
+    # What it lands on, said once it's done: the menu has one line per choice.
     clashes = key_clashes(scope, mask, hypr_binds())
-    if clashes:
-        notify("amarchy keys", f"{label}: {mod_label(mask)} also does "
-               + ", ".join(f"{mod_label(mask)}+{b['key'].capitalize()} ({b.get('description') or b.get('arg') or 'yours'})"
-                           for b in clashes[:3]) + ("…" if len(clashes) > 3 else ""), ICON_KEYS)
+    said = [f"{mod_label(mask)}+{b['key'].capitalize()} also does {b.get('description') or b.get('arg') or 'something of yours'}"
+            for b in clashes[:3]] + (["…"] if len(clashes) > 3 else [])
+    if scope == "inside" and keys[option] in KEY_MOD_NOTES:
+        said.append(KEY_MOD_NOTES[keys[option]])
+    notify("amarchy keys", f"{label} is now {mod_label(mask)}" + (". " + "; ".join(said) if said else ""), ICON_KEYS)
     return None
 
 
-def key_mod_rows(scope, binds):
-    """The modifiers a scope can have, as menu rows: checked if it's the one
-    now, else free or what it would clash with."""
-    now = bound_mask(scope, binds)
-    rows = []
-    for mod in KEY_MODS:
-        mask = mod_mask(mod)
-        clashes = key_clashes(scope, mask, binds)
-        what = ("now" if mask == now else "free" if not clashes else
-                f"clashes with {len(clashes)}: " + ", ".join(
-                    (b.get("description") or b["key"]) for b in clashes[:2]) + ("…" if len(clashes) > 2 else ""))
-        if mask != now and scope == "inside" and mod in KEY_MOD_NOTES:
-            what += f" · {KEY_MOD_NOTES[mod]}"
-        rows.append((ICON_CHECK if mask == now else ICON_KEYS, mod_label(mask), what))
-    return rows
-
-
-def menu_pick_keys():
-    """The two modifiers in the Omarchy menu; picking one lists the choices,
-    each saying what it would clash with, and comes back here."""
-    while True:
-        binds = hypr_binds()
-        rows = []
-        for scope, (_, label, default, _) in KEY_SCOPES.items():
-            mask = bound_mask(scope, binds)
-            rows.append((ICON_KEYS, label, mod_label(mask) if mask is not None else "not bound"))
-        choice = menu_select("Keys", rows)
-        scope = next((sc for sc, v in KEY_SCOPES.items() if v[1] == choice), None)
-        if not scope:
-            return 0
-        now = bound_mask(scope, binds)
-        picked = menu_select(KEY_SCOPES[scope][1], key_mod_rows(scope, binds))
-        mod = next((m for m in KEY_MODS if mod_label(mod_mask(m)) == picked), None)
-        if mod and mod_mask(mod) != now:
-            err = set_key_mod(scope, mod)
-            if err:
-                notify("amarchy keys", err, ICON_KEYS)
-
-
 def cmd_keys(args):
-    """`amarchy keys`: the picker. `keys inside|anywhere <mod>` sets one,
-    `--show` prints them, `reset` goes back to hypr/amarchy.lua."""
+    """`amarchy keys`: Settings → Keys in the amarchy menu. `keys inside|anywhere
+    <mod>` sets one (what the menu runs), `--show` prints them, `reset` goes
+    back to hypr/amarchy.lua."""
     if not args:
-        return menu_pick_keys()
+        return subprocess.run(["omarchy-menu", "summon", "amarchy.settings.keys"], stdout=subprocess.DEVNULL).returncode
     if args == ["--show"]:
         binds = hypr_binds()
         for scope in KEY_SCOPES:
@@ -3754,96 +3735,27 @@ def cmd_keys(args):
         return fail(err) if err else 0
     if len(args) >= 2 and args[0] in KEY_SCOPES:
         err = set_key_mod(args[0], " ".join(args[1:]))
-        return fail(err) if err else 0
+        if err:
+            notify("amarchy keys", err, ICON_KEYS)  # from the menu, nobody reads stderr
+            return fail(err)
+        return 0
     return fail("usage: amarchy keys [inside|anywhere <mod> | --show | reset]")
 
 
-# The amarchy menu: icon, label, the command it runs, and the descriptions its
-# key may be bound under (hypr/amarchy.lua). The last two say where it shows:
-# in a session, outside one. A submenu has its rows where the command goes and
-# a line saying what's in it where the descriptions go.
-RUN_MENU = (
-    ("󰐊", "Run project", ["run"], ("Run amarchy project",), True, False),
-    ("󰐊", "Run a command", ["run", "--pick"], ("Run amarchy command",), True, False),
-    ("󰆍", "Terminal", ["terminal"], ("Toggle amarchy terminal",), True, False),
-)
-SESSION_MENU = (
-    ("󰏫", "Rename session", ["rename"], ("Rename amarchy session",), True, False),
-    ("󰁝", "Raise priority", ["priority", "up"], ("Raise amarchy priority",), True, False),
-    ("󰁅", "Lower priority", ["priority", "down"], ("Lower amarchy priority",), True, False),
-    ("󰒲", "Sleep session", ["sleep"], ("Sleep amarchy session",), True, False),
-    ("󰆴", "Close session", ["close", "--confirm"], ("Close amarchy session",), True, False),
-)
-SESSIONS_MENU = (
-    ("󰁅", "Next session", ["next"], ("Next amarchy session",), True, False),
-    ("󰁝", "Previous session", ["prev"], ("Previous amarchy session",), True, False),
-    ("󰊓", "Toggle zen mode", ["zen"], ("Toggle amarchy zen",), True, False),
-    ("󰒲", "Sleep idle sessions", ["sleep", "--all"], ("Sleep idle amarchy sessions",), True, True),
-)
-SETTINGS_MENU = (
-    ("󰏘", "Theme", ["theme"], ("Pick amarchy theme",), True, True),
-    ("󰕾", "Sound", ["sound"], (), True, True),
-    (ICON_KEYS, "Keys", ["keys"], (), True, True),
-)
-MENU = (
-    ("󰁔", "Go to amarchy", ["open"], ("Open amarchy",), False, True),
-    ("󰐕", "New session", ["new"], ("New amarchy session here", "New amarchy session"), True, True),
-    ("󰍉", "Search sessions", ["search"], ("Search amarchy sessions",), True, True),
-    ("󰐊", "Run", RUN_MENU, "Project, terminal", True, False),
-    ("󰘔", "This session", SESSION_MENU, "Rename, priority, close", True, False),
-    ("󰕰", "Sessions", SESSIONS_MENU, "Next, zen mode, sleep", True, True),
-    ("󰉋", "Add project", ["add"], ("Add amarchy project",), True, True),
-    ("󰒓", "Settings", SETTINGS_MENU, "Theme, sound, keys", True, True),
-)
-
-
-def menu_rows(menu=MENU, binds=None, inside=None):
-    """The menu for where you are: (icon, label, key or what's in it, command
-    or the rows of a submenu, as a tuple). A submenu left with one row is
-    that row."""
-    binds = hypr_binds() if binds is None else binds
-    inside = current_session_id() is not None if inside is None else inside
-    rows = []
-    for icon, label, command, descriptions, in_session, outside in menu:
-        if not (in_session if inside else outside):
-            continue
-        if isinstance(command, tuple):
-            children = menu_rows(command, binds, inside)
-            if len(children) > 1:
-                rows.append((icon, label, descriptions, tuple(children)))
-            else:
-                rows.extend(children)
-            continue
-        b = next((binds[d] for d in descriptions if d in binds), None)
-        key = "+".join([*mod_names(b), b["key"].capitalize()]) if b else ""
-        rows.append((icon, label, key, command))
-    return rows
-
-
 def cmd_menu():
-    """Everything amarchy does from where you are, each with the key that does
-    it without the menu; the less frequent things in submenus, where Escape
-    goes back."""
-    top = menu_rows()
-    while True:
-        choice = menu_select("Amarchy", [row[:3] for row in top])
-        row = next((r for r in top if r[1] == choice), None)
-        if not row:
-            return 1
-        if not isinstance(row[3], tuple):
-            return main(row[3])
-        sub = row[3]
-        choice = menu_select(row[1], [r[:3] for r in sub])
-        picked = next((r[3] for r in sub if r[1] == choice), None)
-        if picked:
-            return main(picked)
-        # Escape: back to the top.
+    """Everything amarchy does from where you are: Amarchy in the Omarchy menu
+    (omarchy/menu.jsonc, which install.sh adds to it), opened right there. Its
+    groups open with →/↵ and close with ←, like the rest of that menu."""
+    return subprocess.run(["omarchy-menu", "summon", "amarchy"], stdout=subprocess.DEVNULL).returncode
 
 
 def cmd_ui():
-    """Everything the shell plugin draws, in one call."""
+    """Everything the shell plugin draws, in one call. It runs every second or
+    so, which also keeps the menu's ✓ on the keys bound now."""
+    binds = hypr_binds()
+    note_bound_keys(binds)
     print(json.dumps({"zen": zen(), "zen_width": ZEN_WIDTH, "panel_gap": PAD, "terminal_alpha": terminal_alpha(),
-                      "header_height": header_height(), "keys": nav_keys(),
+                      "header_height": header_height(), "keys": nav_keys(binds),
                       "group": list_groups(), "sessions": session_view()}))
 
 
