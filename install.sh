@@ -33,7 +33,26 @@ units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
-backup() { [[ -f $1 ]] && cp "$1" "$1.bak.$(date +%s)"; }
+# Keep only the newest three of the files starting with $1.
+prune() {
+  local f
+  ls -1t "$1"* 2>/dev/null | tail -n +4 | while IFS= read -r f; do rm -f -- "$f"; done
+}
+
+# A copy of a file before amarchy changes it, as <file>.amarchy-bak.<time>; the
+# last three are kept.
+backup() {
+  [[ -f $1 ]] || return 0
+  cp "$1" "$1.amarchy-bak.$(date +%s)"
+  prune "$1.amarchy-bak."
+}
+
+# Write $2 over $1 if it says something new, with a backup of what was there.
+replace_if_changed() {
+  cmp -s "$2" "$1" && return 0
+  backup "$1"
+  cp "$2" "$1"
+}
 
 # Rewrite shell.json with a jq filter, keeping a backup; the shell watches it
 # and applies the change live.
@@ -42,8 +61,7 @@ edit_shell_json() {
   local tmp
   tmp=$(mktemp)
   if jq "$1" "$shell_json" >"$tmp" && jq -e '.version' "$tmp" >/dev/null; then
-    backup "$shell_json"
-    cp "$tmp" "$shell_json"
+    replace_if_changed "$shell_json" "$tmp"
   fi
   rm -f "$tmp"
 }
@@ -52,8 +70,9 @@ edit_shell_json() {
 edit_menu() {
   mkdir -p "$(dirname "$menu_ext")"
   [[ -f $menu_ext ]] || echo "{}" >"$menu_ext"
-  backup "$menu_ext"
-  python3 - "$menu_ext" "${1:-}" <<'EOF'
+  local tmp
+  tmp=$(mktemp)
+  python3 - "$menu_ext" "${1:-}" >"$tmp" <<'EOF'
 import re, sys
 from pathlib import Path
 f, block = Path(sys.argv[1]), (Path(sys.argv[2]).read_text().rstrip("\n") if sys.argv[2] else "")
@@ -62,8 +81,10 @@ i = t.rfind("}")
 body = t[:i].rstrip()
 if block and not body.endswith((",", "{")):
     body += ","
-f.write_text(body + ("\n\n" + block if block else "") + "\n}\n")
+sys.stdout.write(body + ("\n\n" + block if block else "") + "\n}\n")
 EOF
+  replace_if_changed "$menu_ext" "$tmp"
+  rm -f "$tmp"
 }
 
 if [[ ${1:-} == --uninstall ]]; then
@@ -105,6 +126,10 @@ fi
 
 mkdir -p "$bin_dir"
 ln -sf "$repo/bin/amarchy" "$bin_dir/amarchy"
+
+# Installs before amarchy-bak left a <file>.bak.<time> of these every time:
+# down to the newest three.
+for f in "$shell_json" "$menu_ext" "$hypr_conf"; do prune "$f.bak."; done
 
 if ! grep -qF "$load_line" "$hypr_conf"; then
   backup "$hypr_conf"
