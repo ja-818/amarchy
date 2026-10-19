@@ -55,6 +55,13 @@ replace_if_changed() {
   cp "$2" "$1"
 }
 
+# Take the amarchy dofile line out of hyprland.lua, and the blank lines it
+# leaves at the end, so putting it back doesn't pile up one more each time.
+drop_load_line() {
+  sed -i '/-- amarchy$/d' "$hypr_conf"
+  sed -i -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' "$hypr_conf"
+}
+
 # Rewrite shell.json with a jq filter, keeping a backup; the shell watches it
 # and applies the change live.
 edit_shell_json() {
@@ -92,7 +99,7 @@ if [[ ${1:-} == --uninstall ]]; then
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy"
-  [[ -f $hypr_conf ]] && sed -i '/-- amarchy$/d' "$hypr_conf"
+  [[ -f $hypr_conf ]] && drop_load_line
   rm -f "$plugin_dir" "$theme_hook"
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
   rm -f "$units/amarchy-sleep.timer" "$units/amarchy-sleep.service"
@@ -134,7 +141,7 @@ for f in "$shell_json" "$menu_ext" "$hypr_conf"; do prune "$f.bak."; done
 
 if ! grep -qF "$load_line" "$hypr_conf"; then
   backup "$hypr_conf"
-  sed -i '/-- amarchy$/d' "$hypr_conf"
+  drop_load_line
   printf '\n%s\n' "$load_line" >>"$hypr_conf"
 fi
 
