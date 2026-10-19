@@ -36,7 +36,8 @@ say() { printf '\033[1m%s\033[0m\n' "$*"; }
 # Keep only the newest three of the files starting with $1.
 prune() {
   local f
-  ls -1t "$1"* 2>/dev/null | tail -n +4 | while IFS= read -r f; do rm -f -- "$f"; done
+  # || true: with none there yet, ls fails and pipefail would end the install.
+  { ls -1t "$1"* 2>/dev/null || true; } | tail -n +4 | while IFS= read -r f; do rm -f -- "$f"; done
 }
 
 # A copy of a file before amarchy changes it, as <file>.amarchy-bak.<time>; the
@@ -106,7 +107,7 @@ if [[ ${1:-} == --uninstall ]]; then
 fi
 
 missing=()
-for cmd in python3 git hyprctl jq omarchy-menu-select omarchy-shell claude; do
+for cmd in python3 git hyprctl jq omarchy-menu-select omarchy-shell omarchy-plugin-validate claude; do
   command -v "$cmd" >/dev/null || missing+=("$cmd")
 done
 if ! command -v foot >/dev/null && ! command -v kitty >/dev/null &&

@@ -1,6 +1,52 @@
 # amarchy
 
-Parallel Claude Code agents, one Hyper key away. For [Omarchy](https://omarchy.org).
+**An agent manager built into your Omarchy desktop.** Run many Claude Code
+sessions in parallel, each in its own git worktree, as normal Hyprland windows,
+with an Ⓐ in the top bar that lights up when one needs you. For people who live
+in [Omarchy](https://omarchy.org) and [Claude Code](https://docs.claude.com/en/docs/claude-code).
+
+<!-- TODO before launch: add a GIF (Super+Alt+N → pick a project → Claude in
+the column, the Ⓐ lighting up, Super+arrows between windows) as docs/demo.gif
+and put this line here: ![amarchy on Omarchy](docs/demo.gif) -->
+
+- `Super+Alt+N` from anywhere: a new session, on a fresh worktree and branch.
+- The **Ⓐ** in the bar lights up when a session needs you; click it for all of them.
+- **Amarchy** sits in the Omarchy menu (`Super+Space`), with every action and its key.
+- Saved run commands: `Ctrl+Alt+R` runs the project in the terminal beside Claude, `Ctrl+Alt+C` picks another.
+- Sessions are ordinary Hyprland windows: `Super+arrows`, `Super+W`, your themes.
+
+## Quick start
+
+You need:
+
+- **Omarchy 4** (tested on 4.0.4): amarchy uses its Lua Hyprland config, the
+  Omarchy shell (for the bar and the session list) and the Omarchy menu.
+- **[Claude Code](https://docs.claude.com/en/docs/claude-code)**, installed and
+  logged in (`claude` on your `PATH`).
+- One of foot, kitty, alacritty or ghostty (Omarchy ships one).
+- Optional: [`gh`](https://cli.github.com), logged in, to start sessions on
+  your GitHub repos from the menu.
+
+```sh
+git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy && ~/.local/share/amarchy/install.sh
+```
+
+Then press `Super+Alt+N`. amarchy offers every git repo in `~/Work` (set
+`AMARCHY_WORK` to use another folder, see [Configure](#configure)), and **New
+project** clones one of yours or starts an empty one. Update with `git pull`
+in that folder and `install.sh` again; remove with `install.sh --uninstall`.
+
+## Why not herdr, or tmux?
+
+I'm a big [herdr](https://herdr.dev) fan, and if you live in one terminal it's
+the thing to use. But on Omarchy the window manager already is a multiplexer:
+workspaces, tiling, `Super+arrows`, a bar, a menu, themes. Running a
+multiplexer inside it felt like one too many. So amarchy puts the agent
+manager in the desktop itself: each session is a Hyprland workspace with
+normal windows, the bar tells you who needs you, and the keys, menu and look
+are Omarchy's. Same idea, a different home for it.
+
+## How it works
 
 Every session is its own git worktree and branch off the latest `main`, on its
 own Hyprland workspace: Claude Code in a centered column, your sessions in the
@@ -296,16 +342,21 @@ ones again.
 
 ## Install
 
-Needs Omarchy 4+ (Hyprland Lua config, the Omarchy shell and menu), [Claude Code](https://docs.claude.com/en/docs/claude-code),
-and one of foot, kitty, alacritty or ghostty.
+See [Quick start](#quick-start) for what it needs. `install.sh` is safe to run
+again, and keeps a backup of every file of yours it changes
+(`<file>.amarchy-bak.<time>`, the last three). It:
 
-```sh
-git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy
-~/.local/share/amarchy/install.sh
-```
+- links `bin/amarchy` into `~/.local/bin`;
+- adds one `dofile(...) -- amarchy` line to `~/.config/hypr/hyprland.lua` (the
+  keys and Claude's column);
+- installs the Omarchy shell plugin (the Ⓐ and the session list) and adds
+  Amarchy to the Omarchy menu;
+- adds an Omarchy theme hook, the amarchy skill for Claude Code
+  (`~/.claude/skills/amarchy`) and the sleep timer (`amarchy-sleep.timer`).
 
-Put your repos in `~/Work` (or set `AMARCHY_WORK`). Update with `git pull`.
-Remove with `install.sh --uninstall`.
+Update with `git pull` and `install.sh` again. `install.sh --uninstall` takes
+all of that out again; your worktrees and `~/.local/state/amarchy` are left
+alone.
 
 ## Configure
 

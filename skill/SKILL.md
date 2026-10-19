@@ -17,7 +17,8 @@ desktop. Each **session** is:
 
 - a **git worktree** on its own **branch**, made from the latest main
   (`$AMARCHY_PATH`, branch `$AMARCHY_BRANCH`), under
-  `~/Work/.worktrees/<project>/<name>` by default;
+  `$AMARCHY_WORK/.worktrees/<project>/<name>` by default (`AMARCHY_WORK` is
+  `~/Work` unless the user set it);
 - **you**, Claude Code, in a centered column on the session's own Hyprland
   workspace;
 - the session's **terminal** on your right, opened in the same worktree. The
@@ -26,7 +27,7 @@ desktop. Each **session** is:
   status glyph, what the session is about, `project · branch`.
 
 The other sessions are other Claude Code instances, each in a worktree of its
-own. The project's **main checkout** is `$AMARCHY_ROOT` (`~/Work/<project>`).
+own. The project's **main checkout** is `$AMARCHY_ROOT` (`$AMARCHY_WORK/<project>`).
 
 ## Your environment
 
@@ -39,7 +40,7 @@ Set in your shell and in the terminal beside you:
 | `AMARCHY_PATH` | This worktree. |
 | `AMARCHY_NAME` | The session's name, e.g. `wobbly-bakunin`. |
 | `AMARCHY_BRANCH` | Its branch (usually the same as the name). |
-| `AMARCHY_REPO` | The project, i.e. the repo's folder name in `~/Work`. |
+| `AMARCHY_REPO` | The project, i.e. the repo's folder name in `$AMARCHY_WORK` (`~/Work` by default). |
 | `AMARCHY_ROOT` | The project's main checkout. |
 
 ## The CLI
