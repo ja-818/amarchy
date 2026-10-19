@@ -81,8 +81,9 @@ Idle), or **Not grouped**. Use any of them; together they nest in the order
 you turn them on, each one inside the ones already on, and the menu numbers
 them (1 outermost) in place of the check. Turn on priority and then project
 for High, Normal and Low with each one's projects inside; project and then
-priority for the priorities inside each project. To change the nesting, turn
-one off and on again: it goes innermost. **Sort by**
+priority for the priorities inside each project. Nested, the outermost
+sections are set apart by a rule across the list with their name in the
+middle. To change the nesting, turn one off and on again: it goes innermost. **Sort by**
 orders the sessions inside each section (or the whole list, ungrouped): by
 **priority** (the default: higher first, then the order you opened them in),
 **newest first** or **oldest first**. Grouped by project and sorted by
