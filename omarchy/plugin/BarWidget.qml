@@ -1,9 +1,10 @@
-import QtQuick 6.11
+import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The amarchy bar widget: an anarchy A that lights up (urgent) when a session
@@ -570,7 +571,7 @@ Panel {
           text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
-          color: Color.menu.text
+          color: Commons.Color.menu.text
           opacity: 0.52
         }
       }
@@ -584,7 +585,7 @@ Panel {
       width: Style.space(3)
       height: Math.max(Style.space(24), scroller.visibleArea.heightRatio * scroller.height)
       radius: width / 2
-      color: Color.menu.text
+      color: Commons.Color.menu.text
       opacity: scrollerHover.hovered || glide.running ? 0.35 : 0.15
       Behavior on opacity { NumberAnimation { duration: 140 } }
     }
@@ -613,8 +614,8 @@ Panel {
       height: menuItems.implicitHeight + topPadding + bottomPadding + borderTop + borderBottom
       radius: Style.cornerRadius
       // Solid, whatever the theme's alpha: the list is right under it.
-      color: Util.alpha(Color.popups.background, 1)
-      borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Style.normalBorderWidth)
+      color: Util.alpha(Commons.Color.popups.background, 1)
+      borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Style.normalBorderWidth)
       padding: Style.spacing.xs
 
       // Clicks between the rows stay on the menu.
@@ -699,7 +700,7 @@ Panel {
       font.pixelSize: Style.font.caption
       font.bold: true
       font.letterSpacing: 1.2
-      color: Qt.darker(Color.popups.text, 1.4)
+      color: Qt.darker(Commons.Color.popups.text, 1.4)
 
       Text {
         anchors.right: parent.right
@@ -710,7 +711,7 @@ Panel {
         text: header.keyText
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption
-        color: Color.popups.text
+        color: Commons.Color.popups.text
         opacity: 0.45
       }
     }
@@ -733,7 +734,7 @@ Panel {
 
     height: Style.spacing.popupRowHeight
     radius: Style.cornerRadius
-    color: hot ? Color.menu.selectedBackground : "transparent"
+    color: hot ? Commons.Color.menu.selectedBackground : "transparent"
 
     Text {
       id: itemIcon
@@ -745,7 +746,7 @@ Panel {
       text: item.icon
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.icon
-      color: item.on ? Color.menu.selectedText : Color.popups.text
+      color: item.on ? Commons.Color.menu.selectedText : Commons.Color.popups.text
       opacity: item.on || item.hot ? 1 : 0.6
     }
 
@@ -760,7 +761,7 @@ Panel {
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.body
       font.bold: item.on
-      color: item.on || item.hot ? Color.menu.selectedText : Color.popups.text
+      color: item.on || item.hot ? Commons.Color.menu.selectedText : Commons.Color.popups.text
     }
 
     Text {
@@ -774,7 +775,7 @@ Panel {
       text: item.keyText
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.caption
-      color: Color.popups.text
+      color: Commons.Color.popups.text
       opacity: 0.45
     }
 
@@ -790,7 +791,7 @@ Panel {
       font.family: Style.font.menuFamily
       font.pixelSize: item.level > 0 ? Style.font.body : Style.font.icon
       font.bold: item.level > 0
-      color: Color.menu.selectedText
+      color: Commons.Color.menu.selectedText
     }
 
     MouseArea {

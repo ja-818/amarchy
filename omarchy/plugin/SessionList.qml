@@ -1,5 +1,6 @@
-import QtQuick 6.11
+import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Sessions in the order the CLI gives them (`amarchy sort`: higher priority
@@ -90,7 +91,7 @@ Column {
             id: label
             x: heading.ruled ? Math.round((heading.width - width) / 2) : 0
             text: list.title(entry.modelData, heading.modelData)
-            foreground: Color.menu.text
+            foreground: Commons.Color.menu.text
             fontFamily: Style.font.menuFamily
             topPadding: (heading.index === entry.firstNew ? entry.gapAbove : 0) + Math.ceil(fontSize * 0.15)
             leftPadding: heading.ruled ? 0 : heading.inset
@@ -98,7 +99,7 @@ Column {
 
           PanelSeparator {
             visible: heading.ruled
-            foreground: Color.menu.text
+            foreground: Commons.Color.menu.text
             strength: 0.2
             x: heading.inset
             width: Math.max(0, label.x - heading.gap - x)
@@ -107,7 +108,7 @@ Column {
 
           PanelSeparator {
             visible: heading.ruled
-            foreground: Color.menu.text
+            foreground: Commons.Color.menu.text
             strength: 0.2
             x: label.x + label.width + heading.gap
             width: Math.max(0, heading.width - heading.inset - x)

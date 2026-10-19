@@ -1,9 +1,10 @@
-import QtQuick 6.11
+import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The chime of amarchy's notifications (`amarchy sound`), in a card like the
@@ -111,7 +112,7 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      color: Color.menu.scrim
+      color: Commons.Color.menu.scrim
     }
 
     // A click beside the card closes it, as in the menu.
@@ -126,8 +127,8 @@ Item {
       height: Math.min(column.implicitHeight + contentTopInset + contentBottomInset, panel.height - Style.gapsOut * 2)
       anchors.centerIn: parent
       radius: Style.cornerRadius
-      color: Color.menu.background
-      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+      color: Commons.Color.menu.background
+      borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
       padding: Style.spacing.panelPadding
       clip: true
 
@@ -164,7 +165,7 @@ Item {
           text: "Sound…"
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.heading
-          color: Color.menu.text
+          color: Commons.Color.menu.text
           opacity: 0.58
         }
 
@@ -187,8 +188,8 @@ Item {
               width: list.width
               height: Math.max(Style.space(50), Style.font.body + Style.spacing.rowPaddingX * 2)
               radius: Style.cornerRadius
-              color: hasCursor ? Color.menu.selectedBackground : "transparent"
-              borderSpec: hasCursor ? Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0) : Border.none()
+              color: hasCursor ? Commons.Color.menu.selectedBackground : "transparent"
+              borderSpec: hasCursor ? Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0) : Border.none()
 
               Text {
                 id: icon
@@ -201,7 +202,7 @@ Item {
                 text: row.isCurrent ? "󰄬" : (row.modelData.kind === "off" ? "󰖁" : row.modelData.kind === "add" ? "󰐕" : "󰕾")
                 font.family: Style.font.menuFamily
                 font.pixelSize: Style.font.iconLarge
-                color: row.hasCursor ? Color.menu.selectedText : Color.menu.text
+                color: row.hasCursor ? Commons.Color.menu.selectedText : Commons.Color.menu.text
               }
 
               Text {
@@ -216,7 +217,7 @@ Item {
                 font.family: Style.font.menuFamily
                 font.pixelSize: Style.font.heading
                 font.weight: Font.Medium
-                color: row.hasCursor ? Color.menu.selectedText : Color.menu.text
+                color: row.hasCursor ? Commons.Color.menu.selectedText : Commons.Color.menu.text
               }
 
               MouseArea {

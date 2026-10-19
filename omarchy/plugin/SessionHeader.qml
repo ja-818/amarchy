@@ -1,8 +1,9 @@
-import QtQuick 6.11
+import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The session's name above Claude in zen mode, where the list that shows the
@@ -33,8 +34,8 @@ PanelWindow {
 
   readonly property var spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property var icons: ({ waiting: "󰂞", idle: "󰄬", asleep: "󰒲" })
-  readonly property color ink: Color.bar.text
-  readonly property color dim: Qt.darker(Color.bar.text, 1.4)
+  readonly property color ink: Commons.Color.bar.text
+  readonly property color dim: Qt.darker(Commons.Color.bar.text, 1.4)
 
   // The keyword before ": " in bold, the rest in the regular weight (as in the list).
   function taskText(task) {
@@ -62,7 +63,7 @@ PanelWindow {
     height: parent.height
     // As wide as Claude's column below it.
     width: Math.min(root.zenWidth, parent.width)
-    color: root.hot ? Qt.tint(Color.bar.background, Style.hoverFillFor(root.ink, Color.accent)) : Color.bar.background
+    color: root.hot ? Qt.tint(Commons.Color.bar.background, Style.hoverFillFor(root.ink, Commons.Color.accent)) : Commons.Color.bar.background
     clip: true
 
     // Where it ends and Claude begins: Omarchy's panel divider, a touch firmer.
@@ -88,7 +89,7 @@ PanelWindow {
                                         : (root.icons[root.status] || "󰄬")
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.body
-        color: root.status === "waiting" ? Color.accent : root.ink
+        color: root.status === "waiting" ? Commons.Color.accent : root.ink
         opacity: root.status === "waiting" || root.status === "working" ? 1 : 0.52
       }
 

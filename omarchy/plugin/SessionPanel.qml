@@ -1,8 +1,9 @@
-import QtQuick 6.11
+import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 
 // Your sessions in the gap left of Claude's column, the way the terminal
 // fills the one on the right. `amarchy layout` keeps that gap free on session
@@ -70,7 +71,7 @@ PanelWindow {
 
   Rectangle {
     anchors.fill: parent
-    color: Util.alpha(Color.menu.background, root.alpha)
+    color: Util.alpha(Commons.Color.menu.background, root.alpha)
 
     HoverHandler {
       id: hover

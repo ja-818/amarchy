@@ -1,9 +1,10 @@
-import QtQuick 6.11
+import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The amarchy menu (`amarchy menu`, Ctrl+Alt+M), in a card like the Omarchy
@@ -135,7 +136,7 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      color: Color.menu.scrim
+      color: Commons.Color.menu.scrim
     }
 
     // A click beside the card closes it, as in the menu.
@@ -150,8 +151,8 @@ Item {
       height: Math.min(column.implicitHeight + contentTopInset + contentBottomInset, panel.height - Style.gapsOut * 2)
       anchors.centerIn: parent
       radius: Style.cornerRadius
-      color: Color.menu.background
-      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+      color: Commons.Color.menu.background
+      borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
       padding: Style.spacing.panelPadding
       clip: true
 
@@ -208,7 +209,7 @@ Item {
           text: root.filter !== "" ? root.filter : root.level.label + "…"
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.heading
-          color: Color.menu.text
+          color: Commons.Color.menu.text
           opacity: root.filter !== "" ? 1 : 0.58
         }
 
@@ -228,7 +229,7 @@ Item {
               required property var modelData
               required property int index
               readonly property bool hasCursor: index === root.cursor
-              readonly property color ink: hasCursor ? Color.menu.selectedText : Color.menu.text
+              readonly property color ink: hasCursor ? Commons.Color.menu.selectedText : Commons.Color.menu.text
               readonly property string side: modelData.children ? "󰅂"
                 : hasCursor && modelData.key ? modelData.key
                 : root.filter !== "" ? (modelData.where || "") : ""
@@ -236,8 +237,8 @@ Item {
               width: list.width
               height: Math.max(Style.space(50), Style.font.body + Style.spacing.rowPaddingX * 2)
               radius: Style.cornerRadius
-              color: hasCursor ? Color.menu.selectedBackground : "transparent"
-              borderSpec: hasCursor ? Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0) : Border.none()
+              color: hasCursor ? Commons.Color.menu.selectedBackground : "transparent"
+              borderSpec: hasCursor ? Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0) : Border.none()
 
               Text {
                 id: icon
@@ -300,7 +301,7 @@ Item {
           text: "Nothing called “" + root.filter + "”"
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
-          color: Color.menu.text
+          color: Commons.Color.menu.text
           opacity: 0.52
         }
       }

@@ -1,5 +1,6 @@
-import QtQuick 6.11
+import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One session, with the proportions of an Omarchy panel hero (the "Display /
@@ -31,16 +32,16 @@ BorderSurface {
   readonly property string status: session.status || "idle"
   readonly property bool urgent: status === "waiting" || status === "working"
   readonly property string priority: session.priority || "normal"
-  readonly property color ink: cursor ? Color.menu.selectedText : Color.menu.text
-  readonly property color dim: Qt.darker(Color.menu.text, 1.4)
+  readonly property color ink: cursor ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+  readonly property color dim: Qt.darker(Commons.Color.menu.text, 1.4)
   readonly property real zoom: 0.85
   readonly property int iconSize: Style.font.iconLarge
 
   implicitHeight: Math.max(icon.implicitHeight, content.implicitHeight) + Style.spacing.controlPaddingY * 2
   radius: Style.cornerRadius
-  color: cursor ? Color.menu.selectedBackground : "transparent"
+  color: cursor ? Commons.Color.menu.selectedBackground : "transparent"
   opacity: priority === "low" && !cursor ? 0.6 : 1
-  borderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
+  borderSpec: Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0)
 
   Text {
     id: icon
@@ -55,7 +56,7 @@ BorderSurface {
                                    : (row.icons[row.status] || "󰄬")
     font.family: Style.font.menuFamily
     font.pixelSize: row.iconSize
-    color: row.cursor || row.urgent ? Color.menu.selectedText : Color.menu.text
+    color: row.cursor || row.urgent ? Commons.Color.menu.selectedText : Commons.Color.menu.text
     opacity: row.cursor || row.urgent ? 1 : 0.52
   }
 
@@ -116,7 +117,7 @@ BorderSurface {
     text: row.session.age || ""
     font.family: Style.font.menuFamily
     font.pixelSize: Style.font.caption
-    color: Color.menu.text
+    color: Commons.Color.menu.text
     opacity: 0.45
   }
 
@@ -130,7 +131,7 @@ BorderSurface {
     text: row.priority === "high" ? "󰈻" : "󰁅"
     font.family: Style.font.menuFamily
     font.pixelSize: Style.font.caption
-    color: row.cursor ? Color.menu.selectedText : (row.priority === "high" ? Color.accent : Color.menu.text)
+    color: row.cursor ? Commons.Color.menu.selectedText : (row.priority === "high" ? Commons.Color.accent : Commons.Color.menu.text)
   }
 
   MouseArea {
