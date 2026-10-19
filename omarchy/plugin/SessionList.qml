@@ -33,9 +33,20 @@ Column {
     return list.statusNames[s.status] || s.status
   }
 
+  // Where a session's row is, from the top of the list, counting the
+  // headers that open right above it: { top, bottom }, or null.
+  function rowExtent(index) {
+    var entry = rows.itemAt(index)
+    if (!entry) return null
+    list.forceLayout()
+    entry.forceLayout()
+    return { top: entry.y, bottom: entry.y + entry.height }
+  }
+
   spacing: Style.spacing.xxs
 
   Repeater {
+    id: rows
     model: list.sessions
 
     Column {

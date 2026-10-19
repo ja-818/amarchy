@@ -54,7 +54,7 @@ gap to its left and the session's terminal (it opens in the worktree) in the
 gap to its right:
 
 ```
- [Ⓐ Amarchy] [󰐕 New session] │                     │
+ [Ⓐ Amarchy Menu] [󰐕 New…]  │                     │
  [󰍉 Search sessions] [󰉋] [󰉹] │                     │ $ npm run dev
                              │                     │
  󰂞  Login: redirect loop   4m│       claude        │
@@ -76,10 +76,13 @@ session by any word of Claude's whole title.
 
 The list is drawn by the Omarchy shell (a shell plugin) with the same type,
 rows and selection as the Omarchy menu, in the order you opened them, so a
-session keeps its place. Click one to jump to it.
+session keeps its place. Click one to jump to it. When there are more than fit,
+the list scrolls under the buttons and search, which stay put, a few rows per
+wheel notch, and it follows the cursor: moving to a session that's off screen
+brings it into view.
 
-Above it there is only what you reach for: **Ⓐ Amarchy** (the menu: everything
-else amarchy does, each with its key), **New session** and a **search**, which
+Above it there is only what you reach for: **Ⓐ Amarchy Menu** (everything
+amarchy does, each with its key), **New session** and a **search**, which
 reads `Ctrl+Alt+S`: the key that does the same as clicking it. Type a few
 letters of a session's name (what it's about, its project or its branch): the
 list narrows as you type, `↑`/`↓` move, `↵` jumps there, `Esc` brings the whole

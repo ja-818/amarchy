@@ -9,8 +9,8 @@ import qs.Commons
 // workspaces, so it only shows there, and not in zen mode (`amarchy zen`).
 // It doesn't take the keyboard (the session keys go through Hyprland) until
 // you click its search, or `amarchy search` asks for it: `keyboard` hands it
-// over. Whatever is declared inside is laid out in the panel, scrolling when
-// it's too tall.
+// over. Whatever is declared inside fills the panel, inside its padding, and
+// does its own scrolling.
 PanelWindow {
   id: root
 
@@ -78,18 +78,9 @@ PanelWindow {
     }
   }
 
-  Flickable {
-    id: flick
+  Item {
+    id: holder
     anchors.fill: parent
     anchors.margins: Style.spacing.panelPadding
-    contentHeight: holder.childrenRect.height
-    clip: true
-    boundsBehavior: Flickable.StopAtBounds
-
-    Item {
-      id: holder
-      width: flick.width
-      height: childrenRect.height
-    }
   }
 }

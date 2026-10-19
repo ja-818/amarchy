@@ -12,9 +12,9 @@ import qs.Ui
 // zen`) it doesn't, and moving between sessions from the keyboard (`amarchy
 // next`) drops the list for a moment, without taking the keyboard, to show
 // where you landed.
-// Above the list there is only the Ⓐ Amarchy button (the menu: everything else
-// amarchy does), New session and a search by name (its placeholder is the key
-// that puts the keyboard in it), with one 󰒼 button next to it that opens how
+// Above the list, fixed while it scrolls, there is only the Ⓐ Amarchy Menu
+// button (everything else amarchy does), New session and a search by name (its
+// placeholder is the key that puts the keyboard in it), with one 󰒼 button next to it that opens how
 // the list is grouped (by project, priority, status) and sorted inside its
 // groups (by priority, newest or oldest first).
 // IPC: omarchy-shell amarchy-bar toggle|open|close
@@ -189,7 +189,10 @@ Panel {
     store.refresh()
     root.query = ""
     root.cursor = Math.max(0, root.currentIndex)
+    Qt.callLater(column.reveal, false)
   }
+
+  onPeekingChanged: if (peeking) Qt.callLater(peekContent.reveal, false)
 
   Sessions {
     id: store
@@ -309,11 +312,32 @@ Panel {
     // border, so theirs is steady.
     readonly property real controlHeight: Math.max(brand.implicitHeight, newSession.implicitHeight, organize.implicitHeight)
 
-    implicitHeight: Math.max(stack.implicitHeight, content.menuOpen ? menu.y + menu.height : 0)
+    // Up top, out of the way of the scrolling: the buttons and the search.
+    readonly property real headerHeight: header.visible ? header.implicitHeight + Style.spacing.panelGap : 0
+
+    implicitHeight: Math.max(headerHeight + rows.implicitHeight, content.menuOpen ? menu.y + menu.height : 0)
+
+    // Bring the session under the cursor into view, with its headers when
+    // they're right above it: moving between sessions (from the keyboard, or
+    // `amarchy next`) never lands on one you can't see. Not while the pointer
+    // moves the cursor, which is on the row already.
+    function reveal(animate) {
+      var r = list.rowExtent(content.cursor)
+      // Not laid out yet: there's nothing to see it through.
+      if (!r || scroller.height < r.bottom - r.top) return
+      if (r.top < scroller.contentY) scroller.scrollTo(r.top, animate)
+      else if (r.bottom > scroller.contentY + scroller.height) scroller.scrollTo(r.bottom - scroller.height, animate)
+    }
+    property bool pointerMoving: false
+    onCursorChanged: if (!pointerMoving) Qt.callLater(content.reveal, true)
+    // Once it has its height (on the first layout of a panel), and when that
+    // changes, the cursor's still in view.
+    onHeightChanged: Qt.callLater(content.reveal, false)
 
     Column {
-      id: stack
+      id: header
       width: parent.width
+      visible: !content.passive
       spacing: Style.spacing.panelGap
 
       // The two share the row in halves, so it's as wide as the search under
@@ -321,19 +345,55 @@ Panel {
       // the wider one keeps its size and the other takes what's left.
       Row {
         width: parent.width
-        visible: !content.passive
         spacing: Style.spacing.controlGap
         // The name on the door is the menu: everything else amarchy does.
+        // Its own label: the Ⓐ sits on the baseline with a descent of its
+        // own, so the Button's centered glyph rides low next to the text.
         Button {
           id: brand
           width: Math.max(implicitWidth, Math.min((parent.width - parent.spacing) / 2,
                                                   parent.width - parent.spacing - newSession.implicitWidth))
           height: content.controlHeight
-          iconText: "Ⓐ"
-          text: "Amarchy"
+          implicitWidth: brandLabel.implicitWidth + horizontalPadding * 2 + _reservedBorderLeft + _reservedBorderRight
+          implicitHeight: newSession.implicitHeight
           tooltipText: root.keyHint("menu")
           bordered: true
           onClicked: root.openMenu("")
+
+          Item {
+            id: brandLabel
+            anchors.centerIn: parent
+            implicitWidth: brandGlyph.width + Style.spacing.controlGap + brandText.implicitWidth
+            implicitHeight: brandText.implicitHeight
+            width: implicitWidth
+            height: implicitHeight
+
+            TextMetrics { id: glyphInk; font: brandGlyph.font; text: brandGlyph.text }
+            TextMetrics { id: capInk; font: brandText.font; text: "A" }
+
+            Text {
+              id: brandGlyph
+              textFormat: Text.PlainText
+              text: "Ⓐ"
+              color: brand.foreground
+              font.family: brand.fontFamily
+              font.pixelSize: brand.iconSize
+              // The middle of its ring on the middle of the capitals beside it.
+              anchors.baseline: brandText.baseline
+              anchors.baselineOffset: Math.round((capInk.tightBoundingRect.y + capInk.tightBoundingRect.height / 2)
+                                                 - (glyphInk.tightBoundingRect.y + glyphInk.tightBoundingRect.height / 2))
+            }
+            Text {
+              id: brandText
+              x: brandGlyph.width + Style.spacing.controlGap
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: "Amarchy Menu"
+              color: brand.foreground
+              font.family: brand.fontFamily
+              font.pixelSize: brand.fontSize
+            }
+          }
         }
         Button {
           id: newSession
@@ -350,7 +410,7 @@ Panel {
       Row {
         id: toolbar
         width: parent.width
-        visible: !content.passive && store.sessions.length > 0
+        visible: store.sessions.length > 0
         spacing: Style.spacing.controlGap
 
         TextField {
@@ -431,30 +491,104 @@ Panel {
           onClicked: content.menuOpen ? content.closeMenu() : content.openMenu(false)
         }
       }
+    }
 
-      SessionList {
-        width: parent.width
-        visible: root.shown.length > 0
-        sessions: root.shown
-        groups: store.groups
-        cursor: content.cursor
-        spinnerFrame: root.spinnerFrame
-        onActivated: function(index) { content.activated(index) }
-        onHovered: function(index) { content.hovered(index) }
+    // The sessions, scrolling under the header. The wheel moves a few rows a
+    // notch, and glides there; a touchpad moves it by its own pixels.
+    // Flickable's own wheel handling crawls with a mouse, so it's off.
+    Flickable {
+      id: scroller
+      y: content.headerHeight
+      width: parent.width
+      height: Math.max(0, content.height - y)
+      contentWidth: width
+      contentHeight: rows.implicitHeight
+      clip: true
+      interactive: false
+      boundsBehavior: Flickable.StopAtBounds
+
+      readonly property real maxY: Math.max(0, contentHeight - height)
+      // Where it's headed, while it glides.
+      readonly property real targetY: glide.running ? glide.to : contentY
+
+      function scrollTo(y, animate) {
+        y = Math.round(Math.max(0, Math.min(y, maxY)))
+        glide.stop()
+        if (animate && y !== contentY) {
+          glide.from = contentY
+          glide.to = y
+          glide.start()
+        } else {
+          contentY = y
+        }
       }
 
-      Text {
-        width: parent.width
-        visible: !content.passive && root.shown.length === 0
-        textFormat: Text.PlainText
-        elide: Text.ElideRight
-        text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
-        font.family: Style.font.menuFamily
-        font.pixelSize: Style.font.body
-        color: Color.menu.text
-        opacity: 0.52
+      // The list grew shorter (a session closed, a search): never past its end.
+      onMaxYChanged: if (contentY > maxY) scrollTo(maxY, false)
+
+      NumberAnimation {
+        id: glide
+        target: scroller
+        property: "contentY"
+        duration: 160
+        easing.type: Easing.OutCubic
+      }
+
+      WheelHandler {
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        onWheel: function(event) {
+          if (event.pixelDelta.y !== 0) scroller.scrollTo(scroller.contentY - event.pixelDelta.y, false)
+          else if (event.angleDelta.y !== 0) scroller.scrollTo(scroller.targetY - event.angleDelta.y / 120 * Style.space(150), true)
+        }
+      }
+
+      Column {
+        id: rows
+        width: scroller.width
+
+        SessionList {
+          id: list
+          width: parent.width
+          visible: root.shown.length > 0
+          sessions: root.shown
+          groups: store.groups
+          cursor: content.cursor
+          spinnerFrame: root.spinnerFrame
+          onActivated: function(index) { content.activated(index) }
+          onHovered: function(index) {
+            content.pointerMoving = true
+            content.hovered(index)
+            content.pointerMoving = false
+          }
+        }
+
+        Text {
+          width: parent.width
+          visible: !content.passive && root.shown.length === 0
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          text: store.sessions.length === 0 ? "No sessions yet" : "No session called “" + root.query.trim() + "”"
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.body
+          color: Color.menu.text
+          opacity: 0.52
+        }
       }
     }
+
+    // How far down the list you are, when it doesn't all fit.
+    Rectangle {
+      visible: scroller.maxY > 0
+      x: parent.width - width + Style.spacing.sm
+      y: scroller.y + scroller.visibleArea.yPosition * scroller.height
+      width: Style.space(3)
+      height: Math.max(Style.space(24), scroller.visibleArea.heightRatio * scroller.height)
+      radius: width / 2
+      color: Color.menu.text
+      opacity: scrollerHover.hovered || glide.running ? 0.35 : 0.15
+      Behavior on opacity { NumberAnimation { duration: 140 } }
+    }
+    HoverHandler { id: scrollerHover }
 
     // A click anywhere off the menu closes it.
     MouseArea {
@@ -688,6 +822,7 @@ Panel {
     Content {
       id: peekContent
       width: parent.width
+      height: parent.height
       passive: true
       cursor: root.currentIndex
     }
@@ -708,11 +843,13 @@ Panel {
     onVisibleChanged: {
       if (!visible && root.searching) root.endSearch()
       if (!visible) sideContent.closeMenu()
+      else Qt.callLater(sideContent.reveal, false)
     }
 
     Content {
       id: sideContent
       width: parent.width
+      height: parent.height
       cursor: root.searching ? root.cursor : root.currentIndex
       onActivated: function(index) { root.activate(index) }
       onMoved: function(dy) { root.moveCursor(dy) }
@@ -819,6 +956,7 @@ Panel {
       Content {
         id: column
         width: parent.width
+        height: parent.height
         showKeys: true
         cursor: root.cursor
         onActivated: function(index) { root.activate(index) }
