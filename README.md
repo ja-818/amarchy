@@ -286,7 +286,8 @@ rest, loaded only when the work calls for it:
 - how to talk to the other sessions: they are Claude Code instances too, so
   Claude can message them with Claude Code's `ListAgents` and `SendMessage`
   (`amarchy list` gives each session's `agent` name for that), and start a new
-  session with a task of its own (`amarchy new <project> --prompt "..."`).
+  session with a task of its own (`amarchy new <project> --no-jump --prompt "..."`,
+  which starts it out of sight, so your screen stays where it is).
 
 Claude and the terminal also carry the session in their environment:
 `AMARCHY=1`, `AMARCHY_SESSION` (its id) and the variables run commands get
@@ -414,6 +415,7 @@ amarchy add                           start a new project interactively (New pro
 
 amarchy new [project] [name]          create a session (menu without a project; name like wobbly-bakunin if omitted); prints its id
 amarchy new <project> [name] --prompt <text|->  the same, with the first thing its Claude is asked (- reads stdin)
+amarchy new <project> [name] --no-jump          the same, out of sight: it shows up in the list, the screen stays put
 amarchy list                          sessions as JSON (agent: the name its Claude has for other sessions' SendMessage)
 amarchy open                          go to the last session you were in
 amarchy next | prev                   go down | up one session in the list (wraps around)

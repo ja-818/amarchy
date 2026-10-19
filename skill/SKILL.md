@@ -99,11 +99,14 @@ dev server). Restart the terminal so the user sees the result too.
   all its sessions). Commands start in the worktree and can use the variables
   above. Single-quote them so they expand per session, e.g.
   `amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'`.
-- `amarchy new <project> [name] [--prompt "<brief>"]`: start another session
-  and print its id. With `--prompt` (or `--prompt -` to read it from stdin), its
-  Claude starts with that as its first message: the way to hand a new session
-  a task. **It takes the user's screen to it.** See "Talking to other
-  sessions".
+- `amarchy new <project> [name] --no-jump [--prompt "<brief>"]`: start another
+  session and print its id. With `--prompt` (or `--prompt -` to read it from
+  stdin), its Claude starts with that as its first message: the way to hand a
+  new session a task. `--no-jump` starts it out of sight: it shows up in the
+  user's list and their screen stays where it is. **Always pass `--no-jump`**
+  when you start a session; without it the screen goes to the new session,
+  which only makes sense when the user asked to be taken there. See "Talking
+  to other sessions".
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
 - `amarchy close <id>`: close **another** session. It removes that worktree and
@@ -142,9 +145,12 @@ the user to paste something into another session: send it yourself.
 
 To give a **new** session a task (only when the user asks for a session):
 
-1. `amarchy new <project> [name] --prompt "<the whole brief>"`. The brief is
-   all it gets, so make it self-contained: what to do, why, where things are,
-   and to report back to you by name (yours is in `ListAgents`' first line).
+1. `amarchy new <project> [name] --no-jump --prompt "<the whole brief>"`, one
+   call per session when there are several. `--no-jump` keeps the user's
+   screen where it is; the new sessions just show up in their list. The brief
+   is all it gets, so make it self-contained: what to do, why, where things
+   are, and to report back to you by name (yours is in `ListAgents`' first
+   line).
 2. Once its Claude is up (`agent` set in `amarchy list --compact`), subscribe
    with `SendMessage` + `notify_when_idle: true` if you want to know when it's
    done.
