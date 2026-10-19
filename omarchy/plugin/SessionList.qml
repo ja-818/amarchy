@@ -5,8 +5,9 @@ import qs.Ui
 // Sessions in the order the CLI gives them (`amarchy sort`: higher priority
 // first, or newest or oldest first), grouped by project, priority and/or
 // status with a section header where the group changes. Groups nest in the
-// order of `groups`, outermost first, each level a step in from the one above
-// and quieter.
+// order of `groups`, outermost first. Every header is the same flush-left
+// label, except that with more than one grouping the outermost is a rule
+// across the list with its name in the middle, to set the big sections apart.
 Column {
   id: list
 
@@ -60,17 +61,47 @@ Column {
       Repeater {
         model: list.groups
 
-        PanelSectionHeader {
+        Item {
+          id: heading
           required property string modelData
           required property int index
+          // With more than one grouping, the outermost is a rule with its
+          // name in the middle; the rest are plain labels.
+          readonly property bool ruled: index === 0 && list.groups.length > 1
+          // The rules stop where the rows' text does.
+          readonly property int inset: Style.space(8)
+          readonly property int gap: Style.space(8)
           visible: index >= entry.firstNew
-          text: list.title(entry.modelData, modelData)
-          foreground: Color.menu.text
-          fontFamily: Style.font.menuFamily
-          // One step in, and quieter, per grouping above it.
-          opacity: index === 0 ? 1 : index === 1 ? 0.7 : 0.55
-          topPadding: (index === entry.firstNew ? entry.gapAbove : 0) + Math.ceil(fontSize * 0.15)
-          leftPadding: Style.space(8 + 12 * index)
+          width: entry.width
+          height: label.height
+
+          PanelSectionHeader {
+            id: label
+            x: heading.ruled ? Math.round((heading.width - width) / 2) : 0
+            text: list.title(entry.modelData, heading.modelData)
+            foreground: Color.menu.text
+            fontFamily: Style.font.menuFamily
+            topPadding: (heading.index === entry.firstNew ? entry.gapAbove : 0) + Math.ceil(fontSize * 0.15)
+            leftPadding: heading.ruled ? 0 : heading.inset
+          }
+
+          PanelSeparator {
+            visible: heading.ruled
+            foreground: Color.menu.text
+            strength: 0.2
+            x: heading.inset
+            width: Math.max(0, label.x - heading.gap - x)
+            y: Math.round(label.topPadding + (label.height - label.topPadding) / 2)
+          }
+
+          PanelSeparator {
+            visible: heading.ruled
+            foreground: Color.menu.text
+            strength: 0.2
+            x: label.x + label.width + heading.gap
+            width: Math.max(0, heading.width - heading.inset - x)
+            y: Math.round(label.topPadding + (label.height - label.topPadding) / 2)
+          }
         }
       }
 
