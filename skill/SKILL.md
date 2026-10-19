@@ -46,7 +46,8 @@ Set in your shell and in the terminal beside you:
 ## The CLI
 
 Every command prints its result to stdout and exits non-zero on failure.
-`amarchy --help` lists all of them.
+`amarchy --help` lists all of them; `amarchy <command> --help` prints one
+command's usage without running it (an option it doesn't know fails instead).
 
 ### Use freely
 

@@ -403,9 +403,13 @@ sleep --after <minutes>|off`, kept with amarchy's state.
 
 Every action in the UI is a command, in the Omarchy spirit: anything you can
 do with a key, a script or an AI agent can do too. Commands print results to
-stdout (JSON with `--json`) and exit non-zero on failure.
+stdout (JSON with `--json`) and exit non-zero on failure. `amarchy help` lists
+them all, and `amarchy <command> --help` (or `-h`, or `amarchy help <command>`)
+prints one command's usage without running it; an option a command doesn't
+know is an error, so a typo never acts on a session.
 
 ```
+amarchy help [command]                all the commands, or the usage of one
 amarchy projects [--json]             your projects and their session counts
 amarchy projects --github [--json]    your GitHub repos (✓ = already added)
 amarchy add <owner/repo|git url>      clone a project (prints its path)
