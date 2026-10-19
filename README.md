@@ -19,7 +19,7 @@ and put this line here: ![amarchy on Omarchy](docs/demo.gif) -->
 
 You need:
 
-- **Omarchy 4** (tested on 4.0.4): amarchy uses its Lua Hyprland config, the
+- **Omarchy 4** (tested on 4.0.4 with Qt 6.12): amarchy uses its Lua Hyprland config, the
   Omarchy shell (for the bar and the session list) and the Omarchy menu.
 - **[Claude Code](https://docs.claude.com/en/docs/claude-code)**, installed and
   logged in (`claude` on your `PATH`).
