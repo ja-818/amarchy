@@ -468,3 +468,8 @@ amarchy run --save main '$AMARCHY_ROOT/install.sh && omarchy-restart-shell'
 
 Each new worktree is pre-trusted in `~/.claude.json` so Claude starts without
 the folder trust prompt, and the entry is removed again on close.
+
+## License
+
+[MIT](LICENSE). The notification sounds in `sounds/` keep their own licenses,
+listed in [`sounds/CREDITS`](sounds/CREDITS).
