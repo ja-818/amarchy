@@ -98,7 +98,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 body::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: 0 0 calc(-1 * var(--shortfall, 0px));      /* down to the screen's real bottom (see shortfall in app.js) */
   z-index: -1;
   background-color: var(--bg);
   background-image: var(--wallpaper, none);
