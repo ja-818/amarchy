@@ -4396,15 +4396,16 @@ def ensure_remote_sync():
 
 def phone_look():
     """The look the phone app on the host wears: the theme your sessions wear
-    here (the amarchy theme, else your Omarchy theme), Hyprland's rounding
-    and the monospace font. (look, font), each with a "sig" that changes
-    with it; (None, None) when there's no theme to read."""
-    src = THEME if theme_name() and (THEME / "colors.toml").is_file() else DESKTOP / "theme"
+    here (the amarchy theme, else your Omarchy theme), Hyprland's rounding,
+    the monospace font and the wallpaper. (look, font, wallpaper), each with
+    a "sig" that changes with it; Nones when there's no theme to read."""
+    amarchy_theme = bool(theme_name()) and (THEME / "colors.toml").is_file()
+    src = THEME if amarchy_theme else DESKTOP / "theme"
     try:
         colors = (src / "colors.toml").read_text()
         shell = (src / "shell.toml").read_text() if (src / "shell.toml").is_file() else ""
     except OSError:
-        return None, None
+        return None, None, None
     try:
         name = theme_name() or (DESKTOP / "theme.name").read_text().strip()
     except OSError:
@@ -4426,7 +4427,40 @@ def phone_look():
     stats = {w: (p, os.stat(p).st_mtime_ns, os.stat(p).st_size) for w, p in font["files"].items()}
     # No font to send: the host keeps none either, so the two agree.
     font["sig"] = hashlib.sha1(json.dumps([font["family"], stats], sort_keys=True).encode()).hexdigest() if stats else ""
-    return look, font
+    # The wallpaper the desktop shows with that theme (an image; a video has none to send).
+    try:
+        path = (THEME / "background").read_text().strip() if amarchy_theme \
+            else os.path.realpath(DESKTOP / "background")
+        st = os.stat(path) if Path(path).suffix.lower() in IMAGES else None
+    except OSError:
+        st = None
+    wallpaper = {"path": path if st else "",
+                 "sig": hashlib.sha1(json.dumps([path, st.st_mtime_ns, st.st_size]).encode()).hexdigest() if st else ""}
+    return look, font, wallpaper
+
+
+_wallpaper_failed = set()
+PHONE_WALLPAPER = "1290x2796"   # an iPhone's screen in pixels, upright: the wallpaper is cut to it
+
+
+def phone_wallpaper(path):
+    """The wallpaper as the phone shows it: its middle, cut to a phone's
+    screen, as a JPEG (a few hundred KB, not the 4K original). Without
+    ImageMagick, the original if it isn't too big; else None."""
+    if not shutil.which("magick"):
+        try:
+            raw = Path(path).read_bytes() if os.path.getsize(path) <= APP_WALLPAPER_MAX else b""
+        except OSError:
+            raw = b""
+        return raw if image_kind(raw) else None
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "wallpaper.jpg"
+        r = sh("magick", f"{path}[0]", "-resize", PHONE_WALLPAPER + "^", "-gravity", "center",
+               "-extent", PHONE_WALLPAPER, "-quality", "82", "-strip", str(out))
+        try:
+            return out.read_bytes() if r.returncode == 0 else None
+        except OSError:
+            return None
 
 
 LOOK_EVERY = 15             # seconds between checks that the host's phone app wears this desktop's look
@@ -4435,10 +4469,16 @@ LOOK_RETRY = 600            # and after it didn't take it
 
 def remote_look(host, has):
     """Send the host's phone app this desktop's look, when what it wears
-    (has: its "phone" in `amarchy events`) isn't that. The font goes only
-    when it changed: it's a few MB. False if the host didn't take it."""
-    look, font = phone_look()
-    if not look or (has.get("look") == look["sig"] and has.get("font") == font["sig"]):
+    (has: its "phone" in `amarchy events`) isn't that. The font and the
+    wallpaper go only when they changed. False if the host didn't take it."""
+    look, font, wallpaper = phone_look()
+    if not look:
+        return True
+    # A wallpaper goes to a host that takes one, once: one that can't be cut
+    # to size isn't tried again until it changes.
+    if "wallpaper" not in has or wallpaper["sig"] in _wallpaper_failed:
+        wallpaper = {"path": "", "sig": has.get("wallpaper", "")}
+    if has.get("look") == look["sig"] and has.get("font") == font["sig"] and has.get("wallpaper", "") == wallpaper["sig"]:
         return True
     data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding")}}
     if has.get("font") != font["sig"]:
@@ -4448,6 +4488,12 @@ def remote_look(host, has):
                 data["font"][weight] = base64.b64encode(Path(path).read_bytes()).decode()
             except OSError:
                 pass
+    if has.get("wallpaper", "") != wallpaper["sig"]:
+        image = phone_wallpaper(wallpaper["path"]) if wallpaper["path"] else None
+        if wallpaper["path"] and not image:
+            _wallpaper_failed.add(wallpaper["sig"])
+        data["wallpaper"] = {"sig": wallpaper["sig"] if image else "",
+                             "image": base64.b64encode(image).decode() if image else ""}
     r = remote_amarchy(host, "app", "theme", input=json.dumps(data), timeout=120)
     if r.returncode:
         print(f"amarchy: the phone app on {host} didn't take the theme: {(r.stderr or '').strip()}",
@@ -5232,6 +5278,20 @@ APP_LOOK = APP / "look"                     # look.json and the font it names
 APP_FONTS = {b"\x00\x01\x00\x00": ("ttf", "font/ttf"), b"true": ("ttf", "font/ttf"),
              b"OTTO": ("otf", "font/otf"), b"wOFF": ("woff", "font/woff"), b"wOF2": ("woff2", "font/woff2")}
 APP_FONT_MAX = 12_000_000       # bytes of one font file
+APP_WALLPAPER_MAX = 8_000_000   # bytes of the wallpaper, a phone-sized copy
+APP_LOOK_TYPES = {"ttf": "font/ttf", "otf": "font/otf", "woff": "font/woff", "woff2": "font/woff2",
+                  "jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
+def image_kind(raw):
+    """jpg, png or webp, by what the file starts with; None for anything else."""
+    if raw[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
 SIG = re.compile(r"[0-9a-f]{40}")
 
 
@@ -5353,7 +5413,7 @@ def app_look_stamp():
     """Which look the app wears (it changes with each one sent), for the
     host's events and the app's list."""
     look = app_look() or {}
-    return {"look": look.get("look", ""), "font": look.get("font", "")}
+    return {"look": look.get("look", ""), "font": look.get("font", ""), "wallpaper": look.get("wallpaper", "")}
 
 
 def app_theme(data):
@@ -5376,7 +5436,7 @@ def app_theme(data):
     old = app_look() or {}
     look = {"look": data["look"], "name": name, "mode": mode, "vars": variables,
             "font": old.get("font", ""), "family": old.get("family", ""), "nerd": old.get("nerd", False),
-            "files": old.get("files", {})}
+            "wallpaper": old.get("wallpaper", ""), "files": dict(old.get("files", {}))}
     font = data.get("font")
     if isinstance(font, dict) and SIG.fullmatch(str(font.get("sig", ""))) and font["sig"] != old.get("font"):
         files = {}
@@ -5392,8 +5452,24 @@ def app_theme(data):
             write_file(APP_LOOK / name_on_disk, raw)
             files[weight] = name_on_disk
         family = re.sub(r"[^\w .-]", "", str(font.get("family", "")))[:64]
+        look["files"] = {k: v for k, v in look["files"].items() if k not in ("regular", "bold")} | files
         look.update(font=font["sig"] if files else "", family=family if files else "",
-                    nerd=bool(files) and "nerd" in family.lower(), files=files)
+                    nerd=bool(files) and "nerd" in family.lower())
+    # The wallpaper: "" for none (a desktop without one), else its sig and the image.
+    wall = data.get("wallpaper")
+    if isinstance(wall, dict) and wall.get("sig", None) != old.get("wallpaper"):
+        look["files"].pop("wallpaper", None)
+        look["wallpaper"] = ""
+        try:
+            raw = base64.b64decode(wall.get("image") or "", validate=True)
+        except ValueError:
+            raw = b""
+        kind = image_kind(raw)
+        if SIG.fullmatch(str(wall.get("sig", ""))) and kind and len(raw) <= APP_WALLPAPER_MAX:
+            name_on_disk = f"{wall['sig'][:12]}-wallpaper.{kind}"
+            write_file(APP_LOOK / name_on_disk, raw)
+            look["files"]["wallpaper"] = name_on_disk
+            look["wallpaper"] = wall["sig"]
     write_file(APP_LOOK / "look.json", json.dumps(look, indent=1))
     keep = set(look["files"].values()) | {"look.json"}
     for f in APP_LOOK.iterdir():
@@ -5411,14 +5487,17 @@ def app_theme_css():
     out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
             and re.fullmatch(r"[\w#().,/% -]+", str(v))]
     out.append(f"  color-scheme: {'light' if look.get('mode') == 'light' else 'dark'};")
-    files = look.get("files") or {}
+    files = dict(look.get("files") or {})
+    wallpaper = files.pop("wallpaper", None)
+    if wallpaper:
+        out.append(f'  --wallpaper: url("/look/{wallpaper}");')
     if files:
         out.append('  --font: "amarchy-mono", ui-monospace, Menlo, monospace;')
     out.append("}")
     for weight, f in files.items():
         kind = Path(f).suffix.lstrip(".")
         fmt = {"ttf": "truetype", "otf": "opentype"}.get(kind, kind)
-        out.append(f'@font-face {{ font-family: "amarchy-mono"; src: url("/font/{f}") format("{fmt}"); '
+        out.append(f'@font-face {{ font-family: "amarchy-mono"; src: url("/look/{f}") format("{fmt}"); '
                    f'font-weight: {700 if weight == "bold" else 400}; font-display: swap; }}')
     if "regular" in files and "bold" not in files:      # one file: the browser makes the bold
         out[-1] = out[-1].replace("font-weight: 400", "font-weight: 100 900")
@@ -5937,14 +6016,14 @@ def app_handler(st, users, address):
                 return self.send(200, {"items": items, "start": start})
             if path == "/theme.css":
                 return self.send(200, app_theme_css().encode(), "text/css; charset=utf-8")
-            m = re.fullmatch(r"/font/([0-9a-f]{12}-(?:regular|bold)\.(ttf|otf|woff2?))", path)
+            m = re.fullmatch(r"/look/([0-9a-f]{12}-(?:regular|bold|wallpaper)\.(ttf|otf|woff2?|jpg|png|webp))", path)
             if m:
                 f = APP_LOOK / m.group(1)
                 if not f.is_file():
                     return self.error(404, "not found")
                 data = f.read_bytes()
-                # Named after the font it is: the same name is always the same file.
-                self.head(200, f"font/{m.group(2)}", [("Content-Length", str(len(data)))],
+                # Named after what it is: the same name is always the same file.
+                self.head(200, APP_LOOK_TYPES[m.group(2)], [("Content-Length", str(len(data)))],
                           cache="max-age=31536000, immutable")
                 self.end_headers()
                 self.wfile.write(data)

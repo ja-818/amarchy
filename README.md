@@ -425,10 +425,12 @@ on notifications (iOS 16.4 or newer; iPhones only notify home screen apps).
 
 It wears your desktop's look: the theme your sessions wear there (the amarchy
 theme, else your Omarchy theme), its monospace font with the Nerd Font icons
-the session list uses, and Hyprland's rounding. The desktop showing the host's
-sessions (`amarchy remote`) sends it whenever it changes, the font only when
-that changes; the host keeps it in `~/.local/state/amarchy/app/look`. Until a
-desktop has, the app wears Omarchy's default, Tokyo Night.
+the session list uses, Hyprland's rounding, and your wallpaper, the app a
+window over it with the gaps around it and a see-through background. The
+desktop showing the host's sessions (`amarchy remote`) sends it whenever it
+changes, the font and the wallpaper (cut to a phone's screen with ImageMagick)
+only when those change; the host keeps it in `~/.local/state/amarchy/app/look`.
+Until a desktop has, the app wears Omarchy's default, Tokyo Night.
 
 How it stays yours: the app listens on the host's localhost only, and
 `tailscale serve` puts it on your tailnet over HTTPS, never on the internet
