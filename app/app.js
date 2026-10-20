@@ -213,7 +213,7 @@ function renderList() {
     h("h1", {}, "Sessions"),
     h("button", { class: "icon-btn", "aria-label": "Settings", html: ICONS.gear, onclick: openSettings }),
     h("button", { class: "icon-btn", "aria-label": "New session", html: ICONS.plus, onclick: () => openNew() }));
-  const sub = h("div", { class: "sub" }, v ? `${v.hostname} · ${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}` : "");
+  const sub = h("div", { class: "list-sub" }, v ? `${v.hostname} · ${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}` : "");
   const list = h("div", { class: "list" });
   if (!v) {
     list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));

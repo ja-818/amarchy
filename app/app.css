@@ -104,7 +104,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   display: flex; align-items: flex-end; gap: 8px;
 }
 .big-title h1 { flex: 1; margin: 0; font-size: 32px; letter-spacing: -0.02em; }
-.big-title .sub { color: var(--muted); font-size: 13px; padding: 0 20px 8px; }
+.list-sub { color: var(--muted); font-size: 13px; padding: 0 20px 4px; }
 
 .offline {
   margin: 0 16px 8px;

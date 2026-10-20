@@ -385,7 +385,8 @@ give you `http://<its tailscale name>:<port>`, so only your own devices reach
 it. Without Tailscale it serves on localhost only, and you forward the port
 (`ssh -L 3000:localhost:3000 <host>`). Set `NAME=` and `BIND=` in
 `~/.config/amarchy/host` on the host to change either. amarchy opens no port
-of its own and everything goes through ssh: **keep the host's ssh on a private
+of its own and everything goes through ssh (the phone app, once you turn it on,
+listens on localhost only, behind Tailscale): **keep the host's ssh on a private
 network too**, not the internet. Your desktop keeps one ssh connection open to
 it (`amarchy remote --sync`, started by the shell plugin) for the list and the
 notifications.

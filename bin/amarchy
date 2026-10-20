@@ -5429,7 +5429,8 @@ def claude_dialog(lines):
             options.append({"label": lines[j][col:].strip(), "detail": "", "selected": j == mark,
                             "keys": ["Up"] * -d + ["Down"] * d + ["Enter"]})
     rule = next((j for j in range(top - 1, -1, -1) if RULE.match(lines[j])), -1)
-    question = [l.strip() for l in lines[rule + 1:top] if l.strip() and not DASHES.match(l)]
+    # (A question's tab in AskUserQuestion has a box before it, ☐ or ☒ once answered.)
+    question = [re.sub(r"^[☐☒✔]\s*", "", l.strip()) for l in lines[rule + 1:top] if l.strip() and not DASHES.match(l)]
     if not options:
         return None
     question = "\n".join(question[-14:])
@@ -5545,8 +5546,7 @@ def app_moments(st, ss):
             time.sleep(0.3)         # the question is on screen by now
             dialog = app_screen(s).get("dialog")
             if dialog and dialog["question"]:
-                lines = [re.sub(r"^[☐☒✔]\s*", "", l) for l in dialog["question"].splitlines()[-3:]]
-                body += ": " + " · ".join(l for l in lines if l)[:300]
+                body += ": " + " · ".join(dialog["question"].splitlines()[-3:])[:300]
         payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
                    "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
         threading.Thread(target=push_all, args=(payload,), daemon=True).start()
@@ -5954,7 +5954,7 @@ def cmd_app(args):
         return app_off()
     if what == "--test":
         if not app_subscriptions():
-            return fail("no phone has turned on notifications yet (in the app: Notifications)")
+            return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
         n = push_all({"title": "amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
         print(f"sent to {n} of {len(app_subscriptions())}")
         return 0 if n else 1
