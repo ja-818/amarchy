@@ -45,6 +45,9 @@ both through amarchy on their own machine. Then:
   the user's screen do nothing here.
 - Nothing opens on their screen from here (a browser, a GUI app): tell them
   what to open instead.
+- They may be reading you on their phone (`amarchy app`): your messages show
+  as a chat, and your questions (AskUserQuestion, permission prompts) as
+  buttons. Short option labels read best there.
 
 ## Your environment
 

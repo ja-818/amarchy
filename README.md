@@ -14,6 +14,7 @@ and put this line here: ![amarchy on Omarchy](docs/demo.gif) -->
 - **Amarchy** sits in the Omarchy menu (`Super+Space`), with every action and its key.
 - Saved run commands: `Ctrl+Alt+R` runs the project in the terminal beside Claude, `Ctrl+Alt+C` picks another.
 - Sessions are ordinary Hyprland windows: `Super+arrows`, `Super+W`, your themes.
+- Sessions on a server keep working with your laptop shut, and are on your phone too, with notifications ([Your phone](#your-phone)).
 
 ## Quick start
 
@@ -393,6 +394,54 @@ The host needs tmux 3.5 or newer, and a login shell that speaks sh (bash,
 zsh). `amarchy remote off` takes the host's sessions off your list (they keep
 running there; `amarchy remote <host>` again brings them back).
 
+## Your phone
+
+A host can put its sessions on your phone too: `amarchy app` is a web app you
+add to the home screen, made for an iPhone (any phone with a current browser
+works). It shows the list as amarchy does (what each session is about,
+project · branch, needs you / working / idle, priority and groups), and in a
+session, its conversation, a box to send it messages, and Claude's questions
+and permission prompts as buttons. **+** starts a new session on one of the
+host's projects. When a session needs you or is done, the phone gets a
+notification, at the same moments as the desktop's chime (not for the one
+you're looking at on the phone). Since it reads the sessions on the host, it
+doesn't matter which Anthropic account each one's Claude Code uses.
+
+It needs [Tailscale](https://tailscale.com) on the host and on the phone, with
+HTTPS certificates turned on for your tailnet (in the Tailscale admin console:
+DNS → HTTPS Certificates). On the host:
+
+```sh
+amarchy app on        # prints its address, https://<host>.<tailnet>.ts.net
+amarchy app --status  # whether it's on, and how many phones it notifies
+amarchy app --test    # a test notification to each phone
+amarchy app off
+```
+
+On the phone, open that address in Safari, then Share → **Add to Home
+Screen**, and open amarchy from the home screen: its settings (the gear) turn
+on notifications (iOS 16.4 or newer; iPhones only notify home screen apps).
+
+How it stays yours: the app listens on the host's localhost only, and
+`tailscale serve` puts it on your tailnet over HTTPS, never on the internet
+(it's not Funnel). Tailscale tells it who each request comes from, and it
+answers only the Tailscale account that owns the host (to let in others, list
+their logins as `APP_USERS=` in `~/.config/amarchy/host`). It only takes
+changes from its own pages, so a website open on your phone can't drive your
+sessions. A process on the host itself could talk to it as you, but anything
+running as you there can drive the sessions anyway.
+
+It runs as a systemd user service (`amarchy-app.service`), so it's back after
+a reboot, and it restarts itself when amarchy is updated. What you send goes
+to the session's Claude as if typed into it (pasted, then Enter), and the
+answer to a question is the key you'd press. **Claude's screen** in a
+session's menu shows its screen as text, with arrow, Enter and Esc keys, for
+anything the buttons don't cover. The app is plain HTML and JavaScript
+(`app/`), served by amarchy itself: nothing to build or install, and
+notifications are signed and encrypted with `openssl`. `APP_PORT=` (on
+localhost, default 7397) and `APP_HTTPS=` (443, 8443 or 10000) in
+`~/.config/amarchy/host` change its ports.
+
 ## Install
 
 See [Quick start](#quick-start) for what it needs. `install.sh` is safe to run
@@ -408,7 +457,8 @@ again, and keeps a backup of every file of yours it changes
   (`~/.claude/skills/amarchy`) and the sleep timer (`amarchy-sleep.timer`).
 
 On a machine that keeps sessions for your desktops, `install.sh --host` only
-links the command and the skill (see [Remote sessions](#remote-sessions)).
+links the command and the skill (see [Remote sessions](#remote-sessions)), and
+`amarchy app on` adds the phone app's service (see [Your phone](#your-phone)).
 
 Update with `git pull` and `install.sh` again. `install.sh --uninstall` takes
 all of that out again; your worktrees and `~/.local/state/amarchy` are left
@@ -518,6 +568,8 @@ amarchy sort [priority|newest|oldest] how the list is sorted inside its groups (
 amarchy layout                        resize Claude's column for the current monitor
 amarchy remote <ssh host> | off       start new sessions on another machine (see Remote sessions) / here again
 amarchy remote [--status]             where new sessions start / whether that host answers
+amarchy app on | off                  on a host: your sessions on your phone (see Your phone)
+amarchy app [--status] | --test       whether it's on, and where / a test notification to each phone
 ```
 
 The run command is saved per project and starts in the session's worktree. It
