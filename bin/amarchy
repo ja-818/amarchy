@@ -105,6 +105,14 @@ asleep; that machine runs amarchy too, installed with ./install.sh --host):
                                         running there (amarchy remote <host> again brings them back)
   amarchy remote [--status]             where new sessions start / whether the host answers
 
+Phone (on a host: its sessions on your phone, as an app on the home screen, reachable only on your
+Tailscale network):
+  amarchy app on                        serve it on your tailnet (https://<this machine>.<tailnet>.ts.net,
+                                        with tailscale serve), now and after every reboot; prints its address
+  amarchy app off                       stop serving it (the phones keep it, for when it's on again)
+  amarchy app [--status]                whether it's on, where, and how many phones it notifies
+  amarchy app --test                    send each phone a test notification
+
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
@@ -123,6 +131,7 @@ Plumbing:
   amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
   amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
+  amarchy app serve                     on a host: the phone app's server (amarchy-app.service runs it)
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -155,6 +164,7 @@ import base64
 import calendar
 import fcntl
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -169,6 +179,7 @@ import tempfile
 import unicodedata
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 HOME = Path.home()
@@ -4891,6 +4902,1067 @@ def cmd_events(args):
             pass
 
 
+# ------------------------------------------------------------------ phone app
+#
+# `amarchy app` on a host: its sessions on your phone, a web app (app/) you add
+# to the home screen. The list as amarchy shows it, each session's
+# conversation from its transcript, what you type pasted into its Claude in
+# tmux, its questions as buttons, and a notification when one needs you or is
+# done (Web Push, the same moments as the desktop's chime).
+#
+# It's reachable from your tailnet only: the server listens on localhost, and
+# `tailscale serve` puts it on https://<this machine>.<tailnet>.ts.net, where
+# Tailscale says who's asking (the Tailscale-User-Login header). Only you (the
+# machine's owner on Tailscale, or APP_USERS= in ~/.config/amarchy/host) get
+# in, and only pages of its own can change anything (Origin), so a website
+# open on your phone can't drive your sessions.
+#
+# Web Push needs a key pair (VAPID) and each notification encrypted for the
+# phone (RFC 8291): openssl does the elliptic curve parts, Python the rest.
+
+APP = STATE / "app"                         # its key (vapid.pem) and the phones it notifies (push.json)
+APP_PAGES = Path(SELF).parent.parent / "app"
+APP_UNIT = "amarchy-app.service"
+APP_PORT = 7397                             # on localhost; APP_PORT= in ~/.config/amarchy/host
+APP_HTTPS = 443                             # on the tailnet; APP_HTTPS= (443, 8443 or 10000)
+# Who a push service should write to about this sender (Apple requires one).
+APP_CONTACT = "https://github.com/ja-818/amarchy"
+APP_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+             ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
+             ".svg": "image/svg+xml", ".png": "image/png"}
+APP_CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+           "connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; "
+           "base-uri 'none'; form-action 'none'")
+APP_CHUNK = 1_500_000           # bytes of a transcript read at a time (the latest first, earlier on request)
+APP_KEYS = {"Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "BTab", "Space", "BSpace",
+            *"0123456789"}
+APP_SEEN = 15                   # seconds a session you're looking at on the phone counts as seen
+P256_SPKI = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
+UNITS = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "systemd/user"
+
+
+def b64u(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def unb64u(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def openssl(*args, input=None):
+    r = subprocess.run(["openssl", *args], input=input, capture_output=True)
+    if r.returncode != 0:
+        raise OSError(f"openssl {args[0]}: {r.stderr.decode(errors='replace').strip()}")
+    return r.stdout
+
+
+def ec_new(path):
+    """A new P-256 private key, readable by you only."""
+    old = os.umask(0o077)
+    try:
+        openssl("ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", str(path))
+    finally:
+        os.umask(old)
+
+
+def ec_public(path):
+    """The public key of a private key file, as the 65 bytes of its point."""
+    return openssl("ec", "-in", str(path), "-pubout", "-outform", "DER")[-65:]
+
+
+def es256(path, data):
+    """data signed with the key (ECDSA, SHA-256) as JWT wants it: r and s, 32 bytes each."""
+    der = openssl("dgst", "-sha256", "-sign", str(path), input=data)
+    i, ints = 2, []
+    while i < len(der):
+        n = der[i + 1]
+        ints.append(int.from_bytes(der[i + 2:i + 2 + n], "big"))
+        i += 2 + n
+    return b"".join(v.to_bytes(32, "big") for v in ints)
+
+
+def ecdh(path, peer):
+    """The secret the key shares with a public key (65 bytes of its point)."""
+    with tempfile.NamedTemporaryFile(suffix=".der") as f:
+        f.write(P256_SPKI + peer)
+        f.flush()
+        return openssl("pkeyutl", "-derive", "-inkey", str(path), "-peerkey", f.name, "-peerform", "DER")
+
+
+def gf_mult(x, y):
+    """Multiplication in GCM's field (NIST SP 800-38D)."""
+    z = 0
+    for i in range(127, -1, -1):
+        if (x >> i) & 1:
+            z ^= y
+        y = (y >> 1) ^ (0xE1 << 120) if y & 1 else y >> 1
+    return z
+
+
+def aes128gcm(key, nonce, data):
+    """AES-128-GCM, ciphertext and tag. openssl's command line has no GCM, so
+    it only runs AES on the counter blocks; the mode is done here."""
+    n = -(-len(data) // 16)
+    blocks = bytes(16) + nonce + b"\0\0\0\1" + b"".join(nonce + (i + 2).to_bytes(4, "big") for i in range(n))
+    out = openssl("enc", "-aes-128-ecb", "-K", key.hex(), "-nopad", input=blocks)
+    h, mask, stream = int.from_bytes(out[:16], "big"), out[16:32], out[32:]
+    ct = bytes(a ^ b for a, b in zip(data, stream))
+    x = 0
+    for i in range(0, len(ct), 16):
+        x = gf_mult(x ^ int.from_bytes(ct[i:i + 16].ljust(16, b"\0"), "big"), h)
+    x = gf_mult(x ^ (len(ct) * 8), h)
+    return ct + bytes(a ^ b for a, b in zip(x.to_bytes(16, "big"), mask))
+
+
+def hkdf(salt, ikm, info, n):
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    return hmac.new(prk, info + b"\1", hashlib.sha256).digest()[:n]
+
+
+def push_encrypt(keys, payload):
+    """A notification's payload as only that phone can read it (RFC 8291, aes128gcm)."""
+    ua_public, auth = unb64u(keys["p256dh"]), unb64u(keys["auth"])
+    with tempfile.TemporaryDirectory() as d:
+        key = Path(d) / "key.pem"
+        ec_new(key)
+        as_public, secret = ec_public(key), ecdh(key, ua_public)
+    ikm = hkdf(auth, secret, b"WebPush: info\0" + ua_public + as_public, 32)
+    salt = os.urandom(16)
+    cek = hkdf(salt, ikm, b"Content-Encoding: aes128gcm\0", 16)
+    nonce = hkdf(salt, ikm, b"Content-Encoding: nonce\0", 12)
+    return salt + (4096).to_bytes(4, "big") + bytes([65]) + as_public + aes128gcm(cek, nonce, payload + b"\2")
+
+
+def app_key():
+    """The app's own key, made the first time: phones subscribe to it, and
+    push services check it signed what it sends."""
+    key = APP / "vapid.pem"
+    if not key.exists():
+        APP.mkdir(parents=True, exist_ok=True)
+        APP.chmod(0o700)
+        ec_new(key)
+    return key
+
+
+_app_public = {}
+
+
+def app_public():
+    """The app's public key, as phones subscribe with it (base64url)."""
+    key = app_key()
+    stamp = key.stat().st_mtime_ns
+    if _app_public.get("stamp") != stamp:
+        _app_public.update(stamp=stamp, key=b64u(ec_public(key)))
+    return _app_public["key"]
+
+
+def app_subscriptions():
+    try:
+        subs = json.loads((APP / "push.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [s for s in subs if isinstance(s, dict) and isinstance(s.get("endpoint"), str)]
+
+
+_push_lock = threading.Lock()
+
+
+def app_save_subscriptions(change):
+    """Change the list of phones to notify (change(list) -> list), in one go."""
+    with _push_lock:
+        subs = change(app_subscriptions())
+        APP.mkdir(parents=True, exist_ok=True)
+        old = os.umask(0o077)
+        try:
+            write_file(APP / "push.json", json.dumps(subs))
+        finally:
+            os.umask(old)
+
+
+def push_send(sub, payload):
+    """Send one notification: True if the push service took it, False if
+    that phone is gone for good (its subscription ended), None on any other
+    failure (it may work next time)."""
+    import urllib.error
+    import urllib.request
+    endpoint = sub["endpoint"]
+    u = urllib.parse.urlsplit(endpoint)
+    claims = {"aud": f"{u.scheme}://{u.netloc}", "exp": int(time.time()) + 12 * 3600, "sub": APP_CONTACT}
+    head = b64u(b'{"typ":"JWT","alg":"ES256"}') + "." + b64u(json.dumps(claims).encode())
+    key = app_key()
+    jwt = head + "." + b64u(es256(key, head.encode()))
+    body = push_encrypt(sub["keys"], json.dumps(payload).encode())
+    req = urllib.request.Request(endpoint, data=body, method="POST", headers={
+        "TTL": "86400", "Urgency": "high", "Content-Encoding": "aes128gcm",
+        "Content-Type": "application/octet-stream",
+        "Authorization": f"vapid t={jwt}, k={app_public()}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20):
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410):
+            return False
+        print(f"amarchy app: push to {u.netloc} failed: {e.code} {e.read()[:200]!r}", file=sys.stderr)
+    except (OSError, ValueError) as e:
+        print(f"amarchy app: push to {u.netloc} failed: {e}", file=sys.stderr)
+    return None
+
+
+def push_all(payload):
+    """Send a notification to every phone, dropping the ones that are gone.
+    The number that took it."""
+    sent, gone = 0, set()
+    for sub in app_subscriptions():
+        try:
+            ok = push_send(sub, payload)
+        except (OSError, KeyError, ValueError) as e:
+            print(f"amarchy app: couldn't send a notification: {e}", file=sys.stderr)
+            ok = None
+        sent += ok is True
+        if ok is False:
+            gone.add(sub["endpoint"])
+    if gone:
+        app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] not in gone])
+    return sent
+
+
+def tailscale_status():
+    try:
+        return json.loads(sh("tailscale", "status", "--json").stdout or "{}")
+    except ValueError:
+        return {}
+
+
+def app_address(status=None):
+    """This machine's name on the tailnet (amarchy.tail1234.ts.net), the one
+    its HTTPS certificate is for, or None."""
+    status = status if status is not None else tailscale_status()
+    name = ((status.get("Self") or {}).get("DNSName") or "").rstrip(".")
+    return name or None
+
+
+def app_users(status=None):
+    """The Tailscale logins let in: APP_USERS= (comma separated), else the
+    owner of this machine."""
+    users = host_setting("APP_USERS")
+    if users:
+        return {u.strip() for u in users.split(",") if u.strip()}
+    status = status if status is not None else tailscale_status()
+    me = status.get("Self") or {}
+    login = ((status.get("User") or {}).get(str(me.get("UserID"))) or {}).get("LoginName", "")
+    return {login} if login and "@" in login else set()
+
+
+def app_port():
+    try:
+        return int(host_setting("APP_PORT") or APP_PORT)
+    except ValueError:
+        return APP_PORT
+
+
+def app_https():
+    try:
+        return int(host_setting("APP_HTTPS") or APP_HTTPS)
+    except ValueError:
+        return APP_HTTPS
+
+
+def app_url(address):
+    https = app_https()
+    return f"https://{address}" + ("" if https == 443 else f":{https}") + "/"
+
+
+# ---- what the app shows of a session
+
+def app_where(s):
+    return f"{s['repo']} · {s.get('branch') or s['name']}"
+
+
+def short_path(path, s):
+    """A file path as the worktree sees it."""
+    root = s["path"].rstrip("/") + "/"
+    return path[len(root):] if isinstance(path, str) and path.startswith(root) else path
+
+
+def tool_summary(name, args, s):
+    """A tool call in a line: the command it runs, the file it reads, what it searches."""
+    if not isinstance(args, dict):
+        return ""
+    if name == "TodoWrite" and isinstance(args.get("todos"), list):
+        return f"{len(args['todos'])} to-dos"
+    if name == "AskUserQuestion" and isinstance(args.get("questions"), list) and args["questions"]:
+        q = args["questions"][0]
+        return q.get("question", "") if isinstance(q, dict) else ""
+    for key in ("command", "file_path", "notebook_path", "pattern", "url", "query", "description", "prompt",
+                "skill", "message", "path"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return short_path(value, s) if key in ("file_path", "notebook_path", "path") else value
+    for value in args.values():
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def result_text(content):
+    if isinstance(content, str):
+        return content
+    out = []
+    for b in content if isinstance(content, list) else []:
+        if isinstance(b, dict):
+            out.append(b.get("text", "") if b.get("type") == "text" else f"[{b.get('type', '')}]")
+    return "\n".join(out)
+
+
+def tag_text(text, tag):
+    m = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.S)
+    return m.group(1).strip() if m else None
+
+
+def user_item(text):
+    """What you said, as the conversation shows it: Claude Code wraps slash
+    commands, ! commands and their output in tags, and adds reminders for Claude."""
+    text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.S).strip()
+    if not text or text.startswith("<local-command-caveat>"):
+        return None
+    name = tag_text(text, "command-name")
+    if name is not None:
+        args = tag_text(text, "command-args") or ""
+        return {"kind": "command", "text": f"{name} {args}".strip()}
+    for tag, kind in (("bash-input", "command"), ("local-command-stdout", "note"), ("bash-stdout", "note"),
+                      ("bash-stderr", "note")):
+        inner = tag_text(text, tag)
+        if inner is not None:
+            if kind == "command":
+                return {"kind": "command", "text": f"! {inner}"}
+            return {"kind": "note", "text": inner} if inner else None
+    if text.startswith("[Request interrupted"):
+        return {"kind": "note", "text": "Interrupted"}
+    return {"kind": "user", "text": text}
+
+
+def app_items(records, s):
+    """A conversation's records as the app shows them: what you said, what
+    Claude said, its tool calls (each result follows as "result", for the
+    call it answers) and notes. Thinking and Claude Code's bookkeeping are left out."""
+    out = []
+    for r in records:
+        if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta"):
+            continue
+        kind, rid, at = r.get("type"), r.get("uuid") or "", r.get("timestamp") or ""
+        message = r.get("message") if isinstance(r.get("message"), dict) else {}
+        content = message.get("content")
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content or []
+        found = []
+        if kind == "user":
+            for b in blocks:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text":
+                    found.append(user_item(b.get("text") or ""))
+                elif b.get("type") == "image":
+                    found.append({"kind": "user", "text": "[image]"})
+                elif b.get("type") == "tool_result":
+                    text = result_text(b.get("content"))
+                    found.append({"kind": "result", "tool": b.get("tool_use_id", ""), "error": bool(b.get("is_error")),
+                                  "text": text[:4000] + ("\n…" if len(text) > 4000 else "")})
+        elif kind == "assistant":
+            for b in blocks:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text" and (b.get("text") or "").strip():
+                    found.append({"kind": "claude", "text": b["text"].strip()})
+                elif b.get("type") == "tool_use":
+                    found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
+                                  "summary": tool_summary(b.get("name"), b.get("input"), s)[:600]})
+        elif kind == "system":
+            sub = r.get("subtype")
+            if sub == "away_summary" and r.get("content"):
+                found.append({"kind": "note", "text": re.sub(r"\s*\(disable recaps.*?\)$", "", str(r["content"]))})
+            elif sub == "compact_boundary":
+                found.append({"kind": "note", "text": "Conversation compacted"})
+            elif sub == "local_command" and isinstance(r.get("content"), str):
+                found.append(user_item(r["content"]))
+        for i, item in enumerate(x for x in found if x):
+            out.append({**item, "key": f"{rid}:{i}", "at": at})
+    return out
+
+
+def line_start(fh, pos):
+    """The start of the line pos is in (0, or just after a newline)."""
+    if pos <= 0:
+        return 0
+    fh.seek(pos - 1)
+    fh.readline()
+    return fh.tell()
+
+
+def read_records(f, start, end):
+    """The records of a transcript between two offsets (at line starts)."""
+    with open(f, "rb") as fh:
+        fh.seek(start)
+        data = fh.read(max(end - start, 0))
+    out = []
+    for line in data.splitlines():
+        if b'"type":"api-request' in line[:40] or not line.strip():
+            continue        # copies of what went to the API: big, and nothing to show
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+class AppConversation:
+    """Follows the conversation a session is in (it changes with /clear): the
+    latest of it first, then what's added."""
+
+    def __init__(self, s):
+        self.s, self.file, self.start, self.offset = s, None, 0, 0
+
+    def poll(self):
+        """(items, reset): what's new, or with reset, all there is to show from scratch."""
+        f = transcript(self.s)
+        if f != self.file:
+            self.file = f
+            if not f:
+                self.start = self.offset = 0
+                return [], True
+            with open(f, "rb") as fh:
+                end = fh.seek(0, 2)
+                self.start = line_start(fh, end - APP_CHUNK)
+            self.offset = self.start
+            return self.read(), True
+        return (self.read(), False) if f else ([], False)
+
+    def read(self):
+        try:
+            with open(self.file, "rb") as fh:
+                fh.seek(self.offset)
+                data = fh.read()
+        except OSError:
+            return []
+        done = data.rfind(b"\n") + 1        # a line still being written waits for the next time
+        records = read_records(self.file, self.offset, self.offset + done) if done else []
+        self.offset += done
+        return app_items(records, self.s)
+
+
+def app_earlier(s, before):
+    """The part of the conversation before an offset: (items, its start)."""
+    f = transcript(s)
+    if not f or before <= 0:
+        return [], 0
+    with open(f, "rb") as fh:
+        start = line_start(fh, before - APP_CHUNK)
+    return app_items(read_records(f, start, before), s), start
+
+
+OPTION = re.compile(r"^(\s{0,8})(❯\s*)?(\d{1,2})\.\s+(\S.*)$")
+RULE = re.compile(r"^\s*[─━]{8,}\s*$")
+DASHES = re.compile(r"^\s*[╌┄-]{8,}\s*$")
+# The line under each of Claude Code's dialogs, saying how to answer it.
+DIALOG_HINT = re.compile(r"Esc to (cancel|exit|go back)|Enter to (select|confirm|continue|submit)|to navigate")
+
+
+def claude_dialog(lines):
+    """A question Claude Code shows (a permission prompt, AskUserQuestion, a
+    menu), read off its screen: {id, question, options: [{label, detail,
+    keys}], hint}, or None. Each option's keys pick it: its number, or the
+    arrows to it and Enter in a menu without numbers."""
+    width = max((len(l) for l in lines), default=0)
+    hint = next((i for i in range(len(lines) - 1, max(len(lines) - 7, -1), -1)
+                 if DIALOG_HINT.search(lines[i])), None)
+    if hint is None:
+        return None
+    found, expect = [], None
+    for j in range(hint - 1, max(hint - 60, -1), -1):
+        m = OPTION.match(lines[j])
+        if not m:
+            continue
+        n = int(m.group(3))
+        if expect is not None and n != expect:
+            break
+        found.insert(0, (j, m))
+        expect = n - 1
+        if n == 1:
+            break
+    options = []
+    if found and expect == 0:
+        top = found[0][0]
+        for k, (j, m) in enumerate(found):
+            label, detail = m.group(4).strip(), []
+            stop = found[k + 1][0] if k + 1 < len(found) else hint
+            # A label too long for the line goes on below it, cut at a space
+            # or, where the line is full to the edge, inside a word.
+            prev = lines[j]
+            for line in lines[j + 1:stop]:
+                if not line.strip() or RULE.match(line) or DASHES.match(line):
+                    prev = ""
+                    continue
+                if len(prev) >= width - 3:
+                    label += ("" if len(prev) == width else " ") + line.strip()
+                    prev = line
+                else:
+                    detail.append(line.strip())
+                    prev = ""
+            n = int(m.group(3))
+            options.append({"label": label, "detail": " ".join(detail), "selected": bool(m.group(2)),
+                            "keys": [str(n)] if n <= 9 else ["Down"] * (n - 1) + ["Enter"]})
+    else:
+        # A menu without numbers: the line with ❯ and the ones beside it, lined up with it.
+        mark = next((j for j in range(hint - 1, max(hint - 30, -1), -1)
+                     if re.match(r"^\s+❯\s+\S", lines[j])), None)
+        if mark is None:
+            return None
+        col = re.match(r"^(\s+❯\s+)", lines[mark]).end()
+        def sibling(line):
+            return len(line) > col and line[:col].strip() in ("", "❯") and line[col] != " "
+        top = mark
+        while top > 0 and sibling(lines[top - 1]):
+            top -= 1
+        bottom = mark
+        while bottom + 1 < hint and sibling(lines[bottom + 1]):
+            bottom += 1
+        for j in range(top, bottom + 1):
+            d = j - mark
+            options.append({"label": lines[j][col:].strip(), "detail": "", "selected": j == mark,
+                            "keys": ["Up"] * -d + ["Down"] * d + ["Enter"]})
+    rule = next((j for j in range(top - 1, -1, -1) if RULE.match(lines[j])), -1)
+    # (A question's tab in AskUserQuestion has a box before it, ☐ or ☒ once answered.)
+    question = [re.sub(r"^[☐☒✔]\s*", "", l.strip()) for l in lines[rule + 1:top] if l.strip() and not DASHES.match(l)]
+    if not options:
+        return None
+    question = "\n".join(question[-14:])
+    sig = json.dumps([question, [o["label"] for o in options]])
+    return {"id": hashlib.sha1(sig.encode()).hexdigest()[:12], "question": question, "options": options,
+            "hint": lines[hint].strip()}
+
+
+EXITED = "Claude Code exited. Press Enter"
+
+
+def app_screen(s):
+    """What the session's Claude shows now: its screen as text, the question
+    on it if any, and whether Claude is there at all (exited: it's waiting
+    for Enter to start again)."""
+    r = tmux("capture-pane", "-p", "-t", f"={tmux_name(s['id'])}:")
+    if r.returncode != 0:
+        return {"live": False, "text": "", "dialog": None, "exited": False}
+    lines = [l.rstrip() for l in r.stdout.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    exited = any(EXITED in l for l in lines[-4:])
+    return {"live": True, "text": "\n".join(lines), "exited": exited,
+            "dialog": None if exited else claude_dialog(lines)}
+
+
+def app_type(s, text):
+    """Send a message to the session's Claude, as if typed and sent: pasted
+    (so new lines stay in it) and Enter."""
+    pane = f"={tmux_name(s['id'])}:"
+    buffer = f"amarchy-app-{os.getpid()}-{threading.get_ident()}"
+    r = tmux("set-buffer", "-b", buffer, "--", text)
+    if r.returncode == 0:
+        r = tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", pane)
+    if r.returncode != 0:
+        return r.stderr.strip() or "tmux failed"
+    time.sleep(0.25)      # Claude takes the paste in before Enter sends it
+    r = tmux("send-keys", "-t", pane, "Enter")
+    return None if r.returncode == 0 else (r.stderr.strip() or "tmux failed")
+
+
+def valid_keys(keys):
+    return isinstance(keys, list) and 0 < len(keys) <= 20 and all(isinstance(k, str) and k in APP_KEYS for k in keys)
+
+
+def app_keys(s, keys):
+    pane = f"={tmux_name(s['id'])}:"
+    for i, key in enumerate(keys):
+        if i:
+            time.sleep(0.06)
+        r = tmux("send-keys", "-t", pane, key)
+        if r.returncode != 0:
+            return r.stderr.strip() or "tmux failed"
+    return None
+
+
+# ---- the server
+
+class AppState:
+    """What every connection shares: the list as last read, the moments it
+    changed, and which sessions you're looking at on the phone."""
+
+    def __init__(self):
+        self.changed = threading.Condition()
+        self.view, self.version, self.statuses = {}, 0, None
+        self.seen = {}          # session id -> when the phone last said it's on screen
+
+    def row(self, sid):
+        return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
+
+
+def app_watch(st):
+    """Read the list every second; on a change wake the streams, and tell the
+    phones about a session that went on to need you or be done."""
+    ps, projects_at = [], 0
+    while True:
+        try:
+            if time.time() - projects_at > 10:
+                ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
+            ss = session_view()
+            view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
+                    "sort": list_sort()}
+        except Exception as e:      # a half-written file, say: the next second will do
+            print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
+            time.sleep(1)
+            continue
+        with st.changed:
+            if view != st.view:
+                st.view = view
+                st.version += 1
+                st.changed.notify_all()
+        app_moments(st, ss)
+        time.sleep(1)
+
+
+def app_moments(st, ss):
+    """Notify about each session that went on to need you or finished, as the
+    desktop does (cmd_hook): unless it's the one on your phone's screen."""
+    now = {s["id"]: s["status"] for s in ss}
+    was, st.statuses = st.statuses, now
+    if was is None:
+        return
+    waiting = sum(1 for s in ss if s["status"] == "waiting")
+    for s in ss:
+        state, prev = s["status"], was.get(s["id"])
+        if state == prev or not (state == "waiting" or (state == "idle" and prev == "working")):
+            continue
+        if time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
+            continue
+        where = app_where(s)
+        body = "Needs you" if state == "waiting" else "Done"
+        if state == "waiting":
+            time.sleep(0.3)         # the question is on screen by now
+            dialog = app_screen(s).get("dialog")
+            if dialog and dialog["question"]:
+                body += ": " + " · ".join(dialog["question"].splitlines()[-3:])[:300]
+        payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
+                   "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
+        threading.Thread(target=push_all, args=(payload,), daemon=True).start()
+
+
+def app_handler(st, users, address):
+    import http.server
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        server_version = "amarchy"
+        sys_version = ""
+
+        def log_message(self, fmt, *args):
+            pass
+
+        def log_error(self, fmt, *args):
+            print("amarchy app: " + fmt % args, file=sys.stderr)
+
+        def head(self, code, ctype, extra=()):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            for k, v in (("Content-Security-Policy", APP_CSP), ("X-Content-Type-Options", "nosniff"),
+                         ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
+                         ("Cache-Control", "no-cache"), *extra):
+                self.send_header(k, v)
+
+        def send(self, code, body, ctype="application/json"):
+            data = json.dumps(body).encode() if ctype == "application/json" else body
+            self.head(code, ctype, [("Content-Length", str(len(data)))])
+            self.end_headers()
+            self.wfile.write(data)
+
+        def error(self, code, why):
+            self.send(code, {"error": why})
+
+        def allowed(self, write=False):
+            """Only you, through tailscale serve, at this machine's address;
+            changes only from the app's own pages."""
+            host = self.headers.get("Host", "")
+            if self.headers.get("Tailscale-User-Login", "") not in users or host.split(":")[0] != address:
+                self.error(403, "not yours")
+                return False
+            if write:
+                site = self.headers.get("Sec-Fetch-Site")
+                if (self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin")
+                        or not self.headers.get("Content-Type", "").startswith("application/json")):
+                    self.error(403, "only from the app")
+                    return False
+            return True
+
+        def body(self):
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(n) if 0 < n <= 200_000 else b"{}")
+            except ValueError:
+                data = None
+            return data if isinstance(data, dict) else {}
+
+        def session(self, sid):
+            s = session(sid) if re.fullmatch(r"[\w][\w.-]{0,119}", sid) else None
+            if not s or s.get("host") or (CLOSING / f"{sid}.json").exists():
+                self.error(404, "no such session")
+                return None
+            return s
+
+        def do_GET(self):
+            if not self.allowed():
+                return
+            path, _, query = self.path.partition("?")
+            args = urllib.parse.parse_qs(query)
+            if path == "/api/state":
+                with st.changed:
+                    view = dict(st.view)
+                return self.send(200, {**view, "key": app_public(),
+                                       "user": self.headers.get("Tailscale-User-Login")})
+            if path == "/api/events":
+                return self.list_stream()
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier)", path)
+            if m:
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                if m.group(2) == "stream":
+                    return self.session_stream(s)
+                try:
+                    items, start = app_earlier(s, int(args.get("before", ["0"])[0]))
+                except (ValueError, OSError):
+                    return self.error(400, "bad offset")
+                return self.send(200, {"items": items, "start": start})
+            return self.page(path)
+
+        def page(self, path):
+            name = "index.html" if path == "/" else path.lstrip("/")
+            f = APP_PAGES / name
+            if not re.fullmatch(r"[\w-]+(\.[\w-]+)+", name) or Path(name).suffix not in APP_TYPES or not f.is_file():
+                return self.error(404, "not found")
+            extra = [("Service-Worker-Allowed", "/")] if name == "sw.js" else []
+            data = f.read_bytes()
+            self.head(200, APP_TYPES[Path(name).suffix], [("Content-Length", str(len(data))), *extra])
+            self.end_headers()
+            self.wfile.write(data)
+
+        def stream_start(self):
+            self.head(200, "text/event-stream", [("X-Accel-Buffering", "no")])
+            self.end_headers()
+            self.close_connection = True
+
+        def event(self, name, data):
+            self.wfile.write(f"event: {name}\ndata: {json.dumps(data)}\n\n".encode())
+            self.wfile.flush()
+
+        def list_stream(self):
+            """The list, and again on every change."""
+            self.stream_start()
+            version = -1
+            try:
+                while True:
+                    with st.changed:
+                        if st.version == version or not st.view:
+                            st.changed.wait(KEEPALIVE)
+                        if not st.view:
+                            continue
+                        view, changed, version = st.view, st.version != version, st.version
+                    if changed:
+                        self.event("list", view)
+                    else:
+                        self.wfile.write(b": still here\n\n")
+                        self.wfile.flush()
+            except OSError:
+                pass
+
+        def session_stream(self, s):
+            """A session as it goes on: its row in the list, its conversation
+            (the latest of it first), and its screen with any question on it."""
+            if not s.get("setup") and Path(s["path"]).is_dir() and not tmux_has(tmux_name(s["id"])):
+                host_start(s)       # after a reboot, before anyone attached: Claude picks up where it was
+            self.stream_start()
+            conv, screen, row, beat = AppConversation(s), None, None, time.time()
+            try:
+                while True:
+                    now = st.row(s["id"])
+                    if now is None and (not session(s["id"]) or (CLOSING / f"{s['id']}.json").exists()):
+                        self.event("gone", {})
+                        return
+                    if now is not None and now != row:
+                        row = now
+                        self.event("session", row)
+                    items, reset = conv.poll()
+                    if reset:
+                        self.event("conversation", {"reset": True, "items": items, "start": conv.start})
+                    elif items:
+                        self.event("conversation", {"items": items})
+                    seen = app_screen(s)
+                    if seen != screen:
+                        screen = seen
+                        self.event("screen", screen)
+                    if time.time() - beat > KEEPALIVE:
+                        self.wfile.write(b": still here\n\n")
+                        self.wfile.flush()
+                        beat = time.time()
+                    time.sleep(0.5)
+            except OSError:
+                pass
+
+        def do_POST(self):
+            if not self.allowed(write=True):
+                return
+            data = self.body()
+            if self.path == "/api/new":
+                return self.new(data)
+            if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
+                return self.push(data)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen)", self.path)
+            s = self.session(m.group(1)) if m else self.error(404, "not found")
+            if not s:
+                return
+            what = m.group(2)
+            if what == "seen":
+                st.seen[s["id"]] = time.time()
+                return self.send(200, {})
+            if what == "priority":
+                level = data.get("level")
+                if level not in PRIORITIES:
+                    return self.error(400, "high, normal or low")
+                r = run_amarchy("priority", level, "--id", s["id"])
+                return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+            screen = app_screen(s)
+            if what == "send":
+                text = data.get("text")
+                if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
+                    return self.error(400, "nothing to send")
+                if not screen["live"]:
+                    return self.error(409, "Claude isn't running yet: try again in a moment")
+                if screen["exited"]:
+                    return self.error(409, "Claude Code exited: start it again first")
+                # An answer in your own words to a question ("Type something."):
+                # that option's keys first, then the text.
+                answer = data.get("answer") if isinstance(data.get("answer"), dict) else None
+                if screen["dialog"] and not answer:
+                    return self.error(409, "Claude is asking you something: answer that first")
+                if answer:
+                    keys = answer.get("keys")
+                    if (screen["dialog"] or {}).get("id") != answer.get("dialog"):
+                        return self.error(409, "The question changed: look again")
+                    if not valid_keys(keys):
+                        return self.error(400, "keys it doesn't send")
+                    why = app_keys(s, keys)
+                    if why:
+                        return self.error(500, why)
+                    time.sleep(0.2)
+                why = app_type(s, text.replace("\r\n", "\n").replace("\r", "\n"))
+            else:
+                keys = data.get("keys")
+                if not valid_keys(keys):
+                    return self.error(400, "keys it doesn't send")
+                expect = data.get("dialog")
+                if expect is not None and (screen["dialog"] or {}).get("id") != expect:
+                    return self.error(409, "The question changed: look again")
+                why = app_keys(s, keys)
+            st.seen[s["id"]] = time.time()
+            return self.send(200, {}) if why is None else self.error(500, why)
+
+        def new(self, data):
+            repo, prompt = data.get("repo"), data.get("prompt")
+            if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])}:
+                return self.error(400, "no such project")
+            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 60_000:
+                return self.error(400, "say what it's for")
+            r = run_amarchy("new", repo, "--no-jump", "--prompt", "-", input=prompt, timeout=300)
+            sid = (r.stdout.strip().splitlines() or [""])[-1]
+            if r.returncode != 0 or not sid:
+                return self.error(500, gist(r.stderr) or "couldn't start it")
+            return self.send(200, {"id": sid})
+
+        def push(self, data):
+            if self.path == "/api/push/test":
+                n = push_all({"title": "amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+                return self.send(200, {"sent": n})
+            endpoint = data.get("endpoint")
+            if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+                return self.error(400, "not a push subscription")
+            if self.path == "/api/push/remove":
+                app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint])
+                return self.send(200, {})
+            keys = data.get("keys") if isinstance(data.get("keys"), dict) else {}
+            try:
+                if len(unb64u(keys["p256dh"])) != 65 or len(unb64u(keys["auth"])) != 16:
+                    raise ValueError
+            except (KeyError, ValueError, TypeError):
+                return self.error(400, "not a push subscription")
+            sub = {"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]},
+                   "added": int(time.time()), "device": str(self.headers.get("User-Agent", ""))[:200]}
+            app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint] + [sub])
+            return self.send(200, {})
+
+    return Handler
+
+
+def run_amarchy(*args, input=None, timeout=60):
+    try:
+        return subprocess.run([sys.executable, SELF, *args], capture_output=True, text=True, input=input,
+                              stdin=None if input is not None else subprocess.DEVNULL, timeout=timeout,
+                              env=clean_env())
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(args, 1, "", str(e))
+
+
+def app_serve():
+    """Run the app's server (what amarchy-app.service runs) until amarchy is
+    updated, when systemd starts the new one."""
+    import http.server
+    if not HOST_MODE:
+        return fail("the phone app runs on a host (see amarchy remote)")
+    status = tailscale_status()
+    address, users = app_address(status), app_users(status)
+    if not address:
+        return fail("this machine isn't on Tailscale (or Tailscale isn't up): the app is served on your tailnet")
+    if not users:
+        return fail("couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> "
+                    f"in {HOST_CONFIG}")
+    app_key()
+    st = AppState()
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", app_port()), app_handler(st, users, address))
+    server.daemon_threads = True
+    threading.Thread(target=app_watch, args=(st,), daemon=True).start()
+    version = os.stat(SELF).st_mtime_ns
+
+    def updated():
+        while True:
+            time.sleep(2)
+            try:
+                if os.stat(SELF).st_mtime_ns != version:
+                    break
+            except OSError:
+                pass
+        server.shutdown()
+
+    threading.Thread(target=updated, daemon=True).start()
+    print(f"amarchy app: {app_url(address)} for {', '.join(sorted(users))} "
+          f"(on 127.0.0.1:{app_port()})", file=sys.stderr, flush=True)
+    server.serve_forever()
+    return 0
+
+
+def app_unit():
+    return f"""[Unit]
+Description=amarchy phone app: your sessions on your phone, on your tailnet
+After=network-online.target tailscaled.service
+
+[Service]
+ExecStart={ENTRY} app serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def serve_config():
+    """What tailscale serve proxies the app's HTTPS port to, or None."""
+    try:
+        conf = json.loads(sh("tailscale", "serve", "status", "--json").stdout or "{}")
+    except ValueError:
+        return None
+    for hostport, web in (conf.get("Web") or {}).items():
+        if hostport.endswith(f":{app_https()}"):
+            return ((web.get("Handlers") or {}).get("/") or {}).get("Proxy")
+    return None
+
+
+def app_on():
+    status = tailscale_status()
+    address = app_address(status)
+    if not shutil.which("tailscale") or not address:
+        return fail("the app is served on your tailnet: install Tailscale and run `sudo tailscale up` first")
+    if not status.get("CertDomains"):
+        return fail("Tailscale has no HTTPS certificates for your tailnet yet: turn them on at "
+                    "https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this again")
+    if not app_users(status):
+        return fail(f"couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> in {HOST_CONFIG}")
+    target = f"http://127.0.0.1:{app_port()}"
+    taken = serve_config()
+    if taken and taken != target:
+        return fail(f"tailscale serve already sends port {app_https()} to {taken}: set APP_HTTPS=8443 "
+                    f"in {HOST_CONFIG} to put the app on another port")
+    app_key()
+    UNITS.mkdir(parents=True, exist_ok=True)
+    unit = UNITS / APP_UNIT
+    if not unit.exists() or unit.read_text() != app_unit():
+        write_file(unit, app_unit())
+        sh("systemctl", "--user", "daemon-reload")
+    r = sh("systemctl", "--user", "enable", "--now", APP_UNIT)
+    if r.returncode != 0:
+        return fail(f"couldn't start {APP_UNIT}: {gist(r.stderr)}")
+    sh("systemctl", "--user", "restart", APP_UNIT)
+    if taken != target:
+        r = sh("tailscale", "serve", "--bg", f"--https={app_https()}", target)
+        if r.returncode != 0:
+            why = gist(r.stderr or r.stdout)
+            if "access denied" in (r.stderr + r.stdout).lower():
+                why = "Tailscale won't let you change it: run `sudo tailscale set --operator=$USER` once"
+            return fail(f"couldn't serve it on your tailnet: {why}")
+    if sh("loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger").stdout.strip() == "Linger=no":
+        print("  Note: it stops when you log out of this machine. `sudo loginctl enable-linger $USER` keeps it running.")
+    print(f"{app_url(address)}\n"
+          f"  On your phone (on your tailnet): open it in Safari, then Share → Add to Home Screen.\n"
+          f"  Open it from the home screen and turn on notifications there.")
+    return 0
+
+
+def app_off():
+    if serve_config() == f"http://127.0.0.1:{app_port()}":
+        sh("tailscale", "serve", f"--https={app_https()}", "off")
+    sh("systemctl", "--user", "disable", "--now", APP_UNIT)
+    (UNITS / APP_UNIT).unlink(missing_ok=True)
+    sh("systemctl", "--user", "daemon-reload")
+    print("off: the app is no longer served (your phones keep it, and it works again with `amarchy app on`)")
+    return 0
+
+
+def app_status():
+    running = sh("systemctl", "--user", "is-active", APP_UNIT).stdout.strip() == "active"
+    served = serve_config() == f"http://127.0.0.1:{app_port()}"
+    address = app_address()
+    phones = len(app_subscriptions())
+    if not running and not served:
+        print("off (amarchy app on starts it)")
+        return 1
+    where = app_url(address) if address and served else "not on your tailnet (amarchy app on)"
+    print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified")
+    return 0 if running and served else 1
+
+
+def cmd_app(args):
+    """amarchy app [on|off|--status|--test|serve]."""
+    if not HOST_MODE:
+        return fail("the phone app runs on a host: the machine your desktops reach with amarchy remote")
+    what = args[0] if args else "--status"
+    if what == "serve":
+        return app_serve()
+    if what == "on":
+        return app_on()
+    if what == "off":
+        return app_off()
+    if what == "--test":
+        if not app_subscriptions():
+            return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
+        n = push_all({"title": "amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+        print(f"sent to {n} of {len(app_subscriptions())}")
+        return 0 if n else 1
+    if what == "--status":
+        return app_status()
+    return fail("usage: amarchy app [on|off|--status|--test]")
+
+
 # ------------------------------------------------------------------ main
 
 # What each command takes, for `amarchy <command> --help` and for catching an
@@ -4932,6 +6004,7 @@ OPTIONS = {
     "watch": (set(), set(), set()),
     "remote": ({"--status", "--sync"}, set(), set()),
     "events": ({"--once"}, set(), set()),
+    "app": ({"--status", "--test"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
 }
@@ -5095,6 +6168,8 @@ def main(argv):
         return cmd_held(args[0])
     elif cmd == "events":
         return cmd_events(args)
+    elif cmd == "app":
+        return cmd_app(args)
     else:   # a command it knows, with the wrong number of arguments
         print(usage(ALIASES.get(cmd, cmd)), file=sys.stderr)
         return 1

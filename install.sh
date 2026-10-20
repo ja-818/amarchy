@@ -18,6 +18,7 @@
 #   ./install.sh             install / update
 #   ./install.sh --host      on a machine without a desktop that keeps sessions
 #                            for your desktops (amarchy remote): command + skill
+#                            (and the phone app, once you turn it on: amarchy app on)
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
@@ -186,6 +187,10 @@ guard_live() {
 if ((uninstall)); then
   guard_live "uninstalling takes it away"
   live=$(live_checkouts | sed -n 1p)
+  # The phone app (a host's amarchy app on): no longer served on the tailnet, its service gone.
+  if [[ -f $units/amarchy-app.service && -x $bin_dir/amarchy ]]; then
+    "$bin_dir/amarchy" app off >/dev/null 2>&1 || true
+  fi
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy" "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
@@ -244,11 +249,14 @@ if ((host)); then
   # What makes it a host, also with Hyprland installed (amarchy reads it).
   mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"
   touch "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
+  # The phone app, if it's on, runs from the checkout installed now.
+  systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
   say "amarchy installed as a host."
   echo "  On your desktop: amarchy remote <how ssh reaches this machine>"
   echo "  ssh has to get in without a password. Keep this machine on a private network"
   echo "  (Tailscale, say). Sessions serve on its Tailscale address if it has one, else"
   echo "  only on localhost; set NAME= and BIND= in ~/.config/amarchy/host to change it."
+  echo "  On your phone: amarchy app on (needs Tailscale with HTTPS certificates turned on)."
   exit 0
 fi
 
