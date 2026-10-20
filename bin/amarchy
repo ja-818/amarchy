@@ -91,6 +91,15 @@ Sound (the chime of a notification, when a session needs you or is done):
   amarchy sound --play [name] | --stop  hear one (the one set now without a name), cutting off the one before
   amarchy sound --add                   open the folder your own sounds go in
 
+Remote (sessions on a machine that's always on, e.g. a server, so they go on working with this one
+asleep; that machine runs amarchy too, installed with ./install.sh --host):
+  amarchy remote <ssh host>             new sessions start there: same list, keys and windows, each window
+                                        attached to the session over ssh (the host has to answer ssh without
+                                        a password; keep it on a private network such as Tailscale)
+  amarchy remote off                    new sessions start here again; the host's leave the list and keep
+                                        running there (amarchy remote <host> again brings them back)
+  amarchy remote [--status]             where new sessions start / whether the host answers
+
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
@@ -103,6 +112,10 @@ Plumbing:
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
+  amarchy remote --sync                 keep this desktop's copy of the host's list (the shell plugin starts it)
+  amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
+  amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
+  amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -195,6 +208,19 @@ OMARCHY = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
 # command run from elsewhere resizes it all again.
 if (OMARCHY / "bin").is_dir() and str(OMARCHY / "bin") not in os.environ.get("PATH", "").split(os.pathsep):
     os.environ["PATH"] = os.pathsep.join(filter(None, (os.environ.get("PATH"), str(OMARCHY / "bin"))))
+# Host mode: amarchy on a machine without a desktop (a server), keeping
+# sessions for desktops elsewhere to show (see "remote"). Each session's
+# Claude and terminal run in tmux there instead of in windows.
+# `install.sh --host` marks it (a host may have Hyprland installed too); a
+# machine without hyprctl can't be anything else.
+_host_env = os.environ.get("AMARCHY_HOST_MODE", "")
+HOST_MODE = _host_env == "1" or (_host_env != "0" and (
+    (Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy/host").exists()
+    or not shutil.which("hyprctl")))
+# Reached over ssh, which gives a bare PATH: Claude Code's installer puts
+# claude in ~/.local/bin.
+if HOST_MODE and str(HOME / ".local/bin") not in os.environ.get("PATH", "").split(os.pathsep):
+    os.environ["PATH"] = os.pathsep.join(filter(None, (str(HOME / ".local/bin"), os.environ.get("PATH"))))
 DESKTOP = HOME / ".local/state/omarchy/current"     # the Omarchy theme the rest of the desktop wears
 CLAUDE_THEME = HOME / ".claude/themes/amarchy.json"
 # Who last painted over the Omarchy theme ("amarchy" while ours shows, empty
@@ -220,11 +246,20 @@ IMAGES = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
 # ------------------------------------------------------------------ helpers
 
 def sh(*args, check=False, cwd=None):
-    return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
+    """Run a command and capture what it says. One that isn't there (hyprctl
+    in host mode) or a folder that's gone fails like a command would."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
+    except (FileNotFoundError, NotADirectoryError) as e:
+        if check:
+            raise
+        return subprocess.CompletedProcess(args, 127, "", str(e))
 
 
 def notify(title, body="", glyph="Ⓐ", click=()):
     """A notification; click is the amarchy command a click on it runs."""
+    if HOST_MODE:
+        return      # nobody's there: the desktops showing its sessions notify
     if shutil.which("omarchy-notification-send"):
         sh("omarchy-notification-send", "-g", glyph, title, body, *(["--exec", ENTRY, *click] if click else []))
     else:
@@ -234,7 +269,7 @@ def notify(title, body="", glyph="Ⓐ", click=()):
 def chime():
     """The sound of a session's notification, the same whether it needs you or
     is done: the one `amarchy sound` picked. AMARCHY_SOUND=off for none."""
-    if SOUND:
+    if SOUND and not HOST_MODE:
         play(sound_file(sound_name()))
 
 
@@ -435,6 +470,11 @@ def github_slug(url):
 
 
 def projects():
+    """Your projects: those in AMARCHY_WORK, or the remote host's while new
+    sessions go there."""
+    host = remote_host()
+    if host:
+        return remote_projects(host)
     counts = {}
     for s in sessions():
         counts[s["repo"]] = counts.get(s["repo"], 0) + 1
@@ -467,6 +507,8 @@ def add_project(source):
     """Clone owner/repo, a GitHub URL or any git URL into AMARCHY_WORK.
 
     Returns (name, error). Adding a project that's already there is not an error."""
+    if remote_host():
+        return remote_add(remote_host(), [source.strip()])
     source = source.strip()
     url = f"https://github.com/{source}.git" if re.fullmatch(r"[\w.-]+/[\w.-]+", source) else source
     name = re.sub(r"\.git$", "", re.split(r"[/:]", url.rstrip("/"))[-1])
@@ -490,6 +532,8 @@ def add_project(source):
 def new_project(name, github=False):
     """An empty git repo with one commit (worktrees need a base), optionally
     pushed to a new private GitHub repo. Returns (name, error)."""
+    if remote_host():
+        return remote_add(remote_host(), ["--new", name, *(["--github"] if github else [])])
     name = slug(name)
     if not name:
         return None, "the project needs a name"
@@ -562,6 +606,9 @@ def sessions():
         st = STATUS / s["id"]
         s["status"] = st.read_text().strip() if st.exists() else "idle"
         out.append(s)
+    # And the sessions of the remote host, as it last said (a session here wins a clash of ids).
+    ids = {s["id"] for s in out}
+    out += [s for s in remote_sessions() if s["id"] not in ids]
     return out
 
 
@@ -570,12 +617,14 @@ def session(sid):
     try:
         return with_defaults(json.loads(f.read_text()))
     except (OSError, ValueError):
-        return None
+        return next((s for s in remote_sessions() if s["id"] == sid), None)
 
 
 def save_session(s):
     """Write a session's file in one go: the list (and every other amarchy
     reading it meanwhile) never sees half of it."""
+    if s.get("host"):
+        return      # the remote host keeps it: changes go there (remote_call)
     SESSIONS.mkdir(parents=True, exist_ok=True)
     keep = {k: v for k, v in s.items() if k not in VIEW_FIELDS}
     tmp = SESSIONS / f".{s['id']}.json.{os.getpid()}"
@@ -1361,6 +1410,8 @@ def run_in_terminal(s, command):
     you in a shell when it ends. The new terminal opens out of sight, takes
     the old one's place beside Claude and only then is the old one closed, so
     the terminal on the right just starts over."""
+    if HOST_MODE:
+        return host_run(s, command)
     # From the session on screen it shows (leaving zen mode). An agent in
     # another session restarts its terminal where it is, out of sight in zen
     # mode, and leaves the keyboard alone.
@@ -1420,6 +1471,8 @@ def cmd_run(args):
     s = session(sid) if sid else None
     if not s:
         return 1
+    if s.get("host"):
+        return remote_run(s, args)
     if s.get("setup") and (not args or not args[0].startswith("--") or args[0] == "--pick"):
         return fail(f"{s['name']} is still being set up: run it once Claude has started")
     flag = args[0] if args else ""
@@ -1648,7 +1701,8 @@ def create(repo, name, prompt=None):
             print(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)",
                   file=sys.stderr)
             return None
-        cmd_jump(sid)
+        if not HOST_MODE:
+            cmd_jump(sid)
         return sid
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
         notify("amarchy", f"{repo} has no commits yet. Commit something to branch off first.")
@@ -1656,6 +1710,7 @@ def create(repo, name, prompt=None):
 
     SESSIONS.mkdir(parents=True, exist_ok=True)
     STATUS.mkdir(parents=True, exist_ok=True)
+    (STATE / "failed" / sid).unlink(missing_ok=True)
     # "setup" until the worktree is there. Working meanwhile, so the list
     # spins on it; Claude's SessionStart hook settles it.
     s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
@@ -1665,6 +1720,9 @@ def create(repo, name, prompt=None):
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
     (STATUS / sid).write_text("working")
+    if HOST_MODE:
+        host_start(s)       # its tmux sets it up and becomes Claude, as a window would
+        return sid
     tell_shell("refresh")
     cmd_layout()
     cmd_jump(sid)
@@ -1767,6 +1825,11 @@ def setup_session(sid):
         (STATUS / sid).unlink(missing_ok=True)
         tell_shell("refresh")
         notify("amarchy", f"Couldn't start {s['repo']} · {s['name']}: {gist(error)}")
+        if HOST_MODE:
+            # Nobody may be watching: the desktop's window shows it on attach.
+            write_file(STATE / "failed" / sid, gist(error) or error)
+            time.sleep(3)
+            return error
         try:
             input("  Press Enter to close this window. ")
         except (EOFError, KeyboardInterrupt):
@@ -1777,6 +1840,10 @@ def setup_session(sid):
         return "closed"     # while it was being set up
     set_trust(Path(s["path"]), True)
     tell_shell("refresh")
+    if HOST_MODE:
+        host_start(s)       # the terminal beside it, now that the worktree is there
+        print("  \033[32m✓\033[0m Starting Claude Code", flush=True)
+        return None
     with step("Starting Claude Code"):
         # The terminal beside it, out of sight until it's in place. Nothing
         # takes the keyboard: you may have gone somewhere else meanwhile.
@@ -1972,18 +2039,28 @@ def ensure_windows(s, wake=False):
     wake starts it right away instead. A new session sets itself up first."""
     path = Path(s["path"])
     setting_up = bool(s.get("setup"))
-    if not setting_up and not path.is_dir():
+    # A remote session's windows are views of its tmux on the host (attach_argv),
+    # which never sleeps; its terminal waits there for the worktree.
+    remote = s.get("host")
+    if not remote and not setting_up and not path.is_dir():
         return
     opened = []
     if not find(claude_class(s)):
-        if not setting_up and not wake and asleep_since(s["id"]) is None:
-            mark_asleep(s["id"])
-        # A new session's worktree isn't there yet: it starts in the project's checkout.
-        open_term(claude_class(s), f"amarchy:{s['id']}", WORK / s["repo"] if setting_up else path,
-                  window_argv(s), env=session_env(s))
+        if remote:
+            open_term(claude_class(s), f"amarchy:{s['id']}", HOME, attach_argv(s, "claude"))
+        else:
+            if not setting_up and not wake and asleep_since(s["id"]) is None:
+                mark_asleep(s["id"])
+            # A new session's worktree isn't there yet: it starts in the project's checkout.
+            open_term(claude_class(s), f"amarchy:{s['id']}", WORK / s["repo"] if setting_up else path,
+                      window_argv(s), env=session_env(s))
         opened.append(claude_class(s))
-    if not setting_up and not zen() and not find(term_class(s)):
-        open_term(term_class(s), f"{s['repo']} · {s['name']} · terminal", path, env=session_env(s))
+    if (remote or not setting_up) and not zen() and not find(term_class(s)):
+        title = f"{s['repo']} · {s['name']} · terminal"
+        if remote:
+            open_term(term_class(s), title, HOME, attach_argv(s, "term"))
+        else:
+            open_term(term_class(s), title, path, env=session_env(s))
         opened.append(term_class(s))
     for cls in opened:
         win = wait_for(cls)
@@ -2015,7 +2092,10 @@ def cmd_new(args):
     repo = rest[0] if rest else menu_pick_project()
     if not repo:
         return 1
-    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
+    if remote_host():
+        sid = remote_create(remote_host(), repo, rest[1] if len(rest) > 1 else None, prompt)
+    else:
+        sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
     if not sid:
         return 1
     print(sid)
@@ -2323,6 +2403,8 @@ def put_to_sleep(s, auto=False, force=False):
     """Stop a session's Claude Code, keeping the session as it was. Returns
     None once it sleeps, else why it didn't."""
     sid = s["id"]
+    if s.get("host"):
+        return f"it runs on {s['host']}, where sessions don't sleep"
     if s.get("setup"):
         return "it's still being set up"
     win = find(claude_class(s))
@@ -2503,7 +2585,7 @@ def sleep_idle():
         return 0
     current = current_session_id()
     for s in session_view():
-        if not s["awake"] or s["sleeping"] or s["current"] or s["id"] == current or s["status"] not in ("idle", "waiting"):
+        if s.get("host") or not s["awake"] or s["sleeping"] or s["current"] or s["id"] == current or s["status"] not in ("idle", "waiting"):
             continue
         try:
             idle = time.time() - (STATUS / s["id"]).stat().st_mtime
@@ -3090,6 +3172,8 @@ def cmd_reap(sid):
     path = Path(s["path"])
     # Its background sessions (/bg) would go on working in a worktree that's gone.
     stop_background(s, only_idle=False)
+    if HOST_MODE:
+        host_stop(s)
     claude = find(claude_class(s))
     if claude:
         stop_claude(claude)
@@ -3136,7 +3220,10 @@ def confirm_close(s):
     """Ask in the Omarchy menu before closing. Returns "close", "force" (throw
     away uncommitted changes too) or None."""
     path = Path(s["path"])
-    changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.exists() else 0
+    if s.get("host"):
+        changes = len(remote_sh(s["host"], ["git", "-C", s["path"], "status", "--porcelain"]).stdout.splitlines())
+    else:
+        changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.exists() else 0
     if changes:
         yes = "Close and discard changes"
         detail = f"{changes} uncommitted file{'s' if changes != 1 else ''} lost"
@@ -3157,6 +3244,8 @@ def cmd_close(args):
     if not s:
         return 1
     force = "--force" in args
+    if s.get("host"):
+        return remote_close(s, force, confirm="--confirm" in args)
     if "--confirm" in args:
         answer = confirm_close(s)
         if not answer:
@@ -3165,6 +3254,7 @@ def cmd_close(args):
     err = close(sid, force=force)
     if err:
         notify("amarchy", f"{sid}: {err}. Use amarchy close {sid} --confirm to discard them.")
+        print(f"amarchy: {sid}: {err}", file=sys.stderr)
         return 1
     return 0
 
@@ -3190,6 +3280,8 @@ def cmd_rename(args):
         title = menu_input(f"Name for {s.get('title') or s['repo'] + ' · ' + s['name']}")
         if not title:
             return 1
+    if s.get("host"):
+        return remote_call(s, "rename", "--id", sid, *(["--reset"] if reset else [title]))
     if reset:
         s.pop("title", None)
     else:
@@ -3212,7 +3304,8 @@ def agent_context(s):
             f"(AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
             f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
             f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the "
-            f"work involves other sessions, worktrees, that terminal or merging back into main.")
+            f"work involves other sessions, worktrees, that terminal or merging back into main."
+            + (host_context() if HOST_MODE else ""))
 
 
 # The notifications of Claude Code that mean it's blocked on you. Others aren't
@@ -3437,6 +3530,8 @@ def cmd_priority(args):
         level = PRIORITIES[max(0, min(len(PRIORITIES) - 1, RANK[now] + (-1 if level == "up" else 1)))]
     if len(args) > 1 or level not in RANK:
         return fail("usage: amarchy priority [high|normal|low|up|down] [--id <id>]")
+    if s.get("host"):
+        return remote_call(s, "priority", level, "--id", sid)
     if level == "normal":
         s.pop("priority", None)
     else:
@@ -3649,12 +3744,17 @@ def session_view():
     """Sessions as every UI shows them (the bar widget, the Omarchy menu): in list order, with what each one is
     about, how long it has been in its state, and which one is on screen."""
     resume_closing()
-    titles = {c["class"]: c["title"] for c in clients()}
+    ensure_remote_sync()
+    titles = host_titles() if HOST_MODE else {c["class"]: c["title"] for c in clients()}
     current = current_session_id()
     agents = claude_agents()
     ss = sessions()
     background = all_background_sessions()
     for s in ss:
+        if s.get("host"):
+            # As the host shows it; its agent names only reach the Claude sessions there.
+            s["current"], s["agent"] = s["id"] == current, ""
+            continue
         # Sleeping (its Claude stopped until you type in it) looks just as it
         # did, idle. So does a session whose window was closed: it opens again
         # asleep, and looks the same.
@@ -4027,6 +4127,707 @@ def cmd_pick(args):
     return 0
 
 
+# ------------------------------------------------------------------ remote
+#
+# Sessions can live on another machine: a server that's always on, so their
+# Claude Code goes on working with your laptop closed, and any of your devices
+# can pick them up. That machine runs amarchy too, without a desktop (host
+# mode, install.sh --host), each session's Claude and terminal in tmux. A
+# desktop shows them as it shows its own: the same list, keys and windows,
+# each window a terminal attached to the session's tmux over ssh.
+#
+#   amarchy remote <ssh host>   new sessions start there (any host ssh reaches
+#                               without a password: a Host in ~/.ssh/config, a
+#                               Tailscale name...)
+#   amarchy remote off          new sessions start here again; the host's leave this
+#                               list and go on there (amarchy remote <host> brings them back)
+#
+# The desktop keeps a copy of the host's list (remote.json), which `amarchy
+# events` on the host streams over one ssh connection (`amarchy remote
+# --sync`, kept running by the shell plugin's poll), and notifies you when one
+# of the host's sessions needs you or is done, as it does for its own. What
+# you do to one (rename, priority, run, close) is done there.
+#
+# amarchy opens no port of its own: everything goes through ssh, so the host
+# is as reachable as its ssh is. Keep that to a private network (Tailscale,
+# say), not the internet.
+
+REMOTE_FILE = STATE / "remote"          # the ssh host new sessions start on
+REMOTE_STATE = STATE / "remote.json"    # what it last said: its sessions and projects
+HOST_AMARCHY = ".local/bin/amarchy"     # amarchy on the host (install.sh links it there), from its home
+# One connection to the host, shared by every window and command (ControlMaster),
+# that notices within seconds when the network is gone (a laptop that slept).
+SSH_OPTS = ("-o", "ControlMaster=auto", "-o", f"ControlPath={STATE}/ssh-%C", "-o", "ControlPersist=10m",
+            "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=15")
+REMOTE_TERM = "~term"                   # a session's terminal on the host: tmux session <id>~term
+KEEPALIVE = 15                          # seconds between events' lines when nothing changes
+
+
+def remote_host():
+    """The ssh host new sessions start on, or None for this machine."""
+    if HOST_MODE:
+        return None
+    host = os.environ.get("AMARCHY_REMOTE")
+    if host is None:
+        try:
+            host = REMOTE_FILE.read_text().strip()
+        except OSError:
+            host = ""
+    return host if host and host != "off" else None
+
+
+def ssh_argv(host, command, tty=False):
+    """ssh to the host running a command line. With tty, for a window: a
+    terminal there, and ssh may ask you things (a host key). Without, it
+    fails rather than wait for an answer nobody gives."""
+    return ["ssh", *SSH_OPTS, *(["-t"] if tty else ["-T", "-o", "BatchMode=yes"]), "--", host, command]
+
+
+def amarchy_line(*args, sid=None):
+    """The command line of amarchy on the host, acting on session sid when given."""
+    return shlex.join([*(["env", f"AMARCHY_SESSION={sid}"] if sid else []), HOST_AMARCHY, *args])
+
+
+def remote_sh(host, command, input=None, timeout=30):
+    """Run a command line on the host (a list is quoted into one)."""
+    line = command if isinstance(command, str) else shlex.join(command)
+    try:
+        return subprocess.run(ssh_argv(host, line), capture_output=True, text=True, input=input,
+                              stdin=None if input is not None else subprocess.DEVNULL,
+                              timeout=timeout, env=clean_env())
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(line, 255, "", f"ssh {host}: {e}")
+
+
+def remote_amarchy(host, *args, sid=None, input=None, timeout=30):
+    return remote_sh(host, amarchy_line(*args, sid=sid), input=input, timeout=timeout)
+
+
+def remote_snapshot():
+    host = remote_host()
+    if not host:
+        return {}
+    try:
+        snap = json.loads(REMOTE_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return snap if isinstance(snap, dict) and snap.get("host") == host else {}
+
+
+def remote_clean(sessions):
+    """The host's sessions as this desktop can use them: well-formed ones only.
+    Ids end up in Hyprland commands (workspaces, window classes): only plain
+    ones, and the workspace and classes this desktop gives every session."""
+    out = []
+    for s in sessions if isinstance(sessions, list) else []:
+        if not (isinstance(s, dict) and re.fullmatch(r"[\w.-]{1,120}", str(s.get("id", "")))
+                and all(isinstance(s.get(k), str) for k in ("repo", "name", "path"))):
+            continue
+        s = {**s, "prefix": PREFIX, "workspace": WS_PREFIX + s["id"], "branch": str(s.get("branch") or s["name"])}
+        for k in ("status", "task", "claude_title", "age", "priority"):
+            s[k] = str(s.get(k) or "")
+        s["status"] = s["status"] if s["status"] in ORDER else "idle"
+        s["created"] = s["created"] if isinstance(s.get("created"), (int, float)) else 0
+        s["background"] = s["background"] if isinstance(s.get("background"), int) else 0
+        out.append(s)
+    return out
+
+
+def remote_sessions():
+    """The remote host's sessions, as it last said, each with "host"."""
+    snap = remote_snapshot()
+    return [{**s, "host": snap["host"]} for s in remote_clean(snap.get("sessions"))]
+
+
+def remote_projects(host):
+    snap = remote_snapshot()
+    if "projects" not in snap:
+        remote_refresh(host)
+        snap = remote_snapshot()
+    return snap.get("projects") or []
+
+
+def remote_update(host, data, seen=None, quiet=False):
+    """Take in what the host says (a line of `amarchy events`): keep it and
+    redraw the list. With seen (the statuses the sync has already told you
+    about, which it keeps), tell you about each session that went on to need
+    you or be done, the way a session here does (unless you're looking at it).
+    quiet: only take note (the first list, which just arrived), but still
+    tell you about one that needs you."""
+    if not isinstance(data, dict) or not isinstance(data.get("sessions"), list):
+        return
+    sessions = remote_clean(data["sessions"])
+    before = remote_snapshot()
+    projects = data["projects"] if isinstance(data.get("projects"), list) else before.get("projects", [])
+    snap = {"host": host, "online": True, "at": time.time(), "hostname": str(data.get("hostname", "")),
+            "sessions": sessions, "projects": [p for p in projects if isinstance(p, dict) and p.get("name")]}
+    write_file(REMOTE_STATE, json.dumps(snap))
+    tell_shell("refresh")
+    if seen is None:
+        return
+    first, was = not seen, dict(seen)
+    seen.clear()
+    seen.update({s["id"]: s["status"] for s in sessions})
+    seen.setdefault("", "")          # not empty even with no sessions: the first list is in
+    if first:
+        return
+    for s in sessions:
+        state, prev = s["status"], was.get(s["id"])
+        if state == prev or not (state == "waiting" or (state == "idle" and prev == "working")):
+            continue
+        if quiet and state != "waiting":
+            continue
+        s = {**s, "host": host}
+        claude = find(claude_class(s))
+        if claude and claude.get("focusHistoryID") == 0:
+            continue
+        where = f"{s['repo']} · {s['name']}"
+        notify(s.get("task") or where, where if s.get("task") else "", PICK_ICONS[state], click=("jump", s["id"]))
+        chime()
+
+
+def remote_offline(host, why=""):
+    snap = remote_snapshot() or {"host": host, "sessions": []}
+    if snap.get("online", True):
+        snap.update(online=False, error=why)
+        write_file(REMOTE_STATE, json.dumps(snap))
+        tell_shell("refresh")
+
+
+def remote_refresh(host):
+    """Ask the host for its list right away (after a change made there),
+    rather than wait for the stream. False if it didn't answer."""
+    r = remote_amarchy(host, "events", "--once")
+    try:
+        data = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else None
+    except (ValueError, IndexError):
+        data = None
+    if data:
+        remote_update(host, data)
+    return bool(data)
+
+
+def ensure_remote_sync():
+    """Keep `amarchy remote --sync` running while new sessions go to a host."""
+    if not remote_host():
+        return
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "remote.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return      # it's running
+    detach([SELF, "remote", "--sync"])
+
+
+def remote_sync():
+    """Follow the host's `amarchy events` for as long as it's the remote, over
+    and over: a dropped connection (a laptop that slept, a host that
+    rebooted) is tried again, sooner at first."""
+    host = remote_host()
+    if not host:
+        return 0
+    STATE.mkdir(parents=True, exist_ok=True)
+    lock = open(STATE / "remote.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0
+    version, wait, seen = os.stat(SELF).st_mtime_ns, 1, {}
+
+    def updated():
+        """amarchy changed on disk, or is installed from somewhere else now."""
+        try:
+            return os.stat(SELF).st_mtime_ns != version or str(Path(ENTRY).resolve()) != SELF
+        except OSError:
+            return True
+
+    while remote_host() == host and not updated():
+        why = ""
+        try:
+            p = subprocess.Popen(ssh_argv(host, amarchy_line("events")), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=clean_env())
+        except OSError as e:
+            p, why = None, str(e)
+        if p:
+            fresh = True        # the first line of a connection: what changed while away
+            for line in p.stdout:
+                if remote_host() != host or updated():
+                    break
+                if line.strip():
+                    try:
+                        remote_update(host, json.loads(line), seen, quiet=fresh)
+                        wait, fresh = 1, False
+                    except ValueError:
+                        pass
+                else:       # nothing changed there: still, it was heard from
+                    snap = remote_snapshot()
+                    if snap.get("online"):
+                        write_file(REMOTE_STATE, json.dumps({**snap, "at": time.time()}))
+            p.terminate()
+            try:
+                why = (p.communicate(timeout=5)[1] or "").strip().splitlines()[-1:] or [""]
+                why = why[0]
+            except (subprocess.TimeoutExpired, ValueError):
+                p.kill()
+        if remote_host() != host or updated():
+            break
+        remote_offline(host, why)
+        time.sleep(wait)
+        wait = min(wait * 2, 30)
+    lock.close()
+    if updated() and remote_host():
+        os.execv(sys.executable, [sys.executable, ENTRY, "remote", "--sync"])
+    return 0
+
+
+def remote_call(s, *args):
+    """Do something to a remote session on its host (rename it, say), then
+    show the list as it is there now. Returns the exit code."""
+    r = remote_amarchy(s["host"], *args, sid=s["id"])
+    if r.stdout:
+        print(r.stdout, end="")
+    if r.returncode != 0:
+        why = gist(r.stderr) or f"{s['host']} didn't answer"
+        print(r.stderr, end="", file=sys.stderr)
+        notify("amarchy", f"{s['repo']} · {s['name']}: {why}")
+    remote_refresh(s["host"])
+    return r.returncode
+
+
+def remote_create(host, repo, name, prompt):
+    """Start a session on the host and go to it: its windows show the worktree
+    being made there, then Claude. Returns its id."""
+    args = ["new", repo, *([name] if name else []), *(["--prompt", "-"] if prompt is not None else [])]
+    r = remote_amarchy(host, *args, input=prompt, timeout=60)
+    lines = r.stdout.strip().splitlines()
+    sid = lines[-1].strip() if lines else ""
+    if r.returncode != 0 or not sid:
+        print(r.stderr, end="", file=sys.stderr)
+        notify("amarchy", f"Couldn't start a session on {host}: {gist(r.stderr) or 'no answer'}")
+        return None
+    remote_refresh(host)
+    if not session(sid):
+        notify("amarchy", f"Started {sid} on {host}, but it isn't in the list yet")
+        return sid
+    tell_shell("refresh")
+    cmd_layout()
+    cmd_jump(sid)
+    return sid
+
+
+def remote_add(host, args):
+    """Add a project on the host (clone it, or start an empty one). Returns (name, error)."""
+    r = remote_amarchy(host, "add", *args, timeout=900)
+    lines = r.stdout.strip().splitlines()
+    if r.returncode != 0 or not lines:
+        return None, gist(r.stderr) or f"{host} didn't answer"
+    remote_refresh(host)
+    return Path(lines[-1].strip()).name, None
+
+
+def remote_close(s, force, confirm):
+    """Close a remote session there (its worktree is removed on the host),
+    and its windows here."""
+    if confirm:
+        answer = confirm_close(s)
+        if not answer:
+            return 1
+        force = force or answer == "force"
+    elif not force:
+        r = remote_sh(s["host"], ["git", "-C", s["path"], "status", "--porcelain"])
+        if r.returncode == 0 and r.stdout.strip():
+            sid = s["id"]
+            notify("amarchy", f"{sid}: uncommitted changes. Use amarchy close {sid} --confirm to discard them.")
+            return fail(f"{sid}: uncommitted changes")
+    sid = s["id"]
+    if current_session_id() == sid:
+        ids = [x["id"] for x in session_view()]
+        i = ids.index(sid) if sid in ids else len(ids)
+        rest = ids[i + 1:] + ids[:i][::-1]
+        if rest:
+            cmd_jump(rest[0])
+    if remote_call(s, "close", sid, *(["--force"] if force else [])) != 0:
+        return 1
+    for cls in (claude_class(s), term_class(s)):
+        win = find(cls)
+        if win:
+            hypr(f'hl.dsp.window.close({{ window = "address:{win["address"]}" }})')
+    if LAST.exists() and LAST.read_text().strip() == sid:
+        LAST.unlink(missing_ok=True)
+    return 0
+
+
+def remote_run(s, args):
+    """amarchy run for a remote session: the host runs it in the session's
+    terminal there, which the terminal beside Claude shows. What has to be
+    asked (a command not set yet, a pick) is asked here."""
+    flag = args[0] if args else ""
+    if flag == "--pick":
+        r = remote_amarchy(s["host"], "run", "--list", sid=s["id"])
+        commands = dict(l.split("\t", 1) for l in r.stdout.splitlines() if "\t" in l)
+        rows = [(ICON_RUN, RUN_DEFAULT, commands.pop(RUN_DEFAULT, "") or "Not set yet")]
+        rows += [(ICON_RUN, name, command) for name, command in commands.items()]
+        rows.append((ICON_ADD, SAVE_COMMAND, "Name it, then type it"))
+        choice = menu_select(f"Run in {s['repo']}", rows)
+        if not choice:
+            return 1
+        if choice == SAVE_COMMAND:
+            name = menu_input("Name for the command")
+            command = name and menu_input(f"Command for {name}")
+            return remote_call(s, "run", "--save", name, command) if command else 1
+        args = [] if choice == RUN_DEFAULT else [choice]
+        flag = args[0] if args else ""
+    if flag in ("--set", "--save") and len(args) < (2 if flag == "--set" else 3):
+        command = menu_input(f"Run command for {s['repo']}" if flag == "--set" else f"Command for {args[1:] and args[1]}")
+        if not command or (flag == "--save" and len(args) < 2):
+            return 1
+        args = [*args, command]
+    if flag.startswith("--"):
+        return remote_call(s, "run", *args)
+    if not args and remote_amarchy(s["host"], "run", "--show", sid=s["id"]).returncode != 0:
+        command = menu_input(f"Run command for {s['repo']}")
+        if not command or remote_call(s, "run", "--set", command) != 0:
+            return 1
+    on_screen = current_session_id() == s["id"]
+    if on_screen and not leave_zen():
+        return 1
+    code = remote_call(s, "run", *args)
+    if on_screen:
+        ensure_windows(s)
+        arrange(s["id"], focus="claude")
+    return code
+
+
+# A remote session's window: attached to its tmux on the host, and again
+# whenever the connection drops, until the host says the session is gone (3).
+ATTACH_LOOP = ('while :; do "$@"; [ $? -eq 3 ] && exit; '
+               'printf "\\r\\n  \\033[2mReconnecting…\\033[0m\\r\\n"; sleep 2; done')
+
+
+def attach_argv(s, which):
+    return ["sh", "-c", ATTACH_LOOP, "amarchy-attach",
+            *ssh_argv(s["host"], amarchy_line("attach", s["id"], which), tty=True)]
+
+
+def cmd_remote(args):
+    """amarchy remote [<ssh host>|off|--status]."""
+    if args[:1] == ["--sync"]:
+        return remote_sync()
+    if HOST_MODE:
+        return fail("this is a host: desktops start sessions here with `amarchy remote <this host>`")
+    if not args:
+        print(remote_host() or "off")
+        return 0
+    if args[0] == "--status":
+        host = remote_host()
+        if not host:
+            print("off")
+            return 0
+        snap = remote_snapshot()
+        heard = since_age(snap["at"]) if snap.get("at") else ""
+        seen = "" if not heard else ", last heard just now" if heard == "now" else f", last heard {heard} ago"
+        state = "online" if snap.get("online") else f"offline{': ' + snap['error'] if snap.get('error') else ''}"
+        print(f"{host}: {state}{seen}, {len(snap.get('sessions') or [])} sessions")
+        return 0 if snap.get("online") else 1
+    if args[0] == "off":
+        REMOTE_FILE.unlink(missing_ok=True)
+        REMOTE_STATE.unlink(missing_ok=True)
+        tell_shell("refresh")
+        print("off: new sessions start on this machine (the host's go on there)")
+        return 0
+    host = args[0]
+    if host.startswith("-") or not re.fullmatch(r"[\w.@:%+=-]+", host):
+        return fail(f"{host!r} isn't an ssh host")
+    r = remote_amarchy(host, "events", "--once")
+    if r.returncode != 0:
+        why = gist(r.stderr) or "no answer"
+        return fail(f"couldn't reach amarchy on {host}: {why}\n"
+                    f"  ssh {host} has to work without a password, and amarchy be installed there "
+                    f"(git clone amarchy, ./install.sh --host).")
+    try:
+        data = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        data = {}
+    if not data.get("host_mode"):
+        return fail(f"amarchy on {host} isn't set up as a host: run ./install.sh --host there "
+                    f"(an amarchy from before remote sessions? update it)")
+    STATE.mkdir(parents=True, exist_ok=True)
+    REMOTE_FILE.write_text(host + "\n")
+    remote_update(host, data)
+    ensure_remote_sync()
+    print(f"{host}: new sessions start there ({len(remote_sessions())} running)")
+    return 0
+
+
+# ------------------------------------------------------------------ host mode
+#
+# On the host, a session's Claude runs in tmux session <id> and its terminal in
+# <id>~term, on a tmux server of amarchy's own (tmux -L amarchy), so your own
+# tmux is left alone. Its settings make tmux disappear: no status bar, no
+# prefix key, your terminal's keys, colors, titles and clipboard passed
+# through, and the mouse scrolls back through what Claude printed.
+
+TMUX_CONF = """# Written by amarchy (host mode): the tmux that keeps its sessions.
+set -g prefix None
+unbind C-b
+set -g status off
+set -g escape-time 0
+set -g history-limit 100000
+set -g mouse on
+set -g default-terminal tmux-256color
+set -s terminal-features[90] '*:RGB:clipboard:extkeys:hyperlinks:usstyle:strikethrough:overline'
+set -g extended-keys always
+set -g extended-keys-format csi-u
+set -g set-clipboard on
+set -g allow-passthrough on
+set -g focus-events on
+set -g set-titles on
+set -g set-titles-string '#{pane_title}'
+set -g window-size latest
+set -g aggressive-resize on
+set -g destroy-unattached off
+"""
+
+# A session's Claude in tmux: Claude, and when you quit it, a key to start it again.
+HOST_LOOP = 'while :; do "$0" claude "$1"; "$0" held "$1" || exit; done'
+
+
+HOST_CONFIG = HOME / ".config/amarchy/host"     # NAME= and BIND= lines, for the network below
+
+
+def host_setting(key):
+    """AMARCHY_HOST_<key>, from the environment or ~/.config/amarchy/host."""
+    value = os.environ.get(f"AMARCHY_HOST_{key}")
+    if value is None:
+        try:
+            for line in HOST_CONFIG.read_text().splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() == key:
+                    value = v.strip()
+        except OSError:
+            pass
+    return value or None
+
+
+_network = None
+
+
+def host_network():
+    """How your devices reach what a session serves here: (name, address to
+    listen on). Set in ~/.config/amarchy/host (NAME=, BIND=); else, on
+    Tailscale, this machine's Tailscale name and address, so it's only
+    reachable from your tailnet; else nothing but localhost (an ssh tunnel)."""
+    global _network
+    if _network:
+        return _network
+    name, bind = host_setting("NAME"), host_setting("BIND")
+    if (not name or not bind) and shutil.which("tailscale"):
+        try:
+            me = json.loads(sh("tailscale", "status", "--json").stdout or "{}").get("Self") or {}
+        except ValueError:
+            me = {}
+        ips = [ip for ip in me.get("TailscaleIPs") or [] if "." in ip]
+        if ips and me.get("Online", True):
+            name = name or (me.get("DNSName") or "").split(".")[0] or None
+            bind = bind or ips[0]
+    _network = (name or socket.gethostname(), bind)
+    return _network
+
+
+def host_name():
+    return host_network()[0]
+
+
+def host_context():
+    """What a session's Claude on a host is told about where it is."""
+    name, bind = host_network()
+    text = (f" This session runs on a server, {name}, that the user reaches from their own devices: they "
+            f"see your window and the terminal through amarchy, but their browser isn't on this machine. ")
+    if bind:
+        text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
+                 f"(reachable only from their private network), and give them http://{name}:<port>. ")
+    else:
+        text += (f"What you serve here is reachable only on this machine: listen on localhost, and to open "
+                 f"it they forward the port (ssh -L <port>:localhost:<port> {name}) and use "
+                 f"http://localhost:<port>. ")
+    return text + "Other sessions share this machine, so a port may be taken: pick a free one."
+
+
+def login_shell(script, *args):
+    """A sh script run by the user's login shell (when it speaks sh), so it
+    has the PATH and tools they set up (mise, nvm, cargo), as their own
+    terminal would."""
+    shell = os.environ.get("SHELL") or ""
+    if Path(shell).name in ("bash", "zsh", "sh", "dash", "ksh"):
+        return [shell, "-lc", script, *args]
+    return ["sh", "-c", script, *args]
+
+
+def tmux(*args):
+    conf = STATE / "tmux.conf"
+    try:
+        fresh = conf.read_text() != TMUX_CONF
+    except OSError:
+        fresh = True
+    if fresh:
+        write_file(conf, TMUX_CONF)
+    run = lambda *a: subprocess.run(["tmux", "-u", "-L", "amarchy", "-f", str(conf), *a], capture_output=True,
+                                    text=True, stdin=subprocess.DEVNULL, env=clean_env())
+    try:
+        if fresh:
+            run("source-file", str(conf))     # a server already up takes the new settings
+        return run(*args)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args, 127, "", "tmux isn't installed")
+
+
+def tmux_name(sid, which="claude"):
+    """A session's tmux session name: its id, without what tmux reads in a
+    target ("." splits off the pane, ":" the window)."""
+    return re.sub(r"[.:]", "_", sid) + (REMOTE_TERM if which == "term" else "")
+
+
+def tmux_has(name):
+    return tmux("has-session", "-t", f"={name}").returncode == 0
+
+
+def tmux_env(s):
+    return [x for k, v in session_env(s).items() for x in ("-e", f"{k}={v}")]
+
+
+def host_start(s):
+    """Start whatever of a session's tmux isn't running: Claude (setting the
+    worktree up first, for a new one) and, once the worktree is there, the
+    terminal. After a reboot, attaching brings them back like this."""
+    sid, path = s["id"], Path(s["path"])
+    claude, term = tmux_name(sid), tmux_name(sid, "term")
+    if not tmux_has(claude):
+        cwd = path if path.is_dir() else WORK / s["repo"]
+        tmux("new-session", "-d", "-s", claude, "-x", "200", "-y", "50", "-c", str(cwd), *tmux_env(s),
+             *login_shell(HOST_LOOP, ENTRY, sid))
+        tmux("select-pane", "-t", f"={claude}:", "-T", f"amarchy:{sid}")
+    if not s.get("setup") and path.is_dir() and not tmux_has(term):
+        tmux("new-session", "-d", "-s", term, "-x", "100", "-y", "50", "-c", str(path), *tmux_env(s))
+
+
+def host_stop(s):
+    """End a session's tmux: Claude first, the way quitting it would."""
+    sid = s["id"]
+    pid = tmux("display-message", "-p", "-t", f"={tmux_name(sid)}:", "#{pane_pid}").stdout.strip()
+    if pid.isdigit():
+        stop_claude({"pid": int(pid)})
+    for name in (tmux_name(sid), tmux_name(sid, "term")):
+        tmux("kill-session", "-t", f"={name}")
+
+
+def host_run(s, command):
+    """Restart the session's terminal on command, as run_in_terminal does on a desktop."""
+    host_start(s)
+    shell = os.environ.get("SHELL") or "bash"
+    script = (f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
+              f"{command}; exec {shlex.quote(shell)}")
+    r = tmux("respawn-pane", "-k", "-t", f"={tmux_name(s['id'], 'term')}:", "-c", s["path"], *tmux_env(s),
+             shell, "-ic", script)
+    return 0 if r.returncode == 0 else fail(f"couldn't run it: {r.stderr.strip()}")
+
+
+def host_titles():
+    """The title Claude gave each session (its tmux pane's), by window class,
+    as a desktop has them from its windows."""
+    panes = {}
+    for line in tmux("list-panes", "-a", "-F", "#{session_name}\t#{pane_title}").stdout.splitlines():
+        name, _, title = line.partition("\t")
+        panes[name] = title
+    return {claude_class(s): panes[tmux_name(s["id"])] for s in sessions() if tmux_name(s["id"]) in panes}
+
+
+def cmd_attach(args):
+    """Host mode: show a session's Claude (or with term, its terminal) in this
+    terminal, starting it if needed. Exits 3 when there's no such session."""
+    if not HOST_MODE:
+        return fail("attach runs on a host (see amarchy remote)")
+    sid, which = args[0], (args[1] if len(args) > 1 else "claude")
+    s = session(sid)
+    if not s or (CLOSING / f"{sid}.json").exists():
+        try:
+            why = f": {(STATE / 'failed' / sid).read_text().strip()}"
+        except OSError:
+            why = ""
+        print(f"\r\n  {sid} {'could not start' if why else 'was closed'}{why}\r\n", flush=True)
+        if why:
+            time.sleep(5)
+        return 3
+    name = tmux_name(sid, which)
+    end, said = time.time() + 600, False
+    while True:
+        host_start(s)
+        if tmux_has(name):
+            break
+        if not s.get("setup") and not Path(s["path"]).is_dir():
+            print(f"\r\n  {sid}'s worktree is gone ({s['path']}). Close the session.\r\n", flush=True)
+            time.sleep(5)
+            return 3
+        if which == "term" and s.get("setup") and time.time() < end:
+            if not said:
+                print("\r\n  \033[2mWaiting for the worktree…\033[0m", flush=True)
+                said = True
+            time.sleep(0.5)
+            s = session(sid)
+            if not s:
+                return 3
+            continue
+        return fail(f"couldn't start {name} in tmux")
+    env = clean_env()
+    # Your terminal's own TERM, if this machine knows it; else close enough.
+    if not env.get("TERM") or sh("infocmp", env["TERM"]).returncode != 0:
+        env["TERM"] = "xterm-256color"
+    os.execvpe("tmux", ["tmux", "-u", "-L", "amarchy", "-f", str(STATE / "tmux.conf"),
+                        "attach-session", "-t", f"={name}"], env)
+
+
+def cmd_held(sid):
+    """Host mode, after the session's Claude has exited: start it again on
+    Enter. Fails (ending its tmux) when the session is gone."""
+    if not session(sid) or (CLOSING / f"{sid}.json").exists():
+        return 1
+    print("\n  \033[2mClaude Code exited. Press Enter to start it again.\033[0m", flush=True)
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        time.sleep(1)
+    return 0 if session(sid) and not (CLOSING / f"{sid}.json").exists() else 1
+
+
+def cmd_events(args):
+    """Host mode: the session list and projects as one line of JSON, and again
+    whenever they change (or a blank line now and then, to show it's there),
+    for the desktops showing these sessions. --once: just the one."""
+    version, last, quiet, projects_at, ps = os.stat(SELF).st_mtime_ns, None, time.time(), 0, []
+    while True:
+        if time.time() - projects_at > 10:
+            ps, projects_at = projects(), time.time()
+        line = json.dumps({"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(),
+                           "projects": ps})
+        try:
+            if line != last:
+                print(line, flush=True)
+                last, quiet = line, time.time()
+            elif time.time() - quiet > KEEPALIVE:
+                print(flush=True)
+                quiet = time.time()
+        except BrokenPipeError:
+            return 0
+        if "--once" in args:
+            return 0
+        time.sleep(1)
+        try:
+            if os.stat(SELF).st_mtime_ns != version:     # updated: the desktop reconnects to the new one
+                return 0
+        except OSError:
+            pass
+
+
 # ------------------------------------------------------------------ main
 
 def main(argv):
@@ -4104,6 +4905,14 @@ def main(argv):
         return cmd_woke(args[0], args[1] if len(args) > 1 else "")
     elif cmd == "editor":
         return cmd_editor(args)
+    elif cmd == "remote":
+        return cmd_remote(args)
+    elif cmd == "attach" and args:
+        return cmd_attach(args)
+    elif cmd == "held" and len(args) == 1:
+        return cmd_held(args[0])
+    elif cmd == "events":
+        return cmd_events(args)
     else:
         print(__doc__)
     return 0

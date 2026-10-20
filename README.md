@@ -344,6 +344,54 @@ amarchy's replaces it. Keep it short: it plays in full with every notification.
 `sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
 ones again.
 
+## Remote sessions
+
+Your sessions can live on another machine: a server that's always on, a box at
+home. Close your laptop and their Claude Code goes on working; open it, or
+another desktop, and they're all there. Nothing else changes: the same list,
+keys, notifications and windows. Claude and the terminal on the right are views
+of the session on that machine, so its worktrees, builds and dev servers are
+all there.
+
+On the machine (Linux with `python3`, `git`, `tmux` and Claude Code, logged in):
+
+```sh
+git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy && ~/.local/share/amarchy/install.sh --host
+```
+
+On your desktop, once `ssh <host>` gets in without a password:
+
+```sh
+amarchy remote <host>      # new sessions start there, e.g. amarchy remote homebox
+amarchy remote --status    # whether it answers
+amarchy remote off         # new sessions start here again; the host's leave the list, running there
+```
+
+From then on, `Super+Alt+N` starts the session on the host, from the host's
+projects (**New project** clones there). Sessions already on your desktop keep
+working as they did. On the host, each session's Claude and terminal run in
+tmux (a tmux of amarchy's own, `tmux -L amarchy`, set up to stay out of sight:
+no status bar, no prefix key, the mouse wheel scrolls back), and each window on
+your desktop is a terminal attached to it over ssh. A dropped connection (a
+laptop that slept, a host that rebooted) reconnects by itself; after a reboot
+the session's Claude picks its conversation back up. Remote sessions don't
+sleep: a server is there to keep them.
+
+To see what a session serves: on a host with [Tailscale](https://tailscale.com),
+each session's Claude is told to listen on the host's Tailscale address and
+give you `http://<its tailscale name>:<port>`, so only your own devices reach
+it. Without Tailscale it serves on localhost only, and you forward the port
+(`ssh -L 3000:localhost:3000 <host>`). Set `NAME=` and `BIND=` in
+`~/.config/amarchy/host` on the host to change either. amarchy opens no port
+of its own and everything goes through ssh: **keep the host's ssh on a private
+network too**, not the internet. Your desktop keeps one ssh connection open to
+it (`amarchy remote --sync`, started by the shell plugin) for the list and the
+notifications.
+
+The host needs tmux 3.5 or newer, and a login shell that speaks sh (bash,
+zsh). `amarchy remote off` takes the host's sessions off your list (they keep
+running there; `amarchy remote <host>` again brings them back).
+
 ## Install
 
 See [Quick start](#quick-start) for what it needs. `install.sh` is safe to run
@@ -357,6 +405,9 @@ again, and keeps a backup of every file of yours it changes
   Amarchy to the Omarchy menu;
 - adds an Omarchy theme hook, the amarchy skill for Claude Code
   (`~/.claude/skills/amarchy`) and the sleep timer (`amarchy-sleep.timer`).
+
+On a machine that keeps sessions for your desktops, `install.sh --host` only
+links the command and the skill (see [Remote sessions](#remote-sessions)).
 
 Update with `git pull` and `install.sh` again. `install.sh --uninstall` takes
 all of that out again; your worktrees and `~/.local/state/amarchy` are left
@@ -449,6 +500,8 @@ amarchy group none                    no grouping (the default)
 amarchy sort [priority|newest|oldest] how the list is sorted inside its groups (priority, the default:
                                       higher first, then the order you opened them in)
 amarchy layout                        resize Claude's column for the current monitor
+amarchy remote <ssh host> | off       start new sessions on another machine (see Remote sessions) / here again
+amarchy remote [--status]             where new sessions start / whether that host answers
 ```
 
 The run command is saved per project and starts in the session's worktree. It

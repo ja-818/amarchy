@@ -29,6 +29,23 @@ desktop. Each **session** is:
 The other sessions are other Claude Code instances, each in a worktree of its
 own. The project's **main checkout** is `$AMARCHY_ROOT` (`$AMARCHY_WORK/<project>`).
 
+### On a server (remote sessions)
+
+Your session may run on a **host**: a machine without a desktop that keeps
+sessions for the user's desktops (`amarchy remote` there). Your SessionStart
+context says so. You and the terminal run in tmux on the host, and the user sees
+both through amarchy on their own machine. Then:
+
+- The user's browser isn't on your machine. Your SessionStart context says
+  which address to listen on (the host's private network address, never
+  `0.0.0.0` on your own initiative) and what URL to give them. Other sessions
+  share the machine, so check the port is free.
+- `amarchy run`, `list`, `new`, `rename`, `close` and messaging other sessions
+  work as below; the other sessions you see are the host's. Commands that move
+  the user's screen do nothing here.
+- Nothing opens on their screen from here (a browser, a GUI app): tell them
+  what to open instead.
+
 ## Your environment
 
 Set in your shell and in the terminal beside you:

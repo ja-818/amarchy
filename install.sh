@@ -16,6 +16,8 @@
 #     Code exits until you type in them again; amarchy sleep --after)
 #
 #   ./install.sh             install / update
+#   ./install.sh --host      on a machine without a desktop that keeps sessions
+#                            for your desktops (amarchy remote): command + skill
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 
 set -euo pipefail
@@ -98,7 +100,7 @@ EOF
 if [[ ${1:-} == --uninstall ]]; then
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
-  rm -f "$bin_dir/amarchy"
+  rm -f "$bin_dir/amarchy" "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
   [[ -f $hypr_conf ]] && drop_load_line
   rm -f "$plugin_dir" "$theme_hook"
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
@@ -110,6 +112,50 @@ if [[ ${1:-} == --uninstall ]]; then
   [[ -f $menu_ext ]] && edit_menu ""
   hyprctl reload >/dev/null 2>&1 || true
   say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone."
+  exit 0
+fi
+
+install_skill() {
+  # The amarchy skill: Claude Code finds it in every session (their SessionStart
+  # hook points it there). A link, so it follows this checkout.
+  if [[ -e $skill_link && ! -L $skill_link ]]; then
+    say "Left $skill_link alone (not amarchy's link); the amarchy skill isn't installed."
+  else
+    mkdir -p "$(dirname "$skill_link")"
+    ln -sfn "$repo/skill" "$skill_link"
+  fi
+}
+
+# A host: a machine without a desktop (a server, say) that keeps sessions for
+# your desktops to show (`amarchy remote <host>` on them). Only the command and
+# the skill; each session's Claude and terminal run in tmux there.
+if [[ ${1:-} == --host ]]; then
+  missing=()
+  for cmd in python3 git tmux claude; do
+    command -v "$cmd" >/dev/null || missing+=("$cmd")
+  done
+  if ((${#missing[@]})); then
+    say "Missing: ${missing[*]}"
+    echo "Claude Code: https://docs.claude.com/en/docs/claude-code"
+    exit 1
+  fi
+  # amarchy's tmux settings (extended keys, passthrough) need 3.5.
+  tmux_version=$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  if ! printf '3.5\n%s\n' "$tmux_version" | sort -V -C; then
+    say "tmux $tmux_version is too old: amarchy needs 3.5 or newer."
+    exit 1
+  fi
+  mkdir -p "$bin_dir"
+  ln -sf "$repo/bin/amarchy" "$bin_dir/amarchy"
+  install_skill
+  # What makes it a host, also with Hyprland installed (amarchy reads it).
+  mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"
+  touch "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
+  say "amarchy installed as a host."
+  echo "  On your desktop: amarchy remote <how ssh reaches this machine>"
+  echo "  ssh has to get in without a password. Keep this machine on a private network"
+  echo "  (Tailscale, say). Sessions serve on its Tailscale address if it has one, else"
+  echo "  only on localhost; set NAME= and BIND= in ~/.config/amarchy/host to change it."
   exit 0
 fi
 
@@ -171,14 +217,7 @@ cat >"$theme_hook" <<HOOK
 exit 0
 HOOK
 
-# The amarchy skill: Claude Code finds it in every session (their SessionStart
-# hook points it there). A link, so it follows this checkout.
-if [[ -e $skill_link && ! -L $skill_link ]]; then
-  say "Left $skill_link alone (not amarchy's link); the amarchy skill isn't installed."
-else
-  mkdir -p "$(dirname "$skill_link")"
-  ln -sfn "$repo/skill" "$skill_link"
-fi
+install_skill
 
 # Sessions sleep once they've been idle and off screen for a while (`amarchy
 # sleep --after`): Claude Code exits and lets go of its memory, and comes back
