@@ -25,6 +25,9 @@ Sessions:
                                         prints its id
   amarchy new <project> [name] --prompt <text|->
                                         the same, with the first thing its Claude is asked (- reads it from stdin)
+  amarchy new <project> [name] --no-jump [--prompt <text|->]
+                                        the same, out of sight: it shows up in the list and the screen
+                                        stays where it is (for starting sessions from a script or agent)
   amarchy list [--compact]              sessions as JSON, in list order (task, age, current, and agent: the
                                         name its Claude goes by for other Claude sessions' SendMessage)
   amarchy open                          go to the last session you were in (nothing if already in one)
@@ -1687,11 +1690,12 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name, prompt=None):
+def create(repo, name, prompt=None, jump=True):
     """Start a session, and show it right away: its row in the list, its
     workspace, and Claude's window, where `amarchy setup` makes the worktree
     in front of you and then becomes Claude, asked prompt first if given.
-    Returns the session id."""
+    Without jump it starts the same way out of sight: its row shows up in the
+    list and the screen stays where it is. Returns the session id."""
     repo_dir = WORK / repo
     name = slug(name)
     if not name or not (repo_dir / ".git").exists():
@@ -1705,7 +1709,7 @@ def create(repo, name, prompt=None):
             print(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)",
                   file=sys.stderr)
             return None
-        if not HOST_MODE:
+        if jump and not HOST_MODE:
             cmd_jump(sid)
         return sid
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
@@ -1722,6 +1726,8 @@ def create(repo, name, prompt=None):
          "prefix": PREFIX, "workspace": WS_PREFIX + sid, "setup": True}
     if prompt is not None:
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
+    if not jump:
+        s["no_jump"] = True       # no "is ready" toast: nobody's waiting for it
     save_session(s)
     (STATUS / sid).write_text("working")
     if HOST_MODE:
@@ -1729,7 +1735,12 @@ def create(repo, name, prompt=None):
         return sid
     tell_shell("refresh")
     cmd_layout()
-    cmd_jump(sid)
+    if jump:
+        cmd_jump(sid)
+    else:
+        # Claude's window (where the setup runs) opens out of sight and goes
+        # to the session's workspace without following it.
+        ensure_windows(s)
     return sid
 
 
@@ -1853,7 +1864,10 @@ def setup_session(sid):
         # takes the keyboard: you may have gone somewhere else meanwhile.
         ensure_windows(s)
         arrange(sid, focus=None)
-    if current_session_id() != sid:
+    s = session(sid) or s
+    if s.pop("no_jump", None):
+        save_session(s)
+    elif current_session_id() != sid:
         notify("amarchy", f"{s['repo']} · {s['name']} is ready", click=("jump", sid))
     return None
 
@@ -2076,17 +2090,23 @@ def ensure_windows(s, wake=False):
 
 
 def cmd_new(args):
-    """amarchy new [project] [name] [--prompt <text>|-]: the new session's id on
-    stdout. --prompt is the first thing its Claude is asked (- reads it from stdin)."""
-    prompt, rest = None, []
+    """amarchy new [project] [name] [--prompt <text>|-] [--no-jump]: the new
+    session's id on stdout. --prompt is the first thing its Claude is asked
+    (- reads it from stdin). --no-jump starts it out of sight: it shows up in
+    the list, and the screen stays where it is."""
+    prompt, jump, rest = None, True, []
     it = iter(args)
     for a in it:
-        if a == "--prompt":
+        if a == "--no-jump":
+            jump = False
+        elif a == "--prompt":
             prompt = next(it, None)
             if prompt is None:
                 return fail("--prompt needs the text, or - to read it from stdin")
         elif a.startswith("--prompt="):
             prompt = a.split("=", 1)[1]
+        elif a.startswith("--"):
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt and --no-jump)")
         else:
             rest.append(a)
     if len(rest) > 2:
@@ -2099,9 +2119,9 @@ def cmd_new(args):
     if not repo:
         return 1
     if remote_host():
-        sid = remote_create(remote_host(), repo, rest[1] if len(rest) > 1 else None, prompt)
+        sid = remote_create(remote_host(), repo, rest[1] if len(rest) > 1 else None, prompt, jump)
     else:
-        sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
+        sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, jump)
     if not sid:
         return 1
     print(sid)
@@ -3309,7 +3329,7 @@ def agent_context(s):
             f"where the project runs. The `amarchy` CLI drives all of it and acts on this session "
             f"(AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
             f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
-            f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the "
+            f"(amarchy new <project> --no-jump --prompt). Use the amarchy skill before running it, or when the "
             f"work involves other sessions, worktrees, that terminal or merging back into main."
             + (host_context() if HOST_MODE else ""))
 
@@ -4401,9 +4421,10 @@ def remote_call(s, *args):
     return r.returncode
 
 
-def remote_create(host, repo, name, prompt):
-    """Start a session on the host and go to it: its windows show the worktree
-    being made there, then Claude. Returns its id."""
+def remote_create(host, repo, name, prompt, jump=True):
+    """Start a session on the host and go to it (without jump, the screen
+    stays where it is): its windows show the worktree being made there, then
+    Claude. Returns its id."""
     args = ["new", repo, *([name] if name else []), *(["--prompt", "-"] if prompt is not None else [])]
     r = remote_amarchy(host, *args, input=prompt, timeout=60)
     lines = r.stdout.strip().splitlines()
@@ -4418,7 +4439,8 @@ def remote_create(host, repo, name, prompt):
         return sid
     tell_shell("refresh")
     cmd_layout()
-    cmd_jump(sid)
+    if jump:
+        cmd_jump(sid)
     return sid
 
 
@@ -4844,7 +4866,7 @@ def cmd_events(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt"}, {"--prompt"}, set()),
+    "new": ({"--prompt", "--no-jump"}, {"--prompt"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact"}, set(), set()),
