@@ -4805,7 +4805,9 @@ def attach_argv(s, which):
 # the clipboard by running wl-paste (or xclip) where it runs, and the host has
 # no clipboard. So there a session's Claude finds amarchy's own wl-paste first
 # on its PATH (bin/amarchy-paste, as `amarchy paste`), which asks your
-# desktop's clipboard instead.
+# desktop's clipboard instead: install.sh --host links it into ~/.local/bin
+# (for the terminal too, and a Claude already running), and a session's
+# Claude also gets it first on its PATH, wherever ~/.local/bin comes.
 #
 # It goes through ssh like everything else: the connection `amarchy remote
 # --sync` keeps to the host forwards a socket there, <host's state>/clipboard/
@@ -4984,8 +4986,10 @@ def cmd_paste(args):
         return 2
     # A host with a desktop of its own after all: its own clipboard.
     if os.environ.get("WAYLAND_DISPLAY"):
-        real = shutil.which("wl-paste", path=os.pathsep.join(
-            d for d in os.environ.get("PATH", "").split(os.pathsep) if d and d != str(PASTE_BIN)))
+        me = (Path(SELF).parent / "amarchy-paste").resolve()
+        real = next((str(p) for d in os.environ.get("PATH", "").split(os.pathsep) if d
+                     for p in [Path(d) / "wl-paste"] if p.is_file() and os.access(p, os.X_OK)
+                     and p.resolve().name != me.name), None)
         if real:
             os.execv(real, [real, *args])
     why = "no desktop is connected (amarchy remote --sync)"

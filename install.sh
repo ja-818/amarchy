@@ -17,7 +17,8 @@
 #
 #   ./install.sh             install / update
 #   ./install.sh --host      on a machine without a desktop that keeps sessions
-#                            for your desktops (amarchy remote): command + skill
+#                            for your desktops (amarchy remote): command + skill,
+#                            and a wl-paste that pastes from your desktop
 #                            (and the phone app, once you turn it on: amarchy app on)
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 #   ./install.sh --force     either, without asking first when amarchy is
@@ -194,6 +195,8 @@ if ((uninstall)); then
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy" "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
+  # A host's wl-paste (install.sh --host), only if it's ours.
+  [[ $(readlink "$bin_dir/wl-paste" 2>/dev/null) == */bin/amarchy-paste ]] && rm -f "$bin_dir/wl-paste"
   [[ -f $hypr_conf ]] && drop_load_line
   rm -f "$plugin_dir" "$theme_hook"
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
@@ -245,6 +248,15 @@ if ((host)); then
   fi
   mkdir -p "$bin_dir"
   ln -sf "$repo/bin/amarchy" "$bin_dir/amarchy"
+  # wl-paste for the sessions here, Claude's Ctrl+V and the terminal's: what's
+  # copied on your desktop (see "clipboard" in bin/amarchy). Not over a
+  # wl-paste of this machine's own.
+  if [[ -L $bin_dir/wl-paste ]] || [[ ! -e $bin_dir/wl-paste ]]; then
+    rm -f "$bin_dir/wl-paste"
+    if ! command -v wl-paste >/dev/null; then
+      ln -s "$repo/bin/amarchy-paste" "$bin_dir/wl-paste"
+    fi
+  fi
   install_skill
   # What makes it a host, also with Hyprland installed (amarchy reads it).
   mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"

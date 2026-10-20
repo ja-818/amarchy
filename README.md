@@ -394,8 +394,8 @@ notifications, and sends the phone app your look over it.
 **Pasting an image works as it does locally**: copy one on your desktop (a
 screenshot, say) and press `Ctrl+V` in a remote session's Claude. Claude Code
 reads a pasted image with `wl-paste` where it runs, and the host has no
-clipboard, so there each session's Claude finds amarchy's own `wl-paste` first
-on its PATH: it asks your desktop's clipboard through a socket that `amarchy
+clipboard, so there amarchy has a `wl-paste` of its own (`install.sh --host`
+links it into `~/.local/bin`, unless the host has a real one): it asks your desktop's clipboard through a socket that `amarchy
 remote --sync` forwards over its ssh connection, and your desktop answers with
 your `wl-paste` (only listing and printing what's copied, nothing else). With
 more than one desktop connected, the paste comes from the one you pressed it
