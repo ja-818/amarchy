@@ -3,8 +3,8 @@
 // when the server can't be reached (it then says so, rather than Safari's
 // error page). Everything else always comes from the server.
 
-const SHELL = "amarchy-shell-v1";
-const FILES = ["/", "/app.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png"];
+const SHELL = "amarchy-shell-v2";
+const FILES = ["/", "/app.css", "/theme.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));
@@ -40,7 +40,7 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data && e.data.text() }; }
-  const shown = self.registration.showNotification(d.title || "amarchy", {
+  const shown = self.registration.showNotification(d.title || "Amarchy", {
     body: d.body || "",
     tag: d.tag || "amarchy",
     renotify: true,

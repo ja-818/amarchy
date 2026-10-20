@@ -4,9 +4,18 @@
 "use strict";
 
 const root = document.getElementById("root");
-const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "" };
-const STATUS = { waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Idle" };
+const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false };
+const STATUS = { waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// The glyphs amarchy's list uses on the desktop (Nerd Font icons), when the
+// font your desktop sent has them; else the drawings below and plain marks.
+const NERD = {
+  waiting: "\u{F009E}", idle: "\u{F012C}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
+  back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
+  stop: "\u{F04DB}", check: "\u{F012C}",
+};
+const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓" };
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -33,6 +42,61 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
+// An icon: the Nerd Font glyph, or the drawing / plain mark without one.
+function glyph(name, cls) {
+  const el = h("span", { class: `glyph${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
+  if (app.nerd && NERD[name]) el.textContent = NERD[name];
+  else if (ICONS[name]) el.innerHTML = ICONS[name];
+  else el.textContent = PLAIN[name] || "";
+  return el;
+}
+
+// A session's state, in its fixed slot: the spinner while it works.
+function stateIcon(s) {
+  const st = stateOf(s);
+  if (st === "working") return h("span", { class: "state working", title: STATUS.working }, SPINNER[spin.frame]);
+  const el = glyph(st, `state ${st}`);
+  el.title = STATUS[st];
+  return el;
+}
+
+const spin = { frame: 0 };
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  spin.frame = (spin.frame + 1) % SPINNER.length;
+  document.querySelectorAll(".state.working").forEach((el) => { el.textContent = SPINNER[spin.frame]; });
+}, 90);
+
+// What a session is about, the keyword before ": " in bold (as the desktop list has it).
+function taskText(task, cls) {
+  const el = h("div", { class: `task${cls ? ` ${cls}` : ""}` });
+  const i = task.indexOf(": ");
+  if (i > 0) el.append(h("b", {}, task.slice(0, i + 1)), " ", task.slice(i + 2));
+  else el.append(h("b", {}, task));
+  return el;
+}
+
+// The look your desktop sent (theme.css), again whenever it changes; the
+// status bar in its background.
+function wearLook(look) {
+  const stamp = look ? `${look.look || ""}${look.font || ""}` : "";
+  const link = document.getElementById("look");
+  if (link && !link.dataset.stamp) link.dataset.stamp = stamp;     // the page came with this one
+  else if (link && stamp && link.dataset.stamp !== stamp) {
+    const v = `${(look.look || "").slice(0, 12)}${(look.font || "").slice(0, 12)}`;
+    const next = h("link", { rel: "stylesheet", href: `theme.css?v=${v}`, id: "look" });
+    next.dataset.stamp = stamp;
+    next.addEventListener("load", () => { link.remove(); paintBars(); });
+    link.after(next);
+  }
+  paintBars();
+}
+
+function paintBars() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", bg));
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -43,7 +107,7 @@ async function api(path, body) {
     res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
                               body: JSON.stringify(body || {}) });
   } catch (e) {
-    throw new Error("Can't reach amarchy");
+    throw new Error("Can't reach Amarchy");
   }
   let data = {};
   try { data = await res.json(); } catch (e) { /* no body */ }
@@ -65,9 +129,10 @@ const store = {
   set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* private mode */ } },
 };
 
-function where(s) { return `${s.repo} · ${s.branch || s.name}`; }
+function where(s) { return `${s.repo} · ${s.name || s.branch}`; }
 function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
+function stateOf(s) { return s.status || "idle"; }
 
 // The visible part of the screen: above the keyboard while it's up.
 function fitViewport() {
@@ -178,6 +243,8 @@ function openList() {
     app.view = JSON.parse(e.data);
     app.online = true;
     app.failed = "";
+    app.nerd = !!app.view.nerd;
+    wearLook(app.view.look);
     badge();
     if (!app.session) renderList();
   });
@@ -201,56 +268,66 @@ function badge() {
 
 function groupLabel(s, g) {
   if (g === "project") return s.repo;
-  if (g === "priority") return PRIORITY[s.priority] || "Normal";
-  return STATUS[statusOf(s)];
+  if (g === "priority") return `${PRIORITY[s.priority] || "Normal"} priority`;
+  return STATUS[stateOf(s)];
 }
 
 function renderList() {
   const scroll = root.querySelector(".scroll");
   const keep = scroll && root.querySelector(".view.list-view") ? scroll.scrollTop : 0;
   const v = app.view;
-  const head = h("div", { class: "big-title" },
-    h("h1", {}, "Sessions"),
-    h("button", { class: "icon-btn", "aria-label": "Settings", html: ICONS.gear, onclick: openSettings }),
-    h("button", { class: "icon-btn", "aria-label": "New session", html: ICONS.plus, onclick: () => openNew() }));
-  const sub = h("div", { class: "list-sub" }, v ? `${v.hostname} · ${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}` : "");
+  const meta = h("div", { class: "meta" });
+  if (v) {
+    const waiting = v.sessions.filter((s) => s.status === "waiting").length;
+    meta.append(`${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}`);
+    if (waiting) meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
+  }
+  const head = h("div", { class: "hero" },
+    h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
+    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")),
+    h("button", { class: "icon-btn", "aria-label": "New session", onclick: () => openNew() }, glyph("plus")));
   const list = h("div", { class: "list" });
   if (!v) {
     list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
   } else if (!v.sessions.length) {
-    list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), h("br"),
-      h("button", { class: "chip accent", onclick: () => openNew() }, "Start one")));
+    list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"),
+      h("button", { class: "control accent", onclick: () => openNew() }, glyph("plus"), "New session")));
   } else {
+    // Grouped as amarchy groups them, outermost first. With more than one
+    // grouping the outermost is a rule across the list, its name in the middle.
     const groups = v.group || [];
-    let prev = [], card = null;
+    let prev = [];
     for (const s of v.sessions) {
       const labels = groups.map((g) => groupLabel(s, g));
       const at = labels.findIndex((l, i) => l !== prev[i]);
-      if (at >= 0 || !card) {
-        for (let i = Math.max(at, 0); i < labels.length; i++)
-          list.append(h("div", { class: `group-head${i ? " inner" : ""}` }, labels[i]));
-        card = h("div", { class: "card", style: groups.length ? null : "margin-top: 8px" });
-        list.append(card);
-      }
+      if (at >= 0)
+        for (let i = at; i < labels.length; i++)
+          list.append(h("div", { class: `group-head${i === 0 && groups.length > 1 ? " ruled" : ""}` }, labels[i]));
       prev = labels;
-      card.append(sessionRow(s));
+      list.append(sessionRow(s, groups));
     }
   }
-  const offline = !app.online && v ? h("div", { class: "offline" }, "Reconnecting to amarchy…") : null;
-  const view = h("div", { class: "view list-view" }, head, sub, offline, h("div", { class: "scroll" }, list));
+  const offline = !app.online && v ? h("div", { class: "offline" }, "Reconnecting to Amarchy…") : null;
+  const view = h("div", { class: "view list-view" }, head, offline, h("div", { class: "scroll" }, list));
   root.replaceChildren(view);
   root.querySelector(".scroll").scrollTop = keep;
 }
 
-function sessionRow(s) {
-  const prio = s.priority && s.priority !== "normal"
-    ? h("span", { class: `prio ${s.priority}` }, s.priority === "high" ? "▲ HIGH" : "▼ LOW") : null;
-  return h("button", { class: "row", onclick: () => { location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
-    h("span", { class: `status ${statusOf(s)}`, title: STATUS[statusOf(s)] }),
+// One session, as the desktop list draws it: the project and the priority
+// only when no header above it says them already.
+function sessionRow(s, groups) {
+  const showRepo = !groups.includes("project"), showPriority = !groups.includes("priority");
+  const prio = showPriority && s.priority && s.priority !== "normal"
+    ? glyph(s.priority, `prio ${s.priority}`) : null;
+  const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "new session");
+  const bg = s.background > 0 ? ` · +${s.background} bg` : "";
+  return h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
+                       onclick: () => { location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
+    stateIcon(s),
     h("span", { class: "main" },
-      h("div", { class: "name" }, s.setup ? `${title(s)} (setting up…)` : title(s)),
-      h("div", { class: "where" }, where(s))),
-    h("span", { class: "side" }, s.age ? h("span", {}, s.age) : null, prio));
+      taskText(task, s.task ? "" : "untitled"),
+      h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), prio));
 }
 
 // ---- a session
@@ -272,12 +349,11 @@ class SessionView {
   }
 
   build() {
-    this.titleEl = h("b", {}, this.row ? title(this.row) : "…");
-    this.subEl = h("small", {}, this.row ? where(this.row) : "");
+    this.titleEl = h("div", { class: "title" });
     const bar = h("div", { class: "bar" },
-      h("button", { class: "icon-btn", "aria-label": "Sessions", html: ICONS.back, onclick: () => { location.hash = "#/"; } }),
-      h("div", { class: "title" }, this.titleEl, this.subEl),
-      h("button", { class: "icon-btn", "aria-label": "More", html: ICONS.more, onclick: () => this.menu() }));
+      h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { location.hash = "#/"; } }, glyph("back")),
+      this.titleEl,
+      h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
     this.conv = h("div", { class: "conv" });
     this.screenEl = h("pre", { class: "screen" });
     this.scroller = h("div", { class: "scroll" }, this.conv);
@@ -285,14 +361,14 @@ class SessionView {
     this.input = h("textarea", { rows: 1, placeholder: "Message Claude", enterkeyhint: "enter",
                                  oninput: () => { this.grow(); store.set(`draft:${this.id}`, this.input.value); this.sendButtons(); } });
     this.input.value = store.get(`draft:${this.id}`) || "";
-    this.sendBtn = h("button", { class: "send", "aria-label": "Send", html: ICONS.send, onclick: () => this.send() });
-    this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude", html: ICONS.stop,
-                                 onclick: () => this.press(["Escape"]) });
-    this.composer = h("div", { class: "composer" }, this.input, this.stopBtn, this.sendBtn);
+    this.sendBtn = h("button", { class: "control send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
+    this.stopBtn = h("button", { class: "control stop", "aria-label": "Stop Claude",
+                                 onclick: () => this.press(["Escape"]) }, glyph("stop"));
+    this.composer = h("div", { class: "composer" }, h("div", { class: "prompt" }, this.input), this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
-        h("button", { class: "chip", onclick: () => this.press([key]) }, label)));
+        h("button", { class: "control", onclick: () => this.press([key]) }, label)));
     this.el = h("div", { class: "view" }, bar, this.scroller, this.dock);
     root.replaceChildren(this.el);
     this.renderHeader();
@@ -341,12 +417,15 @@ class SessionView {
       api(`/api/session/${encodeURIComponent(this.id)}/seen`).catch(() => {});
   }
 
+  // As the strip above Claude on the desktop: its state, what it's about, project · name.
   renderHeader() {
-    if (!this.row) return;
-    this.titleEl.textContent = title(this.row);
-    const st = statusOf(this.row);
-    this.subEl.replaceChildren(h("span", { class: "pill" }, h("span", { class: `status ${st}` }), STATUS[st]),
-                               " ", where(this.row));
+    if (!this.row) {
+      this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
+      return;
+    }
+    this.titleEl.replaceChildren(stateIcon(this.row),
+      h("div", { class: "text" }, taskText(this.row.task || "New session", this.row.task ? "" : "untitled"),
+        h("div", { class: "meta" }, `${where(this.row)} · ${STATUS[stateOf(this.row)]}`)));
   }
 
   atBottom() {
@@ -367,7 +446,7 @@ class SessionView {
       this.tools.clear();
       this.keys.clear();
       this.start = d.start;
-      this.earlierBtn = h("button", { class: "earlier", onclick: () => this.earlier() }, "Earlier");
+      this.earlierBtn = h("button", { class: "control earlier", onclick: () => this.earlier() }, "Earlier");
       if (this.start > 0) this.conv.append(this.earlierBtn);
       if (!d.items.length) this.conv.append(h("div", { class: "msg note" }, "Nothing here yet."));
     }
@@ -408,11 +487,14 @@ class SessionView {
     if (it.kind === "note") return h("div", { class: "msg note" }, it.text);
     if (it.kind === "claude") return h("div", { class: "msg claude", html: md(it.text) });
     if (it.kind === "tool") {
+      // As Claude Code prints one: ● Name(what), its output under ⎿.
       const result = h("pre", {}, "…");
       const el = h("div", { class: "tool" },
         h("button", { onclick: () => el.classList.toggle("open") },
-          h("span", { class: "tdot" }), h("span", { class: "tname" }, it.name), h("span", { class: "tsum" }, it.summary)),
-        h("div", { class: "tbody" }, h("div", { class: "full" }, it.summary), result));
+          h("span", { class: "tdot" }, "●"),
+          h("span", { class: "tline" }, h("span", { class: "tname" }, it.name),
+            it.summary ? h("span", { class: "tsum" }, `(${it.summary})`) : null)),
+        h("div", { class: "tbody" }, h("div", { class: "out" }, result)));
       el.result = result;
       this.tools.set(it.id, el);
       return el;
@@ -480,9 +562,10 @@ class SessionView {
     if (sc && sc.exited) {
       kids.push(h("div", { class: "ask" },
         h("div", { class: "q" }, h("div", { class: "head" }, "Claude Code exited"), "Start it again to go on with this session."),
-        h("button", { class: "opt first", onclick: () => this.press(["Enter"]) }, h("b", {}, "Start Claude again"))));
+        h("button", { class: "opt first", onclick: () => this.press(["Enter"]) },
+          h("span", { class: "n" }), h("span", { class: "what" }, h("b", {}, "Start Claude again")))));
     } else if (this.row && this.row.setup) {
-      kids.push(h("div", { class: "hint", style: "text-align:center;padding:8px" }, "Setting up the worktree…"));
+      kids.push(h("div", { class: "note" }, "Setting up the worktree…"));
     } else if (dialog && this.mode === "chat") {
       kids.push(this.ask(dialog));
     } else {
@@ -494,29 +577,32 @@ class SessionView {
     if (this.mode === "chat" && this.atBottom()) requestAnimationFrame(() => this.toBottom());
   }
 
+  // Claude's question as its own menu draws it: the choices numbered (when
+  // they are), its cursor on one; tap one to pick it.
   ask(d) {
     const box = h("div", { class: "ask" });
     const q = d.question.split("\n");
-    box.append(h("div", { class: "q" },
-      h("div", { class: "head" }, h("span", { class: "status waiting" }), q[0] || "Claude asks"),
-      q.slice(1).join("\n")));
+    box.append(h("div", { class: "q" }, h("div", { class: "head" }, q[0] || "Claude asks"), q.slice(1).join("\n")));
+    const numbered = d.options.length && d.options[0].keys[0] === "1";
+    const cursor = Math.max(0, d.options.findIndex((o) => o.selected));
     d.options.forEach((o, i) => {
+      const n = h("span", { class: "n" }, numbered ? `${i + 1}.` : "");
       if (/^Type something/i.test(o.label)) {
-        const field = h("textarea", { class: "field", style: "min-height:80px", placeholder: "Your answer" });
-        const write = h("div", { class: "ask", style: "display:none" }, field,
-          h("button", { class: "opt first", onclick: () => this.answer(d, o, field.value) }, h("b", {}, "Send answer")));
+        const field = h("textarea", { class: "field", placeholder: "Your answer" });
+        const write = h("div", { class: "write", style: "display:none" }, field,
+          h("button", { class: "control accent", onclick: () => this.answer(d, o, field.value) }, "Send answer"));
         box.append(h("button", { class: "opt", onclick: () => { write.style.display = ""; field.focus(); } },
-          h("b", {}, "Answer in your own words…")), write);
+          n, h("span", { class: "what" }, h("b", {}, "Answer in your own words…"))), write);
         return;
       }
-      box.append(h("button", { class: `opt${i === 0 ? " first" : ""}${o.selected && i ? " selected" : ""}`,
+      box.append(h("button", { class: `opt${i === cursor ? " first" : ""}`,
                                onclick: (e) => this.pick(d, o, e.currentTarget) },
-        h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null));
+        n, h("span", { class: "what" }, h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null)));
     });
     box.append(h("div", { class: "row-btns" },
-      h("button", { class: "chip", onclick: () => this.press(["Escape"]) }, "Esc"),
-      h("button", { class: "chip", onclick: () => this.setMode("screen") }, "Screen"),
-      h("span", { class: "hint", style: "align-self:center" }, d.hint)));
+      h("button", { class: "control", onclick: () => this.press(["Escape"]) }, "Esc"),
+      h("button", { class: "control", onclick: () => this.setMode("screen") }, "Screen"),
+      h("span", { class: "hint" }, d.hint)));
     return box;
   }
 
@@ -571,22 +657,20 @@ class SessionView {
   menu() {
     const row = this.row || {};
     const seg = h("div", { class: "seg" }, ...["high", "normal", "low"].map((p) =>
-      h("button", { class: (row.priority || "normal") === p ? "on" : "",
+      h("button", { class: `control${(row.priority || "normal") === p ? " on" : ""}`,
                     onclick: async () => {
                       try {
                         await api(`/api/session/${encodeURIComponent(this.id)}/priority`, { level: p });
                         closeSheet();
                       } catch (e) { toast(e.message); }
                     } }, PRIORITY[p])));
-    sheet(h("h2", {}, title(row)),
-      h("p", {}, where(row)),
-      h("h3", {}, "Priority"), seg,
-      h("h3", {}, "Show"),
-      h("div", { class: "card" },
-        h("button", { class: "menu-item", onclick: () => { closeSheet(); this.setMode("chat"); } },
-          "Conversation", h("span", { class: "val" }, this.mode === "chat" ? "✓" : "")),
-        h("button", { class: "menu-item", onclick: () => { closeSheet(); this.setMode("screen"); } },
-          "Claude's screen, with keys", h("span", { class: "val" }, this.mode === "screen" ? "✓" : ""))));
+    const shown = (mode, label) =>
+      h("button", { class: `menu-item${this.mode === mode ? " on" : ""}`, onclick: () => { closeSheet(); this.setMode(mode); } },
+        label, this.mode === mode ? glyph("check", "val") : null);
+    sheet(sheetHead(title(row), where(row)),
+      h("div", { class: "section" }, "Priority"), seg,
+      h("div", { class: "section" }, "Show"),
+      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("screen", "Claude's screen, with keys")));
   }
 }
 
@@ -595,9 +679,14 @@ class SessionView {
 function sheet(...kids) {
   closeSheet();
   const back = h("div", { class: "sheet-back", onclick: (e) => { if (e.target === back) closeSheet(); } },
-    h("div", { class: "sheet", role: "dialog" }, h("div", { class: "grab" }), ...kids));
+    h("div", { class: "sheet", role: "dialog" }, ...kids));
   document.body.append(back);
   return back;
+}
+
+// A sheet's title, with a small-caps line under it.
+function sheetHead(text, meta) {
+  return h("div", { class: "head" }, h("h2", {}, text), meta ? h("div", { class: "meta" }, meta) : null);
 }
 
 function closeSheet() {
@@ -614,13 +703,13 @@ function openNew() {
   if (!projects.some((p) => p.name === repo)) repo = projects[0].name;
   const chips = h("div", { class: "projects" });
   const draw = () => chips.replaceChildren(...projects.map((p) =>
-    h("button", { class: `chip${p.name === repo ? " on" : ""}`, onclick: () => { repo = p.name; draw(); } }, p.name)));
+    h("button", { class: `control${p.name === repo ? " on" : ""}`, onclick: () => { repo = p.name; draw(); } }, p.name)));
   draw();
   const field = h("textarea", { class: "field", placeholder: "What should Claude do?" });
   field.value = store.get("draft:new") || "";
   field.addEventListener("input", () => store.set("draft:new", field.value));
   const err = h("div", { class: "error" });
-  const go = h("button", { class: "wide-btn", onclick: async () => {
+  const go = h("button", { class: "control wide accent", onclick: async () => {
     if (!field.value.trim()) { err.textContent = "Say what it's for."; return; }
     go.disabled = true;
     go.textContent = "Starting…";
@@ -636,7 +725,8 @@ function openNew() {
       go.textContent = "Start session";
     }
   } }, "Start session");
-  sheet(h("h2", {}, "New session"), h("h3", {}, "Project"), chips, h("h3", {}, "Task"), field, err, go);
+  sheet(sheetHead("New session", "Its Claude starts on the task"), h("div", { class: "section" }, "Project"), chips,
+    h("div", { class: "section" }, "Task"), h("div", { class: "new-task" }, field), err, go);
   setTimeout(() => field.focus(), 250);
 }
 
@@ -665,7 +755,7 @@ async function pushState() {
 
 async function pushOn() {
   const asked = Notification.requestPermission();      // first, while it's still your tap
-  if ((await asked) !== "granted") throw new Error("Notifications weren't allowed (Settings → Notifications → amarchy).");
+  if ((await asked) !== "granted") throw new Error("Notifications weren't allowed (Settings → Notifications → Amarchy).");
   const reg = await navigator.serviceWorker.ready;
   const key = keyBytes(app.key);
   let sub = await reg.pushManager.getSubscription();
@@ -701,34 +791,38 @@ async function openSettings() {
   const body = h("div", {});
   const draw = async () => {
     const state = await pushState().catch(() => "unsupported");
-    const kids = [h("h3", {}, "Notifications")];
+    const kids = [h("div", { class: "section" }, "Notifications")];
     if (!standalone) {
-      kids.push(h("p", {}, "To get notifications, add amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
+      kids.push(h("p", {}, "To get notifications, add Amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
     } else if (state === "unsupported") {
       kids.push(h("p", {}, "This browser can't get notifications (on iPhone they need iOS 16.4 or newer)."));
     } else if (state === "denied") {
-      kids.push(h("p", {}, "Notifications are turned off for amarchy in the phone's Settings → Notifications."));
+      kids.push(h("p", {}, "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
     } else if (state === "off") {
       kids.push(h("p", {}, "Get a notification when a session needs you or is done."),
-        h("button", { class: "wide-btn", onclick: async (e) => {
+        h("button", { class: "control wide accent", onclick: async (e) => {
           e.currentTarget.disabled = true;
           try { await pushOn(); toast("Notifications on."); } catch (err) { toast(err.message); }
           draw();
         } }, "Turn on notifications"));
     } else {
       kids.push(h("p", {}, "On: you're told when a session needs you or is done, unless you're looking at it."),
-        h("button", { class: "wide-btn plain", onclick: async () => {
+        h("button", { class: "control wide", onclick: async () => {
           try { const r = await api("/api/push/test"); toast(r.sent ? "Sent. It should arrive in a moment." : "It couldn't be sent."); }
           catch (err) { toast(err.message); }
         } }, "Send a test"),
-        h("button", { class: "wide-btn plain", onclick: async () => { await pushOff(); draw(); } }, "Turn off"));
+        h("button", { class: "control wide", onclick: async () => { await pushOff(); draw(); } }, "Turn off"));
     }
-    kids.push(h("h3", {}, "Host"),
+    const look = app.view && app.view.look && app.view.look.look;
+    kids.push(h("div", { class: "section" }, "Look"),
+      h("p", {}, look ? "Your theme and font, as your desktop wears them. Change your theme there and it changes here."
+                      : "Omarchy's default. Your own theme shows up here once your desktop has sent it (it does on its own when amarchy remote points at this host)."),
+      h("div", { class: "section" }, "Host"),
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
     body.replaceChildren(...kids);
   };
-  sheet(h("h2", {}, "Settings"), body);
+  sheet(sheetHead("Settings", "Amarchy on your phone"), body);
   draw();
 }
 
@@ -771,14 +865,15 @@ async function start() {
     const res = await fetch("/api/state");
     const d = await res.json();
     if (!res.ok) throw new Error(d.error === "not yours"
-      ? "This amarchy belongs to someone else on the tailnet."
-      : d.error || "amarchy didn't answer.");
+      ? "This Amarchy belongs to someone else on the tailnet."
+      : d.error || "Amarchy didn't answer.");
     app.key = d.key;
     app.user = d.user;
+    app.nerd = !!d.nerd;
     if (d.sessions) app.view = d;
   } catch (e) {
-    app.failed = e.message.includes("amarchy") ? e.message
-      : "Can't reach amarchy. Is Tailscale on, on this phone?";
+    app.failed = e.message.includes("Amarchy") ? e.message
+      : "Can't reach Amarchy. Is Tailscale on, on this phone?";
   }
   window.addEventListener("hashchange", route);
   route();
