@@ -391,6 +391,17 @@ network too**, not the internet. Your desktop keeps one ssh connection open to
 it (`amarchy remote --sync`, started by the shell plugin) for the list and the
 notifications, and sends the phone app your look over it.
 
+**Pasting an image works as it does locally**: copy one on your desktop (a
+screenshot, say) and press `Ctrl+V` in a remote session's Claude. Claude Code
+reads a pasted image with `wl-paste` where it runs, and the host has no
+clipboard, so there each session's Claude finds amarchy's own `wl-paste` first
+on its PATH: it asks your desktop's clipboard through a socket that `amarchy
+remote --sync` forwards over its ssh connection, and your desktop answers with
+your `wl-paste` (only listing and printing what's copied, nothing else). With
+more than one desktop connected, the paste comes from the one you pressed it
+on. While your desktop is connected, whatever runs on the host as you can read
+your clipboard this way.
+
 Your desktop keeps up with the host: when the host runs a newer amarchy (one
 shipped to `origin`'s main), the desktop pulls its own checkout, runs its
 `install.sh`, restarts the shell and tells you. It does that only when amarchy

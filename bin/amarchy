@@ -128,10 +128,14 @@ Plumbing:
                                         (start: idle, and tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
   amarchy remote --sync                 keep this desktop's copy of the host's list, send its phone app your
-                                        look, and update amarchy here to the host's (the shell plugin starts it)
+                                        look, lend the host your clipboard to paste from, and update amarchy
+                                        here to the host's (the shell plugin starts it)
   amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
   amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
+  amarchy paste [wl-paste options]      on a host: wl-paste for a session's Claude (bin/amarchy-paste), what's
+                                        copied on your desktop, so Ctrl+V pastes an image there
+  amarchy clipboard <desktop>           on a host: where a desktop's clipboard goes (remote --sync forwards it)
   amarchy app serve                     on a host: the phone app's server (amarchy-app.service runs it)
   amarchy app theme                     on a host: keep the look the phone app wears (JSON on stdin, from remote --sync)
 
@@ -2049,6 +2053,8 @@ def cmd_claude(sid):
     if shim:
         os.environ["AMARCHY_VISUAL"] = editor
         os.environ["VISUAL"] = str(shim)
+    if HOST_MODE:       # Ctrl+V pastes what's copied on your desktop (see "clipboard")
+        os.environ["PATH"] = paste_path()
     argv = claude_argv(s, prefill.strip("\n"), prompt)
     try:
         os.execvp(argv[0], argv)
@@ -4250,16 +4256,19 @@ def remote_host():
     return host if host and host != "off" else None
 
 
-def ssh_argv(host, command, tty=False):
+def ssh_argv(host, command, tty=False, opts=()):
     """ssh to the host running a command line. With tty, for a window: a
     terminal there, and ssh may ask you things (a host key). Without, it
-    fails rather than wait for an answer nobody gives."""
-    return ["ssh", *SSH_OPTS, *(["-t"] if tty else ["-T", "-o", "BatchMode=yes"]), "--", host, command]
+    fails rather than wait for an answer nobody gives. opts go first: ssh
+    takes the first value it's given for each option."""
+    return ["ssh", *opts, *SSH_OPTS, *(["-t"] if tty else ["-T", "-o", "BatchMode=yes"]), "--", host, command]
 
 
-def amarchy_line(*args, sid=None):
-    """The command line of amarchy on the host, acting on session sid when given."""
-    return shlex.join([*(["env", f"AMARCHY_SESSION={sid}"] if sid else []), HOST_AMARCHY, *args])
+def amarchy_line(*args, sid=None, env=()):
+    """The command line of amarchy on the host, acting on session sid when
+    given, with env (NAME=value strings) set."""
+    env = [*([f"AMARCHY_SESSION={sid}"] if sid else []), *env]
+    return shlex.join([*(["env", *env] if env else []), HOST_AMARCHY, *args])
 
 
 def remote_sh(host, command, input=None, timeout=30):
@@ -4564,6 +4573,7 @@ def remote_sync():
     # The host runs a newer amarchy (one was shipped): this desktop updates
     # itself to it, once per version it hears of.
     mine, tried = amarchy_version(), set()
+    clip = clipboard_serve()        # your clipboard, for pasting an image there (see "clipboard")
 
     def catch_up(version):
         if not isinstance(version, str) or not version or version == mine or version in tried:
@@ -4606,12 +4616,14 @@ def remote_sync():
             return True
 
     while remote_host() == host and not updated():
-        why = ""
-        try:
-            p = subprocess.Popen(ssh_argv(host, amarchy_line("events")), stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=clean_env())
-        except OSError as e:
-            p, why = None, str(e)
+        p = None
+        forward, why = clipboard_forward(host, clip)
+        if forward is not None:
+            try:
+                p = subprocess.Popen(ssh_argv(host, amarchy_line("events"), opts=forward), stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=clean_env())
+            except OSError as e:
+                why = str(e)
         if p:
             fresh = True        # the first line of a connection: what changed while away
             for line in p.stdout:
@@ -4783,7 +4795,252 @@ ATTACH_LOOP = ('while :; do "$@"; [ $? -eq 3 ] && exit; '
 
 def attach_argv(s, which):
     return ["sh", "-c", ATTACH_LOOP, "amarchy-attach",
-            *ssh_argv(s["host"], amarchy_line("attach", s["id"], which), tty=True)]
+            *ssh_argv(s["host"], amarchy_line("attach", s["id"], which, env=[f"AMARCHY_DESKTOP={desktop_name()}"]),
+                      tty=True)]
+
+
+# ------------------------------------------------------------------ clipboard
+#
+# Pasting an image into a remote session's Claude (Ctrl+V): Claude Code reads
+# the clipboard by running wl-paste (or xclip) where it runs, and the host has
+# no clipboard. So there a session's Claude finds amarchy's own wl-paste first
+# on its PATH (bin/amarchy-paste, as `amarchy paste`), which asks your
+# desktop's clipboard instead.
+#
+# It goes through ssh like everything else: the connection `amarchy remote
+# --sync` keeps to the host forwards a socket there, <host's state>/clipboard/
+# <desktop>.sock, to one here (clipboard.sock) that runs your wl-paste and
+# sends back what it printed. Only reading: the options that list or print
+# what's copied, nothing else (wl-paste --watch runs a command). With more
+# than one desktop attached, the paste comes from the one you pressed it on:
+# the tmux client that last had a key, whose amarchy attach says which desktop
+# it is (AMARCHY_DESKTOP, or else the address its ssh came from).
+#
+# Anything running on the host as you can read your clipboard this way while
+# your desktop is connected: the host is yours, as it is for everything else.
+
+CLIP_SOCK = STATE / "clipboard.sock"    # on a desktop: what the host's socket leads to
+CLIP_DIR = STATE / "clipboard"          # on a host: a socket per desktop, and the address it was seen from
+PASTE_BIN = STATE / "paste"             # on a host: wl-paste for a session's Claude, a link to bin/amarchy-paste
+PASTE_FLAGS = {"-l": "--list-types", "--list-types": "--list-types", "-n": "--no-newline",
+               "--no-newline": "--no-newline", "-p": "--primary", "--primary": "--primary"}
+MIME = re.compile(r"(?!-)[\w.+-]+(/[\w.+-]+)?(; ?[\w.+-]+=[\w.+-]+)*")
+
+
+def paste_args(args):
+    """wl-paste's options as amarchy passes them on (its long ones), or None
+    for one it doesn't (anything but listing or printing what's copied)."""
+    out, it = [], iter(args)
+    for a in it:
+        if a in PASTE_FLAGS:
+            out.append(PASTE_FLAGS[a])
+        elif a in ("-t", "--type") or a.startswith("--type="):
+            value = a.partition("=")[2] if "=" in a else next(it, "")
+            if not (len(value) <= 120 and MIME.fullmatch(value)):
+                return None
+            out += ["--type", value]
+        elif re.fullmatch(r"-[lnp]{2,3}", a):
+            out += [PASTE_FLAGS[f"-{c}"] for c in a[1:]]
+        else:
+            return None
+    return out
+
+
+def desktop_name():
+    """This desktop as the host knows it: its hostname, as a file name."""
+    return re.sub(r"[^\w.-]", "-", socket.gethostname())[:40].strip(".-") or "desktop"
+
+
+def clipboard_serve():
+    """On a desktop: answer the host's pastes on clipboard.sock (in threads of
+    remote --sync, which has your Wayland session). Returns its path, or None."""
+    if not shutil.which("wl-paste"):
+        return None
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        CLIP_SOCK.unlink(missing_ok=True)
+        old = os.umask(0o177)       # yours only, as the host's end is
+        try:
+            srv.bind(str(CLIP_SOCK))
+        finally:
+            os.umask(old)
+        srv.listen(8)
+    except OSError as e:
+        print(f"amarchy: no clipboard for the host: {e}", file=sys.stderr)
+        srv.close()
+        return None
+
+    def answer(conn):
+        with conn:
+            try:
+                conn.settimeout(15)
+                ask = b""
+                while not ask.endswith(b"\n") and len(ask) < 4096:
+                    got = conn.recv(4096)
+                    if not got:
+                        return
+                    ask += got
+                req = json.loads(ask)
+                args = paste_args(req.get("args") if isinstance(req, dict) and isinstance(req.get("args"), list)
+                                  and all(isinstance(a, str) for a in req["args"]) else ["?"])
+                if args is None:
+                    head, data = {"code": 2, "error": "amarchy only lists and prints what's copied"}, b""
+                else:
+                    try:
+                        r = subprocess.run(["wl-paste", *args], capture_output=True, stdin=subprocess.DEVNULL,
+                                           timeout=10, env=clean_env())
+                        err = r.stderr.decode(errors="replace").strip()
+                        head, data = {"code": r.returncode, "error": err[-300:]}, r.stdout
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        head, data = {"code": 1, "error": f"wl-paste: {e}"}, b""
+                conn.sendall(json.dumps(head).encode() + b"\n" + data)
+            except (OSError, ValueError):
+                pass
+
+    def serve():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=answer, args=(conn,), daemon=True).start()
+    threading.Thread(target=serve, daemon=True).start()
+    return str(CLIP_SOCK)
+
+
+def clipboard_forward(host, local):
+    """Before each connection of remote --sync: the host makes room for this
+    desktop's socket. Returns the ssh options that forward it there ([] for a
+    host whose amarchy doesn't know how yet), and when the host doesn't
+    answer, why not."""
+    if not local:
+        return [], ""
+    r = remote_amarchy(host, "clipboard", desktop_name(), timeout=20)
+    if r.returncode == 255:
+        return None, (r.stderr.strip().splitlines()[-1:] or [f"{host} didn't answer"])[0]
+    there = r.stdout.strip().splitlines()[-1:]
+    if r.returncode != 0 or not there or not there[0].startswith("/"):
+        return [], ""
+    # A connection of its own, not the windows' shared one: the forward ends
+    # with it, and comes back with the next.
+    return ["-o", "ControlPath=none", "-R", f"{there[0]}:{local}"], ""
+
+
+def cmd_clipboard(args):
+    """Host mode, from a desktop about to connect: make room for its clipboard's
+    socket (the last one, from a connection that dropped, can't be used again)
+    and print where ssh should put it."""
+    if not HOST_MODE:
+        return fail("clipboard runs on a host (see amarchy remote)")
+    name = args[0] if args else ""
+    if not re.fullmatch(r"[\w.-]{1,40}", name):
+        return fail(f"not a desktop name: {name!r}")
+    CLIP_DIR.mkdir(parents=True, exist_ok=True)
+    CLIP_DIR.chmod(0o700)
+    sock = CLIP_DIR / f"{name}.sock"
+    sock.unlink(missing_ok=True)
+    addr = (os.environ.get("SSH_CONNECTION") or "").split()[:1]
+    write_file(CLIP_DIR / f"{name}.addr", addr[0] if addr else "")
+    print(sock)
+    return 0
+
+
+def paste_desktops():
+    """The desktops to ask, in order: the one whose window had the last key in
+    this session's tmux, then the others, most recently connected first."""
+    def connected(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0
+    socks = sorted(CLIP_DIR.glob("*.sock"), key=connected, reverse=True)
+    pane = os.environ.get("TMUX_PANE")
+    if pane and socks:
+        pid = tmux("display-message", "-p", "-t", pane, "#{client_pid}").stdout.strip()
+        try:
+            env = dict(l.partition("=")[::2] for l in
+                       Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace").split("\0") if l)
+        except (OSError, ValueError):
+            env = {}
+        name = env.get("AMARCHY_DESKTOP", "")
+        addr = (env.get("SSH_CONNECTION") or "").split()[:1]
+        for p in socks:
+            try:
+                seen = (CLIP_DIR / f"{p.stem}.addr").read_text().strip()
+            except OSError:
+                seen = ""
+            if p.stem == name or (not name and addr and seen == addr[0]):
+                socks.remove(p)
+                socks.insert(0, p)
+                break
+    return socks
+
+
+def cmd_paste(args):
+    """wl-paste for a session's Claude on a host: what's copied on your desktop."""
+    passed = paste_args(args)
+    if passed is None:
+        print(f"wl-paste (amarchy): only -l, -t <type>, -n and -p, not {' '.join(args)}", file=sys.stderr)
+        return 2
+    # A host with a desktop of its own after all: its own clipboard.
+    if os.environ.get("WAYLAND_DISPLAY"):
+        real = shutil.which("wl-paste", path=os.pathsep.join(
+            d for d in os.environ.get("PATH", "").split(os.pathsep) if d and d != str(PASTE_BIN)))
+        if real:
+            os.execv(real, [real, *args])
+    why = "no desktop is connected (amarchy remote --sync)"
+    for path in paste_desktops():
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(15)
+        try:
+            conn.connect(str(path))
+            conn.sendall(json.dumps({"args": passed}).encode() + b"\n")
+            got = b""
+            while b"\n" not in got and len(got) < 65536:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                got += chunk
+            if b"\n" not in got:
+                raise ConnectionResetError
+            line, _, data = got.partition(b"\n")
+            head = json.loads(line)
+            out = sys.stdout.buffer
+            out.write(data)
+            while chunk := conn.recv(1 << 20):
+                out.write(chunk)
+            out.flush()
+            if head.get("error"):
+                print(head["error"], file=sys.stderr)
+            return int(head.get("code", 1))
+        except ConnectionRefusedError:      # its connection is gone
+            path.unlink(missing_ok=True)
+            why = f"{path.stem} isn't connected"
+        except (ConnectionResetError, BrokenPipeError):     # connected, but amarchy there isn't answering
+            why = f"{path.stem} didn't answer (amarchy remote --sync isn't running there)"
+        except (OSError, ValueError) as e:
+            why = f"{path.stem}: {e}"
+        finally:
+            conn.close()
+    print(f"wl-paste (amarchy): {why}", file=sys.stderr)
+    return 1
+
+
+def paste_path():
+    """On a host, the PATH a session's Claude gets: amarchy's wl-paste first
+    (see "clipboard"). Unchanged when the link can't be made."""
+    link, target = PASTE_BIN / "wl-paste", Path(SELF).parent / "amarchy-paste"
+    path = os.environ.get("PATH", "")
+    try:
+        if not link.is_symlink() or os.readlink(link) != str(target):
+            PASTE_BIN.mkdir(parents=True, exist_ok=True)
+            tmp = link.with_name(f".wl-paste.{os.getpid()}")
+            tmp.unlink(missing_ok=True)
+            tmp.symlink_to(target)
+            os.replace(tmp, link)
+    except OSError:
+        return path
+    return os.pathsep.join([str(PASTE_BIN), *[d for d in path.split(os.pathsep) if d and d != str(PASTE_BIN)]])
 
 
 def cmd_remote(args):
@@ -6468,6 +6725,7 @@ OPTIONS = {
     "app": ({"--status", "--test"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
+    "clipboard": None, "paste": None,
 }
 ALIASES = {"cockpit": "terminal"}     # cockpit: the old name of terminal, still bound in some configs
 HELP = ("-h", "--help")
@@ -6627,6 +6885,10 @@ def main(argv):
         return cmd_attach(args)
     elif cmd == "held" and len(args) == 1:
         return cmd_held(args[0])
+    elif cmd == "clipboard" and len(args) == 1:
+        return cmd_clipboard(args)
+    elif cmd == "paste":
+        return cmd_paste(args)
     elif cmd == "events":
         return cmd_events(args)
     elif cmd == "app":
