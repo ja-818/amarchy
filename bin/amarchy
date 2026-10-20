@@ -127,8 +127,8 @@ Plumbing:
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
-  amarchy remote --sync                 keep this desktop's copy of the host's list, and send its phone app
-                                        your look (the shell plugin starts it)
+  amarchy remote --sync                 keep this desktop's copy of the host's list, send its phone app your
+                                        look, and update amarchy here to the host's (the shell plugin starts it)
   amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
   amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
@@ -4501,6 +4501,51 @@ def remote_look(host, has):
     return r.returncode == 0
 
 
+def amarchy_version():
+    """The commit amarchy runs from (its checkout's HEAD), or "" when it
+    isn't a git checkout."""
+    r = sh("git", "-C", str(Path(SELF).parent.parent), "rev-parse", "HEAD")
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def self_update(version):
+    """Bring this desktop's amarchy up to the host's: version is the commit
+    the host runs, shipped to origin's main. Only when amarchy runs from a
+    checkout of main with nothing uncommitted (not a session's worktree, not
+    work in progress): pull it, run its install.sh and restart the shell, as
+    you would. Says what it did, or why it didn't."""
+    repo = Path(SELF).parent.parent
+    env = {**clean_env(), "GIT_TERMINAL_PROMPT": "0"}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL, timeout=120)
+    if not re.fullmatch(r"[0-9a-f]{40}", version) or git("rev-parse", "HEAD").stdout.strip() == version:
+        return "up to date"
+    if git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
+        return f"not updated: {repo} isn't on main"
+    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        return f"not updated: {repo} has uncommitted changes"
+    if git("fetch", "--quiet", "origin", "main").returncode:
+        return "not updated: couldn't fetch origin"
+    if git("merge-base", "--is-ancestor", version, "origin/main").returncode:
+        return "not updated: the host runs a commit that isn't on origin's main"
+    if git("merge-base", "--is-ancestor", "HEAD", "origin/main").returncode:
+        return "not updated: main here has commits origin doesn't"
+    before = git("rev-parse", "--short", "HEAD").stdout.strip()
+    if git("merge", "--ff-only", "--quiet", "origin/main").returncode:
+        return "not updated: couldn't fast-forward main"
+    r = subprocess.run([str(repo / "install.sh")], capture_output=True, text=True, env=env,
+                       stdin=subprocess.DEVNULL, timeout=300)
+    if r.returncode:
+        return f"updated main, but install.sh failed: {(r.stderr or r.stdout).strip().splitlines()[-1:]}"
+    if shutil.which("omarchy-restart-shell"):
+        sh("omarchy-restart-shell")
+    after = git("rev-parse", "--short", "HEAD").stdout.strip()
+    notify("amarchy updated", f"{before} → {after}, the version your host runs")
+    return f"updated {before} → {after}"
+
+
 def remote_sync():
     """Follow the host's `amarchy events` for as long as it's the remote, over
     and over: a dropped connection (a laptop that slept, a host that
@@ -4516,6 +4561,21 @@ def remote_sync():
         return 0
     version, wait, seen = os.stat(SELF).st_mtime_ns, 1, {}
     phone = {"has": None, "at": 0.0, "busy": threading.Lock()}
+    # The host runs a newer amarchy (one was shipped): this desktop updates
+    # itself to it, once per version it hears of.
+    mine, tried = amarchy_version(), set()
+
+    def catch_up(version):
+        if not isinstance(version, str) or not version or version == mine or version in tried:
+            return
+        tried.add(version)
+
+        def run():
+            try:
+                print(f"amarchy: {self_update(version)}", file=sys.stderr)
+            except (OSError, subprocess.SubprocessError) as e:
+                print(f"amarchy: couldn't update: {e}", file=sys.stderr)
+        threading.Thread(target=run, daemon=True).start()
 
     def look():
         """Now and then, and as soon as the host says what its phone app
@@ -4564,6 +4624,8 @@ def remote_sync():
                         wait, fresh = 1, False
                     except ValueError:
                         data = {}
+                    if isinstance(data, dict) and data:
+                        catch_up(data.get("version"))
                     # What the phone app there wears; nothing when it's off.
                     if isinstance(data, dict) and data:
                         has = data.get("phone")
@@ -5018,10 +5080,12 @@ def cmd_events(args):
     whenever they change (or a blank line now and then, to show it's there),
     for the desktops showing these sessions. --once: just the one."""
     version, last, quiet, projects_at, ps = os.stat(SELF).st_mtime_ns, None, time.time(), 0, []
+    commit = amarchy_version()      # desktops update themselves to it (see self_update)
     while True:
         if time.time() - projects_at > 10:
             ps, projects_at = projects(), time.time()
-        view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps}
+        view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps,
+                "version": commit}
         if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
             view["phone"] = app_look_stamp()
         line = json.dumps(view)

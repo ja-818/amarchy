@@ -391,6 +391,12 @@ network too**, not the internet. Your desktop keeps one ssh connection open to
 it (`amarchy remote --sync`, started by the shell plugin) for the list and the
 notifications, and sends the phone app your look over it.
 
+Your desktop keeps up with the host: when the host runs a newer amarchy (one
+shipped to `origin`'s main), the desktop pulls its own checkout, runs its
+`install.sh`, restarts the shell and tells you. It does that only when amarchy
+runs from a checkout of `main` with nothing uncommitted, never over work in
+progress or from a session's worktree.
+
 The host needs tmux 3.5 or newer, and a login shell that speaks sh (bash,
 zsh). `amarchy remote off` takes the host's sessions off your list (they keep
 running there; `amarchy remote <host>` again brings them back).
