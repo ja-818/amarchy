@@ -414,6 +414,16 @@ Update with `git pull` and `install.sh` again. `install.sh --uninstall` takes
 all of that out again; your worktrees and `~/.local/state/amarchy` are left
 alone.
 
+Every install points all of it at the checkout it runs from. While it points
+at another session's worktree (that session is trying its changes on your
+desktop), `install.sh` and `install.sh --uninstall` say whose it is and ask
+before replacing it; with no terminal to ask in (Claude running it, a script)
+they change nothing. `--force` goes on without asking. The session's own
+worktree, a main checkout and a checkout that's gone are never asked about.
+Closing a session whose worktree amarchy runs from puts amarchy back on the
+project's main checkout first, so nothing is left pointing at a removed
+worktree.
+
 ## Configure
 
 **Settings → Keys** in the amarchy menu (`Ctrl+Alt+M`, or `amarchy keys`) picks the two
@@ -528,6 +538,10 @@ change is done:
 ```
 amarchy run --save main '$AMARCHY_ROOT/install.sh && omarchy-restart-shell'
 ```
+
+Trying a worktree while another session's is the installed copy asks first
+(see [Install](#install)), so one session doesn't silently take over
+another's live build.
 
 Each new worktree is pre-trusted in `~/.claude.json` so Claude starts without
 the folder trust prompt, and the entry is removed again on close.

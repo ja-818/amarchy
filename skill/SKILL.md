@@ -117,6 +117,13 @@ dev server). Restart the terminal so the user sees the result too.
   all its sessions). Commands start in the worktree and can use the variables
   above. Single-quote them so they expand per session, e.g.
   `amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'`.
+  amarchy's own `install.sh` (and `--uninstall`) won't take the installed
+  amarchy off **another** session's worktree without asking: in a terminal it
+  asks, and run by you (no terminal) it changes nothing and says whose build
+  it is. Tell the user instead of adding `--force` on your own. Your own
+  worktree's build is never asked about, so putting it back on main
+  (`$AMARCHY_ROOT/install.sh`) just works. Closing a session whose worktree
+  amarchy runs from puts it back on the main checkout first.
 - `amarchy new <project> [name] --no-jump [--prompt "<brief>"]`: start another
   session and print its id. With `--prompt` (or `--prompt -` to read it from
   stdin), its Claude starts with that as its first message: the way to hand a

@@ -19,8 +19,24 @@
 #   ./install.sh --host      on a machine without a desktop that keeps sessions
 #                            for your desktops (amarchy remote): command + skill
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
+#   ./install.sh --force     either, without asking first when amarchy is
+#                            installed from another session's worktree (it
+#                            asks in a terminal, and stops without one)
 
 set -euo pipefail
+
+usage() { sed -n '3,/^$/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
+
+uninstall=0 force=0 host=0
+for arg in "$@"; do
+  case $arg in
+    --uninstall) uninstall=1 ;;
+    --force) force=1 ;;
+    --host) host=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bin_dir="$HOME/.local/bin"
@@ -32,6 +48,7 @@ menu_ext="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
 theme_hook="$HOME/.config/omarchy/hooks/theme-set.d/amarchy"
 skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+sessions="${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/sessions"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -97,7 +114,78 @@ EOF
   rm -f "$tmp"
 }
 
-if [[ ${1:-} == --uninstall ]]; then
+# The checkouts the installed amarchy runs from now, one per line, as its links
+# and its load line say (they agree unless an install was cut short).
+live_checkouts() {
+  local t
+  if t=$(readlink "$plugin_dir"); then echo "${t%/omarchy/plugin}"; fi
+  if t=$(readlink "$bin_dir/amarchy"); then echo "${t%/bin/amarchy}"; fi
+  if [[ -f $hypr_conf ]]; then
+    sed -n 's|^dofile("\(.*\)/hypr/amarchy\.lua") -- amarchy$|\1|p' "$hypr_conf"
+  fi
+} 2>/dev/null
+
+# A git worktree of its own (amarchy puts a session in one), not a repo's main
+# checkout.
+is_worktree() {
+  local dir common
+  dir=$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 1
+  common=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [[ $dir != "$common" ]]
+}
+
+# Who works in a worktree: "<project> · <session>, branch <branch>".
+describe() {
+  local who="" branch
+  if [[ -d $sessions ]]; then
+    who=$(find "$sessions" -maxdepth 1 -name '*.json' -exec \
+      jq -r --arg p "$1" 'select(.path == $p) | "\(.repo) · \(.title // .name)"' {} + 2>/dev/null | sed -n 1p)
+  fi
+  branch=$(git -C "$1" branch --show-current 2>/dev/null) || true
+  echo "${who:-not an amarchy session}${branch:+, branch $branch}"
+}
+
+# Installing (or uninstalling) moves everything to this checkout at once: the
+# shell plugin, the keys, the CLI and the skill. While they're on another
+# session's worktree, that session is trying its changes on the live desktop,
+# and taking them away under it is never what you meant by updating from main.
+# So ask first, or stop when there's no one to ask (Claude running it, a
+# script), unless it's --force. Not asked: a checkout that's gone, a main
+# checkout (the install you come back to), and the worktree of the session
+# running this (it's putting its own build back).
+guard_live() {
+  local live mine="" busy=()
+  [[ -n ${AMARCHY_PATH:-} ]] && mine=$(realpath -m "$AMARCHY_PATH")
+  while IFS= read -r live; do
+    [[ $live == "$repo" || $live == "$mine" ]] && continue
+    if [[ ! -d $live ]]; then
+      echo "amarchy was installed from $live, which is gone."
+    elif is_worktree "$live"; then
+      busy+=("$live")
+    fi
+  done < <(live_checkouts | awk '!seen[$0]++')
+  ((${#busy[@]})) || return 0
+  say "amarchy is installed from another session's worktree:"
+  for live in "${busy[@]}"; do echo "  $live ($(describe "$live"))"; done
+  echo "That build is being tried on your desktop; $1."
+  if ((force)); then
+    echo "Going on (--force)."
+    return 0
+  fi
+  if [[ -t 0 && -t 1 ]]; then
+    local answer
+    read -rp "Go on? [y/N] " answer || answer=""
+    [[ $answer == [yY]* ]] && return 0
+    echo "Left as it was."
+  else
+    echo "Nothing changed. Run it again with --force to go on anyway."
+  fi
+  exit 1
+}
+
+if ((uninstall)); then
+  guard_live "uninstalling takes it away"
+  live=$(live_checkouts | sed -n 1p)
   # Back to your Omarchy theme everywhere (the watcher then ends on its own).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" theme system || true
   rm -f "$bin_dir/amarchy" "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
@@ -106,8 +194,13 @@ if [[ ${1:-} == --uninstall ]]; then
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
   rm -f "$units/amarchy-sleep.timer" "$units/amarchy-sleep.service"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  # Only our own link: a skill of the same name the user wrote stays.
-  [[ -L $skill_link && $(readlink "$skill_link") == "$repo/skill" ]] && rm -f "$skill_link"
+  # Only our own link (to this checkout or the one installed): a skill of the
+  # same name the user wrote stays.
+  if [[ -L $skill_link ]]; then
+    case $(readlink "$skill_link") in
+      "$repo/skill" | "${live:-$repo}/skill") rm -f "$skill_link" ;;
+    esac
+  fi
   edit_shell_json '.plugins |= map(select(.id != "amarchy")) | .bar.layout |= with_entries(.value |= map(select(.id != "amarchy")))'
   [[ -f $menu_ext ]] && edit_menu ""
   hyprctl reload >/dev/null 2>&1 || true
@@ -129,7 +222,7 @@ install_skill() {
 # A host: a machine without a desktop (a server, say) that keeps sessions for
 # your desktops to show (`amarchy remote <host>` on them). Only the command and
 # the skill; each session's Claude and terminal run in tmux there.
-if [[ ${1:-} == --host ]]; then
+if ((host)); then
   missing=()
   for cmd in python3 git tmux claude; do
     command -v "$cmd" >/dev/null || missing+=("$cmd")
@@ -177,6 +270,8 @@ if [[ ! -f $hypr_conf ]]; then
   say "No $hypr_conf. amarchy needs Omarchy's Lua Hyprland config."
   exit 1
 fi
+
+guard_live "installing from $repo replaces it"
 
 mkdir -p "$bin_dir"
 ln -sf "$repo/bin/amarchy" "$bin_dir/amarchy"

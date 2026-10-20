@@ -144,6 +144,9 @@ install.sh) has the rest.
 Run commands are saved per project, start in the session's worktree and can use the same
 variables. Quote them when setting from a shell:
   amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'
+(install.sh asks before replacing an install that runs from another session's worktree,
+and stops without a terminal to ask in; --force goes on anyway. Closing the session an
+install runs from puts it back on the main checkout.)
 
 State: ~/.local/state/amarchy/.
 """
@@ -3148,6 +3151,24 @@ def resume_closing():
             detach([ENTRY, "reap", f.stem])
 
 
+def installed_from(path):
+    """Whether the installed amarchy (its CLI or its shell plugin, which
+    install.sh links together) runs from the checkout at path."""
+    inside = str(path).rstrip("/") + "/"
+    for link in (INSTALLED, SHELL_PLUGIN.parent):
+        try:
+            if os.readlink(link).startswith(inside):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def last_line(result, fallback):
+    """The last line a command wrote to stderr (or stdout): why it failed."""
+    return ((result.stderr or result.stdout).strip().splitlines() or [fallback])[-1]
+
+
 def reap_lock(sid):
     """The lock of a session's reap, held while it lasts: the open file, or
     None when another reap has it."""
@@ -3213,18 +3234,30 @@ def cmd_reap(sid):
     while time.time() < end and (find(claude_class(s)) or find(term_class(s))):
         time.sleep(0.1)
     repo_dir = WORK / s["repo"]
-    removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
-    sh("git", "worktree", "prune", cwd=repo_dir)
-    if path.exists() and removed.returncode != 0:
-        # Changed after close looked (something still running wrote to it):
-        # back in the list rather than lost, with why.
+
+    def keep_open(why):
+        # Back in the list rather than lost, with why.
         save_session(s)
         f.unlink(missing_ok=True)
         (CLOSING / f"{sid}.lock").unlink(missing_ok=True)
         tell_shell("refresh")
-        why = (removed.stderr.strip().splitlines() or ["git worktree remove failed"])[-1]
         notify("amarchy", f"Couldn't close {s['repo']} · {s['name']}: {why}. It's back in your list.")
         return 1
+
+    # The installed amarchy runs from this worktree (it was being tried live):
+    # put it back on the main checkout first, or the CLI, the keys and the
+    # shell plugin would go with the worktree.
+    if installed_from(path) and (repo_dir / "install.sh").exists():
+        put = sh(str(repo_dir / "install.sh"), "--force", cwd=repo_dir)
+        if put.returncode != 0:
+            return keep_open("amarchy runs from it, and putting it back on "
+                             f"{repo_dir} failed ({last_line(put, 'install.sh failed')})")
+        sh("omarchy-restart-shell")
+    removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
+    sh("git", "worktree", "prune", cwd=repo_dir)
+    if path.exists() and removed.returncode != 0:
+        # Changed after close looked (something still running wrote to it).
+        return keep_open(last_line(removed, "git worktree remove failed"))
     had_branch = sh("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{s['branch']}",
                     cwd=repo_dir).returncode == 0
     kept = had_branch and sh("git", "branch", "-d", s["branch"], cwd=repo_dir).returncode != 0
@@ -3255,6 +3288,8 @@ def confirm_close(s):
         detail = f"{changes} uncommitted file{'s' if changes != 1 else ''} lost"
     else:
         yes, detail = "Close session", "Removes its worktree"
+    if installed_from(path):
+        detail += f" · amarchy runs from it, and goes back to {WORK / s['repo']}"
     picked = menu_select(f"Close {s['repo']} · {s['name']}?", [
         (ICON_CLOSE, yes, detail),
         (ICON_CANCEL, "Cancel", "Keep the session"),
