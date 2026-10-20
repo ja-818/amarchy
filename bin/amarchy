@@ -11,6 +11,8 @@ Omarchy bar; asking for the terminal brings the panels back.
 Every action in the UI is one of these commands, so scripts and agents can do
 anything you can. Commands print results to stdout and fail with a non-zero exit.
 
+  amarchy help [command]                this, or the usage of one command (also amarchy <command> --help)
+
 Projects (git repos directly inside AMARCHY_WORK):
   amarchy projects [--json]             your projects and their session counts
   amarchy projects --github [--json]    your GitHub repos (✓ = already added)
@@ -108,6 +110,8 @@ Plumbing:
                                         start Claude; keep the session on screen asleep; the prompt
                                         you type in while it sleeps
   amarchy sleep --idle                  put the sessions idle long enough to sleep (the timer runs it)
+  amarchy reap <id>                     the rest of closing a session, detached from what closed it
+  amarchy shorten <repo> <title>        cut Claude's title for the list down to "Keyword: a few words"
   amarchy editor <file>                 Claude's $VISUAL in a session (bin/amarchy-editor)
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
@@ -2085,6 +2089,8 @@ def cmd_new(args):
             prompt = a.split("=", 1)[1]
         else:
             rest.append(a)
+    if len(rest) > 2:
+        return fail("usage: amarchy new [project] [name] [--prompt <text|->]")
     if prompt == "-":
         prompt = sys.stdin.read()
     if prompt is not None and not prompt.strip():
@@ -4830,8 +4836,125 @@ def cmd_events(args):
 
 # ------------------------------------------------------------------ main
 
+# What each command takes, for `amarchy <command> --help` and for catching an
+# option it doesn't know before it acts on it: `close --help` would otherwise
+# close the session, `new --help` start one named --help. Flags are the
+# options it knows; values, those that take the next word (skipped when
+# checking); text, those after which the rest is free text (a command, a
+# prompt), left alone. Commands with None are plumbing whose arguments come
+# from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
+OPTIONS = {
+    "new": ({"--prompt"}, {"--prompt"}, set()),
+    "add": ({"--new", "--github"}, set(), set()),
+    "projects": ({"--github", "--json"}, set(), set()),
+    "list": ({"--compact"}, set(), set()),
+    "open": (set(), set(), set()),
+    "next": (set(), set(), set()),
+    "prev": (set(), set(), set()),
+    "jump": (set(), set(), set()),
+    "close": ({"--force", "--confirm"}, set(), set()),
+    "rename": ({"--id", "--reset"}, {"--id"}, set()),
+    "zen": (set(), set(), set()),
+    "terminal": (set(), set(), set()),
+    "run": ({"--show", "--set", "--save", "--forget", "--list", "--pick"}, {"--forget"}, {"--set", "--save"}),
+    "show": (set(), set(), set()),
+    "search": (set(), set(), set()),
+    "pick": (set(), set(), set()),
+    "menu": ({"--json", "--omarchy"}, set(), set()),
+    "priority": ({"--id"}, {"--id"}, set()),
+    "group": (set(), set(), set()),
+    "sort": (set(), set(), set()),
+    "order": (set(), set(), set()),
+    "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
+    "wake": (set(), set(), set()),
+    "theme": ({"--show", "--refresh"}, set(), set()),
+    "keys": ({"--show"}, set(), set()),
+    "sound": ({"--show", "--list", "--json", "--play", "--stop", "--add"}, set(), set()),
+    "ui": (set(), set(), set()),
+    "layout": (set(), set(), set()),
+    "watch": (set(), set(), set()),
+    "remote": ({"--status", "--sync"}, set(), set()),
+    "events": ({"--once"}, set(), set()),
+    "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None,
+    "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
+}
+ALIASES = {"cockpit": "terminal"}     # cockpit: the old name of terminal, still bound in some configs
+HELP = ("-h", "--help")
+OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
+                      "`group status on`, opened `group status off`"}
+
+
+def usage(cmd):
+    """The lines of this file's docstring for one command (with the ones
+    continuing them), or None for a command it doesn't know."""
+    lines, found, keep = __doc__.splitlines(), [], False
+    for line in lines:
+        words = line.split()
+        if line.startswith("  amarchy ") and len(words) > 1:
+            names, i = [words[1]], 2
+            while i + 1 < len(words) and words[i] == "|" and re.fullmatch(r"[a-z]+", words[i + 1]):
+                names.append(words[i + 1])
+                i += 2
+            keep = cmd in names
+            if keep:
+                found.append(line)
+        elif keep and line.startswith(" " * 40) and line.strip():
+            found.append(line)
+        else:
+            keep = False
+    if not found and cmd in OLD_USAGE:
+        found = [OLD_USAGE[cmd]]
+    return "usage:\n" + "\n".join(found) if found else None
+
+
+def check_args(cmd, args):
+    """`--help` or `-h` for a command: its usage (0). An option it doesn't know:
+    the usage on stderr (1). Otherwise None, and the command runs."""
+    spec = OPTIONS.get(cmd)
+    if spec is None:
+        if cmd != "editor" and args[:1] and args[0] in HELP:
+            print(usage(cmd))
+            return 0
+        return None
+    flags, values, text = spec
+    it = iter(args)
+    for a in it:
+        if a in HELP:
+            print(usage(cmd))
+            return 0
+        name = "--prompt" if cmd == "new" and a.startswith("--prompt=") else a     # new's only --option=value
+        if name in text:
+            break
+        if name in values and name == a:
+            next(it, None)
+        elif re.fullmatch(r"--[A-Za-z][\w-]*(=.*)?", a) and name not in flags:
+            print(f"amarchy {cmd}: unknown option {name}\n{usage(cmd)}", file=sys.stderr)
+            return 1
+    return None
+
+
+def cmd_help(args):
+    """`amarchy help [command]`: everything, or one command's usage."""
+    if not args:
+        print(__doc__)
+        return 0
+    cmd = ALIASES.get(args[0], args[0])
+    text = usage(cmd) if cmd in OPTIONS else None
+    if not text:
+        return fail(f"unknown command {args[0]!r} (amarchy help lists them)")
+    print(text)
+    return 0
+
+
 def main(argv):
     cmd, args = (argv[0], argv[1:]) if argv else ("help", [])
+    if cmd in ("help", *HELP):
+        return cmd_help(args)
+    if ALIASES.get(cmd, cmd) not in OPTIONS:
+        return fail(f"unknown command {cmd!r} (amarchy help lists them)")
+    checked = check_args(ALIASES.get(cmd, cmd), args)
+    if checked is not None:
+        return checked
     migrate_legacy()
     if cmd == "new":
         return cmd_new(args)
@@ -4849,7 +4972,9 @@ def main(argv):
         cmd_open()
     elif cmd in ("next", "prev"):
         return cmd_step(1 if cmd == "next" else -1)
-    elif cmd == "jump" and args:
+    elif cmd == "jump" and len(args) == 1:
+        if not session(args[0]):
+            return fail(f"No session {args[0]!r}")
         cmd_jump(args[0])
     elif cmd == "list":
         print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
@@ -4913,8 +5038,9 @@ def main(argv):
         return cmd_held(args[0])
     elif cmd == "events":
         return cmd_events(args)
-    else:
-        print(__doc__)
+    else:   # a command it knows, with the wrong number of arguments
+        print(usage(ALIASES.get(cmd, cmd)), file=sys.stderr)
+        return 1
     return 0
 
 
