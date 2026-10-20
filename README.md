@@ -389,7 +389,7 @@ of its own and everything goes through ssh (the phone app, once you turn it on,
 listens on localhost only, behind Tailscale): **keep the host's ssh on a private
 network too**, not the internet. Your desktop keeps one ssh connection open to
 it (`amarchy remote --sync`, started by the shell plugin) for the list and the
-notifications.
+notifications, and sends the phone app your look over it.
 
 The host needs tmux 3.5 or newer, and a login shell that speaks sh (bash,
 zsh). `amarchy remote off` takes the host's sessions off your list (they keep
@@ -422,6 +422,13 @@ amarchy app off
 On the phone, open that address in Safari, then Share → **Add to Home
 Screen**, and open amarchy from the home screen: its settings (the gear) turn
 on notifications (iOS 16.4 or newer; iPhones only notify home screen apps).
+
+It wears your desktop's look: the theme your sessions wear there (the amarchy
+theme, else your Omarchy theme), its monospace font with the Nerd Font icons
+the session list uses, and Hyprland's rounding. The desktop showing the host's
+sessions (`amarchy remote`) sends it whenever it changes, the font only when
+that changes; the host keeps it in `~/.local/state/amarchy/app/look`. Until a
+desktop has, the app wears Omarchy's default, Tokyo Night.
 
 How it stays yours: the app listens on the host's localhost only, and
 `tailscale serve` puts it on your tailnet over HTTPS, never on the internet

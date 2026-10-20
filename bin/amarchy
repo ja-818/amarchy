@@ -127,11 +127,13 @@ Plumbing:
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
-  amarchy remote --sync                 keep this desktop's copy of the host's list (the shell plugin starts it)
+  amarchy remote --sync                 keep this desktop's copy of the host's list, and send its phone app
+                                        your look (the shell plugin starts it)
   amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
   amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
   amarchy app serve                     on a host: the phone app's server (amarchy-app.service runs it)
+  amarchy app theme                     on a host: keep the look the phone app wears (JSON on stdin, from remote --sync)
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -1928,7 +1930,7 @@ def set_conversation_id(sid, conversation):
 def write_file(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}")
-    tmp.write_text(text)
+    tmp.write_bytes(text) if isinstance(text, bytes) else tmp.write_text(text)
     os.replace(tmp, path)
 
 
@@ -4392,6 +4394,67 @@ def ensure_remote_sync():
     detach([SELF, "remote", "--sync"])
 
 
+def phone_look():
+    """The look the phone app on the host wears: the theme your sessions wear
+    here (the amarchy theme, else your Omarchy theme), Hyprland's rounding
+    and the monospace font. (look, font), each with a "sig" that changes
+    with it; (None, None) when there's no theme to read."""
+    src = THEME if theme_name() and (THEME / "colors.toml").is_file() else DESKTOP / "theme"
+    try:
+        colors = (src / "colors.toml").read_text()
+        shell = (src / "shell.toml").read_text() if (src / "shell.toml").is_file() else ""
+    except OSError:
+        return None, None
+    try:
+        name = theme_name() or (DESKTOP / "theme.name").read_text().strip()
+    except OSError:
+        name = ""
+    try:
+        rounding = int(json.loads(sh("hyprctl", "-j", "getoption", "decoration:rounding").stdout or "{}").get("int", 0))
+    except (ValueError, TypeError, AttributeError):
+        rounding = 0
+    look = {"name": name.replace("-", " ").title(), "colors": colors, "shell": shell, "rounding": rounding}
+    look["sig"] = hashlib.sha1(json.dumps(look, sort_keys=True).encode()).hexdigest()
+    font = {"family": "", "files": {}}
+    for weight, pattern in (("regular", "monospace"), ("bold", "monospace:bold")):
+        family, _, path = sh("fc-match", "-f", "%{family[0]}\t%{file}", pattern).stdout.partition("\t")
+        if path and Path(path).suffix.lower() in (".ttf", ".otf", ".woff", ".woff2") and Path(path).is_file():
+            font["files"][weight] = path
+            font["family"] = font["family"] or family
+    if font["files"].get("bold") == font["files"].get("regular"):
+        font["files"].pop("bold", None)
+    stats = {w: (p, os.stat(p).st_mtime_ns, os.stat(p).st_size) for w, p in font["files"].items()}
+    # No font to send: the host keeps none either, so the two agree.
+    font["sig"] = hashlib.sha1(json.dumps([font["family"], stats], sort_keys=True).encode()).hexdigest() if stats else ""
+    return look, font
+
+
+LOOK_EVERY = 15             # seconds between checks that the host's phone app wears this desktop's look
+LOOK_RETRY = 600            # and after it didn't take it
+
+
+def remote_look(host, has):
+    """Send the host's phone app this desktop's look, when what it wears
+    (has: its "phone" in `amarchy events`) isn't that. The font goes only
+    when it changed: it's a few MB. False if the host didn't take it."""
+    look, font = phone_look()
+    if not look or (has.get("look") == look["sig"] and has.get("font") == font["sig"]):
+        return True
+    data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding")}}
+    if has.get("font") != font["sig"]:
+        data["font"] = {"sig": font["sig"], "family": font["family"]}
+        for weight, path in font["files"].items():
+            try:
+                data["font"][weight] = base64.b64encode(Path(path).read_bytes()).decode()
+            except OSError:
+                pass
+    r = remote_amarchy(host, "app", "theme", input=json.dumps(data), timeout=120)
+    if r.returncode:
+        print(f"amarchy: the phone app on {host} didn't take the theme: {(r.stderr or '').strip()}",
+              file=sys.stderr)
+    return r.returncode == 0
+
+
 def remote_sync():
     """Follow the host's `amarchy events` for as long as it's the remote, over
     and over: a dropped connection (a laptop that slept, a host that
@@ -4406,6 +4469,28 @@ def remote_sync():
     except OSError:
         return 0
     version, wait, seen = os.stat(SELF).st_mtime_ns, 1, {}
+    phone = {"has": None, "at": 0.0, "busy": threading.Lock()}
+
+    def look():
+        """Now and then, and as soon as the host says what its phone app
+        wears: send it this desktop's look if that changed (in the
+        background, so the list doesn't wait on a font going over)."""
+        if phone["has"] is None or time.time() - phone["at"] < LOOK_EVERY or not phone["busy"].acquire(blocking=False):
+            return
+        phone["at"] = time.time()
+
+        def send(has):
+            try:
+                ok = remote_look(host, has)
+            except Exception as e:
+                print(f"amarchy: couldn't send {host} the look: {e}", file=sys.stderr)
+                ok = False
+            try:
+                if not ok:      # not again for a while: it may be a few MB each time
+                    phone["at"] = time.time() + LOOK_RETRY
+            finally:
+                phone["busy"].release()
+        threading.Thread(target=send, args=(dict(phone["has"]),), daemon=True).start()
 
     def updated():
         """amarchy changed on disk, or is installed from somewhere else now."""
@@ -4428,14 +4513,23 @@ def remote_sync():
                     break
                 if line.strip():
                     try:
-                        remote_update(host, json.loads(line), seen, quiet=fresh)
+                        data = json.loads(line)
+                        remote_update(host, data, seen, quiet=fresh)
                         wait, fresh = 1, False
                     except ValueError:
-                        pass
+                        data = {}
+                    # What the phone app there wears; nothing when it's off.
+                    if isinstance(data, dict) and data:
+                        has = data.get("phone")
+                        if not isinstance(has, dict):
+                            phone["has"] = None
+                        elif has != phone["has"]:
+                            phone.update(has=has, at=0.0)
                 else:       # nothing changed there: still, it was heard from
                     snap = remote_snapshot()
                     if snap.get("online"):
                         write_file(REMOTE_STATE, json.dumps({**snap, "at": time.time()}))
+                look()
             p.terminate()
             try:
                 why = (p.communicate(timeout=5)[1] or "").strip().splitlines()[-1:] or [""]
@@ -4881,8 +4975,10 @@ def cmd_events(args):
     while True:
         if time.time() - projects_at > 10:
             ps, projects_at = projects(), time.time()
-        line = json.dumps({"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(),
-                           "projects": ps})
+        view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps}
+        if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
+            view["phone"] = app_look_stamp()
+        line = json.dumps(view)
         try:
             if line != last:
                 print(line, flush=True)
@@ -5124,6 +5220,209 @@ def push_all(payload):
     if gone:
         app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] not in gone])
     return sent
+
+
+# The app wears your desktop's look. A host has no Omarchy theme of its own:
+# the desktop showing its sessions (amarchy remote) sends the theme they wear
+# there (the amarchy theme, else your Omarchy theme) with its monospace font
+# and Hyprland's rounding (see remote_look), and `amarchy app theme` keeps it
+# here. Until one has, the app wears Omarchy's default, Tokyo Night.
+
+APP_LOOK = APP / "look"                     # look.json and the font it names
+APP_FONTS = {b"\x00\x01\x00\x00": ("ttf", "font/ttf"), b"true": ("ttf", "font/ttf"),
+             b"OTTO": ("otf", "font/otf"), b"wOFF": ("woff", "font/woff"), b"wOF2": ("woff2", "font/woff2")}
+APP_FONT_MAX = 12_000_000       # bytes of one font file
+SIG = re.compile(r"[0-9a-f]{40}")
+
+
+def parse_color(value):
+    """A color the way Omarchy and Hyprland write one (#rrggbb[aa],
+    rgb[a](rrggbb[aa]), rgb[a](r,g,b[,a]), 0xaarrggbb) as (r, g, b, alpha),
+    or None."""
+    v = str(value).strip()
+    m = re.fullmatch(r"#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", v) or \
+        re.fullmatch(r"(?i)rgba?\(([0-9a-f]{6})([0-9a-f]{2})?\)", v)
+    if m:
+        hx, alpha = m.group(1), m.group(2)
+        return (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16), int(alpha, 16) / 255 if alpha else 1.0)
+    m = re.fullmatch(r"(?i)rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)", v)
+    if m:
+        return (*(min(int(x), 255) for x in m.groups()[:3]), min(float(m.group(4) or 1), 1.0))
+    m = re.fullmatch(r"0x([0-9a-fA-F]{2})([0-9a-fA-F]{6})", v)
+    if m:
+        hx = m.group(2)
+        return (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16), int(m.group(1), 16) / 255)
+    return None
+
+
+def css_rgba(c, alpha=1.0):
+    r, g, b, a = c
+    a = round(a * alpha, 3)
+    return f"#{r:02x}{g:02x}{b:02x}" if a >= 1 else f"rgb({r} {g} {b} / {a})"
+
+
+def qt_darker(c, factor):
+    """Qt's darker(): the same hue and saturation, its HSV value divided by
+    factor (what the shell dims text with)."""
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c[:3]))
+    return (*(round(x * 255) for x in colorsys.hsv_to_rgb(h, s, v / factor)), c[3])
+
+
+def app_look_vars(colors, shell, rounding):
+    """The app's CSS variables from a theme's colors.toml and shell.toml (as
+    dicts): the same choices the Omarchy shell makes for its menus, popups
+    and controls, so the app reads like them."""
+    def section(name):
+        v = shell.get(name)
+        return v if isinstance(v, dict) else {}
+
+    def number(name, key, default):
+        v = section(name).get(key, default)
+        return min(max(float(v), 0.0), 1.0) if isinstance(v, (int, float)) else default
+
+    def colors_of(spec):
+        """A shell value's colors and angle: a color, a Hyprland gradient
+        ("c1 c2 45deg"), or a reference to one ("hyprland.active-border")."""
+        if isinstance(spec, str) and re.fullmatch(r"[\w-]+\.[\w-]+", spec.strip()):
+            ref, key = spec.strip().split(".")
+            spec = section(ref).get(key)
+        if not isinstance(spec, str):
+            return [], None
+        angle = next((float(p[:-3]) for p in spec.split() if re.fullmatch(r"-?\d+(\.\d+)?deg", p)), None)
+        return [c for c in (parse_color(p) for p in spec.split() if not p.endswith("deg")) if c], angle
+
+    def color(name, key, fallback):
+        found = colors_of(section(name).get(key))[0]
+        return found[0] if found else fallback
+
+    def base(key, fallback):
+        return parse_color(colors.get(key, "")) or parse_color(fallback)
+
+    bg = color("menu", "background", base("background", "#1a1b26"))
+    fg = color("menu", "text", base("foreground", "#a9b1d6"))
+    accent = base("accent", "#7aa2f7")
+    border, angle = colors_of(section("popups").get("border", "hyprland.active-border"))
+    border = border or [accent]
+    # Hyprland's 0deg runs left to right, CSS's bottom to top.
+    gradient = (f"linear-gradient({round(90 - (angle or 0), 2)}deg, {', '.join(css_rgba(c) for c in border)})"
+                if len(border) > 1 else css_rgba(border[0]))
+    controls = section("controls")
+    light = colors.get("mode") == "light" if colors.get("mode") in ("light", "dark") \
+        else sum(bg[:3]) / 3 > 140
+    out = {
+        "bg": css_rgba(bg),
+        "fg": css_rgba(fg),
+        "dim": css_rgba(qt_darker(fg, 1.4)),
+        "accent": css_rgba(accent),
+        "line": css_rgba(fg, 0.12),
+        "rule": css_rgba(fg, 0.2),
+        "sel-bg": css_rgba(color("menu", "selected-background", fg), number("menu", "selected-background-alpha", 0.08)),
+        "sel-text": css_rgba(color("menu", "selected-text", accent)),
+        "sel-border": css_rgba(color("menu", "selected-border", fg), number("menu", "selected-border-alpha", 0.25)),
+        "menu-border": css_rgba(color("menu", "border", fg), number("menu", "border-alpha", 1.0)),
+        "popup-border": gradient,
+        "popup-border-solid": css_rgba(border[0]),
+        "scrim": css_rgba(color("menu", "scrim", bg), number("menu", "scrim-alpha", 0.5)),
+        "control-fill": css_rgba(fg, number("controls", "normal-fill-alpha", 0.04)),
+        "control-border": css_rgba(color("controls", "normal-border", fg), number("controls", "normal-border-alpha", 0.4)),
+        "control-hover": css_rgba(fg, number("controls", "hover-cursor-fill-alpha", 0.08)),
+        "control-selected": css_rgba(color("controls", "selected-color", fg),
+                                     number("controls", "selected-fill-alpha", 0.18)),
+        "control-pressed": css_rgba(fg, number("controls", "pressed-fill-alpha", 0.22)),
+        "radius": f"{rounding}px",
+    }
+    for key, fallback in (("red", "#f7768e"), ("yellow", "#e0af68"), ("green", "#9ece6a"), ("blue", "#7aa2f7"),
+                          ("magenta", "#ad8ee6"), ("cyan", "#449dab"), ("orange", "#eb927b"),
+                          ("selection", "#292e42"), ("dark_background", "#13141c"),
+                          ("lighter_background", "#24283b")):
+        out[key.replace("_", "-")] = css_rgba(base(key, fallback))
+    return out, "light" if light else "dark"
+
+
+def app_look():
+    """What the app wears, as the last desktop sent it, or None."""
+    try:
+        look = json.loads((APP_LOOK / "look.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return look if isinstance(look, dict) and isinstance(look.get("vars"), dict) else None
+
+
+def app_look_stamp():
+    """Which look the app wears (it changes with each one sent), for the
+    host's events and the app's list."""
+    look = app_look() or {}
+    return {"look": look.get("look", ""), "font": look.get("font", "")}
+
+
+def app_theme(data):
+    """Keep the look a desktop sent (`amarchy app theme`, JSON on stdin; see
+    remote_look). Everything in it is checked: what the app is sent are
+    colors this parsed and font files that are what they say."""
+    import tomllib
+    if not isinstance(data, dict) or not SIG.fullmatch(str(data.get("look", ""))):
+        return fail("app theme: expects the look as JSON, from the desktop")
+    try:
+        colors = tomllib.loads(str(data.get("colors", "")))
+        shell = tomllib.loads(str(data.get("shell", "")))
+    except tomllib.TOMLDecodeError as e:
+        return fail(f"app theme: its colors don't read: {e}")
+    rounding = data.get("rounding")
+    rounding = min(max(int(rounding), 0), 40) if isinstance(rounding, (int, float)) else 0
+    variables, mode = app_look_vars(colors, shell, rounding)
+    name = re.sub(r"[^\w .'+-]", "", str(data.get("name", "")))[:60]
+    APP_LOOK.mkdir(parents=True, exist_ok=True)
+    old = app_look() or {}
+    look = {"look": data["look"], "name": name, "mode": mode, "vars": variables,
+            "font": old.get("font", ""), "family": old.get("family", ""), "nerd": old.get("nerd", False),
+            "files": old.get("files", {})}
+    font = data.get("font")
+    if isinstance(font, dict) and SIG.fullmatch(str(font.get("sig", ""))) and font["sig"] != old.get("font"):
+        files = {}
+        for weight in ("regular", "bold"):
+            try:
+                raw = base64.b64decode(font.get(weight) or "", validate=True)
+            except ValueError:
+                raw = b""
+            kind = APP_FONTS.get(raw[:4])
+            if not kind or len(raw) > APP_FONT_MAX:
+                continue
+            name_on_disk = f"{font['sig'][:12]}-{weight}.{kind[0]}"
+            write_file(APP_LOOK / name_on_disk, raw)
+            files[weight] = name_on_disk
+        family = re.sub(r"[^\w .-]", "", str(font.get("family", "")))[:64]
+        look.update(font=font["sig"] if files else "", family=family if files else "",
+                    nerd=bool(files) and "nerd" in family.lower(), files=files)
+    write_file(APP_LOOK / "look.json", json.dumps(look, indent=1))
+    keep = set(look["files"].values()) | {"look.json"}
+    for f in APP_LOOK.iterdir():
+        if f.name not in keep:
+            f.unlink(missing_ok=True)
+    return 0
+
+
+def app_theme_css():
+    """/theme.css: the look over app.css's own (Tokyo Night), and the font."""
+    look = app_look()
+    if not look:
+        return "/* Omarchy's default look until a desktop sends yours (amarchy remote). */\n"
+    out = [f"/* {look.get('name') or 'Your theme'}, as your desktop wears it. */", ":root {"]
+    out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
+            and re.fullmatch(r"[\w#().,/% -]+", str(v))]
+    out.append(f"  color-scheme: {'light' if look.get('mode') == 'light' else 'dark'};")
+    files = look.get("files") or {}
+    if files:
+        out.append('  --font: "amarchy-mono", ui-monospace, Menlo, monospace;')
+    out.append("}")
+    for weight, f in files.items():
+        kind = Path(f).suffix.lstrip(".")
+        fmt = {"ttf": "truetype", "otf": "opentype"}.get(kind, kind)
+        out.append(f'@font-face {{ font-family: "amarchy-mono"; src: url("/font/{f}") format("{fmt}"); '
+                   f'font-weight: {700 if weight == "bold" else 400}; font-display: swap; }}')
+    if "regular" in files and "bold" not in files:      # one file: the browser makes the bold
+        out[-1] = out[-1].replace("font-weight: 400", "font-weight: 100 900")
+    return "\n".join(out) + "\n"
 
 
 def tailscale_status():
@@ -5512,7 +5811,7 @@ def app_watch(st):
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
             ss = session_view()
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
-                    "sort": list_sort()}
+                    "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd"))}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -5565,12 +5864,12 @@ def app_handler(st, users, address):
         def log_error(self, fmt, *args):
             print("amarchy app: " + fmt % args, file=sys.stderr)
 
-        def head(self, code, ctype, extra=()):
+        def head(self, code, ctype, extra=(), cache="no-cache"):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             for k, v in (("Content-Security-Policy", APP_CSP), ("X-Content-Type-Options", "nosniff"),
                          ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
-                         ("Cache-Control", "no-cache"), *extra):
+                         ("Cache-Control", cache), *extra):
                 self.send_header(k, v)
 
         def send(self, code, body, ctype="application/json"):
@@ -5636,6 +5935,20 @@ def app_handler(st, users, address):
                 except (ValueError, OSError):
                     return self.error(400, "bad offset")
                 return self.send(200, {"items": items, "start": start})
+            if path == "/theme.css":
+                return self.send(200, app_theme_css().encode(), "text/css; charset=utf-8")
+            m = re.fullmatch(r"/font/([0-9a-f]{12}-(?:regular|bold)\.(ttf|otf|woff2?))", path)
+            if m:
+                f = APP_LOOK / m.group(1)
+                if not f.is_file():
+                    return self.error(404, "not found")
+                data = f.read_bytes()
+                # Named after the font it is: the same name is always the same file.
+                self.head(200, f"font/{m.group(2)}", [("Content-Length", str(len(data)))],
+                          cache="max-age=31536000, immutable")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             return self.page(path)
 
         def page(self, path):
@@ -5783,7 +6096,7 @@ def app_handler(st, users, address):
 
         def push(self, data):
             if self.path == "/api/push/test":
-                n = push_all({"title": "amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+                n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
                 return self.send(200, {"sent": n})
             endpoint = data.get("endpoint")
             if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
@@ -5948,6 +6261,11 @@ def cmd_app(args):
     what = args[0] if args else "--status"
     if what == "serve":
         return app_serve()
+    if what == "theme":
+        try:
+            return app_theme(json.loads(sys.stdin.read()))
+        except ValueError:
+            return fail("app theme: expects the look as JSON, from the desktop")
     if what == "on":
         return app_on()
     if what == "off":
@@ -5955,7 +6273,7 @@ def cmd_app(args):
     if what == "--test":
         if not app_subscriptions():
             return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
-        n = push_all({"title": "amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+        n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
         print(f"sent to {n} of {len(app_subscriptions())}")
         return 0 if n else 1
     if what == "--status":
