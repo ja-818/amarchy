@@ -20,7 +20,8 @@
 #                            for your desktops (amarchy remote): command + skill,
 #                            a wl-paste that pastes from your desktop, and a
 #                            rec that is the phone's microphone while you dictate
-#                            (and the phone app, once you turn it on: amarchy app on)
+#                            (and the phone app, once you turn it on: amarchy app on),
+#                            and a timer that keeps it up to date (amarchy update)
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
@@ -203,6 +204,8 @@ if ((uninstall)); then
   rm -f "$plugin_dir" "$theme_hook"
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
   rm -f "$units/amarchy-sleep.timer" "$units/amarchy-sleep.service"
+  systemctl --user disable --now amarchy-update.timer >/dev/null 2>&1 || true
+  rm -f "$units/amarchy-update.timer" "$units/amarchy-update.service"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   # Only our own link (to this checkout or the one installed): a skill of the
   # same name the user wrote stays.
@@ -270,6 +273,37 @@ if ((host)); then
   # What makes it a host, also with Hyprland installed (amarchy reads it).
   mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"
   touch "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
+  # amarchy keeps itself up to date here (amarchy update --auto), every 5
+  # minutes: what's shipped to GitHub reaches the host, and from it its
+  # desktops, without anyone running this again.
+  mkdir -p "$units"
+  cat >"$units/amarchy-update.service" <<UNIT
+# Installed by amarchy ($repo/install.sh --host); removed by its --uninstall.
+[Unit]
+Description=Update amarchy to the latest on GitHub
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=$bin_dir:$PATH
+ExecStart=$bin_dir/amarchy update --auto
+UNIT
+  cat >"$units/amarchy-update.timer" <<UNIT
+# Installed by amarchy ($repo/install.sh --host); removed by its --uninstall.
+[Unit]
+Description=Update amarchy to the latest on GitHub, every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now amarchy-update.timer >/dev/null 2>&1 ||
+    say "Couldn't start the update timer (systemctl --user enable --now amarchy-update.timer)"
   # The phone app, if it's on, runs from the checkout installed now.
   systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
   say "amarchy installed as a host."

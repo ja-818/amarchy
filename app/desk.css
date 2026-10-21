@@ -1,7 +1,8 @@
 /* amarchy in a browser on your computer (desk.js): laid out as on your
    Omarchy desktop. Your sessions in the gap left of Claude's column (900px,
-   centered), the session's terminal in the gap on its right, each a window
-   with Hyprland's border and rounding over your wallpaper; the bar on top.
+   centered), the session's terminal in the gap on its right, each a
+   see-through panel from the top of the screen to the bottom over your
+   wallpaper, with no bar and no borders.
    The terminals' colors are your theme's (theme.css puts them over these,
    Tokyo Night's). */
 
@@ -17,8 +18,6 @@
   --term-12: #7da6ff; --term-13: #bb9af7; --term-14: #0db9d7; --term-15: #acb0d0;
   --term-alpha: 0.96;
   --term-pad: 14px 14px;          /* inside a terminal window, as Omarchy's terminals have it */
-  --border: 2px;                  /* Hyprland's window border */
-  --inactive-border: rgb(89 89 89 / 0.67);
 }
 
 /* ---- the page */
@@ -26,7 +25,7 @@
 body.desk { overflow: hidden; }
 body.desk::before { background-image: var(--wallpaper-wide, var(--wallpaper, none)); }
 body.desk #root { background: transparent; padding: 0; height: 100vh; }
-body.desk .toast { top: 34px; right: 10px; left: auto; max-width: 420px; }
+body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 body.desk .toast.action { cursor: pointer; }
 
 .desk-root {
@@ -40,24 +39,22 @@ body.desk .toast.action { cursor: pointer; }
   font-size: var(--body);
 }
 
-/* The bar (Waybar's place): the Ⓐ, lit when a session needs you; the clock. */
-.topbar {
-  flex: none;
-  height: 26px;
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-  padding: 0 8px;
-  background: var(--bg);
-  font-size: 12px; font-weight: 700;
-  user-select: none;
+/* No bar: the windows go from the top of the screen to the bottom. In zen
+   mode, with no list, an Ⓐ in the corner opens your sessions (lit when one
+   needs you); a red dot on it, and on the menu's, while you dictate. */
+.ball {
+  position: fixed; z-index: 7; top: 0; left: 8px;
+  display: none;
+  width: 30px; height: 30px; border-radius: var(--radius);
+  font-size: 21px; line-height: 30px; text-align: center;
+  color: var(--fg);
 }
-.topbar .left, .topbar .right { display: flex; align-items: center; gap: 10px; }
-.topbar .right { justify-content: flex-end; }
-.topbar .host { color: var(--dim); font-weight: 400; }
-.topbar .ball { font-size: 15px; line-height: 26px; padding: 0 4px; color: var(--fg); }
-.topbar .ball.lit { color: var(--accent); }
-.topbar .bar-btn { font-size: 13px; padding: 0 4px; color: var(--fg); }
-.topbar .ball:hover, .topbar .bar-btn:hover { color: var(--accent); }
-body.dictating .topbar .ball::after { content: " ●"; color: var(--red); font-size: 10px; }
+.zen .ball { display: block; }
+.ball:hover, .ball.lit, .panel-buttons .brand.lit .a { color: var(--accent); }
+body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
+  content: "●"; position: absolute; top: 2px; right: 0; color: var(--red); font-size: 9px; line-height: 1;
+}
+.panel-buttons .brand .a { position: relative; }
 
 .stage { position: relative; flex: 1; min-height: 0; }
 
@@ -72,9 +69,11 @@ body.dictating .topbar .ball::after { content: " ●"; color: var(--red); font-s
 }
 .zen .panel { display: none; }
 .panel-buttons { display: flex; gap: 6px; flex: none; }
+/* As on your desktop: the menu as wide as its name, New session the rest. */
 .panel-buttons .control { min-height: 32px; padding: 4px 10px; gap: 6px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
-.panel-buttons .control:first-child { flex: 1; min-width: 0; justify-content: flex-start; }
-.panel-buttons .a { font-size: 15px; }
+.panel-buttons .brand { flex: none; }
+.panel-buttons .control:last-child { flex: 1; min-width: 0; justify-content: center; }
+.panel-buttons .a { font-size: var(--title); line-height: 1; }
 .desk .control:hover { background: var(--control-hover); }
 .desk .toolbar { padding: 0; flex: none; }
 .desk .searchbox { height: 34px; }
@@ -103,14 +102,13 @@ body.dictating .topbar .ball::after { content: " ●"; color: var(--red); font-s
   width: var(--column);
   display: flex; flex-direction: column;
 }
+/* Windows without borders: see-through panels from top to bottom, as on
+   your desktop. */
 .window {
   position: relative;
   min-height: 0;
-  border: var(--border) solid var(--inactive-border);
-  border-radius: var(--radius);
   overflow: hidden;
 }
-.window.active { border-color: var(--popup-border-solid); }
 .window.claude { flex: 1; }
 .window.term {
   position: absolute; top: 0; bottom: 0; right: 0;
@@ -167,7 +165,7 @@ body.dictating .topbar .ball::after { content: " ●"; color: var(--red); font-s
 .bar-shade { position: fixed; inset: 0; z-index: 8; }
 .bar-drop {
   position: fixed; z-index: 9;
-  top: 30px; left: 8px;
+  top: 8px; left: 8px;
   width: min(380px, calc(100vw - 16px));
   max-height: calc(100vh - 60px);
   display: flex; flex-direction: column; gap: 6px;

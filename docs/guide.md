@@ -380,7 +380,15 @@ each session's Claude is told to listen on the host's Tailscale address and
 give you `http://<its tailscale name>:<port>`, so only your own devices reach
 it. Without Tailscale it serves on localhost only, and you forward the port
 (`ssh -L 3000:localhost:3000 <host>`). Set `NAME=` and `BIND=` in
-`~/.config/amarchy/host` on the host to change either. amarchy opens no port
+`~/.config/amarchy/host` on the host to change either.
+
+The host keeps amarchy up to date by itself: every 5 minutes a timer
+(`amarchy-update.timer`, from `install.sh --host`) runs `amarchy update`,
+which pulls what was shipped to GitHub into the checkout it runs from (only
+when it's on main with nothing uncommitted) and installs it, and your
+desktops then update themselves to the host's version. Open app pages offer
+to load the new one (one you're not looking at just does). `AUTO_UPDATE=off`
+in `~/.config/amarchy/host` stops it; `amarchy update` does it now. amarchy opens no port
 of its own and everything goes through ssh (the phone app, once you turn it on,
 listens on localhost only, behind Tailscale): **keep the host's ssh on a private
 network too**, not the internet. Your desktop keeps one ssh connection open to
@@ -492,9 +500,10 @@ The same app (`amarchy app`, same address) on a computer's wide screen is
 amarchy as your desktop lays it out, so a Mac or any other computer with
 Tailscale and a browser can use the host's sessions without Omarchy: your
 sessions on the left, the session's Claude in the 900px column in the middle
-and its terminal on the right, the bar on top with the Ⓐ (lit when one needs
-you), zen mode with the strip with the session's name, all over your wallpaper
-in your theme and font. Claude and the terminal are the real thing: terminals
+and its terminal on the right, each a see-through panel from the top of the
+window to the bottom with no bar and no borders, zen mode with the strip with
+the session's name (and an Ⓐ in the corner for your sessions, lit when one
+needs you), all over your whole wallpaper in your theme and font. Claude and the terminal are the real thing: terminals
 (xterm.js) attached to the session's tmux on the host as your desktop's
 windows are, so the desktop, the phone and the browser show the same session
 at once (a session's window takes the size of whichever of them showed it or
@@ -503,8 +512,7 @@ your clipboard, as tmux does there), resizing and the Nerd Font icons work as
 in your desktop's terminal; links open in a new tab.
 
 It picks the layout by the window: a wide one with a mouse gets this, a
-phone the list and conversation. Settings (the gear, or Settings in the
-amarchy menu) can fix it to either, change the terminals' font size (they
+phone the list and conversation. Settings (in the amarchy menu) can fix it to either, change the terminals' font size (they
 start at your desktop terminal's), and turn on WebGL drawing (faster; the DOM
 is the default, since a headless test drew WebGL's text too big at 2x). On
 the phone, a session's ••• menu shows **Claude's terminal**, the real one, on
@@ -577,10 +585,11 @@ again, and keeps a backup of every file of yours it changes
   (`~/.claude/skills/amarchy`) and the sleep timer (`amarchy-sleep.timer`).
 
 On a machine that keeps sessions for your desktops, `install.sh --host` only
-links the command and the skill (see [Remote sessions](#remote-sessions)), and
+links the command and the skill and adds a timer that keeps it up to date
+(see [Remote sessions](#remote-sessions)), and
 `amarchy app on` adds the phone app's service (see [Your phone](#your-phone)).
 
-Update with `git pull` and `install.sh` again. `install.sh --uninstall` takes
+Update with `amarchy update` (or `git pull` and `install.sh` again). `install.sh --uninstall` takes
 all of that out again; your worktrees and `~/.local/state/amarchy` are left
 alone.
 

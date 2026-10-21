@@ -405,7 +405,7 @@ async function copyText(text) {
     await navigator.clipboard.writeText(text);
   } catch (e) {
     toast("Copied in the terminal: click here to copy it here too");
-    const t = document.querySelector(".toast");
+    const t = document.querySelector(".toast:not(.stay)");
     if (t) {
       t.classList.add("action");
       t.addEventListener("click", () => { navigator.clipboard.writeText(text).catch(() => {}); t.remove(); }, { once: true });
@@ -534,8 +534,9 @@ function deskStart() {
                                     onclick: () => { desk.organize.hidden = !desk.organize.hidden; deskList(); } }, glyph("organize"));
   desk.panel = h("aside", { class: "panel" },
     h("div", { class: "panel-buttons" },
-      h("button", { class: "control", onclick: () => deskMenu() }, h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
-      h("button", { class: "control", onclick: () => newSession() }, glyph("plus"), "New…")),
+      desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
+                     h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
+      h("button", { class: "control", title: "Ctrl+Alt+N", onclick: () => newSession() }, glyph("plus"), "New session")),
     h("div", { class: "toolbar" },
       h("label", { class: "searchbox" }, glyph("search"), desk.search,
         h("span", { class: "hint" }, "Ctrl+Alt+S")),
@@ -554,18 +555,11 @@ function deskStart() {
   }
   desk.empty = h("div", { class: "desk-empty", hidden: true });
   desk.column = h("main", { class: "column" }, desk.strip, desk.claudeWin, desk.empty);
-  desk.ball = h("button", { class: "ball", title: "Your sessions (right click: new session)",
+  // In zen mode, with no list, the way to your sessions: the Ⓐ in the corner.
+  desk.ball = h("button", { class: "ball", title: "Your sessions (Ctrl+Alt+A; right click: new session)",
                             onclick: () => barDrop(), oncontextmenu: (e) => { e.preventDefault(); newSession(); } }, "Ⓐ");
-  desk.clock = h("div", { class: "clock" });
-  desk.bar = h("header", { class: "topbar" },
-    h("div", { class: "left" }, desk.ball, h("span", { class: "host" })),
-    desk.clock,
-    h("div", { class: "right" },
-      h("button", { class: "bar-btn", title: "Settings", onclick: () => openSettings() }, glyph("gear"))));
-  desk.el = h("div", { class: "desk-root" }, desk.bar, h("div", { class: "stage" }, desk.panel, desk.column, desk.termWin));
+  desk.el = h("div", { class: "desk-root" }, h("div", { class: "stage" }, desk.panel, desk.column, desk.termWin), desk.ball);
   root.replaceChildren(desk.el);
-  tick();
-  setInterval(tick, 10000);
   window.addEventListener("keydown", deskKeys, true);
   window.addEventListener("resize", () => deskLayout());
   window.addEventListener("focus", () => { micFocus(); markSeen(); });
@@ -574,12 +568,6 @@ function deskStart() {
   setInterval(markSeen, 10000);
   deskLayout();
   deskRoute();
-}
-
-function tick() {
-  const d = new Date();
-  desk.clock.textContent = d.toLocaleDateString(undefined, { weekday: "long" }) + " " +
-    d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 // Zen when you said so, or when the window has no room beside the column.
@@ -671,8 +659,7 @@ function deskList() {
   chime(v);
   const waiting = v ? v.sessions.filter((s) => s.status === "waiting").length : 0;
   document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
-  desk.ball.classList.toggle("lit", waiting > 0);
-  desk.bar.querySelector(".host").textContent = (v && v.hostname) || "";
+  for (const b of [desk.brand, desk.ball]) b.classList.toggle("lit", waiting > 0);
   // The strip above Claude in zen mode: what it is, project · branch on hover.
   const s = row(desk.current);
   desk.strip.replaceChildren(...(s ? [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"),

@@ -130,7 +130,7 @@ async function api(path, body) {
 
 let toastTimer = null;
 function toast(text) {
-  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  document.querySelectorAll(".toast:not(.stay)").forEach((t) => t.remove());
   const t = h("div", { class: "toast", role: "status" }, text);
   document.body.append(t);
   clearTimeout(toastTimer);
@@ -251,6 +251,18 @@ function md(text) {
 
 // ---- the list
 
+// amarchy was updated on the host (its app came back with other pages):
+// the new ones, at once if you're not looking, else when you click.
+function updated() {
+  if (app.reloading) return;
+  app.reloading = true;
+  if (document.hidden) return document.addEventListener("visibilitychange", () => location.reload(), { once: true });
+  const t = h("div", { class: "toast action stay", role: "status", onclick: () => location.reload() },
+              "Amarchy was updated: click here to load it");
+  document.body.append(t);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) location.reload(); });
+}
+
 function openList() {
   if (app.list) return;
   const es = new EventSource("/api/events");
@@ -262,6 +274,8 @@ function openList() {
     app.online = true;
     app.failed = "";
     app.nerd = !!app.view.nerd;
+    if (app.view.build && app.build && app.view.build !== app.build) updated();
+    app.build = app.build || app.view.build;
     wearLook(app.view.look);
     badge();
     refresh();

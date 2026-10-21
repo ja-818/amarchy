@@ -114,6 +114,12 @@ Tailscale network):
   amarchy app [--status]                whether it's on, where, and how many phones it notifies
   amarchy app --test                    send each phone a test notification
 
+Updating:
+  amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
+                                        runs from (when it's on main, with nothing uncommitted) and install it.
+                                        A host does it by itself every 5 minutes (AUTO_UPDATE=off in
+                                        ~/.config/amarchy/host to stop that); a desktop follows its host
+
 Plumbing:
   amarchy ui                            state for the Omarchy shell plugin (JSON)
   amarchy layout                        resize the zen column for the current monitor
@@ -4665,6 +4671,7 @@ def phone_look():
 
 
 _wallpaper_failed = set()
+_wide_sent = set()          # wallpapers sent again for a host that had them only cut for a phone
 PHONE_WALLPAPER = "1290x2796"   # an iPhone's screen in pixels, upright: the wallpaper is cut to it
 DESK_WALLPAPER = "2880x1800"    # a laptop's screen in pixels: the wallpaper at most this, for a browser
 
@@ -4707,8 +4714,14 @@ def remote_look(host, has):
     # to size isn't tried again until it changes.
     if "wallpaper" not in has or wallpaper["sig"] in _wallpaper_failed:
         wallpaper = {"path": "", "sig": has.get("wallpaper", "")}
-    if has.get("look") == look["sig"] and has.get("font") == font["sig"] and has.get("wallpaper", "") == wallpaper["sig"]:
+    # One the host has without the cut for a computer's screen (sent by an
+    # amarchy from before it): again, once.
+    again = bool(wallpaper["path"]) and has.get("wide") is False and wallpaper["sig"] not in _wide_sent
+    if has.get("look") == look["sig"] and has.get("font") == font["sig"] and has.get("wallpaper", "") == wallpaper["sig"] \
+            and not again:
         return True
+    if again:
+        _wide_sent.add(wallpaper["sig"])
     data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding", "terminal", "sound")}}
     if has.get("font") != font["sig"]:
         data["font"] = {"sig": font["sig"], "family": font["family"]}
@@ -4717,7 +4730,7 @@ def remote_look(host, has):
                 data["font"][weight] = base64.b64encode(Path(path).read_bytes()).decode()
             except OSError:
                 pass
-    if has.get("wallpaper", "") != wallpaper["sig"]:
+    if has.get("wallpaper", "") != wallpaper["sig"] or again:
         image = phone_wallpaper(wallpaper["path"]) if wallpaper["path"] else None
         if wallpaper["path"] and not image:
             _wallpaper_failed.add(wallpaper["sig"])
@@ -4768,19 +4781,22 @@ def amarchy_version():
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def self_update(version):
-    """Bring this desktop's amarchy up to the host's: version is the commit
-    the host runs, shipped to origin's main. Only when amarchy runs from a
-    checkout of main with nothing uncommitted (not a session's worktree, not
-    work in progress): pull it, run its install.sh and restart the shell, as
-    you would. Says what it did, or why it didn't."""
+def self_update(version=None):
+    """Bring amarchy here up to origin's main: version, the commit the host
+    runs (a desktop following its host, see remote_sync), or None for the
+    latest (`amarchy update`, which a host's timer runs). Only when amarchy
+    runs from a checkout of main with nothing uncommitted (not a session's
+    worktree, not work in progress): pull it, run its install.sh (--host on a
+    host) and restart the shell, as you would. Says what it did, or why it
+    didn't; "not updated: ..." when it couldn't."""
     repo = Path(SELF).parent.parent
     env = {**clean_env(), "GIT_TERMINAL_PROMPT": "0"}
 
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env,
                               stdin=subprocess.DEVNULL, timeout=120)
-    if not re.fullmatch(r"[0-9a-f]{40}", version) or git("rev-parse", "HEAD").stdout.strip() == version:
+    head = git("rev-parse", "HEAD").stdout.strip()
+    if version is not None and (not re.fullmatch(r"[0-9a-f]{40}", version) or head == version):
         return "up to date"
     if git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
         return f"not updated: {repo} isn't on main"
@@ -4788,22 +4804,44 @@ def self_update(version):
         return f"not updated: {repo} has uncommitted changes"
     if git("fetch", "--quiet", "origin", "main").returncode:
         return "not updated: couldn't fetch origin"
-    if git("merge-base", "--is-ancestor", version, "origin/main").returncode:
+    if version and git("merge-base", "--is-ancestor", version, "origin/main").returncode:
         return "not updated: the host runs a commit that isn't on origin's main"
+    if head == git("rev-parse", "origin/main").stdout.strip():
+        return "up to date"
     if git("merge-base", "--is-ancestor", "HEAD", "origin/main").returncode:
         return "not updated: main here has commits origin doesn't"
     before = git("rev-parse", "--short", "HEAD").stdout.strip()
     if git("merge", "--ff-only", "--quiet", "origin/main").returncode:
         return "not updated: couldn't fast-forward main"
-    r = subprocess.run([str(repo / "install.sh")], capture_output=True, text=True, env=env,
-                       stdin=subprocess.DEVNULL, timeout=300)
+    r = subprocess.run([str(repo / "install.sh"), *(["--host"] if HOST_MODE else [])], capture_output=True,
+                       text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
     if r.returncode:
-        return f"updated main, but install.sh failed: {(r.stderr or r.stdout).strip().splitlines()[-1:]}"
-    if shutil.which("omarchy-restart-shell"):
+        return f"not updated: main is at origin's, but install.sh failed: {(r.stderr or r.stdout).strip().splitlines()[-1:]}"
+    if not HOST_MODE and shutil.which("omarchy-restart-shell"):
         sh("omarchy-restart-shell")
     after = git("rev-parse", "--short", "HEAD").stdout.strip()
-    notify("amarchy updated", f"{before} → {after}, the version your host runs")
+    notify("amarchy updated", f"{before} → {after}" + (", the version your host runs" if version else ""))
     return f"updated {before} → {after}"
+
+
+def cmd_update(args):
+    """`amarchy update`: to the latest amarchy on GitHub (origin's main).
+    --auto: as the timer a host runs it (`install.sh --host`), every few
+    minutes: one at a time, quiet when there's nothing new, and not at all
+    with AUTO_UPDATE=off in ~/.config/amarchy/host."""
+    auto = "--auto" in args
+    if auto and (host_setting("AUTO_UPDATE") or "").lower() in ("off", "no", "0", "false"):
+        return 0
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "update.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return 0 if auto else fail("already updating")
+        said = self_update()
+    if not (auto and said == "up to date"):
+        print(f"amarchy: {said}", file=sys.stderr if said.startswith("not updated") else sys.stdout)
+    return 1 if said.startswith("not updated") else 0
 
 
 def remote_sync():
@@ -6017,11 +6055,10 @@ def app_look_stamp():
     # One kept before it had the terminals' colors says it has none, so the
     # desktop sends it again.
     sig = look.get("look", "") if "term-0" in (look.get("vars") or {}) else ""
-    # And one kept before it had the wallpaper for a computer's screen.
-    wall = look.get("wallpaper", "")
-    if wall and "wallpaper-wide" not in (look.get("files") or {}) and look.get("wide") is not False:
-        wall = ""
-    return {"look": sig, "font": look.get("font", ""), "wallpaper": wall}
+    # wide: whether it has the wallpaper for a computer's screen too; a
+    # desktop that makes one sends it again when not (see remote_look).
+    return {"look": sig, "font": look.get("font", ""), "wallpaper": look.get("wallpaper", ""),
+            "wide": "wallpaper-wide" in (look.get("files") or {})}
 
 
 def app_theme(data):
@@ -6045,7 +6082,7 @@ def app_theme(data):
     term = data.get("terminal") if isinstance(data.get("terminal"), dict) else {}
     size, alpha = term.get("size"), term.get("alpha")
     sound = data.get("sound")
-    look = {"look": data["look"], "name": name, "mode": mode, "vars": variables, "wide": old.get("wide"),
+    look = {"look": data["look"], "name": name, "mode": mode, "vars": variables,
             "terminal": {"size": min(max(float(size), 5.0), 40.0) if isinstance(size, (int, float)) else None,
                          "alpha": min(max(float(alpha), 0.0), 1.0) if isinstance(alpha, (int, float)) else None},
             "sound": sound if isinstance(sound, str) and (sound == "off" or sound in CHIMES) else "",
@@ -6071,15 +6108,10 @@ def app_theme(data):
                     nerd=bool(files) and "nerd" in family.lower())
     # The wallpaper: "" for none (a desktop without one), else its sig and the image.
     wall = data.get("wallpaper")
-    # A desktop from before the wide one (for a computer's browser) sends
-    # none: it isn't asked for it again.
-    if isinstance(wall, dict) and "wide" not in wall:
-        look["wide"] = False
-    if isinstance(wall, dict) and (wall.get("sig", None) != old.get("wallpaper") or "wide" in wall):
+    if isinstance(wall, dict) and (wall.get("sig", None) != old.get("wallpaper") or wall.get("wide")):
         look["files"].pop("wallpaper", None)
         look["files"].pop("wallpaper-wide", None)
         look["wallpaper"] = ""
-        look["wide"] = "wide" in wall
         try:
             raw = base64.b64decode(wall.get("image") or "", validate=True)
         except ValueError:
@@ -7046,6 +7078,20 @@ def mic_record(conn, args):
 
 # ---- the server
 
+def app_build():
+    """Which app pages this server has (a hash of its files): open pages
+    that loaded others offer to reload once amarchy was updated."""
+    h = hashlib.sha1()
+    for f in sorted(APP_PAGES.rglob("*")):
+        if f.is_file():
+            h.update(f.relative_to(APP_PAGES).as_posix().encode() + b"\0")
+            try:
+                h.update(f.read_bytes())
+            except OSError:
+                pass
+    return h.hexdigest()[:12]
+
+
 class AppState:
     """What every connection shares: the list as last read, the moments it
     changed, and which sessions you're looking at on the phone."""
@@ -7058,6 +7104,7 @@ class AppState:
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
         self.clips = {}         # page -> what was pasted in that browser, for its Claude (BrowserClip)
         self.lock = threading.Lock()
+        self.build = app_build()
 
     def row(self, sid):
         return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
@@ -7079,7 +7126,7 @@ def app_watch(st):
                     s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
-                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound()}
+                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound(), "build": st.build}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -8149,6 +8196,7 @@ OPTIONS = {
     "remote": ({"--status", "--sync"}, set(), set()),
     "events": ({"--once"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
+    "update": ({"--auto"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
     "clipboard": None, "paste": None, "rec": None,
@@ -8323,6 +8371,8 @@ def main(argv):
         return cmd_events(args)
     elif cmd == "app":
         return cmd_app(args)
+    elif cmd == "update" and not [a for a in args if a != "--auto"]:
+        return cmd_update(args)
     else:   # a command it knows, with the wrong number of arguments
         print(usage(ALIASES.get(cmd, cmd)), file=sys.stderr)
         return 1
