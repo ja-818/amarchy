@@ -408,8 +408,9 @@ add to the home screen, made for an iPhone (any phone with a current browser
 works). It shows the list as amarchy does (what each session is about,
 project · branch, needs you / working / idle, priority and groups), and in a
 session, its conversation, a box to send it messages, and Claude's questions
-and permission prompts as buttons. **+** starts a new session on one of the
-host's projects. When a session needs you or is done, the phone gets a
+and permission prompts as buttons. The bar under the list starts a new
+session: say what its Claude should do (tap the project on its left for
+another of the host's projects). When a session needs you or is done, the phone gets a
 notification, at the same moments as the desktop's chime (not for the one
 you're looking at on the phone). Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.
