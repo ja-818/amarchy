@@ -423,6 +423,12 @@ your desktop's, so the phone's list is grouped and sorted as the desktop's,
 and changing it on either changes both. Hold a session down to set its
 priority or close it (from its ••• menu too): it asks first, as the
 desktop does, and says if uncommitted work would go with it. In a
+session, hold the mic button to dictate with Claude Code's own voice mode
+(it has to be on: `/voice`): what the phone hears goes to that session's
+Claude as if you held its key on the desktop, and when you let go the
+transcript comes into the box, to edit and send. (On the host, Claude's
+`rec` is amarchy's, which is the phone's microphone while you dictate and
+the real one the rest of the time, so the desktop's mic works as before.) In a
 session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for

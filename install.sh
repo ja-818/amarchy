@@ -18,7 +18,8 @@
 #   ./install.sh             install / update
 #   ./install.sh --host      on a machine without a desktop that keeps sessions
 #                            for your desktops (amarchy remote): command + skill,
-#                            and a wl-paste that pastes from your desktop
+#                            a wl-paste that pastes from your desktop, and a
+#                            rec that is the phone's microphone while you dictate
 #                            (and the phone app, once you turn it on: amarchy app on)
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 #   ./install.sh --force     either, without asking first when amarchy is
@@ -197,6 +198,7 @@ if ((uninstall)); then
   rm -f "$bin_dir/amarchy" "${XDG_STATE_HOME:-$HOME/.local/state}/amarchy/host"
   # A host's wl-paste (install.sh --host), only if it's ours.
   [[ $(readlink "$bin_dir/wl-paste" 2>/dev/null) == */bin/amarchy-paste ]] && rm -f "$bin_dir/wl-paste"
+  [[ $(readlink "$bin_dir/rec" 2>/dev/null) == */bin/amarchy-rec ]] && rm -f "$bin_dir/rec"
   [[ -f $hypr_conf ]] && drop_load_line
   rm -f "$plugin_dir" "$theme_hook"
   systemctl --user disable --now amarchy-sleep.timer >/dev/null 2>&1 || true
@@ -256,6 +258,13 @@ if ((host)); then
     if ! command -v wl-paste >/dev/null; then
       ln -s "$repo/bin/amarchy-paste" "$bin_dir/wl-paste"
     fi
+  fi
+  # rec for the sessions here, Claude's voice mode: the phone's microphone
+  # while you dictate on the phone, else the real rec, which it then runs (see
+  # "dictation from the phone" in bin/amarchy). Ahead of it on the PATH, so a
+  # Claude that's already running finds it too; never over a rec of your own.
+  if [[ -L $bin_dir/rec ]] || [[ ! -e $bin_dir/rec ]]; then
+    ln -sfn "$repo/bin/amarchy-rec" "$bin_dir/rec"
   fi
   install_skill
   # What makes it a host, also with Hyprland installed (amarchy reads it).

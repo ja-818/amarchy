@@ -402,6 +402,15 @@ th { font-weight: 700; }
 .prompt textarea::placeholder, .field::placeholder { color: var(--dim); }
 .send, .stop { width: 44px; height: 48px; flex: none; display: grid; place-items: center; font-size: 20px; padding: 0; }
 .send { color: var(--accent); }
+/* Hold to dictate: lit while it listens, the bar too. */
+.mic {
+  width: 44px; height: 48px; flex: none; display: grid; place-items: center; font-size: 20px; padding: 0;
+  color: var(--dim);
+  touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.mic.on { color: var(--bg); background: var(--accent); }
+.prompt.listening { border-color: var(--accent); animation: listen 1.2s ease-in-out infinite; }
+@keyframes listen { 50% { border-color: color-mix(in srgb, var(--accent) 40%, transparent); } }
 .send:disabled { color: var(--dim); opacity: 0.6; }
 .send:active:not(:disabled), .stop:active { background: var(--sel-bg); }
 

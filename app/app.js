@@ -15,7 +15,7 @@ const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
   stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
-  organize: "\u{F04BC}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
+  organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
 };
 const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑" };
@@ -28,6 +28,7 @@ const ICONS = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>',
   organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
 };
 
@@ -542,7 +543,10 @@ class SessionView {
     this.sendBtn = h("button", { class: "send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
     this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude",
                                  onclick: () => this.press(["Escape"]) }, glyph("stop"));
-    this.composer = h("div", { class: "prompt" }, this.input, this.stopBtn, this.sendBtn);
+    this.micBtn = h("button", { class: "mic", "aria-label": "Hold to dictate", hidden: !(app.view && app.view.voice) },
+                    glyph("mic"));
+    holdToTalk(this.micBtn, () => this.dictate(), () => this.letGo());
+    this.composer = h("div", { class: "prompt" }, this.input, this.micBtn, this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
@@ -580,6 +584,96 @@ class SessionView {
     if (this.es) this.es.close();
     this.es = null;
     clearInterval(this.seen);
+    this.letGo();
+    micClose();
+  }
+
+  // Claude's own dictation (its voice mode), from the phone's microphone:
+  // while the button is held, what the phone hears goes to the session's
+  // Claude as if its key were held on the desktop; let go, and what Claude
+  // made of it comes into the box, to send from there.
+  async dictate() {
+    if (this.voice) return;
+    const v = this.voice = { held: true, ws: null, queue: [], heard: false };
+    this.listening("Listening…");
+    try {
+      await micOpen();
+    } catch (e) {
+      this.voice = null;
+      this.listening(null);
+      toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
+                                        : `The microphone didn't start: ${e.message}`);
+      return;
+    }
+    if (!v.held) {      // let go already (the first time, while the phone asked about the microphone)
+      this.voice = null;
+      this.listening(null);
+      micRelease();
+      return;
+    }
+    const url = `/api/session/${encodeURIComponent(this.id)}/voice`;
+    const ws = v.ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`);
+    ws.binaryType = "arraybuffer";
+    mic.take = (pcm) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
+      else if (ws.readyState === WebSocket.CONNECTING) v.queue.push(pcm);
+    };
+    ws.onopen = () => {
+      for (const pcm of v.queue) ws.send(pcm);
+      v.queue = [];
+      if (!v.held) this.letGo(true);
+    };
+    ws.onmessage = (e) => {
+      let d = {};
+      try { d = JSON.parse(e.data); } catch (err) { return; }
+      v.heard = true;
+      if (d.state === "transcribing") this.listening("Claude is writing it down…");
+      if (typeof d.text === "string") {
+        ws.send("got");     // it can go from Claude's prompt now
+        const was = this.input.value.replace(/\s+$/, "");
+        this.input.value = was ? `${was} ${d.text}` : d.text;
+        store.set(`draft:${this.id}`, this.input.value);
+        this.grow();
+        this.sendButtons();
+      }
+      if (d.error) toast(d.error);
+    };
+    ws.onclose = async () => {
+      mic.take = null;
+      if (this.voice === v) this.voice = null;
+      this.listening(null);
+      micRelease();
+      if (!v.heard) {     // it didn't take it: ask why
+        try {
+          const r = await fetch(url);
+          const d = await r.json();
+          toast(d.error || "Dictation didn't connect");
+        } catch (e) {
+          toast("Can't reach Amarchy");
+        }
+      }
+    };
+  }
+
+  // Let go: the rest of what it heard, then "end". Before the connection is
+  // up, it ends as soon as it is (force: it's up now).
+  letGo(force) {
+    const v = this.voice;
+    if (!v || (!v.held && !force)) return;
+    v.held = false;
+    this.micBtn.classList.remove("on");
+    if (v.ws && v.ws.readyState === WebSocket.OPEN) {
+      mic.take = null;
+      v.ws.send("end");
+      this.listening("Claude is writing it down…");
+    }
+  }
+
+  // The box while dictating: what's going on, in place of its placeholder.
+  listening(text) {
+    this.composer.classList.toggle("listening", text !== null);
+    this.micBtn.classList.toggle("on", !!this.voice && this.voice.held);
+    this.input.placeholder = text || "Message Claude";
   }
 
   // Back from the background: everything from scratch.
@@ -716,6 +810,7 @@ class SessionView {
   }
 
   sendButtons() {
+    this.micBtn.hidden = !(app.view && app.view.voice);
     const working = this.row && this.row.status === "working";
     const empty = !this.input.value.trim();
     this.stopBtn.style.display = working && empty ? "" : "none";
@@ -844,6 +939,85 @@ class SessionView {
       h("div", { class: "menu" }, shown("chat", "Conversation"), shown("screen", "Claude's screen, with keys")),
       closeButton({ ...row, id: this.id }));
   }
+}
+
+// ---- the microphone, while dictating (and a little after, for the next time)
+
+const mic = { stream: null, ctx: null, source: null, node: null, idle: null, take: null };
+
+async function micOpen() {
+  clearTimeout(mic.idle);
+  if (!mic.ctx) {
+    mic.ctx = new AudioContext();
+    if (mic.ctx.audioWorklet) await mic.ctx.audioWorklet.addModule("voice.js");
+  }
+  await mic.ctx.resume();
+  if (mic.stream && mic.stream.active) return;
+  mic.stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  mic.source = mic.ctx.createMediaStreamSource(mic.stream);
+  if (mic.ctx.audioWorklet) {
+    mic.node = new AudioWorkletNode(mic.ctx, "amarchy-mic");
+    mic.node.port.onmessage = (e) => { if (mic.take) mic.take(e.data); };
+  } else {        // an older phone: the same, on the page itself (see voice.js)
+    const down = downsampler(mic.ctx.sampleRate, (pcm) => { if (mic.take) mic.take(pcm); });
+    mic.node = mic.ctx.createScriptProcessor(4096, 1, 1);
+    mic.node.onaudioprocess = (e) => down(e.inputBuffer.getChannelData(0));
+  }
+  const mute = mic.ctx.createGain();    // through to the speaker, silently: some browsers only run what reaches it
+  mute.gain.value = 0;
+  mic.source.connect(mic.node).connect(mute).connect(mic.ctx.destination);
+}
+
+// What voice.js does, for a phone without AudioWorklet: the microphone's
+// samples down to 16 kHz 16-bit, each the average of those it stands for,
+// handed on 20 ms at a time.
+function downsampler(rate, take) {
+  const step = rate / 16000;
+  let pos = 0, acc = 0, count = 0, out = new Int16Array(320), n = 0;
+  return (ch) => {
+    for (let i = 0; i < ch.length; i++) {
+      acc += ch[i];
+      count++;
+      if (++pos >= step) {
+        pos -= step;
+        const v = Math.max(-1, Math.min(1, acc / count));
+        out[n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+        acc = count = 0;
+        if (n === out.length) {
+          take(out.buffer);
+          out = new Int16Array(320);
+          n = 0;
+        }
+      }
+    }
+  };
+}
+
+// Kept a little for the next time; then the phone's microphone is let go.
+function micRelease() {
+  clearTimeout(mic.idle);
+  mic.idle = setTimeout(micClose, 20000);
+}
+
+function micClose() {
+  clearTimeout(mic.idle);
+  if (mic.stream) mic.stream.getTracks().forEach((t) => t.stop());
+  if (mic.source) mic.source.disconnect();
+  if (mic.node) mic.node.disconnect();
+  mic.stream = mic.source = mic.node = null;
+  if (mic.ctx) mic.ctx.suspend().catch(() => {});
+}
+
+// Held down: start(); let go (or the finger slides off): stop().
+function holdToTalk(el, start, stop) {
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
+    start();
+  });
+  for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(end, () => stop());
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
 // ---- sheets

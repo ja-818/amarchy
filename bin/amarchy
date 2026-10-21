@@ -135,6 +135,8 @@ Plumbing:
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
   amarchy paste [wl-paste options]      on a host: wl-paste for a session's Claude (bin/amarchy-paste), what's
                                         copied on your desktop, so Ctrl+V pastes an image there
+  amarchy rec [rec options]             on a host: SoX's rec for a session's Claude (bin/amarchy-rec): the phone's
+                                        microphone while you dictate on the phone, else the real rec
   amarchy clipboard <desktop>           on a host: where a desktop's clipboard goes (remote --sync forwards it)
   amarchy app serve                     on a host: the phone app's server (amarchy-app.service runs it)
   amarchy app theme                     on a host: keep the look the phone app wears (JSON on stdin, from remote --sync)
@@ -4892,7 +4894,7 @@ def attach_argv(s, which):
 
 CLIP_SOCK = STATE / "clipboard.sock"    # on a desktop: what the host's socket leads to
 CLIP_DIR = STATE / "clipboard"          # on a host: a socket per desktop, and the address it was seen from
-PASTE_BIN = STATE / "paste"             # on a host: wl-paste for a session's Claude, a link to bin/amarchy-paste
+PASTE_BIN = STATE / "paste"             # on a host: wl-paste and rec for a session's Claude (links to bin/amarchy-paste, -rec)
 PASTE_FLAGS = {"-l": "--list-types", "--list-types": "--list-types", "-n": "--no-newline",
                "--no-newline": "--no-newline", "-p": "--primary", "--primary": "--primary"}
 MIME = re.compile(r"(?!-)[\w.+-]+(/[\w.+-]+)?(; ?[\w.+-]+=[\w.+-]+)*")
@@ -5101,18 +5103,20 @@ def cmd_paste(args):
 
 def paste_path():
     """On a host, the PATH a session's Claude gets: amarchy's wl-paste first
-    (see "clipboard"). Unchanged when the link can't be made."""
-    link, target = PASTE_BIN / "wl-paste", Path(SELF).parent / "amarchy-paste"
+    (see "clipboard"), and its rec (see "dictation from the phone").
+    Unchanged when the links can't be made."""
     path = os.environ.get("PATH", "")
-    try:
-        if not link.is_symlink() or os.readlink(link) != str(target):
-            PASTE_BIN.mkdir(parents=True, exist_ok=True)
-            tmp = link.with_name(f".wl-paste.{os.getpid()}")
-            tmp.unlink(missing_ok=True)
-            tmp.symlink_to(target)
-            os.replace(tmp, link)
-    except OSError:
-        return path
+    for name, target in (("wl-paste", "amarchy-paste"), ("rec", "amarchy-rec")):
+        link, target = PASTE_BIN / name, Path(SELF).parent / target
+        try:
+            if not link.is_symlink() or os.readlink(link) != str(target):
+                PASTE_BIN.mkdir(parents=True, exist_ok=True)
+                tmp = link.with_name(f".{name}.{os.getpid()}")
+                tmp.unlink(missing_ok=True)
+                tmp.symlink_to(target)
+                os.replace(tmp, link)
+        except OSError:
+            return path
     return os.pathsep.join([str(PASTE_BIN), *[d for d in path.split(os.pathsep) if d and d != str(PASTE_BIN)]])
 
 
@@ -6269,6 +6273,233 @@ def app_keys(s, keys):
     return None
 
 
+# ---- dictation from the phone
+#
+# Claude Code's voice mode (/voice) records with SoX's rec, whichever its PATH
+# finds, and listens for its key held down: a space again and again, as a key
+# repeats, starts it (five of them, under 120 ms apart), and none for 200 ms
+# ends it, the transcript going into its prompt. A session's Claude on a host
+# finds amarchy's rec first (bin/amarchy-rec, linked as rec: see paste_path
+# and install.sh). While the phone holds its mic button on that session, that
+# rec is the phone's microphone, which the app's server hands it on a socket
+# (mic_socket); the server holds the space down meanwhile. Otherwise
+# it's the real rec, which your desktop's microphone reaches (PULSE_SERVER).
+
+APP_MIC = APP / "mic"
+MIC_FORMAT = ["-t", "raw", "-r", "16000", "-e", "signed", "-b", "16", "-c", "1"]   # what the phone sends
+MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key repeats
+MIC_MAX = 300           # seconds a dictation lasts at most
+MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
+SGR = re.compile(r"\x1b\[([0-9;:]*)m")
+ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
+
+
+def mic_socket(sid):
+    """Where a session's dictation is read from: a short name (a socket's
+    path can't be long), in amarchy's state, or the runtime directory when
+    even that is too long."""
+    name = hashlib.sha1(f"{STATE}\0{sid}".encode()).hexdigest()[:20] + ".sock"
+    path = APP_MIC / name
+    if len(str(path)) < 100:
+        return path
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/amarchy-{os.getuid()}") / "amarchy-mic" / name
+
+
+def claude_voice():
+    """Claude Code's voice mode as its settings have it: on or not, and held
+    ("hold", the default) or tapped ("tap")."""
+    try:
+        d = json.loads((Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude") / "settings.json").read_text())
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    v = d.get("voice") if isinstance(d.get("voice"), dict) else {}
+    return {"enabled": bool(v["enabled"] if "enabled" in v else d.get("voiceEnabled")),
+            "mode": "tap" if v.get("mode") == "tap" else "hold"}
+
+
+def undimmed(line):
+    """A line of the screen (with its colors) without its dim text: Claude's
+    grey placeholder and suggestions aren't what's typed."""
+    out, dim, at = [], False, 0
+    for m in SGR.finditer(line):
+        if not dim:
+            out.append(line[at:m.start()])
+        at = m.end()
+        ps = m.group(1).replace(":", ";").split(";")
+        i = 0
+        while i < len(ps):
+            p = ps[i]
+            if p in ("38", "48", "58"):        # a color: its own numbers aren't attributes
+                i += 3 if ps[i + 1:i + 2] == ["5"] else 5
+                continue
+            if p in ("", "0", "22"):
+                dim = False
+            elif p == "2":
+                dim = True
+            i += 1
+    if not dim:
+        out.append(line[at:])
+    return ANSI.sub("", "".join(out))
+
+
+def claude_prompt(s):
+    """What's typed in the session's Claude's prompt, as one line ("" for
+    nothing), or None when its prompt isn't on screen."""
+    r = tmux("capture-pane", "-p", "-e", "-t", f"={tmux_name(s['id'])}:")
+    if r.returncode != 0:
+        return None
+    raw = r.stdout.splitlines()
+    plain = [ANSI.sub("", l).rstrip() for l in raw]
+    rule = lambda l: len(l) > 10 and set(l.strip()) == {"─"}
+    for i in range(len(plain) - 1, 0, -1):
+        if not (plain[i].startswith("❯") and rule(plain[i - 1])):
+            continue
+        end = next((j for j in range(i + 1, len(plain)) if rule(plain[j])), None)
+        if end is None:
+            return None
+        parts = [undimmed(raw[i]).split("❯", 1)[-1], *(undimmed(l) for l in raw[i + 1:end])]
+        return " ".join(" ".join(p.replace("\xa0", " ").split()) for p in parts).strip()
+    return None
+
+
+def clear_claude_prompt(s):
+    """Empty the session's Claude's prompt (Ctrl+U, line by line). Whether it is."""
+    pane = f"={tmux_name(s['id'])}:"
+    for _ in range(12):
+        if not claude_prompt(s):
+            break
+        tmux("send-keys", "-t", pane, "C-u")
+        time.sleep(0.12)
+        if claude_prompt(s):        # a line above, of a prompt of several
+            tmux("send-keys", "-t", pane, "BSpace")
+            time.sleep(0.08)
+    return claude_prompt(s) == ""
+
+
+class AppMic:
+    """One dictation from the phone: its audio as it comes, for the session's
+    rec (amarchy rec) to read on a socket, from the start: what was said
+    before Claude got its rec going too."""
+
+    def __init__(self, sid):
+        self.path = mic_socket(sid)
+        self.cond = threading.Condition()
+        self.chunks, self.ended, self.readers, self.read = [], False, 0, False
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.path.parent, 0o700)
+        self.path.unlink(missing_ok=True)
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(str(self.path))
+        self.sock.listen(2)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:         # closed: the dictation is over
+                return
+            with self.cond:
+                self.readers += 1
+                start = 0 if self.readers == 1 else len(self.chunks)    # a second rec: from now on
+            threading.Thread(target=self.feed, args=(conn, start), daemon=True).start()
+
+    def feed(self, conn, i):
+        try:
+            while True:
+                with self.cond:
+                    self.cond.wait_for(lambda: i < len(self.chunks) or self.ended)
+                    new = self.chunks[i:]
+                    i += len(new)
+                    if not new and self.ended:
+                        break
+                conn.sendall(b"".join(new))
+        except OSError:
+            pass
+        finally:
+            conn.close()        # the end of its input: rec ends, having passed on all of it
+            with self.cond:
+                self.read = True
+                self.cond.notify_all()
+
+    def add(self, data):
+        with self.cond:
+            self.chunks.append(data)
+            self.cond.notify_all()
+
+    def end(self, wait=3.0):
+        """No more audio; wait until a rec has read all of it (or none came).
+        Whether one did."""
+        with self.cond:
+            self.ended = True
+            self.cond.notify_all()
+            self.cond.wait_for(lambda: self.read, timeout=wait)
+            return self.readers > 0
+
+    def close(self):
+        self.end(wait=0)
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        self.path.unlink(missing_ok=True)
+
+
+def cmd_rec(args):
+    """rec (SoX) for a session's Claude on a host: the phone's microphone while
+    it holds its button on this session (see "dictation from the phone"),
+    else the real rec. The phone's audio goes through sox, so it comes out as
+    rec was asked for, effects and all."""
+    sid = os.environ.get("AMARCHY_SESSION", "")
+    if HOST_MODE and re.fullmatch(r"[\w][\w.-]{0,119}", sid) and "--version" not in args:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            conn.connect(str(mic_socket(sid)))
+        except OSError:
+            conn.close()
+        else:
+            return mic_record(conn, args)
+    me = (Path(SELF).parent / "amarchy-rec").resolve()
+    real = next((str(p) for d in os.environ.get("PATH", "").split(os.pathsep) if d
+                 for p in [Path(d) / "rec"] if p.is_file() and os.access(p, os.X_OK) and p.resolve() != me), None)
+    if not real:
+        print("rec (amarchy): SoX's rec isn't installed", file=sys.stderr)
+        return 127
+    os.execv(real, [real, *args])
+
+
+def mic_record(conn, args):
+    """rec's output from the phone's audio on conn: sox reads it where rec
+    would read the microphone (rec's options first, then its output)."""
+    import signal
+    first, rest = [], list(args)
+    while rest and (rest[0] in ("-q", "-S", "--no-show-progress", "--show-progress") or re.fullmatch(r"-V\d?", rest[0])
+                    or rest[0] in ("--buffer", "--input-buffer") and len(rest) > 1):
+        n = 2 if rest[0] in ("--buffer", "--input-buffer") else 1
+        first, rest = first + rest[:n], rest[n:]
+    try:
+        sox = subprocess.Popen(["sox", *first, *MIC_FORMAT, "-", *rest], stdin=subprocess.PIPE, bufsize=0)
+    except OSError as e:
+        print(f"rec (amarchy): {e}", file=sys.stderr)
+        return 127
+
+    def stop(*_):           # Claude's done with it
+        sox.terminate()
+        os._exit(0)
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        while data := conn.recv(65536):
+            sox.stdin.write(data)
+    except OSError:
+        pass
+    try:
+        sox.stdin.close()
+    except OSError:
+        pass
+    return sox.wait()
+
+
 # ---- the server
 
 class AppState:
@@ -6279,6 +6510,7 @@ class AppState:
         self.changed = threading.Condition()
         self.view, self.version, self.statuses = {}, 0, None
         self.seen = {}          # session id -> when the phone last said it's on screen
+        self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
 
     def row(self, sid):
         return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
@@ -6294,7 +6526,8 @@ def app_watch(st):
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
             ss = session_view()
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
-                    "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd"))}
+                    "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
+                    "voice": claude_voice()["enabled"]}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -6350,7 +6583,11 @@ def app_handler(st, users, address):
         def head(self, code, ctype, extra=(), cache="no-cache"):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            for k, v in (("Content-Security-Policy", APP_CSP), ("X-Content-Type-Options", "nosniff"),
+            # The dictation's WebSocket, to this host (not every browser counts wss: as 'self').
+            host = self.headers.get("Host", "")
+            csp = APP_CSP.replace("connect-src 'self'", f"connect-src 'self' wss://{host}") \
+                if re.fullmatch(r"[\w.-]+(:\d+)?", host) else APP_CSP
+            for k, v in (("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
                          ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                          ("Cache-Control", cache), *extra):
                 self.send_header(k, v)
@@ -6394,6 +6631,167 @@ def app_handler(st, users, address):
                 return None
             return s
 
+        def voice(self, s):
+            """Dictation from the phone into the session's Claude (see
+            "dictation from the phone"): a WebSocket, the phone's audio in it
+            (16 kHz, 16-bit, mono) while the button is held and "end" when it's
+            let go. Back come {"state": "listening"}, then {"state":
+            "transcribing"}, and the transcript ({"text"}, taken out of Claude's
+            prompt for the phone's box) or why there's none ({"error"})."""
+            sid = s["id"]
+            voice = claude_voice()
+            if not voice["enabled"]:
+                return self.error(409, "Claude's voice mode is off: turn it on with /voice")
+            screen = app_screen(s)
+            if not screen["live"] or screen["exited"]:
+                return self.error(409, "Claude isn't running")
+            if screen["dialog"]:
+                return self.error(409, "Claude is asking you something: answer that first")
+            if sid in st.mics:
+                return self.error(409, "It's already listening")
+            before = claude_prompt(s)
+            if before is None:
+                return self.error(409, "Claude's prompt isn't on screen")
+            # Without the WebSocket, just whether it would listen (so the
+            # phone can say why it didn't).
+            if self.headers.get("Upgrade", "").lower() != "websocket":
+                return self.send(200, {"ready": True})
+            host = self.headers.get("Host", "")
+            site = self.headers.get("Sec-Fetch-Site")
+            if self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin"):
+                return self.error(403, "only from the app")
+            if self.headers.get("Sec-WebSocket-Version") != "13" or not self.headers.get("Sec-WebSocket-Key"):
+                return self.error(400, "a WebSocket")
+            mic = st.mics[sid] = AppMic(sid)
+            pane = f"={tmux_name(sid)}:"
+            holding, holder = threading.Event(), None
+
+            def hold():         # the space, held: as the key repeats
+                end = time.time() + MIC_MAX
+                while holding.is_set() and time.time() < end:
+                    tmux("send-keys", "-t", pane, "Space")
+                    time.sleep(MIC_REPEAT)
+            try:
+                key = base64.b64encode(hashlib.sha1((self.headers["Sec-WebSocket-Key"]
+                                                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+                self.protocol_version = "HTTP/1.1"     # a WebSocket's answer is HTTP/1.1, whatever the server's
+                self.send_response(101)
+                for k, v in (("Upgrade", "websocket"), ("Connection", "Upgrade"), ("Sec-WebSocket-Accept", key)):
+                    self.send_header(k, v)
+                self.end_headers()
+                self.close_connection = True
+                self.connection.settimeout(MIC_QUIET)      # a phone gone quiet has let go
+                if voice["mode"] == "tap":
+                    tmux("send-keys", "-t", pane, "Space")
+                else:
+                    holding.set()
+                    holder = threading.Thread(target=hold, daemon=True)
+                    holder.start()
+                self.ws_send({"state": "listening"})
+                started, said = time.time(), 0
+                while time.time() - started < MIC_MAX:
+                    try:
+                        op, data = self.ws_recv()
+                    except (OSError, ValueError):
+                        break
+                    if op in (None, 8) or op == 1 and data == b"end":
+                        break
+                    if op in (0, 2):
+                        mic.add(data)
+                        said += len(data)
+                    elif op == 9:
+                        self.ws_send(data, op=10)
+                # Let go: Claude gets all of it before it's told the key is up.
+                came = mic.end()
+                time.sleep(0.1)
+                holding.clear()
+                if voice["mode"] == "tap":
+                    tmux("send-keys", "-t", pane, "Space")
+                elif holder:
+                    holder.join()
+                if not came:
+                    # Claude never recorded (its voice mode is off after all):
+                    # the spaces went into its prompt. As it was, then.
+                    time.sleep(0.3)
+                    clear_claude_prompt(s)
+                    if before:
+                        tmux("set-buffer", "-b", f"amarchy-mic-{sid}", "--", before)
+                        tmux("paste-buffer", "-p", "-r", "-d", "-b", f"amarchy-mic-{sid}", "-t", pane)
+                    self.ws_send({"error": "Claude didn't record: turn its voice mode on with /voice"})
+                    return
+                self.ws_send({"state": "transcribing"})
+                text, quiet = None, None
+                end = time.time() + 20
+                while time.time() < end:
+                    time.sleep(0.25)
+                    r = tmux("capture-pane", "-p", "-t", pane)
+                    busy = "processing…" in r.stdout or "listening…" in r.stdout
+                    now = claude_prompt(s)
+                    if not busy and now is not None and now != before:
+                        text = now
+                        break
+                    if busy:
+                        quiet = None
+                    elif quiet is None:
+                        quiet = time.time()
+                    elif time.time() - quiet > 2.5:     # done, and nothing came of it
+                        break
+                if not text:
+                    self.ws_send({"error": "No words heard" if said else "No sound came from the phone"})
+                    return
+                # Into the phone's box, to send from there; out of Claude's
+                # once the phone says it has it (else it stays where it is).
+                self.ws_send({"text": text})
+                got = time.time() + MIC_QUIET
+                while time.time() < got:
+                    try:
+                        op, data = self.ws_recv()
+                    except (OSError, ValueError):
+                        break
+                    if op in (None, 8):
+                        break
+                    if op == 1 and data == b"got":
+                        clear_claude_prompt(s)
+                        break
+            except OSError:
+                pass
+            finally:
+                holding.clear()
+                mic.close()
+                st.mics.pop(sid, None)
+                try:
+                    self.ws_send(b"", op=8)
+                except OSError:
+                    pass
+
+        def ws_recv(self):
+            """A WebSocket frame from the phone: (opcode, payload), or (None,
+            b"") when it's gone. Frames from a browser are masked."""
+            head = self.rfile.read(2)
+            if len(head) < 2:
+                return None, b""
+            n = head[1] & 0x7F
+            if n == 126:
+                n = int.from_bytes(self.rfile.read(2), "big")
+            elif n == 127:
+                n = int.from_bytes(self.rfile.read(8), "big")
+            if not head[1] & 0x80 or n > 1 << 20:
+                raise ValueError("not a frame from a browser")
+            mask = self.rfile.read(4)
+            data = self.rfile.read(n)
+            if len(data) < n:
+                return None, b""
+            if n:
+                data = (int.from_bytes(data, "big") ^ int.from_bytes((mask * (n // 4 + 1))[:n], "big")).to_bytes(n, "big")
+            return head[0] & 0x0F, data
+
+        def ws_send(self, body, op=1):
+            data = json.dumps(body).encode() if isinstance(body, dict) else body
+            n = len(data)
+            size = (bytes([n]) if n < 126 else bytes([126]) + n.to_bytes(2, "big") if n < 1 << 16
+                    else bytes([127]) + n.to_bytes(8, "big"))
+            self.wfile.write(bytes([0x80 | op]) + size + data)
+
         def do_GET(self):
             if not self.allowed():
                 return
@@ -6406,11 +6804,13 @@ def app_handler(st, users, address):
                                        "user": self.headers.get("Tailscale-User-Login")})
             if path == "/api/events":
                 return self.list_stream()
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
+                if m.group(2) == "voice":
+                    return self.voice(s)
                 if m.group(2) == "stream":
                     return self.session_stream(s)
                 if m.group(2) == "closing":
@@ -6827,7 +7227,7 @@ OPTIONS = {
     "app": ({"--status", "--test"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "clipboard": None, "paste": None,
+    "clipboard": None, "paste": None, "rec": None,
 }
 ALIASES = {"cockpit": "terminal"}     # cockpit: the old name of terminal, still bound in some configs
 HELP = ("-h", "--help")
@@ -6991,6 +7391,8 @@ def main(argv):
         return cmd_clipboard(args)
     elif cmd == "paste":
         return cmd_paste(args)
+    elif cmd == "rec":
+        return cmd_rec(args)
     elif cmd == "events":
         return cmd_events(args)
     elif cmd == "app":
