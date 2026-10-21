@@ -7,7 +7,7 @@
 Each session gets its own git worktree, its own workspace and a terminal next to it.
 The Ⓐ in your bar lights up when one of them needs you.
 
-<!-- demo: docs/demo.gif goes here -->
+<img src="docs/demo.gif" alt="One prompt in amarchy starts an agent per open GitHub issue, each in its own worktree" width="100%">
 
 [Install](#install) · [Keys](#the-keys-that-matter) · [Full guide](docs/guide.md)
 
@@ -18,6 +18,7 @@ The Ⓐ in your bar lights up when one of them needs you.
 ## What you get
 
 - **One key, new agent.** `Super+Alt+N`, pick a project, and you're done. You get a fresh worktree and branch, with Claude in the middle and a terminal beside it.
+- **Agents that start agents.** Ask one Claude to start a session per GitHub issue, and they all appear in the list, each on its own branch.
 - **Knows who needs you.** The Ⓐ in the bar lights up, and a chime plays, when a session asks a question or finishes. Click it to jump there.
 - **Sessions you can find.** They're listed by what they're about (**Login:** redirect loop), with search, priorities, and grouping by project, priority or status.
 - **Light on memory.** Idle sessions sleep and free their memory. Start typing and they wake up mid-conversation.
