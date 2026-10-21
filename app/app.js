@@ -594,7 +594,13 @@ class SessionView {
   // made of it comes into the box, to send from there.
   async dictate() {
     if (this.voice) return;
-    const v = this.voice = { held: true, ws: null, queue: [], heard: false };
+    // What was in the box before: the words go after it, as they come.
+    const v = this.voice = { held: true, ws: null, queue: [], heard: false, base: this.input.value.replace(/\s+$/, "") };
+    const write = (words) => {
+      this.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
+      this.grow();
+      this.sendButtons();
+    };
     this.listening("Listening…");
     try {
       await micOpen();
@@ -628,15 +634,16 @@ class SessionView {
       try { d = JSON.parse(e.data); } catch (err) { return; }
       v.heard = true;
       if (d.state === "transcribing") this.listening("Claude is writing it down…");
+      if (typeof d.interim === "string") write(d.interim);
       if (typeof d.text === "string") {
         ws.send("got");     // it can go from Claude's prompt now
-        const was = this.input.value.replace(/\s+$/, "");
-        this.input.value = was ? `${was} ${d.text}` : d.text;
+        write(d.text);
         store.set(`draft:${this.id}`, this.input.value);
-        this.grow();
-        this.sendButtons();
       }
-      if (d.error) toast(d.error);
+      if (d.error) {
+        write("");
+        toast(d.error);
+      }
     };
     ws.onclose = async () => {
       mic.take = null;

@@ -414,10 +414,13 @@ session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. Hold the mic button by the box to
 dictate with Claude Code's own voice mode (it has to be on: `/voice`): what
 the phone hears goes to that session's Claude as if you held its key on the
-desktop, and when you let go the transcript comes into the box, to edit and
-send. (On the host, Claude's `rec` is amarchy's, which `install.sh --host`
-links into `~/.local/bin`: the phone's microphone while you dictate, the real
-`rec` the rest of the time, so your desktop's mic works as before.) The bar under the list starts a new
+desktop, and the words come up in the phone's box as Claude writes them
+down, to edit and send when you let go. Meanwhile your desktop's view of that
+session says it's dictating on your phone, and is back on Claude once the
+words are on the phone. (On the host, Claude's `rec` is amarchy's, which
+`install.sh --host` links into `~/.local/bin`: the phone's microphone while
+you dictate, the real `rec` the rest of the time, so your desktop's mic works
+as before.) The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for
 another of the host's projects). When a session needs you or is done, the phone gets a
 notification, at the same moments as the desktop's chime (not for the one

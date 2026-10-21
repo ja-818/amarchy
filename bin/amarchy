@@ -6295,19 +6295,22 @@ MIC_FORMAT = ["-t", "raw", "-r", "16000", "-e", "signed", "-b", "16", "-c", "1"]
 MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key repeats
 MIC_MAX = 300           # seconds a dictation lasts at most
 MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
+MIC_METER = "▁▂▃▄▅▆▇█"  # what Claude draws after the words while it listens (how loud)
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
 
 
-def mic_socket(sid):
+def mic_socket(sid, state=None):
     """Where a session's dictation is read from: a short name (a socket's
-    path can't be long), in amarchy's state, or the runtime directory when
+    path can't be long), in amarchy's state, or your runtime directory when
     even that is too long."""
-    name = hashlib.sha1(f"{STATE}\0{sid}".encode()).hexdigest()[:20] + ".sock"
-    path = APP_MIC / name
+    state = state or STATE
+    name = hashlib.sha1(f"{state}\0{sid}".encode()).hexdigest()[:20] + ".sock"
+    path = state / APP_MIC.relative_to(STATE) / name
     if len(str(path)) < 100:
         return path
-    return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/amarchy-{os.getuid()}") / "amarchy-mic" / name
+    run = Path(f"/run/user/{os.getuid()}")      # the same for the server and Claude, whatever their environments
+    return (run if run.is_dir() else Path(f"/tmp/amarchy-{os.getuid()}")) / "amarchy-mic" / name
 
 
 def claude_voice():
@@ -6380,6 +6383,42 @@ def clear_claude_prompt(s):
             tmux("send-keys", "-t", pane, "BSpace")
             time.sleep(0.08)
     return claude_prompt(s) == ""
+
+
+def desk_hide(s):
+    """While the phone dictates, your desktop's view of the session's Claude
+    (its tmux clients) goes to a screen that says so: the words come up on
+    the phone only. What desk_show needs to put it back, or None."""
+    name = tmux_name(s["id"])
+    r = tmux("list-clients", "-t", f"={name}", "-F", "#{client_name}")
+    clients = r.stdout.split() if r.returncode == 0 else []
+    if not clients:
+        return None
+    away = f"{name}-dictating"
+    size = tmux("display-message", "-p", "-t", f"={name}:", "#{window_width} #{window_height}").stdout.split()
+    # Back to Claude on its own too, should the server go before it says so.
+    back = (f'sleep {MIC_MAX + 60}; for c in $(tmux -L amarchy list-clients -t "={away}" -F "#{{client_name}}"); '
+            f'do tmux -L amarchy switch-client -c "$c" -t "={name}"; done')
+    tmux("kill-session", "-t", f"={away}")
+    tmux("new-session", "-d", "-s", away, *(["-x", size[0], "-y", size[1]] if len(size) == 2 else []),
+         "printf '\\033[?25l\\n\\n   Dictating on your phone…\\n\\n   \\033[2mWhat you say goes to the phone; "
+         "Claude is back here when you let go.\\033[0m\\n'; " + back)
+    title = tmux("display-message", "-p", "-t", f"={name}:", "#{pane_title}").stdout.strip()
+    if title:
+        tmux("select-pane", "-t", f"={away}:", "-T", title)     # the window keeps its title
+    for c in clients:
+        tmux("switch-client", "-c", c, "-t", f"={away}")
+    return away
+
+
+def desk_show(s, away):
+    """Your desktop's view back on the session's Claude (see desk_hide)."""
+    if not away:
+        return
+    r = tmux("list-clients", "-t", f"={away}", "-F", "#{client_name}")
+    for c in r.stdout.split() if r.returncode == 0 else []:
+        tmux("switch-client", "-c", c, "-t", f"={tmux_name(s['id'])}")
+    tmux("kill-session", "-t", f"={away}")
 
 
 class AppMic:
@@ -6456,22 +6495,43 @@ def cmd_rec(args):
     it holds its button on this session (see "dictation from the phone"),
     else the real rec. The phone's audio goes through sox, so it comes out as
     rec was asked for, effects and all."""
-    sid = os.environ.get("AMARCHY_SESSION", "")
-    if HOST_MODE and re.fullmatch(r"[\w][\w.-]{0,119}", sid) and "--version" not in args:
+    sid, state = rec_session()
+    if re.fullmatch(r"[\w][\w.-]{0,119}", sid) and "--version" not in args:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            conn.connect(str(mic_socket(sid)))
+            conn.connect(str(mic_socket(sid, state)))
         except OSError:
             conn.close()
         else:
             return mic_record(conn, args)
-    me = (Path(SELF).parent / "amarchy-rec").resolve()
-    real = next((str(p) for d in os.environ.get("PATH", "").split(os.pathsep) if d
-                 for p in [Path(d) / "rec"] if p.is_file() and os.access(p, os.X_OK) and p.resolve() != me), None)
+    # Not one of amarchy's (another checkout's would hand it back).
+    real = next((str(p) for d in os.environ.get("PATH", "").split(os.pathsep) if d.startswith("/")
+                 for p in [Path(d) / "rec"] if p.is_file() and os.access(p, os.X_OK)
+                 and p.resolve().name != "amarchy-rec"), None)
     if not real:
         print("rec (amarchy): SoX's rec isn't installed", file=sys.stderr)
         return 127
     os.execv(real, [real, *args])
+
+
+def rec_session():
+    """Which session's Claude runs this rec, and that session's amarchy state:
+    from Claude's own environment, the process above, since Claude Code gives
+    the programs it runs for itself (rec among them) none of its own."""
+    pid = os.getpid()
+    for _ in range(6):
+        try:
+            env = dict(v.split("=", 1) for v in Path(f"/proc/{pid}/environ").read_text(errors="replace").split("\0")
+                       if "=" in v)
+            pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+        if env.get("AMARCHY_SESSION"):
+            home = env.get("XDG_STATE_HOME")
+            return env["AMARCHY_SESSION"], Path(home) / "amarchy" if home else HOME / ".local/state/amarchy"
+        if pid <= 1:
+            break
+    return "", STATE
 
 
 def mic_record(conn, args):
@@ -6670,6 +6730,21 @@ def app_handler(st, users, address):
             mic = st.mics[sid] = AppMic(sid)
             pane = f"={tmux_name(sid)}:"
             holding, holder = threading.Event(), None
+            away, watching, sending = None, threading.Event(), threading.Lock()
+            self.ws_lock = sending
+
+            def watch():        # the words as Claude writes them down, to the phone as they come
+                last = before
+                while watching.is_set():
+                    now = claude_prompt(s)
+                    now = now.rstrip(MIC_METER).rstrip() if now is not None else None
+                    if now is not None and now != last:
+                        last = now
+                        try:
+                            self.ws_send({"interim": now})
+                        except OSError:
+                            return
+                    time.sleep(0.15)
 
             def hold():         # the space, held: as the key repeats
                 end = time.time() + MIC_MAX
@@ -6686,6 +6761,9 @@ def app_handler(st, users, address):
                 self.end_headers()
                 self.close_connection = True
                 self.connection.settimeout(MIC_QUIET)      # a phone gone quiet has let go
+                away = desk_hide(s)
+                watching.set()
+                threading.Thread(target=watch, daemon=True).start()
                 if voice["mode"] == "tap":
                     tmux("send-keys", "-t", pane, "Space")
                 else:
@@ -6715,6 +6793,7 @@ def app_handler(st, users, address):
                 elif holder:
                     holder.join()
                 if not came:
+                    watching.clear()
                     # Claude never recorded (its voice mode is off after all):
                     # the spaces went into its prompt. As it was, then.
                     time.sleep(0.3)
@@ -6732,6 +6811,7 @@ def app_handler(st, users, address):
                     r = tmux("capture-pane", "-p", "-t", pane)
                     busy = "processing…" in r.stdout or "listening…" in r.stdout
                     now = claude_prompt(s)
+                    now = now.rstrip(MIC_METER).rstrip() if now is not None else None
                     if not busy and now is not None and now != before:
                         text = now
                         break
@@ -6741,6 +6821,7 @@ def app_handler(st, users, address):
                         quiet = time.time()
                     elif time.time() - quiet > 2.5:     # done, and nothing came of it
                         break
+                watching.clear()
                 if not text:
                     self.ws_send({"error": "No words heard" if said else "No sound came from the phone"})
                     return
@@ -6762,6 +6843,8 @@ def app_handler(st, users, address):
                 pass
             finally:
                 holding.clear()
+                watching.clear()
+                desk_show(s, away)
                 mic.close()
                 st.mics.pop(sid, None)
                 try:
@@ -6795,7 +6878,8 @@ def app_handler(st, users, address):
             n = len(data)
             size = (bytes([n]) if n < 126 else bytes([126]) + n.to_bytes(2, "big") if n < 1 << 16
                     else bytes([127]) + n.to_bytes(8, "big"))
-            self.wfile.write(bytes([0x80 | op]) + size + data)
+            with self.ws_lock:      # the words as they come go out from another thread
+                self.wfile.write(bytes([0x80 | op]) + size + data)
 
         def do_GET(self):
             if not self.allowed():
