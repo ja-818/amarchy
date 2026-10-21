@@ -13,7 +13,7 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
-  stop: "\u{F04DB}", check: "\u{F012C}",
+  stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}",
 };
 const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓" };
 const ICONS = {
@@ -23,6 +23,7 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
 };
 
 // ---- small helpers
@@ -139,22 +140,9 @@ function fitViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
   const up = vv.height < window.innerHeight - 120;
-  const short = shortfall();
-  document.documentElement.style.setProperty("--shortfall", `${short}px`);
-  root.style.setProperty("--vvh", `${vv.height + (up ? 0 : short)}px`);
+  root.style.setProperty("--vvh", `${vv.height}px`);
   root.style.transform = `translateY(${vv.offsetTop}px)`;
   document.body.classList.toggle("keyboard-up", up);
-}
-
-// On the home screen, with the status bar see-through, iOS lays the page out
-// as if the screen were shorter by the status bar, and leaves that much at the
-// bottom bare: how much, to draw on it too (0 anywhere else).
-function shortfall() {
-  const home = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-  if (!home) return 0;
-  const tall = window.matchMedia("(orientation: portrait)").matches ? screen.height : screen.width;
-  const missing = tall - window.innerHeight;
-  return missing > 0 && missing <= 80 ? missing : 0;
 }
 if (window.visualViewport) {
   visualViewport.addEventListener("resize", fitViewport);
@@ -286,26 +274,43 @@ function groupLabel(s, g) {
   return STATUS[stateOf(s)];
 }
 
-function renderList() {
-  const scroll = root.querySelector(".scroll");
-  const keep = scroll && root.querySelector(".view.list-view") ? scroll.scrollTop : 0;
-  const v = app.view;
+// The list's view, built once and kept: its bar holds what you're typing
+// while the list under it changes.
+function listView() {
+  if (app.listEl) return app.listEl;
   const meta = h("div", { class: "meta" });
-  if (v) {
-    const waiting = v.sessions.filter((s) => s.status === "waiting").length;
-    meta.append(`${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}`);
-    if (waiting) meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
-  }
   const head = h("div", { class: "hero" },
     h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
-    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")),
-    h("button", { class: "icon-btn", "aria-label": "New session", onclick: () => openNew() }, glyph("plus")));
+    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));
+  const offline = h("div", { class: "offline" }, "Reconnecting to Amarchy…");
   const list = h("div", { class: "list" });
+  const scroll = h("div", { class: "scroll" }, list);
+  app.newBar = newBar();
+  app.listEl = h("div", { class: "view list-view" }, head, offline, scroll, h("div", { class: "dock" }, app.newBar.el));
+  Object.assign(app.listEl, { meta, offline, list, scroll });
+  return app.listEl;
+}
+
+function renderList() {
+  const view = listView();
+  if (!root.contains(view)) {
+    root.replaceChildren(view);
+    view.scroll.scrollTop = 0;
+  }
+  const v = app.view;
+  view.meta.replaceChildren();
+  if (v) {
+    const waiting = v.sessions.filter((s) => s.status === "waiting").length;
+    view.meta.append(`${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}`);
+    if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
+  }
+  view.offline.hidden = app.online || !v;
+  const list = view.list;
+  list.replaceChildren();
   if (!v) {
     list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
   } else if (!v.sessions.length) {
-    list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"),
-      h("button", { class: "control accent", onclick: () => openNew() }, glyph("plus"), "New session")));
+    list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), "Say what Claude should do, below, to start one."));
   } else {
     // Grouped as amarchy groups them, outermost first. With more than one
     // grouping the outermost is a rule across the list, its name in the middle.
@@ -321,10 +326,7 @@ function renderList() {
       list.append(sessionRow(s, groups));
     }
   }
-  const offline = !app.online && v ? h("div", { class: "offline" }, "Reconnecting to Amarchy…") : null;
-  const view = h("div", { class: "view list-view" }, head, offline, h("div", { class: "scroll" }, list));
-  root.replaceChildren(view);
-  root.querySelector(".scroll").scrollTop = keep;
+  app.newBar.update();
 }
 
 // One session, as the desktop list draws it: the project and the priority
@@ -375,10 +377,10 @@ class SessionView {
     this.input = h("textarea", { rows: 1, placeholder: "Message Claude", enterkeyhint: "enter",
                                  oninput: () => { this.grow(); store.set(`draft:${this.id}`, this.input.value); this.sendButtons(); } });
     this.input.value = store.get(`draft:${this.id}`) || "";
-    this.sendBtn = h("button", { class: "control send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
-    this.stopBtn = h("button", { class: "control stop", "aria-label": "Stop Claude",
+    this.sendBtn = h("button", { class: "send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
+    this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude",
                                  onclick: () => this.press(["Escape"]) }, glyph("stop"));
-    this.composer = h("div", { class: "composer" }, h("div", { class: "prompt" }, this.input), this.stopBtn, this.sendBtn);
+    this.composer = h("div", { class: "prompt" }, this.input, this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
@@ -460,7 +462,7 @@ class SessionView {
       this.tools.clear();
       this.keys.clear();
       this.start = d.start;
-      this.earlierBtn = h("button", { class: "control earlier", onclick: () => this.earlier() }, "Earlier");
+      this.earlierBtn = h("button", { class: "link earlier", onclick: () => this.earlier() }, "earlier");
       if (this.start > 0) this.conv.append(this.earlierBtn);
       if (!d.items.length) this.conv.append(h("div", { class: "msg note" }, "Nothing here yet."));
     }
@@ -614,8 +616,8 @@ class SessionView {
         n, h("span", { class: "what" }, h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null)));
     });
     box.append(h("div", { class: "row-btns" },
-      h("button", { class: "control", onclick: () => this.press(["Escape"]) }, "Esc"),
-      h("button", { class: "control", onclick: () => this.setMode("screen") }, "Screen"),
+      h("button", { class: "link", onclick: () => this.press(["Escape"]) }, "esc"),
+      h("button", { class: "link", onclick: () => this.setMode("screen") }, "screen"),
       h("span", { class: "hint" }, d.hint)));
     return box;
   }
@@ -707,41 +709,59 @@ function closeSheet() {
   document.querySelectorAll(".sheet-back").forEach((s) => s.remove());
 }
 
-function openNew() {
-  const projects = (app.view && app.view.projects) || [];
-  if (!projects.length) {
-    toast("No projects on the host yet.");
-    return;
-  }
+// The bar under the list, as omalauncher's: the project on its left (tap it
+// for another), and what the new session's Claude should do.
+function newBar() {
   let repo = store.get("last-project");
-  if (!projects.some((p) => p.name === repo)) repo = projects[0].name;
-  const chips = h("div", { class: "projects" });
-  const draw = () => chips.replaceChildren(...projects.map((p) =>
-    h("button", { class: `control${p.name === repo ? " on" : ""}`, onclick: () => { repo = p.name; draw(); } }, p.name)));
-  draw();
-  const field = h("textarea", { class: "field", placeholder: "What should Claude do?" });
+  const name = h("span", { class: "name" });
+  const pick = h("button", { class: "pick", "aria-label": "Project", onclick: () => pickProject() }, name, glyph("down"));
+  const field = h("textarea", { rows: 1, placeholder: "What should Claude do?", enterkeyhint: "enter",
+                                oninput: () => { store.set("draft:new", field.value); grow(); buttons(); } });
   field.value = store.get("draft:new") || "";
-  field.addEventListener("input", () => store.set("draft:new", field.value));
-  const err = h("div", { class: "error" });
-  const go = h("button", { class: "control wide accent", onclick: async () => {
-    if (!field.value.trim()) { err.textContent = "Say what it's for."; return; }
+  const go = h("button", { class: "send", "aria-label": "Start session", onclick: () => start() }, glyph("send"));
+  const el = h("div", { class: "prompt new" }, pick, field, go);
+  const projects = () => (app.view && app.view.projects) || [];
+  const grow = () => {
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight + 2, window.innerHeight * 0.4)}px`;
+  };
+  const buttons = () => {
+    const none = !projects().length;
+    go.disabled = none || !field.value.trim();
+    pick.hidden = none;
+    field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…") : "What should Claude do?";
+  };
+  const update = () => {
+    const ps = projects();
+    if (ps.length && !ps.some((p) => p.name === repo)) repo = ps[0].name;
+    name.textContent = repo || "";
+    buttons();
+  };
+  const pickProject = () => sheet(sheetHead("Project", "Where the new session starts"),
+    h("div", { class: "menu" }, ...projects().map((p) =>
+      h("button", { class: `menu-item${p.name === repo ? " on" : ""}`,
+                    onclick: () => { repo = p.name; store.set("last-project", repo); closeSheet(); update(); field.focus(); } },
+        p.name, p.name === repo ? glyph("check", "val") : null))));
+  const start = async () => {
+    if (!field.value.trim() || !repo) return;
     go.disabled = true;
-    go.textContent = "Starting…";
+    el.classList.add("busy");
     try {
       const { id } = await api("/api/new", { repo, prompt: field.value });
+      field.value = "";
       store.set("draft:new", "");
       store.set("last-project", repo);
-      closeSheet();
+      grow();
+      field.blur();
       location.hash = `#/s/${encodeURIComponent(id)}`;
     } catch (e) {
-      err.textContent = e.message;
-      go.disabled = false;
-      go.textContent = "Start session";
+      toast(e.message);
     }
-  } }, "Start session");
-  sheet(sheetHead("New session", "Its Claude starts on the task"), h("div", { class: "section" }, "Project"), chips,
-    h("div", { class: "section" }, "Task"), h("div", { class: "new-task" }, field), err, go);
-  setTimeout(() => field.focus(), 250);
+    el.classList.remove("busy");
+    buttons();
+  };
+  requestAnimationFrame(grow);
+  return { el, update };
 }
 
 // ---- notifications
