@@ -94,10 +94,15 @@ function wearLook(look) {
     const v = `${(look.look || "").slice(0, 12)}${(look.font || "").slice(0, 12)}`;
     const next = h("link", { rel: "stylesheet", href: `theme.css?v=${v}`, id: "look" });
     next.dataset.stamp = stamp;
-    next.addEventListener("load", () => { link.remove(); paintBars(); });
+    next.addEventListener("load", () => { link.remove(); paintBars(); restyleTerminals(); });
     link.after(next);
   }
   paintBars();
+}
+
+// The real terminals wear it too (desk.js).
+function restyleTerminals() {
+  for (const p of [desk.claude, desk.term, app.session && app.session.pane]) if (p) p.restyle();
 }
 
 function paintBars() {
@@ -259,13 +264,19 @@ function openList() {
     app.nerd = !!app.view.nerd;
     wearLook(app.view.look);
     badge();
-    if (!app.session) renderList();
+    refresh();
   });
-  es.addEventListener("open", () => { if (!app.online) { app.online = true; if (!app.session) renderList(); } });
+  es.addEventListener("open", () => { if (!app.online) { app.online = true; refresh(); } });
   es.addEventListener("error", () => {
     app.online = false;
-    if (!app.session) renderList();
+    refresh();
   });
+}
+
+// The list changed: on a wide screen the desktop's layout (desk.js), else the list's view.
+function refresh() {
+  if (app.desk) deskList();
+  else if (!app.session) renderList();
 }
 
 function closeList() {
@@ -592,6 +603,7 @@ class SessionView {
     if (this.es) this.es.close();
     this.es = null;
     this.closed = true;
+    if (this.pane) this.pane.disconnect();
     clearInterval(this.seen);
     this.letGo();
   }
@@ -733,6 +745,7 @@ class SessionView {
     this.close();
     this.closed = false;
     this.open();
+    if (this.mode === "terminal") this.pane.open(this.id);
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
   }
@@ -843,7 +856,15 @@ class SessionView {
 
   setMode(mode) {
     this.mode = mode;
-    if (mode === "screen") {
+    this.el.classList.toggle("terminal", mode === "terminal");
+    if (mode !== "terminal" && this.pane) this.pane.disconnect();
+    if (mode === "terminal") {
+      // Claude's real terminal (desk.js), as on your desktop: what you type
+      // goes to it, the keys below for what the phone's keyboard hasn't.
+      if (!this.pane) this.pane = new TermPane("claude", { size: 10 });
+      this.scroller.replaceChildren(this.pane.box);
+      this.pane.open(this.id).then(() => this.pane.fit());
+    } else if (mode === "screen") {
       this.scroller.replaceChildren(this.screenEl);
       this.renderScreen();
       this.toBottom();
@@ -881,11 +902,14 @@ class SessionView {
     else if (this.row && this.row.setup) key = "setup";
     else if (dialog) key = `dialog:${dialog.id}`;
     key += `:${this.mode}`;
+    if (this.mode === "terminal") key = "terminal";
     if (key === this.dialogId) { this.sendButtons(); return; }
     this.dialogId = key;
     const kids = [];
-    if (this.mode === "screen") kids.push(this.keysRow);
-    if (sc && sc.exited) {
+    if (this.mode !== "chat") kids.push(this.keysRow);
+    if (this.mode === "terminal") {
+      // Its prompt is in the terminal itself.
+    } else if (sc && sc.exited) {
       kids.push(h("div", { class: "ask" },
         h("div", { class: "q" }, h("div", { class: "head" }, "Claude Code exited"), "Start it again to go on with this session."),
         h("button", { class: "opt first", onclick: () => this.press(["Enter"]) },
@@ -989,7 +1013,8 @@ class SessionView {
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
       h("div", { class: "section" }, "Show"),
-      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("screen", "Claude's screen, with keys")),
+      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("terminal", "Claude's terminal"),
+        shown("screen", "Claude's screen, as text")),
       closeButton({ ...row, id: this.id }));
   }
 }
@@ -1230,7 +1255,9 @@ function sameKey(a, b) {
 
 async function pushState() {
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return "unsupported";
-  const reg = await navigator.serviceWorker.ready;
+  // Not there when its service worker couldn't start (then it never is).
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(() => ok(null), 4000))]);
+  if (!reg) return "unsupported";
   const sub = await reg.pushManager.getSubscription();
   if (sub) return "on";
   return Notification.permission === "denied" ? "denied" : "off";
@@ -1272,15 +1299,20 @@ async function pushRefresh() {
 
 async function openSettings() {
   const body = h("div", {});
-  const draw = async () => {
-    const state = await pushState().catch(() => "unsupported");
+  // Drawn at once, the notifications' part once it's known whether they're on.
+  const draw = async (known) => {
+    const state = known || await pushState().catch(() => "unsupported");
     const kids = [h("div", { class: "section" }, "Notifications")];
-    if (!standalone) {
+    if (state === "checking") {
+      kids.push(h("p", {}, "…"));
+    } else if (!standalone && !app.desk) {
       kids.push(h("p", {}, "To get notifications, add Amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
     } else if (state === "unsupported") {
-      kids.push(h("p", {}, "This browser can't get notifications (on iPhone they need iOS 16.4 or newer)."));
+      kids.push(h("p", {}, app.desk ? "This browser can't get notifications (in Safari, add Amarchy to the Dock first: File → Add to Dock)."
+                                    : "This browser can't get notifications (on iPhone they need iOS 16.4 or newer)."));
     } else if (state === "denied") {
-      kids.push(h("p", {}, "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
+      kids.push(h("p", {}, app.desk ? "Notifications are turned off for Amarchy in this browser's settings (and System Settings → Notifications)."
+                                    : "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
     } else if (state === "off") {
       kids.push(h("p", {}, "Get a notification when a session needs you or is done."),
         h("button", { class: "control wide accent", onclick: async (e) => {
@@ -1303,9 +1335,11 @@ async function openSettings() {
       h("div", { class: "section" }, "Host"),
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
+    if (app.desk) kids.push(...deskSettings());
     body.replaceChildren(...kids);
   };
-  sheet(sheetHead("Settings", "Amarchy on your phone"), body);
+  sheet(sheetHead("Settings", app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
+  draw("checking");
   draw();
 }
 
@@ -1331,6 +1365,7 @@ function go(hash) {
 function here() { return standalone ? routed.hash : location.hash; }
 
 function route() {
+  if (app.desk) return deskRoute();
   closeSheet();
   const m = here().match(/^#\/s\/(.+)$/);
   const id = m ? decodeURIComponent(m[1]) : null;
@@ -1346,6 +1381,7 @@ function route() {
 }
 
 document.addEventListener("visibilitychange", () => {
+  if (app.desk) return;       // a computer's: its terminals stay as they are
   if (document.visibilityState === "hidden") {
     closeList();
     if (app.session) app.session.close();
@@ -1355,7 +1391,16 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+// On a computer's wide screen, amarchy as your desktop lays it out (desk.js);
+// on a phone, the list and the conversation. The settings can say which.
+function wantsDesk() {
+  const layout = store.get("layout");
+  if (layout) return layout === "desktop";
+  return window.matchMedia("(min-width: 1000px) and (hover: hover) and (pointer: fine)").matches;
+}
+
 async function start() {
+  app.desk = wantsDesk();
   fitViewport();
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -1381,7 +1426,8 @@ async function start() {
     routed.hash = location.hash;
     route();
   });
-  route();
+  if (app.desk) deskStart();
+  else route();
   openList();
   if (app.key) pushRefresh();
 }

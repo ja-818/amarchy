@@ -485,6 +485,79 @@ notifications are signed and encrypted with `openssl`. `APP_PORT=` (on
 localhost, default 7397) and `APP_HTTPS=` (443, 8443 or 10000) in
 `~/.config/amarchy/host` change its ports.
 
+## In a browser on your computer
+
+The same app (`amarchy app`, same address) on a computer's wide screen is
+amarchy as your desktop lays it out, so a Mac or any other computer with
+Tailscale and a browser can use the host's sessions without Omarchy: your
+sessions on the left, the session's Claude in the 900px column in the middle
+and its terminal on the right, the bar on top with the Ⓐ (lit when one needs
+you), zen mode with the strip with the session's name, all over your wallpaper
+in your theme and font. Claude and the terminal are the real thing: terminals
+(xterm.js) attached to the session's tmux on the host as your desktop's
+windows are, so the desktop, the phone and the browser show the same session
+at once (a session's window takes the size of whichever of them showed it or
+typed in it last, as with two desktops). Typing, the mouse wheel (tmux's scrollback), selecting (it copies to
+your clipboard, as tmux does there), resizing and the Nerd Font icons work as
+in your desktop's terminal; links open in a new tab.
+
+It picks the layout by the window: a wide one with a mouse gets this, a
+phone the list and conversation. Settings (the gear, or Settings in the
+amarchy menu) can fix it to either, change the terminals' font size (they
+start at your desktop terminal's), and turn on WebGL drawing (faster; the DOM
+is the default, since a headless test drew WebGL's text too big at 2x). On
+the phone, a session's ••• menu shows **Claude's terminal**, the real one, with
+keys under it.
+
+The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have:
+
+| Key | |
+| --- | --- |
+| `Ctrl+Alt+J` / `K` | The session below / above in the list. |
+| `Ctrl+Alt+S` | Search the list (in zen mode, under the Ⓐ). |
+| `Ctrl+Alt+A` | Your sessions under the Ⓐ (`Super+Alt+A` on Omarchy): `j`/`k`, `↵`, `/`, `+`/`-`, `g`, `p`/`f`/`s`, `o`, `Esc`, as there. |
+| `Ctrl+Alt+Z` | Zen mode (this browser's own). |
+| `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. |
+| `Ctrl+Alt+←` / `→` | Claude / the terminal (`Super+arrows` on Omarchy, which the browser keeps). |
+| `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
+| `Ctrl+Alt+N` / `P` | New session (`Super+Alt+N` on Omarchy) / new project. |
+| `Ctrl+Alt+Up` / `Down` | Raise / lower the session's priority. |
+| `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the session. |
+
+The keyboard follows the pointer between Claude and the terminal, as on
+Omarchy. On a Mac, Option is Alt in the terminals (Settings turns that off,
+for typing accented letters with it), and `Shift+Enter` is a new line in
+Claude's prompt. `Ctrl+Alt+T` says the theme is your desktop's: the browser
+wears what your desktop sends.
+
+**Pasting an image** works as on your desktop: `⌘V` (or `Ctrl+V`, once the
+browser lets the page read the clipboard) or dropping an image on Claude.
+The page hands the image to the host, and Claude's `Ctrl+V` gets it from
+amarchy's `wl-paste` there, which asks the browser the key came from (each
+page's terminals say which page they are) the way it asks your desktop.
+
+**Dictating** (`/voice`): hold Space in Claude, as on your desktop. While the
+page has the keyboard in a session's Claude, that session's `rec` on the host
+is the browser's microphone: the page opens it as soon as Space is held
+(what's said before Claude listens waits on the host), the host tells it when
+Claude starts and stops recording, and the words come up in Claude's prompt.
+The browser asks for the microphone the first time. When the page loses the
+keyboard (another window, the terminal), `rec` is the host's own again.
+
+**Notifications**: Settings turns them on, as on the phone (in Safari, add the
+app to the Dock first: File → Add to Dock; Chrome: Install). While the page is
+open it also plays your desktop's chime (the one `amarchy sound` picked,
+sent with the look) when a session needs you or is done, unless it's the one
+you're looking at.
+
+How it stays yours is the phone app's: each terminal is a WebSocket on the
+app's own server, taken only from the Tailscale login that owns the host
+(`APP_USERS=`), at its tailnet address, and only from the app's own pages
+(their `Origin`), never through Funnel. The server also checks that a
+connection to it on localhost comes from Tailscale (`tailscaled`) or from you,
+so another user on the host can't pass for Tailscale. What a terminal gives is
+what your desktop's windows give: Claude and a shell on the host, as you.
+
 ## Install
 
 See [Quick start](#quick-start) for what it needs. `install.sh` is safe to run
@@ -611,7 +684,7 @@ amarchy sort [priority|newest|oldest] how the list is sorted inside its groups (
 amarchy layout                        resize Claude's column for the current monitor
 amarchy remote <ssh host> | off       start new sessions on another machine (see Remote sessions) / here again
 amarchy remote [--status]             where new sessions start / whether that host answers
-amarchy app on | off                  on a host: your sessions on your phone (see Your phone)
+amarchy app on | off                  on a host: your sessions on your phone and in a browser (see Your phone)
 amarchy app [--status] | --test       whether it's on, and where / a test notification to each phone
 ```
 

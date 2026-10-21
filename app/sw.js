@@ -3,8 +3,8 @@
 // when the server can't be reached (it then says so, rather than Safari's
 // error page). Everything else always comes from the server.
 
-const SHELL = "amarchy-shell-v2";
-const FILES = ["/", "/app.css", "/theme.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png"];
+const SHELL = "amarchy-shell-v3";
+const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));

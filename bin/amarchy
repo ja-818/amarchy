@@ -105,7 +105,8 @@ asleep; that machine runs amarchy too, installed with ./install.sh --host):
                                         running there (amarchy remote <host> again brings them back)
   amarchy remote [--status]             where new sessions start / whether the host answers
 
-Phone (on a host: its sessions on your phone, as an app on the home screen, reachable only on your
+Phone and browser (on a host: its sessions on your phone, as an app on the home screen, and in a
+computer's browser as your desktop lays them out, with real terminals; reachable only on your
 Tailscale network):
   amarchy app on                        serve it on your tailnet (https://<this machine>.<tailnet>.ts.net,
                                         with tailscale serve), now and after every reboot; prints its address
@@ -183,9 +184,11 @@ import select
 import shlex
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import unicodedata
 import threading
 import time
@@ -388,6 +391,24 @@ TERMINAL_ALPHA = {"foot": (".config/foot/foot.ini", r"^\s*alpha\s*=\s*([\d.]+)")
                   "alacritty": (".config/alacritty/alacritty.toml", r"^\s*opacity\s*=\s*([\d.]+)"),
                   "ghostty": (".config/ghostty/config", r"^\s*background-opacity\s*=\s*([\d.]+)")}
 WINDOW_OPACITY = 0.96   # what Omarchy's Hyprland config gives a window without the keyboard
+
+
+# Where each terminal keeps its font size (in points), and what it is when unset.
+TERMINAL_FONT = {"foot": (".config/foot/foot.ini", r"^\s*font\s*=.*?:size=([\d.]+)", 8),
+                 "kitty": (".config/kitty/kitty.conf", r"^\s*font_size\s+([\d.]+)", 11),
+                 "alacritty": (".config/alacritty/alacritty.toml", r"^\s*size\s*=\s*([\d.]+)", 11.25),
+                 "ghostty": (".config/ghostty/config", r"^\s*font-size\s*=\s*([\d.]+)", 13)}
+
+
+def terminal_font_size():
+    """The session terminals' font size in points, as their terminal is set up
+    (for the app's terminals in a browser, which show them the same size)."""
+    path, pattern, default = TERMINAL_FONT.get(terminal(), ("", "", 11))
+    try:
+        found = re.findall(pattern, (HOME / path).read_text(), re.M) if path else []
+        return min(max(float(found[-1]), 5.0), 40.0) if found else default
+    except (OSError, ValueError):
+        return default
 
 
 def terminal_alpha():
@@ -4614,7 +4635,11 @@ def phone_look():
         rounding = int(json.loads(sh("hyprctl", "-j", "getoption", "decoration:rounding").stdout or "{}").get("int", 0))
     except (ValueError, TypeError, AttributeError):
         rounding = 0
-    look = {"name": name.replace("-", " ").title(), "colors": colors, "shell": shell, "rounding": rounding}
+    # The session terminals as they are here, for the app's real terminals in
+    # a browser (its desktop mode), and the chime it plays.
+    term = {"size": terminal_font_size(), "alpha": terminal_alpha()}
+    look = {"name": name.replace("-", " ").title(), "colors": colors, "shell": shell, "rounding": rounding,
+            "terminal": term, "sound": sound_name() if SOUND else "off"}
     look["sig"] = hashlib.sha1(json.dumps(look, sort_keys=True).encode()).hexdigest()
     font = {"family": "", "files": {}}
     for weight, pattern in (("regular", "monospace"), ("bold", "monospace:bold")):
@@ -4641,12 +4666,15 @@ def phone_look():
 
 _wallpaper_failed = set()
 PHONE_WALLPAPER = "1290x2796"   # an iPhone's screen in pixels, upright: the wallpaper is cut to it
+DESK_WALLPAPER = "2880x1800"    # a laptop's screen in pixels: the wallpaper at most this, for a browser
 
 
-def phone_wallpaper(path):
+def phone_wallpaper(path, wide=False):
     """The wallpaper as the phone shows it: its middle, cut to a phone's
-    screen, as a JPEG (a few hundred KB, not the 4K original). Without
-    ImageMagick, the original if it isn't too big; else None."""
+    screen, as a JPEG (a few hundred KB, not the 4K original). wide: as a
+    computer's browser shows it (the app's desktop mode), the whole of it at
+    most a laptop's screen in size. Without ImageMagick, the original if it
+    isn't too big; else None."""
     if not shutil.which("magick"):
         try:
             raw = Path(path).read_bytes() if os.path.getsize(path) <= APP_WALLPAPER_MAX else b""
@@ -4655,8 +4683,9 @@ def phone_wallpaper(path):
         return raw if image_kind(raw) else None
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "wallpaper.jpg"
-        r = sh("magick", f"{path}[0]", "-resize", PHONE_WALLPAPER + "^", "-gravity", "center",
-               "-extent", PHONE_WALLPAPER, "-quality", "82", "-strip", str(out))
+        cut = ["-resize", DESK_WALLPAPER + ">"] if wide else \
+            ["-resize", PHONE_WALLPAPER + "^", "-gravity", "center", "-extent", PHONE_WALLPAPER]
+        r = sh("magick", f"{path}[0]", *cut, "-quality", "82", "-strip", str(out))
         try:
             return out.read_bytes() if r.returncode == 0 else None
         except OSError:
@@ -4680,7 +4709,7 @@ def remote_look(host, has):
         wallpaper = {"path": "", "sig": has.get("wallpaper", "")}
     if has.get("look") == look["sig"] and has.get("font") == font["sig"] and has.get("wallpaper", "") == wallpaper["sig"]:
         return True
-    data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding")}}
+    data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding", "terminal", "sound")}}
     if has.get("font") != font["sig"]:
         data["font"] = {"sig": font["sig"], "family": font["family"]}
         for weight, path in font["files"].items():
@@ -4692,8 +4721,10 @@ def remote_look(host, has):
         image = phone_wallpaper(wallpaper["path"]) if wallpaper["path"] else None
         if wallpaper["path"] and not image:
             _wallpaper_failed.add(wallpaper["sig"])
+        wide = phone_wallpaper(wallpaper["path"], wide=True) if image else None
         data["wallpaper"] = {"sig": wallpaper["sig"] if image else "",
-                             "image": base64.b64encode(image).decode() if image else ""}
+                             "image": base64.b64encode(image).decode() if image else "",
+                             "wide": base64.b64encode(wide).decode() if wide else ""}
     r = remote_amarchy(host, "app", "theme", input=json.dumps(data), timeout=120)
     if r.returncode:
         print(f"amarchy: the phone app on {host} didn't take the theme: {(r.stderr or '').strip()}",
@@ -5541,6 +5572,13 @@ def cmd_attach(args):
                 return 3
             continue
         return fail(f"couldn't start {name} in tmux")
+    # On a pty of the app's server (a browser's terminal), make it tmux's
+    # own terminal, so it hears when the browser resizes it.
+    if os.isatty(0):
+        try:
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+        except OSError:
+            pass
     env = clean_env()
     # Your terminal's own TERM, if this machine knows it; else close enough.
     if not env.get("TERM") or sh("infocmp", env["TERM"]).returncode != 0:
@@ -5949,7 +5987,18 @@ def app_look_vars(colors, shell, rounding):
                           ("selection", "#292e42"), ("dark_background", "#13141c"),
                           ("lighter_background", "#24283b")):
         out[key.replace("_", "-")] = css_rgba(base(key, fallback))
+    # The terminals' own colors (the 16 ANSI ones, the cursor, the
+    # selection), for the app's real terminals: Claude's and the session's.
+    for key, fallback in (("foreground", "#a9b1d6"), ("background", "#1a1b26"), ("cursor", "#c0caf5"),
+                          ("selection_foreground", "#c0caf5"), ("selection_background", "#7aa2f7"),
+                          *((f"color{i}", c) for i, c in enumerate(TERM_COLORS))):
+        out["term-" + key.replace("color", "").replace("_", "-")] = css_rgba(base(key, fallback))
     return out, "light" if light else "dark"
+
+
+# Tokyo Night's terminal colors (color0..color15), for a theme without its own.
+TERM_COLORS = ("#32344a", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#ad8ee6", "#449dab", "#787c99",
+               "#444b6a", "#ff7a93", "#b9f27c", "#ff9e64", "#7da6ff", "#bb9af7", "#0db9d7", "#acb0d0")
 
 
 def app_look():
@@ -5965,7 +6014,14 @@ def app_look_stamp():
     """Which look the app wears (it changes with each one sent), for the
     host's events and the app's list."""
     look = app_look() or {}
-    return {"look": look.get("look", ""), "font": look.get("font", ""), "wallpaper": look.get("wallpaper", "")}
+    # One kept before it had the terminals' colors says it has none, so the
+    # desktop sends it again.
+    sig = look.get("look", "") if "term-0" in (look.get("vars") or {}) else ""
+    # And one kept before it had the wallpaper for a computer's screen.
+    wall = look.get("wallpaper", "")
+    if wall and "wallpaper-wide" not in (look.get("files") or {}) and look.get("wide") is not False:
+        wall = ""
+    return {"look": sig, "font": look.get("font", ""), "wallpaper": wall}
 
 
 def app_theme(data):
@@ -5986,7 +6042,13 @@ def app_theme(data):
     name = re.sub(r"[^\w .'+-]", "", str(data.get("name", "")))[:60]
     APP_LOOK.mkdir(parents=True, exist_ok=True)
     old = app_look() or {}
-    look = {"look": data["look"], "name": name, "mode": mode, "vars": variables,
+    term = data.get("terminal") if isinstance(data.get("terminal"), dict) else {}
+    size, alpha = term.get("size"), term.get("alpha")
+    sound = data.get("sound")
+    look = {"look": data["look"], "name": name, "mode": mode, "vars": variables, "wide": old.get("wide"),
+            "terminal": {"size": min(max(float(size), 5.0), 40.0) if isinstance(size, (int, float)) else None,
+                         "alpha": min(max(float(alpha), 0.0), 1.0) if isinstance(alpha, (int, float)) else None},
+            "sound": sound if isinstance(sound, str) and (sound == "off" or sound in CHIMES) else "",
             "font": old.get("font", ""), "family": old.get("family", ""), "nerd": old.get("nerd", False),
             "wallpaper": old.get("wallpaper", ""), "files": dict(old.get("files", {}))}
     font = data.get("font")
@@ -6009,9 +6071,15 @@ def app_theme(data):
                     nerd=bool(files) and "nerd" in family.lower())
     # The wallpaper: "" for none (a desktop without one), else its sig and the image.
     wall = data.get("wallpaper")
-    if isinstance(wall, dict) and wall.get("sig", None) != old.get("wallpaper"):
+    # A desktop from before the wide one (for a computer's browser) sends
+    # none: it isn't asked for it again.
+    if isinstance(wall, dict) and "wide" not in wall:
+        look["wide"] = False
+    if isinstance(wall, dict) and (wall.get("sig", None) != old.get("wallpaper") or "wide" in wall):
         look["files"].pop("wallpaper", None)
+        look["files"].pop("wallpaper-wide", None)
         look["wallpaper"] = ""
+        look["wide"] = "wide" in wall
         try:
             raw = base64.b64decode(wall.get("image") or "", validate=True)
         except ValueError:
@@ -6022,6 +6090,15 @@ def app_theme(data):
             write_file(APP_LOOK / name_on_disk, raw)
             look["files"]["wallpaper"] = name_on_disk
             look["wallpaper"] = wall["sig"]
+            try:
+                raw = base64.b64decode(wall.get("wide") or "", validate=True)
+            except ValueError:
+                raw = b""
+            kind = image_kind(raw)
+            if kind and len(raw) <= APP_WALLPAPER_MAX:
+                name_on_disk = f"{wall['sig'][:12]}-wallpaper-wide.{kind}"
+                write_file(APP_LOOK / name_on_disk, raw)
+                look["files"]["wallpaper-wide"] = name_on_disk
     write_file(APP_LOOK / "look.json", json.dumps(look, indent=1))
     keep = set(look["files"].values()) | {"look.json"}
     for f in APP_LOOK.iterdir():
@@ -6039,10 +6116,16 @@ def app_theme_css():
     out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
             and re.fullmatch(r"[\w#().,/% -]+", str(v))]
     out.append(f"  color-scheme: {'light' if look.get('mode') == 'light' else 'dark'};")
+    term = look.get("terminal") if isinstance(look.get("terminal"), dict) else {}
+    if isinstance(term.get("size"), (int, float)):      # points, as the terminal has them: 96 dpi
+        out.append(f"  --term-size: {round(term['size'] * 4 / 3, 2)}px;")
+    if isinstance(term.get("alpha"), (int, float)):
+        out.append(f"  --term-alpha: {term['alpha']};")
     files = dict(look.get("files") or {})
-    wallpaper = files.pop("wallpaper", None)
+    wallpaper, wide = files.pop("wallpaper", None), files.pop("wallpaper-wide", None)
     if wallpaper:
         out.append(f'  --wallpaper: url("/look/{wallpaper}");')
+        out.append(f'  --wallpaper-wide: url("/look/{wide or wallpaper}");')
     if files:
         out.append('  --font: "amarchy-mono", ui-monospace, Menlo, monospace;')
     out.append("}")
@@ -6639,6 +6722,251 @@ class AppMic:
         self.path.unlink(missing_ok=True)
 
 
+# ---- the app in a browser on your computer (its desktop mode)
+#
+# On a wide screen the app is amarchy as your desktop shows it: the list, and
+# beside it the session's real terminals, Claude's and the one it runs the
+# project in. Each is xterm.js in the page, on a WebSocket to the app's server
+# (Handler.tty), which runs `amarchy attach` on a pty of its own: a tmux
+# client of the session's tmux, as each window on your desktop is, so your
+# desktop, the phone and the browser all show the same session at once.
+#
+# Two things your desktop lends the host reach it from the browser too. A
+# pasted image: Claude's Ctrl+V asks wl-paste (amarchy paste) for it, which
+# asks the desktop the key came from, the tmux client that had it (see
+# "clipboard"); a browser's terminals say they're web-<page>, and the page
+# hands the app what was pasted in it (BrowserClip) before it sends Ctrl+V.
+# And the microphone: Claude's voice mode records with rec (amarchy rec),
+# which, while the page shows that session's Claude with the keyboard in it,
+# is the browser's microphone (DeskMic), as dictating from the phone is.
+
+DESK_PAGE = re.compile(r"[0-9a-z]{8,32}")      # a page of the app, as it names itself
+CLIP_MAX = 25_000_000                           # bytes of one pasted image (as base64 in its JSON)
+CLIP_TYPES = re.compile(r"image/(png|jpeg|gif|webp)")
+TTY_PING = 25                                   # seconds between pings on a terminal's WebSocket
+MIC_EARLY = 96_000                              # bytes of audio kept from before rec is there: 3 seconds
+
+
+class DeskMic:
+    """The microphone of a browser showing a session's Claude, for Claude's
+    voice mode: while the page has the keyboard, the session's rec is this.
+    When Claude starts recording, the page is told to turn its microphone on
+    (tell(True)), and its audio goes to rec as it comes, after what it heard
+    just before (the page opens it as soon as the key is held); when Claude
+    is done with rec, the page turns it off (tell(False))."""
+
+    def __init__(self, sid, tell):
+        self.sid, self.tell = sid, tell
+        self.path = mic_socket(sid)
+        self.lock = threading.Lock()
+        self.recs, self.sock, self.early = [], None, []
+        self.wanted = True      # the page has the keyboard in Claude
+        self.resume()
+
+    def resume(self):
+        """Be the session's rec (again)."""
+        with self.lock:
+            if self.sock:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(self.path.parent, 0o700)
+            self.path.unlink(missing_ok=True)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.bind(str(self.path))
+                sock.listen(4)
+            except OSError as e:
+                sock.close()
+                print(f"amarchy app: no microphone for {self.sid}: {e}", file=sys.stderr)
+                return
+            self.sock = sock
+        threading.Thread(target=self.serve, args=(sock,), daemon=True).start()
+
+    def suspend(self):
+        """Stop being it: the page lost the keyboard, a phone dictates, or it's gone."""
+        with self.lock:
+            sock, self.sock = self.sock, None
+            recs, self.recs, self.early = self.recs, [], []
+        if sock:
+            sock.close()
+            self.path.unlink(missing_ok=True)
+        for c in recs:
+            c.close()
+        if recs:
+            self.tell(False)
+
+    def serve(self, sock):
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:         # suspended
+                return
+            with self.lock:
+                if self.sock is not sock:
+                    conn.close()
+                    return
+                first, early, self.early = not self.recs, self.early, []
+                self.recs.append(conn)
+            try:
+                conn.sendall(b"".join(early))
+            except OSError:
+                pass
+            if first:
+                self.tell(True)
+            threading.Thread(target=self.watch, args=(conn,), daemon=True).start()
+
+    def watch(self, conn):
+        """Until that rec is done with it (it only reads)."""
+        try:
+            while conn.recv(4096):
+                pass
+        except OSError:
+            pass
+        with self.lock:
+            mine = conn in self.recs
+            if mine:
+                self.recs.remove(conn)
+            last = mine and not self.recs
+        conn.close()
+        if last:
+            self.tell(False)
+
+    def feed(self, data):
+        """Audio from the page: to rec, or kept until rec comes (the start of what's said)."""
+        with self.lock:
+            recs = list(self.recs)
+            if not recs:
+                self.early.append(data)
+                while sum(map(len, self.early)) > MIC_EARLY:
+                    self.early.pop(0)
+        for c in recs:
+            try:
+                c.sendall(data)
+            except OSError:
+                pass
+
+    def forget(self):
+        """What was heard while no rec came: not for the next one."""
+        with self.lock:
+            self.early = []
+
+
+class BrowserClip:
+    """What was pasted in a browser showing sessions, for their Claude: what
+    the desktop's clipboard.sock is for a desktop (see "clipboard"), on a
+    socket of the same kind, web-<page>.sock, which the page's terminals name
+    (AMARCHY_DESKTOP). Only what the page handed it: an image pasted there."""
+
+    def __init__(self, page):
+        self.name = f"web-{page}"
+        self.path = CLIP_DIR / f"{self.name}.sock"
+        self.item = None        # (type, bytes)
+        self.users = 0
+        CLIP_DIR.mkdir(parents=True, exist_ok=True)
+        CLIP_DIR.chmod(0o700)
+        self.path.unlink(missing_ok=True)
+        (CLIP_DIR / f"{self.name}.addr").unlink(missing_ok=True)
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old = os.umask(0o177)
+        try:
+            self.sock.bind(str(self.path))
+        finally:
+            os.umask(old)
+        self.sock.listen(8)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self.answer, args=(conn,), daemon=True).start()
+
+    def answer(self, conn):
+        with conn:
+            try:
+                conn.settimeout(15)
+                ask = b""
+                while not ask.endswith(b"\n") and len(ask) < 4096:
+                    got = conn.recv(4096)
+                    if not got:
+                        return
+                    ask += got
+                req = json.loads(ask)
+                args = paste_args(req.get("args") if isinstance(req, dict) and isinstance(req.get("args"), list)
+                                  and all(isinstance(a, str) for a in req["args"]) else ["?"])
+                item, data = self.item, b""
+                if args is None:
+                    head = {"code": 2, "error": "amarchy only lists and prints what's copied"}
+                elif not item or "--primary" in args:
+                    head = {"code": 1, "error": "Nothing is copied"}
+                elif "--list-types" in args:
+                    head, data = {"code": 0, "error": ""}, item[0].encode() + b"\n"
+                else:
+                    want = args[args.index("--type") + 1] if "--type" in args else item[0]
+                    ok = want.split(";")[0].strip() in (item[0], "image", "image/*")
+                    head = {"code": 0, "error": ""} if ok else {"code": 1, "error": "No suitable type of content copied"}
+                    data = item[1] if ok else b""
+                conn.sendall(json.dumps(head).encode() + b"\n" + data)
+            except (OSError, ValueError):
+                pass
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        self.path.unlink(missing_ok=True)
+
+
+def peer_uid(sock):
+    """Who's at the other end of a connection to the app's server on
+    localhost: the uid owning that socket (from /proc/net/tcp), or None."""
+    try:
+        port = sock.getpeername()[1]
+        mine = sock.getsockname()[1]
+        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                lines = Path(table).read_text().splitlines()[1:]
+            except OSError:
+                continue
+            for line in lines:
+                f = line.split()
+                if int(f[1].rsplit(":", 1)[1], 16) == port and int(f[2].rsplit(":", 1)[1], 16) == mine:
+                    return int(f[7])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def tailscale_uids():
+    """Whom the app takes connections from: tailscaled (tailscale serve
+    is it), which runs as root, or as whoever runs it; and you."""
+    uids = {0, os.getuid()}
+    for d in Path("/proc").iterdir():
+        if d.name.isdigit():
+            try:
+                if (d / "comm").read_text().strip() == "tailscaled":
+                    uids.add(d.stat().st_uid)
+            except OSError:
+                pass
+    return uids
+
+
+def app_commands(s):
+    """The project's saved commands, the run command first (as amarchy run --list)."""
+    saved = {RUN_DEFAULT: run_command(s), **saved_commands(s["repo"])}
+    return [{"name": k, "command": v} for k, v in saved.items() if v]
+
+
+def app_sound():
+    """The chime your desktop plays (it sends it with its look), for the app
+    to play in a browser: its name, or "off"."""
+    sound = (app_look() or {}).get("sound") or CHIMES[0]
+    return sound if sound == "off" or sound in CHIMES else CHIMES[0]
+
+
 def cmd_rec(args):
     """rec (SoX) for a session's Claude on a host: the phone's microphone while
     it holds its button on this session (see "dictation from the phone"),
@@ -6725,6 +7053,9 @@ class AppState:
         self.view, self.version, self.statuses = {}, 0, None
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
+        self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
+        self.clips = {}         # page -> what was pasted in that browser, for its Claude (BrowserClip)
+        self.lock = threading.Lock()
 
     def row(self, sid):
         return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
@@ -6746,7 +7077,7 @@ def app_watch(st):
                     s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
-                    "voice": claude_voice()["enabled"]}
+                    "voice": claude_voice()["enabled"], "sound": app_sound()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -6788,6 +7119,7 @@ def app_moments(st, ss):
 
 def app_handler(st, users, address):
     import http.server
+    trusted = tailscale_uids()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "amarchy"
@@ -6799,13 +7131,18 @@ def app_handler(st, users, address):
         def log_error(self, fmt, *args):
             print("amarchy app: " + fmt % args, file=sys.stderr)
 
-        def head(self, code, ctype, extra=(), cache="no-cache"):
+        def head(self, code, ctype, extra=(), cache="no-cache", nonce=None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            # The dictation's WebSocket, to this host (not every browser counts wss: as 'self').
+            # The dictation's and the terminals' WebSockets, to this host (not
+            # every browser counts wss: as 'self').
             host = self.headers.get("Host", "")
             csp = APP_CSP.replace("connect-src 'self'", f"connect-src 'self' wss://{host}") \
                 if re.fullmatch(r"[\w.-]+(:\d+)?", host) else APP_CSP
+            # The terminals (xterm.js) style themselves: <style> elements the
+            # page made (its nonce), and style attributes.
+            if nonce:
+                csp = csp.replace("style-src 'self'", f"style-src 'self' 'nonce-{nonce}'; style-src-attr 'unsafe-inline'")
             for k, v in (("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
                          ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                          ("Cache-Control", cache), *extra):
@@ -6827,6 +7164,14 @@ def app_handler(st, users, address):
             if self.headers.get("Tailscale-User-Login", "") not in users or host.split(":")[0] != address:
                 self.error(403, "not yours")
                 return False
+            # Through tailscale serve: that header is Tailscale's, not another
+            # user's on this machine who can reach localhost too.
+            uid = peer_uid(self.connection)
+            if uid not in trusted:
+                trusted.update(tailscale_uids())        # tailscaled restarted as someone else?
+            if uid not in trusted:
+                self.error(403, "not through Tailscale")
+                return False
             if write:
                 site = self.headers.get("Sec-Fetch-Site")
                 if (self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin")
@@ -6835,10 +7180,10 @@ def app_handler(st, users, address):
                     return False
             return True
 
-        def body(self):
+        def body(self, limit=200_000):
             try:
                 n = int(self.headers.get("Content-Length") or 0)
-                data = json.loads(self.rfile.read(n) if 0 < n <= 200_000 else b"{}")
+                data = json.loads(self.rfile.read(n) if 0 < n <= limit else b"{}")
             except ValueError:
                 data = None
             return data if isinstance(data, dict) else {}
@@ -6879,12 +7224,13 @@ def app_handler(st, users, address):
             # phone can say why it didn't).
             if self.headers.get("Upgrade", "").lower() != "websocket":
                 return self.send(200, {"ready": True})
-            host = self.headers.get("Host", "")
-            site = self.headers.get("Sec-Fetch-Site")
-            if self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin"):
-                return self.error(403, "only from the app")
-            if self.headers.get("Sec-WebSocket-Version") != "13" or not self.headers.get("Sec-WebSocket-Key"):
-                return self.error(400, "a WebSocket")
+            if not self.ws_check():
+                return
+            # A browser's microphone for this Claude (desktop mode) steps
+            # aside meanwhile: what Claude records now is the phone.
+            desk = st.desk_mics.get(sid)
+            if desk:
+                desk.suspend()
             mic = st.mics[sid] = AppMic(sid)
             pane = f"={tmux_name(sid)}:"
             holding, holder = threading.Event(), None
@@ -6913,14 +7259,7 @@ def app_handler(st, users, address):
                     tmux("send-keys", "-t", pane, "Space")
                     time.sleep(MIC_REPEAT)
             try:
-                key = base64.b64encode(hashlib.sha1((self.headers["Sec-WebSocket-Key"]
-                                                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
-                self.protocol_version = "HTTP/1.1"     # a WebSocket's answer is HTTP/1.1, whatever the server's
-                self.send_response(101)
-                for k, v in (("Upgrade", "websocket"), ("Connection", "Upgrade"), ("Sec-WebSocket-Accept", key)):
-                    self.send_header(k, v)
-                self.end_headers()
-                self.close_connection = True
+                self.ws_handshake()
                 self.connection.settimeout(MIC_QUIET)      # a phone gone quiet has let go
                 away = desk_hide(s)
                 watching.set()
@@ -7015,6 +7354,218 @@ def app_handler(st, users, address):
                 desk_show(s, away)
                 mic.close()
                 st.mics.pop(sid, None)
+                if desk and desk.wanted:
+                    desk.resume()
+                try:
+                    self.ws_send(b"", op=8)
+                except OSError:
+                    pass
+
+        def ws_check(self):
+            """Whether this is a WebSocket from one of the app's own pages (a
+            page elsewhere can open one to it too: its Origin says whose it is).
+            Else it says why not."""
+            host = self.headers.get("Host", "")
+            site = self.headers.get("Sec-Fetch-Site")
+            if self.headers.get("Upgrade", "").lower() != "websocket":
+                self.error(400, "a WebSocket")
+                return False
+            if self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin"):
+                self.error(403, "only from the app")
+                return False
+            if self.headers.get("Sec-WebSocket-Version") != "13" or not self.headers.get("Sec-WebSocket-Key"):
+                self.error(400, "a WebSocket")
+                return False
+            return True
+
+        def ws_handshake(self):
+            key = base64.b64encode(hashlib.sha1((self.headers["Sec-WebSocket-Key"]
+                                                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+            self.protocol_version = "HTTP/1.1"     # a WebSocket's answer is HTTP/1.1, whatever the server's
+            self.send_response(101)
+            for k, v in (("Upgrade", "websocket"), ("Connection", "Upgrade"), ("Sec-WebSocket-Accept", key)):
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.flush()
+            self.close_connection = True
+            if not hasattr(self, "ws_lock"):
+                self.ws_lock = threading.Lock()
+
+        def tty(self, s, which, args):
+            """A session's real terminal, Claude's or its own (which), for
+            xterm.js in a browser: a WebSocket whose binary messages are what
+            it shows (the pty's output) one way and the keys (its input) the
+            other; text ones are JSON: {"resize": [cols, rows]} and {"mic":
+            true|false} (whether the page has the keyboard, and so the
+            microphone) from the page, {"mic": true|false} (turn it on or
+            off) and {"exit": code} to it. On the pty, `amarchy attach` as on
+            your desktop: it starts what isn't running, waits for a new
+            worktree, says so when the session is gone, and is then tmux."""
+            if not self.ws_check():
+                return
+            page = (args.get("page") or [""])[0]
+            if not DESK_PAGE.fullmatch(page):
+                return self.error(400, "which page")
+            try:
+                cols = min(max(int((args.get("cols") or ["80"])[0]), 2), 1000)
+                rows = min(max(int((args.get("rows") or ["24"])[0]), 2), 500)
+            except ValueError:
+                return self.error(400, "its size")
+            sid = s["id"]
+            master, slave = os.openpty()
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+            env = {**clean_env(), "TERM": "xterm-256color", "COLORTERM": "truecolor", "AMARCHY_DESKTOP": f"web-{page}"}
+            env.pop("TMUX", None)
+            try:
+                proc = subprocess.Popen([sys.executable, SELF, "attach", sid, which], stdin=slave, stdout=slave,
+                                        stderr=slave, env=env, cwd=HOME, start_new_session=True)
+            except OSError as e:
+                os.close(master)
+                os.close(slave)
+                return self.error(500, f"couldn't attach: {e}")
+            os.close(slave)
+            with st.lock:
+                clip = st.clips.get(page)
+                if not clip:
+                    try:
+                        clip = st.clips[page] = BrowserClip(page)
+                    except OSError as e:
+                        print(f"amarchy app: no clipboard for that browser: {e}", file=sys.stderr)
+                if clip:
+                    clip.users += 1
+            done, mic = threading.Event(), None
+
+            def tell(on):
+                try:
+                    self.ws_send({"mic": on})
+                except OSError:
+                    pass
+
+            def out():          # the terminal, as it draws, to the page
+                try:
+                    while True:
+                        try:
+                            data = os.read(master, 65536)
+                        except OSError:         # attach has ended
+                            break
+                        if not data:
+                            break
+                        self.ws_send(data, op=2)
+                    code = proc.wait()
+                    self.ws_send({"exit": code})
+                    self.ws_send(b"", op=8)
+                except OSError:
+                    pass
+                finally:
+                    done.set()
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
+            def ping():         # a quiet terminal's connection stays open through the proxy
+                while not done.wait(TTY_PING):
+                    try:
+                        self.ws_send(b"", op=9)
+                    except OSError:
+                        return
+            try:
+                self.ws_handshake()
+                if which == "claude" and (args.get("mic") or [""])[0] == "1":
+                    mic = DeskMic(sid, tell)
+                    with st.lock:
+                        old, st.desk_mics[sid] = st.desk_mics.get(sid), mic
+                    if old:
+                        old.suspend()
+                    mic.wanted = (args.get("focus") or [""])[0] == "1"
+                    if not mic.wanted or sid in st.mics:
+                        mic.suspend()
+                threading.Thread(target=out, daemon=True).start()
+                threading.Thread(target=ping, daemon=True).start()
+                while not done.is_set():
+                    try:
+                        op, data = self.ws_recv()
+                    except (OSError, ValueError):
+                        break
+                    if op in (None, 8):
+                        break
+                    if op in (0, 2):
+                        while data:
+                            data = data[os.write(master, data):]
+                    elif op == 1:
+                        try:
+                            msg = json.loads(data)
+                        except ValueError:
+                            continue
+                        if not isinstance(msg, dict):
+                            continue
+                        size = msg.get("resize")
+                        if isinstance(size, list) and len(size) == 2 and all(isinstance(n, int) for n in size):
+                            fcntl.ioctl(master, termios.TIOCSWINSZ,
+                                        struct.pack("HHHH", min(max(size[1], 2), 500), min(max(size[0], 2), 1000), 0, 0))
+                        if mic and isinstance(msg.get("mic"), bool):
+                            mic.wanted = msg["mic"]
+                            if mic.wanted and sid not in st.mics:
+                                mic.resume()
+                            elif not mic.wanted:
+                                mic.suspend()
+                    elif op == 9:
+                        self.ws_send(data, op=10)
+            except OSError:
+                pass
+            finally:
+                done.set()
+                if mic:
+                    mic.suspend()
+                    with st.lock:
+                        if st.desk_mics.get(sid) is mic:
+                            del st.desk_mics[sid]
+                try:
+                    os.close(master)
+                except OSError:
+                    pass
+                try:
+                    proc.terminate()
+                    proc.wait(3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                except OSError:
+                    pass
+                with st.lock:
+                    if clip:
+                        clip.users -= 1
+                        if clip.users <= 0 and st.clips.get(page) is clip:
+                            del st.clips[page]
+                            clip.close()
+
+        def desk_mic(self, s):
+            """The browser's microphone while Claude records from it (see
+            DeskMic): a WebSocket of its audio, 16 kHz 16-bit mono, as the
+            phone's dictation sends it."""
+            if not self.ws_check():
+                return
+            sid = s["id"]
+            if sid not in st.desk_mics:
+                return self.error(409, "Claude's terminal isn't open in this browser")
+            try:
+                self.ws_handshake()
+                self.connection.settimeout(MIC_QUIET)
+                while True:
+                    op, data = self.ws_recv()
+                    if op in (None, 8) or op == 1 and data == b"end":
+                        break
+                    mic = st.desk_mics.get(sid)
+                    if op in (0, 2) and mic:
+                        mic.feed(data)
+                    elif op == 9:
+                        self.ws_send(data, op=10)
+            except (OSError, ValueError):
+                pass
+            finally:
+                mic = st.desk_mics.get(sid)
+                if mic:
+                    mic.forget()
                 try:
                     self.ws_send(b"", op=8)
                 except OSError:
@@ -7061,13 +7612,29 @@ def app_handler(st, users, address):
                                        "user": self.headers.get("Tailscale-User-Login")})
             if path == "/api/events":
                 return self.list_stream()
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice)", path)
+            if path == "/api/github":       # your repos, for a new project (desktop mode)
+                r = run_amarchy("projects", "--github", "--json")
+                try:
+                    repos = json.loads(r.stdout) if r.returncode == 0 else None
+                except ValueError:
+                    repos = None
+                if not isinstance(repos, list):
+                    return self.error(500, gist(r.stderr) or "gh isn't installed or logged in on the host")
+                return self.send(200, {"repos": [{"name": x.get("name"), "private": bool(x.get("private")),
+                                                  "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
                 if m.group(2) == "voice":
                     return self.voice(s)
+                if m.group(2).startswith("tty/"):
+                    return self.tty(s, m.group(2)[4:], args)
+                if m.group(2) == "mic":
+                    return self.desk_mic(s)
+                if m.group(2) == "commands":
+                    return self.send(200, {"commands": app_commands(s)})
                 if m.group(2) == "stream":
                     return self.session_stream(s)
                 if m.group(2) == "closing":
@@ -7077,9 +7644,20 @@ def app_handler(st, users, address):
                 except (ValueError, OSError):
                     return self.error(400, "bad offset")
                 return self.send(200, {"items": items, "start": start})
+            m = re.fullmatch(r"/sound/(\w+)", path)
+            if m:
+                f = sound_file(m.group(1)) if m.group(1) in CHIMES else None
+                if not f or not f.is_file():
+                    return self.error(404, "not found")
+                data = f.read_bytes()
+                self.head(200, "audio/wav" if f.suffix == ".wav" else "audio/ogg", [("Content-Length", str(len(data)))],
+                          cache="max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if path == "/theme.css":
                 return self.send(200, app_theme_css().encode(), "text/css; charset=utf-8")
-            m = re.fullmatch(r"/look/([0-9a-f]{12}-(?:regular|bold|wallpaper)\.(ttf|otf|woff2?|jpg|png|webp))", path)
+            m = re.fullmatch(r"/look/([0-9a-f]{12}-(?:regular|bold|wallpaper|wallpaper-wide)\.(ttf|otf|woff2?|jpg|png|webp))", path)
             if m:
                 f = APP_LOOK / m.group(1)
                 if not f.is_file():
@@ -7095,12 +7673,19 @@ def app_handler(st, users, address):
 
         def page(self, path):
             name = "index.html" if path == "/" else path.lstrip("/")
-            f = APP_PAGES / name
+            # The libraries it uses (vendor/), named with their versions: the
+            # same name is always the same file.
+            folder, _, name = name.rpartition("/") if name.startswith("vendor/") else ("", "", name)
+            f = APP_PAGES / folder / name
             if not re.fullmatch(r"[\w-]+(\.[\w-]+)+", name) or Path(name).suffix not in APP_TYPES or not f.is_file():
                 return self.error(404, "not found")
             extra = [("Service-Worker-Allowed", "/")] if name == "sw.js" else []
-            data = f.read_bytes()
-            self.head(200, APP_TYPES[Path(name).suffix], [("Content-Length", str(len(data))), *extra])
+            data, nonce = f.read_bytes(), None
+            if name == "index.html":
+                nonce = b64u(os.urandom(16))
+                data = data.replace(b"{{nonce}}", nonce.encode())
+            self.head(200, APP_TYPES[Path(name).suffix], [("Content-Length", str(len(data))), *extra],
+                      cache="max-age=31536000, immutable" if folder else "no-cache", nonce=nonce)
             self.end_headers()
             self.wfile.write(data)
 
@@ -7169,19 +7754,25 @@ def app_handler(st, users, address):
         def do_POST(self):
             if not self.allowed(write=True):
                 return
-            data = self.body()
+            data = self.body(CLIP_MAX if self.path == "/api/clip" else 200_000)
+            if self.path == "/api/clip":
+                return self.clip(data)
             if self.path == "/api/new":
                 return self.new(data)
+            if self.path == "/api/add":
+                return self.add(data)
             if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
                 return self.push(data)
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
             what = m.group(2)
+            if what in ("rename", "run", "commands"):
+                return self.desk_action(s, what, data)
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 mark_seen(s["id"])
@@ -7236,6 +7827,71 @@ def app_handler(st, users, address):
             st.seen[s["id"]] = time.time()
             return self.send(200, {}) if why is None else self.error(500, why)
 
+        def clip(self, data):
+            """An image pasted in a browser, for its Claude's next Ctrl+V (see BrowserClip)."""
+            page, kind = data.get("page"), data.get("type")
+            if not isinstance(page, str) or not DESK_PAGE.fullmatch(page):
+                return self.error(400, "which page")
+            if not isinstance(kind, str) or not CLIP_TYPES.fullmatch(kind):
+                return self.error(400, "only an image (PNG, JPEG, GIF or WebP)")
+            try:
+                raw = base64.b64decode(data.get("data") or "", validate=True)
+            except (ValueError, TypeError):
+                raw = b""
+            if not raw:
+                return self.error(400, "no image")
+            with st.lock:
+                clip = st.clips.get(page)
+            if not clip:
+                return self.error(409, "No terminal of this page is open")
+            clip.item = (kind, raw)
+            return self.send(200, {})
+
+        def desk_action(self, s, what, data):
+            """What the desktop's keys do to a session: name it (Ctrl+Alt+E),
+            run its command or another one in its terminal (Ctrl+Alt+R,
+            Ctrl+Alt+C), save one."""
+            if what == "rename":
+                title = data.get("title")
+                if data.get("reset") is True:
+                    r = run_amarchy("rename", "--id", s["id"], "--reset")
+                elif isinstance(title, str) and title.strip() and len(title) <= 200:
+                    r = run_amarchy("rename", "--id", s["id"], title.strip())
+                else:
+                    return self.error(400, "what to call it")
+                return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+            env = {"AMARCHY_SESSION": s["id"]}
+            if what == "commands":       # save one: {name, command}; the run command itself is "run"
+                name, command = data.get("name"), data.get("command")
+                if not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,40}", name) or \
+                        not isinstance(command, str) or not command.strip() or len(command) > 4000:
+                    return self.error(400, "a name and a command")
+                r = run_amarchy("run", *(["--set", command] if name == RUN_DEFAULT else ["--save", name, command]), env=env)
+                return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+            name = data.get("name")
+            if name is not None and (not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,40}", name)):
+                return self.error(400, "no such command")
+            if s.get("setup"):
+                return self.error(409, "It's still being set up: run it once Claude has started")
+            if name in (None, RUN_DEFAULT) and not run_command(s):
+                return self.send(409, {"error": "No run command for this project yet", "ask": True})
+            r = run_amarchy("run", *([name] if name and name != RUN_DEFAULT else []), env=env)
+            return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr or r.stdout))
+
+        def add(self, data):
+            """A new project (Ctrl+Alt+P): a repo (owner/repo or a git URL),
+            or an empty one ({new, github})."""
+            repo, new = data.get("repo"), data.get("new")
+            if isinstance(new, str) and re.fullmatch(r"[\w.-]{1,100}", new) and not new.startswith("-"):
+                r = run_amarchy("add", "--new", new, *(["--github"] if data.get("github") is True else []), timeout=900)
+            elif isinstance(repo, str) and re.fullmatch(r"[\w.@:/~+-]{1,300}", repo) and not repo.startswith("-"):
+                r = run_amarchy("add", repo, timeout=900)
+            else:
+                return self.error(400, "which repo")
+            if r.returncode != 0:
+                return self.error(500, gist(r.stderr or r.stdout) or "couldn't add it")
+            return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
+
         def new(self, data):
             repo, prompt = data.get("repo"), data.get("prompt")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])}:
@@ -7276,11 +7932,11 @@ def app_handler(st, users, address):
     return Handler
 
 
-def run_amarchy(*args, input=None, timeout=60):
+def run_amarchy(*args, input=None, timeout=60, env=None):
     try:
         return subprocess.run([sys.executable, SELF, *args], capture_output=True, text=True, input=input,
                               stdin=None if input is not None else subprocess.DEVNULL, timeout=timeout,
-                              env=clean_env())
+                              env={**clean_env(), **(env or {})})
     except (OSError, subprocess.TimeoutExpired) as e:
         return subprocess.CompletedProcess(args, 1, "", str(e))
 

@@ -24,6 +24,7 @@ The Ⓐ in your bar lights up when one of them needs you.
 - **Light on memory.** Idle sessions sleep and free their memory. Start typing and they wake up mid-conversation.
 - **Keeps going with the lid shut.** Put your sessions on a server. They keep working while your laptop sleeps.
 - **On your phone.** A home-screen web app to read, answer and start sessions, with push notifications.
+- **In a browser.** The same app on a computer's wide screen is amarchy as your desktop has it, with Claude's and the session's real terminals: no Omarchy needed there.
 
 It's all plain Omarchy: ordinary Hyprland windows, `Super+arrows`, the Omarchy menu, your theme.
 Running another multiplexer inside a tiling window manager felt like one too many, so amarchy lives in the desktop instead.
@@ -60,6 +61,7 @@ Every action is also a command: `amarchy help`.
 The **[full guide](docs/guide.md)** covers all of it: [how it works](docs/guide.md#how-it-works),
 [sleep](docs/guide.md#sleep), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
 [remote sessions](docs/guide.md#remote-sessions), [the phone app](docs/guide.md#your-phone),
+[the browser](docs/guide.md#in-a-browser-on-your-computer),
 [configuration](docs/guide.md#configure) and [the CLI](docs/guide.md#cli).
 
 [MIT](LICENSE)
