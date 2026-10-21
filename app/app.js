@@ -449,7 +449,7 @@ function prioritySeg(s) {
 
 function rowMenu(s) {
   sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
-    h("button", { class: "control wide", onclick: () => { closeSheet(); location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
+    h("button", { class: "control wide", onclick: () => { closeSheet(); go(`#/s/${encodeURIComponent(s.id)}`); } },
       "Open"),
     closeButton(s));
 }
@@ -485,7 +485,7 @@ async function confirmClose(s, known) {
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheet();
       toast(`Closing ${s.repo} · ${s.name}`);
-      if (app.session && app.session.id === s.id) location.hash = "#/";
+      if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
@@ -504,7 +504,7 @@ function sessionRow(s, groups) {
   const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "new session");
   const bg = s.background > 0 ? ` · +${s.background} bg` : "";
   return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
-                       onclick: () => { location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
+                       onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     stateIcon(s),
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
@@ -528,12 +528,17 @@ class SessionView {
     this.open();
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
+    if (app.handed && app.handed.id === id) {     // said on the new-session bar, for this one
+      const handed = app.handed;
+      app.handed = null;
+      this.dictate(handed);
+    }
   }
 
   build() {
     this.titleEl = h("div", { class: "title" });
     const bar = h("div", { class: "bar" },
-      h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { location.hash = "#/"; } }, glyph("back")),
+      h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { go("#/"); } }, glyph("back")),
       this.titleEl,
       h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
     this.conv = h("div", { class: "conv" });
@@ -573,12 +578,12 @@ class SessionView {
     });
     es.addEventListener("gone", () => {
       toast("That session was closed.");
-      location.hash = "#/";
+      go("#/");
     });
     es.addEventListener("error", () => {
       if (es.readyState === EventSource.CLOSED) {
         toast("Can't open that session.");
-        location.hash = "#/";
+        go("#/");
       }
     });
   }
@@ -586,51 +591,66 @@ class SessionView {
   close() {
     if (this.es) this.es.close();
     this.es = null;
+    this.closed = true;
     clearInterval(this.seen);
     this.letGo();
-    micClose();
   }
 
   // Claude's own dictation (its voice mode), from the phone's microphone:
   // while the button is held, what the phone hears goes to the session's
   // Claude as if its key were held on the desktop; let go, and what Claude
-  // made of it comes into the box, to send from there.
-  async dictate() {
+  // made of it comes into the box, to send from there. What's said before
+  // Claude can listen (it's starting, in a session just made) waits for it.
+  // handed: said already, on the new-session bar ({queue}: its audio).
+  async dictate(handed) {
     if (this.voice) return;
     // What was in the box before: the words go after it, as they come.
-    const v = this.voice = { held: true, ws: null, queue: [], heard: false, base: this.input.value.replace(/\s+$/, "") };
+    const v = this.voice = { held: !handed, ws: null, queue: handed ? handed.queue : [], heard: false,
+                             base: this.input.value.replace(/\s+$/, "") };
     const write = (words) => {
       this.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
       this.grow();
       this.sendButtons();
     };
-    this.listening("Listening…");
-    try {
-      await micOpen();
-    } catch (e) {
-      this.voice = null;
+    const done = () => {
+      if (this.voice === v) this.voice = null;
       this.listening(null);
-      toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
-                                        : `The microphone didn't start: ${e.message}`);
-      return;
-    }
-    if (!v.held) {      // let go already (the first time, while the phone asked about the microphone)
-      this.voice = null;
-      this.listening(null);
-      micRelease();
-      return;
+    };
+    if (!handed) {
+      this.listening("Listening…");
+      try {
+        await micOpen();
+      } catch (e) {
+        done();
+        toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
+                                          : `The microphone didn't start: ${e.message}`);
+        return;
+      }
+      if (!v.held) {      // let go already (the first time, while the phone asked about the microphone)
+        done();
+        micRelease();
+        return;
+      }
+      mic.take = (pcm) => {
+        if (v.ws && v.ws.readyState === WebSocket.OPEN) v.ws.send(pcm);
+        else if (v.queue.length < 15000) v.queue.push(pcm);      // 5 minutes, as long as one can be
+      };
     }
     const url = `/api/session/${encodeURIComponent(this.id)}/voice`;
+    const why = await this.voiceReady(v, url);
+    if (why !== null) {
+      if (v.held) micRelease();
+      v.held = false;
+      done();
+      if (why) toast(why);
+      return;
+    }
     const ws = v.ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`);
     ws.binaryType = "arraybuffer";
-    mic.take = (pcm) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
-      else if (ws.readyState === WebSocket.CONNECTING) v.queue.push(pcm);
-    };
     ws.onopen = () => {
       for (const pcm of v.queue) ws.send(pcm);
       v.queue = [];
-      if (!v.held) this.letGo(true);
+      if (!v.held) this.end(v);
     };
     ws.onmessage = (e) => {
       let d = {};
@@ -649,10 +669,9 @@ class SessionView {
       }
     };
     ws.onclose = async () => {
-      mic.take = null;
-      if (this.voice === v) this.voice = null;
-      this.listening(null);
-      micRelease();
+      if (v.held) micRelease();       // gone while the button was still held
+      v.held = false;
+      done();
       if (!v.heard) {     // it didn't take it: ask why
         try {
           const r = await fetch(url);
@@ -665,18 +684,41 @@ class SessionView {
     };
   }
 
-  // Let go: the rest of what it heard, then "end". Before the connection is
-  // up, it ends as soon as it is (force: it's up now).
-  letGo(force) {
-    const v = this.voice;
-    if (!v || (!v.held && !force)) return;
-    v.held = false;
-    this.micBtn.classList.remove("on");
-    if (v.ws && v.ws.readyState === WebSocket.OPEN) {
-      mic.take = null;
-      v.ws.send("end");
-      this.listening("Claude is writing it down…");
+  // Whether Claude can take a dictation now: null when it can, else why not
+  // ("" when there's nothing to say: the session was left). While it can't
+  // yet (it's starting, or asking something), it's asked again, for a while.
+  async voiceReady(v, url) {
+    const until = Date.now() + 120000;
+    for (;;) {
+      if (this.closed || this.voice !== v) return "";
+      let d = {};
+      try {
+        const r = await fetch(url);
+        d = await r.json();
+        if (r.ok) return null;
+      } catch (e) {
+        return "Can't reach Amarchy";
+      }
+      if (!d.wait || Date.now() > until) return d.error || "Dictation didn't connect";
+      if (!v.held) this.listening("Waiting for Claude to start…");
+      await new Promise((ok) => setTimeout(ok, 700));
     }
+  }
+
+  // Let go: the rest of what it heard, then "end" (once it's connected).
+  letGo() {
+    const v = this.voice;
+    if (!v || !v.held) return;
+    v.held = false;
+    micRelease();
+    this.micBtn.classList.remove("on");
+    if (v.ws && v.ws.readyState === WebSocket.OPEN) this.end(v);
+    else this.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
+  }
+
+  end(v) {
+    v.ws.send("end");
+    this.listening("Claude is writing it down…");
   }
 
   // The box while dictating: what's going on, in place of its placeholder.
@@ -689,6 +731,7 @@ class SessionView {
   // Back from the background: everything from scratch.
   reopen() {
     this.close();
+    this.closed = false;
     this.open();
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
@@ -951,18 +994,27 @@ class SessionView {
   }
 }
 
-// ---- the microphone, while dictating (and a little after, for the next time)
+// ---- the microphone, while dictating
+//
+// iOS asks again whether Amarchy may use it once the page has gone a minute
+// without it (WebKit's rule; and each time the app starts). So once it's
+// allowed it's kept while the app is open: between dictations its track is
+// off (nothing is heard, and iOS turns the microphone itself off) and the
+// audio stops, and holding the button turns them back on, unasked.
 
-const mic = { stream: null, ctx: null, source: null, node: null, idle: null, take: null };
+const mic = { stream: null, ctx: null, source: null, node: null, take: null };
 
 async function micOpen() {
-  clearTimeout(mic.idle);
   if (!mic.ctx) {
     mic.ctx = new AudioContext();
     if (mic.ctx.audioWorklet) await mic.ctx.audioWorklet.addModule("voice.js");
   }
   await mic.ctx.resume();
-  if (mic.stream && mic.stream.active) return;
+  if (mic.stream && mic.stream.active) {
+    mic.stream.getTracks().forEach((t) => { t.enabled = true; });
+    return;
+  }
+  micClose();       // what's left of one that ended (a phone call took it, say)
   mic.stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   mic.source = mic.ctx.createMediaStreamSource(mic.stream);
@@ -1004,19 +1056,18 @@ function downsampler(rate, take) {
   };
 }
 
-// Kept a little for the next time; then the phone's microphone is let go.
+// Done dictating: off, but kept for the next time (see above).
 function micRelease() {
-  clearTimeout(mic.idle);
-  mic.idle = setTimeout(micClose, 20000);
+  mic.take = null;
+  if (mic.stream) mic.stream.getTracks().forEach((t) => { t.enabled = false; });
+  if (mic.ctx) mic.ctx.suspend().catch(() => {});
 }
 
 function micClose() {
-  clearTimeout(mic.idle);
   if (mic.stream) mic.stream.getTracks().forEach((t) => t.stop());
   if (mic.source) mic.source.disconnect();
   if (mic.node) mic.node.disconnect();
   mic.stream = mic.source = mic.node = null;
-  if (mic.ctx) mic.ctx.suspend().catch(() => {});
 }
 
 // Held down: start(); let go (or the finger slides off): stop().
@@ -1058,8 +1109,10 @@ function newBar() {
   const field = h("textarea", { rows: 1, placeholder: "What should Claude do?", enterkeyhint: "enter",
                                 oninput: () => { store.set("draft:new", field.value); grow(); buttons(); } });
   field.value = store.get("draft:new") || "";
-  const go = h("button", { class: "send", "aria-label": "Start session", onclick: () => start() }, glyph("send"));
-  const el = h("div", { class: "prompt new" }, pick, field, go);
+  const send = h("button", { class: "send", "aria-label": "Start session", onclick: () => start() }, glyph("send"));
+  const micBtn = h("button", { class: "mic", "aria-label": "Hold to dictate", hidden: true }, glyph("mic"));
+  holdToTalk(micBtn, () => talk(), () => letGo());
+  const el = h("div", { class: "prompt new" }, pick, field, micBtn, send);
   const projects = () => (app.view && app.view.projects) || [];
   const grow = () => {
     field.style.height = "auto";
@@ -1067,9 +1120,13 @@ function newBar() {
   };
   const buttons = () => {
     const none = !projects().length;
-    go.disabled = none || !field.value.trim();
+    send.disabled = none || !field.value.trim() || !!said;
     pick.hidden = none;
-    field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…") : "What should Claude do?";
+    micBtn.hidden = none || !(app.view && app.view.voice);
+    micBtn.classList.toggle("on", !!said && said.held);
+    el.classList.toggle("listening", !!said);
+    field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…")
+      : said ? (said.held ? "Listening…" : "Starting the session…") : "What should Claude do?";
   };
   const update = () => {
     const ps = projects();
@@ -1083,8 +1140,8 @@ function newBar() {
                     onclick: () => { repo = p.name; store.set("last-project", repo); closeSheet(); update(); field.focus(); } },
         p.name, p.name === repo ? glyph("check", "val") : null))));
   const start = async () => {
-    if (!field.value.trim() || !repo) return;
-    go.disabled = true;
+    if (!field.value.trim() || !repo || said) return;
+    send.disabled = true;
     el.classList.add("busy");
     try {
       const { id } = await api("/api/new", { repo, prompt: field.value });
@@ -1093,12 +1150,64 @@ function newBar() {
       store.set("last-project", repo);
       grow();
       field.blur();
-      location.hash = `#/s/${encodeURIComponent(id)}`;
+      go(`#/s/${encodeURIComponent(id)}`);
     } catch (e) {
       toast(e.message);
     }
     el.classList.remove("busy");
     buttons();
+  };
+  // Or hold the mic and say it: the session starts while you speak (once
+  // it's clearly held, not just tapped), and when you let go it opens, what
+  // you said going to its Claude's dictation as soon as Claude is up. The
+  // words come into its box, after what was typed here, to send from there.
+  let said = null;
+  const talk = async () => {
+    if (said || !repo) return;
+    const s = said = { held: true, queue: [], id: null, failed: null, making: null };
+    buttons();
+    try {
+      await micOpen();
+    } catch (e) {
+      said = null;
+      buttons();
+      toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
+                                        : `The microphone didn't start: ${e.message}`);
+      return;
+    }
+    if (!s.held) {      // let go already (the first time, while the phone asked about the microphone)
+      micRelease();
+      return;
+    }
+    mic.take = (pcm) => { if (s.queue.length < 15000) s.queue.push(pcm); };      // 5 minutes, as long as one can be
+    s.timer = setTimeout(() => {
+      s.making = api("/api/new", { repo }).then((d) => { s.id = d.id; }, (e) => { s.failed = e.message; });
+    }, 400);
+  };
+  const letGo = async () => {
+    const s = said;
+    if (!s || !s.held) return;
+    s.held = false;
+    clearTimeout(s.timer);
+    micRelease();
+    if (!s.making) {        // only tapped (or let go while the phone asked about the microphone)
+      said = null;
+      buttons();
+      if (s.queue.length) toast("Hold the mic while you speak");
+      return;
+    }
+    buttons();
+    await s.making;
+    said = null;
+    buttons();
+    if (s.failed) return toast(s.failed);
+    store.set(`draft:${s.id}`, field.value.trim());
+    field.value = "";
+    store.set("draft:new", "");
+    store.set("last-project", repo);
+    grow();
+    app.handed = { id: s.id, queue: s.queue };
+    go(`#/s/${encodeURIComponent(s.id)}`);
   };
   requestAnimationFrame(grow);
   return { el, update };
@@ -1201,10 +1310,29 @@ async function openSettings() {
 }
 
 // ---- going between views
+//
+// In a Safari tab the view is in the address (#/s/<id>), so the browser's
+// back goes back. On the home screen there's no address bar, and there iOS
+// forgets that the microphone was allowed whenever the address changes
+// (WebKit bug 215884): the address stays as the app opened, the view goes
+// where it's told.
+
+const routed = { hash: location.hash };
+
+function go(hash) {
+  if (!standalone) {
+    location.hash = hash;
+    return;
+  }
+  routed.hash = hash;
+  route();
+}
+
+function here() { return standalone ? routed.hash : location.hash; }
 
 function route() {
   closeSheet();
-  const m = location.hash.match(/^#\/s\/(.+)$/);
+  const m = here().match(/^#\/s\/(.+)$/);
   const id = m ? decodeURIComponent(m[1]) : null;
   if (app.session && app.session.id !== id) {
     app.session.close();
@@ -1232,7 +1360,7 @@ async function start() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (e) => {
-      if (e.data && e.data.go) location.hash = new URL(e.data.go, location.href).hash || "#/";
+      if (e.data && e.data.go) go(new URL(e.data.go, location.href).hash || "#/");
     });
   }
   try {
@@ -1249,7 +1377,10 @@ async function start() {
     app.failed = e.message.includes("Amarchy") ? e.message
       : "Can't reach Amarchy. Is Tailscale on, on this phone?";
   }
-  window.addEventListener("hashchange", route);
+  window.addEventListener("hashchange", () => {
+    routed.hash = location.hash;
+    route();
+  });
   route();
   openList();
   if (app.key) pushRefresh();

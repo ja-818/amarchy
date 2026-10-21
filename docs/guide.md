@@ -429,9 +429,14 @@ session says it's dictating on your phone, and is back on Claude once the
 words are on the phone. (On the host, Claude's `rec` is amarchy's, which
 `install.sh --host` links into `~/.local/bin`: the phone's microphone while
 you dictate, the real `rec` the rest of the time, so your desktop's mic works
-as before.) The bar under the list starts a new
+as before.) The phone asks whether Amarchy may use the microphone the first
+time you dictate after opening the app; after that the app keeps the
+microphone, turned off between dictations, so it doesn't ask again while
+it's open. The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for
-another of the host's projects). When a session needs you or is done, the phone gets a
+another of the host's projects), or hold its mic and say it: the session
+starts while you speak, opens when you let go, and what you said goes to its
+Claude's dictation once Claude is up, the words coming into its box to send. When a session needs you or is done, the phone gets a
 notification, at the same moments as the desktop's chime (not for the one
 you're looking at on the phone). Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.

@@ -6443,6 +6443,7 @@ MIC_FORMAT = ["-t", "raw", "-r", "16000", "-e", "signed", "-b", "16", "-c", "1"]
 MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key repeats
 MIC_MAX = 300           # seconds a dictation lasts at most
 MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
+MIC_CAUGHT_UP = 1.5     # seconds without a new word from Claude, writing down what was said ahead of it
 MIC_METER = "▁▂▃▄▅▆▇█"  # what Claude draws after the words while it listens (how loud)
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
@@ -6860,16 +6861,20 @@ def app_handler(st, users, address):
             voice = claude_voice()
             if not voice["enabled"]:
                 return self.error(409, "Claude's voice mode is off: turn it on with /voice")
+            # "wait": not yet (Claude is starting, or asking something), so
+            # the phone asks again, what was said waiting for it.
             screen = app_screen(s)
-            if not screen["live"] or screen["exited"]:
-                return self.error(409, "Claude isn't running")
+            if screen["exited"]:
+                return self.error(409, "Claude Code exited: start it again first")
+            if not screen["live"]:
+                return self.send(409, {"error": "Claude isn't running", "wait": True})
             if screen["dialog"]:
-                return self.error(409, "Claude is asking you something: answer that first")
+                return self.send(409, {"error": "Claude is asking you something: answer that first", "wait": True})
             if sid in st.mics:
                 return self.error(409, "It's already listening")
             before = claude_prompt(s)
             if before is None:
-                return self.error(409, "Claude's prompt isn't on screen")
+                return self.send(409, {"error": "Claude's prompt isn't on screen", "wait": True})
             # Without the WebSocket, just whether it would listen (so the
             # phone can say why it didn't).
             if self.headers.get("Upgrade", "").lower() != "websocket":
@@ -6886,6 +6891,8 @@ def app_handler(st, users, address):
             away, watching, sending = None, threading.Event(), threading.Lock()
             self.ws_lock = sending
 
+            wrote = [None]      # when Claude last wrote a word down
+
             def watch():        # the words as Claude writes them down, to the phone as they come
                 last = before
                 while watching.is_set():
@@ -6893,6 +6900,7 @@ def app_handler(st, users, address):
                     now = now.rstrip(MIC_METER).rstrip() if now is not None else None
                     if now is not None and now != last:
                         last = now
+                        wrote[0] = time.time()
                         try:
                             self.ws_send({"interim": now})
                         except OSError:
@@ -6938,6 +6946,13 @@ def app_handler(st, users, address):
                     elif op == 9:
                         self.ws_send(data, op=10)
                 # Let go: Claude gets all of it before it's told the key is up.
+                # Said before Claude was up, it all came at once, and a key let
+                # go at once is no dictation to Claude: held then until Claude
+                # has caught up (no new words for a moment), or for as long as
+                # what was said lasts.
+                ahead = started + said / 32000
+                while time.time() < ahead and not (wrote[0] and time.time() - wrote[0] > MIC_CAUGHT_UP):
+                    time.sleep(0.1)
                 came = mic.end()
                 time.sleep(0.1)
                 holding.clear()
@@ -7225,9 +7240,13 @@ def app_handler(st, users, address):
             repo, prompt = data.get("repo"), data.get("prompt")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])}:
                 return self.error(400, "no such project")
-            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 60_000:
+            # Without a prompt when it's to be dictated, once it's up.
+            if prompt is None or isinstance(prompt, str) and not prompt.strip():
+                r = run_amarchy("new", repo, "--no-jump", timeout=300)
+            elif not isinstance(prompt, str) or len(prompt) > 60_000:
                 return self.error(400, "say what it's for")
-            r = run_amarchy("new", repo, "--no-jump", "--prompt", "-", input=prompt, timeout=300)
+            else:
+                r = run_amarchy("new", repo, "--no-jump", "--prompt", "-", input=prompt, timeout=300)
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
