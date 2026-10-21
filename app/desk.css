@@ -30,9 +30,10 @@ body.desk .toast.action { cursor: pointer; }
 
 .desk-root {
   --pad: 8px;
-  --caption: 11px;
-  --body: 13px;
-  --title: 14.5px;
+  /* As your desktop's panel draws them (measured against it). */
+  --caption: 12px;
+  --body: 14px;
+  --title: 15.5px;
   --icon-large: 19px;
   position: fixed; inset: 0;
   display: flex; flex-direction: column;
@@ -63,35 +64,35 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .panel {
   position: absolute; left: 0; top: 0; bottom: 0;
   width: calc((100% - var(--column)) / 2 - var(--pad));
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 12px 10px 0;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 20px 20px 0;
   background: color-mix(in srgb, var(--bg) calc(var(--term-alpha) * 100%), transparent);
 }
 .zen .panel { display: none; }
-.panel-buttons { display: flex; gap: 6px; flex: none; }
+.panel-buttons { display: flex; gap: 9px; flex: none; }
 /* As on your desktop: the menu as wide as its name, New session the rest. */
-.panel-buttons .control { min-height: 32px; padding: 4px 10px; gap: 6px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
+.panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
 .panel-buttons .brand { flex: none; }
 .panel-buttons .control:last-child { flex: 1; min-width: 0; justify-content: center; }
 .panel-buttons .a { font-size: var(--title); line-height: 1; }
 .desk .control:hover { background: var(--control-hover); }
 .desk .toolbar { padding: 0; flex: none; }
-.desk .searchbox { height: 34px; }
+.desk .searchbox { height: 38px; }
 .desk .searchbox input { font-size: var(--body); }
 .desk .searchbox .hint { flex: none; padding-right: 8px; font-size: var(--caption); color: var(--dim); }
 .desk .searchbox:focus-within .hint { display: none; }
-.desk .control.organize { width: 34px; height: 34px; min-height: 34px; font-size: 15px; }
+.desk .control.organize { width: 38px; height: 38px; min-height: 38px; font-size: 16px; }
 .desk .organize-menu { right: 0; top: 100%; }
 .desk .organize-menu .menu-item:hover { background: var(--sel-bg); }
 .panel .scroll { margin: 0 -4px; padding-bottom: 12px; }
 .desk .list { padding: 0 4px; gap: 1px; }
-.desk .row { padding: 6px 10px 6px 4px; gap: 10px; }
+.desk .row { padding: 9px 10px 9px 4px; gap: 12px; }
 .desk .row:hover { background: var(--control-hover); }
-.desk .row.cursor { background: var(--sel-bg); border-color: var(--sel-border); }
+.desk .row.cursor { background: var(--sel-bg); border-color: transparent; }
 .desk .row.cursor .task, .desk .row.cursor .state { color: var(--sel-text); opacity: 1; }
-.desk .row .meta { font-size: 10px; }
-.desk .row .side { font-size: 10px; }
-.desk .group-head { padding: 10px 6px 3px; font-size: 10.5px; }
+.desk .row .meta { font-size: 11px; }
+.desk .row .side { font-size: 11px; }
+.desk .group-head { padding: 12px 6px 4px; font-size: var(--caption); }
 .desk .empty { padding: 32px 12px; }
 
 /* ---- Claude's column, and the terminal in the gap on its right */
@@ -128,7 +129,9 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   position: absolute; inset: 0;
   background: color-mix(in srgb, var(--term-background) calc(var(--term-alpha) * 100%), transparent);
 }
-.term-host { position: absolute; inset: 0; padding: var(--term-pad); }
+/* content-box: xterm's fit reads the box's height as the room for rows, so
+   it mustn't count the padding (the last row went under the window). */
+.term-host { position: absolute; inset: 0; padding: var(--term-pad); box-sizing: content-box; }
 .term-host .xterm { height: 100%; }
 .term-host .xterm-viewport { background: transparent !important; scrollbar-width: none; }
 .term-host .xterm-viewport::-webkit-scrollbar { display: none; }
