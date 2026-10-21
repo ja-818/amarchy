@@ -146,7 +146,7 @@ Environment:
   AMARCHY_TERMINAL     foot, kitty, alacritty or ghostty (default: first one installed)
   AMARCHY_ZEN_WIDTH    width of the Claude column in logical pixels (default 900)
   AMARCHY_HEADER_HEIGHT    height of the strip above Claude with the session's name in zen mode (default 30, 0 for none)
-  AMARCHY_CLAUDE_ARGS  extra arguments for claude (default "--permission-mode auto")
+  AMARCHY_CLAUDE_ARGS  extra arguments for claude (else ~/.config/amarchy/claude-args, else "--permission-mode auto")
   AMARCHY_SOUND        off for silent notifications, whatever `amarchy sound` picked
   AMARCHY_SHORT_NAMES  off to show Claude Code's titles as they are, not cut down to "Keyword: a few words"
 
@@ -262,7 +262,12 @@ LEGACY_PREFIX = "factory"
 LEGACY_WS_PREFIX = "F:"
 
 ZEN_WIDTH = int(os.environ.get("AMARCHY_ZEN_WIDTH") or os.environ.get("READING_WIDTH") or 900)
-CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS", "--permission-mode auto"))
+# AMARCHY_CLAUDE_ARGS, else ~/.config/amarchy/claude-args: a file reaches every way a
+# session starts (ssh from a desktop, the phone app's service, another session).
+_CLAUDE_ARGS_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/claude-args"
+CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS")
+                          or (_CLAUDE_ARGS_FILE.read_text().strip() if _CLAUDE_ARGS_FILE.is_file() else "")
+                          or "--permission-mode auto")
 # The strip above the zen column where the shell plugin writes the session's name.
 HEADER_HEIGHT = max(int(os.environ.get("AMARCHY_HEADER_HEIGHT") or 30), 0)
 TERMINALS = ("foot", "kitty", "alacritty", "ghostty")
