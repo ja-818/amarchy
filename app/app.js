@@ -138,9 +138,23 @@ function stateOf(s) { return s.status || "idle"; }
 function fitViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
-  root.style.setProperty("--vvh", `${vv.height}px`);
+  const up = vv.height < window.innerHeight - 120;
+  const short = shortfall();
+  document.documentElement.style.setProperty("--shortfall", `${short}px`);
+  root.style.setProperty("--vvh", `${vv.height + (up ? 0 : short)}px`);
   root.style.transform = `translateY(${vv.offsetTop}px)`;
-  document.body.classList.toggle("keyboard-up", vv.height < window.innerHeight - 120);
+  document.body.classList.toggle("keyboard-up", up);
+}
+
+// On the home screen, with the status bar see-through, iOS lays the page out
+// as if the screen were shorter by the status bar, and leaves that much at the
+// bottom bare: how much, to draw on it too (0 anywhere else).
+function shortfall() {
+  const home = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  if (!home) return 0;
+  const tall = window.matchMedia("(orientation: portrait)").matches ? screen.height : screen.width;
+  const missing = tall - window.innerHeight;
+  return missing > 0 && missing <= 80 ? missing : 0;
 }
 if (window.visualViewport) {
   visualViewport.addEventListener("resize", fitViewport);
