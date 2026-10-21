@@ -171,10 +171,11 @@ session goes away; without the network it starts from what was fetched last.
 Closing a session (`Ctrl+Alt+X`) asks first if it has uncommitted changes,
 then takes you straight to the next session in the list, and its row goes.
 The rest happens out of sight: its Claude Code exits as if you'd quit it, its
-background sessions stop, its windows close, the worktree is removed and the
-branch deleted if it was merged. A notification says when it's done (or, if
-the worktree changed meanwhile, why it couldn't, and the session is back in
-the list).
+background sessions stop, its windows close, anything still running from the
+worktree is stopped (a dev server Claude started in the background, say), the
+worktree is removed and the branch deleted if it was merged. A notification
+says when it's done (or, if the worktree changed meanwhile, why it couldn't,
+and the session is back in the list).
 
 Windows are disposable, like everywhere else in Omarchy. Close Claude or the
 terminal with `Super+W` (or let Claude exit) and the session just goes to sleep
@@ -226,7 +227,8 @@ Claude Code **background sessions** (`/bg`) started from a session show as
 `+1 BG` in its row. When the session sleeps, those with nothing left to do are
 stopped as well (Claude Code keeps their conversations: `claude attach <id>`
 brings one back); close stops them all, since their worktree goes away. Running
-ones are left alone.
+ones are left alone. So is anything else running from a sleeping session's
+worktree (a dev server you may still want): only close stops it.
 
 ```sh
 amarchy sleep              # this session, now (it says why not, if something would be lost)

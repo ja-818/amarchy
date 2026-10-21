@@ -142,9 +142,10 @@ dev server). Restart the terminal so the user sees the result too.
   to other sessions".
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
-- `amarchy close <id>`: close **another** session. It removes that worktree and
-  refuses if it has uncommitted changes. Never add `--force` without explicit
-  approval: it discards them.
+- `amarchy close <id>`: close **another** session. It stops every process still
+  running from that worktree (dev servers started in the background too),
+  removes the worktree, and refuses if it has uncommitted changes. Never add
+  `--force` without explicit approval: it discards them.
 
 ### Never on your own
 

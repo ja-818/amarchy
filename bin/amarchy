@@ -3235,10 +3235,79 @@ def stop_claude(win):
         pass
 
 
+def stop_leftovers(path):
+    """Stop what still runs from a worktree once its session's Claude, tmux
+    and windows are gone: whatever Claude started in the background (a
+    `nohup pnpm dev &`) lives on outside them, holding its port and serving
+    files that are about to go. A process counts if its working directory or
+    its executable is in the worktree. Whole process groups get SIGTERM when
+    all of them are in it, the rest one by one; SIGKILL for what's left after
+    a few seconds. Never this process or what started it."""
+    inside = str(path).rstrip("/") + "/"
+    procs = processes()
+    spared, pid = set(), os.getpid()
+    while pid > 1 and pid not in spared:
+        spared.add(pid)
+        pid = procs.get(pid, (0,))[0]
+
+    def in_worktree(p):
+        for link in ("cwd", "exe"):
+            try:
+                target = os.readlink(f"/proc/{p}/{link}").removesuffix(" (deleted)")
+            except OSError:       # gone, or not ours
+                continue
+            if (target + "/").startswith(inside):
+                return True
+        return False
+
+    found = {p for p in procs if p not in spared and in_worktree(p)}
+    if not found:
+        return 0
+    groups = {}
+    for p in procs:
+        try:
+            groups.setdefault(os.getpgid(p), set()).add(p)
+        except OSError:
+            pass
+    for p in found:
+        try:
+            g = os.getpgid(p)
+        except OSError:
+            continue
+        if g > 1 and groups.get(g, set()) <= found:
+            try:
+                os.killpg(g, 15)
+                continue
+            except OSError:
+                pass
+        try:
+            os.kill(p, 15)
+        except OSError:
+            pass
+    def running(p):
+        try:
+            stat = Path(f"/proc/{p}/stat").read_text()
+        except OSError:
+            return False
+        return stat[stat.rfind(")") + 2] != "Z"   # a zombie only waits for its parent
+
+    end = time.time() + 5
+    while time.time() < end and any(running(p) for p in found):
+        time.sleep(0.1)
+    for p in found:
+        if running(p) and in_worktree(p):     # not a new process that got its pid
+            try:
+                os.kill(p, 9)
+            except OSError:
+                pass
+    return len(found)
+
+
 def cmd_reap(sid):
     """The rest of close, detached from whatever asked for it (a key, the
     list, a terminal that's about to close): the session's Claude Code and
-    its background sessions stop, its windows close, then the worktree goes."""
+    its background sessions stop, its windows close, whatever still runs
+    from the worktree is stopped, then the worktree goes."""
     f = CLOSING / f"{sid}.json"
     lock = reap_lock(sid) if f.exists() else None
     if not lock or not f.exists():     # another reap has it, or had it and is done
@@ -3285,6 +3354,9 @@ def cmd_reap(sid):
             return keep_open("amarchy runs from it, and putting it back on "
                              f"{repo_dir} failed ({last_line(put, 'install.sh failed')})")
         sh("omarchy-restart-shell")
+    # What its Claude started in the background (a dev server) outlives its
+    # tmux and windows, and would go on running from a worktree that's gone.
+    stop_leftovers(path)
     removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
     sh("git", "worktree", "prune", cwd=repo_dir)
     if path.exists() and removed.returncode != 0:
