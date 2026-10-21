@@ -4,7 +4,8 @@
 "use strict";
 
 const root = document.getElementById("root");
-const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false };
+const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
+              query: "", organize: null };
 const STATUS = { waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -13,9 +14,11 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
-  stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}",
+  stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
+  organize: "\u{F04BC}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
 };
-const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓" };
+const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
+                project: "▤", status: "●", newest: "↓", oldest: "↑" };
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -23,6 +26,8 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>',
+  organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
 };
 
@@ -243,6 +248,8 @@ function openList() {
   app.list = es;
   es.addEventListener("list", (e) => {
     app.view = JSON.parse(e.data);
+    const o = app.organize;
+    if (o && o.done && same(o.group, app.view.group) && o.sort === app.view.sort) app.organize = null;
     app.online = true;
     app.failed = "";
     app.nerd = !!app.view.nerd;
@@ -282,12 +289,25 @@ function listView() {
   const head = h("div", { class: "hero" },
     h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
     h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));
+  // Above the list, as on the desktop beside Claude: the search, and how
+  // the list is grouped and sorted.
+  const search = h("input", { type: "search", placeholder: "Search sessions", enterkeyhint: "search",
+                              autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
+                              oninput: () => { app.query = search.value; renderList(); },
+                              onkeydown: (e) => { if (e.key === "Enter") search.blur(); } });
+  const clear = h("button", { class: "clear", "aria-label": "Clear the search",
+                              onclick: () => { search.value = app.query = ""; renderList(); search.focus(); } }, glyph("close"));
+  const organize = h("button", { class: "control organize", "aria-label": "Group and sort the list",
+                                 onclick: () => { menu.hidden = !menu.hidden; renderList(); } }, glyph("organize"));
+  const menu = h("div", { class: "organize-menu", hidden: true });
+  const shade = h("div", { class: "organize-shade", onclick: () => { menu.hidden = true; renderList(); } });
+  const toolbar = h("div", { class: "toolbar" }, h("label", { class: "searchbox" }, glyph("search"), search, clear), organize, menu);
   const offline = h("div", { class: "offline" }, "Reconnecting to Amarchy…");
   const list = h("div", { class: "list" });
   const scroll = h("div", { class: "scroll" }, list);
   app.newBar = newBar();
-  app.listEl = h("div", { class: "view list-view" }, head, offline, scroll, h("div", { class: "dock" }, app.newBar.el));
-  Object.assign(app.listEl, { meta, offline, list, scroll });
+  app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, h("div", { class: "dock" }, app.newBar.el));
+  Object.assign(app.listEl, { meta, offline, list, scroll, toolbar, clear, organize, menu, shade });
   return app.listEl;
 }
 
@@ -305,18 +325,27 @@ function renderList() {
     if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
   }
   view.offline.hidden = app.online || !v;
+  view.toolbar.hidden = !v || !v.sessions.length;
+  view.clear.hidden = !app.query;
+  if (view.toolbar.hidden) view.menu.hidden = true;
+  view.shade.hidden = view.menu.hidden;
+  view.organize.classList.toggle("on", !view.menu.hidden);
+  if (!view.menu.hidden) view.menu.replaceChildren(...organizeMenu());
   const list = view.list;
   list.replaceChildren();
+  const shown = v ? matching(v.sessions, app.query) : [];
   if (!v) {
     list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
   } else if (!v.sessions.length) {
     list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), "Say what Claude should do, below, to start one."));
+  } else if (!shown.length) {
+    list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
   } else {
     // Grouped as amarchy groups them, outermost first. With more than one
     // grouping the outermost is a rule across the list, its name in the middle.
     const groups = v.group || [];
     let prev = [];
-    for (const s of v.sessions) {
+    for (const s of shown) {
       const labels = groups.map((g) => groupLabel(s, g));
       const at = labels.findIndex((l, i) => l !== prev[i]);
       if (at >= 0)
@@ -329,6 +358,97 @@ function renderList() {
   app.newBar.update();
 }
 
+// The sessions the search matches by name (what it's about, Claude's title
+// for it, its project and its branch), every word of it, as on the desktop.
+function matching(sessions, query) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return sessions;
+  return sessions.filter((s) => {
+    const name = `${s.task || ""} ${s.claude_title || ""} ${s.repo || ""} ${s.name || ""}`.toLowerCase();
+    return words.every((w) => name.includes(w));
+  });
+}
+
+function same(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
+
+// How the list is grouped (any of them, nested in the order you turn them
+// on, each showing its level) and sorted inside its groups: the desktop's
+// group & sort menu. It's one setting with your desktop's: change it here
+// and the desktop's list changes too, and the other way round.
+const GROUPINGS = [["project", "project", "Project"], ["priority", "high", "Priority"],
+                   ["status", "status", "Status"], ["none", "organize", "Not grouped"]];
+const SORTINGS = [["priority", "high", "Priority"], ["newest", "newest", "Newest first"], ["oldest", "oldest", "Oldest first"]];
+
+function organizeMenu() {
+  const v = app.organize || app.view || {};
+  const groups = v.group || [], sort = v.sort || "priority";
+  const row = (icon, label, on, level, pick) =>
+    h("button", { class: `menu-item${on ? " on" : ""}`, onclick: pick },
+      h("span", { class: "label" }, glyph(icon, "icon"), label),
+      on ? (level ? h("span", { class: "val level" }, level) : glyph("check", "val")) : null);
+  return [
+    h("div", { class: "menu-head" }, "Group by"),
+    ...GROUPINGS.map(([what, icon, label]) => {
+      const on = what === "none" ? !groups.length : groups.includes(what);
+      const level = on && what !== "none" && groups.length > 1 ? String(groups.indexOf(what) + 1) : "";
+      const next = what === "none" ? [] : on ? groups.filter((g) => g !== what) : [...groups, what];
+      return row(icon, label, on, level, () => organizeList(next, sort));
+    }),
+    h("div", { class: "menu-head" }, "Sort by"),
+    ...SORTINGS.map(([what, icon, label]) => row(icon, label, sort === what, "", () => organizeList(groups, what))),
+  ];
+}
+
+async function organizeList(group, sort) {
+  const mine = { group, sort, done: false };
+  app.organize = mine;
+  renderList();
+  try {
+    await api("/api/list", { group, sort });
+    mine.done = true;
+    if (app.view && same(app.view.group, group) && app.view.sort === sort && app.organize === mine) app.organize = null;
+  } catch (e) {
+    if (app.organize === mine) app.organize = null;
+    toast(e.message);
+    renderList();
+  }
+}
+
+// Held down (as on a right click on the desktop): what you can change about
+// it from the list, its priority.
+function holdable(el, onHold) {
+  let timer = null, held = false, x = 0, y = 0;
+  const cancel = () => clearTimeout(timer);
+  el.addEventListener("pointerdown", (e) => {
+    held = false; x = e.clientX; y = e.clientY;
+    cancel();
+    timer = setTimeout(() => { held = true; onHold(); }, 500);
+  });
+  el.addEventListener("pointermove", (e) => { if (Math.hypot(e.clientX - x, e.clientY - y) > 10) cancel(); });
+  for (const end of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(end, cancel);
+  el.addEventListener("click", (e) => { if (held) { e.stopImmediatePropagation(); held = false; } }, true);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+  return el;
+}
+
+// High, normal or low, the one it is on.
+function prioritySeg(s) {
+  return h("div", { class: "seg" }, ...["high", "normal", "low"].map((p) =>
+    h("button", { class: `control${(s.priority || "normal") === p ? " on" : ""}`,
+                  onclick: async () => {
+                    try {
+                      await api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p });
+                      closeSheet();
+                    } catch (e) { toast(e.message); }
+                  } }, PRIORITY[p])));
+}
+
+function rowMenu(s) {
+  sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
+    h("button", { class: "control wide", onclick: () => { closeSheet(); location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
+      "Open"));
+}
+
 // One session, as the desktop list draws it: the project and the priority
 // only when no header above it says them already.
 function sessionRow(s, groups) {
@@ -337,13 +457,13 @@ function sessionRow(s, groups) {
     ? glyph(s.priority, `prio ${s.priority}`) : null;
   const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "new session");
   const bg = s.background > 0 ? ` · +${s.background} bg` : "";
-  return h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
+  return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
                        onclick: () => { location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
     stateIcon(s),
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
       h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), prio));
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), prio)), () => rowMenu(s));
 }
 
 // ---- a session
@@ -671,15 +791,8 @@ class SessionView {
   }
 
   menu() {
-    const row = this.row || {};
-    const seg = h("div", { class: "seg" }, ...["high", "normal", "low"].map((p) =>
-      h("button", { class: `control${(row.priority || "normal") === p ? " on" : ""}`,
-                    onclick: async () => {
-                      try {
-                        await api(`/api/session/${encodeURIComponent(this.id)}/priority`, { level: p });
-                        closeSheet();
-                      } catch (e) { toast(e.message); }
-                    } }, PRIORITY[p])));
+    const row = this.row || { id: this.id };
+    const seg = prioritySeg(row);
     const shown = (mode, label) =>
       h("button", { class: `menu-item${this.mode === mode ? " on" : ""}`, onclick: () => { closeSheet(); this.setMode(mode); } },
         label, this.mode === mode ? glyph("check", "val") : null);

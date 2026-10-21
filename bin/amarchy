@@ -138,6 +138,7 @@ Plumbing:
   amarchy clipboard <desktop>           on a host: where a desktop's clipboard goes (remote --sync forwards it)
   amarchy app serve                     on a host: the phone app's server (amarchy-app.service runs it)
   amarchy app theme                     on a host: keep the look the phone app wears (JSON on stdin, from remote --sync)
+  amarchy app list                      on a host: group and sort its list as a desktop does (JSON on stdin, from remote --sync)
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -3564,6 +3565,41 @@ def cmd_group(args):
     return 0
 
 
+def list_at():
+    """When the list's grouping or sort was last set here (0: never)."""
+    at = 0
+    for f in (GROUP_FILE, SORT_FILE, ORDER_FILE):
+        try:
+            at = max(at, f.stat().st_mtime)
+        except OSError:
+            pass
+    return round(at, 3)
+
+
+def list_setting():
+    """How the list is grouped and sorted here, and since when: what a host
+    tells its desktops, so the phone's list and the desktop's agree."""
+    return {"group": list_groups(), "sort": list_sort(), "at": list_at()}
+
+
+def set_list(data):
+    """Group and sort the list as {"group": [...], "sort": ...} says (from
+    the phone, or a desktop: see remote_list). What's already so is left
+    alone, so it keeps its time. None, or what's wrong with it."""
+    groups, how = data.get("group") if isinstance(data, dict) else None, (data or {}).get("sort")
+    if not isinstance(groups, list) or not all(g in GROUPS for g in groups) or len(set(groups)) < len(groups):
+        return "group: project, priority and/or status, each once"
+    if how not in SORTS:
+        return "sort: priority, newest or oldest"
+    if groups != list_groups():
+        set_groups(groups)
+    if how != list_sort():
+        STATE.mkdir(parents=True, exist_ok=True)
+        SORT_FILE.write_text(how + "\n")
+        tell_shell("refresh")
+    return None
+
+
 def cmd_sort(args):
     """`amarchy sort priority|newest|oldest`: how the list is sorted inside its
     groups. Prints how it's sorted now."""
@@ -4510,6 +4546,35 @@ def remote_look(host, has):
     return r.returncode == 0
 
 
+def remote_list(host, theirs, sent):
+    """Keep the host's list (the phone app's) grouped and sorted as this
+    desktop's, both ways: whichever was set last wins. Set here, it goes to
+    the host; set on the phone, this desktop takes it. sent: what went to the
+    host and when, so a host that doesn't take it isn't asked every line."""
+    mine = list_setting()
+    if not isinstance(theirs, dict):
+        return
+    if (theirs.get("group"), theirs.get("sort")) == (mine["group"], mine["sort"]):
+        sent.clear()        # it took what was sent, if anything was
+        return
+    at = theirs.get("at")
+    if isinstance(at, (int, float)) and at > mine["at"]:
+        why = set_list(theirs)
+        if why:
+            print(f"amarchy: the list on {host} is grouped in a way this amarchy doesn't know: {why}", file=sys.stderr)
+        return
+    want = json.dumps({"group": mine["group"], "sort": mine["sort"]})
+    if sent.get("what") == want and time.time() - sent.get("at", 0) < LOOK_RETRY:
+        return
+    sent.update(what=want, at=time.time())
+
+    def send():
+        r = remote_amarchy(host, "app", "list", input=want, timeout=30)
+        if r.returncode:
+            print(f"amarchy: {host} didn't take how the list is grouped: {(r.stderr or '').strip()}", file=sys.stderr)
+    threading.Thread(target=send, daemon=True).start()
+
+
 def amarchy_version():
     """The commit amarchy runs from (its checkout's HEAD), or "" when it
     isn't a git checkout."""
@@ -4570,6 +4635,8 @@ def remote_sync():
         return 0
     version, wait, seen = os.stat(SELF).st_mtime_ns, 1, {}
     phone = {"has": None, "at": 0.0, "busy": threading.Lock()}
+    # How the host groups and sorts its list, and what this desktop last sent it (see remote_list).
+    listed = {"theirs": None, "sent": {}}
     # The host runs a newer amarchy (one was shipped): this desktop updates
     # itself to it, once per version it hears of.
     mine, tried = amarchy_version(), set()
@@ -4638,6 +4705,7 @@ def remote_sync():
                         data = {}
                     if isinstance(data, dict) and data:
                         catch_up(data.get("version"))
+                        listed["theirs"] = data.get("list")
                     # What the phone app there wears; nothing when it's off.
                     if isinstance(data, dict) and data:
                         has = data.get("phone")
@@ -4650,6 +4718,7 @@ def remote_sync():
                     if snap.get("online"):
                         write_file(REMOTE_STATE, json.dumps({**snap, "at": time.time()}))
                 look()
+                remote_list(host, listed["theirs"], listed["sent"])
             p.terminate()
             try:
                 why = (p.communicate(timeout=5)[1] or "").strip().splitlines()[-1:] or [""]
@@ -5349,6 +5418,7 @@ def cmd_events(args):
                 "version": commit}
         if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
             view["phone"] = app_look_stamp()
+            view["list"] = list_setting()   # and how it groups and sorts the list (see remote_list)
         line = json.dumps(view)
         try:
             if line != last:
@@ -6436,6 +6506,9 @@ def app_handler(st, users, address):
                 return self.new(data)
             if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
                 return self.push(data)
+            if self.path == "/api/list":      # group and sort the list, here and on your desktop
+                why = set_list(data)
+                return self.error(400, why) if why else self.send(200, {})
             m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
@@ -6670,6 +6743,12 @@ def cmd_app(args):
             return app_theme(json.loads(sys.stdin.read()))
         except ValueError:
             return fail("app theme: expects the look as JSON, from the desktop")
+    if what == "list":
+        try:
+            why = set_list(json.loads(sys.stdin.read()))
+        except ValueError:
+            why = "expects JSON, from the desktop"
+        return fail(f"app list: {why}") if why else 0
     if what == "on":
         return app_on()
     if what == "off":

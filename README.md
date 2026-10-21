@@ -416,8 +416,12 @@ running there; `amarchy remote <host>` again brings them back).
 
 A host can put its sessions on your phone too: `amarchy app` is a web app you
 add to the home screen, made for an iPhone (any phone with a current browser
-works). It shows the list as amarchy does (what each session is about,
-project · branch, needs you / working / idle, priority and groups), and in a
+works). It shows the list as amarchy does beside Claude (what each session
+is about, project · branch, needs you / working / idle, priority and groups),
+with the same search, and the same group & sort menu: it's one setting with
+your desktop's, so the phone's list is grouped and sorted as the desktop's,
+and changing it on either changes both. Hold a session down to set its
+priority. In a
 session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for

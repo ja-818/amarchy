@@ -194,6 +194,52 @@ body::before {
 
 .list { padding: 2px 6px 18px; display: flex; flex-direction: column; gap: 2px; }
 
+/* Above the list, as on the desktop: the search, and the button for how
+   the list is grouped and sorted, its menu dropping over the list. */
+.toolbar { position: relative; display: flex; gap: 6px; padding: 0 12px 8px; }
+.searchbox {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  height: 42px;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--control-fill);
+}
+.searchbox:focus-within { border-color: var(--accent); }
+.searchbox > .glyph { flex: none; color: var(--dim); font-size: 16px; }
+.searchbox input {
+  flex: 1; min-width: 0; height: 100%;
+  border: 0; background: none; outline: none; padding: 0;
+  font-size: 16px;      /* less, and iOS zooms in on it */
+  -webkit-appearance: none; appearance: none;
+}
+.searchbox input::placeholder { color: var(--dim); }
+.searchbox input::-webkit-search-cancel-button { display: none; }
+.searchbox .clear { flex: none; width: 34px; height: 34px; display: grid; place-items: center; color: var(--dim); font-size: 15px; }
+.control.organize { width: 42px; min-height: 42px; height: 42px; padding: 0; flex: none; font-size: 18px; }
+.organize-menu {
+  position: absolute; z-index: 6;
+  top: calc(100% - 2px); right: 12px;
+  width: min(250px, calc(100% - 24px));
+  padding: 4px;
+  border: 2px solid var(--popup-border-solid);
+  border-radius: var(--radius);
+  background: var(--bg);
+  animation: fade 0.12s ease-out;
+}
+.organize-shade { position: fixed; inset: 0; z-index: 5; }
+.menu-head {
+  padding: 8px 8px 4px;
+  font-size: var(--caption); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--dim);
+}
+.menu-head ~ .menu-head { margin-top: 6px; }
+.organize-menu .menu-item { padding: 9px 8px; }
+.menu-item .label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.menu-item .label .icon { width: 18px; flex: none; font-size: 16px; text-align: center; opacity: 0.8; }
+.menu-item .level { font-weight: 700; min-width: 1em; text-align: center; }
+
 /* A group's header: a plain label, or (the outermost of several) a rule
    across the list with its name in the middle. */
 .group-head { font-size: var(--caption); font-weight: 700; color: var(--dim); padding: 12px 8px 4px; }
@@ -211,6 +257,7 @@ body::before {
   border: 1px solid transparent;
   border-radius: var(--radius);
 }
+.row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .row:active { background: var(--sel-bg); border-color: var(--sel-border); }
 .row:active .task, .row:active .state { color: var(--sel-text); opacity: 1; }
 .row.low { opacity: 0.6; }
