@@ -421,7 +421,8 @@ is about, project · branch, needs you / working / idle, priority and groups),
 with the same search, and the same group & sort menu: it's one setting with
 your desktop's, so the phone's list is grouped and sorted as the desktop's,
 and changing it on either changes both. Hold a session down to set its
-priority. In a
+priority or close it (from its ••• menu too): it asks first, as the
+desktop does, and says if uncommitted work would go with it. In a
 session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for

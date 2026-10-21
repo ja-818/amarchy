@@ -446,7 +446,49 @@ function prioritySeg(s) {
 function rowMenu(s) {
   sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
     h("button", { class: "control wide", onclick: () => { closeSheet(); location.hash = `#/s/${encodeURIComponent(s.id)}`; } },
-      "Open"));
+      "Open"),
+    closeButton(s));
+}
+
+function closeButton(s) {
+  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close session");
+}
+
+// Closing, asked first as the desktop asks: it removes the worktree, and
+// with it any work not committed, which it says in so many words.
+async function confirmClose(s, known) {
+  let c = known;
+  if (!c) {
+    try {
+      const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
+      c = await res.json();
+      if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
+    } catch (e) {
+      toast(e.message);
+      return;
+    }
+  }
+  const n = c.changes || 0;
+  let detail = n ? `${n} uncommitted file${n === 1 ? "" : "s"} lost` : "Removes its worktree";
+  if (c.amarchy) detail += " · amarchy runs from it, and goes back to its project's checkout";
+  const yes = h("button", { class: "control wide danger", onclick: async () => {
+    yes.disabled = true;
+    try {
+      const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/close`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ discard: n > 0 }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
+      if (!res.ok) throw new Error(d.error || "It didn't close");
+      closeSheet();
+      toast(`Closing ${s.repo} · ${s.name}`);
+      if (app.session && app.session.id === s.id) location.hash = "#/";
+    } catch (e) {
+      yes.disabled = false;
+      toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
+    }
+  } }, n ? "Close and discard changes" : "Close session");
+  sheet(sheetHead(`Close ${where(s)}?`, detail), yes,
+    h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
 // One session, as the desktop list draws it: the project and the priority
@@ -799,7 +841,8 @@ class SessionView {
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
       h("div", { class: "section" }, "Show"),
-      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("screen", "Claude's screen, with keys")));
+      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("screen", "Claude's screen, with keys")),
+      closeButton({ ...row, id: this.id }));
   }
 }
 

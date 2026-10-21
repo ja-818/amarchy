@@ -6121,6 +6121,15 @@ class AppConversation:
         return app_items(records, self.s)
 
 
+def app_closing(s):
+    """What closing a session would cost, for the phone to ask first (as
+    confirm_close does): its uncommitted files, and whether amarchy runs
+    from its worktree."""
+    path = Path(s["path"])
+    changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.is_dir() else 0
+    return {"changes": changes, "amarchy": installed_from(path)}
+
+
 def app_earlier(s, before):
     """The part of the conversation before an offset: (items, its start)."""
     f = transcript(s)
@@ -6397,13 +6406,15 @@ def app_handler(st, users, address):
                                        "user": self.headers.get("Tailscale-User-Login")})
             if path == "/api/events":
                 return self.list_stream()
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
                 if m.group(2) == "stream":
                     return self.session_stream(s)
+                if m.group(2) == "closing":
+                    return self.send(200, app_closing(s))
                 try:
                     items, start = app_earlier(s, int(args.get("before", ["0"])[0]))
                 except (ValueError, OSError):
@@ -6509,7 +6520,7 @@ def app_handler(st, users, address):
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
@@ -6517,6 +6528,14 @@ def app_handler(st, users, address):
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 return self.send(200, {})
+            if what == "close":
+                # Uncommitted work goes only when the phone said so, having
+                # been told about it (app_closing); else it asks again.
+                closing = app_closing(s)
+                if closing["changes"] and data.get("discard") is not True:
+                    return self.send(409, {"error": "It has uncommitted changes", **closing})
+                r = run_amarchy("close", s["id"], *(["--force"] if closing["changes"] else []))
+                return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
             if what == "priority":
                 level = data.get("level")
                 if level not in PRIORITIES:

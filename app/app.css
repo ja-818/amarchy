@@ -149,6 +149,8 @@ body::before {
 .control.accent { border-color: var(--accent); color: var(--accent); }
 .control.accent:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .control.wide { width: 100%; margin-top: 10px; min-height: 46px; font-weight: 700; }
+.control.danger { border-color: var(--red); color: var(--red); }
+.control.danger:active { background: color-mix(in srgb, var(--red) 18%, transparent); }
 
 /* An action in words, omalauncher's [ browse ]: in the accent, in brackets. */
 .link {
