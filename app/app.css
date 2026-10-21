@@ -363,7 +363,7 @@ th { font-weight: 700; }
   margin: 0;
   padding: 10px;
   min-height: 100%;
-  font-size: 10.5px;
+  font-size: var(--screen-size, 12px);     /* A−/A+ under it */
   line-height: 1.3;
   border: 0;
   border-radius: 0;

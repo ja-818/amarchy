@@ -718,12 +718,15 @@ class SessionView {
   }
 
   // Let go: the rest of what it heard, then "end" (once it's connected).
-  letGo() {
+  // Let go: the microphone keeps on a moment (the last word is still being
+  // said as the finger lifts), then the rest of it and "end".
+  async letGo() {
     const v = this.voice;
     if (!v || !v.held) return;
     v.held = false;
-    micRelease();
     this.micBtn.classList.remove("on");
+    await new Promise((ok) => setTimeout(ok, MIC_TAIL));
+    micRelease();
     if (v.ws && v.ws.readyState === WebSocket.OPEN) this.end(v);
     else this.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
   }
@@ -861,7 +864,7 @@ class SessionView {
     if (mode === "terminal") {
       // Claude's real terminal (desk.js), as on your desktop: what you type
       // goes to it, the keys below for what the phone's keyboard hasn't.
-      if (!this.pane) this.pane = new TermPane("claude", { size: 10 });
+      if (!this.pane) this.pane = new TermPane("claude", { size: phoneSize, mic: true });
       this.scroller.replaceChildren(this.pane.box);
       this.pane.open(this.id).then(() => this.pane.fit());
     } else if (mode === "screen") {
@@ -906,7 +909,7 @@ class SessionView {
     if (key === this.dialogId) { this.sendButtons(); return; }
     this.dialogId = key;
     const kids = [];
-    if (this.mode !== "chat") kids.push(this.keysRow);
+    if (this.mode !== "chat") kids.push(this.toolsRow(), this.keysRow);
     if (this.mode === "terminal") {
       // Its prompt is in the terminal itself.
     } else if (sc && sc.exited) {
@@ -925,6 +928,27 @@ class SessionView {
     this.sendButtons();
     this.grow();
     if (this.mode === "chat" && this.atBottom()) requestAnimationFrame(() => this.toBottom());
+  }
+
+  // Over Claude's terminal or its screen: the text bigger or smaller (kept
+  // for next time), and in the terminal the mic, held to dictate as you'd
+  // hold Claude's key: the words come up in its prompt as it writes them.
+  toolsRow() {
+    if (!this.toolsEl) {
+      const size = (d) => {
+        store.set("phone-size", String(Math.max(7, Math.min(24, phoneSize() + d))));
+        wearPhoneSize();
+        if (this.pane) this.pane.restyle();
+      };
+      this.talkBtn = h("button", { class: "control talk", "aria-label": "Hold to dictate" }, glyph("mic"), "Hold to talk");
+      holdToTalk(this.talkBtn, () => { this.talkBtn.classList.add("on"); talkStart(this.pane); },
+                 () => { this.talkBtn.classList.remove("on"); talkStop(this.pane); });
+      this.toolsEl = h("div", { class: "keys tools" }, this.talkBtn,
+        h("button", { class: "control", "aria-label": "Smaller text", onclick: () => size(-1) }, "A−"),
+        h("button", { class: "control", "aria-label": "Bigger text", onclick: () => size(1) }, "A+"));
+    }
+    this.talkBtn.hidden = this.mode !== "terminal" || !(app.view && app.view.voice);
+    return this.toolsEl;
   }
 
   // Claude's question as its own menu draws it: the choices numbered (when
@@ -1019,6 +1043,16 @@ class SessionView {
   }
 }
 
+// The text size of Claude's terminal and screen on the phone (A−/A+ there).
+function phoneSize() {
+  const n = parseFloat(store.get("phone-size") || "");
+  return n >= 7 && n <= 24 ? n : 12;
+}
+
+function wearPhoneSize() {
+  document.documentElement.style.setProperty("--screen-size", `${phoneSize()}px`);
+}
+
 // ---- the microphone, while dictating
 //
 // iOS asks again whether Amarchy may use it once the page has gone a minute
@@ -1028,6 +1062,7 @@ class SessionView {
 // audio stops, and holding the button turns them back on, unasked.
 
 const mic = { stream: null, ctx: null, source: null, node: null, take: null };
+const MIC_TAIL = 500;     // ms the microphone stays on after you let go: the end of the last word
 
 async function micOpen() {
   if (!mic.ctx) {
@@ -1214,6 +1249,8 @@ function newBar() {
     if (!s || !s.held) return;
     s.held = false;
     clearTimeout(s.timer);
+    buttons();
+    await new Promise((ok) => setTimeout(ok, MIC_TAIL));     // the end of the last word
     micRelease();
     if (!s.making) {        // only tapped (or let go while the phone asked about the microphone)
       said = null;
@@ -1401,6 +1438,7 @@ function wantsDesk() {
 
 async function start() {
   app.desk = wantsDesk();
+  wearPhoneSize();
   fitViewport();
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});

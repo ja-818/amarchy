@@ -424,7 +424,8 @@ and permission prompts as buttons. Hold the mic button by the box to
 dictate with Claude Code's own voice mode (it has to be on: `/voice`): what
 the phone hears goes to that session's Claude as if you held its key on the
 desktop, and the words come up in the phone's box as Claude writes them
-down, to edit and send when you let go. Meanwhile your desktop's view of that
+down, to edit and send when you let go (the microphone stays on half a second
+after you let go, for the end of the last word). Meanwhile your desktop's view of that
 session says it's dictating on your phone, and is back on Claude once the
 words are on the phone. (On the host, Claude's `rec` is amarchy's, which
 `install.sh --host` links into `~/.local/bin`: the phone's microphone while
@@ -506,8 +507,11 @@ phone the list and conversation. Settings (the gear, or Settings in the
 amarchy menu) can fix it to either, change the terminals' font size (they
 start at your desktop terminal's), and turn on WebGL drawing (faster; the DOM
 is the default, since a headless test drew WebGL's text too big at 2x). On
-the phone, a session's ••• menu shows **Claude's terminal**, the real one, with
-keys under it.
+the phone, a session's ••• menu shows **Claude's terminal**, the real one, on
+the app's glass like the conversation, with keys under it: **A−**/**A+** for
+the text size (Claude's screen as text too), and **Hold to talk**, which holds
+Claude's key for you while the phone's microphone is Claude's `rec`, so the
+words come up in its prompt as on your desktop.
 
 The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have:
 

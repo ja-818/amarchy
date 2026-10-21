@@ -104,15 +104,16 @@ function termColor(c, a) {
   return alpha >= 1 ? `#${[r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("")}` : `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// Your theme's terminal colors, the background as see-through as your
-// desktop's terminals are over the wallpaper.
+// Your theme's terminal colors. The background is the window's (.term-box),
+// as see-through as your desktop's terminals over the wallpaper, or the
+// phone app's glass: the terminal's own is clear (what's drawn in reverse
+// still takes its color, solid).
 function termTheme() {
-  const alpha = parseFloat(cssVar("term-alpha"));
   const bg = cssVar("term-background") || cssVar("bg");
   const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
   const theme = {
     foreground: termColor(cssVar("term-foreground") || cssVar("fg")),
-    background: termColor(bg, alpha >= 0 && alpha <= 1 ? alpha : 0.96),
+    background: termColor(bg, 0),
     cursor: termColor(cssVar("term-cursor") || cssVar("fg")),
     cursorAccent: termColor(bg),
     selectionBackground: termColor(cssVar("term-selection-background") || cssVar("selection"), 0.5),
@@ -150,7 +151,7 @@ class TermPane {
     await loadXterm();
     if (this.term) return;
     const t = this.term = new Terminal({
-      fontFamily: termFont(), fontSize: this.opts.size || termSize(), lineHeight: 1,
+      fontFamily: termFont(), fontSize: this.size(), lineHeight: 1,
       theme: termTheme(), allowTransparency: true, allowProposedApi: true,
       drawBoldTextInBrightColors: false, minimumContrastRatio: 1, rescaleOverlappingGlyphs: true,
       customGlyphs: true, cursorBlink: false, scrollback: 1000,
@@ -205,9 +206,20 @@ class TermPane {
     if (!this.term) return;
     this.term.options.theme = termTheme();
     this.term.options.fontFamily = termFont();
-    this.term.options.fontSize = this.opts.size || termSize();
+    this.term.options.fontSize = this.size();
     this.term.options.macOptionIsMeta = store.get("option-meta") !== "off";
     this.fit();
+  }
+
+  size() {
+    const s = this.opts.size;
+    return (typeof s === "function" ? s() : s) || termSize();
+  }
+
+  // Whether this page's microphone is its Claude's now: on a computer, while
+  // the keyboard is in Claude; on the phone, while it shows Claude's terminal.
+  wantsMic() {
+    return app.desk ? micWanted() : document.visibilityState === "visible";
   }
 
   async open(sid) {
@@ -227,7 +239,7 @@ class TermPane {
     const q = new URLSearchParams({ page: PAGE_ID, cols: this.term.cols, rows: this.term.rows });
     if (this.which === "claude" && this.opts.mic) {
       q.set("mic", "1");
-      q.set("focus", micWanted() ? "1" : "0");
+      q.set("focus", this.wantsMic() ? "1" : "0");
     }
     const ws = this.ws = new WebSocket(wsURL(`/api/session/${encodeURIComponent(sid)}/tty/${this.which}?${q}`));
     ws.binaryType = "arraybuffer";
@@ -287,6 +299,16 @@ class TermPane {
 
   // The keys a browser would otherwise have, as your desktop's terminal sends them.
   key(e) {
+    // Space let go while Claude listens: held a moment more (as key repeats),
+    // so the last word, still on its way, is in what Claude writes down.
+    if (e.type === "keyup" && e.code === "Space" && voice.on && this.which === "claude") {
+      const until = Date.now() + MIC_TAIL;
+      const hold = setInterval(() => {
+        if (Date.now() > until) clearInterval(hold);
+        else this.send(enc.encode(" "));
+      }, 40);
+      return true;
+    }
     if (e.type !== "keydown") return true;
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     if (this.which === "claude") {
@@ -459,10 +481,35 @@ function voiceStop() {
   }
   if (mic.stream) {
     micRelease();
-    // Off for good after a while, so the browser stops showing it in use.
+    // On a computer, off for good after a while, so the browser stops
+    // showing it in use (a phone keeps it: iOS would ask again).
     clearTimeout(voice.idle);
-    voice.idle = setTimeout(() => { if (!voice.ws) micClose(); }, 20000);
+    if (app.desk) voice.idle = setTimeout(() => { if (!voice.ws) micClose(); }, 20000);
   }
+}
+
+// Claude's key held from a button (the phone's terminal), as you'd hold it
+// on your desktop: Space as a key repeats (or once, in tap mode), the
+// microphone Claude's meanwhile. Let go, and it's held a moment more for the
+// last word; the host says when Claude is done with rec.
+function talkStart(pane) {
+  if (!pane || !pane.sid || pane.talking) return;
+  const tap = !!(app.view && app.view.voice_mode === "tap");
+  pane.talking = { tap, timer: null };
+  voiceStart(pane.sid);
+  if (tap) pane.send(enc.encode(" "));
+  else pane.talking.timer = setInterval(() => pane.send(enc.encode(" ")), 40);
+}
+
+async function talkStop(pane) {
+  const t = pane && pane.talking;
+  if (!t || t.stopping) return;
+  t.stopping = true;
+  await new Promise((ok) => setTimeout(ok, MIC_TAIL));
+  if (t.tap) pane.send(enc.encode(" "));
+  else clearInterval(t.timer);
+  pane.talking = null;
+  setTimeout(() => { if (!voice.on && !pane.talking) voiceStop(); }, 3000);     // Claude never listened
 }
 
 // Whether the page's microphone is Claude's now: it has the keyboard in Claude.

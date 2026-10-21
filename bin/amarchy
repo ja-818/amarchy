@@ -6527,6 +6527,7 @@ MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key r
 MIC_MAX = 300           # seconds a dictation lasts at most
 MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
 MIC_CAUGHT_UP = 1.5     # seconds without a new word from Claude, writing down what was said ahead of it
+MIC_TAIL = 0.4          # seconds the key stays held after the last of the audio
 MIC_METER = "▁▂▃▄▅▆▇█"  # what Claude draws after the words while it listens (how loud)
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
@@ -6745,6 +6746,7 @@ CLIP_MAX = 25_000_000                           # bytes of one pasted image (as 
 CLIP_TYPES = re.compile(r"image/(png|jpeg|gif|webp)")
 TTY_PING = 25                                   # seconds between pings on a terminal's WebSocket
 MIC_EARLY = 96_000                              # bytes of audio kept from before rec is there: 3 seconds
+DESK_MIC_QUIET = 20                             # seconds a page's microphone may say nothing before it counts as gone
 
 
 class DeskMic:
@@ -7077,7 +7079,7 @@ def app_watch(st):
                     s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
-                    "voice": claude_voice()["enabled"], "sound": app_sound()}
+                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -7293,7 +7295,9 @@ def app_handler(st, users, address):
                 while time.time() < ahead and not (wrote[0] and time.time() - wrote[0] > MIC_CAUGHT_UP):
                     time.sleep(0.1)
                 came = mic.end()
-                time.sleep(0.1)
+                # Held a moment more once rec has all of it: Claude writes
+                # down the last words before it's told the key is up.
+                time.sleep(MIC_TAIL)
                 holding.clear()
                 if voice["mode"] == "tap":
                     tmux("send-keys", "-t", pane, "Space")
@@ -7550,7 +7554,9 @@ def app_handler(st, users, address):
                 return self.error(409, "Claude's terminal isn't open in this browser")
             try:
                 self.ws_handshake()
-                self.connection.settimeout(MIC_QUIET)
+                # A page whose microphone takes a while to start sends nothing
+                # at first; a page gone (it says "end" otherwise) is quiet for good.
+                self.connection.settimeout(DESK_MIC_QUIET)
                 while True:
                     op, data = self.ws_recv()
                     if op in (None, 8) or op == 1 and data == b"end":

@@ -232,4 +232,8 @@ body.desk .menu-item:hover, body.desk .opt:hover { background: var(--sel-bg); }
 /* ---- the phone, showing Claude's real terminal */
 
 .view.terminal > .scroll { overflow: hidden; position: relative; }
-.view.terminal > .scroll > .term-box { --term-pad: 4px 6px; }
+/* On the app's glass, as the conversation is. */
+.view.terminal > .scroll > .term-box { --term-pad: 4px 6px; background: transparent; }
+.keys.tools { margin-bottom: 6px; }
+.keys .control.talk { flex: 1; gap: 8px; font-size: var(--caption); touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.keys .control.talk.on { color: var(--bg); background: var(--accent); border-color: var(--accent); animation: listen 1.2s ease-in-out infinite; }
