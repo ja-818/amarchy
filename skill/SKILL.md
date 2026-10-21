@@ -78,7 +78,8 @@ command's usage without running it (an option it doesn't know fails instead).
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
   `idle`), `sleeping` (its Claude Code isn't running until the user types
-  in it; it still shows as idle), `priority` (`high`,
+  in it; it still shows as idle), `unseen` (idle, and finished a turn the
+  user hasn't opened yet), `priority` (`high`,
   `normal`, `low`), `task` (what it's about: the user's name for it, else Claude Code's title cut down to "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current` (on screen), `agent`
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
   Claude runs), `background` (Claude Code background sessions running in its

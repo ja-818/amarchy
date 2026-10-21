@@ -8,7 +8,9 @@ import qs.Ui
 // on the row, a bold title (what the session is about) and a small-caps line
 // under it (project · branch), plus the time on the right. Everything is the
 // hero's size times `zoom`, so a screenful of sessions fits.
-// A session asleep (its Claude Code stopped until you type in it) shows the
+// A session that finished while you weren't looking shows a filled check in
+// the theme's accent until you open it (a plain, dimmed one after). A session
+// asleep (its Claude Code stopped until you type in it) shows the
 // moon and how long it has slept; "+1 BG" after the branch counts Claude Code
 // background sessions still running in its worktree.
 // The cursor (which starts on the session you're in) uses the menu's selected
@@ -30,7 +32,9 @@ BorderSurface {
   readonly property var spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   readonly property var icons: ({ waiting: "󰂞", idle: "󰄬", asleep: "󰒲" })
   readonly property string status: session.status || "idle"
-  readonly property bool urgent: status === "waiting" || status === "working"
+  // Done, and you haven't opened it since.
+  readonly property bool unseen: status === "idle" && session.unseen === true
+  readonly property bool urgent: status === "waiting" || status === "working" || unseen
   readonly property string priority: session.priority || "normal"
   readonly property color ink: cursor ? Commons.Color.menu.selectedText : Commons.Color.menu.text
   readonly property color dim: Qt.darker(Commons.Color.menu.text, 1.4)
@@ -53,10 +57,12 @@ BorderSurface {
     horizontalAlignment: Text.AlignHCenter
     textFormat: Text.PlainText
     text: row.status === "working" ? row.spinner[row.spinnerFrame % row.spinner.length]
-                                   : (row.icons[row.status] || "󰄬")
+                                   : row.unseen ? "󰗠" : (row.icons[row.status] || "󰄬")
     font.family: Style.font.menuFamily
     font.pixelSize: row.iconSize
-    color: row.cursor || row.urgent ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+    color: row.cursor ? Commons.Color.menu.selectedText
+         : row.unseen ? Commons.Color.accent
+         : row.urgent ? Commons.Color.menu.selectedText : Commons.Color.menu.text
     opacity: row.cursor || row.urgent ? 1 : 0.52
   }
 

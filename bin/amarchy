@@ -56,7 +56,7 @@ Sessions:
                                         new sessions are normal
   amarchy group [project|priority|status] [on|off]
                                         group the list by project, priority (High, Normal, Low) and/or
-                                        status (Needs you, Working, Idle), nested in the order you
+                                        status (Needs you, Working, Done, Idle), nested in the order you
                                         turn them on (a new one goes inside the others); without
                                         on|off switches it, without anything prints the grouping
                                         outermost first; `group none` drops them all
@@ -126,6 +126,7 @@ Plumbing:
   amarchy editor <file>                 Claude's $VISUAL in a session (bin/amarchy-editor)
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
+  amarchy seen <id>                     you've opened a session that finished: its row drops the done mark
   amarchy watch                         repaint the desktop as you enter and leave amarchy (runs while a theme is set)
   amarchy remote --sync                 keep this desktop's copy of the host's list, send its phone app your
                                         look, lend the host your clipboard to paste from, and update amarchy
@@ -197,6 +198,7 @@ WORKTREES = Path(os.environ.get("AMARCHY_WORKTREES", WORK / ".worktrees")).expan
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy"
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
+UNSEEN = STATE / "unseen"       # sessions that finished while you weren't looking, until you open them
 RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
 ZEN = STATE / "zen"             # exists while zen mode is on
 LAYOUT = STATE / "layout.lua"
@@ -668,7 +670,8 @@ def save_session(s):
 
 
 # What session_view() adds for the UIs, never saved.
-VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent")
+VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent",
+               "unseen")
 
 
 def claude_class(s):
@@ -1866,6 +1869,7 @@ def setup_session(sid):
         print(f"\n  \033[31m{error}\033[0m\n", flush=True)
         (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
         (STATUS / sid).unlink(missing_ok=True)
+        mark_seen(sid)
         tell_shell("refresh")
         notify("amarchy", f"Couldn't start {s['repo']} · {s['name']}: {gist(error)}")
         if HOST_MODE:
@@ -3161,6 +3165,7 @@ def close(sid, force=False):
     write_file(CLOSING / f"{sid}.json", json.dumps(keep))
     (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
     (STATUS / sid).unlink(missing_ok=True)
+    mark_seen(sid)
     if LAST.exists() and LAST.read_text().strip() == sid:
         LAST.unlink(missing_ok=True)
     tell_shell("refresh")
@@ -3450,6 +3455,11 @@ def cmd_hook(sid, state):
     (STATUS / sid).write_text(state)
     if state == prev:
         return
+    # Done while you weren't looking at it: its row says so until you open it
+    # (see mark_seen). A host has no screen: the desktops and phones looking
+    # at it say they did, within a second.
+    if state == "idle" and prev == "working" and (HOST_MODE or current_session_id() != sid):
+        mark_unseen(sid)
     claude = find(claude_class(s))
     focused = claude and claude.get("focusHistoryID") == 0
     if focused:
@@ -3461,6 +3471,57 @@ def cmd_hook(sid, state):
         where = f"{s['repo']} · {s['name']}"
         notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", sid))
         chime()
+
+
+def unseen(sid):
+    """Whether the session finished a turn you haven't looked at yet."""
+    return (UNSEEN / sid).exists()
+
+
+def mark_unseen(sid):
+    write_file(UNSEEN / sid, "")
+
+
+def mark_seen(sid):
+    (UNSEEN / sid).unlink(missing_ok=True)
+
+
+# A remote session you have on screen here: how often its host is told so at
+# most, while it still says it's unseen (its list may lag a line behind).
+TELL_SEEN = 10
+
+
+def tell_seen(s):
+    """You're looking at a remote session that finished: tell its host, in
+    the background (the list doesn't wait on ssh), and drop the mark from
+    this desktop's copy of its list right away."""
+    told = UNSEEN / f".told.{s['id']}"
+    try:
+        if time.time() - told.stat().st_mtime < TELL_SEEN:
+            return
+    except OSError:
+        pass
+    write_file(told, "")
+    snap = remote_snapshot()
+    if snap.get("sessions"):
+        for r in snap["sessions"]:
+            if r.get("id") == s["id"]:
+                r["unseen"] = False
+        write_file(REMOTE_STATE, json.dumps(snap))
+    detach(ssh_argv(s["host"], amarchy_line("seen", s["id"])))
+
+
+def cmd_seen(sid):
+    s = session(sid)
+    if not s:
+        return fail(f"no session {sid!r}")
+    if s.get("host"):
+        r = remote_amarchy(s["host"], "seen", sid)
+        return r.returncode
+    mark_seen(sid)
+    (UNSEEN / f".told.{sid}").unlink(missing_ok=True)
+    tell_shell("refresh")
+    return 0
 
 
 # ------------------------------------------------------------------ mission control
@@ -3477,6 +3538,13 @@ def task_title(window_title):
 
 # States, most urgent first, for the list grouped by status.
 ORDER = {state: i for i, state in enumerate(("waiting", "working", "idle", "asleep"))}
+# ...where one that finished and you haven't opened yet ("Done") comes
+# before the idle ones you have.
+STATUS_GROUPS = {state: i for i, state in enumerate(("waiting", "working", "done", "idle", "asleep"))}
+
+
+def status_group(s):
+    return "done" if s.get("unseen") and s["status"] == "idle" else s["status"]
 # How much a session matters to you, most first (`amarchy priority`). New
 # sessions are normal; the list always puts the higher ones first.
 PRIORITIES = ("high", "normal", "low")
@@ -3530,7 +3598,7 @@ def session_order(s, groups=None, how=None):
     rank = RANK[priority(s)]
     created = s.get("created", 0)
     by = {"project": s["repo"].lower(), "priority": rank,
-          "status": ORDER.get(s["status"], len(ORDER))}
+          "status": STATUS_GROUPS.get(status_group(s), len(STATUS_GROUPS))}
     return (*(by[g] for g in groups),
             rank if how == "priority" else 0,
             -created if how == "newest" else created, s["id"])
@@ -3877,6 +3945,9 @@ def session_view():
         if s.get("host"):
             # As the host shows it; its agent names only reach the Claude sessions there.
             s["current"], s["agent"] = s["id"] == current, ""
+            if s["current"] and s["unseen"]:
+                tell_seen(s)
+                s["unseen"] = False
             continue
         # Sleeping (its Claude stopped until you type in it) looks just as it
         # did, idle. So does a session whose window was closed: it opens again
@@ -3895,6 +3966,10 @@ def session_view():
         s["background"] = len(background_sessions(s, background))
         s["current"] = s["id"] == current
         s["priority"] = priority(s)
+        # Done, and you haven't opened it since: on screen now, you have.
+        if s["current"]:
+            mark_seen(s["id"])
+        s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
     groups, how = list_groups(), list_sort()
     ss.sort(key=lambda s: session_order(s, groups, how))
     return ss
@@ -4223,7 +4298,7 @@ def cmd_ui():
                       "group": list_groups(), "sort": list_sort(), "sessions": session_view()}))
 
 
-PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲"}
+PICK_ICONS = {"waiting": "󰂞", "working": "󰔟", "idle": "󰄬", "asleep": "󰒲", "done": "󰗠"}
 
 
 def cmd_pick(args):
@@ -4236,7 +4311,7 @@ def cmd_pick(args):
     # Rows carry "project · session" as their subtext, which the menu hands
     # back with the label, so identical task titles still pick the right one.
     by_sub = {f"{s['repo']} · {s['name']}": s for s in ss}
-    options = [f"{PICK_ICONS.get(s['status'], '󰄬')}\t{s['task'] or 'new session'}\t{sub}"
+    options = [f"{PICK_ICONS.get(status_group(s), '󰄬')}\t{s['task'] or 'new session'}\t{sub}"
                for sub, s in by_sub.items()]
     r = subprocess.run(["omarchy-menu-select", "Close session" if closing else "Sessions", *options],
                        capture_output=True, text=True)
@@ -4355,6 +4430,7 @@ def remote_clean(sessions):
         s["status"] = s["status"] if s["status"] in ORDER else "idle"
         s["created"] = s["created"] if isinstance(s.get("created"), (int, float)) else 0
         s["background"] = s["background"] if isinstance(s.get("background"), int) else 0
+        s["unseen"] = s.get("unseen") is True and s["status"] == "idle"
         out.append(s)
     return out
 
@@ -6590,6 +6666,11 @@ def app_watch(st):
             if time.time() - projects_at > 10:
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
             ss = session_view()
+            # One finished while it was on your phone's screen: you've seen it.
+            for s in ss:
+                if s["unseen"] and time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
+                    mark_seen(s["id"])
+                    s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
                     "voice": claude_voice()["enabled"]}
@@ -7016,6 +7097,7 @@ def app_handler(st, users, address):
             what = m.group(2)
             if what == "seen":
                 st.seen[s["id"]] = time.time()
+                mark_seen(s["id"])
                 return self.send(200, {})
             if what == "close":
                 # Uncommitted work goes only when the phone said so, having
@@ -7314,7 +7396,7 @@ OPTIONS = {
     "remote": ({"--status", "--sync"}, set(), set()),
     "events": ({"--once"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
-    "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None,
+    "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
     "clipboard": None, "paste": None, "rec": None,
 }
@@ -7454,6 +7536,8 @@ def main(argv):
         return cmd_setup(args[0])
     elif cmd == "hook" and len(args) == 2:
         cmd_hook(*args)
+    elif cmd == "seen" and len(args) == 1:
+        return cmd_seen(args[0])
     elif cmd == "sleep":
         return cmd_sleep(args)
     elif cmd == "wake":

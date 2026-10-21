@@ -6,18 +6,18 @@
 const root = document.getElementById("root");
 const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
               query: "", organize: null };
-const STATUS = { waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" };
+const STATUS = { waiting: "Needs you", working: "Working", done: "Done", idle: "Idle", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // The glyphs amarchy's list uses on the desktop (Nerd Font icons), when the
 // font your desktop sent has them; else the drawings below and plain marks.
 const NERD = {
-  waiting: "\u{F009E}", idle: "\u{F012C}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
+  waiting: "\u{F009E}", idle: "\u{F012C}", done: "\u{F05E0}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
   stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
   organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
 };
-const PLAIN = { waiting: "●", idle: "✓", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
+const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑" };
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
@@ -58,9 +58,10 @@ function glyph(name, cls) {
   return el;
 }
 
-// A session's state, in its fixed slot: the spinner while it works.
+// A session's state, in its fixed slot: the spinner while it works, a filled
+// check in the accent when it finished and you haven't opened it yet.
 function stateIcon(s) {
-  const st = stateOf(s);
+  const st = doneOf(s);
   if (st === "working") return h("span", { class: "state working", title: STATUS.working }, SPINNER[spin.frame]);
   const el = glyph(st, `state ${st}`);
   el.title = STATUS[st];
@@ -140,6 +141,8 @@ function where(s) { return `${s.repo} · ${s.name || s.branch}`; }
 function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
 function stateOf(s) { return s.status || "idle"; }
+// As the list shows it: "done" for one that finished and you haven't opened since.
+function doneOf(s) { return stateOf(s) === "idle" && s.unseen === true ? "done" : stateOf(s); }
 
 // The visible part of the screen: above the keyboard while it's up.
 function fitViewport() {
@@ -279,7 +282,7 @@ function badge() {
 function groupLabel(s, g) {
   if (g === "project") return s.repo;
   if (g === "priority") return `${PRIORITY[s.priority] || "Normal"} priority`;
-  return STATUS[stateOf(s)];
+  return STATUS[doneOf(s)];
 }
 
 // The list's view, built once and kept: its bar holds what you're typing

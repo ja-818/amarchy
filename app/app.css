@@ -275,6 +275,7 @@ body::before {
 .state { width: var(--icon-large); flex: none; font-size: var(--icon-large); text-align: center; line-height: 1; }
 .state.idle, .state.asleep { opacity: 0.52; }
 .state.waiting, .state.working { color: var(--sel-text); }
+.state.done { color: var(--accent); }
 .empty { text-align: center; color: var(--dim); padding: 48px 24px; }
 
 /* ---- a session: its header (SessionHeader), the conversation as Claude

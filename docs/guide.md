@@ -114,7 +114,7 @@ Next to the search, the 󰒼 button opens how the list is grouped and sorted.
 **Group by** puts sessions in sections: **by project** (󰉋, one section per
 project, each row showing just its branch), **by priority** (󰈻, High, Normal,
 Low) and **by status** (󰉹, by what they need from you: Needs you, Working,
-Idle), or **Not grouped**. Use any of them; together they nest in the order
+Done (finished, not opened yet), Idle), or **Not grouped**. Use any of them; together they nest in the order
 you turn them on, each one inside the ones already on, and the menu numbers
 them (1 outermost) in place of the check. Turn on priority and then project
 for High, Normal and Low with each one's projects inside; project and then
@@ -251,6 +251,13 @@ chime, the same one either way; pick it in [Sound](#sound). The bell only rings
 when Claude is actually blocked on you (a permission, a question): the reminder
 Claude Code sends a minute after a turn you haven't answered doesn't count, so
 a finished session never chimes twice.
+
+A session that finished while you were somewhere else keeps saying so: its
+check is filled and in the theme's accent (󰗠) until you open it, on the
+desktop or on your phone, and goes back to the plain, dimmed one (󰄬) after.
+So with many sessions done you can tell the ones you haven't looked at yet
+from the ones you've read and are leaving for later. One that finishes while
+it's on your screen is never marked.
 
 In zen mode, with the list out of the way, a bar as wide as Claude's
 column, divided from it by a line, says which session this is: the status glyph (the

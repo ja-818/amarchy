@@ -20,18 +20,22 @@ Column {
   signal activated(int index)
   signal hovered(int index)
 
-  readonly property var statusNames: ({ waiting: "Needs you", working: "Working", idle: "Idle", asleep: "Asleep" })
+  readonly property var statusNames: ({ waiting: "Needs you", working: "Working", done: "Done", idle: "Idle", asleep: "Asleep" })
   readonly property var priorityNames: ({ high: "High priority", normal: "Normal priority", low: "Low priority" })
 
-  // What a session is grouped under, for one grouping.
+  // What a session is grouped under, for one grouping. By status, one that
+  // finished and you haven't opened yet is "Done", apart from the idle ones.
   function key(s, what) {
-    return what === "project" ? s.repo : s[what]
+    if (what === "project") return s.repo
+    if (what === "status") return s.status === "idle" && s.unseen === true ? "done" : s.status
+    return s[what]
   }
   // A header's name, for one grouping.
   function title(s, what) {
     if (what === "project") return s.repo || ""
     if (what === "priority") return list.priorityNames[s.priority] || s.priority
-    return list.statusNames[s.status] || s.status
+    var status = list.key(s, "status")
+    return list.statusNames[status] || status
   }
 
   // Where a session's row is, from the top of the list, counting the
