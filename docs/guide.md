@@ -593,7 +593,7 @@ amarchy assistant off                    # a session like the others again
 
 - **In every list** (beside Claude, under the Ⓐ, on the phone, in the
   browser) it comes first, above the groups: bigger, with its picture (an imp
-  of a retainer with his staff of two heads, `app/assistant.svg`), its name,
+  of a retainer with his staff of two heads, `app/assistant.svg`, or yours), its name,
   and what it's on, its state on a badge at the corner of the picture. The
   other sessions of its project (more sessions for small personal things) sit
   under it there, at their usual size with its picture small, and a rule sets
@@ -613,6 +613,22 @@ amarchy assistant off                    # a session like the others again
   another). What it sends with `amarchy notify` goes under its name too, and a
   tap opens it. On an iPhone a notification always wears the app's icon, so
   there its name is what sets it apart.
+
+Its picture can be yours rather than amarchy's imp:
+
+```sh
+amarchy assistant --picture ~/Pictures/jaken.png                  # the middle of it, as big as it goes
+amarchy assistant --picture ~/Pictures/jaken.png --crop 400,0,990  # the square at x 400, y 0, 990 pixels across
+amarchy assistant --picture off                                   # amarchy's own again
+```
+
+It's cut round and square (with ffmpeg, else ImageMagick) and kept in
+`~/.config/amarchy` (`assistant.png`, and `assistant-192.png` for the phones'
+notifications), not in amarchy. Every list shows it, and the notifications
+(the desktop's, and the phone's where it shows a picture, not an iPhone). It
+goes by a hash of itself, so a new one shows at once everywhere, the phone's
+saved copy of the app included. A desktop showing a host's sessions shows the
+host's and keeps a copy; run there, the command sets the host's.
 
 `amarchy alerts` cuts the noise from the rest, on the desktop and the phone
 alike (the phone's settings have it too, under "Tell me"):

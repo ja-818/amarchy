@@ -663,7 +663,7 @@ function deskList() {
   // The strip above Claude in zen mode: what it is, project · branch on hover.
   const s = row(desk.current);
   desk.strip.replaceChildren(...(!s ? [] : s.assistant === "main"
-    ? [stateIcon(s), avatar("small"), taskText(s.assistant_name || "Assistant", "assistant-name"),
+    ? [stateIcon(s), avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name"),
        h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]
     : [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"),
        h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]));

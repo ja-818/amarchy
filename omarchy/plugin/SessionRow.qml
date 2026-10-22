@@ -81,7 +81,9 @@ BorderSurface {
     anchors.left: row.main ? parent.left : icon.right
     anchors.leftMargin: row.main ? row.borderLeft + Style.spacing.sm : Math.round(Style.space(8) * row.zoom)
     anchors.verticalCenter: parent.verticalCenter
-    source: Qt.resolvedUrl("assistant.svg")
+    // Yours (amarchy assistant --picture), by its hash so a new one shows; else amarchy's own.
+    source: row.session.picture_file ? "file://" + encodeURI(row.session.picture_file) + "?" + row.session.picture
+                                     : Qt.resolvedUrl("assistant.svg")
     sourceSize.width: row.avatarSize * 2
     sourceSize.height: row.avatarSize * 2
     fillMode: Image.PreserveAspectFit
