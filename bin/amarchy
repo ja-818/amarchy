@@ -8759,6 +8759,12 @@ def app_handler(st, users, address):
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
+            # Once the list has it (app_watch reads it every second), so the
+            # page that asked can go straight to it.
+            until = time.time() + 5
+            with st.changed:
+                while st.row(sid) is None and time.time() < until:
+                    st.changed.wait(until - time.time())
             return self.send(200, {"id": sid})
 
         def push(self, data):

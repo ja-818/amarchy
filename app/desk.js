@@ -15,6 +15,7 @@ const desk = {
   claude: null,         // its two terminals (TermPane)
   term: null,
   cursor: null,         // the session under the list's cursor, while searching it
+  pending: null,        // a session just started, {id, until}: shown once the list has it
   query: "",
   statuses: null,       // each session's status as last seen, for the chime
   el: null,
@@ -595,10 +596,14 @@ function paneFocused(pane) {
 function row(id) { return app.view && app.view.sessions.find((s) => s.id === id) || null; }
 
 // The session in the address (#/s/<id>), else the one you were on, else the first.
+// One you just started that the list doesn't have yet: it shows when it does.
 function deskRoute() {
   closeSheet();
   const m = here().match(/^#\/s\/(.+)$/);
   let id = m ? decodeURIComponent(m[1]) : null;
+  const p = desk.pending;
+  if (p && (p.id !== id || Date.now() > p.until || row(id))) desk.pending = null;
+  if (desk.pending) return;
   if (app.view && !row(id)) {
     const last = store.get("desk-last");
     id = row(last) ? last : (app.view.sessions[0] || {}).id || null;
@@ -656,6 +661,7 @@ function deskList() {
     return show(null);
   }
   if (v && !desk.current && v.sessions.length) return deskRoute();
+  if (desk.pending && (row(desk.pending.id) || Date.now() > desk.pending.until)) return deskRoute();
   chime(v);
   const waiting = v ? v.sessions.filter((s) => s.status === "waiting").length : 0;
   document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
@@ -988,6 +994,7 @@ async function startSession(repo, prompt) {
   try {
     const { id } = await api("/api/new", prompt ? { repo, prompt } : { repo });
     store.set("last-project", repo);
+    desk.pending = { id, until: Date.now() + 15000 };
     go2(id);
   } catch (e) {
     toast(e.message);
