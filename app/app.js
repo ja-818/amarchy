@@ -236,6 +236,36 @@ function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idl
 function stateOf(s) { return s.status || "idle"; }
 // As the list shows it: "done" for one that finished and you haven't opened since.
 function doneOf(s) { return stateOf(s) === "idle" && s.unseen === true ? "done" : stateOf(s); }
+// Asleep: its Claude Code isn't running (its memory freed) until something
+// you send wakes it, its conversation kept; waking: Claude on its way back.
+function sleepOf(s) { return !s || s.setup ? "" : s.waking ? "waking" : s.sleeping ? "asleep" : ""; }
+const SLEEP = { asleep: "Asleep", waking: "Waking…" };
+function sleepMark(s) {
+  const st = sleepOf(s);
+  if (!st) return null;
+  const el = glyph("asleep", `sleep ${st}`);
+  el.title = st === "waking" ? "Waking up" : "Asleep: its memory is freed until you send it something";
+  return el;
+}
+
+async function wakeSession(s) {
+  try { await api(`/api/session/${encodeURIComponent(s.id)}/wake`); } catch (e) { toast(e.message); }
+}
+
+async function sleepSession(s) {
+  try {
+    await api(`/api/session/${encodeURIComponent(s.id)}/sleep`);
+    toast("Asleep: its memory is freed until you send it something.");
+  } catch (e) { toast(e.message); }
+}
+
+// Wake or sleep, as the session is now.
+function sleepButton(s) {
+  const st = sleepOf(s);
+  if (st === "waking" || s.setup) return null;
+  return h("button", { class: "control wide", onclick: () => { closeSheet(); st ? wakeSession(s) : sleepSession(s); } },
+    st ? "Wake" : "Put to sleep");
+}
 
 // The visible part of the screen: above the keyboard while it's up.
 function fitViewport() {
@@ -733,7 +763,8 @@ function sessionActions(s, opened) {
     h("button", { class: "control wide", onclick: () => commandsSheet(s, opened) }, "Run…"),
     h("button", { class: "control wide", onclick: () => assistantSheet(s) },
       s.assistant === "main" ? `${s.assistant_name || "Assistant"}: name, picture, chime…` : "Make it my assistant…"),
-  ];
+    sleepButton(s),
+  ].filter(Boolean);
 }
 
 function closeButton(s) {
@@ -802,7 +833,7 @@ function assistantCard(s) {
       h("div", { class: "name" }, name, unread ? h("span", { class: "new" }, "New") : null),
       h("div", { class: `line${st === "waiting" ? " waiting" : ""}${unread ? " said" : ""}` }, line),
       h("div", { class: "meta" }, unread ? (task ? `${task} · unread` : "Unread") : STATUS[st])),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s))), () => rowMenu(s));
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), sleepMark(s))), () => rowMenu(s));
 }
 
 // A session that finished a turn you haven't opened yet: a dot by its time.
@@ -828,7 +859,7 @@ function sessionRow(s, groups, near = false) {
       // Your assistant's other sessions, unread: what it wrote, in a line.
       near && s.unseen && s.said ? h("div", { class: "meta said" }, s.said)
         : h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio)), () => rowMenu(s));
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio, sleepMark(s))), () => rowMenu(s));
 }
 
 // ---- a session
@@ -1091,12 +1122,12 @@ class SessionView {
       this.input.placeholder = `Message ${name}`;
       this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(r), stateIcon(r)),
         h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
-          h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}`)));
+          h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
       return;
     }
-    this.titleEl.replaceChildren(stateIcon(r), ...(r.assistant ? [avatar(r, "small")] : []),
+    this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null, sleepMark(r)].filter(Boolean),
       h("div", { class: "text" }, taskText(r.task || "New session", r.task ? "" : "untitled"),
-        h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}`)));
+        h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
   }
 
   atBottom() {
@@ -1231,10 +1262,11 @@ class SessionView {
     const sc = this.screen;
     const dialog = sc && sc.dialog;
     let key = "composer";
+    const sleep = sleepOf(this.row);
     if (sc && sc.exited) key = "exited";
     else if (this.row && this.row.setup) key = "setup";
     else if (dialog) key = `dialog:${dialog.id}`;
-    key += `:${this.mode}`;
+    key += `:${this.mode}:${sleep}`;
     if (this.mode === "terminal") key = "terminal";
     if (key === this.dialogId) { this.sendButtons(); return; }
     this.dialogId = key;
@@ -1252,6 +1284,12 @@ class SessionView {
     } else if (dialog && this.mode === "chat") {
       kids.push(this.ask(dialog));
     } else {
+      // Asleep, what you send wakes it (with that as Claude's first message).
+      if (sleep === "asleep") kids.push(h("div", { class: "sleep-note" }, glyph("asleep", "sleep"),
+        h("span", {}, "Asleep, its memory freed. Send something to wake it."),
+        h("button", { class: "link", onclick: () => wakeSession(this.row) }, "Wake")));
+      else if (sleep === "waking") kids.push(h("div", { class: "sleep-note" }, glyph("asleep", "sleep waking"),
+        h("span", {}, "Waking Claude…")));
       kids.push(this.composer);
     }
     // The keys, if they were here, stay: on Claude's question (its cursor's
@@ -1364,7 +1402,8 @@ class SessionView {
     if (!text.trim()) return;
     this.sendBtn.disabled = true;
     try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/send`, { text });
+      const r = await api(`/api/session/${encodeURIComponent(this.id)}/send`, { text });
+      if (r.waking) toast("Waking Claude with it…");
       this.input.value = "";
       store.set(`draft:${this.id}`, "");
       this.grow();
@@ -1918,6 +1957,31 @@ async function pushRefresh() {
   } catch (e) { /* next time */ }
 }
 
+// When a session you're not using sleeps (amarchy sleep --after): its
+// Claude Code exits, freeing its memory, and comes back when you send it
+// something. Not using it: idle, and open on no phone or browser.
+function sleepSettings(draw) {
+  const after = app.view ? app.view.sleep_after : 1;
+  const choices = [[1, "1m"], [5, "5m"], [15, "15m"], [60, "1h"], ["off", "Never"]];
+  if (after !== undefined && !choices.some(([v]) => v === after)) choices.splice(-1, 0, [after, `${after}m`]);
+  return [h("div", { class: "section" }, "Sleep"),
+    h("div", { class: "seg" }, ...choices.map(([value, label]) =>
+      h("button", { class: `control${after === value ? " on" : ""}`, onclick: async () => {
+        try { await api("/api/sleep", { after: value }); app.view.sleep_after = value; draw(); }
+        catch (err) { toast(err.message); }
+      } }, label))),
+    h("p", {}, after === "off" ? "Sessions stay awake until you put one to sleep (its menu)."
+      : `A session idle for ${after === 1 ? "a minute" : `${after} minutes`} and open nowhere sleeps: its Claude Code exits and frees its memory, the conversation stays, and what you send it wakes it. Never while it works, asks you something or runs something in the background.`),
+    h("button", { class: "control wide", onclick: async (e) => {
+      e.currentTarget.disabled = true;
+      try {
+        const r = await api("/api/sleep", { all: true });
+        toast(`${r.slept} asleep${r.kept ? `, ${r.kept} kept awake (busy)` : ""}`);
+      } catch (err) { toast(err.message); }
+      draw();
+    } }, "Put idle sessions to sleep now")];
+}
+
 async function openSettings() {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
@@ -1980,6 +2044,7 @@ async function openSettings() {
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newBar) app.newBar.use(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
+    kids.push(...sleepSettings(draw));
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),

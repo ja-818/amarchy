@@ -292,6 +292,12 @@ body::before {
 .row .side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--caption); }
 .row .age { opacity: 0.45; }
 .prio.high { color: var(--accent); }
+.sleep { opacity: 0.45; font-size: var(--caption); line-height: 1; }
+.sleep.waking { animation: waking 1.2s ease-in-out infinite; }
+@keyframes waking { 50% { opacity: 1; } }
+.sleep-note { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 0 8px 8px;
+              color: var(--dim); font-size: var(--caption); }
+.sleep-note .link { padding: 0; }
 
 .state { width: var(--icon-large); flex: none; font-size: var(--icon-large); text-align: center; line-height: 1; }
 .state.idle, .state.asleep { opacity: 0.52; }

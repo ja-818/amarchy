@@ -691,9 +691,9 @@ function deskList() {
   // The strip above Claude in zen mode: what it is, project · branch on hover.
   const s = row(desk.current);
   desk.strip.replaceChildren(...(!s ? [] : s.assistant === "main"
-    ? [stateIcon(s), avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name"),
+    ? [stateIcon(s), avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name"), sleepMark(s),
        h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]
-    : [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"),
+    : [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"), sleepMark(s),
        h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]));
   // The panel.
   desk.organize.hidden = desk.organize.hidden || !v || !v.sessions.length;
@@ -1169,6 +1169,8 @@ function deskMenu() {
       { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toPane("term") }] }) },
     { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: [
       { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
+      ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
+                                                : { label: "Put to sleep", act: () => sleepSession(s) }]),
       { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
         act: () => assistantSheet(s) },
       ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),

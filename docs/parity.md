@@ -32,7 +32,7 @@ terminal or Claude; no screen needed).
 | Priority up / down / set | `amarchy priority`, `↑`/`↓` | ••• or hold → High · Normal · Low | `Ctrl+Alt+Up`/`Down`, menu, `+`/`-` under the Ⓐ | done |
 | Close, asking first, saying what's lost | `amarchy close --confirm`, `X` | ••• or hold → Close session | `Ctrl+Alt+X`, menu, Close one… | done |
 | Close one from a picker | `amarchy pick close` | hold any row → Close | Sessions → Close one… | done |
-| Sleep / wake a session, sleep the idle ones, `sleep --after` | `amarchy sleep`/`wake` | — | — | owned (session host-sleep) |
+| Sleep / wake a session, sleep the idle ones, `sleep --after` | `amarchy sleep`/`wake` | session menu: Wake / Put to sleep; Settings → Sleep (minutes, Never, sleep the idle ones now) | the same, and Wake / Put to sleep under This session in the amarchy menu | done |
 | Zen mode | `amarchy zen`, `Z` | (the phone is always one column) | `Ctrl+Alt+Z` | done (wide) |
 | Claude ↔ terminal | `amarchy terminal`, `Return`, `Super+arrows` | ••• → Claude's terminal | `Ctrl+Alt+Return`, `Ctrl+Alt+←`/`→` | done |
 | The session's name strip above Claude | SessionHeader | the bar of the session view | the strip in zen mode | done |
@@ -104,7 +104,7 @@ terminal or Claude; no screen needed).
 | --- | --- | --- | --- | --- |
 | amarchy's theme, font, wallpaper | `amarchy theme`, `T` | the look a desktop sent | the same | owned (session theme-web) |
 | Opening links | the desktop's browser | — | a new tab | owned (session open-links) |
-| Host sleep | — | — | — | owned (session host-sleep) |
+| Host sleep | — | ☾ in the list (pulsing while it wakes), "Asleep" above the box; what you send wakes it | ☾ in the list and the strip; typing in Claude's terminal wakes it | done (`amarchy-sleep.timer` from `install.sh --host`; off screen = open on no phone or browser) |
 | The keys' modifiers | `amarchy keys` | — | fixed at `Ctrl+Alt` (the browser lets a page have them) | not needed |
 | Windows, workspaces, the zen column's width | `amarchy layout`, Hyprland window rules | — | the page lays itself out | not needed |
 | Repaint as you enter/leave | `amarchy watch` | — | — | not needed |

@@ -107,7 +107,8 @@ dev server). Restart the terminal so the user sees the result too.
   window keeps Claude's last screen, and what the user types there goes to
   Claude when it comes back (`claude --resume`). A sleeping session's Claude
   can't be messaged with SendMessage (its `agent` is empty), but `amarchy
-  send` wakes it with the message (see "Talking to other sessions"). Idle sessions off screen sleep on their own after
+  send` wakes it with the message (see "Talking to other sessions"). Idle sessions off screen (on a
+  host: open on no phone or browser) sleep on their own after
   `amarchy sleep --after` minutes (default 1), so you rarely need these. A
   session never sleeps while it's working, asking the user something, or
   running background commands or agents. Never add `--force` without

@@ -261,6 +261,24 @@ could do this can't hand their prompt over: `amarchy sleep --force` sleeps them
 anyway (closing the window, which opens again asleep), so anything typed and
 not sent there is lost.
 
+### On a host
+
+A host's sessions (in tmux, reached from [your phone](#your-phone) and [a
+browser](#in-a-browser-on-your-computer)) sleep the same way, by the same rules.
+Off screen there means open on no phone or browser: a session sleeps once it
+has been idle for `amarchy sleep --after` minutes counted from when it was last
+open on one, and never while its conversation is open on a phone or its
+terminal in a browser. Its tmux keeps Claude's last screen, with the badge;
+typing in its terminal in a browser wakes it as on a desktop, and so does
+sending it something from the phone (it's Claude's first message when it comes
+back, and what was typed in its prompt before it slept is put back after) or
+`amarchy send`. The app marks a sleeping session with `󰒲` in the list (it
+pulses while it wakes), says so above where you type, and has **Wake** / **Put
+to sleep** in the session's menu; **Settings → Sleep** sets the minutes (or
+Never) and puts the idle ones to sleep at once. After a reboot a session comes
+back asleep: opening it doesn't start its Claude, sending it something does.
+`./install.sh --host` adds the same timer.
+
 You get a notification when a session you're not looking at needs input or
 finishes its turn (via Claude Code hooks, nothing to configure). It reads like
 the session's row in the list: a bell or a check, what the session is about,
@@ -396,8 +414,8 @@ tmux (a tmux of amarchy's own, `tmux -L amarchy`, set up to stay out of sight:
 no status bar, no prefix key, the mouse wheel scrolls back), and each window on
 your desktop is a terminal attached to it over ssh. A dropped connection (a
 laptop that slept, a host that rebooted) reconnects by itself; after a reboot
-the session's Claude picks its conversation back up. Remote sessions don't
-sleep: a server is there to keep them.
+the session's Claude picks its conversation back up, asleep until you send it
+something. Sessions on a host sleep too (see below).
 
 To see what a session serves: on a host with [Tailscale](https://tailscale.com),
 each session's Claude is told to listen on the host's Tailscale address and

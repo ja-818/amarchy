@@ -85,9 +85,10 @@ Sleep (a session you're not using lets go of its Claude Code, and its memory, un
 nothing on screen changes, and what you type goes to Claude when it's back):
   amarchy sleep [id] [--force]          put a session to sleep (current one if no id); it says why not when
                                         something would be lost, and --force does it anyway
-  amarchy sleep --all [--force]         every session that can sleep, except the one on screen
-  amarchy sleep --after [minutes|off]   how long a session sits idle off screen before it sleeps on its
-                                        own (default 1; prints it without a value)
+  amarchy sleep --all [--force]         every session that can sleep, except the one on screen (on a host,
+                                        those open on a phone or in a browser)
+  amarchy sleep --after [minutes|off]   how long a session sits idle off screen (on a host: open nowhere)
+                                        before it sleeps on its own (default 1; prints it without a value)
   amarchy wake [id]                     wake a session without typing in it
 
 Theme on a host (the app's look, on every phone and browser; Settings, Look in the app):
@@ -864,7 +865,7 @@ def save_session(s):
 
 
 # What session_view() adds for the UIs, never saved.
-VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent",
+VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "current", "background", "agent",
                "unseen", "assistant", "assistant_name", "said", "picture", "picture_file")
 
 
@@ -2195,7 +2196,7 @@ def claude_argv(s, prefill="", prompt=None):
 # closes the window, as it always did. A shell rather than amarchy, because
 # it's what stays while the session sleeps; amarchy itself only runs in between.
 WINDOW_LOOP = ('while :; do "$0" claude "$1"; "$0" asleep "$1" || exit; '
-               '"$0" woke "$1" "$(stty -icanon -echo -isig -ixon min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1)"; '
+               '"$0" woke "$1" "$(stty -icanon -echo -isig -ixon -icrnl min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1)"; '
                'done')
 
 
@@ -2204,8 +2205,13 @@ def window_argv(s):
 
 
 def window_loop(win, procs):
-    """The pid of the window loop in a Claude window, or None for a window
-    opened before there was one (Claude then is the window's own process)."""
+    """The pid of the window loop in a Claude window (on a host, its tmux pane:
+    the pane's own process), or None for a window opened before there was one
+    (Claude then is the window's own process; on a host, the loop that can't
+    sleep)."""
+    if HOST_MODE:
+        pid = win["pid"]
+        return pid if pid in procs and '"$0" asleep "$1"' in " ".join(cmdline(pid)) else None
     return next((p for p in descendants(win["pid"], procs)[:3]
                  if procs[p][1] == "sh" and '"$0" claude "$1"' in " ".join(cmdline(p))), None)
 
@@ -2458,6 +2464,28 @@ def clear_asleep(sid):
     (claude_dir(sid) / "asleep").unlink(missing_ok=True)
 
 
+WAKING = 60     # seconds a session counts as waking until its Claude says it's up
+
+
+def woken(sid):
+    """The session isn't asleep any more, and its Claude is on its way: it's
+    waking until Claude's SessionStart hook says it's up (or for WAKING)."""
+    write_file(claude_dir(sid) / "waking", "")
+    clear_asleep(sid)
+
+
+def waking_now(sid):
+    """Whether the session's Claude was woken and isn't up yet."""
+    try:
+        return time.time() - (claude_dir(sid) / "waking").stat().st_mtime < WAKING
+    except OSError:
+        return False
+
+
+def clear_waking(sid):
+    (claude_dir(sid) / "waking").unlink(missing_ok=True)
+
+
 def all_background_sessions():
     """Every Claude Code background session (/bg, `claude --bg`) still
     running, as Claude Code lists them in ~/.claude/sessions."""
@@ -2534,12 +2562,12 @@ def hand_over_prompt(s, win=None):
     """Ask the session's Claude for what's typed in its prompt, and keep it
     for when it wakes (in its draft). False when Claude didn't hand it over
     (a menu or a dialog open, say), so the session had better stay awake.
-    Its window on a desktop; without one, its tmux on a host."""
+    Its window on a desktop; on a host, its tmux."""
     d = claude_dir(s["id"])
     (d / "draft").unlink(missing_ok=True)
     write_file(d / "handover", str(time.time()))
     mods, key = claude_key("chat:externalEditor")
-    if win:
+    if win and not HOST_MODE:
         hypr(f'hl.dsp.send_shortcut({{ mods = "{mods}", key = "{key}", window = "address:{win["address"]}" }})')
     else:
         prefix = "".join({"CTRL": "C-", "ALT": "M-", "SHIFT": "S-"}.get(m, "") for m in mods.split())
@@ -2632,7 +2660,7 @@ def sleep_blockers(s, win, procs, auto):
         reasons.append("it's working")
     elif status == "waiting":
         reasons.append("it's waiting for your answer")
-    if not window_loop(win, procs):
+    if not window_loop(win, procs) and not HOST_MODE:      # a host's pane changes to the loop as it sleeps
         reasons.append("its window is from before sessions could sleep, so its prompt can't be kept "
                        "(--force closes the window, anything typed and not sent is lost)")
     if not pid:
@@ -2687,10 +2715,10 @@ def put_to_sleep(s, auto=False, force=False):
     None once it sleeps, else why it didn't."""
     sid = s["id"]
     if s.get("host"):
-        return f"it runs on {s['host']}, where sessions don't sleep"
+        return f"it runs on {s['host']}: put it to sleep there (amarchy sleep {sid} on {s['host']})"
     if s.get("setup"):
         return "it's still being set up"
-    win = find(claude_class(s))
+    win = host_pane(s) if HOST_MODE else find(claude_class(s))
     if not win:
         if asleep_since(sid) is None:
             mark_asleep(sid)
@@ -2704,9 +2732,11 @@ def put_to_sleep(s, auto=False, force=False):
         return "; ".join(reasons)
     pid = window_claude(win, procs)
     loop = window_loop(win, procs)
-    if loop and pid and not hand_over_prompt(s, win) and not force:
+    # On a host Claude hands its prompt over with or without the loop (its
+    # editor is amarchy's either way).
+    if (loop or HOST_MODE) and pid and not hand_over_prompt(s, win) and not force:
         return "Claude didn't hand over its prompt (a menu or a dialog open?)"
-    if auto and current_session_id() == sid:
+    if auto and (current_session_id() == sid or HOST_MODE and sid in on_screen()[0]):
         (claude_dir(sid) / "draft").unlink(missing_ok=True)    # it's still in Claude's prompt
         return "you came back to it"
     try:
@@ -2714,6 +2744,7 @@ def put_to_sleep(s, auto=False, force=False):
     except (OSError, ValueError, TypeError):
         pass
     mark_asleep(sid, FROZEN if loop else DRAWN)
+    clear_waking(sid)
     try:
         stop_background(s)
         if pid:
@@ -2721,7 +2752,9 @@ def put_to_sleep(s, auto=False, force=False):
     except BaseException:
         clear_asleep(sid)       # it isn't asleep: say so, for whoever tries next
         raise
-    if not loop:
+    if not loop and HOST_MODE:
+        host_respawn(s)         # on the loop that sleeps, showing the conversation as amarchy draws it
+    elif not loop:
         # Its window went with it: it opens again, asleep, when you go there.
         hypr(f'hl.dsp.window.close({{ window = "address:{win["address"]}" }})')
     tell_shell("refresh")
@@ -2766,10 +2799,13 @@ def wake(s):
     sid = s["id"]
     if asleep_since(sid) is None:
         return
-    clear_asleep(sid)
-    win = find(claude_class(s))
+    woken(sid)
+    win = host_pane(s) if HOST_MODE else find(claude_class(s))
     if not win:
-        ensure_windows(s, wake=True)
+        if HOST_MODE:
+            host_start(s, wake=True)
+        else:
+            ensure_windows(s, wake=True)
     else:
         # The window loop waits for a key: stop waiting, as if one came.
         end = time.time() + 3
@@ -2779,7 +2815,11 @@ def wake(s):
             readers = [p for p in descendants(loop, procs) if procs[p][1] == "dd"] if loop else []
             for p in readers:
                 os.kill(p, 15)
-            if readers or not loop:
+            if readers:
+                break
+            if not loop:
+                if HOST_MODE:   # a pane from before host sessions slept, at "Press Enter"
+                    tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")
                 break
             time.sleep(0.1)
     tell_shell("refresh")
@@ -2838,8 +2878,10 @@ def cmd_sleep(args):
             return sleep_idle()
         if rest[:1] == ["--all"]:
             current, slept, kept = current_session_id(), [], []
+            shown = on_screen()[0] if HOST_MODE else set()
             for s in session_view():
-                if s["awake"] and not s["sleeping"] and s["id"] != current and s["status"] in ("idle", "waiting"):
+                if s["awake"] and not s["sleeping"] and s["id"] != current and s["id"] not in shown \
+                        and s["status"] in ("idle", "waiting"):
                     err = put_to_sleep(session(s["id"]), force=force)
                     (kept if err else slept).append((s, err))
             for s, err in kept:
@@ -2862,21 +2904,42 @@ def cmd_sleep(args):
 
 def sleep_idle():
     """What the timer does: every session that has been idle and off screen
-    for long enough goes to sleep, if nothing would be lost."""
+    for long enough goes to sleep, if nothing would be lost. On a host, off
+    screen is open on no phone or browser (on_screen), and the time counts
+    from when it was last open on one, if that's later."""
     after = sleep_after()
     if after is None:
         return 0
     current = current_session_id()
+    shown, last = on_screen() if HOST_MODE else (set(), {})
     for s in session_view():
-        if s.get("host") or not s["awake"] or s["sleeping"] or s["current"] or s["id"] == current or s["status"] not in ("idle", "waiting"):
+        if s.get("host") or not s["awake"] or s["sleeping"] or s["current"] or s["id"] == current \
+                or s["id"] in shown or s["status"] not in ("idle", "waiting"):
             continue
         try:
-            idle = time.time() - (STATUS / s["id"]).stat().st_mtime
+            since = (STATUS / s["id"]).stat().st_mtime
         except OSError:
-            idle = float("inf")
-        if idle >= after * 60:
+            since = 0
+        if time.time() - max(since, last.get(s["id"], 0)) >= after * 60:
             put_to_sleep(session(s["id"]), auto=True)
     return 0
+
+
+def on_screen():
+    """Host mode: the sessions open on a device now (their conversation on a
+    phone, their terminals in a browser), as the app's server keeps them in
+    APP_VIEWING, and when each was last open on one: (ids, {id: time})."""
+    try:
+        d = json.loads(APP_VIEWING.read_text())
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    last = {k: v for k, v in (d.get("at") if isinstance(d.get("at"), dict) else {}).items()
+            if isinstance(v, (int, float))}
+    # A server that's gone (restarting, say) shows nothing anymore.
+    up = isinstance(d.get("pid"), int) and Path(f"/proc/{d['pid']}").exists()
+    shown = {x for x in d.get("open") or [] if isinstance(x, str)} if up else set()
+    return shown | {k for k, v in last.items() if time.time() - v < APP_SEEN}, last
 
 
 def cmd_wake(args):
@@ -2924,8 +2987,12 @@ def cmd_asleep(sid):
     """The window loop, once Claude has exited: 0 if the session sleeps (the
     window keeps showing it), 1 if Claude was quit (the window closes)."""
     s = session(sid)
-    if not s or asleep_since(sid) is None:
+    if not s:
         return 1
+    if asleep_since(sid) is None:
+        # Woken as Claude was stopped, before this got here: on to the wait
+        # for a key, which wake() ends (it looks for it a moment).
+        return 0 if waking_now(sid) else 1
     out = sys.stdout
     if asleep_look(sid) == FROZEN:
         # Claude's screen stays as it was. Only what would now come in without
@@ -3060,7 +3127,7 @@ def cmd_woke(sid, key):
             write_file(d / "draft", typed)
         else:
             (d / "draft").unlink(missing_ok=True)
-        clear_asleep(sid)
+        woken(sid)
         tell_shell("refresh")
         return 0
 
@@ -3086,7 +3153,7 @@ def cmd_woke(sid, key):
                     waking()
                     write_file(d / "send", text)
                     (d / "draft").unlink(missing_ok=True)
-                    clear_asleep(sid)
+                    woken(sid)
                     tell_shell("refresh")
                     return 0
                 continue
@@ -3778,6 +3845,7 @@ def cmd_hook(sid, state):
     if hook_claude().get("kind") == "bg":
         return
     set_conversation_id(sid, event.get("session_id", ""))
+    clear_waking(sid)       # it's up
     if asleep_since(sid) is not None and state != "idle":
         clear_asleep(sid)   # it's running after all (woken some other way)
     prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
@@ -4295,6 +4363,8 @@ def session_view():
         # asleep, and looks the same.
         s["awake"] = claude_class(s) in titles
         s["sleeping"] = asleep_since(s["id"]) is not None or not s["awake"]
+        # Woken, and its Claude isn't up yet.
+        s["waking"] = not s["sleeping"] and waking_now(s["id"])
         s["agent"] = agents.get(s["path"], "") if not s["sleeping"] else ""
         s.pop("prompt", None)
         if s["sleeping"] and not s.get("setup"):
@@ -6227,8 +6297,18 @@ set -g aggressive-resize on
 set -g destroy-unattached off
 """
 
-# A session's Claude in tmux: Claude, and when you quit it, a key to start it again.
-HOST_LOOP = 'while :; do "$0" claude "$1"; "$0" held "$1" || exit; done'
+# A session's Claude in tmux: Claude; while the session sleeps, its last
+# screen and a wait for the first key (as WINDOW_LOOP on a desktop); and when
+# you quit Claude, a key to start it again.
+HOST_LOOP = ('while :; do "$0" claude "$1"; if "$0" asleep "$1"; then '
+             '"$0" woke "$1" "$(stty -icanon -echo -isig -ixon -icrnl min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1)"; '
+             'else "$0" held "$1" || exit; fi; done')
+
+
+def host_loop(sid):
+    """HOST_LOOP for a session, with your login shell's PATH and tools, in sh:
+    bash proper would print "Killed" over Claude's last screen as it sleeps."""
+    return login_shell('exec sh -c "$0" "$@"', HOST_LOOP, ENTRY, sid)
 
 
 HOST_CONFIG = HOME / ".config/amarchy/host"     # NAME= and BIND= lines, for the network below
@@ -6346,19 +6426,38 @@ def tmux_env(s):
     return [x for k, v in session_env(s).items() for x in ("-e", f"{k}={v}")]
 
 
-def host_start(s):
+def host_start(s, wake=False):
     """Start whatever of a session's tmux isn't running: Claude (setting the
     worktree up first, for a new one) and, once the worktree is there, the
-    terminal. After a reboot, attaching brings them back like this."""
+    terminal. After a reboot, attaching brings them back like this, Claude
+    asleep (the conversation, and a key to wake it), so opening your sessions
+    doesn't start a Claude in each; wake starts it right away instead."""
     sid, path = s["id"], Path(s["path"])
     claude, term = tmux_name(sid), tmux_name(sid, "term")
     if not tmux_has(claude):
+        if not s.get("setup") and path.is_dir() and not wake:
+            # Asleep from before, it has no screen of Claude's to keep now.
+            if asleep_since(sid) is None or asleep_look(sid) == FROZEN:
+                mark_asleep(sid)
         cwd = path if path.is_dir() else WORK / s["repo"]
         tmux("new-session", "-d", "-s", claude, "-x", "200", "-y", "50", "-c", str(cwd), *tmux_env(s),
-             *login_shell(HOST_LOOP, ENTRY, sid))
+             *host_loop(sid))
         tmux("select-pane", "-t", f"={claude}:", "-T", f"amarchy:{sid}")
     if not s.get("setup") and path.is_dir() and not tmux_has(term):
         tmux("new-session", "-d", "-s", term, "-x", "100", "-y", "50", "-c", str(path), *tmux_env(s))
+
+
+def host_pane(s):
+    """A session's Claude pane in tmux, as sleep handles a window: {"pid":
+    the pane's process} (the loop, HOST_LOOP), or None while it has none."""
+    pid = tmux("display-message", "-p", "-t", f"={tmux_name(s['id'])}:", "#{pane_pid}").stdout.strip()
+    return {"pid": int(pid)} if pid.isdigit() else None
+
+
+def host_respawn(s):
+    """Restart a session's Claude pane on HOST_LOOP: a pane from before
+    sessions could sleep on a host, its Claude stopped, sleeps from then on."""
+    tmux("respawn-pane", "-k", "-t", f"={tmux_name(s['id'])}:", "-c", s["path"], *tmux_env(s), *host_loop(s["id"]))
 
 
 def host_stop(s):
@@ -6448,6 +6547,7 @@ def cmd_held(sid):
     Enter. Fails (ending its tmux) when the session is gone."""
     if not session(sid) or (CLOSING / f"{sid}.json").exists():
         return 1
+    sh("stty", "sane")      # a Claude that was stopped (put to sleep) left the terminal raw: Enter is \r
     print("\n  \033[2mClaude Code exited. Press Enter to start it again.\033[0m", flush=True)
     try:
         input()
@@ -6526,6 +6626,7 @@ APP_CHUNK = 1_500_000           # bytes of a transcript read at a time (the late
 APP_KEYS = {"Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "BTab", "Space", "BSpace",
             *"0123456789"}
 APP_SEEN = 15                   # seconds a session you're looking at on the phone counts as seen
+APP_VIEWING = APP / "viewing.json"      # which sessions are open on a phone or in a browser (see on_screen)
 P256_SPKI = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
 UNITS = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "systemd/user"
 
@@ -7757,16 +7858,18 @@ EXITED = "Claude Code exited. Press Enter"
 def app_screen(s):
     """What the session's Claude shows now: its screen as text, the question
     on it if any, and whether Claude is there at all (exited: it's waiting
-    for Enter to start again)."""
+    for Enter to start again; asleep: its last screen stays, Claude gone
+    until something wakes it; waking: on its way back)."""
+    asleep, waking = asleep_since(s["id"]) is not None, waking_now(s["id"])
     r = tmux("capture-pane", "-p", "-t", f"={tmux_name(s['id'])}:")
     if r.returncode != 0:
-        return {"live": False, "text": "", "dialog": None, "exited": False}
+        return {"live": False, "text": "", "dialog": None, "exited": False, "asleep": asleep, "waking": False}
     lines = [l.rstrip() for l in r.stdout.splitlines()]
     while lines and not lines[-1]:
         lines.pop()
-    exited = any(EXITED in l for l in lines[-4:])
-    return {"live": True, "text": "\n".join(lines), "exited": exited,
-            "dialog": None if exited else claude_dialog(lines)}
+    exited = not asleep and any(EXITED in l for l in lines[-4:])
+    return {"live": True, "text": "\n".join(lines), "exited": exited, "asleep": asleep, "waking": waking,
+            "dialog": None if exited or asleep or waking else claude_dialog(lines)}
 
 
 def app_type(s, text):
@@ -7878,7 +7981,10 @@ def undimmed(line):
 
 def claude_prompt(s):
     """What's typed in the session's Claude's prompt, as one line ("" for
-    nothing), or None when its prompt isn't on screen."""
+    nothing), or None when its prompt isn't on screen (asleep or waking, the
+    prompt there is Claude's last screen, not Claude)."""
+    if asleep_since(s["id"]) is not None or waking_now(s["id"]):
+        return None
     r = tmux("capture-pane", "-p", "-e", "-t", f"={tmux_name(s['id'])}:")
     if r.returncode != 0:
         return None
@@ -8389,9 +8495,35 @@ class AppState:
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
         self.lock = threading.Lock()
         self.build = app_build()
+        # Which sessions are open on a device (a phone's conversation, a
+        # browser's terminals: id -> how many), and when each last was, for
+        # the sleep timer (on_screen). What the last server knew of when stays.
+        self.open, self.viewed, self.viewing_lock = {}, on_screen()[1], threading.Lock()
+        self.save_viewing()
 
     def row(self, sid):
         return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
+
+    def looking(self, sid, on=None):
+        """A device opened a session (on), left it (off), or says it's still
+        looking at it (None)."""
+        with self.viewing_lock:
+            if on is not None:
+                n = self.open.get(sid, 0) + (1 if on else -1)
+                if n > 0:
+                    self.open[sid] = n
+                else:
+                    self.open.pop(sid, None)
+            self.viewed[sid] = time.time()
+            self.save_viewing()
+
+    def save_viewing(self):
+        live = {s.get("id") for s in sessions()}
+        self.viewed = {k: v for k, v in self.viewed.items() if k in live}
+        try:
+            write_file(APP_VIEWING, json.dumps({"pid": os.getpid(), "open": sorted(self.open), "at": self.viewed}))
+        except OSError as e:
+            print(f"amarchy app: couldn't write {APP_VIEWING}: {e}", file=sys.stderr)
 
 
 def app_watch(st):
@@ -8413,7 +8545,8 @@ def app_watch(st):
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound(),
-                    "assistant_sound": app_assistant_sound(), "alerts": alerts(), "build": st.build}
+                    "assistant_sound": app_assistant_sound(), "alerts": alerts(), "build": st.build,
+                    "sleep_after": "off" if sleep_after() is None else sleep_after()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -8553,6 +8686,11 @@ def app_handler(st, users, address):
             # "wait": not yet (Claude is starting, or asking something), so
             # the phone asks again, what was said waiting for it.
             screen = app_screen(s)
+            if screen["asleep"]:
+                wake(s)
+                return self.send(409, {"error": "Claude is waking up", "wait": True})
+            if screen["waking"]:
+                return self.send(409, {"error": "Claude is waking up", "wait": True})
             if screen["exited"]:
                 return self.error(409, "Claude Code exited: start it again first")
             if not screen["live"]:
@@ -8785,6 +8923,7 @@ def app_handler(st, users, address):
                 os.close(slave)
                 return self.error(500, f"couldn't attach: {e}")
             os.close(slave)
+            st.looking(sid, True)
             done, mic = threading.Event(), None
 
             def tell(on):
@@ -8867,6 +9006,7 @@ def app_handler(st, users, address):
                 pass
             finally:
                 done.set()
+                st.looking(sid, False)
                 if mic:
                     mic.suspend()
                     with st.lock:
@@ -9103,9 +9243,10 @@ def app_handler(st, users, address):
             """A session as it goes on: its row in the list, its conversation
             (the latest of it first), and its screen with any question on it."""
             if not s.get("setup") and Path(s["path"]).is_dir() and not tmux_has(tmux_name(s["id"])):
-                host_start(s)       # after a reboot, before anyone attached: Claude picks up where it was
+                host_start(s)       # after a reboot, before anyone attached: asleep, until you send it something
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
+            st.looking(s["id"], True)
             try:
                 while True:
                     now = st.row(s["id"])
@@ -9131,6 +9272,8 @@ def app_handler(st, users, address):
                     time.sleep(0.5)
             except OSError:
                 pass
+            finally:
+                st.looking(s["id"], False)
 
         def do_POST(self):
             if not self.allowed(write=True):
@@ -9175,7 +9318,9 @@ def app_handler(st, users, address):
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant)", self.path)
+            if self.path == "/api/sleep":     # when idle sessions sleep (amarchy sleep --after), or all of them now
+                return self.sleep(data)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|wake|sleep)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
@@ -9186,8 +9331,22 @@ def app_handler(st, users, address):
                 return self.assistant(s, data)
             if what == "seen":
                 st.seen[s["id"]] = time.time()
+                st.looking(s["id"])
                 mark_seen(s["id"])
                 return self.send(200, {})
+            if what == "wake":
+                if asleep_since(s["id"]) is not None:
+                    wake(s)
+                else:
+                    host_start(s, wake=True)    # not started since a reboot
+                return self.send(200, {})
+            if what == "sleep":
+                lock = sleep_lock(wait=True)
+                if not lock:
+                    return self.error(409, "Amarchy is putting sessions to sleep already: try again in a moment")
+                with lock:
+                    why = put_to_sleep(s)
+                return self.error(409, f"It stays awake: {why}") if why else self.send(200, {})
             if what == "close":
                 # Uncommitted work goes only when the phone said so, having
                 # been told about it (app_closing); else it asks again.
@@ -9202,11 +9361,30 @@ def app_handler(st, users, address):
                     return self.error(400, "high, normal or low")
                 r = run_amarchy("priority", level, "--id", s["id"])
                 return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+            st.looking(s["id"])
             screen = app_screen(s)
+            if screen["waking"]:
+                # On its way back: what's sent waits for its prompt.
+                end = time.time() + 30
+                while screen["waking"] and time.time() < end:
+                    time.sleep(0.3)
+                    screen = app_screen(s)
+                if screen["waking"]:
+                    return self.error(409, "Claude is still waking up: try again in a moment")
+                time.sleep(0.5)     # its first screen drawn
+                screen = app_screen(s)
             if what == "send":
                 text = data.get("text")
                 if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
                     return self.error(400, "nothing to send")
+                if screen["asleep"] or not screen["live"] and not s.get("setup"):
+                    # Asleep (or not started since a reboot): it wakes with this
+                    # as its first message, what was typed in its prompt kept.
+                    if starting(s["id"]):
+                        return self.error(409, "Claude is starting with another message: try again in a moment")
+                    threading.Thread(target=send_start, args=(s, text.replace("\r\n", "\n").replace("\r", "\n")),
+                                     daemon=True).start()
+                    return self.send(200, {"waking": True})
                 if not screen["live"]:
                     return self.error(409, "Claude isn't running yet: try again in a moment")
                 if screen["exited"]:
@@ -9231,12 +9409,38 @@ def app_handler(st, users, address):
                 keys = data.get("keys")
                 if not valid_keys(keys):
                     return self.error(400, "keys it doesn't send")
+                if screen["asleep"]:
+                    wake(s)
+                    return self.error(409, "It was asleep: Claude is waking up, try again in a moment")
                 expect = data.get("dialog")
                 if expect is not None and (screen["dialog"] or {}).get("id") != expect:
                     return self.error(409, "The question changed: look again")
                 why = app_keys(s, keys)
             st.seen[s["id"]] = time.time()
             return self.send(200, {}) if why is None else self.error(500, why)
+
+        def sleep(self, data):
+            """{"after": minutes|"off"}: how long a session idle and open
+            nowhere waits before it sleeps. {"all": true}: every idle one
+            open nowhere sleeps now (amarchy sleep --all)."""
+            if data.get("all") is True:
+                lock = sleep_lock(wait=True)
+                if not lock:
+                    return self.error(409, "Amarchy is putting sessions to sleep already: try again in a moment")
+                slept, kept = 0, 0
+                with lock:
+                    shown = on_screen()[0]
+                    for row in session_view():
+                        if row["awake"] and not row["sleeping"] and row["id"] not in shown \
+                                and row["status"] in ("idle", "waiting"):
+                            why = put_to_sleep(session(row["id"]))
+                            slept, kept = slept + (not why), kept + bool(why)
+                return self.send(200, {"slept": slept, "kept": kept})
+            after = data.get("after")
+            if after != "off" and (isinstance(after, bool) or not isinstance(after, (int, float)) or not 0 <= after <= 1440):
+                return self.error(400, "minutes (0 to 1440) or off")
+            write_file(SLEEP_AFTER, f"{'off' if after == 'off' else f'{after:g}'}\n")
+            return self.send(200, {})
 
         def clip(self, data):
             """What you pasted (or copied) in a browser or on the phone: the web
@@ -9695,17 +9899,43 @@ def send_start(s, text):
     sid = s["id"]
     d = claude_dir(sid)
     since = time.time()
+    # What was typed in its prompt when it went to sleep goes back there once
+    # Claude has the message (on a host, where amarchy types into Claude).
+    draft = take(d / "draft") if HOST_MODE and asleep_since(sid) is not None else None
     write_file(d / "send", text)
     if HOST_MODE:
-        clear_asleep(sid)
-        if tmux_has(tmux_name(sid)):
+        if asleep_since(sid) is not None:
+            wake(s)
+        elif tmux_has(tmux_name(sid)):
+            woken(sid)
             tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")     # it exited: Enter starts it again
         else:
-            host_start(s)
-    elif asleep_since(sid) is not None:
+            woken(sid)
+            host_start(s, wake=True)
+        why = send_started(sid, text, since)
+        if draft and draft.strip():
+            if why:
+                write_file(d / "draft", draft)      # for when it does start
+            else:
+                end = time.time() + 30
+                while claude_prompt(s) is None and time.time() < end:
+                    time.sleep(0.3)
+                time.sleep(0.5)     # Claude's turn draws its prompt again
+                buffer = f"amarchy-send-{os.getpid()}"
+                if tmux("set-buffer", "-b", buffer, "--", draft.rstrip("\n")).returncode == 0:
+                    tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", f"={tmux_name(sid)}:")
+        return why
+    if asleep_since(sid) is not None:
         wake(s)
     else:
         ensure_windows(s, wake=True)
+    return send_started(sid, text, since)
+
+
+def send_started(sid, text, since):
+    """Wait for a Claude started with text (send_start) to take it. None once
+    it did, else why not."""
+    d = claude_dir(sid)
     # Taken once its Claude starts on it: the next message waits for that
     # turn instead of landing in a Claude still starting up.
     end = time.time() + SEND_START
@@ -9777,6 +10007,10 @@ def send_deliver(sid, text, deadline):
             return send_start(s, text)
         else:
             screen = app_screen(s)
+            if screen["waking"]:
+                wait = "its Claude is waking up"
+                time.sleep(0.5)
+                continue
             if asleep_since(sid) is not None or not screen["live"] or screen["exited"]:
                 return send_start(s, text)
             prompt = claude_prompt(s)

@@ -21,7 +21,8 @@
 #                            a wl-paste that pastes from your desktop, and a
 #                            rec that is the phone's microphone while you dictate
 #                            (and the phone app, once you turn it on: amarchy app on),
-#                            and a timer that keeps it up to date (amarchy update)
+#                            a timer that keeps it up to date (amarchy update), and
+#                            the timer that puts idle sessions to sleep
 #   ./install.sh --uninstall remove all of the above (sessions and worktrees untouched)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
@@ -232,6 +233,41 @@ install_skill() {
   fi
 }
 
+# Sessions sleep once they've been idle and off screen for a while (`amarchy
+# sleep --after`): Claude Code exits and lets go of its memory, and comes back
+# when you type in the session or send it something. Off screen is not on
+# your desktop's screen, or on a host, open on no phone or browser. The timer
+# only checks; nothing stays running.
+install_sleep_timer() {
+  mkdir -p "$units"
+  cat >"$units/amarchy-sleep.service" <<UNIT
+# Installed by amarchy ($repo/install.sh${1:-}); removed by its --uninstall.
+[Unit]
+Description=Put idle amarchy sessions to sleep
+
+[Service]
+Type=oneshot
+Environment=PATH=$bin_dir:$PATH
+ExecStart=$bin_dir/amarchy sleep --idle
+UNIT
+  cat >"$units/amarchy-sleep.timer" <<UNIT
+# Installed by amarchy ($repo/install.sh${1:-}); removed by its --uninstall.
+[Unit]
+Description=Put idle amarchy sessions to sleep, every 30 seconds
+
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now amarchy-sleep.timer >/dev/null 2>&1 ||
+    say "Couldn't start the sleep timer (systemctl --user enable --now amarchy-sleep.timer)"
+}
+
 # A host: a machine without a desktop (a server, say) that keeps sessions for
 # your desktops to show (`amarchy remote <host>` on them). Only the command and
 # the skill; each session's Claude and terminal run in tmux there.
@@ -304,6 +340,7 @@ UNIT
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user enable --now amarchy-update.timer >/dev/null 2>&1 ||
     say "Couldn't start the update timer (systemctl --user enable --now amarchy-update.timer)"
+  install_sleep_timer " --host"
   # The phone app, if it's on, runs from the checkout installed now.
   systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
   say "amarchy installed as a host."
@@ -312,6 +349,7 @@ UNIT
   echo "  (Tailscale, say). Sessions serve on its Tailscale address if it has one, else"
   echo "  only on localhost; set NAME= and BIND= in ~/.config/amarchy/host to change it."
   echo "  On your phone: amarchy app on (needs Tailscale with HTTPS certificates turned on)."
+  echo "  Idle sessions open nowhere sleep after $("$bin_dir/amarchy" sleep --after) min (amarchy sleep --after <min>|off); send one something to wake it"
   exit 0
 fi
 
@@ -377,35 +415,7 @@ HOOK
 
 install_skill
 
-# Sessions sleep once they've been idle and off screen for a while (`amarchy
-# sleep --after`): Claude Code exits and lets go of its memory, and comes back
-# when you type in the session. The timer only checks; nothing stays running.
-mkdir -p "$units"
-cat >"$units/amarchy-sleep.service" <<UNIT
-# Installed by amarchy ($repo/install.sh); removed by its --uninstall.
-[Unit]
-Description=Put idle amarchy sessions to sleep
-
-[Service]
-Type=oneshot
-ExecStart=$bin_dir/amarchy sleep --idle
-UNIT
-cat >"$units/amarchy-sleep.timer" <<UNIT
-# Installed by amarchy ($repo/install.sh); removed by its --uninstall.
-[Unit]
-Description=Put idle amarchy sessions to sleep, every 30 seconds
-
-[Timer]
-OnActiveSec=30s
-OnUnitActiveSec=30s
-AccuracySec=5s
-
-[Install]
-WantedBy=timers.target
-UNIT
-systemctl --user daemon-reload
-systemctl --user enable --now amarchy-sleep.timer >/dev/null 2>&1 ||
-  say "Couldn't start the sleep timer (systemctl --user enable --now amarchy-sleep.timer)"
+install_sleep_timer
 
 # Sizes the zen column for this monitor and reloads Hyprland.
 "$bin_dir/amarchy" layout
