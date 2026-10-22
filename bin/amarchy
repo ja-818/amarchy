@@ -28,6 +28,13 @@ Sessions:
   amarchy new <project> [name] --no-jump [--prompt <text|->]
                                         the same, out of sight: it shows up in the list and the screen
                                         stays where it is (for starting sessions from a script or agent)
+  amarchy send <id> <text|->            a message for a session's Claude, as if typed and sent (- reads it
+                                        from stdin), once Claude is free: after the turn under way, not
+                                        over a question it asks; a session asleep or whose Claude exited
+                                        starts again with it. Waits until Claude has it (60 minutes at most)
+  amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]
+                                        the same, returning at once (it's delivered in the background), or
+                                        waiting that long; from the session's own Claude it never waits
   amarchy list [--compact]              sessions as JSON, in list order (task, age, current, and agent: the
                                         name its Claude goes by for other Claude sessions' SendMessage)
   amarchy open                          go to the last session you were in (nothing if already in one)
@@ -113,6 +120,11 @@ Tailscale network):
   amarchy app off                       stop serving it (the phones keep it, for when it's on again)
   amarchy app [--status]                whether it's on, where, and how many phones it notifies
   amarchy app --test                    send each phone a test notification
+  amarchy notify <title> [body] [--session <id>] [--urgent]
+                                        a notification of your own on each phone (and browser) the app
+                                        notifies, from anywhere on the host (a desktop sends it there);
+                                        a tap opens that session. --urgent: it stays until dismissed where
+                                        the browser lets it (a computer's; iOS shows it as any other)
 
 Updating:
   amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
@@ -2339,15 +2351,20 @@ def claude_key(name):
     return " ".join(names.get(m, m.upper()) for m in mods), last.upper()
 
 
-def hand_over_prompt(s, win):
+def hand_over_prompt(s, win=None):
     """Ask the session's Claude for what's typed in its prompt, and keep it
-    for when it wakes. False when Claude didn't hand it over (a menu or a
-    dialog open, say), so the session had better stay awake."""
+    for when it wakes (in its draft). False when Claude didn't hand it over
+    (a menu or a dialog open, say), so the session had better stay awake.
+    Its window on a desktop; without one, its tmux on a host."""
     d = claude_dir(s["id"])
     (d / "draft").unlink(missing_ok=True)
     write_file(d / "handover", str(time.time()))
     mods, key = claude_key("chat:externalEditor")
-    hypr(f'hl.dsp.send_shortcut({{ mods = "{mods}", key = "{key}", window = "address:{win["address"]}" }})')
+    if win:
+        hypr(f'hl.dsp.send_shortcut({{ mods = "{mods}", key = "{key}", window = "address:{win["address"]}" }})')
+    else:
+        prefix = "".join({"CTRL": "C-", "ALT": "M-", "SHIFT": "S-"}.get(m, "") for m in mods.split())
+        tmux("send-keys", "-t", f"={tmux_name(s['id'])}:", prefix + (key.lower() if len(key) == 1 else key))
     end = time.time() + HANDOVER_TIMEOUT
     while time.time() < end and (d / "handover").exists():
         time.sleep(0.05)
@@ -5509,6 +5526,18 @@ def tmux(*args):
     try:
         if fresh:
             run("source-file", str(conf))     # a server already up takes the new settings
+        # The server starts with the first session, in whatever started that:
+        # in its own systemd scope instead, so it outlives it (a unit's
+        # processes all end with it, amarchy send from a timer's say).
+        if args[:1] == ("new-session",) and shutil.which("systemd-run"):
+            down = run("list-sessions")
+            if down.returncode != 0 and re.search(r"no server|error connecting", down.stderr):
+                scoped = subprocess.run(["systemd-run", "--user", "--scope", "--quiet", "--collect",
+                                         f"--unit=amarchy-tmux-{os.getpid()}-{time.time_ns()}",
+                                         "tmux", "-u", "-L", "amarchy", "-f", str(conf), *args],
+                                        capture_output=True, text=True, stdin=subprocess.DEVNULL, env=clean_env())
+                if scoped.returncode == 0 or run("list-sessions").returncode == 0:
+                    return scoped
         return run(*args)
     except FileNotFoundError:
         return subprocess.CompletedProcess(args, 127, "", "tmux isn't installed")
@@ -8171,6 +8200,357 @@ def cmd_app(args):
     return fail("usage: amarchy app [on|off|--status|--test]")
 
 
+# ------------------------------------------------------------------ send and notify
+#
+# What a script or another agent does as you would from the phone: a message
+# for a session's Claude (a timer waking an assistant for a check-in), a
+# notification on your phones.
+#
+# A message waits its turn in the session's queue (a file each, oldest first),
+# so two senders never type into one prompt at once and messages arrive in
+# the order they were sent. It's typed, as the phone types one, once Claude is
+# free: up, at its prompt, not in the middle of a turn (Claude Code would hand
+# it to the turn under way, between two of its steps) and not asking you
+# anything (it would answer the question). Something you're typing in its
+# prompt goes first if it sits still, and is back in the prompt after. A
+# Claude asleep or exited starts again with it as its first message, the way
+# Enter does in its asleep window.
+
+SEND_TIMEOUT = 60       # minutes a message waits for Claude to be free, unless told otherwise
+SEND_TAKEN = 15         # seconds Claude has to take a message once it's typed
+SEND_START = 180        # seconds a Claude asleep or exited has to come back and take one
+SEND_SETTLE = 1.5       # seconds Claude has to look free before a message is typed
+SEND_TYPING = 15        # seconds what's typed in Claude's prompt sits still before a message goes ahead of it
+
+
+def send_queue(sid):
+    return claude_dir(sid) / "queue"
+
+
+def send_entry(f):
+    try:
+        d = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and isinstance(d.get("text"), str) else None
+
+
+def send_turn(f):
+    """Whether it's this message's turn: the oldest in its queue, once the
+    ones whose sender is gone are dropped. None when it's gone itself."""
+    for g in sorted(f.parent.glob("[0-9]*")):
+        if g == f:
+            return True
+        pid = (send_entry(g) or {}).get("pid")
+        if not isinstance(pid, int) or not Path(f"/proc/{pid}").exists():
+            g.unlink(missing_ok=True)
+            continue
+        return False
+    return None
+
+
+def claude_busy(s, screen):
+    """Whether the session's Claude is in the middle of a turn: it says so
+    under its prompt, or it said it started one (an interrupted turn never
+    says it ended) and its conversation is still moving."""
+    if any("esc to interrupt" in l for l in screen["text"].splitlines()[-6:]):
+        return True
+    try:
+        status = (STATUS / s["id"]).read_text().strip()
+    except OSError:
+        status = ""
+    f = transcript(s)
+    return status == "working" and bool(f) and time.time() - f.stat().st_mtime < QUIET
+
+
+def send_taken(sid, since):
+    """Whether the session's Claude took a message typed at `since`: it
+    started a turn on it."""
+    try:
+        f = STATUS / sid
+        return f.stat().st_mtime >= since - 0.5 and f.read_text().strip() == "working"
+    except OSError:
+        return False
+
+
+def starting(sid):
+    """Whether the session's Claude is starting with a message: one left for
+    it to take, lately. One that's sat there longer is gone: Claude, up by
+    now, never took it."""
+    f = claude_dir(sid) / "send"
+    try:
+        if time.time() - f.stat().st_mtime < SEND_START:
+            return True
+    except OSError:
+        return False
+    if HOST_MODE and claude_prompt(session(sid) or {"id": sid}) is not None:
+        f.unlink(missing_ok=True)
+    return False
+
+
+def send_start(s, text):
+    """Start the session's Claude (asleep, exited or not running) with text
+    as its first message. None once it took it, else why not."""
+    sid = s["id"]
+    d = claude_dir(sid)
+    since = time.time()
+    write_file(d / "send", text)
+    if HOST_MODE:
+        clear_asleep(sid)
+        if tmux_has(tmux_name(sid)):
+            tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")     # it exited: Enter starts it again
+        else:
+            host_start(s)
+    elif asleep_since(sid) is not None:
+        wake(s)
+    else:
+        ensure_windows(s, wake=True)
+    # Taken once its Claude starts on it: the next message waits for that
+    # turn instead of landing in a Claude still starting up.
+    end = time.time() + SEND_START
+    while time.time() < end:
+        if send_taken(sid, since):
+            return None
+        time.sleep(0.3)
+    try:
+        if (d / "send").read_text() == text:
+            (d / "send").unlink()
+            return "its Claude didn't start"
+    except OSError:
+        pass
+    return None     # it started with it, and hasn't said it's working on it (a /command)
+
+
+def send_type(s, text):
+    """Type a message into the session's Claude, free and at its prompt: what
+    was typed there first handed over (Ctrl+G) and put back after. None once
+    Claude took it, False to try again in a moment, else why not."""
+    sid = s["id"]
+    pane = f"={tmux_name(sid)}:"
+    draft = ""
+    if claude_prompt(s):
+        if not hand_over_prompt(s):
+            return False
+        draft = take(claude_dir(sid) / "draft") or ""
+        if not clear_claude_prompt(s):
+            return False
+    since = time.time()
+    why = app_type(s, text)
+    end = time.time() + SEND_TAKEN
+    taken = False
+    while not why and time.time() < end:
+        time.sleep(0.3)
+        # Its prompt empty again: taken, even without a turn (a /command).
+        if send_taken(sid, since) or (time.time() - since > 1 and claude_prompt(s) == ""):
+            taken = True
+            break
+    if draft.strip():
+        time.sleep(0.5)     # Claude's turn draws its prompt again
+        buffer = f"amarchy-send-{os.getpid()}"
+        if tmux("set-buffer", "-b", buffer, "--", draft.rstrip("\n")).returncode == 0:
+            tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", pane)
+    if why:
+        return why
+    return None if taken else "it's typed in Claude's prompt, but Claude didn't take it (a menu open there?)"
+
+
+def send_deliver(sid, text, deadline):
+    """Deliver a message to the session's Claude once it's free (see above).
+    None once Claude has it, else why not."""
+    wait, typed, typed_at, free_since = "", None, 0, None
+    while True:
+        s = session(sid)
+        if not s or (CLOSING / f"{sid}.json").exists():
+            return "the session was closed"
+        if time.time() > deadline:
+            return f"its Claude wasn't free in time ({wait})"
+        free, free_since = free_since, None     # set again below while Claude stays free
+        if s.get("setup"):
+            wait = "it's being set up"
+        elif starting(sid):
+            wait = "its Claude is starting with another message"
+        elif not HOST_MODE:
+            if asleep_since(sid) is None and find(claude_class(s)):
+                return ("its Claude is awake in a window on this desktop, where amarchy can't type "
+                        "(it can when the session sleeps, or runs on a host)")
+            return send_start(s, text)
+        else:
+            screen = app_screen(s)
+            if asleep_since(sid) is not None or not screen["live"] or screen["exited"]:
+                return send_start(s, text)
+            prompt = claude_prompt(s)
+            if prompt != typed:
+                typed, typed_at = prompt, time.time()
+            if prompt is None:
+                wait = "its prompt isn't on screen"
+            elif screen["dialog"]:
+                wait = "it's asking something"
+            elif claude_busy(s, screen):
+                wait = "it's working"
+            elif prompt and time.time() - typed_at < SEND_TYPING:
+                wait = "someone is typing in it"
+            elif not free or time.time() - free < SEND_SETTLE:
+                free_since = free or time.time()        # free for a moment, not just between two steps
+                wait = "it's settling"
+            else:
+                why = send_type(s, text)
+                if why is not False:
+                    return why
+                wait = "it didn't hand over what's typed in its prompt"
+        time.sleep(0.5)
+
+
+def send_run(sid, f, deadline):
+    """Deliver the message in queue file f, in its turn, and drop it."""
+    try:
+        text = send_entry(f)["text"]
+        while True:
+            turn = send_turn(f)
+            if turn is None:
+                return fail(f"{sid}: the message left the queue unsent")
+            if turn:
+                break
+            if time.time() > deadline:
+                return fail(f"{sid}: not sent: messages sent before it were still waiting")
+            time.sleep(0.5)
+        why = send_deliver(sid, text, deadline)
+    finally:
+        f.unlink(missing_ok=True)
+    if why:
+        return fail(f"{sid}: not sent: {why}")
+    print(f"sent to {sid}")
+    return 0
+
+
+def send_later(sid, f):
+    """Deliver queue file f from a process of its own, which outlives this
+    one (and the unit it may run in: amarchy send --no-wait from a timer)."""
+    argv = [sys.executable, SELF, "send", sid, "--queued", str(f)]
+    started = False
+    if shutil.which("systemd-run"):
+        keep = ("PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "AMARCHY_WORK",
+                "AMARCHY_WORKTREES", "AMARCHY_HOST_MODE")
+        r = sh("systemd-run", "--user", "--quiet", "--collect", f"--unit=amarchy-send-{time.time_ns()}",
+               f"--description=amarchy send {sid}",
+               *(f"--setenv={k}={os.environ[k]}" for k in keep if k in os.environ), *argv)
+        started = r.returncode == 0
+    if not started:
+        detach(argv)
+    # It's ours until that process takes it: a queue drops a message whose sender is gone.
+    end = time.time() + 15
+    while time.time() < end:
+        if (send_entry(f) or {}).get("pid") != os.getpid():
+            return True
+        time.sleep(0.1)
+    f.unlink(missing_ok=True)
+    return False
+
+
+def cmd_send(args):
+    """amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]. --queued
+    <file> is the process --no-wait leaves to deliver it."""
+    wait, minutes, queued, rest = True, SEND_TIMEOUT, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--no-wait":
+            wait = False
+        elif a == "--timeout":
+            try:
+                minutes = float(next(it, ""))
+                if minutes <= 0:
+                    raise ValueError
+            except ValueError:
+                return fail("--timeout takes the minutes a message may wait, e.g. --timeout 30")
+        elif a == "--queued":
+            queued = Path(next(it, ""))
+        else:
+            rest.append(a)
+    if queued:
+        entry = send_entry(queued)
+        if not entry or len(rest) != 1:
+            return fail("send --queued: no such message")
+        entry["pid"] = os.getpid()
+        write_file(queued, json.dumps(entry))
+        return send_run(rest[0], queued, entry.get("deadline") or time.time() + SEND_TIMEOUT * 60)
+    if len(rest) != 2:
+        print(usage("send"), file=sys.stderr)
+        return 1
+    sid, text = rest
+    if text == "-":
+        text = sys.stdin.read()
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    if not text.strip():
+        return fail("nothing to send")
+    s = session(sid)
+    if not s:
+        return fail(f"No session {sid!r}")
+    if s.get("host"):
+        r = remote_amarchy(s["host"], "send", sid, "-", *([] if wait else ["--no-wait"]),
+                           "--timeout", f"{minutes:g}", input=text, timeout=minutes * 60 + 60)
+        print(r.stdout, end="")
+        print(r.stderr, end="", file=sys.stderr)
+        return r.returncode
+    # From the session's own Claude, waiting would wait on itself: its turn
+    # is the one running.
+    if wait and sid == os.environ.get("AMARCHY_SESSION"):
+        wait = False
+    deadline = time.time() + minutes * 60
+    f = send_queue(sid) / f"{time.time_ns()}-{os.getpid()}"
+    write_file(f, json.dumps({"pid": os.getpid(), "text": text, "deadline": deadline}))
+    if wait:
+        return send_run(sid, f, deadline)
+    if not send_later(sid, f):
+        return fail(f"{sid}: couldn't start what delivers it")
+    print(f"queued for {sid}: its Claude gets it once it's free")
+    return 0
+
+
+def cmd_notify(args):
+    """amarchy notify <title> <body> [--session <id>] [--urgent]: a
+    notification on every phone (and browser) with the app's notifications
+    on, as the app's own are sent."""
+    urgent, sid, rest = False, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--urgent":
+            urgent = True
+        elif a == "--session":
+            sid = next(it, None)
+            if not sid:
+                return fail("--session takes a session's id")
+        else:
+            rest.append(a)
+    if len(rest) not in (1, 2) or not rest[0].strip():
+        print(usage("notify"), file=sys.stderr)
+        return 1
+    title, body = rest[0], rest[1] if len(rest) > 1 else ""
+    if not HOST_MODE:
+        host = remote_host()
+        if not host:
+            return fail("notifications go through the phone app, which runs on a host (see amarchy remote)")
+        r = remote_amarchy(host, "notify", title, body, *(["--session", sid] if sid else []),
+                           *(["--urgent"] if urgent else []), timeout=90)
+        print(r.stdout, end="")
+        print(r.stderr, end="", file=sys.stderr)
+        return r.returncode
+    if sid and not session(sid):
+        return fail(f"No session {sid!r}")
+    if len(title) > 200 or len(body) > 2000:
+        return fail("too long for a notification (a title of 200 characters, a body of 2000)")
+    if not app_subscriptions():
+        return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
+    # A tag of its own: it doesn't replace the one before it (the app's own
+    # replace each other per session).
+    payload = {"title": title, "body": body, "tag": f"amarchy-notify-{time.time_ns()}",
+               "url": f"/#/s/{sid}" if sid else "/"}
+    if urgent:
+        payload["urgent"] = True
+    n = push_all(payload)
+    total = len(app_subscriptions())
+    print(f"sent to {n} of {total}")
+    return 0 if n else 1
+
+
 # ------------------------------------------------------------------ main
 
 # What each command takes, for `amarchy <command> --help` and for catching an
@@ -8213,6 +8593,8 @@ OPTIONS = {
     "remote": ({"--status", "--sync"}, set(), set()),
     "events": ({"--once"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
+    "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
+    "notify": ({"--session", "--urgent"}, {"--session"}, set()),
     "update": ({"--auto"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
@@ -8388,6 +8770,10 @@ def main(argv):
         return cmd_events(args)
     elif cmd == "app":
         return cmd_app(args)
+    elif cmd == "send":
+        return cmd_send(args)
+    elif cmd == "notify":
+        return cmd_notify(args)
     elif cmd == "update" and not [a for a in args if a != "--auto"]:
         return cmd_update(args)
     else:   # a command it knows, with the wrong number of arguments

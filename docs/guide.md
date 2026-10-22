@@ -193,6 +193,10 @@ window: Claude's own last screen stays up, the conversation, the prompt and the
 cursor in it. Only a quiet badge in the window's top right corner says it's
 asleep, `󰒲 Asleep, its memory freed · type to wake`.
 
+That's a desktop's own sessions. A host's (see [Remote sessions](#remote-sessions))
+stay up: their Claude keeps running in tmux there, and only exits when you quit
+it (or the host reboots), to start again when you or `amarchy send` come back.
+
 Go there and type as you would: what you type shows in the prompt, where
 Claude would show it. Press **Enter** and Claude comes back with your message
 already sent (`claude --resume`, the same conversation); its screen takes over
@@ -573,6 +577,65 @@ connection to it on localhost comes from Tailscale (`tailscaled`) or from you,
 so another user on the host can't pass for Tailscale. What a terminal gives is
 what your desktop's windows give: Claude and a shell on the host, as you.
 
+## From scripts and agents
+
+Two commands do what you'd do from the phone, for a script, a timer or
+another session's Claude (an assistant that keeps your day, say):
+
+```sh
+amarchy send <id> "<text>"                       # to a session's Claude, as if typed and sent
+amarchy notify "<title>" "<body>" [--session <id>] [--urgent]   # to your phones
+```
+
+**`amarchy send`** types the text into the session's Claude the way the phone
+does (pasted, then Enter), `-` reading it from stdin. It waits until Claude is
+free: not in the middle of a turn (Claude Code would hand a message typed then
+to the turn under way, between two of its steps), not asking you something
+(the text would answer it), and nobody typing in its prompt. What's typed there
+and left alone for 15 seconds goes first: Claude hands it over (`Ctrl+G`, as
+when a session falls asleep), the message is sent, and it's back in the prompt.
+A session whose Claude isn't running (asleep, exited, or after a reboot) starts
+again with the message as its first one, as Enter does in an asleep window.
+Messages for one session wait their turn, so they arrive one at a time, in the
+order sent. It prints `sent to <id>` once Claude has started on it, and fails
+(exit 1, saying why) if Claude wasn't free within an hour (`--timeout
+<minutes>`) or the session was closed. `--no-wait` returns at once, leaving a
+process of its own to deliver it (a transient systemd unit, so it outlives
+whatever called it); from the session's own Claude it never waits, since the
+turn it would wait for is its own. It needs no desktop, terminal or tmux
+client, so a systemd user timer can run it, e.g. a morning check-in:
+
+```ini
+# ~/.config/systemd/user/morning-brief.service
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/amarchy send jaken-jaken "Morning brief, please."
+
+# ~/.config/systemd/user/morning-brief.timer
+[Timer]
+OnCalendar=Mon..Fri 07:30
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+On a host, the session's Claude runs in tmux. A desktop's own sessions, whose
+Claude runs in a window, can only take a message while asleep: amarchy can't
+type into a window. For a session on your host, a desktop's `amarchy send`
+sends it there.
+
+**`amarchy notify`** sends a notification of your own to every phone (and
+browser) the app notifies, through the same Web Push as the app's own ones
+(`amarchy app --test`). Each one stays: it doesn't replace the one before it.
+With `--session <id>`, tapping it opens that session in the app. It works from
+anywhere on the host (a desktop's `amarchy notify` sends it there), and fails
+when no phone has turned notifications on. `--urgent` asks for all a web app
+may: a push sent at the highest urgency (all of amarchy's are), and on a
+computer's browser a notification that stays on screen until you dismiss it.
+iOS gives a home screen app nothing more: no Time Sensitive or critical
+alerts, so an urgent one looks and sounds like any other, stays silent in
+silent mode, and waits out a Focus that holds back the app's notifications.
+
 ## Install
 
 See [Quick start](#quick-start) for what it needs. `install.sh` is safe to run
@@ -702,6 +765,8 @@ amarchy remote <ssh host> | off       start new sessions on another machine (see
 amarchy remote [--status]             where new sessions start / whether that host answers
 amarchy app on | off                  on a host: your sessions on your phone and in a browser (see Your phone)
 amarchy app [--status] | --test       whether it's on, and where / a test notification to each phone
+amarchy notify <title> [body] [--session <id>] [--urgent]  a notification on your phones (see From scripts and agents)
+amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]  a message to a session's Claude, once it's free
 ```
 
 The run command is saved per project and starts in the session's worktree. It

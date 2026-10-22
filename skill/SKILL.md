@@ -104,7 +104,8 @@ dev server). Restart the terminal so the user sees the result too.
   sleeping session's Claude Code isn't running (it holds no memory); its
   window keeps Claude's last screen, and what the user types there goes to
   Claude when it comes back (`claude --resume`). A sleeping session's Claude
-  can't be messaged (its `agent` is empty). Idle sessions off screen sleep on their own after
+  can't be messaged with SendMessage (its `agent` is empty), but `amarchy
+  send` wakes it with the message (see "Talking to other sessions"). Idle sessions off screen sleep on their own after
   `amarchy sleep --after` minutes (default 1), so you rarely need these. A
   session never sleeps while it's working, asking the user something, or
   running background commands or agents. Never add `--force` without
@@ -177,6 +178,14 @@ the user to paste something into another session: send it yourself.
   subscribe) gets you one notice when that session finishes its turn. Use it to
   hear back instead of polling `ListAgents` or asking "are you done?".
 
+- **`amarchy send <id> "<text>"`** types a message into a session's Claude as
+  if the user typed it (no `<cross-session-message>` around it), once that
+  Claude is free (after its turn, not over a question it's asking), waking
+  it first if it's asleep or exited. It waits until Claude has it (`--no-wait`
+  returns at once; from your own session it never waits). Prefer SendMessage
+  to talk to a session; use `amarchy send` when it's asleep, when it should
+  read as the user's own prompt, or from a script or timer.
+
 To give a **new** session a task (only when the user asks for a session):
 
 1. `amarchy new <project> [name] --no-jump --prompt "<the whole brief>"`, one
@@ -215,4 +224,6 @@ blocked here; take it back to the user instead.
 
 amarchy already notifies the user (with a chime) when you stop or need their
 input, and their list shows your status live. Don't add notifications of your
-own for that.
+own for that. `amarchy notify "<title>" "<body>" [--session <id>] [--urgent]`
+pushes a notification of your own to the user's phones (on a host with the
+phone app on); only send one when the user asked for it (a reminder, a brief).

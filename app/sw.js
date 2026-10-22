@@ -44,6 +44,9 @@ self.addEventListener("push", (e) => {
     body: d.body || "",
     tag: d.tag || "amarchy",
     renotify: true,
+    // amarchy notify --urgent: on screen until dismissed, where the browser
+    // lets it (a computer's; iOS ignores it).
+    requireInteraction: !!d.urgent,
     icon: "/icon-192.png",
     data: { url: d.url || "/" },
   });
