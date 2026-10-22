@@ -103,6 +103,21 @@ Sound (the chime of a notification, when a session needs you or is done):
   amarchy sound --play [name] | --stop  hear one (the one set now without a name), cutting off the one before
   amarchy sound --add                   open the folder your own sounds go in
 
+Your assistant (one session that keeps your day rather than writing code: at the top of every list,
+above the groups, bigger and with its picture, the other sessions of its project under it; it always
+tells you when it needs you or is done, under its name and picture, with a chime of its own):
+  amarchy assistant                     which session it is (id, then its name), or none
+  amarchy assistant <id> [--name <name>]
+                                        make a session your assistant (named after its project unless
+                                        you name it); --name alone renames the one you have
+  amarchy assistant off                 no assistant: it's a session like the others again
+  amarchy sound --assistant [name|off]  its chime (herald until you pick one); prints it without one
+  amarchy alerts [all|needs-you|assistant]
+                                        what the other sessions tell you about, on the desktop and the
+                                        phone: when they need you or are done (all), only when one needs
+                                        you (needs-you, the default: a finished one is marked done in the
+                                        list, quietly), or nothing (assistant); prints it without one
+
 Remote (sessions on a machine that's always on, e.g. a server, so they go on working with this one
 asleep; that machine runs amarchy too, installed with ./install.sh --host):
   amarchy remote <ssh host>             new sessions start there: same list, keys and windows, each window
@@ -243,6 +258,7 @@ SOUNDS = Path(SELF).parent.parent / "sounds"       # amarchy's chimes, one playe
 KEYS_FILE = STATE / "keys.lua"                     # the modifiers picked in `amarchy keys`
 KEYS_BOUND = STATE / "keys.bound"                  # the modifiers bound now, for the menu's ✓
 SOUND_FILE = STATE / "sound"                       # the one picked (its name, or "off")
+ASSISTANT_SOUND_FILE = STATE / "sound-assistant"   # your assistant's own (its name, or "off"; see "assistant")
 SOUND = os.environ.get("AMARCHY_SOUND", "on").lower() not in ("0", "off", "no", "false")
 
 PREFIX = "amarchy"          # window classes: amarchy.claude.<id>, amarchy.term.<id>
@@ -314,21 +330,29 @@ def sh(*args, check=False, cwd=None):
         return subprocess.CompletedProcess(args, 127, "", str(e))
 
 
-def notify(title, body="", glyph="Ⓐ", click=()):
-    """A notification; click is the amarchy command a click on it runs."""
+def notify(title, body="", glyph="Ⓐ", click=(), image=None, critical=False):
+    """A notification; click is the amarchy command a click on it runs. With
+    image, a picture beside it (your assistant's); critical stays until you
+    dismiss it. An Omarchy too old for those shows it without them."""
     if HOST_MODE:
         return      # nobody's there: the desktops showing its sessions notify
     if shutil.which("omarchy-notification-send"):
-        sh("omarchy-notification-send", "-g", glyph, title, body, *(["--exec", ENTRY, *click] if click else []))
+        extra = [*(["--image", str(image)] if image and Path(image).exists() else []),
+                 *(["-u", "critical"] if critical else [])]
+        then = ["--exec", ENTRY, *click] if click else []
+        if sh("omarchy-notification-send", "-g", glyph, *extra, title, body, *then).returncode != 0 and extra:
+            sh("omarchy-notification-send", "-g", glyph, title, body, *then)
     else:
-        sh("notify-send", title, body)
+        sh("notify-send", *(["-i", str(image)] if image else []), *(["-u", "critical"] if critical else []),
+           title, body)
 
 
-def chime():
+def chime(assistant=False):
     """The sound of a session's notification, the same whether it needs you or
-    is done: the one `amarchy sound` picked. AMARCHY_SOUND=off for none."""
+    is done: the one `amarchy sound` picked, or for your assistant its own
+    (`amarchy sound --assistant`). AMARCHY_SOUND=off for none."""
     if SOUND and not HOST_MODE:
-        play(sound_file(sound_name()))
+        play(sound_file(assistant_sound_name() if assistant else sound_name()))
 
 
 def hypr(expr):
@@ -710,7 +734,7 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent",
-               "unseen")
+               "unseen", "assistant", "assistant_name", "said")
 
 
 def claude_class(s):
@@ -1245,7 +1269,8 @@ def theme_refresh():
 
 # amarchy's own chimes (sounds/, where sounds/CREDITS says where each is from),
 # in the order the menu offers them; the first is the default.
-CHIMES = ("kalimba", "vibraphone", "tine", "fairy", "ocean", "elementary")
+CHIMES = ("kalimba", "vibraphone", "tine", "fairy", "ocean", "elementary", "herald")
+ASSISTANT_CHIME = "herald"      # your assistant's, until you pick another (amarchy sound --assistant)
 USER_SOUNDS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/sounds"
 AUDIO = (".wav", ".oga", ".ogg", ".opus", ".flac", ".mp3")   # what pw-play and paplay read
 PREVIEW = STATE / "preview"     # the pid of the sound playing in the picker, so the next one cuts it off
@@ -1286,6 +1311,17 @@ def sound_name():
     if picked == "off":
         return picked
     return (sound_key(picked) if picked else None) or CHIMES[0]
+
+
+def assistant_sound_name():
+    """Your assistant's chime: its name, "off", or herald."""
+    try:
+        picked = ASSISTANT_SOUND_FILE.read_text().strip()
+    except OSError:
+        picked = ""
+    if picked == "off":
+        return picked
+    return (sound_key(picked) if picked else None) or ASSISTANT_CHIME
 
 
 def sound_file(name):
@@ -1368,6 +1404,16 @@ def cmd_sound(args):
     --play [name], --stop and --add for the rest."""
     if args and args[0] == "--show":
         print(sound_name())
+        return 0
+    if args and args[0] == "--assistant":
+        name = " ".join(args[1:])
+        if name:
+            key = "off" if name.lower() == "off" else sound_key(name)
+            if not key:
+                return fail(f"no sound {name!r} (see amarchy sound --list)")
+            write_file(ASSISTANT_SOUND_FILE, key + "\n")
+            tell_shell("refresh")
+        print(assistant_sound_name())
         return 0
     if args and args[0] == "--list":
         found = sounds()
@@ -3580,13 +3626,7 @@ def cmd_hook(sid, state):
     focused = claude and claude.get("focusHistoryID") == 0
     if focused:
         return
-    # The session's row in the list, as a notification: the icon of its state,
-    # what it's about, and project · branch under it. A click takes you there.
-    if state == "waiting" or (state == "idle" and prev == "working"):
-        task = session_task(s, claude["title"] if claude else "")
-        where = f"{s['repo']} · {s['name']}"
-        notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", sid))
-        chime()
+    session_alert(s, state, prev, session_task(s, claude["title"] if claude else ""))
 
 
 def unseen(sid):
@@ -3715,7 +3755,9 @@ def session_order(s, groups=None, how=None):
     created = s.get("created", 0)
     by = {"project": s["repo"].lower(), "priority": rank,
           "status": STATUS_GROUPS.get(status_group(s), len(STATUS_GROUPS))}
-    return (*(by[g] for g in groups),
+    # Your assistant's section first, above the groups: it, then the other
+    # sessions of its project.
+    return ({"main": 0, "near": 1}.get(s.get("assistant"), 2), *(by[g] for g in groups),
             rank if how == "priority" else 0,
             -created if how == "newest" else created, s["id"])
 
@@ -4086,9 +4128,249 @@ def session_view():
         if s["current"]:
             mark_seen(s["id"])
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
+    mine = assistant()
+    for s in ss:
+        if not s.get("host"):
+            s["assistant"] = assistant_role(s, mine)
+            s["assistant_name"] = mine["name"] if s["assistant"] else ""
+            if s["assistant"] == "main":
+                s["said"] = last_said(s)        # for its notifications (a desktop's, from here)
     groups, how = list_groups(), list_sort()
     ss.sort(key=lambda s: session_order(s, groups, how))
     return ss
+
+
+# ------------------------------------------------------------------ your assistant
+#
+# One session can be your assistant (`amarchy assistant <id>`): a Claude that
+# keeps your day rather than writing code. Every list (beside Claude, under
+# the Ⓐ, the phone's, the browser's) shows it at the top, above the groups,
+# bigger and with its picture (app/assistant.svg); the other sessions of its
+# project sit under it there. What it says reaches you apart from the coding
+# sessions: under its name and picture, with a chime of its own, always,
+# whatever `amarchy alerts` lets through of the others.
+
+ASSISTANT_FILE = STATE / "assistant"        # {"id": its session, "name": what it's called}
+AVATAR_PNG = Path(SELF).parent.parent / "app/assistant-192.png"
+ASSISTANT_GLYPH = "󰚩"
+ALERTS_FILE = STATE / "alerts"
+# What the other sessions tell you about (your assistant always does): all =
+# when they need you and when they're done; needs-you = only when one asks you
+# something (a question, a permission), a finished one just marked done in the
+# list; assistant = nothing but your assistant.
+ALERTS = ("all", "needs-you", "assistant")
+ALERTS_DEFAULT = "needs-you"
+NOTES = STATE / "notes"         # what amarchy notify sent lately, for the desktops to show too
+NOTES_KEEP = 600                # seconds a note is offered to the desktops
+NOTES_SEEN = "\0notes"          # where a desktop's sync keeps the notes it has shown
+
+
+def assistant():
+    """Your assistant here: {"id", "name"}, or None. Its name is what you
+    called it, else its project's ("Jaken" for jaken)."""
+    try:
+        d = json.loads(ASSISTANT_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("id"), str):
+        return None
+    try:
+        s = json.loads((SESSIONS / f"{d['id']}.json").read_text())
+    except (OSError, ValueError):
+        return None     # closed
+    name = d.get("name") if isinstance(d.get("name"), str) else ""
+    return {"id": d["id"], "name": name.strip() or s.get("repo", "").capitalize() or "Assistant",
+            "repo": s.get("repo", "")}
+
+
+def assistant_role(s, mine=None):
+    """"main" for your assistant, "near" for another session of its project,
+    "" for the rest. A session as the list has it already (a host's, as the
+    host says), else from amarchy assistant."""
+    if s.get("host") or "assistant" in s:
+        return s.get("assistant") if s.get("assistant") in ("main", "near") else ""
+    mine = assistant() if mine is None else mine
+    if not mine:
+        return ""
+    return "main" if s["id"] == mine["id"] else "near" if s.get("repo") == mine["repo"] else ""
+
+
+def cmd_assistant(args):
+    """amarchy assistant [<id>] [--name <name>] | off: which session is your
+    assistant (prints it as id<TAB>name, or none)."""
+    name, rest = None, []
+    it = iter(args)
+    for a in it:
+        if a == "--name":
+            name = next(it, None)
+            if name is None or not name.strip() or len(name) > 40:
+                return fail("--name takes what to call it (40 characters at most)")
+            name = name.strip()
+        else:
+            rest.append(a)
+    host = remote_host()
+    current = next((s for s in session_view() if s.get("assistant") == "main"), None)
+    if not rest and name is None:
+        print(f"{current['id']}\t{current['assistant_name']}" if current else "none")
+        return 0
+    if rest == ["off"] and name is None:
+        ASSISTANT_FILE.unlink(missing_ok=True)
+        if host:
+            r = remote_amarchy(host, "assistant", "off")
+            if r.returncode != 0:
+                return fail(f"{host}: {gist(r.stderr) or 'no answer'}")
+            remote_refresh(host)
+        tell_shell("refresh")
+        print("none")
+        return 0
+    if len(rest) > 1:
+        print(usage("assistant"), file=sys.stderr)
+        return 1
+    sid = rest[0] if rest else (current or {}).get("id")
+    s = session(sid) if sid else None
+    if not s:
+        return fail(f"No session {sid!r}" if sid else "no assistant yet: name its session (amarchy assistant <id>)")
+    if s.get("host"):
+        ASSISTANT_FILE.unlink(missing_ok=True)      # one assistant: the host's
+        return remote_call(s, "assistant", sid, *(["--name", name] if name else []))
+    mine = assistant()
+    if name is None and mine and mine["id"] == sid:
+        try:
+            name = json.loads(ASSISTANT_FILE.read_text()).get("name") or ""
+        except (OSError, ValueError, AttributeError):
+            name = ""
+    write_file(ASSISTANT_FILE, json.dumps({"id": sid, "name": name or ""}))
+    tell_shell("refresh")
+    print(f"{sid}\t{assistant()['name']}")
+    return 0
+
+
+def alerts():
+    """What the other sessions tell you about (see ALERTS). A desktop showing
+    a host's sessions goes by the host's, as the phones do."""
+    if remote_host():
+        value = remote_snapshot().get("alerts")
+    else:
+        try:
+            value = ALERTS_FILE.read_text().strip()
+        except OSError:
+            value = ""
+    return value if value in ALERTS else ALERTS_DEFAULT
+
+
+def cmd_alerts(args):
+    """amarchy alerts [all|needs-you|assistant]: prints it, or sets it."""
+    if len(args) > 1 or args and args[0] not in ALERTS:
+        print(usage("alerts"), file=sys.stderr)
+        return 1
+    if args:
+        host = remote_host()
+        if host:
+            r = remote_amarchy(host, "alerts", args[0])
+            if r.returncode != 0:
+                return fail(f"{host}: {gist(r.stderr) or 'no answer'}")
+            remote_refresh(host)
+        else:
+            write_file(ALERTS_FILE, args[0] + "\n")
+    print(alerts())
+    return 0
+
+
+def alert_kind(s, state, prev):
+    """Whether a session that went on to need you (waiting) or finished (idle
+    after working) tells you so: "assistant" for your assistant, which always
+    does, "session" for another one when amarchy alerts lets it, else None."""
+    if not (state == "waiting" or (state == "idle" and prev == "working")):
+        return None
+    if assistant_role(s) == "main":
+        return "assistant"
+    level = alerts()
+    return "session" if level == "all" or (level == "needs-you" and state == "waiting") else None
+
+
+_said = {}
+
+
+def last_said(s, limit=240):
+    """The last thing the session's Claude wrote, in a line (a brief's first
+    words, for its notification), or "". Read again only when its
+    conversation has moved."""
+    f = transcript(s)
+    if not f:
+        return ""
+    try:
+        stamp = f.stat().st_mtime_ns
+    except OSError:
+        return ""
+    if _said.get(str(f), (None,))[0] == stamp:
+        return _said[str(f)][1]
+    said = ""
+    for r in reversed(conversation_records(f, tail=400_000)):
+        message = r.get("message") if isinstance(r, dict) and r.get("type") == "assistant" else None
+        content = message.get("content") if isinstance(message, dict) else None
+        text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
+            if isinstance(content, list) else content if isinstance(content, str) else ""
+        text = " ".join(re.sub(r"[*_`#>]+", "", text).split())
+        if text:
+            said = text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+            break
+    _said[str(f)] = (stamp, said)
+    return said
+
+
+def session_alert(s, state, prev, task=""):
+    """Tell you on this desktop that a session went on to need you or
+    finished, if it does (alert_kind): your assistant under its name and
+    picture, with its chime, until you dismiss it; another session as its row
+    in the list. A click takes you there."""
+    kind = None if HOST_MODE else alert_kind(s, state, prev)
+    if not kind:
+        return
+    where = f"{s['repo']} · {s['name']}"
+    if kind == "assistant":
+        name = s.get("assistant_name") or (assistant() or {}).get("name") or "Your assistant"
+        said = s.get("said") or ("" if s.get("host") else last_said(s))
+        body = ("Needs you" if state == "waiting" else said or "Done") + (f"\n{task}" if task and not said else "")
+        notify(name, body, ASSISTANT_GLYPH, click=("jump", s["id"]), image=AVATAR_PNG, critical=True)
+        chime(assistant=True)
+    else:
+        notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", s["id"]))
+        chime()
+
+
+def add_note(note):
+    """Keep what amarchy notify sent, for the desktops showing this host's
+    sessions to show too (amarchy events); drop the old ones."""
+    NOTES.mkdir(parents=True, exist_ok=True)
+    for f in NOTES.glob("*.json"):
+        try:
+            if time.time() - f.stat().st_mtime > NOTES_KEEP:
+                f.unlink()
+        except OSError:
+            pass
+    write_file(NOTES / f"{note['id']}.json", json.dumps(note))
+
+
+def recent_notes():
+    out = []
+    for f in sorted(NOTES.glob("*.json")) if NOTES.is_dir() else []:
+        try:
+            if time.time() - f.stat().st_mtime <= NOTES_KEEP:
+                out.append(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            pass
+    return out
+
+
+def show_note(n):
+    """A note from amarchy notify, on this desktop: your assistant's with its
+    picture and chime."""
+    title, body = str(n.get("title") or "amarchy")[:200], str(n.get("body") or "")[:2000]
+    sid = n.get("session") if isinstance(n.get("session"), str) and session(n["session"]) else None
+    mine = n.get("assistant") is True
+    notify(title, body, ASSISTANT_GLYPH if mine else "󰂚", click=("jump", sid) if sid else (),
+           image=AVATAR_PNG if mine else None, critical=mine or n.get("urgent") is True)
+    chime(assistant=mine)
 
 
 MOD_NAMES = ((64, "Super"), (32, "Hyper"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
@@ -4547,6 +4829,9 @@ def remote_clean(sessions):
         s["created"] = s["created"] if isinstance(s.get("created"), (int, float)) else 0
         s["background"] = s["background"] if isinstance(s.get("background"), int) else 0
         s["unseen"] = s.get("unseen") is True and s["status"] == "idle"
+        s["assistant"] = s.get("assistant") if s.get("assistant") in ("main", "near") else ""
+        s["assistant_name"] = str(s.get("assistant_name") or "")[:40] if s["assistant"] else ""
+        s["said"] = str(s.get("said") or "")[:300] if s["assistant"] == "main" else ""
         out.append(s)
     return out
 
@@ -4578,17 +4863,26 @@ def remote_update(host, data, seen=None, quiet=False):
     before = remote_snapshot()
     projects = data["projects"] if isinstance(data.get("projects"), list) else before.get("projects", [])
     snap = {"host": host, "online": True, "at": time.time(), "hostname": str(data.get("hostname", "")),
-            "sessions": sessions, "projects": [p for p in projects if isinstance(p, dict) and p.get("name")]}
+            "sessions": sessions, "projects": [p for p in projects if isinstance(p, dict) and p.get("name")],
+            "alerts": data["alerts"] if data.get("alerts") in ALERTS else before.get("alerts", ALERTS_DEFAULT)}
     write_file(REMOTE_STATE, json.dumps(snap))
     tell_shell("refresh")
     if seen is None:
         return
     first, was = not seen, dict(seen)
+    notes = [n for n in data.get("notes") or [] if isinstance(n, dict) and isinstance(n.get("id"), str)]
+    told = was.get(NOTES_SEEN)
     seen.clear()
     seen.update({s["id"]: s["status"] for s in sessions})
     seen.setdefault("", "")          # not empty even with no sessions: the first list is in
+    # The notes amarchy notify sent there lately: each shown once, those
+    # already there when the sync starts not at all.
+    seen[NOTES_SEEN] = {n["id"] for n in notes} if first or told is None else told | {n["id"] for n in notes}
     if first:
         return
+    for n in notes:
+        if told is not None and n["id"] not in told:
+            show_note(n)
     for s in sessions:
         state, prev = s["status"], was.get(s["id"])
         if state == prev or not (state == "waiting" or (state == "idle" and prev == "working")):
@@ -4599,9 +4893,7 @@ def remote_update(host, data, seen=None, quiet=False):
         claude = find(claude_class(s))
         if claude and claude.get("focusHistoryID") == 0:
             continue
-        where = f"{s['repo']} · {s['name']}"
-        notify(s.get("task") or where, where if s.get("task") else "", PICK_ICONS[state], click=("jump", s["id"]))
-        chime()
+        session_alert(s, state, prev, s.get("task") or "")
 
 
 def remote_offline(host, why=""):
@@ -4662,7 +4954,8 @@ def phone_look():
     # a browser (its desktop mode), and the chime it plays.
     term = {"size": terminal_font_size(), "alpha": terminal_alpha()}
     look = {"name": name.replace("-", " ").title(), "colors": colors, "shell": shell, "rounding": rounding,
-            "terminal": term, "sound": sound_name() if SOUND else "off"}
+            "terminal": term, "sound": sound_name() if SOUND else "off",
+            "assistant_sound": assistant_sound_name() if SOUND else "off"}
     look["sig"] = hashlib.sha1(json.dumps(look, sort_keys=True).encode()).hexdigest()
     font = {"family": "", "files": {}}
     for weight, pattern in (("regular", "monospace"), ("bold", "monospace:bold")):
@@ -4739,7 +5032,8 @@ def remote_look(host, has):
         return True
     if again:
         _wide_sent.add(wallpaper["sig"])
-    data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding", "terminal", "sound")}}
+    data = {"look": look["sig"], **{k: look[k] for k in ("name", "colors", "shell", "rounding", "terminal", "sound",
+                                                     "assistant_sound")}}
     if has.get("font") != font["sig"]:
         data["font"] = {"sig": font["sig"], "family": font["family"]}
         for weight, path in font["files"].items():
@@ -5677,7 +5971,7 @@ def cmd_events(args):
         if time.time() - projects_at > 10:
             ps, projects_at = projects(), time.time()
         view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps,
-                "version": commit}
+                "version": commit, "alerts": alerts(), "notes": recent_notes()}
         if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
             view["phone"] = app_look_stamp()
             view["list"] = list_setting()   # and how it groups and sorts the list (see remote_list)
@@ -6110,11 +6404,12 @@ def app_theme(data):
     old = app_look() or {}
     term = data.get("terminal") if isinstance(data.get("terminal"), dict) else {}
     size, alpha = term.get("size"), term.get("alpha")
-    sound = data.get("sound")
+    sound, theirs = data.get("sound"), data.get("assistant_sound")
     look = {"look": data["look"], "name": name, "mode": mode, "vars": variables,
             "terminal": {"size": min(max(float(size), 5.0), 40.0) if isinstance(size, (int, float)) else None,
                          "alpha": min(max(float(alpha), 0.0), 1.0) if isinstance(alpha, (int, float)) else None},
             "sound": sound if isinstance(sound, str) and (sound == "off" or sound in CHIMES) else "",
+            "assistant_sound": theirs if isinstance(theirs, str) and (theirs == "off" or theirs in CHIMES) else "",
             "font": old.get("font", ""), "family": old.get("family", ""), "nerd": old.get("nerd", False),
             "wallpaper": old.get("wallpaper", ""), "files": dict(old.get("files", {}))}
     font = data.get("font")
@@ -7034,6 +7329,12 @@ def app_sound():
     return sound if sound == "off" or sound in CHIMES else CHIMES[0]
 
 
+def app_assistant_sound():
+    """Your assistant's chime, as your desktop sends it with its look."""
+    sound = (app_look() or {}).get("assistant_sound") or ASSISTANT_CHIME
+    return sound if sound == "off" or sound in CHIMES else ASSISTANT_CHIME
+
+
 def cmd_rec(args):
     """rec (SoX) for a session's Claude on a host: the phone's microphone while
     it holds its button on this session (see "dictation from the phone"),
@@ -7159,7 +7460,8 @@ def app_watch(st):
                     s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": app_look_stamp(), "nerd": bool((app_look() or {}).get("nerd")),
-                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound(), "build": st.build}
+                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": app_sound(),
+                    "assistant_sound": app_assistant_sound(), "alerts": alerts(), "build": st.build}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -7183,7 +7485,8 @@ def app_moments(st, ss):
     waiting = sum(1 for s in ss if s["status"] == "waiting")
     for s in ss:
         state, prev = s["status"], was.get(s["id"])
-        if state == prev or not (state == "waiting" or (state == "idle" and prev == "working")):
+        kind = alert_kind(s, state, prev) if state != prev else None
+        if not kind:
             continue
         if time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
             continue
@@ -7194,8 +7497,15 @@ def app_moments(st, ss):
             dialog = app_screen(s).get("dialog")
             if dialog and dialog["question"]:
                 body += ": " + " · ".join(dialog["question"].splitlines()[-3:])[:300]
-        payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
-                   "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
+        if kind == "assistant":
+            # Under its name and picture, what it said (a brief's first words).
+            said = s.get("said") or last_said(s) if state == "idle" else ""
+            payload = {"title": s.get("assistant_name") or "Your assistant", "body": said or body,
+                       "tag": f"assistant-{s['id']}", "url": f"/#/s/{s['id']}", "waiting": waiting,
+                       "icon": "/assistant-192.png"}
+        else:
+            payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
+                       "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
         threading.Thread(target=push_all, args=(payload,), daemon=True).start()
 
 
@@ -7862,6 +8172,11 @@ def app_handler(st, users, address):
                 return self.add(data)
             if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
                 return self.push(data)
+            if self.path == "/api/alerts":    # what the other sessions tell you about (amarchy alerts)
+                if data.get("alerts") not in ALERTS:
+                    return self.error(400, "all, needs-you or assistant")
+                write_file(ALERTS_FILE, data["alerts"] + "\n")
+                return self.send(200, {})
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
@@ -8524,10 +8839,10 @@ def cmd_notify(args):
         print(usage("notify"), file=sys.stderr)
         return 1
     title, body = rest[0], rest[1] if len(rest) > 1 else ""
-    if not HOST_MODE:
-        host = remote_host()
-        if not host:
-            return fail("notifications go through the phone app, which runs on a host (see amarchy remote)")
+    if len(title) > 200 or len(body) > 2000:
+        return fail("too long for a notification (a title of 200 characters, a body of 2000)")
+    host = None if HOST_MODE else remote_host()
+    if host:
         r = remote_amarchy(host, "notify", title, body, *(["--session", sid] if sid else []),
                            *(["--urgent"] if urgent else []), timeout=90)
         print(r.stdout, end="")
@@ -8535,19 +8850,36 @@ def cmd_notify(args):
         return r.returncode
     if sid and not session(sid):
         return fail(f"No session {sid!r}")
-    if len(title) > 200 or len(body) > 2000:
-        return fail("too long for a notification (a title of 200 characters, a body of 2000)")
+    # From your assistant (or another session of its project): under its
+    # name and picture, and a tap opens it unless it says where.
+    me = session(os.environ.get("AMARCHY_SESSION", ""))
+    mine = assistant() if me and assistant_role(me) else None
+    if mine:
+        sid = sid or me["id"]
+        if not title.lower().startswith(mine["name"].lower()):
+            title = f"{mine['name']}: {title}"
+    note = {"id": f"{time.time_ns()}", "title": title, "body": body, "session": sid or "",
+            "assistant": bool(mine), "urgent": urgent}
+    if not HOST_MODE:       # a desktop on its own: on its screen only
+        show_note(note)
+        print("shown on this desktop (no host's phone app to send it to: see amarchy remote)")
+        return 0
+    add_note(note)          # the desktops showing this host's sessions show it too
     if not app_subscriptions():
-        return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
+        print("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications); "
+              "shown on the desktops showing this host's sessions")
+        return 0
     # A tag of its own: it doesn't replace the one before it (the app's own
     # replace each other per session).
-    payload = {"title": title, "body": body, "tag": f"amarchy-notify-{time.time_ns()}",
+    payload = {"title": title, "body": body, "tag": f"amarchy-notify-{note['id']}",
                "url": f"/#/s/{sid}" if sid else "/"}
     if urgent:
         payload["urgent"] = True
+    if mine:
+        payload["icon"] = "/assistant-192.png"
     n = push_all(payload)
     total = len(app_subscriptions())
-    print(f"sent to {n} of {total}")
+    print(f"sent to {n} of {total} (and the desktops showing this host's sessions)")
     return 0 if n else 1
 
 
@@ -8586,7 +8918,7 @@ OPTIONS = {
     "wake": (set(), set(), set()),
     "theme": ({"--show", "--refresh"}, set(), set()),
     "keys": ({"--show"}, set(), set()),
-    "sound": ({"--show", "--list", "--json", "--play", "--stop", "--add"}, set(), set()),
+    "sound": ({"--show", "--list", "--json", "--play", "--stop", "--add", "--assistant"}, set(), set()),
     "ui": (set(), set(), set()),
     "layout": (set(), set(), set()),
     "watch": (set(), set(), set()),
@@ -8595,6 +8927,8 @@ OPTIONS = {
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
+    "assistant": ({"--name"}, {"--name"}, set()),
+    "alerts": (set(), set(), set()),
     "update": ({"--auto"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
@@ -8774,6 +9108,10 @@ def main(argv):
         return cmd_send(args)
     elif cmd == "notify":
         return cmd_notify(args)
+    elif cmd == "assistant":
+        return cmd_assistant(args)
+    elif cmd == "alerts":
+        return cmd_alerts(args)
     elif cmd == "update" and not [a for a in args if a != "--auto"]:
         return cmd_update(args)
     else:   # a command it knows, with the wrong number of arguments

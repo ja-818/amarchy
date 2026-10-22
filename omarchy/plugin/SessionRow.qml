@@ -13,6 +13,9 @@ import qs.Ui
 // asleep (its Claude Code stopped until you type in it) shows the
 // moon and how long it has slept; "+1 BG" after the branch counts Claude Code
 // background sessions still running in its worktree.
+// Your assistant (`amarchy assistant`) is bigger: its picture in the icon's
+// place with its state on a badge, its name, and what it's on, on a tint of
+// the accent. The other sessions of its project show its picture small.
 // The cursor (which starts on the session you're in) uses the menu's selected
 // treatment. Under the time sits the priority: a flag for high, in the
 // theme's accent, an arrow down for low (which also steps back, dimmed).
@@ -40,30 +43,78 @@ BorderSurface {
   readonly property color dim: Qt.darker(Commons.Color.menu.text, 1.4)
   readonly property real zoom: 0.85
   readonly property int iconSize: Style.font.iconLarge
+  // "main" for your assistant, "near" for another session of its project.
+  readonly property string assistant: session.assistant || ""
+  readonly property bool main: assistant === "main"
+  readonly property string assistantName: session.assistant_name || "Assistant"
+  readonly property int avatarSize: main ? Math.round(iconSize * 2.6) : Math.round(iconSize * 1.05)
+  // Under its name: what it's on (unless that's just its name again), else how it is.
+  readonly property string assistantLine: {
+    if (status === "waiting") return "Needs you"
+    var task = session.task || ""
+    if (task && task.toLowerCase() !== assistantName.toLowerCase()) return task
+    return status === "working" ? "On it…" : "Here for you"
+  }
 
-  implicitHeight: Math.max(icon.implicitHeight, content.implicitHeight) + Style.spacing.controlPaddingY * 2
+  implicitHeight: Math.max(icon.implicitHeight, content.implicitHeight, avatar.visible ? avatar.height : 0)
+                  + Style.spacing.controlPaddingY * (main ? 3 : 2)
   radius: Style.cornerRadius
-  color: cursor ? Commons.Color.menu.selectedBackground : "transparent"
+  color: cursor ? Commons.Color.menu.selectedBackground
+       : main ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.1) : "transparent"
   opacity: priority === "low" && !cursor ? 0.6 : 1
   borderSpec: Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0)
 
+  // Your assistant's picture: in the icon's place, big, for the assistant;
+  // small after the icon for the other sessions of its project.
+  Image {
+    id: avatar
+    visible: row.assistant !== ""
+    width: visible ? row.avatarSize : 0
+    height: width
+    anchors.left: row.main ? parent.left : icon.right
+    anchors.leftMargin: row.main ? row.borderLeft + Style.spacing.sm : Math.round(Style.space(8) * row.zoom)
+    anchors.verticalCenter: parent.verticalCenter
+    source: Qt.resolvedUrl("assistant.svg")
+    sourceSize.width: row.avatarSize * 2
+    sourceSize.height: row.avatarSize * 2
+    fillMode: Image.PreserveAspectFit
+    smooth: true
+    mipmap: true
+  }
+
+  // The assistant's state, on a badge at the corner of its picture.
+  Rectangle {
+    id: badge
+    visible: row.main
+    width: Math.round(row.iconSize * 1.15)
+    height: width
+    radius: width / 2
+    x: avatar.x + avatar.width - width * 0.8
+    y: avatar.y + avatar.height - height * 0.8
+    color: Commons.Color.menu.background
+    border.width: 1
+    border.color: Qt.rgba(Commons.Color.menu.text.r, Commons.Color.menu.text.g, Commons.Color.menu.text.b, 0.25)
+  }
+
   Text {
     id: icon
-    // A fixed slot, so titles line up whatever the glyph's own width.
-    width: row.iconSize
-    anchors.left: parent.left
+    // A fixed slot, so titles line up whatever the glyph's own width; on
+    // the assistant's badge, centered on it.
+    width: row.main ? badge.width : row.iconSize
+    anchors.left: row.main ? undefined : parent.left
     anchors.leftMargin: row.borderLeft + Style.spacing.sm
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenter: row.main ? badge.verticalCenter : parent.verticalCenter
+    anchors.horizontalCenter: row.main ? badge.horizontalCenter : undefined
     horizontalAlignment: Text.AlignHCenter
     textFormat: Text.PlainText
     text: row.status === "working" ? row.spinner[row.spinnerFrame % row.spinner.length]
                                    : row.unseen ? "󰗠" : (row.icons[row.status] || "󰄬")
     font.family: Style.font.menuFamily
-    font.pixelSize: row.iconSize
+    font.pixelSize: row.main ? Math.round(row.iconSize * 0.7) : row.iconSize
     color: row.cursor ? Commons.Color.menu.selectedText
          : row.unseen ? Commons.Color.accent
          : row.urgent ? Commons.Color.menu.selectedText : Commons.Color.menu.text
-    opacity: row.cursor || row.urgent ? 1 : 0.52
+    opacity: row.cursor || row.urgent || row.main ? 1 : 0.52
   }
 
   // What a session is about, as rich text: the keyword before ": " in bold,
@@ -77,7 +128,7 @@ BorderSurface {
 
   Column {
     id: content
-    anchors.left: icon.right
+    anchors.left: avatar.visible ? avatar.right : icon.right
     anchors.leftMargin: Math.round(Style.space(14) * row.zoom)
     // Clear of the time and the priority under it, whichever is wider.
     anchors.right: parent.right
@@ -91,11 +142,25 @@ BorderSurface {
       width: parent.width
       textFormat: Text.StyledText
       elide: Text.ElideRight
-      text: row.taskText(row.session.task || "new session")
+      text: row.main ? "<b>" + row.assistantName.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</b>"
+                     : row.taskText(row.session.task || "new session")
       font.family: Style.font.menuFamily
-      font.pixelSize: Math.round(Style.font.title * row.zoom)
-      color: row.ink
-      opacity: row.session.task || row.cursor ? 1 : 0.52
+      font.pixelSize: Math.round((row.main ? Style.font.heading : Style.font.title) * row.zoom)
+      color: row.main && !row.cursor ? Commons.Color.accent : row.ink
+      opacity: row.session.task || row.cursor || row.main ? 1 : 0.52
+    }
+
+    // The assistant: what it's on, in the body's size.
+    Text {
+      visible: row.main
+      width: parent.width
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      text: row.assistantLine
+      font.family: Style.font.menuFamily
+      font.pixelSize: Math.round(Style.font.body * row.zoom)
+      font.bold: row.status === "waiting"
+      color: row.status === "waiting" ? Commons.Color.menu.selectedText : row.ink
     }
 
     Text {
@@ -104,7 +169,8 @@ BorderSurface {
       textFormat: Text.PlainText
       elide: Text.ElideRight
       // Claude Code background sessions (/bg) still running in its worktree.
-      text: ((row.showRepo ? (row.session.repo || "") + " · " : "") + (row.session.name || "")
+      text: ((row.showRepo && !(row.main && row.session.name === row.session.repo) ? (row.session.repo || "") + " · " : "")
+             + (row.session.name || "")
              + (row.session.background > 0 ? " · +" + row.session.background + " bg" : "")).toUpperCase()
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * row.zoom)

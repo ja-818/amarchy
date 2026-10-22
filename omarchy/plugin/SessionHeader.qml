@@ -101,11 +101,13 @@ PanelWindow {
                         - glyph.width - row.spacing - (more.visible ? more.implicitWidth + row.spacing : 0))
         textFormat: Text.StyledText
         elide: Text.ElideRight
-        text: root.session ? root.taskText(root.session.task || "New session") : ""
+        // Your assistant goes by its name.
+        text: !root.session ? "" : root.session.assistant === "main" ? root.taskText(root.session.assistant_name || "Assistant")
+                                 : root.taskText(root.session.task || "New session")
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.body
         color: root.ink
-        opacity: root.session && root.session.task ? 1 : 0.52
+        opacity: root.session && (root.session.task || root.session.assistant === "main") ? 1 : 0.52
       }
 
       Text {

@@ -370,11 +370,17 @@ function renderList() {
   } else if (!shown.length) {
     list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
   } else {
-    // Grouped as amarchy groups them, outermost first. With more than one
-    // grouping the outermost is a rule across the list, its name in the middle.
+    // Your assistant first, in a place of its own above the groups (amarchy
+    // assistant): its card, the other sessions of its project under it.
+    const mine = shown.filter((s) => s.assistant);
+    if (mine.length)
+      list.append(h("div", { class: "assistant-section" },
+        ...mine.map((s) => s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true))));
+    // The rest grouped as amarchy groups them, outermost first. With more than
+    // one grouping the outermost is a rule across the list, its name in the middle.
     const groups = v.group || [];
     let prev = [];
-    for (const s of shown) {
+    for (const s of shown.filter((s) => !s.assistant)) {
       const labels = groups.map((g) => groupLabel(s, g));
       const at = labels.findIndex((l, i) => l !== prev[i]);
       if (at >= 0)
@@ -520,9 +526,31 @@ async function confirmClose(s, known) {
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
+// Your assistant's picture (app/assistant.svg).
+function avatar(cls) {
+  return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src: "/assistant.svg", alt: "", draggable: "false" });
+}
+
+// Your assistant, at the top of the list: its picture with its state on it,
+// its name, and what it's on.
+function assistantCard(s) {
+  const st = doneOf(s);
+  const name = s.assistant_name || "Assistant";
+  const task = s.task && s.task.toLowerCase() !== name.toLowerCase() ? s.task : "";
+  const line = s.setup ? "Setting up…" : st === "waiting" ? "Needs you" : task || (st === "working" ? "On it…" : "Here for you");
+  return holdable(h("button", { class: `row assistant ${st}`, onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
+    h("span", { class: "avatar-wrap" }, avatar(), stateIcon(s)),
+    h("span", { class: "main" },
+      h("div", { class: "name" }, name),
+      h("div", { class: `line${st === "waiting" ? " waiting" : ""}` }, line),
+      h("div", { class: "meta" }, STATUS[st])),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""))), () => rowMenu(s));
+}
+
 // One session, as the desktop list draws it: the project and the priority
-// only when no header above it says them already.
-function sessionRow(s, groups) {
+// only when no header above it says them already. near: another session of
+// your assistant's project, under it, with its picture small.
+function sessionRow(s, groups, near = false) {
   const showRepo = !groups.includes("project"), showPriority = !groups.includes("priority");
   const prio = showPriority && s.priority && s.priority !== "normal"
     ? glyph(s.priority, `prio ${s.priority}`) : null;
@@ -531,6 +559,7 @@ function sessionRow(s, groups) {
   return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
                        onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     stateIcon(s),
+    near ? avatar("small") : null,
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
       h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
@@ -778,9 +807,20 @@ class SessionView {
       this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
       return;
     }
-    this.titleEl.replaceChildren(stateIcon(this.row),
-      h("div", { class: "text" }, taskText(this.row.task || "New session", this.row.task ? "" : "untitled"),
-        h("div", { class: "meta" }, `${where(this.row)} · ${STATUS[stateOf(this.row)]}`)));
+    // Your assistant's, under its name and picture: you know who you're talking to.
+    const r = this.row;
+    if (r.assistant === "main") {
+      const name = r.assistant_name || "Assistant";
+      const task = r.task && r.task.toLowerCase() !== name.toLowerCase() ? `${r.task} · ` : "";
+      this.input.placeholder = `Message ${name}`;
+      this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(), stateIcon(r)),
+        h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
+          h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}`)));
+      return;
+    }
+    this.titleEl.replaceChildren(stateIcon(r), r.assistant ? avatar("small") : null,
+      h("div", { class: "text" }, taskText(r.task || "New session", r.task ? "" : "untitled"),
+        h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}`)));
   }
 
   atBottom() {
@@ -1456,6 +1496,20 @@ async function openSettings() {
         } }, "Send a test"),
         h("button", { class: "control wide", onclick: async () => { await pushOff(); draw(); } }, "Turn off"));
     }
+    // What the sessions tell you about (amarchy alerts), here and on your desktop.
+    const alerts = (app.view && app.view.alerts) || "needs-you";
+    const name = ((app.view && app.view.sessions.find((x) => x.assistant === "main")) || {}).assistant_name;
+    kids.push(h("div", { class: "section" }, "Tell me"),
+      h("div", { class: "seg" }, ...[["all", "All"], ["needs-you", "Needs me"], ["assistant", `${name || "Assistant"} only`]]
+        .map(([value, label]) => h("button", { class: `control${alerts === value ? " on" : ""}`, onclick: async () => {
+          try { await api("/api/alerts", { alerts: value }); app.view.alerts = value; draw(); }
+          catch (err) { toast(err.message); }
+        } }, label))),
+      h("p", {}, alerts === "all" ? "Every session, when it needs you and when it's done."
+               : alerts === "needs-you" ? "A session that asks you something, or needs your permission. One that's done is just marked done in the list."
+               : "Nothing from the coding sessions; their list still says how they are."),
+      h("p", {}, name ? `${name}, your assistant, always tells you: under its own name and picture, with its own chime.`
+                      : "Your assistant, once you have one (amarchy assistant <id>), always tells you."));
     const look = app.view && app.view.look && app.view.look.look;
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, look ? "Your theme and font, as your desktop wears them. Change your theme there and it changes here."

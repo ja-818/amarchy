@@ -333,7 +333,7 @@ list. `Enter` or a click sets it, `Esc` leaves it as it was. **Off** for none.
 
 ```sh
 amarchy sound              # the picker
-amarchy sound tine         # set one: kalimba (the default), vibraphone, tine, fairy, ocean, elementary
+amarchy sound tine         # set one: kalimba (the default), vibraphone, tine, fairy, ocean, elementary, herald
 amarchy sound --play fairy # hear one
 amarchy sound off
 ```
@@ -452,9 +452,10 @@ each dictation (`journalctl --user -u amarchy-app`). The bar under the list star
 session: say what its Claude should do (tap the project on its left for
 another of the host's projects), or hold its mic and say it: the session
 starts while you speak, opens when you let go, and what you said goes to its
-Claude's dictation once Claude is up, the words coming into its box to send. When a session needs you or is done, the phone gets a
-notification, at the same moments as the desktop's chime (not for the one
-you're looking at on the phone). Since it reads the sessions on the host, it
+Claude's dictation once Claude is up, the words coming into its box to send. When a session needs you (or is done, with `amarchy alerts
+all`), the phone gets a notification, at the same moments as the desktop's
+chime (not for the one you're looking at on the phone); your assistant's
+always (see [Your assistant](#your-assistant)). Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.
 
 It needs [Tailscale](https://tailscale.com) on the host and on the phone, with
@@ -576,6 +577,50 @@ app's own server, taken only from the Tailscale login that owns the host
 connection to it on localhost comes from Tailscale (`tailscaled`) or from you,
 so another user on the host can't pass for Tailscale. What a terminal gives is
 what your desktop's windows give: Claude and a shell on the host, as you.
+
+## Your assistant
+
+One session can be your **assistant**: a Claude that keeps your day rather
+than writing code (it briefs you in the morning, reminds you of meetings,
+answers on your phone). With thirty coding sessions in the list it would get
+lost among them, and so would what it tells you. So it has a place of its own:
+
+```sh
+amarchy assistant <id> [--name <name>]   # this session is your assistant (named after its project unless you name it)
+amarchy assistant                        # which one it is: id, then name
+amarchy assistant off                    # a session like the others again
+```
+
+- **In every list** (beside Claude, under the Ⓐ, on the phone, in the
+  browser) it comes first, above the groups: bigger, with its picture (an imp
+  of a retainer with his staff of two heads, `app/assistant.svg`), its name,
+  and what it's on, its state on a badge at the corner of the picture. The
+  other sessions of its project (more sessions for small personal things) sit
+  under it there, at their usual size with its picture small, and a rule sets
+  them apart from the rest. In the session itself, the phone and the strip
+  above Claude call it by its name, and the phone's box says "Message Jaken".
+- **It always tells you** when it needs you or is done, whatever `amarchy
+  alerts` lets through of the others: under its name and picture (on the
+  desktop it stays until you dismiss it), with what it said as the body (a
+  brief's first words), and with a chime of its own, `herald` (a knock of the
+  staff and two horn notes; `amarchy sound --assistant <name|off>` picks
+  another). What it sends with `amarchy notify` goes under its name too, and a
+  tap opens it. On an iPhone a notification always wears the app's icon, so
+  there its name is what sets it apart.
+
+`amarchy alerts` cuts the noise from the rest, on the desktop and the phone
+alike (the phone's settings have it too, under "Tell me"):
+
+```sh
+amarchy alerts needs-you   # the default: a session tells you only when it asks you something
+amarchy alerts all         # when one needs you and when one is done, as before
+amarchy alerts assistant   # nothing but your assistant
+```
+
+With `needs-you`, a session that asks a question or a permission notifies
+you; one that's done doesn't, and is marked done in the list (the filled
+check) until you open it. A desktop showing a host's sessions goes by the
+host's setting, so one `amarchy alerts` sets both.
 
 ## From scripts and agents
 
@@ -751,7 +796,8 @@ amarchy sleep --after [minutes|off]   how long an idle session waits off screen 
 amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
-amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add)
+amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add;
+                                      --assistant [name|off] for your assistant's)
 amarchy keys [inside|anywhere <mod>]  the modifiers of amarchy's keys (the picker without one; --show, reset)
 amarchy priority [high|normal|low|up|down] [--id <id>]  how much a session matters; higher first in the list
 amarchy group [project|priority|status] [on|off]  group the list (switches without on|off); one turned on nests
@@ -766,6 +812,8 @@ amarchy remote [--status]             where new sessions start / whether that ho
 amarchy app on | off                  on a host: your sessions on your phone and in a browser (see Your phone)
 amarchy app [--status] | --test       whether it's on, and where / a test notification to each phone
 amarchy notify <title> [body] [--session <id>] [--urgent]  a notification on your phones (see From scripts and agents)
+amarchy assistant [<id> [--name <name>] | off]  your assistant: first in every list, always heard (see Your assistant)
+amarchy alerts [all|needs-you|assistant]  what the other sessions tell you about (default needs-you)
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]  a message to a session's Claude, once it's free
 ```
 

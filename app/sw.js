@@ -3,8 +3,8 @@
 // when the server can't be reached (it then says so, rather than Safari's
 // error page). Everything else always comes from the server.
 
-const SHELL = "amarchy-shell-v3";
-const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png"];
+const SHELL = "amarchy-shell-v4";
+const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));
@@ -47,7 +47,9 @@ self.addEventListener("push", (e) => {
     // amarchy notify --urgent: on screen until dismissed, where the browser
     // lets it (a computer's; iOS ignores it).
     requireInteraction: !!d.urgent,
-    icon: "/icon-192.png",
+    // Your assistant's picture on its own (a computer's browser shows it; iOS
+    // always shows the app's icon).
+    icon: d.icon || "/icon-192.png",
     data: { url: d.url || "/" },
   });
   const badge = typeof d.waiting === "number" && navigator.setAppBadge

@@ -227,3 +227,7 @@ input, and their list shows your status live. Don't add notifications of your
 own for that. `amarchy notify "<title>" "<body>" [--session <id>] [--urgent]`
 pushes a notification of your own to the user's phones (on a host with the
 phone app on); only send one when the user asked for it (a reminder, a brief).
+The user's assistant session (`amarchy assistant` names it; `assistant:
+"main"` in `amarchy list`) is the exception: its notifications always reach
+them, under its name. `amarchy alerts` decides what the other sessions'
+do; only change it, or the assistant, when the user asks.

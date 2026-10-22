@@ -127,3 +127,13 @@ x = buf(1.6)
 sparkle(x, 0.00, (93, 98), 0.045, 0.9)
 sparkle(x, 0.30, (88, 91, 93, 96, 98, 100), 0.03, 0.8, 1.4)
 write("fairy", x)
+
+# herald: a knock of the staff, then two horn notes up a fourth (your assistant's)
+HORN = [(1, 1, 0.7), (2, 0.55, 0.5), (3, 0.35, 0.35), (4, 0.2, 0.25), (5, 0.1, 0.18), (6, 0.05, 0.12)]
+WOOD = [(1, 1, 0.03), (2.7, 0.5, 0.02), (5.2, 0.2, 0.01)]
+x = buf(1.6)
+add(x, 0, [0.7 * v for v in partials(820, WOOD, 0.15, attack=0.001)])
+add(x, 0.09, [0.8 * v for v in partials(note(67), HORN, 0.5, attack=0.025)])
+add(x, 0.24, partials(note(72), HORN, 1.3, attack=0.03))
+write("herald", x)
+

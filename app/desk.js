@@ -662,13 +662,16 @@ function deskList() {
   for (const b of [desk.brand, desk.ball]) b.classList.toggle("lit", waiting > 0);
   // The strip above Claude in zen mode: what it is, project · branch on hover.
   const s = row(desk.current);
-  desk.strip.replaceChildren(...(s ? [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"),
-                                       h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)] : []));
+  desk.strip.replaceChildren(...(!s ? [] : s.assistant === "main"
+    ? [stateIcon(s), avatar("small"), taskText(s.assistant_name || "Assistant", "assistant-name"),
+       h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]
+    : [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"),
+       h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]));
   // The panel.
   desk.organize.hidden = desk.organize.hidden || !v || !v.sessions.length;
   if (!desk.organize.hidden) desk.organize.replaceChildren(...organizeMenu());
   const shown = fillList(desk.listEl, desk.query, desk.cursor || desk.current);
-  if (!desk.query) desk.order = shown.map((x) => x.id);
+  if (!desk.query) desk.order = shown.map((x) => x.id);     // already in list order: the assistant's first
   const drop = document.querySelector(".bar-drop");
   if (drop) drop.refresh();
 }
@@ -685,20 +688,27 @@ function fillList(list, query, cursorId) {
   const shown = matching(v.sessions, query);
   if (!v.sessions.length) list.append(h("div", { class: "empty" }, "No sessions yet."));
   else if (!shown.length) list.append(h("div", { class: "empty" }, `No session called “${query.trim()}”`));
+  const place = (el, s) => {
+    el.dataset.id = s.id;
+    el.classList.toggle("cursor", s.id === cursorId);
+    el.addEventListener("contextmenu", (e) => { e.preventDefault(); rowMenu(s); });
+    return el;
+  };
+  // Your assistant first, in a place of its own above the groups, as on the phone.
+  const mine = shown.filter((s) => s.assistant);
+  if (mine.length)
+    list.append(h("div", { class: "assistant-section" },
+      ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true), s))));
   const groups = v.group || [];
   let prev = [];
-  for (const s of shown) {
+  for (const s of shown.filter((s) => !s.assistant)) {
     const labels = groups.map((g) => groupLabel(s, g));
     const at = labels.findIndex((l, i) => l !== prev[i]);
     if (at >= 0)
       for (let i = at; i < labels.length; i++)
         list.append(h("div", { class: `group-head${i === 0 && groups.length > 1 ? " ruled" : ""}` }, labels[i]));
     prev = labels;
-    const el = sessionRow(s, groups);
-    el.dataset.id = s.id;
-    el.classList.toggle("cursor", s.id === cursorId);
-    el.addEventListener("contextmenu", (e) => { e.preventDefault(); rowMenu(s); });
-    list.append(el);
+    list.append(place(sessionRow(s, groups), s));
   }
   const cur = list.querySelector(".row.cursor");
   if (cur) cur.scrollIntoView({ block: "nearest" });
@@ -738,22 +748,29 @@ function leaveSearch(input) {
 }
 
 // The chime your desktop plays when a session needs you or is done (the one
-// you're looking at only when this window isn't).
+// you're looking at only when this window isn't), as amarchy alerts lets the
+// others: your assistant's always, with its own chime.
 let chimeAudio = null;
 function chime(v) {
   if (!v) return;
   const now = Object.fromEntries(v.sessions.map((s) => [s.id, s.status]));
   const was = desk.statuses;
   desk.statuses = now;
-  if (!was || v.sound === "off") return;
-  const rang = v.sessions.some((s) => {
+  if (!was) return;
+  const rings = v.sessions.filter((s) => {
     const prev = was[s.id];
     if (!prev || prev === s.status) return false;
-    if (!(s.status === "waiting" || (s.status === "idle" && prev === "working"))) return false;
-    return !(s.id === desk.current && document.hasFocus());
+    const done = s.status === "idle" && prev === "working";
+    if (!(s.status === "waiting" || done)) return false;
+    if (s.id === desk.current && document.hasFocus()) return false;
+    if (s.assistant === "main") return true;
+    const alerts = v.alerts || "needs-you";
+    return alerts === "all" || (alerts === "needs-you" && s.status === "waiting");
   });
-  if (!rang) return;
-  const src = `/sound/${encodeURIComponent(v.sound || "kalimba")}`;
+  if (!rings.length) return;
+  const sound = rings.some((s) => s.assistant === "main") ? v.assistant_sound || "herald" : v.sound || "kalimba";
+  if (sound === "off") return;
+  const src = `/sound/${encodeURIComponent(sound)}`;
   if (!chimeAudio || !chimeAudio.src.endsWith(src)) chimeAudio = new Audio(src);
   chimeAudio.currentTime = 0;
   chimeAudio.play().catch(() => { /* not until you've clicked the page once */ });

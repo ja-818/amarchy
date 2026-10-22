@@ -9,6 +9,9 @@ import qs.Ui
 // order of `groups`, outermost first. Every header is the same flush-left
 // label, except that with more than one grouping the outermost is a rule
 // across the list with its name in the middle, to set the big sections apart.
+// Your assistant and the other sessions of its project come first (the CLI
+// puts them there), in a place of their own above the groups, without
+// headers, a rule under them.
 Column {
   id: list
 
@@ -64,15 +67,34 @@ Column {
       readonly property var previous: index > 0 ? list.sessions[index - 1] : null
       // How many of the groupings, outermost first, get a new header above
       // this row: from the first one that changes here down to the innermost.
+      readonly property bool mine: !!modelData.assistant
+      // The first row after your assistant's section: the rule above it, and all its headers.
+      readonly property bool afterMine: !mine && !!previous && !!previous.assistant
       readonly property int firstNew: {
         var groups = list.groups
+        if (mine) return groups.length
+        if (afterMine) return 0
         for (var i = 0; i < groups.length; i++)
           if (!previous || list.key(previous, groups[i]) !== list.key(modelData, groups[i])) return i
         return groups.length
       }
       // The first header of a row hugs whatever is above it; the others don't
       // add space, they're right under it.
-      readonly property int gapAbove: index === 0 ? 0 : Style.spacing.md
+      readonly property int gapAbove: index === 0 || afterMine ? 0 : Style.spacing.md
+
+      Item {
+        visible: entry.afterMine
+        width: entry.width
+        height: Style.spacing.md * 2
+
+        PanelSeparator {
+          foreground: Commons.Color.menu.text
+          strength: 0.2
+          x: Style.space(8)
+          width: parent.width - x * 2
+          y: Math.round(parent.height / 2)
+        }
+      }
 
       Repeater {
         model: list.groups
@@ -124,10 +146,10 @@ Column {
       SessionRow {
         width: parent.width
         session: entry.modelData
-        // The project is in the header above it.
-        showRepo: list.groups.indexOf("project") < 0
+        // The project is in the header above it (none above your assistant's).
+        showRepo: entry.mine || list.groups.indexOf("project") < 0
         // The priority is in the header above it.
-        showPriority: list.groups.indexOf("priority") < 0
+        showPriority: entry.mine || list.groups.indexOf("priority") < 0
         cursor: entry.index === list.cursor
         spinnerFrame: list.spinnerFrame
         onActivated: list.activated(entry.index)
