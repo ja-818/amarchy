@@ -549,9 +549,11 @@ function deskStart() {
   desk.search = h("input", { type: "search", placeholder: "Search sessions", autocomplete: "off", spellcheck: "false",
                              oninput: () => { desk.query = desk.search.value; desk.cursor = null; deskList(); },
                              onkeydown: (e) => searchKeys(e, desk.search, () => desk.listEl) });
-  desk.organize = h("div", { class: "organize-menu", hidden: true });
-  const organizeBtn = h("button", { class: "control organize", title: "Group and sort the list",
-                                    onclick: () => { desk.organize.hidden = !desk.organize.hidden; deskList(); } }, glyph("organize"));
+  const organizeBtn = h("button", { class: "control organize", title: "Group and sort the list", "aria-haspopup": "menu",
+                                    onclick: () => toggleOrganize(desk.organize, organizeBtn, deskList),
+                                    onkeydown: (e) => { if (e.key === "ArrowDown" && desk.organize.hidden) { e.preventDefault(); toggleOrganize(desk.organize, organizeBtn, deskList); } } },
+                        glyph("organize"));
+  desk.organize = organizeBox(() => organizeBtn, deskList);
   desk.panel = h("aside", { class: "panel" },
     h("div", { class: "panel-buttons" },
       desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
@@ -694,7 +696,7 @@ function deskList() {
        h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]));
   // The panel.
   desk.organize.hidden = desk.organize.hidden || !v || !v.sessions.length;
-  if (!desk.organize.hidden) desk.organize.replaceChildren(...organizeMenu());
+  if (!desk.organize.hidden) keepFocus(desk.organize, () => desk.organize.replaceChildren(...organizeMenu()));
   const shown = fillList(desk.listEl, desk.query, desk.cursor || desk.current);
   if (!desk.query) desk.order = shown.map((x) => x.id);     // already in list order: the assistant's first
   const drop = document.querySelector(".bar-drop");

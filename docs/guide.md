@@ -561,6 +561,21 @@ The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have:
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the session's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the session. |
 
+Every menu takes the keys, in the browser on your computer and on a phone
+or tablet with a keyboard: a session's menu (its ••• or a right click on it),
+closing one, settings, the group & sort menu, the order of your projects,
+the project for a new session, Claude's questions, and the phone's list
+itself. `↑`/`↓` go from line to line (buttons side by side, as High · Normal ·
+Low, are one line: `←`/`→` go along it), `Home`/`End` to the ends, `↵` or
+`Space` picks, `Tab` stays inside, `Esc` closes and gives the keys back where
+they were (on a computer, to Claude or the terminal). One you open with the
+keys has its cursor, in the accent, on its first line (or the one that's on)
+at once; one you click, once you press an arrow. In Claude's question a
+choice's number picks it and `Esc` says no, as in Claude's own; in the order
+of your projects `Shift+↵` on an arrow sends the project to the top or
+bottom; on a session in the list, the menu key (or `Shift+F10`) opens its
+menu, and `↓` from the search goes into the list.
+
 The keyboard follows the pointer between Claude and the terminal, as on
 Omarchy. On a Mac, Option is Alt in the terminals (Settings turns that off,
 for typing accented letters with it), and `Shift+Enter` is a new line in

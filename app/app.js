@@ -324,16 +324,28 @@ function listView() {
   const search = h("input", { type: "search", placeholder: "Search sessions", enterkeyhint: "search",
                               autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
                               oninput: () => { app.query = search.value; renderList(); },
-                              onkeydown: (e) => { if (e.key === "Enter") search.blur(); } });
+                              onkeydown: (e) => {
+                                if (e.key === "Enter") search.blur();
+                                else if (e.key === "ArrowDown") { e.preventDefault(); const first = menuItems(list)[0]; if (first) first.focus(); }
+                              } });
   const clear = h("button", { class: "clear", "aria-label": "Clear the search",
                               onclick: () => { search.value = app.query = ""; renderList(); search.focus(); } }, glyph("close"));
-  const organize = h("button", { class: "control organize", "aria-label": "Group and sort the list",
-                                 onclick: () => { menu.hidden = !menu.hidden; renderList(); } }, glyph("organize"));
-  const menu = h("div", { class: "organize-menu", hidden: true });
+  const organize = h("button", { class: "control organize", "aria-label": "Group and sort the list", "aria-haspopup": "menu",
+                                 onclick: () => toggleOrganize(menu, organize, renderList),
+                                 onkeydown: (e) => { if (e.key === "ArrowDown" && menu.hidden) { e.preventDefault(); toggleOrganize(menu, organize, renderList); } } },
+                     glyph("organize"));
+  const menu = organizeBox(() => organize, renderList);
   const shade = h("div", { class: "organize-shade", onclick: () => { menu.hidden = true; renderList(); } });
   const toolbar = h("div", { class: "toolbar" }, h("label", { class: "searchbox" }, glyph("search"), search, clear), organize, menu);
   const offline = h("div", { class: "offline" }, "Reconnecting to Amarchy…");
   const list = h("div", { class: "list" });
+  menuKeys(list);       // ↑/↓ from session to session, ↵ opens one
+  list.addEventListener("keydown", (e) => {     // ↑ from the first: back to the search
+    if (e.key === "ArrowUp" && !e.defaultPrevented && menuItems(list)[0] === document.activeElement && !toolbar.hidden) {
+      e.preventDefault();
+      search.focus();
+    }
+  }, true);
   const scroll = h("div", { class: "scroll" }, list);
   app.newBar = newBar();
   app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, h("div", { class: "dock" }, app.newBar.el));
@@ -360,27 +372,29 @@ function renderList() {
   if (view.toolbar.hidden) view.menu.hidden = true;
   view.shade.hidden = view.menu.hidden;
   view.organize.classList.toggle("on", !view.menu.hidden);
-  if (!view.menu.hidden) view.menu.replaceChildren(...organizeMenu());
+  if (!view.menu.hidden) keepFocus(view.menu, () => view.menu.replaceChildren(...organizeMenu()));
   const list = view.list;
-  list.replaceChildren();
-  const shown = v ? matching(v.sessions, app.query) : [];
-  if (!v) {
-    list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
-  } else if (!v.sessions.length) {
-    list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), "Say what Claude should do, below, to start one."));
-  } else if (!shown.length) {
-    list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
-  } else {
-    // Your assistant first, in a place of its own above the groups (amarchy
-    // assistant): its card, the other sessions of its project under it.
-    const mine = shown.filter((s) => s.assistant);
-    if (mine.length)
-      list.append(h("div", { class: "assistant-section" },
-        ...mine.map((s) => s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true))));
-    // The rest grouped as amarchy groups them, outermost first. With more than
-    // one grouping the outermost is a rule across the list, its name in the middle.
-    grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
-  }
+  keepFocus(list, () => {
+    list.replaceChildren();
+    const shown = v ? matching(v.sessions, app.query) : [];
+    if (!v) {
+      list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
+    } else if (!v.sessions.length) {
+      list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), "Say what Claude should do, below, to start one."));
+    } else if (!shown.length) {
+      list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
+    } else {
+      // Your assistant first, in a place of its own above the groups (amarchy
+      // assistant): its card, the other sessions of its project under it.
+      const mine = shown.filter((s) => s.assistant);
+      if (mine.length)
+        list.append(h("div", { class: "assistant-section" },
+          ...mine.map((s) => s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true))));
+      // The rest grouped as amarchy groups them, outermost first. With more than
+      // one grouping the outermost is a rule across the list, its name in the middle.
+      grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
+    }
+  });
   app.newBar.update();
 }
 
@@ -450,15 +464,30 @@ function orderProjects(lit) {
   for (const s of (app.view && app.view.sessions) || []) if (!names.includes(s.repo)) names.push(s.repo);
   const count = Object.fromEntries(((app.view && app.view.projects) || []).map((p) => [p.name, p.sessions || 0]));
   const list = h("div", { class: "menu project-order" });
-  const draw = () => list.replaceChildren(...names.map((name, i) => h("div", { class: `menu-item${name === lit ? " on" : ""}` },
+  // The keys stay on the arrow you pressed, on the project as it moves
+  // (on its other arrow at either end).
+  const arrowOn = (name, dir) => {
+    const moves = Array.from(list.querySelectorAll(".control.move")).filter((b) => b.dataset.name === name);
+    const to = moves.find((b) => b.dataset.dir === dir && !b.disabled) || moves.find((b) => !b.disabled);
+    if (to) to.focus();
+  };
+  const draw = () => {
+    const was = list.contains(document.activeElement) && document.activeElement.dataset;
+    const dir = was && was.dir;
+    list.replaceChildren(...rows());
+    if (dir) arrowOn(lit, dir);
+  };
+  const rows = () => names.map((name, i) => h("div", { class: `menu-item${name === lit ? " on" : ""}` },
     h("span", { class: "label" }, glyph("project", "icon"), h("span", { class: "text" }, name),
       count[name] ? h("small", {}, String(count[name])) : null),
     h("span", { class: "moves" },
-      holdable(h("button", { class: "control move", "aria-label": `Move ${name} up (hold: to the top)`, disabled: i === 0,
-                             onclick: () => move(name, "up") }, glyph("up")), () => move(name, "top")),
-      holdable(h("button", { class: "control move", "aria-label": `Move ${name} down (hold: to the bottom)`,
-                             disabled: i === names.length - 1, onclick: () => move(name, "down") }, glyph("under")),
-               () => move(name, "bottom"))))));
+      holdable(h("button", { class: "control move", "aria-label": `Move ${name} up (hold, or Shift+Enter: to the top)`, disabled: i === 0,
+                             "data-name": name, "data-dir": "up", onclick: () => move(name, "up") },
+                 glyph("up")), () => move(name, "top")),
+      holdable(h("button", { class: "control move", "aria-label": `Move ${name} down (hold, or Shift+Enter: to the bottom)`,
+                             disabled: i === names.length - 1, "data-name": name, "data-dir": "down",
+                             onclick: () => move(name, "down") }, glyph("under")),
+               () => move(name, "bottom")))));
   const move = async (name, where) => {
     lit = name;
     const at = names.indexOf(name);
@@ -469,9 +498,16 @@ function orderProjects(lit) {
     if (now) names.splice(0, names.length, ...now);
     draw();
   };
+  list.addEventListener("keydown", (e) => {      // Shift+↵ on an arrow: as holding it
+    const b = e.target.dataset;
+    if (e.key !== "Enter" || !e.shiftKey || !b.dir) return;
+    e.preventDefault();
+    move(b.name, b.dir === "up" ? "top" : "bottom");
+  });
   draw();
-  sheet(sheetHead("Order projects", "Hold an arrow: to the top or bottom"), list,
+  sheet(sheetHead("Order projects", app.desk ? "Hold an arrow (or Shift+↵ on it): to the top or bottom" : "Hold an arrow: to the top or bottom"), list,
     h("button", { class: "control wide", onclick: closeSheet }, "Done"));
+  if (lastInput.keys) arrowOn(lit || names[0], "up");
 }
 
 // The sessions the search matches by name (what it's about, Claude's title
@@ -517,10 +553,32 @@ function organizeMenu() {
   ];
 }
 
+// The group & sort menu's box (the phone's list, beside Claude on the
+// desktop), with the keys of a menu: Esc closes it, back to its button.
+function organizeBox(button, redraw) {
+  const menu = h("div", { class: "organize-menu", role: "menu", tabindex: "-1", hidden: true });
+  menu.button = button;
+  menuKeys(menu, { close: () => { menu.hidden = true; redraw(); button().focus(); } });
+  return menu;
+}
+
+// Its button opens it (with the keys, the cursor on its first line) or closes it.
+function toggleOrganize(menu, button, redraw) {
+  menu.hidden = !menu.hidden;
+  redraw();
+  if (!menu.hidden) menuFocus(menu);
+  else if (menu.contains(document.activeElement)) button.focus();
+}
+
 // The group & sort menu goes, wherever it is (the phone's list, beside Claude on the desktop).
+// The keys, if they were in it, go back to its button.
 function closeOrganize() {
-  if (app.listEl) app.listEl.menu.hidden = true;
-  if (typeof desk !== "undefined" && desk.organize) desk.organize.hidden = true;
+  for (const menu of [app.listEl && app.listEl.menu, typeof desk !== "undefined" && desk.organize]) {
+    if (!menu) continue;
+    const had = menu.contains(document.activeElement);
+    menu.hidden = true;
+    if (had) menu.button().focus();
+  }
   refresh();
 }
 
@@ -540,8 +598,13 @@ async function organizeList(group, sort) {
 }
 
 // Held down (as on a right click on the desktop): what you can change about
-// it from the list, its priority.
+// it from the list, its priority. With the keys: the menu key, or Shift+F10.
 function holdable(el, onHold) {
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
+    e.preventDefault();
+    onHold();
+  });
   let timer = null, held = false, x = 0, y = 0;
   const cancel = () => clearTimeout(timer);
   el.addEventListener("pointerdown", (e) => {
@@ -634,7 +697,7 @@ function assistantCard(s) {
   const unread = s.unseen && !!s.said;
   const line = s.setup ? "Setting up…" : st === "waiting" ? "Needs you" : unread ? s.said
     : task || (st === "working" ? "On it…" : "Here for you");
-  return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`,
+  return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`, "data-id": s.id,
                                 onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     h("span", { class: "avatar-wrap" }, avatar(s), stateIcon(s)),
     h("span", { class: "main" },
@@ -658,7 +721,7 @@ function sessionRow(s, groups, near = false) {
     ? glyph(s.priority, `prio ${s.priority}`) : null;
   const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "new session");
   const bg = s.background > 0 ? ` · +${s.background} bg` : "";
-  return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
+  return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`, "data-id": s.id,
                        onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     stateIcon(s),
     near ? avatar(s, "small") : null,
@@ -1084,7 +1147,15 @@ class SessionView {
     } else {
       kids.push(this.composer);
     }
+    // The keys, if they were here, stay: on Claude's question (its cursor's
+    // choice), and back in the box you type in once it's answered.
+    const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
     this.dock.replaceChildren(...kids);
+    if (had) {
+      const ask = this.dock.querySelector(".ask");
+      if (ask) (menuStart(ask) || ask).focus({ preventScroll: true });
+      else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
+    }
     this.sendButtons();
     this.grow();
     if (this.mode === "chat" && this.atBottom()) requestAnimationFrame(() => this.toBottom());
@@ -1112,9 +1183,18 @@ class SessionView {
   }
 
   // Claude's question as its own menu draws it: the choices numbered (when
-  // they are), its cursor on one; tap one to pick it.
+  // they are), its cursor on one; tap one to pick it. Or as in Claude's own:
+  // ↑/↓ and ↵, a choice's number, Esc to say no.
   ask(d) {
-    const box = h("div", { class: "ask" });
+    const box = h("div", { class: "ask", role: "menu", tabindex: "-1" });
+    menuKeys(box, { close: () => this.press(["Escape"]) });
+    box.addEventListener("keydown", (e) => {
+      if (!/^[1-9]$/.test(e.key) || e.ctrlKey || e.altKey || e.metaKey || e.target.matches("textarea")) return;
+      const opt = box.querySelectorAll(".opt")[Number(e.key) - 1];
+      if (!opt || opt.disabled) return;
+      e.preventDefault();
+      opt.click();
+    });
     const q = d.question.split("\n");
     box.append(h("div", { class: "q" }, h("div", { class: "head" }, q[0] || "Claude asks"), q.slice(1).join("\n")));
     const numbered = d.options.length && d.options[0].keys[0] === "1";
@@ -1129,7 +1209,7 @@ class SessionView {
           n, h("span", { class: "what" }, h("b", {}, "Answer in your own words…"))), write);
         return;
       }
-      box.append(h("button", { class: `opt${i === cursor ? " first" : ""}`,
+      box.append(h("button", { class: `opt${i === cursor ? " first on" : ""}`,
                                onclick: (e) => this.pick(d, o, e.currentTarget) },
         n, h("span", { class: "what" }, h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null)));
     });
@@ -1387,13 +1467,139 @@ function holdToTalk(el, start, stop) {
   el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
+// ---- the keys in a menu
+//
+// A sheet, the group & sort menu, Claude's question, the phone's list: ↑/↓
+// go from line to line (buttons side by side, as High · Normal · Low, are
+// one line, ←/→ go along it), Home/End to the first and the last, ↵ or Space
+// picks, Esc closes. One opened with the keys has its cursor on its first
+// line (or the one that's on) at once; one opened with a tap or a click,
+// once you press an arrow.
+
+const lastInput = { keys: false };
+window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) lastInput.keys = true; }, true);
+window.addEventListener("pointerdown", () => { lastInput.keys = false; }, true);
+
+// What the cursor can be on in a menu (fields too: Tab goes to them).
+function menuItems(box, fields) {
+  const sel = fields ? "button, [tabindex='0'], textarea, input" : "button, [tabindex='0']";
+  return Array.from(box.querySelectorAll(sel)).filter((el) => !el.disabled && el.getClientRects().length);
+}
+
+// The line an item is on: its row of buttons side by side, or itself.
+function menuLine(box, el) {
+  const line = el.closest(".seg, .moves, .row-btns");
+  return line && box.contains(line) && line !== box ? line : el;
+}
+
+// Where the cursor goes on a line: the button that's on, else its first.
+function lineStart(items, line) {
+  const on = items.filter((el) => line.contains(el));
+  return on.find((el) => el.classList.contains("on")) || on[0];
+}
+
+// Where the cursor starts: what's on in a list of choices, else the first line.
+function menuStart(box) {
+  const items = menuItems(box);
+  const on = items.find((el) => el.classList.contains("on") && el.closest(".menu, [role=menu]"));
+  return on || (items[0] && lineStart(items, menuLine(box, items[0])));
+}
+
+// The keys, for a menu in box. close: what Esc does (none, Esc does
+// nothing). trap: Tab stays inside it (a sheet over the page).
+function menuKeys(box, { close, trap } = {}) {
+  box.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey && e.altKey) || e.metaKey || e.defaultPrevented) return;
+    const typing = e.target.matches("input, textarea");
+    const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === "Escape") {
+      if (typing) { stop(); (menuStart(box) || box).focus(); return; }      // out of the field, into the menu
+      if (close) { stop(); close(); }
+      return;
+    }
+    if (e.key === "Tab" && trap) {
+      const all = menuItems(box, true);
+      if (!all.length) return;
+      const at = all.indexOf(document.activeElement);
+      const to = at < 0 ? (e.shiftKey ? all.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + all.length) % all.length;
+      stop();
+      all[to].focus();
+      return;
+    }
+    if (typing || e.altKey || e.ctrlKey) return;
+    const items = menuItems(box);
+    if (!items.length) return;
+    const cur = items.indexOf(document.activeElement);
+    const lines = [];
+    for (const el of items) { const l = menuLine(box, el); if (!lines.includes(l)) lines.push(l); }
+    let to = null;
+    if (cur < 0) {      // on the menu itself: the first arrow starts it
+      if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home"].includes(e.key)) to = menuStart(box);
+      else if (e.key === "End") to = lineStart(items, lines[lines.length - 1]);
+    } else {
+      const line = menuLine(box, items[cur]);
+      const at = lines.indexOf(line);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const next = lines[at + (e.key === "ArrowDown" ? 1 : -1)];
+        if (next) to = lineStart(items, next);
+        else { stop(); return; }
+      } else if (e.key === "Home") to = lineStart(items, lines[0]);
+      else if (e.key === "End") to = lineStart(items, lines[lines.length - 1]);
+      else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && line !== items[cur]) {
+        const along = items.filter((el) => line.contains(el));
+        to = along[along.indexOf(items[cur]) + (e.key === "ArrowRight" ? 1 : -1)];
+        if (!to) { stop(); return; }
+      }
+    }
+    if (!to) return;
+    stop();
+    to.focus();
+  });
+}
+
+// Puts the cursor in a menu just opened: on its first line when you opened
+// it with the keys, else on the menu itself, for an arrow to start it.
+function menuFocus(box) {
+  const start = lastInput.keys && menuStart(box);
+  if (start) start.focus();
+  else box.focus({ preventScroll: true });
+}
+
+// Draws a menu anew with the cursor kept where it was: on the same session,
+// or the same words, or else the same place.
+function keepFocus(box, fill) {
+  const was = menuItems(box, true);
+  const at = was.indexOf(document.activeElement);
+  const el = was[at];
+  fill();
+  if (at < 0) return;
+  const now = menuItems(box, true);
+  const text = (x) => x.getAttribute("aria-label") || x.textContent;
+  const to = (el.dataset.id && now.find((x) => x.dataset.id === el.dataset.id))
+    || now.find((x) => x.className === el.className && text(x) === text(el))
+    || now[Math.min(at, now.length - 1)];
+  if (to) to.focus({ preventScroll: true });
+  else if (box.tabIndex === -1) box.focus({ preventScroll: true });
+}
+
 // ---- sheets
 
+// A sheet over the page, with the keys of a menu. One in place of another
+// keeps where the keys go back to when it's gone.
 function sheet(...kids) {
-  closeSheet();
-  const back = h("div", { class: "sheet-back", onclick: (e) => { if (e.target === back) closeSheet(); } },
-    h("div", { class: "sheet", role: "dialog" }, ...kids));
+  const was = document.querySelector(".sheet-back");
+  // Back to where the keys were: a field, or what they'd got to (on a
+  // computer, not what a click left them on, as a row you right-clicked).
+  const now = document.activeElement;
+  const returnTo = was ? was.returnTo
+    : now && (now.matches("input, textarea, :focus-visible") || !app.desk) ? now : null;
+  if (was) was.remove();
+  const card = h("div", { class: "sheet", role: "dialog", "aria-modal": "true", tabindex: "-1" }, ...kids);
+  const back = h("div", { class: "sheet-back", onclick: (e) => { if (e.target === back) closeSheet(); } }, card);
+  back.returnTo = returnTo;
+  menuKeys(card, { close: closeSheet, trap: true });
   document.body.append(back);
+  menuFocus(card);
   return back;
 }
 
@@ -1402,8 +1608,18 @@ function sheetHead(text, meta) {
   return h("div", { class: "head" }, h("h2", {}, text), meta ? h("div", { class: "meta" }, meta) : null);
 }
 
+// The keys go back where they were (on a computer, to Claude or the
+// terminal), unless something else has taken them meanwhile.
 function closeSheet() {
-  document.querySelectorAll(".sheet-back").forEach((s) => s.remove());
+  document.querySelectorAll(".sheet-back").forEach((s) => {
+    const had = s.contains(document.activeElement) || document.activeElement === document.body;
+    s.remove();
+    if (!had || !(app.desk || lastInput.keys)) return;
+    const to = s.returnTo;
+    if (to && to !== document.body && to.isConnected) to.focus({ preventScroll: true });
+    else if (app.desk && typeof desk !== "undefined" && desk.current)
+      (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
+  });
 }
 
 // The bar under the list, as omalauncher's: the project on its left (tap it
@@ -1583,6 +1799,8 @@ async function pushRefresh() {
 }
 
 async function openSettings() {
+  const open = document.querySelector(".sheet-back.settings");
+  if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
   const body = h("div", {});
   // Drawn at once, the notifications' part once it's known whether they're on.
   const draw = async (known) => {
@@ -1635,10 +1853,13 @@ async function openSettings() {
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
     if (app.desk) kids.push(...deskSettings());
-    body.replaceChildren(...kids);
+    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids));
   };
-  sheet(sheetHead("Settings", app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
+  const back = sheet(sheetHead("Settings", app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
+  back.classList.add("settings");
+  back.redraw = () => draw();
   draw("checking");
+  if (body.parentNode === document.activeElement) menuFocus(body.parentNode);      // opened with the keys: now there's a first line
   draw();
 }
 

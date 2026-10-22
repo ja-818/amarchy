@@ -81,6 +81,11 @@ body { background: transparent; }      /* the wallpaper (body::before) shows thr
 button, textarea, input { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
 button:disabled { opacity: 0.45; cursor: default; }
+/* Where the keys are (a menu's cursor): the accent, around it. A menu,
+   a sheet or Claude's question holds them itself before an arrow starts it. */
+button:focus-visible, [tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.seg .control.on:focus-visible { outline-color: var(--bg); outline-offset: -4px; }
+[tabindex="-1"]:focus { outline: none; }
 ::selection { background: var(--selection); }
 
 /* Nerd Font glyphs, or the plain drawings when the font has none. */
