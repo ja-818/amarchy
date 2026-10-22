@@ -92,12 +92,10 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .row.cursor .task, .desk .row.cursor .state { color: var(--sel-text); opacity: 1; }
 .desk .row .meta { font-size: 11px; }
 .desk .row .side { font-size: 11px; }
-/* Your assistant's card keeps its size and its tint beside Claude too. */
+/* Your assistant's card keeps its size beside Claude too, selected like any row. */
 .desk .row.assistant { padding: 11px 10px 11px 8px; gap: 13px; }
 .desk .row.assistant .avatar-wrap { width: 52px; height: 52px; }
 .desk .row.assistant .name { font-size: 22px; }
-.desk .row.assistant.cursor { background: color-mix(in srgb, var(--accent) 16%, transparent);
-                              border-color: var(--sel-border); }
 .desk .row.assistant.cursor .name, .desk .row.assistant.cursor .line { color: var(--sel-text); }
 .desk .group-head { padding: 12px 6px 4px; font-size: var(--caption); }
 .desk .empty { padding: 32px 12px; }
