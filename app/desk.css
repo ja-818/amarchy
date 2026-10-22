@@ -98,6 +98,8 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .row.assistant .name { font-size: 22px; }
 .desk .row.assistant.cursor .name, .desk .row.assistant.cursor .line { color: var(--sel-text); }
 .desk .group-head { padding: 12px 6px 4px; font-size: var(--caption); }
+.desk .project-head:hover .moves { display: flex; position: absolute; right: 6px; bottom: 2px; }
+.desk .project-head.ruled:hover::after { margin-right: 48px; }
 .desk .empty { padding: 32px 12px; }
 
 /* ---- Claude's column, and the terminal in the gap on its right */

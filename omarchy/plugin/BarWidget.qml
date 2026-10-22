@@ -116,6 +116,18 @@ Panel {
     store.run(["sort", how])
   }
 
+  // Put a project before or after another one (a project header's arrows).
+  function moveProject(name, where, other) {
+    store.run(["projects", "move", name, where, other])
+  }
+
+  // Put your projects in order, one at a time, in the Omarchy menu.
+  function orderProjects() {
+    root.close()
+    root.endSearch()
+    store.run(["projects", "move"])
+  }
+
   // The next sort, from the keyboard (o in the popup).
   function nextSort() {
     var sorts = ["priority", "newest", "oldest"]
@@ -294,7 +306,7 @@ Panel {
       content.menuCursor = -1
     }
     function moveMenu(dy) {
-      var last = content.groupings.length + content.sorts.length - 1
+      var last = content.groupings.length + content.sorts.length
       content.menuCursor = Math.max(0, Math.min(content.menuCursor + dy, last))
     }
     // Switch the grouping, or pick the sort, under the menu's cursor; the
@@ -303,7 +315,11 @@ Panel {
       var g = content.groupings[content.menuCursor]
       if (g) { root.group(g.what); return }
       var o = content.sorts[content.menuCursor - content.groupings.length]
-      if (o) root.sortBy(o.what)
+      if (o) { root.sortBy(o.what); return }
+      if (content.menuCursor === content.groupings.length + content.sorts.length) {
+        content.closeMenu()
+        root.orderProjects()
+      }
     }
 
     // One height for every control up top: the buttons size from their
@@ -555,7 +571,9 @@ Panel {
           groups: store.groups
           cursor: content.cursor
           spinnerFrame: root.spinnerFrame
+          movable: !content.passive
           onActivated: function(index) { content.activated(index) }
+          onMoveProject: function(name, where, other) { root.moveProject(name, where, other) }
           onHovered: function(index) {
             content.pointerMoving = true
             content.hovered(index)
@@ -603,7 +621,7 @@ Panel {
     // checked while on; together they nest in the order you turned them on,
     // and each shows its level (1 outermost) instead of the check. Under
     // them, how the list is sorted inside its groups: one of them, checked.
-    // It stays open to set several.
+    // It stays open to set several. Last, putting your projects in order.
     BorderSurface {
       id: menu
       visible: content.menuOpen
@@ -670,6 +688,25 @@ Panel {
             on: store.sortBy === modelData.what
             hasCursor: content.menuCursor === content.groupings.length + index
             onPicked: root.sortBy(modelData.what)
+          }
+        }
+
+        // The order your projects come in (also the arrows on a project's
+        // header, under the pointer), one at a time in the Omarchy menu.
+        MenuHeader {
+          width: parent.width
+          text: "PROJECTS"
+          gapAbove: Style.spacing.sm
+        }
+
+        MenuRow {
+          width: menuItems.width
+          icon: "󰒺"
+          label: "Order projects…"
+          hasCursor: content.menuCursor === content.groupings.length + content.sorts.length
+          onPicked: {
+            content.closeMenu()
+            root.orderProjects()
           }
         }
       }

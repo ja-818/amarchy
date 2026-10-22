@@ -699,17 +699,7 @@ function fillList(list, query, cursorId) {
   if (mine.length)
     list.append(h("div", { class: "assistant-section" },
       ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true), s))));
-  const groups = v.group || [];
-  let prev = [];
-  for (const s of shown.filter((s) => !s.assistant)) {
-    const labels = groups.map((g) => groupLabel(s, g));
-    const at = labels.findIndex((l, i) => l !== prev[i]);
-    if (at >= 0)
-      for (let i = at; i < labels.length; i++)
-        list.append(h("div", { class: `group-head${i === 0 && groups.length > 1 ? " ruled" : ""}` }, labels[i]));
-    prev = labels;
-    list.append(place(sessionRow(s, groups), s));
-  }
+  grouped(list, shown, v.group || [], (s) => place(sessionRow(s, v.group || []), s));
   const cur = list.querySelector(".row.cursor");
   if (cur) cur.scrollIntoView({ block: "nearest" });
   return shown;
@@ -1130,7 +1120,8 @@ function organizePicker() {
       return { label: `Group by ${label.toLowerCase()}`, icon, detail: on ? "on" : "", act: () => organizeList(next, sort) };
     }),
     ...SORTINGS.map(([what, icon, label]) => ({ label: `Sort: ${label.toLowerCase()}`, icon, detail: sort === what ? "on" : "",
-                                                act: () => organizeList(groups, what) }))] });
+                                                act: () => organizeList(groups, what) })),
+    { label: "Order projects…", icon: "order", act: () => orderProjects() }] });
 }
 
 // The amarchy menu (Ctrl+Alt+M), as on your desktop.

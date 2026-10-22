@@ -16,6 +16,14 @@ anything you can. Commands print results to stdout and fail with a non-zero exit
 Projects (git repos directly inside AMARCHY_WORK):
   amarchy projects [--json]             your projects and their session counts
   amarchy projects --github [--json]    your GitHub repos (✓ = already added)
+  amarchy projects order [project...]   the order your projects come in (the list's project groups, the
+                                        pickers): prints it, or puts these first, in this order; the
+                                        rest keep theirs, and new ones go last, by name
+  amarchy projects move <project> up|down|top|bottom
+                                        move one project in that order
+  amarchy projects move <project> before|after <other>
+                                        the same, next to another one
+  amarchy projects move                 choose one in the Omarchy menu, and where it goes
   amarchy add <owner/repo|git url>      clone a project (prints its path)
   amarchy add --new <name> [--github]   start an empty project (and a private GitHub repo)
   amarchy add                           start a new project interactively (New project in the menu)
@@ -248,6 +256,7 @@ LAST = STATE / "last"
 GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "priority", "status", any or none, outermost first
 SORT_FILE = STATE / "sort"      # how it's sorted inside its groups: "priority", "newest" or "oldest"
 ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
+PROJECT_ORDER = STATE / "project-order"  # the order your projects come in, one name a line (see project_order)
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
 CLAUDE_STATE = STATE / "claude" # per session: its conversation, and what sleep keeps for it (see "sleep")
 SLEEP_AFTER = STATE / "sleep-after"     # minutes idle and off screen before a session sleeps, or "off"
@@ -590,6 +599,89 @@ def projects():
     return out
 
 
+# Your projects come in the order you put them in (`amarchy projects order`,
+# or moved one at a time from any list): the list's project groups, the
+# pickers. One you haven't placed goes after the ones you have, by name, so
+# a project you add shows up last until you move it.
+
+def project_order():
+    """The projects you put in order, first first (names; one may be gone)."""
+    try:
+        names = PROJECT_ORDER.read_text().split("\n")
+    except OSError:
+        return []
+    out = []
+    for n in (n.strip() for n in names):
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def project_rank(order):
+    """A sort key for a project's name: placed ones in their place, the rest after, by name."""
+    at = {n: i for i, n in enumerate(order)}
+    return lambda name: (at.get(name, len(at)), name.lower(), name)
+
+
+def ordered_projects(ps, order=None):
+    """Projects (dicts with a name) in your order."""
+    rank = project_rank(project_order() if order is None else order)
+    return sorted(ps, key=lambda p: rank(p["name"]))
+
+
+def project_names():
+    """Every project there is, in your order: yours, and any a session is in."""
+    names = {p["name"] for p in projects()} | {s["repo"] for s in sessions()}
+    return sorted(names, key=project_rank(project_order()))
+
+
+def set_project_order(names, rest=True):
+    """Put these projects first, in this order; the ones you had placed
+    before keep their order after them (rest=False: they're unplaced, back
+    after them by name). None, or what's wrong with it."""
+    if not isinstance(names, list) or not all(isinstance(n, str) and n.strip() and "\n" not in n for n in names):
+        return "projects: a list of project names"
+    names = [n.strip() for n in names]
+    if len(set(names)) < len(names):
+        return "projects: each one once"
+    order = names + ([n for n in project_order() if n not in names] if rest else [])
+    if order != project_order():
+        write_file(PROJECT_ORDER, "".join(n + "\n" for n in order))
+        tell_shell("refresh")
+    return None
+
+
+PROJECT_MOVES = ("up", "down", "top", "bottom", "before", "after")
+
+
+def move_project(name, where, other=None):
+    """Move a project up or down one, to the top or bottom, or right before or
+    after another one. None, or what's wrong."""
+    names = project_names()
+    if name not in names:
+        return f"no project {name!r}"
+    if where not in PROJECT_MOVES:
+        return f"move it {', '.join(PROJECT_MOVES[:-1])} or {PROJECT_MOVES[-1]}"
+    if where in ("before", "after"):
+        if other not in names:
+            return f"no project {other!r}" if other else f"{where} which project?"
+        if other == name:
+            return None
+    at = names.index(name)
+    names.remove(name)
+    if where == "up":
+        names.insert(max(at - 1, 0), name)
+    elif where == "down":
+        names.insert(min(at + 1, len(names)), name)
+    elif where == "top":
+        names.insert(0, name)
+    elif where == "bottom":
+        names.append(name)
+    else:
+        names.insert(names.index(other) + (where == "after"), name)
+    return set_project_order(names)
+
+
 def github_repos():
     """Your GitHub repos (owned, collaborator, org), most recently pushed first.
 
@@ -682,7 +774,30 @@ def cmd_projects(args):
             for r in rs:
                 print(f"{'✓' if r['added'] else ' '} {r['name']}{'  (private)' if r['private'] else ''}")
         return 0
-    ps = projects()
+    if args[:1] == ["order"]:
+        if len(args) > 1:
+            names, known = args[1:], set(project_names())
+            missing = [n for n in names if n not in known]
+            why = f"no project {missing[0]!r}" if missing else set_project_order(names)
+            if why:
+                return fail(why)
+        print("\n".join(project_names()))
+        return 0
+    if args[:1] == ["move"]:
+        if len(args) == 1:
+            return menu_move_project()
+        if len(args) not in (3, 4) or args[2] not in PROJECT_MOVES or (len(args) == 4) != (args[2] in ("before", "after")):
+            return fail("usage: amarchy projects move <project> up|down|top|bottom | before|after <other>")
+        why = move_project(args[1], args[2], args[3] if len(args) == 4 else None)
+        if why:
+            return fail(why)
+        print("\n".join(project_names()))
+        return 0
+    if args:
+        unknown = [a for a in args if a not in ("--json",)]
+        if unknown:
+            return fail("usage: amarchy projects [--json] | --github [--json] | order [project...] | move ...")
+    ps = ordered_projects(projects())
     if "--json" in args:
         print(json.dumps(ps, indent=2))
     else:
@@ -3174,10 +3289,46 @@ def project_subtext(p):
 
 
 def menu_pick_project():
-    rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in projects()]
+    rows = [(ICON_PROJECT, p["name"], project_subtext(p)) for p in ordered_projects(projects())]
     rows.append((ICON_ADD, ADD_PROJECT))
     repo = menu_select("New session", rows)
     return menu_add_project() if repo == ADD_PROJECT else repo
+
+
+def menu_move_project():
+    """`amarchy projects move`: choose a project in the Omarchy menu, then
+    where it goes (up, down, top, bottom, or right before another one)."""
+    ps = {p["name"]: p for p in projects()}
+    names = project_names()
+    if len(names) < 2:
+        notify("amarchy", "Only one project: nothing to put in order")
+        return 0
+    rows = [(ICON_PROJECT, f"{i + 1}. {n}", project_subtext(ps[n]) if n in ps else "") for i, n in enumerate(names)]
+    picked = menu_select("Move a project", rows)
+    if not picked:
+        return 0
+    name = picked.split(". ", 1)[1]
+    at = names.index(name)
+    moves = [("󰁝", "Up", "up"), ("󰁅", "Down", "down"), ("󰘣", "To the top", "top"),
+             ("󰘡", "To the bottom", "bottom"), ("󰁔", "Before…", "before")]
+    moves = [m for m in moves if not (at == 0 and m[2] in ("up", "top")) and not (at == len(names) - 1 and m[2] in ("down", "bottom"))]
+    time.sleep(0.1)
+    how = menu_select(f"Move {name}", [(icon, label) for icon, label, _ in moves])
+    where = next((m[2] for m in moves if m[1] == how), None)
+    if not where:
+        return 0
+    other = None
+    if where == "before":
+        time.sleep(0.1)
+        others = [n for n in names if n != name]
+        other = menu_select(f"Put {name} before", [(ICON_PROJECT, n) for n in others])
+        if not other:
+            return 0
+    why = move_project(name, where, other)
+    if why:
+        notify("amarchy", why)
+        return fail(why)
+    return 0
 
 
 def menu_add_project():
@@ -3749,15 +3900,17 @@ def list_sort():
     return how if how in SORTS else "priority"
 
 
-def session_order(s, groups=None, how=None):
-    """Grouped first (outermost first, in the order the groupings nest), then
-    sorted inside each group: by priority, higher first, or by when it was
-    opened. Ties keep the order you opened them in, so each one keeps its place."""
+def session_order(s, groups=None, how=None, projects_in=None):
+    """Grouped first (outermost first, in the order the groupings nest; the
+    projects in yours, see project_order), then sorted inside each group: by
+    priority, higher first, or by when it was opened. Ties keep the order you
+    opened them in, so each one keeps its place."""
     groups = list_groups() if groups is None else groups
     how = list_sort() if how is None else how
+    projects_in = project_rank(project_order()) if projects_in is None else projects_in
     rank = RANK[priority(s)]
     created = s.get("created", 0)
-    by = {"project": s["repo"].lower(), "priority": rank,
+    by = {"project": projects_in(s["repo"]), "priority": rank,
           "status": STATUS_GROUPS.get(status_group(s), len(STATUS_GROUPS))}
     # Your assistant's section first, above the groups: it, then the other
     # sessions of its project.
@@ -3805,7 +3958,7 @@ def cmd_group(args):
 def list_at():
     """When the list's grouping or sort was last set here (0: never)."""
     at = 0
-    for f in (GROUP_FILE, SORT_FILE, ORDER_FILE):
+    for f in (GROUP_FILE, SORT_FILE, ORDER_FILE, PROJECT_ORDER):
         try:
             at = max(at, f.stat().st_mtime)
         except OSError:
@@ -3814,20 +3967,27 @@ def list_at():
 
 
 def list_setting():
-    """How the list is grouped and sorted here, and since when: what a host
-    tells its desktops, so the phone's list and the desktop's agree."""
-    return {"group": list_groups(), "sort": list_sort(), "at": list_at()}
+    """How the list is grouped and sorted here (and the order of your
+    projects), and since when: what a host tells its desktops, so the phone's
+    list and the desktop's agree."""
+    return {"group": list_groups(), "sort": list_sort(), "projects": project_order(), "at": list_at()}
 
 
 def set_list(data):
-    """Group and sort the list as {"group": [...], "sort": ...} says (from
-    the phone, or a desktop: see remote_list). What's already so is left
-    alone, so it keeps its time. None, or what's wrong with it."""
+    """Group and sort the list as {"group": [...], "sort": ..., "projects":
+    [...]} says (from the phone, or a desktop: see remote_list); without
+    "projects" (an amarchy from before), their order stays as it is. What's
+    already so is left alone, so it keeps its time. None, or what's wrong with it."""
     groups, how = data.get("group") if isinstance(data, dict) else None, (data or {}).get("sort")
     if not isinstance(groups, list) or not all(g in GROUPS for g in groups) or len(set(groups)) < len(groups):
         return "group: project, priority and/or status, each once"
     if how not in SORTS:
         return "sort: priority, newest or oldest"
+    if "projects" in data:
+        # Theirs, all of it: one it hasn't placed isn't placed here either.
+        why = set_project_order(data["projects"], rest=False)
+        if why:
+            return why
     if groups != list_groups():
         set_groups(groups)
     if how != list_sort():
@@ -4147,8 +4307,8 @@ def session_view():
                 # What it last wrote: its notifications' body (a desktop's,
                 # from here), and the list's preview while you haven't read it.
                 s["said"] = last_said(s)
-    groups, how = list_groups(), list_sort()
-    ss.sort(key=lambda s: session_order(s, groups, how))
+    groups, how, projects_in = list_groups(), list_sort(), project_rank(project_order())
+    ss.sort(key=lambda s: session_order(s, groups, how, projects_in))
     return ss
 
 
@@ -5284,7 +5444,9 @@ def remote_list(host, theirs, sent):
     mine = list_setting()
     if not isinstance(theirs, dict):
         return
-    if (theirs.get("group"), theirs.get("sort")) == (mine["group"], mine["sort"]):
+    # A host from before the project order has none: it's left out.
+    if (theirs.get("group"), theirs.get("sort"), theirs.get("projects", mine["projects"])) == \
+            (mine["group"], mine["sort"], mine["projects"]):
         sent.clear()        # it took what was sent, if anything was
         return
     at = theirs.get("at")
@@ -5293,7 +5455,7 @@ def remote_list(host, theirs, sent):
         if why:
             print(f"amarchy: the list on {host} is grouped in a way this amarchy doesn't know: {why}", file=sys.stderr)
         return
-    want = json.dumps({"group": mine["group"], "sort": mine["sort"]})
+    want = json.dumps({"group": mine["group"], "sort": mine["sort"], "projects": mine["projects"]})
     if sent.get("what") == want and time.time() - sent.get("at", 0) < LOOK_RETRY:
         return
     sent.update(what=want, at=time.time())
@@ -6207,6 +6369,7 @@ def cmd_events(args):
     while True:
         if time.time() - projects_at > 10:
             ps, projects_at = projects(), time.time()
+        ps = ordered_projects(ps)
         view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps,
                 "version": commit, "alerts": alerts(), "notes": recent_notes(), "picture": picture_sig(PICTURE)}
         if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
@@ -7689,6 +7852,7 @@ def app_watch(st):
         try:
             if time.time() - projects_at > 10:
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
+            ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
             # One finished while it was on your phone's screen: you've seen it.
             for s in ss:
@@ -8428,6 +8592,10 @@ def app_handler(st, users, address):
                     return self.error(400, "all, needs-you or assistant")
                 write_file(ALERTS_FILE, data["alerts"] + "\n")
                 return self.send(200, {})
+            if self.path == "/api/projects/move":     # a project up, down... in your order (amarchy projects move)
+                name, where, other = data.get("name"), data.get("where"), data.get("other")
+                why = move_project(name, where, other) if isinstance(name, str) else "which project?"
+                return self.error(400, why) if why else self.send(200, {"projects": project_names()})
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})

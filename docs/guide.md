@@ -132,6 +132,18 @@ the Ⓐ, `g` opens it (`j`/`k`, `↵` to switch, `Esc` to close), `p`, `f` and
 (all of them at once, outermost first) and `amarchy sort
 priority|newest|oldest`. The choices stick.
 
+Your projects come in the order you choose, not alphabetically: in the list
+grouped by project, and in the picker of a new session. Point at a project's
+header and arrows show on its right, to move it up or down past the project
+next to it; **Order projects…** at the bottom of the group & sort menu puts
+them in order one at a time in the Omarchy menu (up, down, to the top or
+bottom, or right before another one). A project you haven't placed comes
+after the ones you have, by name, so one you add shows up last until you
+move it. From a script, `amarchy projects order` prints the order and
+`amarchy projects order amarchy jaken` puts these first; `amarchy projects
+move <project> up|down|top|bottom` and `move <project> before|after <other>`
+move one.
+
 ## Keys
 
 | Key | |
@@ -428,7 +440,9 @@ works). It shows the list as amarchy does beside Claude (what each session
 is about, project · branch, needs you / working / idle, priority and groups),
 with the same search, and the same group & sort menu: it's one setting with
 your desktop's, so the phone's list is grouped and sorted as the desktop's,
-and changing it on either changes both. Hold a session down to set its
+and changing it on either changes both. The order of your projects too: tap
+a project's header (or **Order projects…** in that menu) for all of them,
+each with arrows; hold an arrow to send it to the top or bottom. Hold a session down to set its
 priority or close it (from its ••• menu too): it asks first, as the
 desktop does, and says if uncommitted work would go with it. In a
 session, its conversation, a box to send it messages, and Claude's questions
@@ -828,6 +842,9 @@ amarchy group <grouping> <grouping>...  group by these, nested in this order, e.
 amarchy group none                    no grouping (the default)
 amarchy sort [priority|newest|oldest] how the list is sorted inside its groups (priority, the default:
                                       higher first, then the order you opened them in)
+amarchy projects order [project...]   the order of your projects (prints it, or puts these first)
+amarchy projects move <project> up|down|top|bottom | before|after <other>
+                                      move one in it (the Omarchy menu without a project)
 amarchy layout                        resize Claude's column for the current monitor
 amarchy remote <ssh host> | off       start new sessions on another machine (see Remote sessions) / here again
 amarchy remote [--status]             where new sessions start / whether that host answers

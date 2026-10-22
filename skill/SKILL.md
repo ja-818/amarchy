@@ -84,7 +84,8 @@ command's usage without running it (an option it doesn't know fails instead).
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
   Claude runs), `background` (Claude Code background sessions running in its
   worktree).
-- `amarchy projects --json`: the user's projects and how many sessions each has.
+- `amarchy projects --json`: the user's projects and how many sessions each
+  has, in the user's order (`amarchy projects order` prints just the names).
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
   its saved commands (`name<TAB>command`).
 - `amarchy run`: (re)start the project's run command in the terminal beside
@@ -117,6 +118,9 @@ dev server). Restart the terminal so the user sees the result too.
   matters to the user. The list puts higher priority first (unless the user
   sorts it by date, `amarchy sort`). Without a level it prints it (that you
   can do freely); only set it when asked.
+- `amarchy projects move <project> up|down|top|bottom|before <other>|after <other>`
+  / `amarchy projects order <project>...`: the order the user's projects come in
+  (the list's project groups, the new-session picker). Only when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
   strip above you. Claude Code's own title (cut down to "Keyword: a few words") is shown until then, so don't rename
   unprompted. Never overwrite a name the user gave (`title` in `amarchy list`).
