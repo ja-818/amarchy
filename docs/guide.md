@@ -508,14 +508,29 @@ On the phone, open that address in Safari, then Share → **Add to Home
 Screen**, and open amarchy from the home screen: its settings (the gear) turn
 on notifications (iOS 16.4 or newer; iPhones only notify home screen apps).
 
-It wears your desktop's look: the theme your sessions wear there (the amarchy
-theme, else your Omarchy theme), its monospace font with the Nerd Font icons
-the session list uses, Hyprland's rounding, and your wallpaper, the app a
-window over it with the gaps around it and a see-through background. The
-desktop showing the host's sessions (`amarchy remote`) sends it whenever it
-changes, the font and the wallpaper (cut to a phone's screen with ImageMagick)
-only when those change; the host keeps it in `~/.local/state/amarchy/app/look`.
-Until a desktop has, the app wears Omarchy's default, Tokyo Night.
+Its look is picked in the app itself (Settings → **Theme, font, wallpaper…**,
+or `Ctrl+Alt+T` in a computer's browser), and every phone and browser of
+yours wears it at once:
+
+- **Theme**: Omarchy's 23 themes (Tokyo Night, Catppuccin, Gruvbox, Nord,
+  Rosé Pine, Hackerman...), each a card in its own colors with its wallpaper.
+  A theme colors the app as the Omarchy shell colors its menus, the terminals
+  (Claude's and the session's) with its 16 terminal colors, and Claude Code
+  itself in the sessions started after it (its own theme, `custom:amarchy`).
+- **Font**: JetBrains Mono (Omarchy's), Caskaydia Mono or Fira Code, the Nerd
+  Font builds with the icons the session list uses, or System (the device's
+  own monospace, SF Mono on Apple's).
+- **Wallpaper**: the theme's (drawn for it), your own (choose a picture: it's
+  cut to a phone's screen and a computer's, in the browser), or none. The app
+  is a window over it with the gaps around it and a see-through background.
+
+On the host, `amarchy theme` does the same (`amarchy theme nord --font "fira
+code" --wallpaper ~/beach.jpg`, `--list` for the names). The host keeps what's
+picked in `~/.local/state/amarchy/app/theme`, the themes and fonts are
+amarchy's (`themes/`, `fonts/`, with their credits). Until something is
+picked, the app wears the look an Omarchy desktop last sent it (`amarchy
+remote`), which stays in the list as a theme of its own, marked "your
+desktop's"; with no desktop ever, Tokyo Night.
 
 How it stays yours: the app listens on the host's localhost only, and
 `tailscale serve` puts it on your tailnet over HTTPS, never on the internet
@@ -597,8 +612,7 @@ menu, and `↓` from the search goes into the list.
 The keyboard follows the pointer between Claude and the terminal, as on
 Omarchy. On a Mac, Option is Alt in the terminals (Settings turns that off,
 for typing accented letters with it), and `Shift+Enter` is a new line in
-Claude's prompt. `Ctrl+Alt+T` says the theme is your desktop's: the browser
-wears what your desktop sends.
+Claude's prompt. `Ctrl+Alt+T` picks the theme, the font and the wallpaper.
 
 **Pasting an image** works as on your desktop: `⌘V` (or `Ctrl+V`, once the
 browser lets the page read the clipboard) or dropping an image on Claude.
@@ -895,7 +909,8 @@ amarchy sleep --all [--force]         every session that can sleep, except the o
 amarchy sleep --after [minutes|off]   how long an idle session waits off screen before it sleeps (default 1)
 amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
-amarchy theme [name|system]              amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+amarchy theme [name|system]           amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
+                                      on a host, the app's look: a theme, --font <name>, --wallpaper theme|own|none|<picture>, --list
 amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add;
                                       --assistant [name|off] for your assistant's)
 amarchy keys [inside|anywhere <mod>]  the modifiers of amarchy's keys (the picker without one; --show, reset)

@@ -1,0 +1,21 @@
+The themes the app can wear (pick one in the app's Settings, or with
+`amarchy theme <name>`), one folder each:
+
+colors.toml
+  The theme's palette, exactly as Omarchy ships it (themes/<name>/colors.toml
+  at basecamp/omarchy 3c7027d, 2026-10-22). Omarchy is MIT licensed, copyright
+  David Heinemeier Hansson: LICENSE-omarchy. Several palettes are Omarchy's
+  takes on color schemes of their own (Catppuccin, Everforest, Flexoki,
+  Gruvbox, Kanagawa, Nord, Rosé Pine, Tokyo Night), each MIT licensed by its
+  authors.
+
+theme.toml
+  amarchy's: the theme's name, the style its wallpaper is drawn in, and what
+  Omarchy's hyprland.lua for the theme changes (its border colors, rounded
+  corners, how see-through its terminals are).
+
+wallpaper.svg, wallpaper-wide.svg
+  amarchy's own, drawn by make.py from the palette, for a phone and for a
+  computer's screen. Run it to draw them again. Omarchy's own wallpapers
+  aren't here: they come without a word on who made them or under what
+  license.

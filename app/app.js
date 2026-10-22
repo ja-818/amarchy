@@ -10,7 +10,7 @@ const STATUS = { waiting: "Needs you", working: "Working", done: "Done", idle: "
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // The glyphs amarchy's list uses on the desktop (Nerd Font icons), when the
-// font your desktop sent has them; else the drawings below and plain marks.
+// look's font has them; else the drawings below and plain marks.
 const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", done: "\u{F05E0}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
@@ -86,8 +86,8 @@ function taskText(task, cls) {
   return el;
 }
 
-// The look your desktop sent (theme.css), again whenever it changes; the
-// status bar in its background.
+// The look picked (theme.css: the theme, its font, the wallpaper), again
+// whenever it changes, on every device; the status bar in its background.
 function wearLook(look) {
   const stamp = look ? `${look.look || ""}${look.font || ""}` : "";
   const link = document.getElementById("look");
@@ -96,7 +96,16 @@ function wearLook(look) {
     const v = `${(look.look || "").slice(0, 12)}${(look.font || "").slice(0, 12)}`;
     const next = h("link", { rel: "stylesheet", href: `theme.css?v=${v}`, id: "look" });
     next.dataset.stamp = stamp;
-    next.addEventListener("load", () => { link.remove(); paintBars(); restyleTerminals(); });
+    next.addEventListener("load", async () => {
+      link.remove();
+      paintBars();
+      // A new font: loaded before the terminals measure it again (or a moment's wait).
+      const family = getComputedStyle(document.documentElement).getPropertyValue("--font").trim();
+      if (family && document.fonts) await Promise.race([
+        Promise.all([document.fonts.load(`16px ${family}`), document.fonts.load(`bold 16px ${family}`)]).catch(() => {}),
+        new Promise((ok) => setTimeout(ok, 3000))]);
+      restyleTerminals();
+    });
     link.after(next);
   }
   paintBars();
@@ -1971,10 +1980,10 @@ async function openSettings() {
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newBar) app.newBar.use(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
-    const look = app.view && app.view.look && app.view.look.look;
+    const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
-      h("p", {}, look ? "Your theme and font, as your desktop wears them. Change your theme there and it changes here."
-                      : "Omarchy's default. Your own theme shows up here once your desktop has sent it (it does on its own when amarchy remote points at this host)."),
+      h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),
+      h("button", { class: "control wide", onclick: () => openLook() }, "Theme, font, wallpaper…"),
       h("div", { class: "section" }, "Host"),
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
@@ -1988,6 +1997,151 @@ async function openSettings() {
   draw("checking");
   if (body.parentNode === document.activeElement) menuFocus(body.parentNode);      // opened with the keys: now there's a first line
   draw();
+}
+
+// ---- the look
+//
+// The theme (amarchy's: Omarchy's palettes, with wallpapers drawn for them),
+// the font and the wallpaper, picked here for every phone and browser of
+// yours: they're kept on the host (amarchy theme there does the same).
+
+async function openLook() {
+  const body = h("div", {}, h("p", {}, "…"));
+  const back = sheet(sheetHead("Look", "On every phone and browser of yours"), body);
+  back.classList.add("look");
+  let info;
+  const pick = async (change, el) => {
+    if (el) el.classList.add("busy");
+    try {
+      info = await api("/api/look", change);
+      wearIt();
+    } catch (err) { toast(err.message); }
+    if (el) el.classList.remove("busy");
+    draw();
+  };
+  // Worn here at once; every other device takes it from the list in a moment.
+  const wearIt = () => {
+    if (app.view) app.view.look = info.look;
+    app.nerd = !!info.nerd;
+    wearLook(info.look);
+    refresh();
+  };
+  const draw = () => {
+    const card = (t) => {
+      const el = h("button", { class: `theme-card${t.key === info.theme ? " on" : ""}`, "aria-label": t.name,
+                               "aria-pressed": t.key === info.theme ? "true" : "false",
+                               onclick: (e) => { if (t.key !== info.theme) pick({ theme: t.key }, e.currentTarget); } },
+        h("span", { class: "thumb" }),
+        h("span", { class: "dots" }, ...t.colors.slice(2).map((c) => {
+          const d = h("i", {});
+          d.style.setProperty("--dot", c);
+          return d;
+        })),
+        h("span", { class: "name" }, t.name, t.desktop ? h("small", {}, "your desktop's") : null));
+      el.style.setProperty("--card-bg", t.colors[0]);
+      el.style.setProperty("--card-fg", t.colors[1]);
+      if (t.wallpaper) el.style.setProperty("--thumb", `url("${t.wallpaper}")`);
+      return el;
+    };
+    const fonts = info.fonts.map((f) => h("button", { class: `control${f.key === info.font ? " on" : ""}`,
+      onclick: (e) => pick({ font: f.key }, e.currentTarget) }, f.name));
+    const walls = [["theme", "Theme's"], ["own", "Your own"], ["none", "None"]].map(([v, label]) =>
+      h("button", { class: `control${info.wallpaper === v ? " on" : ""}`, disabled: v === "own" && !info.own,
+                    onclick: (e) => pick({ wallpaper: v }, e.currentTarget) }, label));
+    const file = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => {
+      const f = file.files[0];
+      if (!f) return;
+      toast("Cutting it to size…");
+      try {
+        const [phone, wide] = await Promise.all([cutPicture(f, false), cutPicture(f, true)]);
+        info = await api("/api/look/wallpaper", { phone, wide });
+        wearIt();
+        toast("Your wallpaper is on.");
+      } catch (err) { toast(err.message); }
+      draw();
+    } });
+    keepFocus(back.firstChild, () => body.replaceChildren(...[
+      h("div", { class: "section" }, "Theme"),
+      themeGrid(info.themes.map(card)),
+      h("div", { class: "section" }, "Font"),
+      h("div", { class: "seg wrap" }, ...fonts),
+      info.font === "desktop" ? h("p", {}, `Now: ${info.sent_font}, the font your desktop sent.`) : null,
+      h("div", { class: "section" }, "Wallpaper"),
+      h("div", { class: "seg" }, ...walls),
+      h("p", {}, info.own_chosen ? "Your own: the picture you chose."
+               : info.own ? "Your own: your desktop's wallpaper, until you choose a picture."
+               : "Choose a picture to have one of your own."),
+      h("button", { class: "control wide", onclick: () => file.click() }, info.own_chosen ? "Choose another picture…" : "Choose a picture…"),
+      file].filter(Boolean)));
+  };
+  try {
+    const res = await fetch("/api/look");
+    info = await res.json();
+    if (!res.ok) throw new Error(info.error || `It didn't work (${res.status})`);
+  } catch (err) {
+    body.replaceChildren(h("p", {}, err.message));
+    return;
+  }
+  draw();
+  if (back.firstChild === document.activeElement) menuFocus(back.firstChild);
+}
+
+// The themes in rows: the arrows go along them, and up and down a row.
+function themeGrid(cards) {
+  const grid = h("div", { class: "theme-grid row-btns" }, ...cards);
+  grid.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    const at = cards.indexOf(document.activeElement);
+    if (at < 0) return;
+    const cols = cards.filter((c) => c.offsetTop === cards[0].offsetTop).length;
+    const to = cards[at + (e.key === "ArrowDown" ? cols : -cols)];
+    if (!to) return;            // off the grid: the menu's own keys take it to the line above or below
+    e.preventDefault();
+    to.focus();
+    to.scrollIntoView({ block: "nearest" });
+  });
+  return grid;
+}
+
+// A picture of yours cut as the app shows a wallpaper (as the host would):
+// a phone's screen, the middle of it; or a computer's, the whole of it at
+// most a laptop's screen in size. A JPEG, in base64.
+async function cutPicture(file, wide) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => no(new Error("That picture can't be read here."));
+      i.src = url;
+    });
+    const [w, h0] = [img.naturalWidth, img.naturalHeight];
+    let cw, ch, sx = 0, sy = 0, sw = w, sh = h0;
+    if (wide) {
+      const k = Math.min(1, 2880 / w, 1800 / h0);
+      [cw, ch] = [Math.round(w * k), Math.round(h0 * k)];
+    } else {
+      [cw, ch] = [1290, 2796];
+      const k = Math.max(cw / w, ch / h0);
+      [sw, sh] = [cw / k, ch / k];
+      [sx, sy] = [(w - sw) / 2, (h0 - sh) / 2];
+    }
+    const canvas = document.createElement("canvas");
+    [canvas.width, canvas.height] = [cw, ch];
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+    const blob = await new Promise((ok) => canvas.toBlob(ok, "image/jpeg", 0.82));
+    if (!blob) throw new Error("That picture can't be read here.");
+    const data = await new Promise((ok) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(",")[1] || "");
+      r.readAsDataURL(blob);
+    });
+    return data;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ---- going between views

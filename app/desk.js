@@ -4,7 +4,7 @@
 // both of them real terminals (xterm.js) attached to the session's tmux on the
 // host, as your desktop's windows are: the desktop, the phone and the browser
 // all show the same session at once. The keys are amarchy's (Ctrl+Alt+…), the
-// look your desktop's. Loaded before app.js, whose helpers it uses (h, glyph,
+// look the one picked in the app (openLook). Loaded before app.js, whose helpers it uses (h, glyph,
 // api, toast, sessionRow…); app.js starts it on a wide screen (deskStart).
 "use strict";
 
@@ -67,8 +67,8 @@ function loadXterm() {
   });
   xtermLoading = (async () => {
     for (const src of webgl() ? [...XTERM, WEBGL] : XTERM) await one(src);
-    // The monospace font your desktop sent (with its Nerd Font icons), before
-    // the terminals measure it.
+    // The look's monospace font (with its Nerd Font icons), before the
+    // terminals measure it.
     const family = termFont();
     try {
       await Promise.all([document.fonts.load(`16px ${family}`), document.fonts.load(`bold 16px ${family}`)]);
@@ -83,8 +83,8 @@ function cssVar(name) {
 
 function termFont() { return cssVar("font") || "ui-monospace, Menlo, monospace"; }
 
-// The terminals' font size: yours if you changed it here, else as your
-// desktop's terminal has it (sent with the look), a bit bigger on a phone.
+// The terminals' font size: yours if you changed it here, else the look's
+// (the size a desktop's terminal had, when it sent its look).
 function termSize() {
   const mine = parseFloat(store.get("term-size") || "");
   if (mine >= 6 && mine <= 40) return mine;
@@ -106,7 +106,7 @@ function termColor(c, a) {
 }
 
 // Your theme's terminal colors. The background is the window's (.term-box),
-// as see-through as your desktop's terminals over the wallpaper, or the
+// as see-through as the look's terminals over the wallpaper, or the
 // phone app's glass: the terminal's own is clear (what's drawn in reverse
 // still takes its color, solid).
 function termTheme() {
@@ -859,7 +859,7 @@ const DESK_KEYS = {
   KeyS: () => deskSearch(), KeyZ: () => toggleZen(), Enter: () => toggleTerminal(),
   ArrowLeft: () => toPane("claude"), ArrowRight: () => toPane("term"),
   KeyR: () => runProject(), KeyC: () => pickCommand(),
-  KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => toast("The theme is your desktop's: change it there (Ctrl+Alt+T) and it changes here"),
+  KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(),
   ArrowUp: () => desk.current && setPriority(row(desk.current), "up"),
   ArrowDown: () => desk.current && setPriority(row(desk.current), "down"),
   KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(), KeyA: () => barDrop(),
@@ -1185,7 +1185,8 @@ function deskMenu() {
       { label: "Close one…", act: () => picker({ title: "Close which session?", items: ((app.view && app.view.sessions) || []).map((x) =>
         ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
     { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
-      { label: "Notifications, look, layout…", act: () => openSettings() },
+      { label: "Notifications, layout…", act: () => openSettings() },
+      { label: "Theme, font, wallpaper…", key: "Ctrl+Alt+T", act: () => openLook() },
       { label: "Sound…", detail: "the chimes, each played as you pick it", act: () => soundSheet(false) },
       { label: "Keys", act: () => showKeys() }] }) });
   picker({ title: "Amarchy", items });
@@ -1197,7 +1198,7 @@ function showKeys() {
     ["Ctrl+Alt+← / →", "Claude / the terminal (Super+arrows on Omarchy)"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New session / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
-    ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+A", "Your sessions under the Ⓐ (Super+Alt+A)"],
+    ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions under the Ⓐ (Super+Alt+A)"],
     ["Hold Space", "Dictate to Claude (/voice), with this computer's microphone"],
     ["⌘V / Ctrl+V", "Paste an image into Claude (or drop it there); wl-paste on the host reads it"],
     ["Shift+Enter", "A new line in Claude's prompt"]];
@@ -1217,7 +1218,7 @@ function deskSettings() {
   return [
     h("div", { class: "section" }, "Terminals"),
     h("div", { class: "seg" }, sizeBtn(-1), h("span", { class: "control size" }, `${size}px`), sizeBtn(1),
-      h("button", { class: "control", onclick: () => { store.set("term-size", ""); for (const p of [desk.claude, desk.term]) if (p) p.restyle(); openSettings(); } }, "As the desktop")),
+      h("button", { class: "control", onclick: () => { store.set("term-size", ""); for (const p of [desk.claude, desk.term]) if (p) p.restyle(); openSettings(); } }, "As the theme")),
     h("button", { class: `control wide${meta ? " on" : ""}`, onclick: () => {
       store.set("option-meta", meta ? "off" : "");
       for (const p of [desk.claude, desk.term]) if (p) p.restyle();

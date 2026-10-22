@@ -1,0 +1,21 @@
+The monospace fonts the app can wear (pick one in the app's Settings, or with
+`amarchy theme --font`). Each is the Nerd Fonts build of the font (its icons
+are the ones amarchy's list draws), regular and bold, converted to WOFF2 for
+the browser. Nothing else about them is changed.
+
+jetbrains-mono/   JetBrainsMono Nerd Font, Omarchy's font
+  JetBrains Mono 2.304, by The JetBrains Mono Project Authors.
+  SIL Open Font License 1.1 (OFL.txt). https://github.com/JetBrains/JetBrainsMono
+
+caskaydia-mono/   CaskaydiaMono Nerd Font
+  Cascadia Mono, by Microsoft Corporation ("Cascadia Code" is its Reserved
+  Font Name, hence Nerd Fonts' "Caskaydia"). SIL Open Font License 1.1
+  (OFL.txt). https://github.com/microsoft/cascadia-code
+
+fira-code/        FiraCode Nerd Font
+  Fira Code, by The Fira Code Project Authors. SIL Open Font License 1.1
+  (OFL.txt). https://github.com/tonsky/FiraCode
+
+The Nerd Fonts patches (v3.5.1) are MIT; the icons they add come from icon
+sets under their own licenses (Font Awesome, Material Design Icons, Codicons,
+Octicons...), listed at https://github.com/ryanoasis/nerd-fonts/blob/master/license-audit.md
