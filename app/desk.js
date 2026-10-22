@@ -301,6 +301,7 @@ class TermPane {
   key(e) {
     // Space let go while Claude listens: held a moment more (as key repeats),
     // so the last word, still on its way, is in what Claude writes down.
+    if (e.type === "keyup" && e.code === "Space" && this.which === "claude" && !voice.on) voiceTyped();
     if (e.type === "keyup" && e.code === "Space" && voice.on && this.which === "claude") {
       const until = Date.now() + MIC_TAIL;
       const hold = setInterval(() => {
@@ -324,9 +325,11 @@ class TermPane {
         this.pasteFromClipboard();
         return false;
       }
-      // Holding Space: Claude's voice mode is about to listen, so the
-      // microphone opens now, and nothing said at the start is lost.
-      if (this.opts.mic && plain && e.code === "Space" && e.repeat) voiceWarm(this.sid);
+      // Space down: Claude's voice mode may be about to listen (it waits
+      // for the key to repeat, half a second on a Mac), so the microphone
+      // comes on now, and nothing said at the start is lost. Let go before
+      // it repeats, it was just a space.
+      if (this.opts.mic && plain && e.code === "Space" && app.view && app.view.voice) voiceWarm(this.sid, e.repeat);
     }
     return true;
   }
@@ -422,18 +425,31 @@ async function copyText(text) {
 // listens waits on the host) and the host says when Claude starts and stops
 // recording.
 
-const voice = { ws: null, sid: null, on: false, warmed: null, idle: null };
+const voice = { ws: null, sid: null, on: false, warmed: null, idle: null, held: false, typed: null };
+const MIC_KEEP = 600000;  // ms the microphone is kept, off, after the last dictation (on a computer)
 
 function micWanted() {
   return !!desk.claude && desk.focus === "claude" && document.hasFocus() && document.visibilityState === "visible";
 }
 
-function voiceWarm(sid) {
+function voiceWarm(sid, held) {
+  if (held) voice.held = true;
   if (voice.ws && voice.sid === sid) return;
   voiceStart(sid);
+  voice.held = !!held;
   clearTimeout(voice.warmed);
   // Held, and yet Claude didn't start listening (its voice mode is off).
   voice.warmed = setTimeout(() => { if (!voice.on) voiceStop(); }, 4000);
+}
+
+// Space let go, Claude not listening: a space typed, unless Claude takes
+// it as the key tapped (its tap mode), which it says in a moment.
+function voiceTyped() {
+  if (!voice.ws || voice.on) return;
+  clearTimeout(voice.typed);
+  const tap = !!(app.view && app.view.voice_mode === "tap");
+  if (!tap && !voice.held) voiceStop();
+  else if (tap) voice.typed = setTimeout(() => { if (!voice.on) voiceStop(); }, 1000);
 }
 
 function voiceSignal(sid, on) {
@@ -472,8 +488,9 @@ async function voiceStart(sid) {
 function voiceStop() {
   const ws = voice.ws;
   voice.ws = null;
-  voice.on = false;
+  voice.on = voice.held = false;
   clearTimeout(voice.warmed);
+  clearTimeout(voice.typed);
   document.body.classList.remove("dictating");
   if (ws) {
     try { if (ws.readyState === WebSocket.OPEN) ws.send("end"); } catch (e) { /* gone */ }
@@ -482,9 +499,10 @@ function voiceStop() {
   if (mic.stream) {
     micRelease();
     // On a computer, off for good after a while, so the browser stops
-    // showing it in use (a phone keeps it: iOS would ask again).
+    // showing it in use (a phone keeps it: iOS would ask again); until then
+    // the next dictation starts at once, not a second or two later.
     clearTimeout(voice.idle);
-    if (app.desk) voice.idle = setTimeout(() => { if (!voice.ws) micClose(); }, 20000);
+    if (app.desk) voice.idle = setTimeout(() => { if (!voice.ws) micClose(); }, MIC_KEEP);
   }
 }
 
@@ -516,6 +534,7 @@ async function talkStop(pane) {
 function micFocus() {
   if (desk.claude) desk.claude.control({ mic: micWanted() });
   if (!micWanted() && voice.ws && !voice.on) voiceStop();
+  if (app.desk && document.visibilityState === "hidden" && !voice.ws && mic.stream) micClose();     // out of sight: let it go
 }
 
 // ---- the layout

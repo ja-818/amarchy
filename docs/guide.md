@@ -575,10 +575,13 @@ page's terminals say which page they are) the way it asks your desktop.
 
 **Dictating** (`/voice`): hold Space in Claude, as on your desktop. While the
 page has the keyboard in a session's Claude, that session's `rec` on the host
-is the browser's microphone: the page opens it as soon as Space is held
-(what's said before Claude listens waits on the host), the host tells it when
-Claude starts and stops recording, and the words come up in Claude's prompt.
-The browser asks for the microphone the first time. When the page loses the
+is the browser's microphone: the page turns it on as soon as Space goes down
+(not once the key repeats, half a second later; a space only typed turns it
+off again), what's said before Claude listens waits on the host, the host
+tells it when Claude starts and stops recording, and the words come up in
+Claude's prompt. The browser asks for the microphone the first time, and the
+page keeps it, off, for ten minutes after a dictation (or until you leave
+the tab), so the next one starts at once. When the page loses the
 keyboard (another window, the terminal), `rec` is the host's own again.
 
 **Notifications**: Settings turns them on, as on the phone (in Safari, add the
