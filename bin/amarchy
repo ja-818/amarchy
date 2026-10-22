@@ -4133,8 +4133,10 @@ def session_view():
         if not s.get("host"):
             s["assistant"] = assistant_role(s, mine)
             s["assistant_name"] = mine["name"] if s["assistant"] else ""
-            if s["assistant"] == "main":
-                s["said"] = last_said(s)        # for its notifications (a desktop's, from here)
+            if s["assistant"]:
+                # What it last wrote: its notifications' body (a desktop's,
+                # from here), and the list's preview while you haven't read it.
+                s["said"] = last_said(s)
     groups, how = list_groups(), list_sort()
     ss.sort(key=lambda s: session_order(s, groups, how))
     return ss
@@ -4831,7 +4833,7 @@ def remote_clean(sessions):
         s["unseen"] = s.get("unseen") is True and s["status"] == "idle"
         s["assistant"] = s.get("assistant") if s.get("assistant") in ("main", "near") else ""
         s["assistant_name"] = str(s.get("assistant_name") or "")[:40] if s["assistant"] else ""
-        s["said"] = str(s.get("said") or "")[:300] if s["assistant"] == "main" else ""
+        s["said"] = str(s.get("said") or "")[:300] if s["assistant"] else ""
         out.append(s)
     return out
 

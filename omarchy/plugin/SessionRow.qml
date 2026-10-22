@@ -16,6 +16,10 @@ import qs.Ui
 // Your assistant (`amarchy assistant`) is bigger: its picture in the icon's
 // place with its state on a badge, its name, and what it's on, on a tint of
 // the accent. The other sessions of its project show its picture small.
+// Unread (a turn it finished that you haven't opened yet, here or on another
+// device): a dot by the time; your assistant's card shows the start of what
+// it wrote, with "New" by its name, and the other sessions of its project
+// show it in place of project · branch.
 // The cursor (which starts on the session you're in) uses the menu's selected
 // treatment. Under the time sits the priority: a flag for high, in the
 // theme's accent, an arrow down for low (which also steps back, dimmed).
@@ -49,8 +53,11 @@ BorderSurface {
   readonly property string assistantName: session.assistant_name || "Assistant"
   readonly property int avatarSize: main ? Math.round(iconSize * 2.6) : Math.round(iconSize * 1.05)
   // Under its name: what it's on (unless that's just its name again), else how it is.
+  // What your assistant (or another session of its project) wrote, unread.
+  readonly property string said: unseen && assistant !== "" ? (session.said || "") : ""
   readonly property string assistantLine: {
     if (status === "waiting") return "Needs you"
+    if (said) return said
     var task = session.task || ""
     if (task && task.toLowerCase() !== assistantName.toLowerCase()) return task
     return status === "working" ? "On it…" : "Here for you"
@@ -133,7 +140,7 @@ BorderSurface {
     // Clear of the time and the priority under it, whichever is wider.
     anchors.right: parent.right
     anchors.rightMargin: row.borderRight + Style.spacing.lg + Style.space(8)
-                         + Math.max(when.implicitWidth, prio.visible ? prio.implicitWidth : 0)
+                         + Math.max(when.implicitWidth + (row.unseen ? Style.space(13) : 0), prio.visible ? prio.implicitWidth : 0)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
 
@@ -150,12 +157,14 @@ BorderSurface {
       opacity: row.session.task || row.cursor || row.main ? 1 : 0.52
     }
 
-    // The assistant: what it's on, in the body's size.
+    // The assistant: what it's on, in the body's size; what it wrote, unread, on two lines.
     Text {
       visible: row.main
       width: parent.width
       textFormat: Text.PlainText
       elide: Text.ElideRight
+      wrapMode: row.said ? Text.Wrap : Text.NoWrap
+      maximumLineCount: row.said ? 2 : 1
       text: row.assistantLine
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.body * row.zoom)
@@ -169,14 +178,17 @@ BorderSurface {
       textFormat: Text.PlainText
       elide: Text.ElideRight
       // Claude Code background sessions (/bg) still running in its worktree.
-      text: ((row.showRepo && !(row.main && row.session.name === row.session.repo) ? (row.session.repo || "") + " · " : "")
+      // Another session of your assistant's project, unread: what it wrote.
+      readonly property bool preview: !row.main && row.said !== ""
+      text: preview ? row.said
+          : ((row.showRepo && !(row.main && row.session.name === row.session.repo) ? (row.session.repo || "") + " · " : "")
              + (row.session.name || "")
              + (row.session.background > 0 ? " · +" + row.session.background + " bg" : "")).toUpperCase()
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * row.zoom)
-      font.bold: true
-      font.letterSpacing: 1.2 * row.zoom
-      color: row.dim
+      font.bold: !preview
+      font.letterSpacing: preview ? 0 : 1.2 * row.zoom
+      color: preview ? row.ink : row.dim
     }
   }
 
@@ -191,6 +203,40 @@ BorderSurface {
     font.pixelSize: Style.font.caption
     color: Commons.Color.menu.text
     opacity: 0.45
+  }
+
+  // "New" by your assistant's name, while what it wrote is unread.
+  Rectangle {
+    visible: row.main && row.said !== ""
+    x: content.x + Math.min(label.contentWidth, label.width) + Style.space(10)
+    y: content.y + label.y + (label.height - height) / 2
+    width: newText.implicitWidth + Style.space(12)
+    height: newText.implicitHeight + Style.space(4)
+    radius: Style.cornerRadius
+    color: Commons.Color.accent
+
+    Text {
+      id: newText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: "New"
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      color: Commons.Color.menu.background
+    }
+  }
+
+  // Unread: a dot on the time's line, before it.
+  Rectangle {
+    visible: row.unseen
+    width: Style.space(7)
+    height: width
+    radius: width / 2
+    anchors.right: when.left
+    anchors.rightMargin: Style.space(6)
+    anchors.verticalCenter: when.verticalCenter
+    color: Commons.Color.accent
   }
 
   // On the second line, under the time.

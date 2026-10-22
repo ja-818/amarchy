@@ -533,18 +533,28 @@ function avatar(cls) {
 
 // Your assistant, at the top of the list: its picture with its state on it,
 // its name, and what it's on.
+// What it wrote and you haven't read (a turn it finished since you last
+// looked, on any device) shows as its first words, with "New" by its name.
 function assistantCard(s) {
   const st = doneOf(s);
   const name = s.assistant_name || "Assistant";
   const task = s.task && s.task.toLowerCase() !== name.toLowerCase() ? s.task : "";
-  const line = s.setup ? "Setting up…" : st === "waiting" ? "Needs you" : task || (st === "working" ? "On it…" : "Here for you");
-  return holdable(h("button", { class: `row assistant ${st}`, onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
+  const unread = s.unseen && !!s.said;
+  const line = s.setup ? "Setting up…" : st === "waiting" ? "Needs you" : unread ? s.said
+    : task || (st === "working" ? "On it…" : "Here for you");
+  return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`,
+                                onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     h("span", { class: "avatar-wrap" }, avatar(), stateIcon(s)),
     h("span", { class: "main" },
-      h("div", { class: "name" }, name),
-      h("div", { class: `line${st === "waiting" ? " waiting" : ""}` }, line),
-      h("div", { class: "meta" }, STATUS[st])),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""))), () => rowMenu(s));
+      h("div", { class: "name" }, name, unread ? h("span", { class: "new" }, "New") : null),
+      h("div", { class: `line${st === "waiting" ? " waiting" : ""}${unread ? " said" : ""}` }, line),
+      h("div", { class: "meta" }, unread ? (task ? `${task} · unread` : "Unread") : STATUS[st])),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s))), () => rowMenu(s));
+}
+
+// A session that finished a turn you haven't opened yet: a dot by its time.
+function unreadDot(s) {
+  return s.unseen ? h("span", { class: "dot", title: "Unread", "aria-label": "Unread" }) : null;
 }
 
 // One session, as the desktop list draws it: the project and the priority
@@ -562,8 +572,10 @@ function sessionRow(s, groups, near = false) {
     near ? avatar("small") : null,
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
-      h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), prio)), () => rowMenu(s));
+      // Your assistant's other sessions, unread: what it wrote, in a line.
+      near && s.unseen && s.said ? h("div", { class: "meta said" }, s.said)
+        : h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio)), () => rowMenu(s));
 }
 
 // ---- a session

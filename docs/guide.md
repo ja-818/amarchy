@@ -597,7 +597,13 @@ amarchy assistant off                    # a session like the others again
   and what it's on, its state on a badge at the corner of the picture. The
   other sessions of its project (more sessions for small personal things) sit
   under it there, at their usual size with its picture small, and a rule sets
-  them apart from the rest. In the session itself, the phone and the strip
+  them apart from the rest. When it has written something you haven't read
+  (a turn it finished since you last opened it, on any device), its card says
+  **New** by its name and shows the start of what it wrote, and the sessions
+  under it show theirs in place of project · branch. Opening it anywhere (the
+  phone, the browser, or having it on screen on the desktop) clears it
+  everywhere. Every other session that finished a turn you haven't opened gets
+  the same mark, smaller: a dot by its time. In the session itself, the phone and the strip
   above Claude call it by its name, and the phone's box says "Message Jaken".
 - **It always tells you** when it needs you or is done, whatever `amarchy
   alerts` lets through of the others: under its name and picture (on the
