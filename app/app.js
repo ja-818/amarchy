@@ -9,7 +9,7 @@ const app = { view: null, key: "", user: "", online: true, list: null, session: 
 const STATUS = { waiting: "Needs you", working: "Working", done: "Done", idle: "Idle", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-// The glyphs amarchy's list uses on the desktop (Nerd Font icons), when the
+// The glyphs of amarchy's list (Nerd Font icons), when the
 // look's font has them; else the drawings below and plain marks.
 const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", done: "\u{F05E0}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
@@ -77,7 +77,7 @@ setInterval(() => {
   document.querySelectorAll(".state.working").forEach((el) => { el.textContent = SPINNER[spin.frame]; });
 }, 90);
 
-// What a session is about, the keyword before ": " in bold (as the desktop list has it).
+// What a session is about, the keyword before ": " in bold.
 function taskText(task, cls) {
   const el = h("div", { class: `task${cls ? ` ${cls}` : ""}` });
   const i = task.indexOf(": ");
@@ -405,7 +405,7 @@ function openList() {
   });
 }
 
-// The list changed: on a wide screen the desktop's layout (desk.js), else the list's view.
+// The list changed: on a wide screen the wide layout (desk.js), else the list's view.
 function refresh() {
   if (app.desk) deskList();
   else if (!app.session) renderList();
@@ -433,7 +433,7 @@ function listView() {
   const head = h("div", { class: "hero" },
     h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
     h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));
-  // Above the list, as on the desktop beside Claude: the search, and how
+  // Above the list, as in the wide layout beside Claude: the search, and how
   // the list is grouped and sorted.
   const search = h("input", { type: "search", placeholder: "Search sessions", enterkeyhint: "search",
                               autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
@@ -517,8 +517,8 @@ function renderList() {
 // The sessions under your assistant's section, grouped as amarchy groups
 // them, outermost first: a header where a group changes. With more than one
 // grouping the outermost is a rule across the list, its name in the middle.
-// A project's header opens the order of your projects (and on the desktop,
-// under the pointer, has arrows to move it past the project next to it).
+// A project's header opens the order of your projects (and in the wide
+// layout, under the pointer, has arrows to move it past the project next to it).
 function grouped(list, shown, groups, rowOf) {
   const rest = shown.filter((s) => !s.assistant);
   let prev = [];
@@ -562,7 +562,7 @@ function projectHead(repo, ruled, above, below) {
 }
 
 // Move a project ("before" or "after" another, "up", "down", "top", "bottom")
-// in the order your projects come in, here and on your desktop.
+// in the order your projects come in, on every phone and browser.
 async function moveProject(name, where, other) {
   try {
     const { projects } = await api("/api/projects/move", other ? { name, where, other } : { name, where });
@@ -627,7 +627,7 @@ function orderProjects(lit) {
 }
 
 // The sessions the search matches by name (what it's about, Claude's title
-// for it, its project and its branch), every word of it, as on the desktop.
+// for it, its project and its branch), every word of it.
 function matching(sessions, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return sessions;
@@ -640,9 +640,9 @@ function matching(sessions, query) {
 function same(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
 
 // How the list is grouped (any of them, nested in the order you turn them
-// on, each showing its level) and sorted inside its groups: the desktop's
-// group & sort menu. It's one setting with your desktop's: change it here
-// and the desktop's list changes too, and the other way round.
+// on, each showing its level) and sorted inside its groups. It's one setting
+// on the host (amarchy group, sort): change it here and every phone's and
+// browser's list changes too.
 const GROUPINGS = [["project", "project", "Project"], ["priority", "high", "Priority"],
                    ["status", "status", "Status"], ["none", "organize", "Not grouped"]];
 const SORTINGS = [["priority", "high", "Priority"], ["newest", "newest", "Newest first"], ["oldest", "oldest", "Oldest first"]];
@@ -669,8 +669,8 @@ function organizeMenu() {
   ];
 }
 
-// The group & sort menu's box (the phone's list, beside Claude on the
-// desktop), with the keys of a menu: Esc closes it, back to its button.
+// The group & sort menu's box (the phone's list, beside Claude in the wide
+// layout), with the keys of a menu: Esc closes it, back to its button.
 function organizeBox(button, redraw) {
   const menu = h("div", { class: "organize-menu", role: "menu", tabindex: "-1", hidden: true });
   menu.button = button;
@@ -686,7 +686,7 @@ function toggleOrganize(menu, button, redraw) {
   else if (menu.contains(document.activeElement)) button.focus();
 }
 
-// The group & sort menu goes, wherever it is (the phone's list, beside Claude on the desktop).
+// The group & sort menu goes, wherever it is (the phone's list, beside Claude in the wide layout).
 // The keys, if they were in it, go back to its button.
 function closeOrganize() {
   for (const menu of [app.listEl && app.listEl.menu, typeof desk !== "undefined" && desk.organize]) {
@@ -713,7 +713,7 @@ async function organizeList(group, sort) {
   }
 }
 
-// Held down (as on a right click on the desktop): what you can change about
+// Held down (as a right click in the wide layout): what you can change about
 // it from the list, its priority. With the keys: the menu key, or Shift+F10.
 function holdable(el, onHold) {
   el.addEventListener("keydown", (e) => {
@@ -771,7 +771,7 @@ function closeButton(s) {
   return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close session");
 }
 
-// Closing, asked first as the desktop asks: it removes the worktree, and
+// Closing, asked first: it removes the worktree, and
 // with it any work not committed, which it says in so many words.
 async function confirmClose(s, known) {
   let c = known;
@@ -841,7 +841,7 @@ function unreadDot(s) {
   return s.unseen ? h("span", { class: "dot", title: "Unread", "aria-label": "Unread" }) : null;
 }
 
-// One session, as the desktop list draws it: the project and the priority
+// One session in the list: the project and the priority
 // only when no header above it says them already. near: another session of
 // your assistant's project, under it, with its picture small.
 function sessionRow(s, groups, near = false) {
@@ -958,7 +958,7 @@ class SessionView {
 
   // Claude's own dictation (its voice mode), from the phone's microphone:
   // while the button is held, what the phone hears goes to the session's
-  // Claude as if its key were held on the desktop; let go, and what Claude
+  // Claude as if its voice key were held down; let go, and what Claude
   // made of it comes into the box, to send from there. What's said before
   // Claude can listen (it's starting, in a session just made) waits for it.
   // handed: said already, on the new-session bar ({queue}: its audio).
@@ -1108,7 +1108,7 @@ class SessionView {
       api(`/api/session/${encodeURIComponent(this.id)}/seen`).catch(() => {});
   }
 
-  // As the strip above Claude on the desktop: its state, what it's about, project · name.
+  // The strip above Claude: its state, what it's about, project · name.
   renderHeader() {
     if (!this.row) {
       this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
@@ -1223,7 +1223,7 @@ class SessionView {
     this.el.classList.toggle("terminal", mode === "terminal");
     if (mode !== "terminal" && this.pane) this.pane.disconnect();
     if (mode === "terminal") {
-      // Claude's real terminal (desk.js), as on your desktop: what you type
+      // Claude's real terminal (desk.js), as in the wide layout: what you type
       // goes to it, the keys below for what the phone's keyboard hasn't.
       if (!this.pane) this.pane = new TermPane("claude", { size: phoneSize, mic: true });
       this.scroller.replaceChildren(this.pane.box);
@@ -2015,7 +2015,7 @@ async function openSettings() {
         } }, "Send a test"),
         h("button", { class: "control wide", onclick: async () => { await pushOff(); draw(); } }, "Turn off"));
     }
-    // What the sessions tell you about (amarchy alerts), here and on your desktop.
+    // What the sessions tell you about (amarchy alerts), on every phone and browser.
     const alerts = (app.view && app.view.alerts) || "needs-you";
     const name = ((app.view && app.view.sessions.find((x) => x.assistant === "main")) || {}).assistant_name;
     kids.push(h("div", { class: "section" }, "Tell me"),
@@ -2102,7 +2102,7 @@ async function openLook() {
           d.style.setProperty("--dot", c);
           return d;
         })),
-        h("span", { class: "name" }, t.name, t.desktop ? h("small", {}, "your desktop's") : null));
+        h("span", { class: "name" }, t.name));
       el.style.setProperty("--card-bg", t.colors[0]);
       el.style.setProperty("--card-fg", t.colors[1]);
       if (t.wallpaper) el.style.setProperty("--thumb", `url("${t.wallpaper}")`);
@@ -2130,13 +2130,10 @@ async function openLook() {
       themeGrid(info.themes.map(card)),
       h("div", { class: "section" }, "Font"),
       h("div", { class: "seg wrap" }, ...fonts),
-      info.font === "desktop" ? h("p", {}, `Now: ${info.sent_font}, the font your desktop sent.`) : null,
       h("div", { class: "section" }, "Wallpaper"),
       h("div", { class: "seg" }, ...walls),
-      h("p", {}, info.own_chosen ? "Your own: the picture you chose."
-               : info.own ? "Your own: your desktop's wallpaper, until you choose a picture."
-               : "Choose a picture to have one of your own."),
-      h("button", { class: "control wide", onclick: () => file.click() }, info.own_chosen ? "Choose another picture…" : "Choose a picture…"),
+      h("p", {}, info.own ? "Your own: the picture you chose." : "Choose a picture to have one of your own."),
+      h("button", { class: "control wide", onclick: () => file.click() }, info.own ? "Choose another picture…" : "Choose a picture…"),
       file].filter(Boolean)));
   };
   try {
@@ -2257,11 +2254,12 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// On a computer's wide screen, amarchy as your desktop lays it out (desk.js);
-// on a phone, the list and the conversation. The settings can say which.
+// On a computer's wide screen, the wide layout (desk.js): the list, Claude's
+// terminal and the session's beside it; on a phone, the list and the
+// conversation. The settings can say which.
 function wantsDesk() {
   const layout = store.get("layout");
-  if (layout) return layout === "desktop";
+  if (layout) return layout === "wide" || layout === "desktop";      // desktop: what it was called before
   return window.matchMedia("(min-width: 1000px) and (hover: hover) and (pointer: fine)").matches;
 }
 

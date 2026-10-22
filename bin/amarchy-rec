@@ -1,7 +1,7 @@
 #!/bin/sh
-# rec (SoX) for a session's Claude on a host (amarchy remote): Claude Code's
-# voice mode records with rec, and while you dictate on the phone (amarchy
-# app) this is the phone's microphone; otherwise the real rec. A session's
+# rec (SoX) for a session's Claude: Claude Code's voice mode records with
+# rec, and while you dictate in the app (the phone, or a browser showing
+# Claude's terminal) this is that microphone; otherwise the real rec. A session's
 # Claude finds it first on its PATH, as a link named rec. See "dictation from
 # the phone" in amarchy.
 #

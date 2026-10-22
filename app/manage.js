@@ -4,8 +4,8 @@
 // assistant: which session, its name, its picture), the chimes (amarchy
 // sound, and --assistant), a new project (amarchy add), an image pasted into
 // Claude from the phone (the web clipboard: amarchy paste), and what needs
-// you, on the tab and the app's icon. On your desktop each was a menu of its
-// own; here each is a sheet. Loaded before app.js, whose helpers it uses.
+// you, on the tab and the app's icon. Each is a sheet. Loaded before app.js,
+// whose helpers it uses.
 "use strict";
 
 function sid(s) { return encodeURIComponent(s.id); }
@@ -130,8 +130,8 @@ function commandForm(s, name, command, opened) {
 
 // ---- the chimes (amarchy sound, and --assistant)
 //
-// Each plays as you pick it, and as the keys land on it, as your desktop's
-// picker did. They ring in the browser on a computer (desk.js's chime); a
+// Each plays as you pick it, and as the keys land on it. They ring in the
+// browser on a computer (desk.js's chime); a
 // phone's notifications ring with the phone's own sound.
 
 let previewing = null;
@@ -392,7 +392,7 @@ async function pickImageInto(s) {
 }
 
 // What you paste or copy as text in a terminal here becomes the web clipboard
-// too: wl-paste in a session reads it, as a desktop's clipboard was read.
+// too: wl-paste in a session reads it.
 function clipText(text) {
   if (typeof text === "string" && text && text.length <= 1e6) api("/api/clip", { text }).catch(() => {});
 }

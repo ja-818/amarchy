@@ -1,9 +1,8 @@
-// amarchy on your computer: the app in a browser on a wide screen, laid out
-// as amarchy is on your Omarchy desktop. Your sessions on the left, the
-// session's Claude in the column in the middle and its terminal on the right,
-// both of them real terminals (xterm.js) attached to the session's tmux on the
-// host, as your desktop's windows are: the desktop, the phone and the browser
-// all show the same session at once. The keys are amarchy's (Ctrl+Alt+…), the
+// amarchy on your computer: the app in a browser on a wide screen (its wide
+// layout). Your sessions on the left, the session's Claude in the column in
+// the middle and its terminal on the right, both of them real terminals
+// (xterm.js) attached to the session's tmux on the host: the phone and every
+// browser show the same session at once. The keys are amarchy's (Ctrl+Alt+…), the
 // look the one picked in the app (openLook). Loaded before app.js, whose helpers it uses (h, glyph,
 // api, toast, sessionRow…); app.js starts it on a wide screen (deskStart).
 "use strict";
@@ -20,16 +19,10 @@ const desk = {
   statuses: null,       // each session's status as last seen, for the chime
   el: null,
 };
-const COLUMN = 900;     // Claude's column, as AMARCHY_ZEN_WIDTH on your desktop
+const COLUMN = 900;     // Claude's column
 const PAD = 8;          // between it and the panels beside it
 const MIN_SIDE = 200;   // narrower than this beside the column, and it's zen mode
 const HEADER = 30;      // the strip with the session's name above Claude, in zen mode
-// This page, as the host knows it: its terminals are tmux clients named web-<page>.
-const PAGE_ID = (() => {
-  const a = new Uint8Array(10);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 16);
-})();
 const enc = new TextEncoder();
 
 // The terminals style themselves with <style> elements of their own, which
@@ -83,8 +76,7 @@ function cssVar(name) {
 
 function termFont() { return cssVar("font") || "ui-monospace, Menlo, monospace"; }
 
-// The terminals' font size: yours if you changed it here, else the look's
-// (the size a desktop's terminal had, when it sent its look).
+// The terminals' font size: yours if you changed it here, else the look's.
 function termSize() {
   const mine = parseFloat(store.get("term-size") || "");
   if (mine >= 6 && mine <= 40) return mine;
@@ -135,7 +127,7 @@ function wsURL(path) {
 
 class TermPane {
   // which: "claude" or "term". opts.mic: this page's microphone is Claude's
-  // rec while it has the keyboard (desktop); opts.size: font size.
+  // rec while it has the keyboard (the wide layout); opts.size: font size.
   constructor(which, opts) {
     this.which = which;
     this.opts = opts || {};
@@ -237,7 +229,7 @@ class TermPane {
     this.timer = null;
     this.fit();
     const sid = this.sid;
-    const q = new URLSearchParams({ page: PAGE_ID, cols: this.term.cols, rows: this.term.rows });
+    const q = new URLSearchParams({ cols: this.term.cols, rows: this.term.rows });
     if (this.which === "claude" && this.opts.mic) {
       q.set("mic", "1");
       q.set("focus", this.wantsMic() ? "1" : "0");
@@ -298,7 +290,7 @@ class TermPane {
 
   focus() { if (this.term) this.term.focus(); }
 
-  // The keys a browser would otherwise have, as your desktop's terminal sends them.
+  // The keys a browser would otherwise have, as a terminal sends them.
   key(e) {
     // Space let go while Claude listens: held a moment more (as key repeats),
     // so the last word, still on its way, is in what Claude writes down.
@@ -420,7 +412,7 @@ async function copyText(text) {
 
 // ---- the microphone, for Claude's own voice mode (/voice)
 //
-// Hold Space in Claude, as on your desktop: Claude records with rec, and
+// Hold Space in Claude, as in a terminal of its own: Claude records with rec, and
 // while this page has the keyboard in Claude, the host's rec for that
 // session is this browser's microphone (DeskMic in amarchy). The page opens
 // the microphone as soon as the key is held (what's said before Claude
@@ -509,7 +501,7 @@ function voiceStop() {
 }
 
 // Claude's key held from a button (the phone's terminal), as you'd hold it
-// on your desktop: Space as a key repeats (or once, in tap mode), the
+// on a keyboard: Space as a key repeats (or once, in tap mode), the
 // microphone Claude's meanwhile. Let go, and it's held a moment more for the
 // last word; the host says when Claude is done with rec.
 function talkStart(pane) {
@@ -569,7 +561,7 @@ function deskStart() {
   desk.claudeWin = h("section", { class: "window claude" }, desk.claude.box);
   desk.termWin = h("section", { class: "window term" }, desk.term.box);
   for (const [pane, win] of [[desk.claude, desk.claudeWin], [desk.term, desk.termWin]]) {
-    // As on Omarchy, the keyboard follows the pointer between the windows.
+    // The keyboard follows the pointer between the terminals.
     win.addEventListener("pointerenter", () => {
       if (!document.querySelector(".sheet-back, .picker-back, .bar-drop") && document.activeElement !== desk.search
           && desk.focus !== pane.which) pane.focus();
@@ -765,7 +757,7 @@ function leaveSearch(input) {
   if (desk.current) (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
 }
 
-// The chime your desktop plays when a session needs you or is done (the one
+// The chime this page plays when a session needs you or is done (the one
 // you're looking at only when this window isn't), as amarchy alerts lets the
 // others: your assistant's always, with its own chime.
 let chimeAudio = null;
@@ -808,7 +800,7 @@ function barDrop(search) {
   drop.refresh = () => fillList(list, query, desk.cursor || desk.current);
   drop.close = () => { back.remove(); drop.remove(); desk.cursor = null; if (desk.current) desk.claude.focus(); };
   input.addEventListener("input", () => { query = input.value; desk.cursor = null; drop.refresh(); });
-  // Under the Ⓐ, as on your desktop: j/k and ↵ in the list, / to search,
+  // The session list's keys: j/k and ↵ in the list, / to search,
   // +/- for priority, g for group & sort, p/f/s to group, o to sort.
   const keys = (e) => {
     if (e.target === input) {
@@ -850,9 +842,7 @@ function barDrop(search) {
   else drop.focus();
 }
 
-// ---- the keys: amarchy's, Ctrl+Alt+… (Hyprland's Super ones are the
-// browser's or the Mac's: Super+Alt+N is Ctrl+Alt+N here, Super+arrows
-// Ctrl+Alt+←/→)
+// ---- the keys: amarchy's, Ctrl+Alt+… (Super is the browser's or the Mac's)
 
 const DESK_KEYS = {
   KeyJ: () => step(1), KeyK: () => step(-1),
@@ -925,7 +915,7 @@ function leaveZen() {
   return true;
 }
 
-// ---- pickers: Omarchy's menu card, for everything amarchy asks
+// ---- pickers: a menu card, for everything amarchy asks
 
 // items: [{label, detail, icon, key, group (a function giving items), act,
 // keep}], or text (a field to type in, value its start). Typing filters;
@@ -1153,7 +1143,7 @@ function organizePicker() {
     { label: "Order projects…", icon: "order", act: () => orderProjects() }] });
 }
 
-// The amarchy menu (Ctrl+Alt+M), as on your desktop.
+// The amarchy menu (Ctrl+Alt+M): everything you can do from here, with its key.
 function deskMenu() {
   const s = row(desk.current);
   const on = (x) => (x ? "on" : "");
@@ -1197,10 +1187,10 @@ function deskMenu() {
 function showKeys() {
   const keys = [["Ctrl+Alt+J / K", "Next / previous session"], ["Ctrl+Alt+S", "Search sessions"],
     ["Ctrl+Alt+Z", "Zen mode"], ["Ctrl+Alt+Return", "Between Claude and the terminal"],
-    ["Ctrl+Alt+← / →", "Claude / the terminal (Super+arrows on Omarchy)"], ["Ctrl+Alt+R", "Run the project"],
+    ["Ctrl+Alt+← / →", "Claude / the terminal"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New session / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
-    ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions under the Ⓐ (Super+Alt+A)"],
+    ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
     ["Hold Space", "Dictate to Claude (/voice), with this computer's microphone"],
     ["⌘V / Ctrl+V", "Paste an image into Claude (or drop it there); wl-paste on the host reads it"],
     ["Shift+Enter", "A new line in Claude's prompt"]];
@@ -1231,8 +1221,8 @@ function deskSettings() {
       location.reload();
     } }, webgl() ? "Drawn with WebGL (on): click for the DOM" : "Draw with WebGL (faster; reloads)"),
     h("div", { class: "section" }, "Layout"),
-    h("div", { class: "seg" }, ...[["", "As the window fits"], ["desktop", "Desktop"], ["phone", "Phone"]].map(([v, label]) =>
-      h("button", { class: `control${(store.get("layout") || "") === v ? " on" : ""}`, onclick: () => {
+    h("div", { class: "seg" }, ...[["", "As the window fits"], ["wide", "Wide"], ["phone", "Phone"]].map(([v, label]) =>
+      h("button", { class: `control${(store.get("layout") || "").replace("desktop", "wide") === v ? " on" : ""}`, onclick: () => {
         store.set("layout", v);
         location.reload();
       } }, label))),

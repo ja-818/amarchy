@@ -1,5 +1,5 @@
-/* amarchy in a browser on your computer (desk.js): laid out as on your
-   Omarchy desktop. Your sessions in the gap left of Claude's column (900px,
+/* amarchy in a browser on your computer (desk.js), its wide layout. Your
+   sessions in the gap left of Claude's column (900px,
    centered), the session's terminal in the gap on its right, each a
    see-through panel from the top of the screen to the bottom over your
    wallpaper, with no bar and no borders.
@@ -17,7 +17,7 @@
   --term-8: #444b6a; --term-9: #ff7a93; --term-10: #b9f27c; --term-11: #ff9e64;
   --term-12: #7da6ff; --term-13: #bb9af7; --term-14: #0db9d7; --term-15: #acb0d0;
   --term-alpha: 0.96;
-  --term-pad: 14px 14px;          /* inside a terminal window, as Omarchy's terminals have it */
+  --term-pad: 14px 14px;          /* inside a terminal, around its text */
 }
 
 /* ---- the page */
@@ -30,7 +30,7 @@ body.desk .toast.action { cursor: pointer; }
 
 .desk-root {
   --pad: 8px;
-  /* As your desktop's panel draws them (measured against it). */
+  /* The panel's type sizes. */
   --caption: 12px;
   --body: 14px;
   --title: 15.5px;
@@ -70,7 +70,7 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 }
 .zen .panel { display: none; }
 .panel-buttons { display: flex; gap: 9px; flex: none; }
-/* As on your desktop: the menu as wide as its name, New session the rest. */
+/* The menu as wide as its name, New session the rest. */
 .panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
 .panel-buttons .brand { flex: none; }
 .panel-buttons .control:last-child { flex: 1; min-width: 0; justify-content: center; }
@@ -110,8 +110,7 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   width: var(--column);
   display: flex; flex-direction: column;
 }
-/* Windows without borders: see-through panels from top to bottom, as on
-   your desktop. */
+/* Windows without borders: see-through panels from top to bottom. */
 .window {
   position: relative;
   min-height: 0;
@@ -130,8 +129,8 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   background: color-mix(in srgb, var(--bg) calc(var(--term-alpha) * 100%), transparent);
 }
 
-/* A real terminal (xterm.js), on your theme's background as see-through as
-   your desktop's terminals. */
+/* A real terminal (xterm.js), on your theme's background, a little
+   see-through (--term-alpha). */
 .term-box {
   position: absolute; inset: 0;
   background: color-mix(in srgb, var(--term-background) calc(var(--term-alpha) * 100%), transparent);
@@ -189,7 +188,7 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 }
 .bar-drop .scroll { flex: 1; }
 
-/* ---- Omarchy's menu card: the amarchy menu, new session, commands… */
+/* ---- the menu card: the amarchy menu, new session, commands… */
 
 .picker-back {
   position: fixed; inset: 0; z-index: 12;

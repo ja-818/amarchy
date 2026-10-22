@@ -1,8 +1,8 @@
-/* amarchy on your phone, in Omarchy's look: your theme's colors, its
-   monospace font, square corners (or Hyprland's rounding), and the shell's
-   treatments for menus, popups and controls. These tokens are Omarchy's
-   default, Tokyo Night; /theme.css puts the theme your desktop wears over
-   them (see app_look_vars in bin/amarchy). */
+/* amarchy on your phone, in the look of Omarchy's shell: the theme's colors,
+   a monospace font, square corners (or the theme's rounding), and the
+   shell's treatments for menus, popups and controls. These tokens are the
+   default, Tokyo Night; /theme.css puts the theme picked in the app over
+   them (see look_worn and app_look_vars in bin/amarchy). */
 
 :root {
   --bg: #1a1b26;
@@ -43,9 +43,9 @@
   --title: 16px;
   --display: 26px;
   --icon-large: 21px;
-  --gap: 6px;           /* Omarchy's gaps, between a bar and the screen's edges */
+  --gap: 6px;           /* the gaps between a bar and the screen's edges */
   /* The app over your wallpaper, edge to edge: your theme's background a
-     little see-through, as Omarchy's terminals are (and omalauncher's glass). */
+     little see-through, as the terminals are (and omalauncher's glass). */
   --panel: color-mix(in srgb, var(--bg) 88%, transparent);
   /* A tile on it (the bar you type in, Claude's question): omalauncher's
      outline, the accent while it's in use. */
@@ -92,7 +92,7 @@ button:focus-visible, [tabindex="0"]:focus-visible { outline: 2px solid var(--ac
 .glyph { display: inline-block; line-height: 1; text-align: center; font-style: normal; }
 .glyph svg { width: 1em; height: 1em; display: block; }
 
-/* A small-caps-style line under a title (Omarchy's panel hero meta). */
+/* A small-caps-style line under a title. */
 .meta {
   font-size: var(--caption);
   font-weight: 700;
@@ -139,7 +139,7 @@ body::before {
 .view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
-/* ---- controls: Omarchy's button chrome */
+/* ---- controls: the button chrome */
 
 .control {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -201,7 +201,7 @@ body::before {
 
 .list { padding: 2px 6px 18px; display: flex; flex-direction: column; gap: 2px; }
 
-/* Above the list, as on the desktop: the search, and the button for how
+/* Above the list: the search, and the button for how
    the list is grouped and sorted, its menu dropping over the list. */
 .toolbar { position: relative; display: flex; gap: 6px; padding: 0 12px 8px; }
 .searchbox {
@@ -253,7 +253,7 @@ body::before {
 .group-head:first-child { padding-top: 4px; }
 .group-head.ruled { display: flex; align-items: center; gap: 8px; padding-left: 8px; padding-right: 8px; }
 .group-head.ruled::before, .group-head.ruled::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-/* A project's opens the order of your projects (on the desktop, arrows
+/* A project's opens the order of your projects (in the wide layout, arrows
    under the pointer move it past the project next to it). */
 .project-head { position: relative; cursor: pointer; }
 .project-head .moves { display: none; }
@@ -523,7 +523,7 @@ th { font-weight: 700; }
 .keys .control { flex: none; min-width: 44px; }
 .dock .note { text-align: center; padding: 8px; color: var(--dim); }
 
-/* ---- sheets: an Omarchy popup card, in from the bottom with the gaps
+/* ---- sheets: a popup card, in from the bottom with the gaps
    around it (the session's menu, settings, the projects) */
 
 .sheet-back {
@@ -561,7 +561,7 @@ th { font-weight: 700; }
 
 /* The look's themes: each a card in its own colors, its wallpaper over its
    colors and its name; the one worn in the accent. */
-.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.theme-grid, .theme-grid.row-btns { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .theme-card {
   display: flex; flex-direction: column;
   padding: 0;
@@ -592,7 +592,7 @@ th { font-weight: 700; }
 .menu-item:active, .menu-item.on { background: var(--sel-bg); border-color: var(--sel-border); color: var(--sel-text); }
 .menu-item .val { color: inherit; }
 
-/* A notification, the way Omarchy shows one. */
+/* A notification in the app (a toast). */
 .toast {
   position: fixed;
   left: var(--gap); right: var(--gap);
