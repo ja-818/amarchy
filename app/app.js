@@ -527,7 +527,7 @@ function closeOrganize() {
 async function organizeList(group, sort) {
   const mine = { group, sort, done: false };
   app.organize = mine;
-  renderList();
+  refresh();
   try {
     await api("/api/list", { group, sort });
     mine.done = true;
@@ -535,7 +535,7 @@ async function organizeList(group, sort) {
   } catch (e) {
     if (app.organize === mine) app.organize = null;
     toast(e.message);
-    renderList();
+    refresh();
   }
 }
 

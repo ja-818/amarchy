@@ -162,6 +162,13 @@ dev server). Restart the terminal so the user sees the result too.
   only when asked, as the action itself.
 - `hook`, `ui`, `watch` are amarchy's own plumbing. Don't edit
   `~/.local/state/amarchy/` either.
+- Typing into a session (`tmux send-keys`, a browser test on the app, `amarchy
+  send`) when it isn't yours to drive. Every session shows up in the user's
+  list, test sessions too, and they may be looking at it or typing in it: what
+  you type mixes with theirs, and clearing its prompt wipes what they wrote.
+  To test against a live session, start one of your own for it with a name
+  that says so (`amarchy new <project> test-<what> --no-jump`), tell the user
+  it's a test session they shouldn't use, and close it as soon as you're done.
 
 ## Talking to other sessions
 
