@@ -686,7 +686,9 @@ class SessionView {
       this.listening(null);
     };
     if (!handed) {
-      this.listening("Listening…");
+      // Listening once the microphone hears: what's said before is lost.
+      this.listening("Starting the microphone…");
+      mic.hears = () => { if (v.held) this.listening("Listening…"); };
       try {
         await micOpen();
       } catch (e) {
@@ -1137,7 +1139,7 @@ function wearPhoneSize() {
 // at all (not a sample but 0) once held is opened afresh, there and then.
 
 const mic = { stream: null, ctx: null, ready: null, source: null, node: null, take: null,
-              pieces: 0, loud: 0, watch: null, fresh: false, gen: 0 };
+              pieces: 0, loud: 0, watch: null, fresh: false, gen: 0, hears: null };
 const MIC_TAIL = 500;     // ms the microphone stays on after you let go: the end of the last word
 const MIC_START = 3000;   // ms the phone's audio may take to start
 const MIC_DEAD = 1200;    // ms held before the microphone is looked at: dead, it's opened afresh
@@ -1163,6 +1165,7 @@ async function micOpen(retry) {
   }
   if (gen !== mic.gen) return;
   if (mic.stream && mic.stream.getAudioTracks().some((t) => t.readyState === "live" && !t.muted)) {
+    if (mic.node && mic.node.port) mic.node.port.postMessage("reset");
     mic.stream.getTracks().forEach((t) => { t.enabled = true; });
     micWatch();
     return;
@@ -1202,7 +1205,15 @@ function within(promise, ms, why) {
 // 20 ms of what the microphone hears, to whoever takes it (a dictation).
 function micHeard(pcm) {
   mic.pieces++;
-  if (new Int16Array(pcm).some((x) => x !== 0)) mic.loud = mic.pieces;
+  if (new Int16Array(pcm).some((x) => x !== 0)) {
+    mic.loud = mic.pieces;
+    // Hearing at last (a phone's microphone takes a moment to come on): say so.
+    if (mic.hears && mic.take) {
+      const hears = mic.hears;
+      mic.hears = null;
+      hears();
+    }
+  }
   if (mic.take) mic.take(pcm);
 }
 
@@ -1254,7 +1265,7 @@ function downsampler(rate, take) {
 
 // Done dictating: off, but kept for the next time (see above).
 function micRelease() {
-  mic.take = null;
+  mic.take = mic.hears = null;
   clearTimeout(mic.watch);
   if (mic.stream) mic.stream.getTracks().forEach((t) => { t.enabled = false; });
   if (mic.ctx) mic.ctx.suspend().catch(() => {});
@@ -1331,7 +1342,8 @@ function newBar() {
     micBtn.classList.toggle("on", !!said && said.held);
     el.classList.toggle("listening", !!said);
     field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…")
-      : said ? (said.held ? "Listening…" : "Starting the session…") : "What should Claude do?";
+      : said ? (!said.held ? "Starting the session…" : said.hearing ? "Listening…" : "Starting the microphone…")
+      : "What should Claude do?";
   };
   const update = () => {
     const ps = projects();
@@ -1369,7 +1381,8 @@ function newBar() {
   let said = null;
   const talk = async () => {
     if (said || !repo) return;
-    const s = said = { held: true, queue: [], id: null, failed: null, making: null };
+    const s = said = { held: true, hearing: false, queue: [], id: null, failed: null, making: null };
+    mic.hears = () => { s.hearing = true; buttons(); };
     buttons();
     try {
       await micOpen();

@@ -14,6 +14,8 @@ class Mic extends AudioWorkletProcessor {
     this.count = 0;
     this.out = new Int16Array(PIECE);
     this.n = 0;
+    // Held again: what's left of the last dictation isn't for this one.
+    this.port.onmessage = () => { this.pos = this.acc = this.count = this.n = 0; };
   }
 
   // Each of ours the average of the phone's it stands for: down to 16 kHz

@@ -433,11 +433,14 @@ priority or close it (from its ••• menu too): it asks first, as the
 desktop does, and says if uncommitted work would go with it. In a
 session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. Hold the mic button by the box to
-dictate with Claude Code's own voice mode (it has to be on: `/voice`): what
+dictate with Claude Code's own voice mode (it has to be on: `/voice`): the
+box says "Listening…" once the microphone hears (it takes a moment to come
+on; what's said before is lost), and what
 the phone hears goes to that session's Claude as if you held its key on the
 desktop, and the words come up in the phone's box as Claude writes them
 down, to edit and send when you let go (the microphone stays on half a second
-after you let go, for the end of the last word). Meanwhile your desktop's view of that
+after you let go, and Claude then hears silence until it stops recording,
+which it needs to keep the last word). Meanwhile your desktop's view of that
 session says it's dictating on your phone, and is back on Claude once the
 words are on the phone. (On the host, Claude's `rec` is amarchy's, which
 `install.sh --host` links into `~/.local/bin`: the phone's microphone while
