@@ -263,7 +263,7 @@ async function sleepSession(s) {
 function sleepButton(s) {
   const st = sleepOf(s);
   if (st === "waking" || s.setup) return null;
-  return h("button", { class: "control wide", onclick: () => { closeSheet(); st ? wakeSession(s) : sleepSession(s); } },
+  return h("button", { class: "control wide", onclick: () => { closeSheets(); st ? wakeSession(s) : sleepSession(s); } },
     st ? "Wake" : "Put to sleep");
 }
 
@@ -272,7 +272,9 @@ function fitViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
   const up = vv.height < window.innerHeight - 120;
-  root.style.setProperty("--vvh", `${vv.height}px`);
+  // On the page's own element, for #root and the sheets over it alike.
+  document.documentElement.style.setProperty("--vvh", `${vv.height}px`);
+  document.documentElement.style.setProperty("--vv-top", `${vv.offsetTop}px`);
   root.style.transform = `translateY(${vv.offsetTop}px)`;
   document.body.classList.toggle("keyboard-up", up);
 }
@@ -655,7 +657,8 @@ function organizeMenu() {
       h("span", { class: "label" }, glyph(icon, "icon"), label),
       on ? (level ? h("span", { class: "val level" }, level) : glyph("check", "val")) : null);
   return [
-    h("div", { class: "menu-head" }, "Group by"),
+    h("div", { class: "menu-head top" }, "Group by",
+      h("button", { class: "menu-close", "aria-label": "Close", title: "Close (Esc)", onclick: () => closeOrganize() }, glyph("close"))),
     ...GROUPINGS.map(([what, icon, label]) => {
       const on = what === "none" ? !groups.length : groups.includes(what);
       const level = on && what !== "none" && groups.length > 1 ? String(groups.indexOf(what) + 1) : "";
@@ -742,14 +745,14 @@ function prioritySeg(s) {
                   onclick: async () => {
                     try {
                       await api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p });
-                      closeSheet();
+                      closeSheets();
                     } catch (e) { toast(e.message); }
                   } }, PRIORITY[p])));
 }
 
 function rowMenu(s) {
   sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
-    h("button", { class: "control wide", onclick: () => { closeSheet(); go(`#/s/${encodeURIComponent(s.id)}`); } },
+    h("button", { class: "control wide", onclick: () => { closeSheets(); go(`#/s/${encodeURIComponent(s.id)}`); } },
       "Open"),
     ...sessionActions(s),
     closeButton(s));
@@ -796,7 +799,7 @@ async function confirmClose(s, known) {
       const d = await res.json().catch(() => ({}));
       if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
       if (!res.ok) throw new Error(d.error || "It didn't close");
-      closeSheet();
+      closeSheets();
       toast(`Closing ${s.repo} · ${s.name}`);
       if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {
@@ -804,7 +807,7 @@ async function confirmClose(s, known) {
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
   } }, n ? "Close and discard changes" : "Close session");
-  sheet(sheetHead(`Close ${where(s)}?`, detail), yes,
+  sheet({ key: "close" }, sheetHead(`Close ${where(s)}?`, detail), yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
@@ -1418,7 +1421,7 @@ class SessionView {
     const row = this.row || { id: this.id };
     const seg = prioritySeg(row);
     const shown = (mode, label) =>
-      h("button", { class: `menu-item${this.mode === mode ? " on" : ""}`, onclick: () => { closeSheet(); this.setMode(mode); } },
+      h("button", { class: `menu-item${this.mode === mode ? " on" : ""}`, onclick: () => { closeSheets(); this.setMode(mode); } },
         label, this.mode === mode ? glyph("check", "val") : null);
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
@@ -1426,7 +1429,7 @@ class SessionView {
       h("div", { class: "menu" }, shown("chat", "Conversation"), shown("terminal", "Claude's terminal"),
         shown("screen", "Claude's screen, as text")),
       h("div", { class: "section" }, "Session"),
-      h("button", { class: "control wide", onclick: () => { closeSheet(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
+      h("button", { class: "control wide", onclick: () => { closeSheets(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
       ...sessionActions({ ...row, id: this.id }),
       closeButton({ ...row, id: this.id }));
   }
@@ -1632,7 +1635,9 @@ window.addEventListener("pointerdown", () => { lastInput.keys = false; }, true);
 // What the cursor can be on in a menu (fields too: Tab goes to them).
 function menuItems(box, fields) {
   const sel = fields ? "button, [tabindex='0'], textarea, input" : "button, [tabindex='0']";
-  return Array.from(box.querySelectorAll(sel)).filter((el) => !el.disabled && el.getClientRects().length);
+  // A menu's ✕ is Tab's, not the arrows': they start on what it's for.
+  return Array.from(box.querySelectorAll(sel)).filter((el) => !el.disabled && el.getClientRects().length
+    && (fields || !el.matches(".sheet-close, .menu-close")));
 }
 
 // The line an item is on: its row of buttons side by side, or itself.
@@ -1732,21 +1737,53 @@ function keepFocus(box, fill) {
 }
 
 // ---- sheets
-
-// A sheet over the page, with the keys of a menu. One in place of another
-// keeps where the keys go back to when it's gone.
+//
+// A sheet over the page, with the keys of a menu, and four ways out that
+// work on a phone as on a computer: its ✕ (at its top right, kept there as
+// it scrolls), a tap on the shade around it, Esc, and (on a phone) a swipe
+// down. A sheet opened from another is laid over it: closing it goes back to
+// the one under it (closeSheet), what finishes the job closes them all
+// (closeSheets). One with the key of one already open (the same sheet drawn
+// anew, or gone back to) takes its place, and whatever was over it goes.
+//
+// On a phone it's a card in from the bottom that leaves a band of the shade
+// under the status bar, however tall it is: that band is the shade you tap
+// to close it (the status bar's own taps are iOS's).
 function sheet(...kids) {
-  const was = document.querySelector(".sheet-back");
-  // Back to where the keys were: a field, or what they'd got to (on a
-  // computer, not what a click left them on, as a row you right-clicked).
+  const opts = kids[0] && !(kids[0] instanceof Node) && typeof kids[0] === "object" ? kids.shift() : {};
+  const open = Array.from(document.querySelectorAll(".sheet-back"));
+  const same = opts.key ? open.findIndex((s) => s.key === opts.key) : -1;
+  const below = same < 0 ? open : open.slice(0, same);
+  const under = below[below.length - 1] || null;
   const now = document.activeElement;
-  const returnTo = was ? was.returnTo
+  // Back to where the keys were when it's gone: in the sheet under it, what
+  // opened it; over the page, a field, or what they'd got to (on a
+  // computer, not what a click left them on, as a row you right-clicked).
+  const returnTo = same >= 0 ? open[same].returnTo
+    : under ? (under.contains(now) ? now : null)
     : now && (now.matches("input, textarea, :focus-visible") || !app.desk) ? now : null;
-  if (was) was.remove();
-  const card = h("div", { class: "sheet", role: "dialog", "aria-modal": "true", tabindex: "-1" }, ...kids);
-  const back = h("div", { class: "sheet-back", onclick: (e) => { if (e.target === back) closeSheet(); } }, card);
+  for (const s of open.slice(below.length)) s.remove();
+  if (under) under.hidden = true;
+  const close = h("button", { class: "sheet-close", "aria-label": "Close", title: "Close (Esc)", onclick: () => closeSheet() }, glyph("close"));
+  const head = kids[0] && kids[0].classList && kids[0].classList.contains("head") ? kids[0] : h("div", { class: "head" });
+  head.append(close);
+  const card = h("div", { class: "sheet", role: "dialog", "aria-modal": "true", tabindex: "-1" }, head, ...kids.filter((k) => k !== head));
+  const heading = head.querySelector("h2");
+  if (heading) card.setAttribute("aria-label", heading.textContent);
+  // The shade closes it: a tap that began on it as well as ended there (not
+  // the end of the long press that opened it, nor a swipe out of the card).
+  let downOnShade = false;
+  const back = h("div", { class: `sheet-back${same >= 0 ? " again" : under ? " over" : ""}`,
+                          onpointerdown: (e) => { downOnShade = e.target === back; },
+                          onclick: (e) => { if (e.target === back && downOnShade) closeSheet(); downOnShade = false; } }, card);
+  // A finger moving on the shade moves nothing: not the page under it (in
+  // the home-screen app the page is a little taller than the screen), which
+  // would swallow the tap as a scroll.
+  back.addEventListener("touchmove", (e) => { if (e.target === back) e.preventDefault(); }, { passive: false });
+  back.key = opts.key || null;
   back.returnTo = returnTo;
   menuKeys(card, { close: closeSheet, trap: true });
+  swipeToClose(back, card);
   document.body.append(back);
   menuFocus(card);
   return back;
@@ -1757,18 +1794,80 @@ function sheetHead(text, meta) {
   return h("div", { class: "head" }, h("h2", {}, text), meta ? h("div", { class: "meta" }, meta) : null);
 }
 
-// The keys go back where they were (on a computer, to Claude or the
-// terminal), unless something else has taken them meanwhile.
+// The sheet on top goes, and the one under it (if any) is back, drawn anew
+// (what you changed over it shows), the keys where they were in it.
 function closeSheet() {
-  document.querySelectorAll(".sheet-back").forEach((s) => {
-    const had = s.contains(document.activeElement) || document.activeElement === document.body;
-    s.remove();
-    if (!had || !(app.desk || lastInput.keys)) return;
-    const to = s.returnTo;
-    if (to && to !== document.body && to.isConnected) to.focus({ preventScroll: true });
-    else if (app.desk && typeof desk !== "undefined" && desk.current)
-      (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
-  });
+  const open = Array.from(document.querySelectorAll(".sheet-back"));
+  const top = open.pop();
+  if (!top) return;
+  const had = top.contains(document.activeElement) || document.activeElement === document.body;
+  top.remove();
+  const under = open.pop();
+  if (under) {
+    under.hidden = false;
+    under.classList.add("again");
+    if (under.redraw) under.redraw();
+  }
+  if (!had) return;
+  const to = top.returnTo;
+  if (under) {
+    if (to && under.contains(to) && (app.desk || lastInput.keys)) to.focus({ preventScroll: true });
+    else under.querySelector(".sheet").focus({ preventScroll: true });
+    return;
+  }
+  if (!(app.desk || lastInput.keys)) return;
+  if (to && to !== document.body && to.isConnected) to.focus({ preventScroll: true });
+  else if (app.desk && typeof desk !== "undefined" && desk.current)
+    (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
+}
+
+// Every sheet goes: what you did in them is done.
+function closeSheets() {
+  while (document.querySelector(".sheet-back")) closeSheet();
+}
+
+// On a phone, a sheet follows a finger that pulls it down (from its top, or
+// anywhere once it's scrolled to the top), and goes when let go far enough
+// down or fast; else it's back in place.
+function swipeToClose(back, card) {
+  let from = null, dragging = false, dy = 0;
+  const skip = ".crop-frame, input, textarea, .seg.wrap, .keys, .theme-grid";
+  card.addEventListener("touchstart", (e) => {
+    if (app.desk || e.touches.length !== 1 || e.target.closest(skip)) { from = null; return; }
+    const t = e.touches[0];
+    from = { x: t.clientX, y: t.clientY, at: e.timeStamp, head: !!e.target.closest(".head") };
+    dragging = false;
+    dy = 0;
+  }, { passive: true });
+  card.addEventListener("touchmove", (e) => {
+    if (!from) return;
+    const t = e.touches[0];
+    const dx = t.clientX - from.x;
+    dy = t.clientY - from.y;
+    if (!dragging) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { from = null; return; }      // sideways: not this
+      if (dy < 8) { if (dy < -8) from = null; return; }
+      if (!from.head && card.scrollTop > 0) { from = null; return; }      // the card scrolls up first
+      dragging = true;
+      card.classList.add("dragging");
+    }
+    e.preventDefault();
+    card.style.transform = `translateY(${Math.max(0, dy)}px)`;
+  }, { passive: false });
+  const end = (e) => {
+    if (!from || !dragging) { from = null; return; }
+    const fast = dy / Math.max(1, e.timeStamp - from.at) > 0.6;
+    from = null;
+    dragging = false;
+    card.classList.remove("dragging");
+    if (dy > Math.min(140, card.offsetHeight / 3) || (fast && dy > 30)) {
+      card.style.transform = "translateY(100%)";
+      back.classList.add("leaving");
+      setTimeout(() => { if (back.isConnected && !back.nextElementSibling?.matches(".sheet-back")) closeSheet(); }, 160);
+    } else card.style.transform = "";
+  };
+  card.addEventListener("touchend", end);
+  card.addEventListener("touchcancel", end);
 }
 
 // The bar under the list, as omalauncher's: the project on its left (tap it
@@ -1810,7 +1909,7 @@ function newBar() {
   const pickProject = () => sheet(sheetHead("Project", "Where the new session starts"),
     h("div", { class: "menu" }, ...projects().map((p) =>
       h("button", { class: `menu-item${p.name === repo ? " on" : ""}`,
-                    onclick: () => { repo = p.name; store.set("last-project", repo); closeSheet(); update(); field.focus(); } },
+                    onclick: () => { repo = p.name; store.set("last-project", repo); closeSheets(); update(); field.focus(); } },
         p.name, p.name === repo ? glyph("check", "val") : null))),
     h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
   // A project just added: the next session starts there (once the list has it).
@@ -2229,7 +2328,7 @@ function here() { return standalone ? routed.hash : location.hash; }
 
 function route() {
   if (app.desk) return deskRoute();
-  closeSheet();
+  closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
   const id = m ? decodeURIComponent(m[1]) : null;
   if (app.session && app.session.id !== id) {

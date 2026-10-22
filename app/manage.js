@@ -49,7 +49,7 @@ function renameSheet(s) {
     const t = input.value.trim();
     try {
       await api(`/api/session/${sid(s)}/rename`, t ? { title: t } : { reset: true });
-      closeSheet();
+      closeSheets();
     } catch (e) { toast(e.message); }
   };
   sheet(sheetHead("Rename", where(s)), input,
@@ -70,7 +70,7 @@ async function commandsSheet(s, opened) {
     cmds = d.commands || [];
   } catch (e) { return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message); }
   const runIt = async (name) => {
-    closeSheet();
+    closeSheets();
     try {
       await api(`/api/session/${sid(s)}/run`, name === "run" ? {} : { name });
       if (opened) opened(name);
@@ -87,7 +87,7 @@ async function commandsSheet(s, opened) {
     } catch (e) { toast(e.message); }
   };
   const hasRun = cmds.some((c) => c.name === "run");
-  sheet(sheetHead(`Run in ${s.repo}`, "Saved for the project: every session of it has them"),
+  sheet({ key: "commands" }, sheetHead(`Run in ${s.repo}`, "Saved for the project: every session of it has them"),
     h("div", { class: "menu" }, ...cmds.map((c) => h("div", { class: "command" },
       h("button", { class: "menu-item", onclick: () => runIt(c.name) },
         h("span", { class: "label" }, h("span", { class: "text" }, c.name === "run" ? "Run the project" : c.name,
@@ -113,7 +113,7 @@ function commandForm(s, name, command, opened) {
     try {
       await api(`/api/session/${sid(s)}/commands`, { name: n, command: c });
       if (!andRun) return commandsSheet(s, opened);
-      closeSheet();
+      closeSheets();
       await api(`/api/session/${sid(s)}/run`, n === "run" ? {} : { name: n });
       if (opened) opened(n);
       else toast(`Running ${n === "run" ? "the project" : n} in its terminal`);
@@ -124,7 +124,7 @@ function commandForm(s, name, command, opened) {
     named ? null : nameIn, cmdIn,
     h("button", { class: "control wide accent", onclick: () => save(true) }, "Save and run"),
     h("button", { class: "control wide", onclick: () => save(false) }, "Save"),
-    h("button", { class: "control wide", onclick: () => commandsSheet(s, opened) }, "Back"));
+    h("button", { class: "control wide", onclick: () => closeSheet() }, "Back"));
   (named || name ? cmdIn : nameIn).focus();
 }
 
@@ -202,7 +202,7 @@ function assistantSheet(s) {
     const make = async () => {
       try {
         await api(`/api/session/${sid(s)}/assistant`, name.value.trim() ? { name: name.value.trim() } : {});
-        closeSheet();
+        closeSheets();
         toast(`${name.value.trim() || "It"} is your assistant now`);
       } catch (e) { toast(e.message); }
     };
@@ -218,7 +218,7 @@ function assistantSheet(s) {
   const name = field({ value: who, maxlength: "40" }, () => rename());
   const rename = async () => {
     if (!name.value.trim()) return toast("What should it be called?");
-    try { await api("/api/assistant", { name: name.value.trim() }); closeSheet(); }
+    try { await api("/api/assistant", { name: name.value.trim() }); closeSheets(); }
     catch (e) { toast(e.message); }
   };
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");
@@ -230,12 +230,12 @@ function assistantSheet(s) {
       h("div", { class: "row-btns" },
         h("button", { class: "control", onclick: () => pictureSheet(s) }, own ? "Change…" : "Choose…"),
         own ? h("button", { class: "control", onclick: async () => {
-          try { await api("/api/assistant/picture", { off: true }); closeSheet(); } catch (e) { toast(e.message); }
+          try { await api("/api/assistant/picture", { off: true }); closeSheets(); } catch (e) { toast(e.message); }
         } }, "Amarchy's own") : null)),
     h("div", { class: "section" }, "Chime"),
     h("button", { class: "control wide", onclick: () => soundSheet(true) }, "Its chime…"),
     h("button", { class: "control wide danger", onclick: async () => {
-      try { await api(`/api/session/${sid(s)}/assistant`, { off: true }); closeSheet(); toast("No assistant: it's a session like the others again"); }
+      try { await api(`/api/session/${sid(s)}/assistant`, { off: true }); closeSheets(); toast("No assistant: it's a session like the others again"); }
       catch (e) { toast(e.message); }
     } }, "Not my assistant any more"));
 }
@@ -312,7 +312,7 @@ async function pictureSheet(s) {
     try {
       const png = await new Promise((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("couldn't cut it"))), "image/png"));
       await api("/api/assistant/picture", { data: await base64Of(png) });
-      closeSheet();
+      closeSheets();
       toast("Its new picture is on every list");
     } catch (e) {
       btn.disabled = false;
@@ -321,7 +321,7 @@ async function pictureSheet(s) {
   };
   sheet(sheetHead("Its picture", "Drag it into the circle; zoom below"), frame, zoom,
     h("button", { class: "control wide accent", onclick: (e) => use(e.currentTarget) }, "Use it"),
-    h("button", { class: "control wide", onclick: () => assistantSheet(rowOf(s.id) || s) }, "Back"));
+    h("button", { class: "control wide", onclick: () => closeSheet() }, "Back"));
   requestAnimationFrame(draw);
 }
 
@@ -344,7 +344,7 @@ function newProjectSheet(added) {
       if (!/^[\w.-]{1,100}$/.test(body.new)) return toast("A name of letters, numbers, - and .");
       if (github.getAttribute("aria-pressed") === "true") body.github = true;
     }
-    closeSheet();
+    closeSheets();
     toast("Adding the project…");
     try {
       const d = await api("/api/add", body);

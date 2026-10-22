@@ -612,7 +612,7 @@ function row(id) { return app.view && app.view.sessions.find((s) => s.id === id)
 // The session in the address (#/s/<id>), else the one you were on, else the first.
 // One you just started that the list doesn't have yet: it shows when it does.
 function deskRoute() {
-  closeSheet();
+  closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
   let id = m ? decodeURIComponent(m[1]) : null;
   const p = desk.pending;
@@ -795,7 +795,9 @@ function barDrop(search) {
   const list = h("div", { class: "list" });
   const back = h("div", { class: "bar-shade", onclick: () => drop.close() });
   const drop = h("div", { class: "bar-drop" },
-    h("label", { class: "searchbox" }, glyph("search"), input), h("div", { class: "scroll" }, list));
+    h("div", { class: "bar-drop-top" }, h("label", { class: "searchbox" }, glyph("search"), input),
+      h("button", { class: "picker-close", "aria-label": "Close", title: "Close (Esc)", tabindex: "-1", onclick: () => drop.close() }, glyph("close"))),
+    h("div", { class: "scroll" }, list));
   let query = "";
   drop.refresh = () => fillList(list, query, desk.cursor || desk.current);
   drop.close = () => { back.remove(); drop.remove(); desk.cursor = null; if (desk.current) desk.claude.focus(); };
@@ -925,8 +927,10 @@ function picker(opts) {
   const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false" });
   const list = h("div", { class: "picker-list" });
   const titleEl = h("div", { class: "picker-title" });
-  const card = h("div", { class: "picker", role: "dialog" }, titleEl, h("label", { class: "picker-input" }, input), list);
-  const back = h("div", { class: "picker-back", onmousedown: (e) => { if (e.target === back) close(); } }, card);
+  const shut = h("button", { class: "picker-close", "aria-label": "Close", title: "Close (Esc)", tabindex: "-1", onclick: () => close() }, glyph("close"));
+  const card = h("div", { class: "picker", role: "dialog" }, h("div", { class: "picker-top" }, titleEl, shut),
+    h("label", { class: "picker-input" }, input), list);
+  const back = h("div", { class: "picker-back", onpointerdown: (e) => { if (e.target === back) close(); } }, card);
   let level, items = [], at = 0;
   const close = back.close = () => {
     back.remove();
@@ -1226,6 +1230,6 @@ function deskSettings() {
         store.set("layout", v);
         location.reload();
       } }, label))),
-    h("button", { class: "control wide", onclick: () => { closeSheet(); showKeys(); } }, "Keys"),
+    h("button", { class: "control wide", onclick: () => showKeys() }, "Keys"),
   ];
 }

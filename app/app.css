@@ -242,6 +242,15 @@ body::before {
   color: var(--dim);
 }
 .menu-head ~ .menu-head { margin-top: 6px; }
+/* The first, with the menu's ✕ (a thumb's 44 points, over the gap around it). */
+.menu-head.top { display: flex; align-items: center; justify-content: space-between; padding-right: 0; }
+.menu-close {
+  width: 44px; height: 44px; margin: -14px -6px -12px 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--dim); font-size: 16px; letter-spacing: 0;
+}
+.menu-close:active, .menu-close:hover { color: var(--fg); background: var(--sel-bg); }
 .organize-menu .menu-item { padding: 9px 8px; }
 .menu-item .label { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .menu-item .label .icon { width: 18px; flex: none; font-size: 16px; text-align: center; opacity: 0.8; }
@@ -524,29 +533,69 @@ th { font-weight: 700; }
 .dock .note { text-align: center; padding: 8px; color: var(--dim); }
 
 /* ---- sheets: a popup card, in from the bottom with the gaps
-   around it (the session's menu, settings, the projects) */
+   around it (the session's menu, settings, the projects)
+
+   Over the visible part of the screen (above the keyboard, as #root), and
+   never taller than it: it scrolls inside. However tall, a band of the shade
+   stays above it, under the status bar (whose taps are iOS's): a thumb's
+   worth of the shade to tap it away. Its title and ✕ stay at its top as it
+   scrolls. */
 
 .sheet-back {
-  position: fixed; inset: 0;
+  position: fixed; left: 0; right: 0; top: 0;
+  height: var(--vvh, 100%);
+  transform: translateY(var(--vv-top, 0px));
   background: var(--scrim);
   z-index: 10;
   display: flex; align-items: flex-end;
-  padding: var(--gap) var(--gap) calc(var(--bottom) + var(--gap));
+  padding: calc(var(--top) + 52px) var(--gap) calc(var(--bottom) + var(--gap));
+  overscroll-behavior: contain;
   animation: fade 0.15s ease-out;
 }
+/* A tap on it is a click to iOS. */
+@media (hover: none) { .sheet-back, .organize-shade { cursor: pointer; } .sheet { cursor: auto; } }
+.keyboard-up .sheet-back { padding-top: calc(var(--top) + var(--gap)); padding-bottom: var(--gap); }
 .sheet, .toast {
   border: 2px solid transparent;
   border-radius: var(--radius);
   background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--popup-border) border-box;
 }
 .sheet {
+  position: relative;
   width: 100%;
-  max-height: calc(100% - var(--top));
+  max-height: 100%;
   overflow-y: auto;
-  padding: 16px 16px 18px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 16px 18px;
   animation: up 0.18s ease-out;
+  transition: transform 0.16s ease-out;
 }
-.sheet .head { margin-bottom: 4px; }
+.sheet.dragging { transition: none; }
+.sheet-back.leaving { transition: opacity 0.16s ease-out; opacity: 0; }
+/* A sheet back from under another, or drawn anew in its place: just there. */
+.sheet-back.again, .sheet-back.again .sheet, .sheet-back.over { animation: none; }
+.sheet .head {
+  position: sticky; top: 0; z-index: 1;
+  margin: 0 -2px 4px; padding: 16px 46px 8px 2px;
+  background: var(--bg);
+}
+/* A sheet you can pull down: its grip, at the top. */
+.sheet .head::before {
+  content: ""; position: absolute; top: 5px; left: 50%;
+  width: 36px; height: 4px; margin-left: -18px;
+  border-radius: 2px; background: var(--dim); opacity: 0.45;
+}
+body.desk .sheet .head::before { display: none; }
+/* Its ✕: a thumb's 44 points, at the top right. */
+.sheet-close {
+  position: absolute; top: 4px; right: -10px;
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--dim); font-size: 18px;
+}
+.sheet-close:active, .sheet-close:hover { color: var(--fg); background: var(--sel-bg); }
 .sheet h2 { font-size: var(--title); font-weight: 700; margin: 0; overflow-wrap: anywhere; }
 .sheet p { margin: 6px 0; color: var(--dim); }
 /* One of a few, omalauncher's joined toggle: the one that's on filled in. */

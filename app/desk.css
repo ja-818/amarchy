@@ -205,7 +205,18 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   border-radius: var(--radius);
   background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--popup-border) border-box;
 }
-.picker-title { padding: 12px 16px 0; color: var(--accent); font-weight: 700; }
+.picker-top { display: flex; align-items: flex-start; }
+.picker-title { flex: 1; min-width: 0; padding: 12px 16px 0; color: var(--accent); font-weight: 700; }
+/* The ✕ of a menu card, and of the list under the Ⓐ. */
+.picker-close {
+  flex: none; width: 44px; height: 44px; margin-left: auto;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--dim); font-size: 16px;
+}
+.picker-close:hover { color: var(--fg); background: var(--sel-bg); }
+.bar-drop-top { display: flex; align-items: center; gap: 4px; }
+.bar-drop-top .searchbox { flex: 1; }
 .picker-input { display: block; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .picker-input input { width: 100%; border: 0; outline: none; background: none; font-size: var(--title); padding: 2px 0; }
 .picker-input input::placeholder { color: var(--dim); }
@@ -228,7 +239,7 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 
 /* ---- sheets (settings, a session's menu, closing) as cards in the middle */
 
-body.desk .sheet-back { align-items: center; justify-content: center; }
+body.desk .sheet-back { align-items: center; justify-content: center; padding: 24px; }
 body.desk .sheet { max-width: 520px; max-height: 80vh; }
 body.desk .menu-item:hover, body.desk .opt:hover { background: var(--sel-bg); }
 .seg .control.size { flex: none; min-width: 64px; }
