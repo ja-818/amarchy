@@ -398,10 +398,6 @@ async function asPNG(blob) {
   return new Promise((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("couldn't read the image"))), "image/png"));
 }
 
-function openLink(uri) {
-  if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
-}
-
 // What tmux copied, to your clipboard. Safari only lets a page write it
 // right after a click or a key: then a click on the notice does it.
 async function copyText(text) {

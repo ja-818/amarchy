@@ -605,6 +605,15 @@ open it also plays your desktop's chime (the one `amarchy sound` picked,
 sent with the look) when a session needs you or is done, unless it's the one
 you're looking at.
 
+**Links** (in what Claude says, and in the terminals: click one) open in the
+default browser, where the device lets a web page get there. In Safari's Dock
+app on a Mac they do: a link to another site leaves for the default browser.
+On an iPhone or iPad, the Home Screen app opens them in a Safari sheet
+whatever the default is, and a page can't ask which browser that is, so
+Settings → "Open links in" picks one for that device (Safari, Chrome,
+Firefox, Edge or Brave, through the browser's own address, so it has to be
+installed); "As iOS does" is the sheet.
+
 How it stays yours is the phone app's: each terminal is a WebSocket on the
 app's own server, taken only from the Tailscale login that owns the host
 (`APP_USERS=`), at its tailnet address, and only from the app's own pages

@@ -547,6 +547,8 @@ th { font-weight: 700; }
 .seg { display: flex; }
 .seg .control { flex: 1; }
 .seg .control + .control { margin-left: -1px; }
+.seg.wrap { flex-wrap: wrap; gap: 6px; }
+.seg.wrap .control { flex: 1 0 30%; margin-left: 0; }
 .seg .control.on { background: var(--accent); border-color: var(--accent); color: var(--bg); position: relative; }
 .menu { display: flex; flex-direction: column; gap: 2px; }
 .menu-item {

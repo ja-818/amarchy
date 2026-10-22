@@ -143,6 +143,83 @@ const store = {
   set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* private mode */ } },
 };
 
+// ---- links out: every link in the app (the chat, the terminals) leaves through here
+//
+// A page can't ask which browser is the default. A Mac's web app (Safari's
+// Add to Dock) gives a link to another site to the default browser itself,
+// but only one clicked as a link: window.open keeps it in the web app. An
+// iPhone's home-screen app shows it in a Safari sheet whatever the default
+// is; only an app's own address (googlechromes://…) reaches another browser.
+// So on an iPhone or iPad the settings can name one, kept on that device.
+
+const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+const BROWSERS = [
+  ["", "As iOS does", null],
+  ["safari", "Safari", (u) => `x-safari-${u}`],
+  ["chrome", "Chrome", (u) => u.replace(/^http/i, "googlechrome")],
+  ["firefox", "Firefox", (u) => `firefox://open-url?url=${encodeURIComponent(u)}`],
+  ["edge", "Edge", (u) => `microsoft-edge-${u}`],
+  ["brave", "Brave", (u) => `brave://open-url?url=${encodeURIComponent(u)}`],
+];
+
+function linkBrowser() {
+  const b = iOS && BROWSERS.find(([k]) => k && k === store.get("open-links"));
+  return b || null;
+}
+
+// A link to somewhere else: http(s), and not this app.
+function outward(uri) {
+  try {
+    const u = new URL(uri, location.href);
+    return /^https?:$/.test(u.protocol) && u.origin !== location.origin ? u.href : null;
+  } catch (e) { return null; }
+}
+
+function follow(href, target) {
+  const a = h("a", { href, target, rel: "noopener noreferrer" });
+  a.style.display = "none";
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+// Called from a click (or a key), so the browser lets it open something.
+function openLink(uri) {
+  const url = outward(uri);
+  if (!url) return;
+  const b = linkBrowser();
+  if (!b) return follow(url, "_blank");
+  follow(b[2](url));
+  // Nothing answers when the app isn't there: still here a moment later, say so.
+  setTimeout(() => {
+    if (document.visibilityState === "visible" && document.hasFocus()) toast(`If ${b[1]} didn't open, is it installed? (Settings → Links)`);
+  }, 2500);
+}
+
+document.addEventListener("click", (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest && e.target.closest("a[href]");
+  if (!a || !a.isConnected || !outward(a.href) || !linkBrowser()) return;      // the system's way: the link as it is
+  e.preventDefault();
+  openLink(a.href);
+}, true);
+
+function linkSettings() {
+  if (!iOS) {
+    return [h("div", { class: "section" }, "Links"),
+      h("p", {}, /Macintosh/.test(navigator.userAgent)
+        ? "Links open in this Mac's default browser when Amarchy is in the Dock (in Safari: File → Add to Dock); in a browser tab, in a new tab."
+        : "Links open in this device's default browser, as it opens them.")];
+  }
+  const now = (linkBrowser() || BROWSERS[0])[0];
+  return [h("div", { class: "section" }, "Open links in"),
+    h("div", { class: "seg wrap" }, ...BROWSERS.map(([k, label]) =>
+      h("button", { class: `control${now === k ? " on" : ""}`, onclick: () => { store.set("open-links", k); openSettings(); } }, label))),
+    h("p", {}, now ? `On this ${/iPhone|iPod/.test(navigator.userAgent) ? "iPhone" : "iPad"}, links open in ${(linkBrowser() || [])[1]}, which has to be installed.`
+                   : "iOS opens links from a Home Screen app in a Safari sheet, whatever your default browser is: a web page can't ask which it is. Pick one to open them there instead.")];
+}
+
 function where(s) { return `${s.repo} · ${s.name || s.branch}`; }
 function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
@@ -1852,6 +1929,7 @@ async function openSettings() {
       h("div", { class: "section" }, "Host"),
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
+    kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
     keepFocus(body.parentNode || body, () => body.replaceChildren(...kids));
   };
