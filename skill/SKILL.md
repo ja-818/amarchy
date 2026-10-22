@@ -12,47 +12,41 @@ description: >
 
 # amarchy
 
-amarchy runs the user's Claude Code sessions in parallel on their Omarchy
-desktop. Each **session** is:
+amarchy runs the user's Claude Code sessions in parallel on a server, the
+**host**, that they reach from their phone and their computer's browser
+(`amarchy app`). Each **session** is:
 
 - a **git worktree** on its own **branch**, made from the latest main
   (`$AMARCHY_PATH`, branch `$AMARCHY_BRANCH`), under
   `$AMARCHY_WORK/.worktrees/<project>/<name>` by default (`AMARCHY_WORK` is
   `~/Work` unless the user set it);
-- **you**, Claude Code, in a centered column on the session's own Hyprland
-  workspace;
-- the session's **terminal** on your right, opened in the same worktree. The
+- **you**, Claude Code, in tmux on the host;
+- the session's **terminal**, also in tmux, opened in the same worktree. The
   project runs there (`bin/dev`, `npm run dev`...);
-- one row in the **session list** on your left (and under the Ⓐ in the bar):
-  status glyph, what the session is about, `project · branch`.
+- one row in the **session list** of the app: status glyph, what the session
+  is about, `project · branch`.
 
-The other sessions are other Claude Code instances, each in a worktree of its
-own. The project's **main checkout** is `$AMARCHY_ROOT` (`$AMARCHY_WORK/<project>`).
+The user sees you and the terminal through the app: on a phone your messages
+show as a chat and your questions (AskUserQuestion, permission prompts) as
+buttons, so short option labels read best; in a browser on a computer, your
+terminal sits in a column with their sessions on its left and this session's
+terminal on its right. The other sessions are other Claude Code instances,
+each in a worktree of its own. The project's **main checkout** is
+`$AMARCHY_ROOT` (`$AMARCHY_WORK/<project>`).
 
-### On a server (remote sessions)
+### Their devices aren't this machine
 
-Your session may run on a **host**: a machine without a desktop that keeps
-sessions for the user's desktops (`amarchy remote` there). Your SessionStart
-context says so. You and the terminal run in tmux on the host, and the user sees
-both through amarchy on their own machine. Then:
-
-- The user's browser isn't on your machine. Your SessionStart context says
-  which address to listen on (the host's private network address, never
-  `0.0.0.0` on your own initiative) and what URL to give them. Other sessions
-  share the machine, so check the port is free.
-- `amarchy run`, `list`, `new`, `rename`, `close` and messaging other sessions
-  work as below; the other sessions you see are the host's. Commands that move
-  the user's screen do nothing here.
+- Their browser isn't here. Your SessionStart context says which address to
+  listen on (the host's private Tailscale address, never `0.0.0.0` on your own
+  initiative) and what URL to give them. Other sessions share the machine, so
+  check the port is free.
 - Nothing opens on their screen from here (a browser, a GUI app): tell them
   what to open instead.
-- `wl-paste` reads what they last pasted (an image, or text) or copied in the
-  app, from their phone or browser (or what's copied on a desktop still
-  connected), the way Ctrl+V pastes an image into you there. Use it when they ask you to look
-  at what they copied: `wl-paste --list-types`, then
-  `wl-paste --type image/png > /tmp/copied.png` and read that file.
-- They may be reading you on their phone (`amarchy app`): your messages show
-  as a chat, and your questions (AskUserQuestion, permission prompts) as
-  buttons. Short option labels read best there.
+- `wl-paste` prints what they last pasted (an image, or text) in the app on
+  their phone or in a browser, or copied in a terminal there: the way `Ctrl+V`
+  pastes an image into you. Use it when they ask you to look at what they
+  pasted or copied: `wl-paste --list-types`, then
+  `wl-paste --type image/png > /tmp/pasted.png` and read that file.
 
 ## Your environment
 
@@ -61,7 +55,7 @@ Set in your shell and in the terminal beside you:
 | Variable | |
 | --- | --- |
 | `AMARCHY` | `1`: you're inside amarchy. |
-| `AMARCHY_SESSION` | This session's id (`<project>-<name>`). `amarchy` commands that act on "the current session" use it, whatever is on screen. |
+| `AMARCHY_SESSION` | This session's id (`<project>-<name>`). `amarchy` commands that act on "the current session" use it, whatever the user has open. |
 | `AMARCHY_PATH` | This worktree. |
 | `AMARCHY_NAME` | The session's name, e.g. `wobbly-bakunin`. |
 | `AMARCHY_BRANCH` | Its branch (usually the same as the name). |
@@ -81,7 +75,7 @@ command's usage without running it (an option it doesn't know fails instead).
   `idle`), `sleeping` (its Claude Code isn't running until the user types
   in it; it still shows as idle), `unseen` (idle, and finished a turn the
   user hasn't opened yet), `priority` (`high`,
-  `normal`, `low`), `task` (what it's about: the user's name for it, else Claude Code's title cut down to "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current` (on screen), `agent`
+  `normal`, `low`), `task` (what it's about: the user's name for it, else Claude Code's title cut down to "Keyword: a few words"), `claude_title` (Claude Code's whole title), `agent`
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
   Claude runs), `background` (Claude Code background sessions running in its
   worktree).
@@ -92,8 +86,8 @@ command's usage without running it (an option it doesn't know fails instead).
 - `amarchy run`: (re)start the project's run command in the terminal beside
   you. Use it after a change the running dev server won't pick up by itself
   (new dependency, config, migrations, server code without reload), or when the
-  user asks. If this session is on screen, the terminal shows (this leaves zen
-  mode). If not, it restarts quietly in place.
+  user asks. It restarts in place; in the browser the user sees it in the
+  terminal beside you.
 - `amarchy run <name>`: run another saved command the same way.
 
 You **can't read that terminal's output**: it's the user's. To check that
@@ -104,11 +98,11 @@ dev server). Restart the terminal so the user sees the result too.
 
 - `amarchy sleep [id]` / `amarchy sleep --all` / `amarchy wake [id]`: a
   sleeping session's Claude Code isn't running (it holds no memory); its
-  window keeps Claude's last screen, and what the user types there goes to
-  Claude when it comes back (`claude --resume`). A sleeping session's Claude
+  tmux window keeps Claude's last screen, and what the user sends or types
+  there goes to Claude when it comes back (`claude --resume`). A sleeping session's Claude
   can't be messaged with SendMessage (its `agent` is empty), but `amarchy
-  send` wakes it with the message (see "Talking to other sessions"). Idle sessions off screen (on a
-  host: open on no phone or browser) sleep on their own after
+  send` wakes it with the message (see "Talking to other sessions"). Idle
+  sessions open on no phone or browser sleep on their own after
   `amarchy sleep --after` minutes (default 1), so you rarely need these. A
   session never sleeps while it's working, asking the user something, or
   running background commands or agents. Never add `--force` without
@@ -124,14 +118,14 @@ dev server). Restart the terminal so the user sees the result too.
   / `amarchy projects order <project>...`: the order the user's projects come in
   (the list's project groups, the new-session picker). Only when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
-  strip above you. Claude Code's own title (cut down to "Keyword: a few words") is shown until then, so don't rename
+  app's bar above you. Claude Code's own title (cut down to "Keyword: a few words") is shown until then, so don't rename
   unprompted. Never overwrite a name the user gave (`title` in `amarchy list`).
   `amarchy rename --reset` goes back to Claude's title.
 - `amarchy run --set '<command>'` / `amarchy run --save <name> '<command>'` /
   `amarchy run --forget <name>`: change the project's saved commands (shared by
   all its sessions). Commands start in the worktree and can use the variables
   above. Single-quote them so they expand per session, e.g.
-  `amarchy run --set '$AMARCHY_PATH/install.sh && omarchy-restart-shell'`.
+  `amarchy run --set '$AMARCHY_PATH/install.sh && systemctl --user restart amarchy-app'`.
   amarchy's own `install.sh` (and `--uninstall`) won't take the installed
   amarchy off **another** session's worktree without asking: in a terminal it
   asks, and run by you (no terminal) it changes nothing and says whose build
@@ -139,14 +133,11 @@ dev server). Restart the terminal so the user sees the result too.
   worktree's build is never asked about, so putting it back on main
   (`$AMARCHY_ROOT/install.sh`) just works. Closing a session whose worktree
   amarchy runs from puts it back on the main checkout first.
-- `amarchy new <project> [name] --no-jump [--prompt "<brief>"]`: start another
+- `amarchy new <project> [name] [--prompt "<brief>"]`: start another
   session and print its id. With `--prompt` (or `--prompt -` to read it from
   stdin), its Claude starts with that as its first message: the way to hand a
-  new session a task. `--no-jump` starts it out of sight: it shows up in the
-  user's list and their screen stays where it is. **Always pass `--no-jump`**
-  when you start a session; without it the screen goes to the new session,
-  which only makes sense when the user asked to be taken there. See "Talking
-  to other sessions".
+  new session a task. It shows up in the user's list; nothing opens on their
+  devices. See "Talking to other sessions".
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
 - `amarchy close <id>`: close **another** session. It stops every process still
@@ -156,20 +147,20 @@ dev server). Restart the terminal so the user sees the result too.
 
 ### Never on your own
 
-- `amarchy close` with no id closes **this** session: your own window and your
-  worktree. Don't.
-- `jump`, `next`, `prev`, `open`, `show`, `search`, `pick`, `menu`, `zen`,
-  `terminal`, `theme`, `sound`, `group`, `sort`, `layout`: these move or
-  repaint what the user is looking at (or change what they hear). Run them
-  only when asked, as the action itself.
-- `hook`, `ui`, `watch` are amarchy's own plumbing. Don't edit
-  `~/.local/state/amarchy/` either.
+- `amarchy close` with no id closes **this** session: your own Claude and
+  your worktree. Don't.
+- `theme`, `sound`, `group`, `sort`, `alerts`, `assistant`, `app on|off`:
+  these change what the user sees and hears on every device. Run them only
+  when asked, as the action itself (printing the current setting is fine).
+- `hook`, `seen`, `reap`, `shorten`, `editor`, `held`, `paste`, `rec`, `app
+  serve` are amarchy's own plumbing. Don't edit `~/.local/state/amarchy/`
+  either.
 - Typing into a session (`tmux send-keys`, a browser test on the app, `amarchy
   send`) when it isn't yours to drive. Every session shows up in the user's
   list, test sessions too, and they may be looking at it or typing in it: what
   you type mixes with theirs, and clearing its prompt wipes what they wrote.
   To test against a live session, start one of your own for it with a name
-  that says so (`amarchy new <project> test-<what> --no-jump`), tell the user
+  that says so (`amarchy new <project> test-<what>`), tell the user
   it's a test session they shouldn't use, and close it as soon as you're done.
 
 ## Talking to other sessions
@@ -201,9 +192,9 @@ the user to paste something into another session: send it yourself.
 
 To give a **new** session a task (only when the user asks for a session):
 
-1. `amarchy new <project> [name] --no-jump --prompt "<the whole brief>"`, one
-   call per session when there are several. `--no-jump` keeps the user's
-   screen where it is; the new sessions just show up in their list. The brief
+1. `amarchy new <project> [name] --prompt "<the whole brief>"`, one call per
+   session when there are several. The new sessions just show up in the
+   user's list. The brief
    is all it gets, so make it self-contained: what to do, why, where things
    are, and to report back to you by name (yours is in `ListAgents`' first
    line).
@@ -235,11 +226,12 @@ blocked here; take it back to the user instead.
 
 ## Notifications
 
-amarchy already notifies the user (with a chime) when you stop or need their
-input, and their list shows your status live. Don't add notifications of your
-own for that. `amarchy notify "<title>" "<body>" [--session <id>] [--urgent]`
-pushes a notification of your own to the user's phones (on a host with the
-phone app on); only send one when the user asked for it (a reminder, a brief).
+amarchy already notifies the user's phones and browsers when you need their
+input (and when you're done, if they asked for that), and their list shows
+your status live. Don't add notifications of your own for that. `amarchy
+notify "<title>" "<body>" [--session <id>] [--urgent]` pushes one of your own
+to every device the app notifies; only send one when the user asked for it (a
+reminder, a brief).
 The user's assistant session (`amarchy assistant` names it; `assistant:
 "main"` in `amarchy list`) is the exception: its notifications always reach
 them, under its name. `amarchy alerts` decides what the other sessions'
