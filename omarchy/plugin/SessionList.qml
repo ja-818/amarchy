@@ -12,6 +12,9 @@ import qs.Ui
 // Your assistant and the other sessions of its project come first (the CLI
 // puts them there), in a place of their own above the groups, without
 // headers, a rule under them.
+// A project's header shows arrows under the pointer: up and down past the
+// project next to it, to put your projects in the order you want
+// (`amarchy projects move`).
 Column {
   id: list
 
@@ -20,8 +23,12 @@ Column {
   property var groups: []
   property int cursor: -1
   property int spinnerFrame: 0
+  // Projects can be moved from their headers (not in the peek, which is only looked at).
+  property bool movable: true
   signal activated(int index)
   signal hovered(int index)
+  // Move a project ("up" before, "down" after another one), from its header's arrows.
+  signal moveProject(string name, string where, string other)
 
   readonly property var statusNames: ({ waiting: "Needs you", working: "Working", done: "Done", idle: "Idle", asleep: "Asleep" })
   readonly property var priorityNames: ({ high: "High priority", normal: "Normal priority", low: "Low priority" })
@@ -39,6 +46,22 @@ Column {
     if (what === "priority") return list.priorityNames[s.priority] || s.priority
     var status = list.key(s, "status")
     return list.statusNames[status] || status
+  }
+
+  // The project next to this row's in the list (dy -1 above, 1 under),
+  // inside the same outer groups, or "" at either end of them. Your
+  // assistant's section is a place of its own: never next to a group.
+  function projectNext(index, dy) {
+    var s = list.sessions[index]
+    var outer = list.groups.indexOf("project")
+    for (var i = index + dy; i >= 0 && i < list.sessions.length; i += dy) {
+      var o = list.sessions[i]
+      if (o.assistant) return ""
+      for (var g = 0; g < outer; g++)
+        if (list.key(o, list.groups[g]) !== list.key(s, list.groups[g])) return ""
+      if (o.repo !== s.repo) return o.repo
+    }
+    return ""
   }
 
   // Where a session's row is, from the top of the list, counting the
@@ -112,6 +135,22 @@ Column {
           visible: index >= entry.firstNew
           width: entry.width
           height: label.height
+          // A project's: the projects above and under it, to move it past.
+          readonly property bool project: list.movable && modelData === "project" && !entry.mine
+          readonly property string above: project && visible ? list.projectNext(entry.index, -1) : ""
+          readonly property string below: project && visible ? list.projectNext(entry.index, 1) : ""
+          readonly property bool arrows: (above !== "" || below !== "")
+                                         && (headArea.containsMouse || upArea.containsMouse || downArea.containsMouse)
+          // The middle of the label's text, under the room above it.
+          readonly property real middle: label.topPadding + (label.height - label.topPadding) / 2
+
+          MouseArea {
+            id: headArea
+            anchors.fill: parent
+            visible: heading.project
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+          }
 
           PanelSectionHeader {
             id: label
@@ -137,8 +176,56 @@ Column {
             foreground: Commons.Color.menu.text
             strength: 0.2
             x: label.x + label.width + heading.gap
-            width: Math.max(0, heading.width - heading.inset - x)
+            width: Math.max(0, (heading.arrows ? moves.x - heading.gap : heading.width - heading.inset) - x)
             y: Math.round(label.topPadding + (label.height - label.topPadding) / 2)
+          }
+
+          // Up / down, on the right, while the pointer is on the header.
+          Row {
+            id: moves
+            visible: heading.arrows
+            anchors.right: parent.right
+            anchors.rightMargin: heading.inset
+            y: Math.round(heading.middle - height / 2)
+            spacing: Style.spacing.xs
+
+            Text {
+              textFormat: Text.PlainText
+              text: "󰁝"
+              font.family: Style.font.menuFamily
+              font.pixelSize: label.fontSize
+              color: Commons.Color.menu.text
+              opacity: heading.above === "" ? 0.2 : upArea.containsMouse ? 1 : 0.55
+
+              MouseArea {
+                id: upArea
+                anchors.fill: parent
+                anchors.margins: -Style.spacing.xxs
+                hoverEnabled: true
+                enabled: heading.above !== ""
+                cursorShape: Qt.PointingHandCursor
+                onClicked: list.moveProject(entry.modelData.repo, "before", heading.above)
+              }
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "󰁅"
+              font.family: Style.font.menuFamily
+              font.pixelSize: label.fontSize
+              color: Commons.Color.menu.text
+              opacity: heading.below === "" ? 0.2 : downArea.containsMouse ? 1 : 0.55
+
+              MouseArea {
+                id: downArea
+                anchors.fill: parent
+                anchors.margins: -Style.spacing.xxs
+                hoverEnabled: true
+                enabled: heading.below !== ""
+                cursorShape: Qt.PointingHandCursor
+                onClicked: list.moveProject(entry.modelData.repo, "after", heading.below)
+              }
+            }
           }
         }
       }

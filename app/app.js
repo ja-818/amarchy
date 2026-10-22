@@ -16,9 +16,10 @@ const NERD = {
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
   stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
   organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
+  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}",
 };
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
-                project: "▤", status: "●", newest: "↓", oldest: "↑" };
+                project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅" };
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -378,19 +379,99 @@ function renderList() {
         ...mine.map((s) => s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true))));
     // The rest grouped as amarchy groups them, outermost first. With more than
     // one grouping the outermost is a rule across the list, its name in the middle.
-    const groups = v.group || [];
-    let prev = [];
-    for (const s of shown.filter((s) => !s.assistant)) {
-      const labels = groups.map((g) => groupLabel(s, g));
-      const at = labels.findIndex((l, i) => l !== prev[i]);
-      if (at >= 0)
-        for (let i = at; i < labels.length; i++)
-          list.append(h("div", { class: `group-head${i === 0 && groups.length > 1 ? " ruled" : ""}` }, labels[i]));
-      prev = labels;
-      list.append(sessionRow(s, groups));
-    }
+    grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
   }
   app.newBar.update();
+}
+
+// The sessions under your assistant's section, grouped as amarchy groups
+// them, outermost first: a header where a group changes. With more than one
+// grouping the outermost is a rule across the list, its name in the middle.
+// A project's header opens the order of your projects (and on the desktop,
+// under the pointer, has arrows to move it past the project next to it).
+function grouped(list, shown, groups, rowOf) {
+  const rest = shown.filter((s) => !s.assistant);
+  let prev = [];
+  rest.forEach((s, n) => {
+    const labels = groups.map((g) => groupLabel(s, g));
+    const at = labels.findIndex((l, i) => l !== prev[i]);
+    if (at >= 0)
+      for (let i = at; i < labels.length; i++) {
+        const ruled = i === 0 && groups.length > 1;
+        list.append(groups[i] === "project"
+          ? projectHead(s.repo, ruled, nextProject(rest, n, groups, -1), nextProject(rest, n, groups, 1))
+          : h("div", { class: `group-head${ruled ? " ruled" : ""}` }, labels[i]));
+      }
+    prev = labels;
+    list.append(rowOf(s));
+  });
+}
+
+// The project next to the nth session's (dy -1 above, 1 under) inside the
+// same outer groups, or "" at either end of them.
+function nextProject(rest, n, groups, dy) {
+  const s = rest[n], outer = groups.slice(0, groups.indexOf("project"));
+  for (let i = n + dy; i >= 0 && i < rest.length; i += dy) {
+    const o = rest[i];
+    if (outer.some((g) => groupLabel(o, g) !== groupLabel(s, g))) return "";
+    if (o.repo !== s.repo) return o.repo;
+  }
+  return "";
+}
+
+function projectHead(repo, ruled, above, below) {
+  const arrow = (icon, label, where, other) => h("button", {
+    class: "move", "aria-label": label, disabled: !other,
+    onclick: (e) => { e.stopPropagation(); moveProject(repo, where, other); } }, glyph(icon));
+  return h("div", { class: `group-head project-head${ruled ? " ruled" : ""}`, role: "button", tabindex: "0",
+                    title: "Order your projects", onclick: () => orderProjects(repo),
+                    onkeydown: (e) => { if (e.key === "Enter") orderProjects(repo); } },
+    h("span", { class: "name" }, repo),
+    h("span", { class: "moves" }, arrow("up", `Move ${repo} up`, "before", above),
+      arrow("under", `Move ${repo} down`, "after", below)));
+}
+
+// Move a project ("before" or "after" another, "up", "down", "top", "bottom")
+// in the order your projects come in, here and on your desktop.
+async function moveProject(name, where, other) {
+  try {
+    const { projects } = await api("/api/projects/move", other ? { name, where, other } : { name, where });
+    return projects;
+  } catch (e) {
+    toast(e.message);
+    return null;
+  }
+}
+
+// The order your projects come in (the list's project groups, the picker of
+// a new session): each with arrows to move it, the one you came from lit.
+function orderProjects(lit) {
+  const names = (app.view && app.view.projects || []).map((p) => p.name);
+  for (const s of (app.view && app.view.sessions) || []) if (!names.includes(s.repo)) names.push(s.repo);
+  const count = Object.fromEntries(((app.view && app.view.projects) || []).map((p) => [p.name, p.sessions || 0]));
+  const list = h("div", { class: "menu project-order" });
+  const draw = () => list.replaceChildren(...names.map((name, i) => h("div", { class: `menu-item${name === lit ? " on" : ""}` },
+    h("span", { class: "label" }, glyph("project", "icon"), h("span", { class: "text" }, name),
+      count[name] ? h("small", {}, String(count[name])) : null),
+    h("span", { class: "moves" },
+      holdable(h("button", { class: "control move", "aria-label": `Move ${name} up (hold: to the top)`, disabled: i === 0,
+                             onclick: () => move(name, "up") }, glyph("up")), () => move(name, "top")),
+      holdable(h("button", { class: "control move", "aria-label": `Move ${name} down (hold: to the bottom)`,
+                             disabled: i === names.length - 1, onclick: () => move(name, "down") }, glyph("under")),
+               () => move(name, "bottom"))))));
+  const move = async (name, where) => {
+    lit = name;
+    const at = names.indexOf(name);
+    names.splice(at, 1);      // at once; amarchy's own order once it answers
+    names.splice({ up: at - 1, down: at + 1, top: 0, bottom: names.length }[where], 0, name);
+    draw();
+    const now = await moveProject(name, where);
+    if (now) names.splice(0, names.length, ...now);
+    draw();
+  };
+  draw();
+  sheet(sheetHead("Order projects", "Hold an arrow: to the top or bottom"), list,
+    h("button", { class: "control wide", onclick: closeSheet }, "Done"));
 }
 
 // The sessions the search matches by name (what it's about, Claude's title
@@ -431,7 +512,16 @@ function organizeMenu() {
     }),
     h("div", { class: "menu-head" }, "Sort by"),
     ...SORTINGS.map(([what, icon, label]) => row(icon, label, sort === what, "", () => organizeList(groups, what))),
+    h("div", { class: "menu-head" }, "Projects"),
+    row("order", "Order projects…", false, "", () => { closeOrganize(); orderProjects(); }),
   ];
+}
+
+// The group & sort menu goes, wherever it is (the phone's list, beside Claude on the desktop).
+function closeOrganize() {
+  if (app.listEl) app.listEl.menu.hidden = true;
+  if (typeof desk !== "undefined" && desk.organize) desk.organize.hidden = true;
+  refresh();
 }
 
 async function organizeList(group, sort) {

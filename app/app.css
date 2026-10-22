@@ -248,6 +248,22 @@ body::before {
 .group-head:first-child { padding-top: 4px; }
 .group-head.ruled { display: flex; align-items: center; gap: 8px; padding-left: 8px; padding-right: 8px; }
 .group-head.ruled::before, .group-head.ruled::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+/* A project's opens the order of your projects (on the desktop, arrows
+   under the pointer move it past the project next to it). */
+.project-head { position: relative; cursor: pointer; }
+.project-head .moves { display: none; }
+.project-head .move { width: 22px; height: 18px; display: inline-grid; place-items: center; color: var(--dim); }
+.project-head .move:hover:not(:disabled) { color: var(--fg); }
+.project-head .move:disabled { opacity: 0.25; }
+
+/* The order of your projects: each with its arrows. */
+.project-order .menu-item { padding: 4px 4px 4px 8px; }
+.project-order .menu-item .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-order .menu-item small { color: var(--dim); font-size: var(--caption); }
+.project-order .menu-item.on small { color: inherit; opacity: 0.7; }
+.project-order .moves { display: flex; gap: 6px; flex: none; }
+.project-order .control.move { width: 42px; min-height: 38px; padding: 0; }
+.project-order .control.move:disabled { opacity: 0.3; }
 
 /* One session (SessionRow): its state in a fixed slot, what it's about with
    the keyword in bold, project · name in small caps, the time on the right. */
