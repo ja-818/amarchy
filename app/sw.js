@@ -1,7 +1,8 @@
 // amarchy's service worker: the notifications (Web Push, sent by `amarchy
 // app` when a session needs you or is done), and the app's own files kept for
 // when the server can't be reached (it then says so, rather than Safari's
-// error page). Everything else always comes from the server.
+// error page), your assistant's picture too. Everything else always comes
+// from the server.
 
 const SHELL = "amarchy-shell-v4";
 const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
@@ -22,13 +23,23 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   const path = url.pathname === "/index.html" ? "/" : url.pathname;
-  if (!FILES.includes(path)) return;
+  if (!FILES.includes(path) && !path.startsWith("/picture/")) return;     // and your assistant's picture
   e.respondWith((async () => {
     try {
       const res = await fetch(e.request);
       if (res.ok) {
         const copy = res.clone();
-        caches.open(SHELL).then((c) => c.put(path, copy));
+        caches.open(SHELL).then(async (c) => {
+          await c.put(path, copy);
+          // A new picture: the one before it isn't needed any more.
+          if (path.startsWith("/picture/")) {
+            const sig = path.slice(9, 21);
+            for (const req of await c.keys()) {
+              const p = new URL(req.url).pathname;
+              if (p.startsWith("/picture/") && p.slice(9, 21) !== sig) await c.delete(req);
+            }
+          }
+        });
       }
       return res;
     } catch (err) {

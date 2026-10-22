@@ -526,9 +526,11 @@ async function confirmClose(s, known) {
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
-// Your assistant's picture (app/assistant.svg).
-function avatar(cls) {
-  return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src: "/assistant.svg", alt: "", draggable: "false" });
+// Your assistant's picture: yours (amarchy assistant --picture), by its hash,
+// else amarchy's own (app/assistant.svg).
+function avatar(s, cls) {
+  const src = /^[0-9a-f]{12}$/.test(s.picture || "") ? `/picture/${s.picture}-512.png` : "/assistant.svg";
+  return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
 }
 
 // Your assistant, at the top of the list: its picture with its state on it,
@@ -544,7 +546,7 @@ function assistantCard(s) {
     : task || (st === "working" ? "On it…" : "Here for you");
   return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`,
                                 onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
-    h("span", { class: "avatar-wrap" }, avatar(), stateIcon(s)),
+    h("span", { class: "avatar-wrap" }, avatar(s), stateIcon(s)),
     h("span", { class: "main" },
       h("div", { class: "name" }, name, unread ? h("span", { class: "new" }, "New") : null),
       h("div", { class: `line${st === "waiting" ? " waiting" : ""}${unread ? " said" : ""}` }, line),
@@ -569,7 +571,7 @@ function sessionRow(s, groups, near = false) {
   return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`,
                        onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     stateIcon(s),
-    near ? avatar("small") : null,
+    near ? avatar(s, "small") : null,
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
       // Your assistant's other sessions, unread: what it wrote, in a line.
@@ -825,12 +827,12 @@ class SessionView {
       const name = r.assistant_name || "Assistant";
       const task = r.task && r.task.toLowerCase() !== name.toLowerCase() ? `${r.task} · ` : "";
       this.input.placeholder = `Message ${name}`;
-      this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(), stateIcon(r)),
+      this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(r), stateIcon(r)),
         h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
           h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}`)));
       return;
     }
-    this.titleEl.replaceChildren(stateIcon(r), r.assistant ? avatar("small") : null,
+    this.titleEl.replaceChildren(stateIcon(r), r.assistant ? avatar(r, "small") : null,
       h("div", { class: "text" }, taskText(r.task || "New session", r.task ? "" : "untitled"),
         h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}`)));
   }

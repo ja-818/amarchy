@@ -111,6 +111,10 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         make a session your assistant (named after its project unless
                                         you name it); --name alone renames the one you have
   amarchy assistant off                 no assistant: it's a session like the others again
+  amarchy assistant --picture <file>|off [--crop x,y,size]
+                                        its picture in every list and by its notifications: yours (a PNG,
+                                        JPEG or WebP, cut to a round square: the middle of it, or the square
+                                        at x,y of that size in its pixels), or amarchy's own again
   amarchy sound --assistant [name|off]  its chime (herald until you pick one); prints it without one
   amarchy alerts [all|needs-you|assistant]
                                         what the other sessions tell you about, on the desktop and the
@@ -734,7 +738,7 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "task", "claude_title", "age", "current", "background", "agent",
-               "unseen", "assistant", "assistant_name", "said")
+               "unseen", "assistant", "assistant_name", "said", "picture", "picture_file")
 
 
 def claude_class(s):
@@ -4099,10 +4103,15 @@ def session_view():
     agents = claude_agents()
     ss = sessions()
     background = all_background_sessions()
+    # Your assistant's picture ("" for amarchy's own): its hash, for the
+    # phone's and the browser's lists; its file, for the desktop's.
+    sig, picture = assistant_picture()
     for s in ss:
         if s.get("host"):
             # As the host shows it; its agent names only reach the Claude sessions there.
             s["current"], s["agent"] = s["id"] == current, ""
+            if s["assistant"]:
+                s["picture"], s["picture_file"] = sig, str(picture or "")
             if s["current"] and s["unseen"]:
                 tell_seen(s)
                 s["unseen"] = False
@@ -4133,6 +4142,7 @@ def session_view():
         if not s.get("host"):
             s["assistant"] = assistant_role(s, mine)
             s["assistant_name"] = mine["name"] if s["assistant"] else ""
+            s["picture"], s["picture_file"] = (sig, str(picture or "")) if s["assistant"] else ("", "")
             if s["assistant"]:
                 # What it last wrote: its notifications' body (a desktop's,
                 # from here), and the list's preview while you haven't read it.
@@ -4197,10 +4207,203 @@ def assistant_role(s, mine=None):
     return "main" if s["id"] == mine["id"] else "near" if s.get("repo") == mine["repo"] else ""
 
 
+# Its picture: amarchy's own (app/assistant.svg) unless you gave it one of
+# yours (`amarchy assistant --picture <file>`), cut square and round and kept
+# in ~/.config/amarchy (assistant.png, and assistant-192.png for the phones'
+# notifications). The lists and the notifications name it by its hash, so a
+# new one shows everywhere at once (no cache keeps the old one). A desktop
+# showing a host's sessions shows the host's: it keeps a copy (remote_picture).
+PICTURE = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/assistant.png"
+PICTURE_SMALL = PICTURE.with_name("assistant-192.png")
+PICTURE_SIZES = (512, 192)
+REMOTE_PICTURE = STATE / "remote-assistant.png"
+_picture_sigs = {}
+
+
+def picture_sig(f):
+    """The hash a picture goes by (12 hex digits), or "" without one."""
+    try:
+        st = f.stat()
+        key = (str(f), st.st_mtime_ns, st.st_size)
+        if key not in _picture_sigs:
+            _picture_sigs[key] = hashlib.sha1(f.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return ""
+    return _picture_sigs[key]
+
+
+def assistant_picture():
+    """Your assistant's picture on this machine: (its hash, its file), or
+    ("", None) for amarchy's own. A desktop showing a host's sessions has the
+    host's, once its copy came."""
+    if remote_host():
+        sig = remote_snapshot().get("picture") or ""
+        return (sig, REMOTE_PICTURE) if sig and picture_sig(REMOTE_PICTURE) == sig else ("", None)
+    sig = picture_sig(PICTURE)
+    return (sig, PICTURE) if sig else ("", None)
+
+
+def assistant_avatar():
+    """The picture by your assistant's notifications on this desktop."""
+    return assistant_picture()[1] or AVATAR_PNG
+
+
+def assistant_icon():
+    """The picture by your assistant's notifications on the phones (a path
+    of the app's)."""
+    sig = picture_sig(PICTURE)
+    return f"/picture/{sig}-192.png" if sig and PICTURE_SMALL.is_file() else "/assistant-192.png"
+
+
+def picture_cut(raw, crop=None):
+    """A picture cut for your assistant's: a square of it (crop: its x, y and
+    size in the picture's pixels, else the middle of it as big as it goes),
+    round, at each of PICTURE_SIZES, as PNGs. Raises ValueError saying why
+    not. With ffmpeg, else ImageMagick."""
+    if not image_kind(raw):
+        raise ValueError("that isn't a picture amarchy takes (a PNG, JPEG or WebP)")
+    ffmpeg, magick = shutil.which("ffmpeg"), shutil.which("magick")
+    if not ffmpeg and not magick:
+        raise ValueError("cutting it to size takes ffmpeg or ImageMagick: install one (pacman -S ffmpeg)")
+    out = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "picture"
+        src.write_bytes(raw)
+        if crop:
+            # Neither cuts outside the picture: they'd quietly cut less.
+            r = sh(shutil.which("ffprobe") or "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                   "stream=width,height", "-of", "csv=p=0:s=x", str(src)) if ffmpeg else \
+                sh(magick, "identify", "-format", "%wx%h", f"{src}[0]")
+            m = re.fullmatch(r"(\d+)x(\d+)", r.stdout.strip())
+            if not m:
+                raise ValueError(gist(r.stderr) or "its size couldn't be read")
+            w, h = int(m[1]), int(m[2])
+            if crop[0] + crop[2] > w or crop[1] + crop[2] > h:
+                raise ValueError(f"--crop {crop[0]},{crop[1]},{crop[2]} goes past the picture's edge "
+                                 f"(it's {w}×{h}: x + size at most {w}, y + size at most {h})")
+        for n in PICTURE_SIZES:
+            dst = Path(tmp) / f"{n}.png"
+            if ffmpeg:
+                square = "crop=%d:%d:%d:%d" % (crop[2], crop[2], crop[0], crop[1]) if crop \
+                    else "crop='min(iw,ih)':'min(iw,ih)'"
+                # Round: what's outside the circle see-through, its edge smoothed over a pixel.
+                c = n / 2
+                ring = f"255*clip({c}-hypot(X+0.5-{c},Y+0.5-{c})+0.5,0,1)"
+                r = sh(ffmpeg, "-v", "error", "-y", "-i", str(src), "-frames:v", "1", "-vf",
+                       f"{square},scale={n}:{n}:flags=lanczos,format=rgba,"
+                       f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{ring}'", str(dst))
+            else:
+                square = ["-crop", "%dx%d+%d+%d" % (crop[2], crop[2], crop[0], crop[1]), "+repage",
+                          "-resize", f"{n}x{n}"] if crop else \
+                    ["-resize", f"{n}x{n}^", "-gravity", "center", "-extent", f"{n}x{n}"]
+                r = sh(magick, f"{src}[0]", *square, "-alpha", "set",
+                       "(", "-size", f"{n}x{n}", "xc:black", "-fill", "white",
+                       "-draw", f"circle {n / 2},{n / 2} {n / 2},0", ")",
+                       "-compose", "CopyOpacity", "-composite", "-strip", f"PNG32:{dst}")
+            try:
+                out[n] = dst.read_bytes() if r.returncode == 0 else b""
+            except OSError:
+                out[n] = b""
+            if image_kind(out[n]) != "png":
+                raise ValueError(gist(r.stderr) or "it couldn't be cut to size")
+    return out
+
+
+def picture_crop(value):
+    """--crop x,y,size: three whole numbers, the size above 0. None if not."""
+    m = re.fullmatch(r"\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*", value or "")
+    return (int(m[1]), int(m[2]), int(m[3])) if m and int(m[3]) > 0 else None
+
+
+def set_picture(source, crop=None):
+    """Your assistant's picture from source (a file, - for stdin: the
+    picture or it in base64), or amarchy's own again ("off"). A desktop
+    showing a host's sessions sets the host's (its one assistant)."""
+    host = remote_host()
+    if source == "off":
+        for f in (PICTURE, PICTURE_SMALL):
+            f.unlink(missing_ok=True)
+        if host:
+            r = remote_amarchy(host, "assistant", "--picture", "off")
+            if r.returncode != 0:
+                return fail(f"{host}: {gist(r.stderr) or 'no answer'}")
+            remote_refresh(host)
+        tell_shell("refresh")
+        print("amarchy's own")
+        return 0
+    try:
+        raw = sys.stdin.buffer.read(APP_WALLPAPER_MAX * 4) if source == "-" else Path(source).expanduser().read_bytes()
+    except OSError as e:
+        return fail(f"can't read {source}: {e.strerror or e}")
+    if source == "-" and not image_kind(raw):
+        try:
+            raw = base64.b64decode(raw.strip(), validate=True)
+        except ValueError:
+            pass
+    if host:
+        if not image_kind(raw):
+            return fail("that isn't a picture amarchy takes (a PNG, JPEG or WebP)")
+        r = remote_amarchy(host, "assistant", "--picture", "-",
+                           *(["--crop", "%d,%d,%d" % crop] if crop else []),
+                           input=base64.b64encode(raw).decode(), timeout=120)
+        if r.returncode != 0:
+            return fail(f"{host}: {gist(r.stderr) or 'no answer'}")
+        remote_refresh(host)
+        print(r.stdout.strip())
+        return 0
+    try:
+        cut = picture_cut(raw, crop)
+    except ValueError as e:
+        return fail(str(e))
+    write_file(PICTURE_SMALL, cut[192])
+    write_file(PICTURE, cut[512])       # last: its hash names both
+    tell_shell("refresh")
+    print(PICTURE)
+    return 0
+
+
+def cmd_picture(args):
+    """Plumbing: your assistant's picture here in base64 (for a desktop
+    showing this host's sessions to keep a copy of), or nothing."""
+    try:
+        print(base64.b64encode(PICTURE.read_bytes()).decode())
+    except OSError:
+        pass
+    return 0
+
+
+_picture_tried = {}
+
+
+def remote_picture(host, sig):
+    """Keep this desktop's copy of the host's assistant picture (sig: its
+    hash, as `amarchy events` says) the host's: fetched when it changed,
+    dropped when there's none. One that didn't come is tried again in a
+    minute."""
+    if not sig:
+        REMOTE_PICTURE.unlink(missing_ok=True)
+        return
+    if picture_sig(REMOTE_PICTURE) == sig or time.time() - _picture_tried.get(sig, 0) < 60:
+        return
+    _picture_tried[sig] = time.time()
+    r = remote_amarchy(host, "picture", timeout=60)
+    try:
+        raw = base64.b64decode(r.stdout.strip(), validate=True) if r.returncode == 0 else b""
+    except ValueError:
+        raw = b""
+    if image_kind(raw) != "png" or hashlib.sha1(raw).hexdigest()[:12] != sig:
+        print(f"amarchy: couldn't fetch the assistant's picture from {host}: {gist(r.stderr) or 'not that one'}",
+              file=sys.stderr)
+        return
+    write_file(REMOTE_PICTURE, raw)
+    tell_shell("refresh")
+
+
 def cmd_assistant(args):
-    """amarchy assistant [<id>] [--name <name>] | off: which session is your
-    assistant (prints it as id<TAB>name, or none)."""
-    name, rest = None, []
+    """amarchy assistant [<id>] [--name <name>] | off | --picture <file>|off
+    [--crop x,y,size]: which session is your assistant (prints it as
+    id<TAB>name, or none), and its picture."""
+    name, picture, crop, rest = None, None, None, []
     it = iter(args)
     for a in it:
         if a == "--name":
@@ -4208,8 +4411,21 @@ def cmd_assistant(args):
             if name is None or not name.strip() or len(name) > 40:
                 return fail("--name takes what to call it (40 characters at most)")
             name = name.strip()
+        elif a == "--picture":
+            picture = next(it, None)
+            if not picture:
+                return fail("--picture takes a picture (a PNG, JPEG or WebP), or off for amarchy's own")
+        elif a == "--crop":
+            crop = picture_crop(next(it, None))
+            if not crop:
+                return fail("--crop takes x,y,size: the square of the picture to show, in its pixels")
         else:
             rest.append(a)
+    if picture is not None or crop:
+        if picture is None or rest or name is not None or (crop and picture == "off"):
+            print(usage("assistant"), file=sys.stderr)
+            return 1
+        return set_picture(picture, crop)
     host = remote_host()
     current = next((s for s in session_view() if s.get("assistant") == "main"), None)
     if not rest and name is None:
@@ -4333,7 +4549,7 @@ def session_alert(s, state, prev, task=""):
         name = s.get("assistant_name") or (assistant() or {}).get("name") or "Your assistant"
         said = s.get("said") or ("" if s.get("host") else last_said(s))
         body = ("Needs you" if state == "waiting" else said or "Done") + (f"\n{task}" if task and not said else "")
-        notify(name, body, ASSISTANT_GLYPH, click=("jump", s["id"]), image=AVATAR_PNG, critical=True)
+        notify(name, body, ASSISTANT_GLYPH, click=("jump", s["id"]), image=assistant_avatar(), critical=True)
         chime(assistant=True)
     else:
         notify(task or where, where if task else "", PICK_ICONS[state], click=("jump", s["id"]))
@@ -4371,7 +4587,7 @@ def show_note(n):
     sid = n.get("session") if isinstance(n.get("session"), str) and session(n["session"]) else None
     mine = n.get("assistant") is True
     notify(title, body, ASSISTANT_GLYPH if mine else "󰂚", click=("jump", sid) if sid else (),
-           image=AVATAR_PNG if mine else None, critical=mine or n.get("urgent") is True)
+           image=assistant_avatar() if mine else None, critical=mine or n.get("urgent") is True)
     chime(assistant=mine)
 
 
@@ -4834,6 +5050,7 @@ def remote_clean(sessions):
         s["assistant"] = s.get("assistant") if s.get("assistant") in ("main", "near") else ""
         s["assistant_name"] = str(s.get("assistant_name") or "")[:40] if s["assistant"] else ""
         s["said"] = str(s.get("said") or "")[:300] if s["assistant"] else ""
+        s["picture"] = s["picture_file"] = ""     # this desktop's copy of it, in session_view
         out.append(s)
     return out
 
@@ -4866,7 +5083,8 @@ def remote_update(host, data, seen=None, quiet=False):
     projects = data["projects"] if isinstance(data.get("projects"), list) else before.get("projects", [])
     snap = {"host": host, "online": True, "at": time.time(), "hostname": str(data.get("hostname", "")),
             "sessions": sessions, "projects": [p for p in projects if isinstance(p, dict) and p.get("name")],
-            "alerts": data["alerts"] if data.get("alerts") in ALERTS else before.get("alerts", ALERTS_DEFAULT)}
+            "alerts": data["alerts"] if data.get("alerts") in ALERTS else before.get("alerts", ALERTS_DEFAULT),
+            "picture": data["picture"] if re.fullmatch(r"[0-9a-f]{12}", str(data.get("picture"))) else ""}
     write_file(REMOTE_STATE, json.dumps(snap))
     tell_shell("refresh")
     if seen is None:
@@ -5191,6 +5409,22 @@ def remote_sync():
                 print(f"amarchy: couldn't update: {e}", file=sys.stderr)
         threading.Thread(target=run, daemon=True).start()
 
+    fetching = threading.Lock()
+
+    def picture(sig):
+        """The host's assistant picture: a copy here when it changed (in the
+        background, so the list doesn't wait on it)."""
+        sig = sig if isinstance(sig, str) and re.fullmatch(r"[0-9a-f]{12}", sig) else ""
+        if picture_sig(REMOTE_PICTURE) == sig or not fetching.acquire(blocking=False):
+            return
+
+        def run():
+            try:
+                remote_picture(host, sig)
+            finally:
+                fetching.release()
+        threading.Thread(target=run, daemon=True).start()
+
     def look():
         """Now and then, and as soon as the host says what its phone app
         wears: send it this desktop's look if that changed (in the
@@ -5242,6 +5476,7 @@ def remote_sync():
                         data = {}
                     if isinstance(data, dict) and data:
                         catch_up(data.get("version"))
+                        picture(data.get("picture"))
                         listed["theirs"] = data.get("list")
                     # What the phone app there wears; nothing when it's off.
                     if isinstance(data, dict) and data:
@@ -5973,7 +6208,7 @@ def cmd_events(args):
         if time.time() - projects_at > 10:
             ps, projects_at = projects(), time.time()
         view = {"hostname": host_name(), "host_mode": HOST_MODE, "sessions": session_view(), "projects": ps,
-                "version": commit, "alerts": alerts(), "notes": recent_notes()}
+                "version": commit, "alerts": alerts(), "notes": recent_notes(), "picture": picture_sig(PICTURE)}
         if (UNITS / APP_UNIT).exists():     # the phone app is on: which look it wears (see remote_look)
             view["phone"] = app_look_stamp()
             view["list"] = list_setting()   # and how it groups and sorts the list (see remote_list)
@@ -7504,7 +7739,7 @@ def app_moments(st, ss):
             said = s.get("said") or last_said(s) if state == "idle" else ""
             payload = {"title": s.get("assistant_name") or "Your assistant", "body": said or body,
                        "tag": f"assistant-{s['id']}", "url": f"/#/s/{s['id']}", "waiting": waiting,
-                       "icon": "/assistant-192.png"}
+                       "icon": assistant_icon()}
         else:
             payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
                        "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
@@ -8068,6 +8303,20 @@ def app_handler(st, users, address):
                 return
             if path == "/theme.css":
                 return self.send(200, app_theme_css().encode(), "text/css; charset=utf-8")
+            # Your assistant's picture (amarchy assistant --picture), by its hash.
+            m = re.fullmatch(r"/picture/([0-9a-f]{12})-(512|192)\.png", path)
+            if m:
+                f = PICTURE if m.group(2) == "512" else PICTURE_SMALL
+                try:
+                    data = f.read_bytes() if picture_sig(PICTURE) == m.group(1) else b""
+                except OSError:
+                    data = b""
+                if not data:
+                    return self.error(404, "not found")
+                self.head(200, "image/png", [("Content-Length", str(len(data)))], cache="max-age=31536000, immutable")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             m = re.fullmatch(r"/look/([0-9a-f]{12}-(?:regular|bold|wallpaper|wallpaper-wide)\.(ttf|otf|woff2?|jpg|png|webp))", path)
             if m:
                 f = APP_LOOK / m.group(1)
@@ -8878,7 +9127,7 @@ def cmd_notify(args):
     if urgent:
         payload["urgent"] = True
     if mine:
-        payload["icon"] = "/assistant-192.png"
+        payload["icon"] = assistant_icon()
     n = push_all(payload)
     total = len(app_subscriptions())
     print(f"sent to {n} of {total} (and the desktops showing this host's sessions)")
@@ -8929,12 +9178,12 @@ OPTIONS = {
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
-    "assistant": ({"--name"}, {"--name"}, set()),
+    "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "alerts": (set(), set(), set()),
     "update": ({"--auto"}, set(), set()),
     "setup": None, "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "clipboard": None, "paste": None, "rec": None,
+    "clipboard": None, "paste": None, "rec": None, "picture": None,
 }
 ALIASES = {"cockpit": "terminal"}     # cockpit: the old name of terminal, still bound in some configs
 HELP = ("-h", "--help")
@@ -9112,6 +9361,8 @@ def main(argv):
         return cmd_notify(args)
     elif cmd == "assistant":
         return cmd_assistant(args)
+    elif cmd == "picture" and not args:
+        return cmd_picture(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
     elif cmd == "update" and not [a for a in args if a != "--auto"]:
