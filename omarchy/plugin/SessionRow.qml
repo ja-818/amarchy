@@ -14,8 +14,8 @@ import qs.Ui
 // moon and how long it has slept; "+1 BG" after the branch counts Claude Code
 // background sessions still running in its worktree.
 // Your assistant (`amarchy assistant`) is bigger: its picture in the icon's
-// place with its state on a badge, its name, and what it's on, on a tint of
-// the accent. The other sessions of its project show its picture small.
+// place with its state on a badge, its name, and what it's on; it looks
+// selected only when it is, like any row. The other sessions of its project show its picture small.
 // Unread (a turn it finished that you haven't opened yet, here or on another
 // device): a dot by the time; your assistant's card shows the start of what
 // it wrote, with "New" by its name, and the other sessions of its project
@@ -66,8 +66,7 @@ BorderSurface {
   implicitHeight: Math.max(icon.implicitHeight, content.implicitHeight, avatar.visible ? avatar.height : 0)
                   + Style.spacing.controlPaddingY * (main ? 3 : 2)
   radius: Style.cornerRadius
-  color: cursor ? Commons.Color.menu.selectedBackground
-       : main ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.1) : "transparent"
+  color: cursor ? Commons.Color.menu.selectedBackground : "transparent"
   opacity: priority === "low" && !cursor ? 0.6 : 1
   borderSpec: Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0)
 
