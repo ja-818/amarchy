@@ -6559,7 +6559,9 @@ MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key r
 MIC_MAX = 300           # seconds a dictation lasts at most
 MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
 MIC_CAUGHT_UP = 1.5     # seconds without a new word from Claude, writing down what was said ahead of it
-MIC_TAIL = 0.4          # seconds the key stays held after the last of the audio
+MIC_TAIL = 0.6          # seconds the key stays held after the last of the audio, rec hearing silence
+MIC_HUSH = bytes(640)   # 20 ms of silence, as the phone sends it
+MIC_LET_GO = 1.5        # seconds rec may go on hearing silence once the key is up
 MIC_METER = "▁▂▃▄▅▆▇█"  # what Claude draws after the words while it listens (how loud)
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
@@ -6699,12 +6701,15 @@ def close_listening(sock):
 class AppMic:
     """One dictation from the phone: its audio as it comes, for the session's
     rec (amarchy rec) to read on a socket, from the start: what was said
-    before Claude got its rec going too."""
+    before Claude got its rec going too. Once the phone's audio ends, rec
+    hears silence until Claude stops it (the key is up), as from a
+    microphone: Claude writes down a last word only with some sound after
+    it, and drops it when rec just ends."""
 
     def __init__(self, sid):
         self.path = mic_socket(sid)
         self.cond = threading.Condition()
-        self.chunks, self.ended, self.readers, self.read = [], False, 0, False
+        self.chunks, self.ended, self.stopped, self.readers, self.read = [], False, False, 0, False
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
         self.path.unlink(missing_ok=True)
@@ -6728,13 +6733,20 @@ class AppMic:
         try:
             while True:
                 with self.cond:
-                    self.cond.wait_for(lambda: i < len(self.chunks) or self.ended)
+                    self.cond.wait_for(lambda: i < len(self.chunks) or self.ended or self.stopped)
                     new = self.chunks[i:]
                     i += len(new)
-                    if not new and self.ended:
+                    if not new and self.stopped:
                         break
-                conn.sendall(b"".join(new))
-        except OSError:
+                    if not new:         # all of it read: silence now, as it comes
+                        self.read = True
+                        self.cond.notify_all()
+                if new:
+                    conn.sendall(b"".join(new))
+                else:
+                    conn.sendall(MIC_HUSH)
+                    time.sleep(len(MIC_HUSH) / 32000)
+        except OSError:         # Claude stopped rec
             pass
         finally:
             conn.close()        # the end of its input: rec ends, having passed on all of it
@@ -6756,8 +6768,14 @@ class AppMic:
             self.cond.wait_for(lambda: self.read, timeout=wait)
             return self.readers > 0
 
+    def stop(self):
+        """Not even silence: a rec still reading ends."""
+        with self.cond:
+            self.ended = self.stopped = True
+            self.cond.notify_all()
+
     def close(self):
-        self.end(wait=0)
+        self.stop()
         close_listening(self.sock)
         self.path.unlink(missing_ok=True)
 
@@ -7348,14 +7366,16 @@ def app_handler(st, users, address):
                 while time.time() < ahead and not (wrote[0] and time.time() - wrote[0] > MIC_CAUGHT_UP):
                     time.sleep(0.1)
                 came = mic.end()
-                # Held a moment more once rec has all of it: Claude writes
-                # down the last words before it's told the key is up.
+                # Held a moment more once rec has all of it, rec hearing
+                # silence: Claude writes down the last words before it's told
+                # the key is up, and then stops rec itself.
                 time.sleep(MIC_TAIL)
                 holding.clear()
                 if voice["mode"] == "tap":
                     tmux("send-keys", "-t", pane, "Space")
                 elif holder:
                     holder.join()
+                threading.Timer(MIC_LET_GO, mic.stop).start()
                 if not came:
                     watching.clear()
                     # Claude never recorded (its voice mode is off after all):
