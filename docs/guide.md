@@ -441,7 +441,10 @@ you dictate, the real `rec` the rest of the time, so your desktop's mic works
 as before.) The phone asks whether Amarchy may use the microphone the first
 time you dictate after opening the app; after that the app keeps the
 microphone, turned off between dictations, so it doesn't ask again while
-it's open. The bar under the list starts a new
+it's open. What iOS kills meanwhile (a call, Siri, the app in the
+background) is made anew when you next hold the mic, and a microphone that
+gives only silence once held is opened afresh on the spot; the host logs
+each dictation (`journalctl --user -u amarchy-app`). The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for
 another of the host's projects), or hold its mic and say it: the session
 starts while you speak, opens when you let go, and what you said goes to its

@@ -6686,6 +6686,16 @@ def desk_show(s, away):
     tmux("kill-session", "-t", f"={away}")
 
 
+def close_listening(sock):
+    """Close a socket that a thread waits on in accept(): shut down first, or
+    Linux leaves it listening and that thread waiting, for good."""
+    for stop in (lambda: sock.shutdown(socket.SHUT_RDWR), sock.close):
+        try:
+            stop()
+        except OSError:
+            pass
+
+
 class AppMic:
     """One dictation from the phone: its audio as it comes, for the session's
     rec (amarchy rec) to read on a socket, from the start: what was said
@@ -6748,10 +6758,7 @@ class AppMic:
 
     def close(self):
         self.end(wait=0)
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        close_listening(self.sock)
         self.path.unlink(missing_ok=True)
 
 
@@ -6822,7 +6829,7 @@ class DeskMic:
             sock, self.sock = self.sock, None
             recs, self.recs, self.early = self.recs, [], []
         if sock:
-            sock.close()
+            close_listening(sock)
             self.path.unlink(missing_ok=True)
         for c in recs:
             c.close()
@@ -6947,10 +6954,7 @@ class BrowserClip:
                 pass
 
     def close(self):
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        close_listening(self.sock)
         self.path.unlink(missing_ok=True)
 
 
@@ -7282,6 +7286,7 @@ def app_handler(st, users, address):
                 desk.suspend()
             mic = st.mics[sid] = AppMic(sid)
             pane = f"={tmux_name(sid)}:"
+            started, said, loud, outcome = time.time(), 0, False, "cut off"
             holding, holder = threading.Event(), None
             away, watching, sending = None, threading.Event(), threading.Lock()
             self.ws_lock = sending
@@ -7320,7 +7325,7 @@ def app_handler(st, users, address):
                     holder = threading.Thread(target=hold, daemon=True)
                     holder.start()
                 self.ws_send({"state": "listening"})
-                started, said = time.time(), 0
+                started = time.time()
                 while time.time() - started < MIC_MAX:
                     try:
                         op, data = self.ws_recv()
@@ -7331,6 +7336,7 @@ def app_handler(st, users, address):
                     if op in (0, 2):
                         mic.add(data)
                         said += len(data)
+                        loud = loud or bool(data.strip(b"\0"))
                     elif op == 9:
                         self.ws_send(data, op=10)
                 # Let go: Claude gets all of it before it's told the key is up.
@@ -7359,6 +7365,7 @@ def app_handler(st, users, address):
                     if before:
                         tmux("set-buffer", "-b", f"amarchy-mic-{sid}", "--", before)
                         tmux("paste-buffer", "-p", "-r", "-d", "-b", f"amarchy-mic-{sid}", "-t", pane)
+                    outcome = "Claude didn't record"
                     self.ws_send({"error": "Claude didn't record: turn its voice mode on with /voice"})
                     return
                 self.ws_send({"state": "transcribing"})
@@ -7381,8 +7388,14 @@ def app_handler(st, users, address):
                         break
                 watching.clear()
                 if not text:
-                    self.ws_send({"error": "No words heard" if said else "No sound came from the phone"})
+                    # Nothing but 0 is a microphone that's dead, not a quiet room.
+                    outcome = ("no words heard" if loud else "only silence from the phone" if said
+                               else "no sound from the phone")
+                    self.ws_send({"error": "No words heard" if loud else
+                                  "The phone's microphone sent only silence: try again" if said else
+                                  "No sound came from the phone"})
                     return
+                outcome = f"{len(text)} characters"
                 # Into the phone's box, to send from there; out of Claude's
                 # once the phone says it has it (else it stays where it is).
                 self.ws_send({"text": text})
@@ -7404,6 +7417,10 @@ def app_handler(st, users, address):
                 watching.clear()
                 desk_show(s, away)
                 mic.close()
+                # In the journal, for when dictation goes wrong.
+                print(f"amarchy app: dictation in {sid}: {said / 32000:.1f}s of audio"
+                      f"{'' if loud or not said else ', all silent'}, read by {mic.readers} rec, {outcome}",
+                      file=sys.stderr, flush=True)
                 st.mics.pop(sid, None)
                 if desk and desk.wanted:
                     desk.resume()

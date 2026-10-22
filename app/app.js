@@ -1074,35 +1074,103 @@ function wearPhoneSize() {
 // allowed it's kept while the app is open: between dictations its track is
 // off (nothing is heard, and iOS turns the microphone itself off) and the
 // audio stops, and holding the button turns them back on, unasked.
+//
+// What's kept can die meanwhile, and iOS doesn't say so: a call, Siri or the
+// app in the background interrupts the audio (and resuming it may never
+// finish), and a track turned back on can stay silent. So it's looked at
+// each time: what's interrupted or ended is made anew, what doesn't start is
+// given up on rather than waited for, and a microphone that hears nothing
+// at all (not a sample but 0) once held is opened afresh, there and then.
 
-const mic = { stream: null, ctx: null, source: null, node: null, take: null };
+const mic = { stream: null, ctx: null, ready: null, source: null, node: null, take: null,
+              pieces: 0, loud: 0, watch: null, fresh: false, gen: 0 };
 const MIC_TAIL = 500;     // ms the microphone stays on after you let go: the end of the last word
+const MIC_START = 3000;   // ms the phone's audio may take to start
+const MIC_DEAD = 1200;    // ms held before the microphone is looked at: dead, it's opened afresh
+const MIC_SILENT = 40;    // pieces (20 ms) of nothing but 0 in a row that only a dead microphone gives
 
-async function micOpen() {
+// retry: the microphone opened afresh while held (see micWatch), not a new hold.
+async function micOpen(retry) {
+  const gen = ++mic.gen;
+  if (!retry) mic.fresh = false;
+  // An AudioContext is made and resumed in the touch itself (iOS starts it
+  // only then): nothing awaited before.
+  if (mic.ctx && mic.ctx.state !== "running" && mic.ctx.state !== "suspended") micReset();
   if (!mic.ctx) {
     mic.ctx = new AudioContext();
-    if (mic.ctx.audioWorklet) await mic.ctx.audioWorklet.addModule("voice.js");
+    mic.ready = mic.ctx.audioWorklet ? mic.ctx.audioWorklet.addModule("voice.js") : Promise.resolve();
   }
-  await mic.ctx.resume();
-  if (mic.stream && mic.stream.active) {
+  const resumed = mic.ctx.resume();
+  try {
+    await within(Promise.all([mic.ready, resumed]), MIC_START, "the phone's audio didn't start");
+  } catch (e) {
+    micReset();       // the next hold makes it all anew
+    throw e;
+  }
+  if (gen !== mic.gen) return;
+  if (mic.stream && mic.stream.getAudioTracks().some((t) => t.readyState === "live" && !t.muted)) {
     mic.stream.getTracks().forEach((t) => { t.enabled = true; });
+    micWatch();
     return;
   }
   micClose();       // what's left of one that ended (a phone call took it, say)
-  mic.stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-  mic.source = mic.ctx.createMediaStreamSource(mic.stream);
+  const stream = await within(navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
+    60000, "the phone didn't answer about the microphone");
+  if (gen !== mic.gen || !mic.ctx) {      // another hold took over meanwhile
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  mic.stream = stream;
+  stream.getTracks().forEach((t) => t.addEventListener("ended", () => { if (mic.stream === stream) micClose(); }));
+  mic.source = mic.ctx.createMediaStreamSource(stream);
   if (mic.ctx.audioWorklet) {
     mic.node = new AudioWorkletNode(mic.ctx, "amarchy-mic");
-    mic.node.port.onmessage = (e) => { if (mic.take) mic.take(e.data); };
+    mic.node.port.onmessage = (e) => micHeard(e.data);
   } else {        // an older phone: the same, on the page itself (see voice.js)
-    const down = downsampler(mic.ctx.sampleRate, (pcm) => { if (mic.take) mic.take(pcm); });
+    const down = downsampler(mic.ctx.sampleRate, micHeard);
     mic.node = mic.ctx.createScriptProcessor(4096, 1, 1);
     mic.node.onaudioprocess = (e) => down(e.inputBuffer.getChannelData(0));
   }
   const mute = mic.ctx.createGain();    // through to the speaker, silently: some browsers only run what reaches it
   mute.gain.value = 0;
   mic.source.connect(mic.node).connect(mute).connect(mic.ctx.destination);
+  micWatch();
+}
+
+// A promise, or why not if it takes longer than ms.
+function within(promise, ms, why) {
+  let timer;
+  return Promise.race([promise, new Promise((ok, no) => { timer = setTimeout(() => no(new Error(why)), ms); })])
+    .finally(() => clearTimeout(timer));
+}
+
+// 20 ms of what the microphone hears, to whoever takes it (a dictation).
+function micHeard(pcm) {
+  mic.pieces++;
+  if (new Int16Array(pcm).some((x) => x !== 0)) mic.loud = mic.pieces;
+  if (mic.take) mic.take(pcm);
+}
+
+// Held a moment and not a sound (no audio at all, or lately nothing but 0,
+// which a real microphone never gives: what came first may be the last
+// dictation's end): it's dead, so it's opened afresh, once, the dictation
+// going on with the new one.
+function micWatch() {
+  clearTimeout(mic.watch);
+  mic.pieces = mic.loud = 0;
+  mic.watch = setTimeout(async () => {
+    if (!mic.take || mic.fresh || (mic.pieces && mic.pieces - mic.loud < MIC_SILENT)) return;
+    console.warn(`amarchy: the microphone gave ${mic.pieces ? "only silence" : "nothing"}; opening it afresh`);
+    mic.fresh = true;
+    micReset();
+    try {
+      await micOpen(true);
+    } catch (e) {
+      return;     // the server says no sound came
+    }
+    if (!mic.take) micRelease();      // let go meanwhile
+  }, MIC_DEAD);
 }
 
 // What voice.js does, for a phone without AudioWorklet: the microphone's
@@ -1133,15 +1201,24 @@ function downsampler(rate, take) {
 // Done dictating: off, but kept for the next time (see above).
 function micRelease() {
   mic.take = null;
+  clearTimeout(mic.watch);
   if (mic.stream) mic.stream.getTracks().forEach((t) => { t.enabled = false; });
   if (mic.ctx) mic.ctx.suspend().catch(() => {});
 }
 
 function micClose() {
+  clearTimeout(mic.watch);
   if (mic.stream) mic.stream.getTracks().forEach((t) => t.stop());
   if (mic.source) mic.source.disconnect();
   if (mic.node) mic.node.disconnect();
   mic.stream = mic.source = mic.node = null;
+}
+
+// All of it gone, the audio too: the next time makes it anew.
+function micReset() {
+  micClose();
+  if (mic.ctx) mic.ctx.close().catch(() => {});
+  mic.ctx = mic.ready = null;
 }
 
 // Held down: start(); let go (or the finger slides off): stop().
