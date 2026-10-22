@@ -1,6 +1,6 @@
 #!/bin/sh
 # wl-paste for a session's Claude on a host (amarchy remote): Claude Code reads
 # a pasted image (Ctrl+V) with wl-paste, and the host has no clipboard, so this
-# asks your desktop's. A session's Claude finds it first on its PATH, as a link
+# reads what you last pasted in the app (or asks a desktop's). A session's Claude finds it first on its PATH, as a link
 # named wl-paste. See "clipboard" in amarchy.
 exec "$(dirname "$(readlink -f "$0")")/amarchy" paste "$@"

@@ -355,6 +355,14 @@ Any sound of your own works: put a `.wav`, `.ogg`, `.oga`, `.opus`, `.flac` or
 name (**Add your own** at the bottom of the list, or `amarchy sound --add`, opens that folder). One named like one of
 amarchy's replaces it. Keep it short: it plays in full with every notification.
 
+In the app (the phone's or the browser's **Settings → Sound**, or **Settings
+→ Sound…** in its amarchy menu) the same list plays each sound as you tap it,
+or as the keys land on it, and sets it on the host, for the sessions or your
+assistant; **Add your own…** there uploads a file from the phone or the
+computer into `~/.config/amarchy/sounds/`. A browser plays the chime while
+the app is open; the Ogg ones are made WAV for it once (Safari plays no Ogg).
+A phone's notifications ring with the phone's own sound.
+
 `sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
 ones again.
 
@@ -444,7 +452,17 @@ and changing it on either changes both. The order of your projects too: tap
 a project's header (or **Order projects…** in that menu) for all of them,
 each with arrows; hold an arrow to send it to the top or bottom. Hold a session down to set its
 priority or close it (from its ••• menu too): it asks first, as the
-desktop does, and says if uncommitted work would go with it. In a
+desktop does, and says if uncommitted work would go with it. The same menu
+renames it, runs its project or one of its saved commands in its terminal
+(**Run…**: run, change or forget each, save a new one, set the run command:
+`amarchy run --set/--save/--forget`), and makes it your assistant. **Paste an
+image into Claude…** there, the picture button by the box, or an image pasted
+into the box sends one from the phone's photos to Claude's prompt, as
+`Ctrl+V` would (it shows as `[Image #1]`, for what you send next).
+**Settings** picks the chimes, sets up your assistant, adds a **new
+project** (one of your GitHub repos, any git URL, or an empty one, with a
+private GitHub repo if you like) and orders them; the project picker under
+the list has **New project…** too. In a
 session, its conversation, a box to send it messages, and Claude's questions
 and permission prompts as buttons. Hold the mic button by the box to
 dictate with Claude Code's own voice mode (it has to be on: `/voice`): the
@@ -585,8 +603,12 @@ wears what your desktop sends.
 **Pasting an image** works as on your desktop: `⌘V` (or `Ctrl+V`, once the
 browser lets the page read the clipboard) or dropping an image on Claude.
 The page hands the image to the host, and Claude's `Ctrl+V` gets it from
-amarchy's `wl-paste` there, which asks the browser the key came from (each
-page's terminals say which page they are) the way it asks your desktop.
+amarchy's `wl-paste` there. No desktop is involved: the host keeps what you
+last pasted, from any browser or phone, as its clipboard (the **web
+clipboard**, `~/.local/state/amarchy/clipboard/web.clip`, yours only), text
+you paste or copy in its terminals too, so `wl-paste` in any session (Claude's
+own, or yours in the terminal) prints it. A desktop still connected with
+`amarchy remote` answers first only for keys pressed on it.
 
 **Dictating** (`/voice`): hold Space in Claude, as on your desktop. While the
 page has the keyboard in a session's Claude, that session's `rec` on the host
@@ -601,9 +623,12 @@ keyboard (another window, the terminal), `rec` is the host's own again.
 
 **Notifications**: Settings turns them on, as on the phone (in Safari, add the
 app to the Dock first: File → Add to Dock; Chrome: Install). While the page is
-open it also plays your desktop's chime (the one `amarchy sound` picked,
-sent with the look) when a session needs you or is done, unless it's the one
-you're looking at.
+open it also plays the chime (the one `amarchy sound` picked on the host,
+**Settings → Sound** in the app) when a session needs you or is done, unless
+it's the one you're looking at. The tab says how many need you, `(2)
+Amarchy` (`•` when only finished ones you haven't opened wait), and its icon
+gets a dot, red for one that needs you; installed (Add to Dock, Install), the
+app's icon carries the count, as the home screen app's does on the phone.
 
 **Links** (in what Claude says, and in the terminals: click one) open in the
 default browser, where the device lets a web page get there. In Safari's Dock
@@ -673,6 +698,15 @@ notifications), not in amarchy. Every list shows it, and the notifications
 goes by a hash of itself, so a new one shows at once everywhere, the phone's
 saved copy of the app included. A desktop showing a host's sessions shows the
 host's and keeps a copy; run there, the command sets the host's.
+
+In the app all of it is a session's menu away (its ••• on the phone, a hold
+on it in the list, or **This session** in the amarchy menu in the browser):
+**Make it my assistant…** with its name, and on your assistant **name,
+picture, chime…**: rename it, pick its chime, go back to amarchy's imp, or
+**Not my assistant any more**. **Choose…** a picture from the phone's photos
+or the computer, drag it into the circle and zoom (the slider, the wheel, two
+fingers, or the arrows and `+`/`-`), and the page cuts it there and sends
+the host what's in the circle. Settings has your assistant too.
 
 `amarchy alerts` cuts the noise from the rest, on the desktop and the phone
 alike (the phone's settings have it too, under "Tell me"):

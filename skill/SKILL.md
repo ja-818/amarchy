@@ -45,8 +45,9 @@ both through amarchy on their own machine. Then:
   the user's screen do nothing here.
 - Nothing opens on their screen from here (a browser, a GUI app): tell them
   what to open instead.
-- `wl-paste` reads what's copied on their desktop (while it's connected), the
-  way Ctrl+V pastes an image into you there. Use it when they ask you to look
+- `wl-paste` reads what they last pasted (an image, or text) or copied in the
+  app, from their phone or browser (or what's copied on a desktop still
+  connected), the way Ctrl+V pastes an image into you there. Use it when they ask you to look
   at what they copied: `wl-paste --list-types`, then
   `wl-paste --type image/png > /tmp/copied.png` and read that file.
 - They may be reading you on their phone (`amarchy app`): your messages show

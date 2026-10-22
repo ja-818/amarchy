@@ -16,7 +16,7 @@ const NERD = {
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
   stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
   organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
-  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}",
+  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}", image: "\u{F02E9}",
 };
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅" };
@@ -29,6 +29,7 @@ const ICONS = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>',
   organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
+  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
 };
@@ -376,11 +377,8 @@ function closeList() {
   app.list = null;
 }
 
-function badge() {
-  if (!app.view || !navigator.setAppBadge) return;
-  const n = app.view.sessions.filter((s) => s.status === "waiting").length;
-  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
-}
+// What needs you, on the tab and the app's icon (manage.js).
+function badge() { markWaiting(); }
 
 function groupLabel(s, g) {
   if (g === "project") return s.repo;
@@ -457,7 +455,9 @@ function renderList() {
     if (!v) {
       list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
     } else if (!v.sessions.length) {
-      list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"), "Say what Claude should do, below, to start one."));
+      list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"),
+        v.projects && v.projects.length ? "Say what Claude should do, below, to start one."
+          : h("button", { class: "control accent", onclick: () => newProjectSheet((p) => app.newBar.use(p)) }, "Add a project…")));
     } else if (!shown.length) {
       list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
     } else {
@@ -712,7 +712,19 @@ function rowMenu(s) {
   sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
     h("button", { class: "control wide", onclick: () => { closeSheet(); go(`#/s/${encodeURIComponent(s.id)}`); } },
       "Open"),
+    ...sessionActions(s),
     closeButton(s));
+}
+
+// What else you can do to a session from its menu (manage.js): name it, run
+// its commands, make it your assistant (or change yours).
+function sessionActions(s, opened) {
+  return [
+    h("button", { class: "control wide", onclick: () => renameSheet(s) }, "Rename…"),
+    h("button", { class: "control wide", onclick: () => commandsSheet(s, opened) }, "Run…"),
+    h("button", { class: "control wide", onclick: () => assistantSheet(s) },
+      s.assistant === "main" ? `${s.assistant_name || "Assistant"}: name, picture, chime…` : "Make it my assistant…"),
+  ];
 }
 
 function closeButton(s) {
@@ -846,13 +858,22 @@ class SessionView {
     this.input = h("textarea", { rows: 1, placeholder: "Message Claude", enterkeyhint: "enter",
                                  oninput: () => { this.grow(); store.set(`draft:${this.id}`, this.input.value); this.sendButtons(); } });
     this.input.value = store.get(`draft:${this.id}`) || "";
+    // An image pasted into the box goes to Claude's prompt (manage.js).
+    this.input.addEventListener("paste", (e) => {
+      const item = e.clipboardData && Array.from(e.clipboardData.items).find((i) => i.kind === "file" && /^image\//.test(i.type));
+      if (!item) return;
+      e.preventDefault();
+      pasteImageInto({ id: this.id }, item.getAsFile());
+    });
+    this.imageBtn = h("button", { class: "attach", "aria-label": "Paste an image into Claude",
+                                  onclick: () => pickImageInto({ id: this.id }) }, glyph("image"));
     this.sendBtn = h("button", { class: "send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
     this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude",
                                  onclick: () => this.press(["Escape"]) }, glyph("stop"));
     this.micBtn = h("button", { class: "mic", "aria-label": "Hold to dictate", hidden: !(app.view && app.view.voice) },
                     glyph("mic"));
     holdToTalk(this.micBtn, () => this.dictate(), () => this.letGo());
-    this.composer = h("div", { class: "prompt" }, this.input, this.micBtn, this.stopBtn, this.sendBtn);
+    this.composer = h("div", { class: "prompt" }, this.input, this.imageBtn, this.micBtn, this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
@@ -1064,7 +1085,7 @@ class SessionView {
           h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}`)));
       return;
     }
-    this.titleEl.replaceChildren(stateIcon(r), r.assistant ? avatar(r, "small") : null,
+    this.titleEl.replaceChildren(stateIcon(r), ...(r.assistant ? [avatar(r, "small")] : []),
       h("div", { class: "text" }, taskText(r.task || "New session", r.task ? "" : "untitled"),
         h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}`)));
   }
@@ -1356,6 +1377,9 @@ class SessionView {
       h("div", { class: "section" }, "Show"),
       h("div", { class: "menu" }, shown("chat", "Conversation"), shown("terminal", "Claude's terminal"),
         shown("screen", "Claude's screen, as text")),
+      h("div", { class: "section" }, "Session"),
+      h("button", { class: "control wide", onclick: () => { closeSheet(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
+      ...sessionActions({ ...row, id: this.id }),
       closeButton({ ...row, id: this.id }));
   }
 }
@@ -1730,7 +1754,8 @@ function newBar() {
   };
   const update = () => {
     const ps = projects();
-    if (ps.length && !ps.some((p) => p.name === repo)) repo = ps[0].name;
+    if (added && ps.some((p) => p.name === added)) added = null;      // the list has it now
+    if (ps.length && !added && !ps.some((p) => p.name === repo)) repo = ps[0].name;
     name.textContent = repo || "";
     buttons();
   };
@@ -1738,7 +1763,16 @@ function newBar() {
     h("div", { class: "menu" }, ...projects().map((p) =>
       h("button", { class: `menu-item${p.name === repo ? " on" : ""}`,
                     onclick: () => { repo = p.name; store.set("last-project", repo); closeSheet(); update(); field.focus(); } },
-        p.name, p.name === repo ? glyph("check", "val") : null))));
+        p.name, p.name === repo ? glyph("check", "val") : null))),
+    h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
+  // A project just added: the next session starts there (once the list has it).
+  let added = null;
+  const use = (project) => {
+    repo = added = project;
+    store.set("last-project", project);
+    update();
+    field.focus();
+  };
   const start = async () => {
     if (!field.value.trim() || !repo || said) return;
     send.disabled = true;
@@ -1813,7 +1847,7 @@ function newBar() {
     go(`#/s/${encodeURIComponent(s.id)}`);
   };
   requestAnimationFrame(grow);
-  return { el, update };
+  return { el, update, use };
 }
 
 // ---- notifications
@@ -1922,6 +1956,21 @@ async function openSettings() {
                : "Nothing from the coding sessions; their list still says how they are."),
       h("p", {}, name ? `${name}, your assistant, always tells you: under its own name and picture, with its own chime.`
                       : "Your assistant, once you have one (amarchy assistant <id>), always tells you."));
+    // The chimes, your assistant and your projects (manage.js), as amarchy sound,
+    // assistant and add set them on the host.
+    const helper = (app.view && app.view.sessions.find((x) => x.assistant === "main")) || null;
+    const label = (n) => (n === "off" ? "off" : n ? n.charAt(0).toUpperCase() + n.slice(1) : "");
+    kids.push(h("div", { class: "section" }, "Sound"),
+      h("button", { class: "control wide", onclick: () => soundSheet(false) },
+        `Chime: ${label(app.view && app.view.sound)}${helper ? ` · ${helper.assistant_name || "Assistant"}'s: ${label(app.view.assistant_sound)}` : ""}`),
+      h("p", {}, app.desk ? "Rings in this browser when a session needs you or is done, unless you're looking at it."
+                          : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
+      h("div", { class: "section" }, "Assistant"),
+      helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
+             : h("p", {}, "None yet: open a session's menu (⋯, or hold it in the list) and make it your assistant."),
+      h("div", { class: "section" }, "Projects"),
+      h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newBar) app.newBar.use(p); }) }, "New project…"),
+      h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     const look = app.view && app.view.look && app.view.look.look;
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, look ? "Your theme and font, as your desktop wears them. Change your theme there and it changes here."

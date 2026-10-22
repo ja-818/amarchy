@@ -24,7 +24,7 @@ const COLUMN = 900;     // Claude's column, as AMARCHY_ZEN_WIDTH on your desktop
 const PAD = 8;          // between it and the panels beside it
 const MIN_SIDE = 200;   // narrower than this beside the column, and it's zen mode
 const HEADER = 30;      // the strip with the session's name above Claude, in zen mode
-// This page, as the host knows it: what it pasted, for its terminals' Claude.
+// This page, as the host knows it: its terminals are tmux clients named web-<page>.
 const PAGE_ID = (() => {
   const a = new Uint8Array(10);
   crypto.getRandomValues(a);
@@ -341,7 +341,10 @@ class TermPane {
     const image = (list) => Array.from(list || []).find((f) => /^image\//.test(f.type));
     this.box.addEventListener("paste", (e) => {
       const item = e.clipboardData && Array.from(e.clipboardData.items).find((i) => i.kind === "file" && /^image\//.test(i.type));
-      if (!item) return;        // text: the terminal pastes it
+      if (!item) {        // text: the terminal pastes it, and wl-paste on the host has it too
+        clipText(e.clipboardData && e.clipboardData.getData("text/plain"));
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       this.pasteImage(item.getAsFile());
@@ -364,6 +367,7 @@ class TermPane {
       for (const item of await navigator.clipboard.read()) {
         const type = item.types.find((t) => /^image\//.test(t));
         if (type) { blob = await item.getType(type); break; }
+        if (item.types.includes("text/plain")) clipText(await (await item.getType("text/plain")).text());
       }
     } catch (e) {
       // Not allowed (or nothing to read): Claude says so, as it would there.
@@ -381,7 +385,7 @@ class TermPane {
         r.onerror = () => fail(new Error("couldn't read the image"));
         r.readAsDataURL(png);
       });
-      await api("/api/clip", { page: PAGE_ID, type: "image/png", data });
+      await api("/api/clip", { type: "image/png", data });
       this.send(enc.encode("\x16"));
     } catch (e) {
       toast(e.message);
@@ -401,6 +405,7 @@ async function asPNG(blob) {
 // What tmux copied, to your clipboard. Safari only lets a page write it
 // right after a click or a key: then a click on the notice does it.
 async function copyText(text) {
+  clipText(text);       // the host's wl-paste has it too
   try {
     await navigator.clipboard.writeText(text);
   } catch (e) {
@@ -1160,9 +1165,12 @@ function deskMenu() {
     { label: "Run", icon: "send", group: () => ({ title: "Run", items: [
       { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
+      { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, (n) => { if (leaveZen()) desk.term.open(s.id); }) },
       { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toPane("term") }] }) },
     { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: [
       { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
+      { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
+        act: () => assistantSheet(s) },
       ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),
                                                   key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
                                                   act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
@@ -1178,6 +1186,7 @@ function deskMenu() {
         ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
     { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
       { label: "Notifications, look, layout…", act: () => openSettings() },
+      { label: "Sound…", detail: "the chimes, each played as you pick it", act: () => soundSheet(false) },
       { label: "Keys", act: () => showKeys() }] }) });
   picker({ title: "Amarchy", items });
 }
@@ -1190,7 +1199,8 @@ function showKeys() {
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+A", "Your sessions under the Ⓐ (Super+Alt+A)"],
     ["Hold Space", "Dictate to Claude (/voice), with this computer's microphone"],
-    ["⌘V / Ctrl+V", "Paste an image into Claude (or drop it there)"], ["Shift+Enter", "A new line in Claude's prompt"]];
+    ["⌘V / Ctrl+V", "Paste an image into Claude (or drop it there); wl-paste on the host reads it"],
+    ["Shift+Enter", "A new line in Claude's prompt"]];
   sheet(sheetHead("Keys", "amarchy's, in the browser"),
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what)))));
 }

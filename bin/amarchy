@@ -180,8 +180,9 @@ Plumbing:
   amarchy events [--once]               on a host: its sessions as a line of JSON, again on every change
   amarchy attach <id> [claude|term]     on a host: show a session's Claude or terminal (tmux) in this terminal
   amarchy held <id>                     on a host: after its Claude exits, Enter starts it again
-  amarchy paste [wl-paste options]      on a host: wl-paste for a session's Claude (bin/amarchy-paste), what's
-                                        copied on your desktop, so Ctrl+V pastes an image there
+  amarchy paste [wl-paste options]      on a host: wl-paste for a session's Claude (bin/amarchy-paste): what you
+                                        last pasted in the app (phone or browser), or copied on a desktop,
+                                        so Ctrl+V pastes an image there
   amarchy rec [rec options]             on a host: SoX's rec for a session's Claude (bin/amarchy-rec): the phone's
                                         microphone while you dictate on the phone, else the real rec
   amarchy clipboard <desktop>           on a host: where a desktop's clipboard goes (remote --sync forwards it)
@@ -5823,10 +5824,18 @@ def attach_argv(s, which):
 #
 # Anything running on the host as you can read your clipboard this way while
 # your desktop is connected: the host is yours, as it is for everything else.
+#
+# Without a desktop, the clipboard is the app's: what you last pasted into a
+# session from a browser or the phone (an image, or text), or copied in one
+# of its terminals there, which the app keeps in <state>/clipboard/web.clip
+# (the web clipboard, yours only) until something else replaces it. wl-paste
+# reads that, unless the key came from a desktop still connected: then that
+# desktop's first, the web clipboard if it has nothing.
 
 CLIP_SOCK = STATE / "clipboard.sock"    # on a desktop: what the host's socket leads to
 CLIP_DIR = STATE / "clipboard"          # on a host: a socket per desktop, and the address it was seen from
 PASTE_BIN = STATE / "paste"             # on a host: wl-paste and rec for a session's Claude (links to bin/amarchy-paste, -rec)
+WEB_CLIP = CLIP_DIR / "web.clip"        # on a host: what a browser or phone last handed the app (see web_clip)
 PASTE_FLAGS = {"-l": "--list-types", "--list-types": "--list-types", "-n": "--no-newline",
                "--no-newline": "--no-newline", "-p": "--primary", "--primary": "--primary"}
 MIME = re.compile(r"(?!-)[\w.+-]+(/[\w.+-]+)?(; ?[\w.+-]+=[\w.+-]+)*")
@@ -5950,9 +5959,62 @@ def cmd_clipboard(args):
     return 0
 
 
+def web_clip_save(items):
+    """The web clipboard is now these [(type, bytes)], the first the one a
+    plain wl-paste prints: a JSON line of their types and sizes, then each."""
+    head = {"time": time.time(), "types": [[kind, len(data)] for kind, data in items]}
+    CLIP_DIR.mkdir(parents=True, exist_ok=True)
+    CLIP_DIR.chmod(0o700)
+    tmp = WEB_CLIP.with_name(f".{WEB_CLIP.name}.{os.getpid()}.{threading.get_ident()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(json.dumps(head).encode() + b"\n")
+        for _, data in items:
+            f.write(data)
+    os.replace(tmp, WEB_CLIP)
+
+
+def web_clip():
+    """What the web clipboard holds: [(type, bytes)], or [] when nothing."""
+    try:
+        with open(WEB_CLIP, "rb") as f:
+            head = json.loads(f.readline())
+            items = [(str(kind), f.read(int(n))) for kind, n in head["types"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    return [(kind, data) for kind, data in items if MIME.fullmatch(kind)]
+
+
+def web_clip_answer(args):
+    """wl-paste's answer from the web clipboard, for its options as
+    paste_args gives them: (exit code, error, what it prints)."""
+    items = web_clip()
+    if not items or "--primary" in args:
+        return 1, "Nothing is copied", b""
+    if "--list-types" in args:
+        kinds = [kind for kind, _ in items]
+        if any(k.startswith("text/plain") for k in kinds):
+            kinds += [k for k in ("TEXT", "STRING", "UTF8_STRING") if k not in kinds]
+        return 0, "", "".join(f"{k}\n" for k in kinds).encode()
+    want = (args[args.index("--type") + 1] if "--type" in args else items[0][0]).split(";")[0].strip().lower()
+    text = want in ("text", "string", "utf8_string") or want.startswith("text/")
+    item = next((d for k, d in items if k.split(";")[0].lower() == want), None)
+    if item is None:
+        item = next((d for k, d in items if (want in ("image", "image/*") and k.startswith("image/"))
+                     or (text and k.startswith("text/plain"))), None)
+    if item is None:
+        return 1, "No suitable type of content copied", b""
+    # wl-paste ends text with a newline unless told not to; images as they are.
+    textual = text or (want == items[0][0].split(";")[0].lower() and want.startswith("text/"))
+    if textual and "--no-newline" not in args and not item.endswith(b"\n"):
+        item += b"\n"
+    return 0, "", item
+
+
 def paste_desktops():
     """The desktops to ask, in order: the one whose window had the last key in
-    this session's tmux, then the others, most recently connected first."""
+    this session's tmux, then the others, most recently connected first.
+    Returns (them, whether the first is the one the key came from)."""
     def connected(p):
         try:
             return p.stat().st_mtime
@@ -5977,12 +6039,13 @@ def paste_desktops():
             if p.stem == name or (not name and addr and seen == addr[0]):
                 socks.remove(p)
                 socks.insert(0, p)
-                break
-    return socks
+                return socks, True
+    return socks, False
 
 
 def cmd_paste(args):
-    """wl-paste for a session's Claude on a host: what's copied on your desktop."""
+    """wl-paste for a session's Claude on a host: what you last pasted in the
+    app, or what's copied on your desktop (see "clipboard")."""
     passed = paste_args(args)
     if passed is None:
         print(f"wl-paste (amarchy): only -l, -t <type>, -n and -p, not {' '.join(args)}", file=sys.stderr)
@@ -5995,42 +6058,62 @@ def cmd_paste(args):
                      and p.resolve().name != me.name), None)
         if real:
             os.execv(real, [real, *args])
-    why = "no desktop is connected (amarchy remote --sync)"
-    for path in paste_desktops():
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.settimeout(15)
-        try:
-            conn.connect(str(path))
-            conn.sendall(json.dumps({"args": passed}).encode() + b"\n")
-            got = b""
-            while b"\n" not in got and len(got) < 65536:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    break
-                got += chunk
-            if b"\n" not in got:
-                raise ConnectionResetError
-            line, _, data = got.partition(b"\n")
-            head = json.loads(line)
-            out = sys.stdout.buffer
-            out.write(data)
-            while chunk := conn.recv(1 << 20):
-                out.write(chunk)
-            out.flush()
-            if head.get("error"):
-                print(head["error"], file=sys.stderr)
-            return int(head.get("code", 1))
-        except ConnectionRefusedError:      # its connection is gone
-            path.unlink(missing_ok=True)
-            why = f"{path.stem} isn't connected"
-        except (ConnectionResetError, BrokenPipeError):     # connected, but amarchy there isn't answering
-            why = f"{path.stem} didn't answer (amarchy remote --sync isn't running there)"
-        except (OSError, ValueError) as e:
-            why = f"{path.stem}: {e}"
-        finally:
-            conn.close()
-    print(f"wl-paste (amarchy): {why}", file=sys.stderr)
-    return 1
+    # The desktop the key came from, else what you last pasted in the app,
+    # else the other desktops (see "clipboard").
+    socks, theirs = paste_desktops()
+    order = [*socks[:1], WEB_CLIP, *socks[1:]] if theirs else [WEB_CLIP, *socks]
+    # The first that has something of the kind asked for answers; else the
+    # first that answered at all says why not.
+    answered, why = None, ""
+    for path in order:
+        if path == WEB_CLIP:
+            code, err, data = web_clip_answer(passed)
+        else:
+            code, err, data = paste_ask(path, passed)
+            if code is None:
+                why = why or err
+                continue
+        if code == 0:
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+            return 0
+        answered = answered or (code, err)
+    code, err = answered or (1, f"wl-paste (amarchy): {why}" if why else "Nothing is copied")
+    if err:
+        print(err, file=sys.stderr)
+    return code
+
+
+def paste_ask(path, passed):
+    """Ask a desktop's clipboard socket: (exit code, error, what it printed),
+    the code None when it didn't answer."""
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(15)
+    try:
+        conn.connect(str(path))
+        conn.sendall(json.dumps({"args": passed}).encode() + b"\n")
+        got = b""
+        while b"\n" not in got and len(got) < 65536:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            got += chunk
+        if b"\n" not in got:
+            raise ConnectionResetError
+        line, _, data = got.partition(b"\n")
+        head = json.loads(line)
+        while chunk := conn.recv(1 << 20):
+            data += chunk
+        return int(head.get("code", 1)), str(head.get("error") or ""), data
+    except ConnectionRefusedError:      # its connection is gone
+        path.unlink(missing_ok=True)
+        return None, f"{path.stem} isn't connected", b""
+    except (ConnectionResetError, BrokenPipeError):     # connected, but amarchy there isn't answering
+        return None, f"{path.stem} didn't answer (amarchy remote --sync isn't running there)", b""
+    except (OSError, ValueError) as e:
+        return None, f"{path.stem}: {e}", b""
+    finally:
+        conn.close()
 
 
 def paste_path():
@@ -7513,17 +7596,17 @@ class AppMic:
 # client of the session's tmux, as each window on your desktop is, so your
 # desktop, the phone and the browser all show the same session at once.
 #
-# Two things your desktop lends the host reach it from the browser too. A
-# pasted image: Claude's Ctrl+V asks wl-paste (amarchy paste) for it, which
-# asks the desktop the key came from, the tmux client that had it (see
-# "clipboard"); a browser's terminals say they're web-<page>, and the page
-# hands the app what was pasted in it (BrowserClip) before it sends Ctrl+V.
+# Two things a desktop would lend the host come from the browser instead. A
+# pasted image: the page hands the app what was pasted in it (the web
+# clipboard, see "clipboard") before it sends Ctrl+V, and Claude's wl-paste
+# (amarchy paste) reads it there; a browser's terminals say they're
+# web-<page>, so a desktop still connected doesn't answer for them.
 # And the microphone: Claude's voice mode records with rec (amarchy rec),
 # which, while the page shows that session's Claude with the keyboard in it,
 # is the browser's microphone (DeskMic), as dictating from the phone is.
 
 DESK_PAGE = re.compile(r"[0-9a-z]{8,32}")      # a page of the app, as it names itself
-CLIP_MAX = 25_000_000                           # bytes of one pasted image (as base64 in its JSON)
+CLIP_MAX = 25_000_000                           # bytes of one pasted image or text (as base64 in its JSON)
 CLIP_TYPES = re.compile(r"image/(png|jpeg|gif|webp)")
 TTY_PING = 25                                   # seconds between pings on a terminal's WebSocket
 MIC_EARLY = 96_000                              # bytes of audio kept from before rec is there: 3 seconds
@@ -7634,72 +7717,6 @@ class DeskMic:
             self.early = []
 
 
-class BrowserClip:
-    """What was pasted in a browser showing sessions, for their Claude: what
-    the desktop's clipboard.sock is for a desktop (see "clipboard"), on a
-    socket of the same kind, web-<page>.sock, which the page's terminals name
-    (AMARCHY_DESKTOP). Only what the page handed it: an image pasted there."""
-
-    def __init__(self, page):
-        self.name = f"web-{page}"
-        self.path = CLIP_DIR / f"{self.name}.sock"
-        self.item = None        # (type, bytes)
-        self.users = 0
-        CLIP_DIR.mkdir(parents=True, exist_ok=True)
-        CLIP_DIR.chmod(0o700)
-        self.path.unlink(missing_ok=True)
-        (CLIP_DIR / f"{self.name}.addr").unlink(missing_ok=True)
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        old = os.umask(0o177)
-        try:
-            self.sock.bind(str(self.path))
-        finally:
-            os.umask(old)
-        self.sock.listen(8)
-        threading.Thread(target=self.serve, daemon=True).start()
-
-    def serve(self):
-        while True:
-            try:
-                conn, _ = self.sock.accept()
-            except OSError:
-                return
-            threading.Thread(target=self.answer, args=(conn,), daemon=True).start()
-
-    def answer(self, conn):
-        with conn:
-            try:
-                conn.settimeout(15)
-                ask = b""
-                while not ask.endswith(b"\n") and len(ask) < 4096:
-                    got = conn.recv(4096)
-                    if not got:
-                        return
-                    ask += got
-                req = json.loads(ask)
-                args = paste_args(req.get("args") if isinstance(req, dict) and isinstance(req.get("args"), list)
-                                  and all(isinstance(a, str) for a in req["args"]) else ["?"])
-                item, data = self.item, b""
-                if args is None:
-                    head = {"code": 2, "error": "amarchy only lists and prints what's copied"}
-                elif not item or "--primary" in args:
-                    head = {"code": 1, "error": "Nothing is copied"}
-                elif "--list-types" in args:
-                    head, data = {"code": 0, "error": ""}, item[0].encode() + b"\n"
-                else:
-                    want = args[args.index("--type") + 1] if "--type" in args else item[0]
-                    ok = want.split(";")[0].strip() in (item[0], "image", "image/*")
-                    head = {"code": 0, "error": ""} if ok else {"code": 1, "error": "No suitable type of content copied"}
-                    data = item[1] if ok else b""
-                conn.sendall(json.dumps(head).encode() + b"\n" + data)
-            except (OSError, ValueError):
-                pass
-
-    def close(self):
-        close_listening(self.sock)
-        self.path.unlink(missing_ok=True)
-
-
 def peer_uid(sock):
     """Who's at the other end of a connection to the app's server on
     localhost: the uid owning that socket (from /proc/net/tcp), or None."""
@@ -7741,16 +7758,81 @@ def app_commands(s):
 
 
 def app_sound():
-    """The chime your desktop plays (it sends it with its look), for the app
-    to play in a browser: its name, or "off"."""
+    """The chime the app plays in a browser when a session needs you or is
+    done: its name, or "off". The host's own (amarchy sound, which the app
+    sets), else the one a desktop sent with its look."""
+    if SOUND_FILE.exists():
+        return sound_name()
     sound = (app_look() or {}).get("sound") or CHIMES[0]
     return sound if sound == "off" or sound in CHIMES else CHIMES[0]
 
 
 def app_assistant_sound():
-    """Your assistant's chime, as your desktop sends it with its look."""
+    """Your assistant's chime, the same way (amarchy sound --assistant)."""
+    if ASSISTANT_SOUND_FILE.exists():
+        return assistant_sound_name()
     sound = (app_look() or {}).get("assistant_sound") or ASSISTANT_CHIME
     return sound if sound == "off" or sound in CHIMES else ASSISTANT_CHIME
+
+
+APP_SOUNDS = APP / "sounds"         # the sounds a browser can't play as they are (Ogg), as WAV
+APP_SOUND_TYPES = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac"}
+APP_SOUND_MAX = 5_000_000           # bytes of a sound of yours added from the app
+
+
+def app_sound_file(name):
+    """A sound as a browser plays it (Safari has no Ogg): (file, type), the
+    Ogg ones made WAV once (kept by their hash), or None."""
+    f = sound_file(name) if name != "off" else None
+    if not f or not f.is_file():
+        return None
+    kind = APP_SOUND_TYPES.get(f.suffix.lower())
+    if kind:
+        return f, kind
+    try:
+        sig = hashlib.sha1(f.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
+    out = APP_SOUNDS / f"{sig}.wav"
+    if not out.is_file():
+        APP_SOUNDS.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".{out.name}.{os.getpid()}.{threading.get_ident()}")
+        for argv in (["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(f), "-f", "wav", str(tmp)],
+                     ["sox", str(f), "-t", "wav", str(tmp)]):
+            if not shutil.which(argv[0]):
+                continue
+            try:
+                if subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=30).returncode == 0:
+                    os.replace(tmp, out)
+                    break
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        tmp.unlink(missing_ok=True)
+    return (out, "audio/wav") if out.is_file() else None
+
+
+def app_sounds():
+    """Every sound to pick from in the app, and the two picked."""
+    return {"sounds": [{"name": name, "label": sound_label(name), "mine": name not in CHIMES} for name in sounds()],
+            "sound": app_sound(), "assistant_sound": app_assistant_sound()}
+
+
+def app_add_sound(name, raw):
+    """A sound of yours, from the app, into ~/.config/amarchy/sounds (as
+    amarchy sound --add has you put it): its name, or (None, why not)."""
+    name = re.sub(r"[^\w .()-]", "", name).strip(" .")[:60]
+    ext = Path(name).suffix.lower()
+    stem = Path(name).stem.strip() if ext in AUDIO else ""
+    if not stem:
+        return None, "a sound file: WAV, Ogg, Opus, FLAC or MP3"
+    if not raw or len(raw) > APP_SOUND_MAX:
+        return None, "a sound of 5 MB at most"
+    USER_SOUNDS.mkdir(parents=True, exist_ok=True)
+    for old in USER_SOUNDS.glob("*"):       # one file per name: a new one replaces it
+        if old.stem.lower() == stem.lower() and old.suffix.lower() in AUDIO:
+            old.unlink(missing_ok=True)
+    write_file(USER_SOUNDS / f"{stem}{ext}", raw)
+    return sound_key(stem), ""
 
 
 def cmd_rec(args):
@@ -7854,7 +7936,6 @@ class AppState:
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
-        self.clips = {}         # page -> what was pasted in that browser, for its Claude (BrowserClip)
         self.lock = threading.Lock()
         self.build = app_build()
 
@@ -8252,15 +8333,6 @@ def app_handler(st, users, address):
                 os.close(slave)
                 return self.error(500, f"couldn't attach: {e}")
             os.close(slave)
-            with st.lock:
-                clip = st.clips.get(page)
-                if not clip:
-                    try:
-                        clip = st.clips[page] = BrowserClip(page)
-                    except OSError as e:
-                        print(f"amarchy app: no clipboard for that browser: {e}", file=sys.stderr)
-                if clip:
-                    clip.users += 1
             done, mic = threading.Event(), None
 
             def tell(on):
@@ -8360,12 +8432,6 @@ def app_handler(st, users, address):
                     proc.wait()
                 except OSError:
                     pass
-                with st.lock:
-                    if clip:
-                        clip.users -= 1
-                        if clip.users <= 0 and st.clips.get(page) is clip:
-                            del st.clips[page]
-                            clip.close()
 
         def desk_mic(self, s):
             """The browser's microphone while Claude records from it (see
@@ -8474,14 +8540,15 @@ def app_handler(st, users, address):
                 except (ValueError, OSError):
                     return self.error(400, "bad offset")
                 return self.send(200, {"items": items, "start": start})
-            m = re.fullmatch(r"/sound/(\w+)", path)
+            if path == "/api/sounds":       # what amarchy sound offers, and the two picked
+                return self.send(200, app_sounds())
+            m = re.fullmatch(r"/sound/([^/]{1,200})", path)
             if m:
-                f = sound_file(m.group(1)) if m.group(1) in CHIMES else None
-                if not f or not f.is_file():
+                found = app_sound_file(urllib.parse.unquote(m.group(1)))
+                if not found:
                     return self.error(404, "not found")
-                data = f.read_bytes()
-                self.head(200, "audio/wav" if f.suffix == ".wav" else "audio/ogg", [("Content-Length", str(len(data)))],
-                          cache="max-age=86400")
+                data = found[0].read_bytes()
+                self.head(200, found[1], [("Content-Length", str(len(data)))], cache="no-cache")
                 self.end_headers()
                 self.wfile.write(data)
                 return
@@ -8598,9 +8665,14 @@ def app_handler(st, users, address):
         def do_POST(self):
             if not self.allowed(write=True):
                 return
-            data = self.body(CLIP_MAX if self.path == "/api/clip" else 200_000)
+            big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add")
+            data = self.body(CLIP_MAX if big else 200_000)
             if self.path == "/api/clip":
                 return self.clip(data)
+            if self.path in ("/api/sound", "/api/sound/add"):
+                return self.sound(data)
+            if self.path in ("/api/assistant", "/api/assistant/picture"):
+                return self.assistant(None, data)
             if self.path == "/api/new":
                 return self.new(data)
             if self.path == "/api/add":
@@ -8619,13 +8691,15 @@ def app_handler(st, users, address):
             if self.path == "/api/list":      # group and sort the list, here and on your desktop
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
             what = m.group(2)
             if what in ("rename", "run", "commands"):
                 return self.desk_action(s, what, data)
+            if what == "assistant":
+                return self.assistant(s, data)
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 mark_seen(s["id"])
@@ -8681,23 +8755,44 @@ def app_handler(st, users, address):
             return self.send(200, {}) if why is None else self.error(500, why)
 
         def clip(self, data):
-            """An image pasted in a browser, for its Claude's next Ctrl+V (see BrowserClip)."""
-            page, kind = data.get("page"), data.get("type")
-            if not isinstance(page, str) or not DESK_PAGE.fullmatch(page):
-                return self.error(400, "which page")
-            if not isinstance(kind, str) or not CLIP_TYPES.fullmatch(kind):
-                return self.error(400, "only an image (PNG, JPEG, GIF or WebP)")
+            """What you pasted (or copied) in a browser or on the phone: the web
+            clipboard now, for wl-paste in your sessions (see "clipboard").
+            {type, data (base64)} for an image, {text} for text; with
+            {session, paste: true}, Claude in that session pastes it (Ctrl+V)."""
+            kind, text = data.get("type"), data.get("text")
+            if isinstance(text, str):
+                if not text or len(text) > 1_000_000:
+                    return self.error(400, "no text")
+                items = [("text/plain;charset=utf-8", text.encode())]
+            else:
+                if not isinstance(kind, str) or not CLIP_TYPES.fullmatch(kind):
+                    return self.error(400, "only an image (PNG, JPEG, GIF or WebP)")
+                try:
+                    raw = base64.b64decode(data.get("data") or "", validate=True)
+                except (ValueError, TypeError):
+                    raw = b""
+                if not raw:
+                    return self.error(400, "no image")
+                items = [(kind, raw)]
+            s = None
+            if data.get("paste") is True:
+                s = self.session(data.get("session")) if isinstance(data.get("session"), str) else self.error(400, "which session")
+                if not s:
+                    return
+                screen = app_screen(s)
+                if not screen["live"] or screen["exited"]:
+                    return self.error(409, "Claude isn't running: start it first")
+                if screen["dialog"]:
+                    return self.error(409, "Claude is asking you something: answer that first")
             try:
-                raw = base64.b64decode(data.get("data") or "", validate=True)
-            except (ValueError, TypeError):
-                raw = b""
-            if not raw:
-                return self.error(400, "no image")
-            with st.lock:
-                clip = st.clips.get(page)
-            if not clip:
-                return self.error(409, "No terminal of this page is open")
-            clip.item = (kind, raw)
+                web_clip_save(items)
+            except OSError as e:
+                return self.error(500, f"couldn't keep it: {e}")
+            if s:
+                r = tmux("send-keys", "-t", f"={tmux_name(s['id'])}:", "C-v")
+                if r.returncode != 0:
+                    return self.error(500, r.stderr.strip() or "tmux failed")
+                st.seen[s["id"]] = time.time()
             return self.send(200, {})
 
         def desk_action(self, s, what, data):
@@ -8714,13 +8809,20 @@ def app_handler(st, users, address):
                     return self.error(400, "what to call it")
                 return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
             env = {"AMARCHY_SESSION": s["id"]}
+            if what == "commands" and data.get("forget") is True:     # drop one: {name, forget}
+                name = data.get("name")
+                if not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,40}", name) or name == RUN_DEFAULT:
+                    return self.error(400, "which command (the run command itself stays: change it instead)")
+                r = run_amarchy("run", "--forget", name, env=env)
+                return self.send(200, {"commands": app_commands(s)}) if r.returncode == 0 \
+                    else self.error(500, gist(r.stderr or r.stdout))
             if what == "commands":       # save one: {name, command}; the run command itself is "run"
                 name, command = data.get("name"), data.get("command")
                 if not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,40}", name) or \
                         not isinstance(command, str) or not command.strip() or len(command) > 4000:
                     return self.error(400, "a name and a command")
                 r = run_amarchy("run", *(["--set", command] if name == RUN_DEFAULT else ["--save", name, command]), env=env)
-                return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+                return self.send(200, {"commands": app_commands(s)}) if r.returncode == 0 else self.error(500, gist(r.stderr))
             name = data.get("name")
             if name is not None and (not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,40}", name)):
                 return self.error(400, "no such command")
@@ -8729,6 +8831,58 @@ def app_handler(st, users, address):
             if name in (None, RUN_DEFAULT) and not run_command(s):
                 return self.send(409, {"error": "No run command for this project yet", "ask": True})
             r = run_amarchy("run", *([name] if name and name != RUN_DEFAULT else []), env=env)
+            return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr or r.stdout))
+
+        def sound(self, data):
+            """The chime (amarchy sound): {name} sets it ("off" for none),
+            {name, assistant: true} your assistant's; /api/sound/add takes one
+            of yours, {name (its file name), data (base64)}."""
+            if self.path == "/api/sound/add":
+                try:
+                    raw = base64.b64decode(data.get("data") or "", validate=True)
+                except (ValueError, TypeError):
+                    raw = b""
+                name, why = app_add_sound(data.get("name") if isinstance(data.get("name"), str) else "", raw)
+                return self.send(200, {"name": name, **app_sounds()}) if name else self.error(400, why)
+            name = data.get("name")
+            if not isinstance(name, str) or not (name == "off" or sound_key(name)):
+                return self.error(400, "no such sound")
+            r = run_amarchy("sound", *(["--assistant"] if data.get("assistant") is True else []), name)
+            return self.send(200, app_sounds()) if r.returncode == 0 else self.error(500, gist(r.stderr))
+
+        def assistant(self, s, data):
+            """Your assistant (amarchy assistant): /api/session/<id>/assistant
+            makes that session it ({name} optional), or not ({off: true});
+            /api/assistant {name} renames the one you have; /api/assistant/
+            picture takes its picture ({data (base64), crop: [x, y, size]}) or
+            amarchy's own again ({off: true})."""
+            name = data.get("name")
+            if name is not None and (not isinstance(name, str) or not name.strip() or len(name.strip()) > 40):
+                return self.error(400, "a name of 40 characters at most")
+            if self.path == "/api/assistant/picture":
+                if data.get("off") is True:
+                    r = run_amarchy("assistant", "--picture", "off")
+                else:
+                    crop = data.get("crop")
+                    if crop is not None and not (isinstance(crop, list) and len(crop) == 3
+                                                 and all(isinstance(n, int) and n >= 0 for n in crop) and crop[2] > 0):
+                        return self.error(400, "crop: x, y and size, in the picture's pixels")
+                    pic = data.get("data")
+                    if not isinstance(pic, str) or not pic:
+                        return self.error(400, "no picture")
+                    r = run_amarchy("assistant", "--picture", "-", *(["--crop", "%d,%d,%d" % tuple(crop)] if crop else []),
+                                    input=pic, timeout=120)
+            elif s is None:
+                if name is None:
+                    return self.error(400, "what to call it")
+                r = run_amarchy("assistant", "--name", name.strip())
+            elif data.get("off") is True:
+                mine = assistant()
+                if not mine or mine["id"] != s["id"]:
+                    return self.error(409, "It isn't your assistant")
+                r = run_amarchy("assistant", "off")
+            else:
+                r = run_amarchy("assistant", s["id"], *(["--name", name.strip()] if name else []))
             return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr or r.stdout))
 
         def add(self, data):
@@ -8747,7 +8901,8 @@ def app_handler(st, users, address):
 
         def new(self, data):
             repo, prompt = data.get("repo"), data.get("prompt")
-            if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])}:
+            if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])} \
+                    and repo not in {p["name"] for p in projects()}:      # one just added: not in the list yet
                 return self.error(400, "no such project")
             # Without a prompt when it's to be dictated, once it's up.
             if prompt is None or isinstance(prompt, str) and not prompt.strip():
@@ -8814,6 +8969,8 @@ def app_serve():
         return fail("couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> "
                     f"in {HOST_CONFIG}")
     app_key()
+    for old in CLIP_DIR.glob("web-*.sock"):     # an earlier server's pages' (they paste into web.clip now)
+        old.unlink(missing_ok=True)
     st = AppState()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", app_port()), app_handler(st, users, address))
     server.daemon_threads = True
