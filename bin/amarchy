@@ -88,8 +88,10 @@ terminals; reachable only on your Tailscale network):
 Theme (the app's look, on every phone and browser; Settings, Look in the app):
   amarchy theme [--show]                print it: the theme, the font and the wallpaper
   amarchy theme <name>                  wear one of amarchy's themes (Omarchy's palettes); Claude Code wears it too
-  amarchy theme --font <name>           the font: JetBrains Mono (the default), Caskaydia Mono, Fira Code, or
-                                        System (the device's own)
+                                        (a theme of yours, e.g. the look an Omarchy desktop sent, kept by
+                                        amarchy migrate, keeps Claude Code's own colors)
+  amarchy theme --font <name>           the font: JetBrains Mono (the default), Caskaydia Mono, Fira Code,
+                                        System (the device's own), or one a theme of yours came with
   amarchy theme --wallpaper theme|own|none|<picture>
                                         the theme's wallpaper, your own (a picture you give it here or in
                                         the app, cut for a phone and a computer), or none
@@ -147,7 +149,8 @@ Plumbing:
                                         browser's microphone while you dictate there, else the real rec
   amarchy app serve                     the app's server (amarchy-app.service runs it)
   amarchy migrate                       bring the state from before (a desktop's) up to date, once (the app's
-                                        server and install.sh run it)
+                                        server and install.sh run it): the look the desktop sent becomes a
+                                        theme of yours, "<name> (yours)", and is picked
 
 Environment:
   AMARCHY_WORK         where your repos live (default ~/Work); every git repo directly inside is offered
@@ -4054,10 +4057,18 @@ TERM_COLORS = ("#32344a", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#ad8ee6",
 # Omarchy's palettes, with wallpapers drawn for them), a font (fonts/) and a
 # wallpaper (the theme's, your own picture, or none). Until one is picked,
 # Tokyo Night, Omarchy's own.
+#
+# Besides amarchy's, a theme of your own (custom_themes): a look kept whole on
+# the host in app/custom/<key>, its colors as the app's variables, with its
+# terminals' size and opacity, its wallpaper and maybe a font of its own. The
+# look an Omarchy desktop sent the app is kept as one (amarchy migrate), so
+# the app wears it as it did.
 
 THEMES = Path(SELF).parent.parent / "themes"
 FONTS = Path(SELF).parent.parent / "fonts"
 APP_PICK = APP / "theme"                    # choice.json (what's picked) and your own wallpaper
+CUSTOM = APP / "custom"                     # your own themes: <key>/theme.json and its files
+CUSTOM_FILE = re.compile(r"(wallpaper|wallpaper-wide|regular|bold)\.(jpg|png|webp|ttf|otf|woff2?)")
 LOOK_DEFAULT = "tokyo-night"
 # The fonts: key -> (its name here, its family). Nerd Fonts builds, so the
 # list's icons are in them; System is the device's own (SF Mono on Apple's).
@@ -4212,31 +4223,90 @@ def look_shell(colors, meta):
             "menu": {"border": "hyprland.active-border-foreground", "selected-border": "hyprland.active-border-foreground"}}
 
 
+def custom_themes():
+    """Your own themes, by key (see above): {"name", "mode", "vars",
+    "terminal": {"size", "alpha"}, "wallpaper": {"phone", "wide"} (its files)
+    or None, "font": {"family", "nerd", "files": {"regular", "bold"}} or
+    None}. One that doesn't read, or names a file it doesn't have, is left out
+    (or its wallpaper or font)."""
+    out = {}
+    for d in sorted(CUSTOM.iterdir()) if CUSTOM.is_dir() else ():
+        try:
+            t = json.loads((d / "theme.json").read_text())
+        except (OSError, ValueError):
+            continue
+        if not re.fullmatch(r"[\w-]+", d.name) or d.name in look_themes() or not isinstance(t, dict):
+            continue
+        variables = t.get("vars") if isinstance(t.get("vars"), dict) else {}
+        variables = {k: v for k, v in variables.items() if isinstance(k, str) and isinstance(v, str)}
+        if not variables:
+            continue
+
+        def have(f):
+            return isinstance(f, str) and CUSTOM_FILE.fullmatch(f) and (d / f).is_file()
+        term = t.get("terminal") if isinstance(t.get("terminal"), dict) else {}
+        wall = t.get("wallpaper") if isinstance(t.get("wallpaper"), dict) else {}
+        font = t.get("font") if isinstance(t.get("font"), dict) else {}
+        files = font.get("files") if isinstance(font.get("files"), dict) else {}
+        files = {w: f for w, f in files.items() if w in ("regular", "bold") and have(f)}
+        out[d.name] = {
+            "name": str(t.get("name") or d.name)[:60], "mode": "light" if t.get("mode") == "light" else "dark",
+            "vars": variables,
+            "terminal": {k: min(max(float(term[k]), lo), hi) for k, lo, hi in (("size", 5.0, 40.0), ("alpha", 0.0, 1.0))
+                         if isinstance(term.get(k), (int, float)) and not isinstance(term.get(k), bool)},
+            "wallpaper": {w: wall[w] for w in ("phone", "wide")} if all(have(wall.get(w)) for w in ("phone", "wide")) else None,
+            "font": {"family": re.sub(r"[^\w .-]", "", str(font.get("family") or ""))[:64] or f"{t.get('name') or d.name}'s",
+                     "nerd": bool(font.get("nerd")), "files": files} if "regular" in files else None}
+    return out
+
+
+def custom_url(key, f):
+    return f"/custom/{key}/{f}?v={file_sig(CUSTOM / key / f)}"
+
+
+def look_fonts(custom=None):
+    """Every font to pick, by key: {"name", "nerd", "files": {weight: url}}:
+    amarchy's (fonts/), then those of your own themes ("custom-<theme>")."""
+    out = {}
+    for key, (name, family) in LOOK_FONTS.items():
+        files = {w: f"/fonts/{key}/{w}.woff2?v={file_sig(FONTS / key / f'{w}.woff2')}"
+                 for w in ("regular", "bold") if (FONTS / key / f"{w}.woff2").is_file()}
+        out[key] = {"name": name, "nerd": bool(family) and bool(files), "files": files}
+    for key, t in (custom_themes() if custom is None else custom).items():
+        if t["font"]:
+            out[f"custom-{key}"] = {"name": t["font"]["family"], "nerd": t["font"]["nerd"],
+                                    "files": {w: custom_url(key, f) for w, f in t["font"]["files"].items()}}
+    return out
+
+
 def look_worn():
     """The look the app wears now: the theme picked (else Tokyo Night), its
     font and its wallpaper. "sig" changes with any of it."""
-    choice, themes = look_choice(), look_themes()
-    key = choice.get("theme") if choice.get("theme") in themes else LOOK_DEFAULT
+    choice, themes, custom = look_choice(), look_themes(), custom_themes()
+    key = choice.get("theme") if choice.get("theme") in themes or choice.get("theme") in custom else LOOK_DEFAULT
     terminal = dict(LOOK_TERMINAL)
     t = themes.get(key)
-    if not t:       # no themes/ (an amarchy from before them): app.css's own Tokyo Night
+    if key in custom:
+        c = custom[key]
+        look = {"name": c["name"], "mode": c["mode"], "vars": c["vars"], "claude": None}
+        terminal.update(c["terminal"])
+        wallpaper = {w: custom_url(key, f) for w, f in c["wallpaper"].items()} if c["wallpaper"] else None
+    elif not t:     # no themes/ (an amarchy from before them): app.css's own Tokyo Night
         return {"theme": key, "name": "Tokyo Night", "mode": "dark", "vars": {}, "claude": None, "terminal": terminal,
                 "font": {"key": "system", "name": "System", "nerd": False, "files": {}}, "wallpaper": None, "sig": ""}
-    rounding = t["meta"].get("rounding", 0)
-    variables, mode = app_look_vars(t["colors"], look_shell(t["colors"], t["meta"]),
-                                    min(max(int(rounding), 0), 40) if isinstance(rounding, (int, float)) else 0)
-    look = {"name": t["name"], "mode": mode, "vars": variables, "claude": t["colors"]}
-    alpha = t["meta"].get("terminal-alpha")
-    if isinstance(alpha, (int, float)):
-        terminal["alpha"] = min(max(float(alpha), 0.0), 1.0)
-    wallpaper = {w: f"/themes/{key}/{f}?v={file_sig(THEMES / key / f)}"
-                 for w, f in (("phone", "wallpaper.svg"), ("wide", "wallpaper-wide.svg"))}
-    font_key = choice.get("font") if choice.get("font") in LOOK_FONTS else LOOK_FONT
-    name, family = LOOK_FONTS[font_key]
-    font = {"key": font_key, "name": name, "nerd": bool(family), "files": {
-        w: f"/fonts/{font_key}/{w}.woff2?v={file_sig(FONTS / font_key / f'{w}.woff2')}"
-        for w in ("regular", "bold") if (FONTS / font_key / f"{w}.woff2").is_file()}}
-    font["nerd"] = font["nerd"] and bool(font["files"])
+    else:
+        rounding = t["meta"].get("rounding", 0)
+        variables, mode = app_look_vars(t["colors"], look_shell(t["colors"], t["meta"]),
+                                        min(max(int(rounding), 0), 40) if isinstance(rounding, (int, float)) else 0)
+        look = {"name": t["name"], "mode": mode, "vars": variables, "claude": t["colors"]}
+        alpha = t["meta"].get("terminal-alpha")
+        if isinstance(alpha, (int, float)):
+            terminal["alpha"] = min(max(float(alpha), 0.0), 1.0)
+        wallpaper = {w: f"/themes/{key}/{f}?v={file_sig(THEMES / key / f)}"
+                     for w, f in (("phone", "wallpaper.svg"), ("wide", "wallpaper-wide.svg"))}
+    fonts = look_fonts(custom)
+    font_key = choice.get("font") if choice.get("font") in fonts else LOOK_FONT
+    font = {"key": font_key, **fonts[font_key]}
     walls = choice.get("wallpaper") if choice.get("wallpaper") in LOOK_WALLPAPERS else "theme"
     if walls == "own":
         wallpaper = look_own()
@@ -4325,15 +4395,15 @@ def look_claude(colors):
 
 
 def look_set(theme=None, font=None, wallpaper=None, own=None, claude=True):
-    """Pick a theme (a key of look_themes()), a font (a key of LOOK_FONTS)
-    and/or a wallpaper ("theme", "own" or "none"); own: your own picture,
-    (phone, wide) as image bytes. Claude Code takes a new theme too, unless
-    not claude. The look worn after, or an error."""
-    themes = look_themes()
-    if theme is not None and theme not in themes:
+    """Pick a theme (a key of look_themes() or custom_themes()), a font (a
+    key of look_fonts()) and/or a wallpaper ("theme", "own" or "none"); own:
+    your own picture, (phone, wide) as image bytes. Claude Code takes a new
+    theme too, unless not claude. The look worn after, or an error."""
+    if theme is not None and theme not in look_themes() and theme not in custom_themes():
         return f"no theme called {theme!r} (see amarchy theme --list)"
-    if font is not None and font not in LOOK_FONTS:
-        return f"no font called {font!r} ({', '.join(LOOK_FONTS)})"
+    fonts = look_fonts()
+    if font is not None and font not in fonts:
+        return f"no font called {font!r} ({', '.join(fonts)})"
     if wallpaper is not None and wallpaper not in LOOK_WALLPAPERS:
         return "the wallpaper is theme, own or none"
     choice = look_choice()
@@ -4369,16 +4439,22 @@ def look_set(theme=None, font=None, wallpaper=None, own=None, claude=True):
 def look_info():
     """Everything the app's picker shows: the themes (with their colors and
     wallpaper), the fonts, the wallpapers, and what's worn."""
-    look = look_worn()
-    themes = [{"key": k, "name": t["name"], "mode": t["mode"],
-               "colors": [t["colors"].get(c, "") for c in ("background", "foreground", "accent", "red", "yellow",
-                                                           "green", "blue", "magenta")],
-               "wallpaper": f"/themes/{k}/wallpaper-wide.svg?v={file_sig(THEMES / k / 'wallpaper-wide.svg')}"}
-              for k, t in look_themes().items()]
+    look, custom = look_worn(), custom_themes()
+    # Your own first, then amarchy's.
+    themes = [{"key": k, "name": t["name"], "mode": t["mode"], "custom": True,
+               "colors": [t["vars"].get(c, "") for c in ("bg", "fg", "accent", "red", "yellow", "green", "blue",
+                                                         "magenta")],
+               "wallpaper": custom_url(k, t["wallpaper"]["wide"]) if t["wallpaper"] else ""}
+              for k, t in custom.items()]
+    themes += [{"key": k, "name": t["name"], "mode": t["mode"],
+                "colors": [t["colors"].get(c, "") for c in ("background", "foreground", "accent", "red", "yellow",
+                                                            "green", "blue", "magenta")],
+                "wallpaper": f"/themes/{k}/wallpaper-wide.svg?v={file_sig(THEMES / k / 'wallpaper-wide.svg')}"}
+               for k, t in look_themes().items()]
     own = look_own()
     return {"theme": look["theme"], "font": look["font"]["key"], "wallpaper": look["wallpapers"], "look": look_stamp(look),
-            "nerd": look["font"]["nerd"],
-            "themes": themes, "fonts": [{"key": k, "name": n, "nerd": bool(f)} for k, (n, f) in LOOK_FONTS.items()],
+            "nerd": look["font"]["nerd"], "themes": themes,
+            "fonts": [{"key": k, "name": f["name"], "nerd": f["nerd"]} for k, f in look_fonts(custom).items()],
             "own": own["phone"] if own else ""}
 
 
@@ -4432,9 +4508,10 @@ def cmd_theme(args):
             if v is None:
                 return fail(f"theme {a}: which?")
             if a == "--font":
-                font = look_find(v, {k: n for k, (n, _) in LOOK_FONTS.items()})
+                fonts = {k: f["name"] for k, f in look_fonts().items()}
+                font = look_find(v, fonts)
                 if not font:
-                    return fail(f"no font called {v!r} ({', '.join(n for n, _ in LOOK_FONTS.values())})")
+                    return fail(f"no font called {v!r} ({', '.join(fonts.values())})")
             elif v in LOOK_WALLPAPERS:
                 wallpaper = v
             else:
@@ -4452,7 +4529,8 @@ def cmd_theme(args):
         elif a.startswith("-"):
             return fail(f"theme: unknown option {a}")
         else:
-            theme = look_find(a, {k: t["name"] for k, t in look_themes().items()})
+            theme = look_find(a, {**{k: t["name"] for k, t in custom_themes().items()},
+                                  **{k: t["name"] for k, t in look_themes().items()}})
             if not theme:
                 return fail(f"no theme called {a!r} (see amarchy theme --list)")
     if listing:
@@ -4462,8 +4540,9 @@ def cmd_theme(args):
             return 0
         for t in info["themes"]:
             mark = "*" if t["key"] == info["theme"] else " "
-            print(f"{mark} {t['key']:<18} {t['name']}{' (light)' if t['mode'] == 'light' else ''}")
-        print("fonts: " + ", ".join(f"{k}{'*' if k == info['font'] else ''}" for k in LOOK_FONTS))
+            print(f"{mark} {t['key']:<18} {t['name']}{' (light)' if t['mode'] == 'light' else ''}"
+                  f"{' (your own)' if t.get('custom') else ''}")
+        print("fonts: " + ", ".join(f"{f['key']}{'*' if f['key'] == info['font'] else ''}" for f in info["fonts"]))
         print("wallpapers: " + ", ".join(f"{k}{'*' if k == info['wallpaper'] else ''}" for k in LOOK_WALLPAPERS))
         return 0
     if any(v is not None for v in (theme, font, wallpaper, own)):
@@ -6090,9 +6169,11 @@ def app_handler(st, users, address):
             # The look's own files: a theme's wallpapers, a font, your own wallpaper.
             m = re.fullmatch(r"/themes/([\w-]+)/(wallpaper|wallpaper-wide)\.svg", path) or \
                 re.fullmatch(r"/fonts/([\w-]+)/(regular|bold)\.woff2", path) or \
-                re.fullmatch(r"/own/(own-[0-9a-f]{12}-(?:phone|wide)\.(jpg|png|webp))", path)
+                re.fullmatch(r"/own/(own-[0-9a-f]{12}-(?:phone|wide)\.(jpg|png|webp))", path) or \
+                re.fullmatch(r"/custom/([\w-]+)/((?:wallpaper|wallpaper-wide|regular|bold)\.(?:jpg|png|webp|ttf|otf|woff2?))", path)
             if m:
-                f = (APP_PICK / m.group(1) if path.startswith("/own/") else
+                f = (APP_PICK / m.group(1) if path.startswith("/own/") else CUSTOM / m.group(1) / m.group(2)
+                     if path.startswith("/custom/") else
                      (THEMES if path.startswith("/themes/") else FONTS) / m.group(1) / path.rsplit("/", 1)[1])
                 if not f.is_file():
                     return self.error(404, "not found")
@@ -7065,12 +7146,14 @@ def cmd_notify(args):
 # amarchy ran on an Omarchy desktop too, once: Hyprland windows, a shell
 # plugin, desktops showing a host's sessions over ssh. What that left in the
 # state goes, once (the app's server runs this as it starts, install.sh as it
-# installs): the look the last desktop sent the app becomes a theme picked
-# here (its wallpaper your own), so the app looks as it did; its chimes the
-# ones picked here; and the desktop's own files are dropped.
+# installs): the look the last desktop sent the app is kept whole as a theme
+# of your own, and picked, so the app looks exactly as it did; its chimes
+# become the ones picked here; and the desktop's own files are dropped.
 
 MIGRATED = STATE / "migrated"       # the last of MIGRATIONS done
-MIGRATIONS = 1
+# 1: the desktop's look as amarchy's theme of the same name (its colors
+# weren't quite the desktop's); 2: as a theme of your own.
+MIGRATIONS = 2
 DESKTOP_STATE = ("zen", "layout.lua", "last", "keys.lua", "keys.bound", "remote", "remote.json",
                  "remote-assistant.png", "preview", "watch.lock", "theme.log", "clipboard.sock", "host",
                  "theme", "notes")
@@ -7114,46 +7197,63 @@ def migrate():
 
 
 def migrate_look():
-    """The look a desktop last sent the app (app/look/look.json), as what's
-    picked here: its theme (one of amarchy's by its name), its font (when
-    it's one of amarchy's), its wallpaper as your own, its chimes. Only what
-    you hadn't picked in the app yourself; Claude Code's colors stay as they
-    were (the desktop's look never had them here)."""
+    """The look a desktop last sent the app (app/look/look.json) as a theme
+    of your own (custom_themes), "<its name> (yours)": its colors exactly as
+    the app wore them, its terminals' size and opacity, its wallpaper, and
+    its font when that isn't one of amarchy's. Picked, with its font, unless
+    you had picked a theme of amarchy's in the app; its chimes too, unless
+    you had picked those. Claude Code's colors stay as they were (the
+    desktop's look never had them here)."""
     old = APP / "look"
     try:
         desk = json.loads((old / "look.json").read_text())
     except (OSError, ValueError):
         desk = None
-    if isinstance(desk, dict):
-        choice = look_choice()
-        was_desk = choice.get("theme") in (None, "desktop")
-        theme = font = wallpaper = own = None
-        if was_desk:
-            theme = look_find(str(desk.get("name") or ""), {k: t["name"] for k, t in look_themes().items()})
-            if not theme:       # not one of amarchy's: what the app wears without one
-                choice.pop("theme", None)
-            if "font" not in choice:
-                font = next((k for k, (_, family) in LOOK_FONTS.items()
-                             if family and family == desk.get("family")), None)
+    variables = desk.get("vars") if isinstance(desk, dict) and isinstance(desk.get("vars"), dict) else None
+    if variables:
+        name = re.sub(r"[^\w .'+-]", "", str(desk.get("name") or "")).strip()[:40] or "Your desktop's"
+        key = (slug(name) or "desktop") + "-yours"
         files = desk.get("files") if isinstance(desk.get("files"), dict) else {}
-        walls = choice.get("wallpaper") or "theme"
-        # The desktop's wallpaper showed for the theme's with its theme, and
-        # for your own until you chose one.
-        if was_desk and walls == "theme" or walls == "own" and not look_own():
-            try:
-                phone = (old / Path(files["wallpaper"]).name).read_bytes()
-                wide = (old / Path(files.get("wallpaper-wide") or files["wallpaper"]).name).read_bytes()
-                own, wallpaper = (phone, wide), "own"
-            except (KeyError, OSError, TypeError):
-                wallpaper = "none"      # the desktop had none
-        if theme is None and "theme" not in choice:
-            choice["theme"] = LOOK_DEFAULT
-        write_file(APP_PICK / "choice.json", json.dumps(choice, indent=1))
-        look = look_set(theme, font, wallpaper, own, claude=False)
+        d = CUSTOM / key
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True)
+
+        def keep(what, as_name):
+            """A file of the old look, kept under the theme as as_name (its
+            own extension): the name it got, or None."""
+            src = old / Path(str(files.get(what) or "")).name if files.get(what) else None
+            m = re.search(r"\.(jpg|png|webp|ttf|otf|woff2?)$", src.name) if src else None
+            if not m or not src.is_file():
+                return None
+            shutil.copyfile(src, d / f"{as_name}.{m.group(1)}")
+            return f"{as_name}.{m.group(1)}"
+        phone = keep("wallpaper", "wallpaper")
+        wide = keep("wallpaper-wide", "wallpaper-wide") or (keep("wallpaper", "wallpaper-wide") if phone else None)
+        family = str(desk.get("family") or "")
+        ours = next((k for k, (_, f) in LOOK_FONTS.items() if f and f == family), None)
+        fonts = {w: f for w in ("regular", "bold") for f in [None if ours else keep(w, w)] if f}
+        term = desk.get("terminal") if isinstance(desk.get("terminal"), dict) else {}
+        write_file(d / "theme.json", json.dumps({
+            "name": f"{name} (yours)", "mode": desk.get("mode") if desk.get("mode") in ("light", "dark") else "dark",
+            "vars": variables, "terminal": {k: term[k] for k in ("size", "alpha") if isinstance(term.get(k), (int, float))},
+            "wallpaper": {"phone": phone, "wide": wide} if phone else None,
+            "font": {"family": family, "nerd": bool(desk.get("nerd")), "files": fonts} if fonts else None,
+            "from": "the look your Omarchy desktop sent the app"}, indent=1))
+        choice = look_choice()
+        theme = font = own = None
+        # What showed was the desktop's look until a theme of amarchy's was picked.
+        if choice.get("theme") in (None, "desktop"):
+            theme = key
+            if "font" not in choice:
+                font = ours or (f"custom-{key}" if fonts else LOOK_FONT)
+        # Your own wallpaper was the desktop's, until you chose a picture.
+        if choice.get("wallpaper") == "own" and not look_own() and phone:
+            own = ((d / phone).read_bytes(), (d / wide).read_bytes())
+        look = look_set(theme, font, own=own, claude=False)
         if isinstance(look, str):
             print(f"amarchy: couldn't keep the desktop's look: {look}", file=sys.stderr)
-        for f, key in ((SOUND_FILE, "sound"), (ASSISTANT_SOUND_FILE, "assistant_sound")):
-            sound = desk.get(key)
+        for f, k in ((SOUND_FILE, "sound"), (ASSISTANT_SOUND_FILE, "assistant_sound")):
+            sound = desk.get(k)
             if not f.exists() and isinstance(sound, str) and (sound == "off" or sound in CHIMES):
                 write_file(f, sound + "\n")
     shutil.rmtree(old, ignore_errors=True)
