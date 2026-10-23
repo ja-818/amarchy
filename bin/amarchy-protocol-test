@@ -897,8 +897,9 @@ def broker_check(t):
         end = time.time() + 120        # its worktree made and its first Claude up
         while time.time() < end and not (status_file.exists() and status_file.read_text().strip() == "idle"):
             time.sleep(1)
-        r = run("agent", "engine", sid, "chat")
-        check(r.returncode == 0, f"amarchy agent engine: {r.stderr.strip() or r.stdout.strip()}")
+        # A new session starts on the chat engine, the only chat there is.
+        on = run("agent", "engine", sid).stdout.strip()
+        check(on == "chat", f"a new session runs on {on!r}, not the chat engine")
         state = lambda: json.loads(run("agent", "state", sid).stdout or "{}")
         end = time.time() + 90
         while time.time() < end and state().get("state") != "idle":
@@ -1007,7 +1008,10 @@ def main(argv):
     if not shutil.which("claude"):
         print("amarchy-protocol-test: no claude on PATH", file=sys.stderr)
         return 1
-    chosen = [Test(n, known[n]) for n in (names or [n for n, _ in CHECKS] + (["broker"] if broker else []))]
+    wanted = names or [n for n, _ in CHECKS]
+    if broker and "broker" not in wanted:
+        wanted.append("broker")
+    chosen = [Test(n, known[n]) for n in wanted]
     version = subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout.strip()
     if not as_json:
         print(f"Claude Code {version}, model {MODEL}: {len(chosen)} checks", flush=True)

@@ -213,10 +213,10 @@ permission class was held there** (seen live in A1).
 
 ## The broker: `amarchy agent`
 
-`bin/amarchy`, section "the chat engine". **Any session can opt in**: "Try the
-new chat" in its menu (the phone's ⋯, the wide layout's `Ctrl+Alt+M` → This
-session), or `amarchy agent engine <id> chat`; "Back to the classic terminal"
-(or `... terminal`) goes back. Sessions start on the terminal engine.
+`bin/amarchy`, section "the chat engine". **Every session runs on it** (see
+[One chat](#one-chat-phase-a3)). Claude's classic terminal is the only other
+way, held while the app has it open; `amarchy agent engine <id> chat|terminal`
+switches by hand.
 
 ```
 amarchy agent engine amarchy-x chat         # its Claude starts again on the broker, same conversation
@@ -442,10 +442,36 @@ mid-turn (idle, no done mark); images sent and pasted; a queued message
 taken back; sleep, typing in the asleep pane, `amarchy send` waking it in
 the mode and model chosen before.
 
+## One chat (phase A3)
+
+- **Every session runs on the chat engine.** New sessions start on it, and a
+  session that was on the TUI moves to it (`follow_engines`, on the timer, every
+  30 s): asleep at once (it wakes on the chat); awake once it's idle with nothing
+  pending, no background task, no queued message, and nothing typed in the TUI's
+  prompt (`engine_blockers`: the sleep checks plus those). The conversation
+  carries over (`switch_engine`).
+- **Claude's classic terminal** (the TUI) is kept for what the chat can't do
+  (`/login`, the `/config` menus). It's under Advanced, shown only with Show
+  terminals on (`POST .../engine {"engine": "terminal"}`), and it's *held*: the
+  app keeps it open with a heartbeat (`POST .../classic`, every 15 s while it's
+  on screen; `touch_classic`), and the session goes back to the chat when the
+  app leaves it (`POST .../engine {"engine": "chat"}`), when nobody has looked at
+  it for a minute (`classic_viewed`), or on the next message (the send path
+  switches it back once it's idle). `amarchy agent engine <id> terminal` holds
+  it the same way: a minute, unless the app keeps it.
+- **The protocol test is a record, not a gate.** `amarchy protocol-check` runs
+  `bin/amarchy-protocol-test --json` (add `--broker` for the broker's own test
+  session too) and records the result in `~/.local/state/amarchy/engine-check.json`
+  for the Claude Code it ran on. A failing check shows in the app's Settings
+  (`engine_problem`) and says why; the chat stays the only chat. `amarchy update`
+  starts a run when Claude Code's version has changed since the last one, in the
+  background, whatever the auto-update setting.
+- **Claude is told which engine it's on**: its startup context says so for the
+  chat engine (no prompt box, the composer, buttons), and the amarchy skill
+  says the same, so nothing it's told needs a terminal it doesn't have.
+
 ## Not yet (phase C and on)
 
 - Drafts: the chat engine has no prompt box; a draft kept from a TUI
   session's sleep stays for the TUI, and the TUI's unsent prompt isn't
   carried over by a switch.
-- Running `amarchy-protocol-test` on `amarchy update` and when Claude Code's
-  version changes, keeping new sessions on the terminal engine when it fails.

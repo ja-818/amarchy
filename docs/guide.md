@@ -575,9 +575,7 @@ your OpenAI API key: to run the tests", "Has a plan for you to approve") or
 chat, on the card when it asks something, whether the app was open or not. Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.
 
-**Try the new chat** in a session's ••• menu (and in the wide layout's
-`Ctrl+Alt+M` → This session) puts its Claude on amarchy's chat engine, the
-same conversation going on: Claude Code runs as `claude -p` behind a small
+Claude runs as a chat, the same conversation going on: Claude Code runs as `claude -p` behind a small
 broker instead of its terminal app, so what it asks (a permission, its
 questions, a plan to approve) reaches the app as data rather than read off
 its screen, answers go straight to it, Stop stops it, pictures go with your
@@ -587,6 +585,13 @@ as before: the list, sleep, notifications, `amarchy send`. Claude's voice
 mode is the terminal app's, so dictation there uses the other ways. **Back to
 the classic terminal** switches back; either way waits until Claude is idle.
 Details in [the chat engine's protocol](agent-protocol.md).
+
+**The chat is the only chat**: every session runs on it, new ones from the
+start, and an older one moves over when it's idle with nothing waiting (or
+asleep); its conversation carries on. Claude's classic terminal is still there
+for what the chat can't do (logins, `/config`): under Advanced, with Show
+terminals on. It holds only while you have it open, and the session goes back
+to the chat when you leave it, or on your next message.
 
 With **Show terminals** on (Settings → Terminals; the host's, for every phone
 and browser: off for a new install, on for one from before), a session has

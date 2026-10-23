@@ -334,11 +334,10 @@ function deviceError(code) {
 function dictationSettings(draw) {
   const d = (app.view && app.view.dictation) || {};
   const kids = [h("div", { class: "section" }, "Dictation")];
-  const now = dictationWay(true);
+  const now = dictationWay();
   const ways = [["auto", "Automatic"]];
   if (d.ready) ways.push(["host", "On the host"]);
   if (SpeechRec) ways.push(["device", "This browser's"]);
-  if (app.view && app.view.voice) ways.push(["claude", "Claude's voice mode"]);
   const pick = store.get("dictation") || "auto";
   if (ways.length > 2) {
     kids.push(h("div", { class: "seg wrap" }, ...ways.map(([value, label]) =>
@@ -348,7 +347,6 @@ function dictationSettings(draw) {
   const say = {
     host: `Hold the mic while you speak, or tap it and tap again when you're done. Your host writes it down (${d.engine || "a speech model"}): Spanish, English and 23 more languages, told apart by themselves. The audio stays on your host.`,
     device: `${/Chrome/.test(navigator.userAgent) ? "Google's" : "Apple's"} speech recognition, in this browser, in one language (below): it sends what you say to ${/Chrome/.test(navigator.userAgent) ? "Google" : "Apple"}.${iPhoneApp ? " In the home-screen app on an iPhone it often hears nothing." : ""}`,
-    claude: "Claude Code's own voice mode, in sessions on Claude's terminal: what it writes down comes into the box.",
   };
   kids.push(h("p", {}, now ? say[now] : "No way to dictate here yet: set it up on the host (below)."));
   if (now === "device" || pick === "device") {

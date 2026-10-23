@@ -1,7 +1,7 @@
 // A session's terminals, as a view of their own beside its chat: the
 // project's terminal (the session's own, where the project runs: a command,
 // a password typed in) and Claude's classic terminal (Claude Code's own
-// app, the fallback for what the chat can't do: /login, /config...). One
+// app, for what the chat can't do: /login, /config...). One
 // component for the phone's Terminal tab (app.js's SessionView) and the
 // wide layout's side panel (desk.js), both real terminals (desk.js's
 // TermPane) attached to the session's tmux on the host.
@@ -12,9 +12,9 @@
 //                         its keyboard hasn't
 //   t.open(id) / t.close()  attach it to a session / let go (when it's hidden)
 //   t.show("term"|"claude") / t.which()   which terminal it shows
-//   t.classic()           Claude's classic terminal: a session on the chat
-//                         engine switches to the terminal one first, and
-//                         "Back to chat" switches it back
+//   t.classic()           Claude's classic terminal: held on (a heartbeat)
+//                         while it shows; leaving it, or "Back to chat", puts
+//                         the session back on the chat engine
 //   t.fit() t.restyle() t.focus()
 //
 // Whether the app shows terminals at all is the host's "Show terminals"
@@ -32,6 +32,50 @@ function terminalsShown() {
 async function setTerminalsShown(on) {
   await api("/api/terminals", { on });
   if (app.view) app.view.show_terminals = on;
+}
+
+// Claude's classic terminal is held on only while the app shows it: a
+// heartbeat every 15 s keeps the session on the terminal engine. Leaving it
+// asks for the chat at once (the server also goes back on its own once the
+// heartbeat stops). One session at a time.
+const CLASSIC_BEAT_MS = 15000;
+let classicHeld = null;     // { id, timer }
+
+// The session on Claude's classic terminal (from the chat engine first, the
+// same conversation). False, with the reason in a toast, when it can't be.
+async function holdClassic(id, engine) {
+  if (classicHeld && classicHeld.id === id) return true;
+  releaseClassic();
+  const enc = encodeURIComponent(id);
+  try {
+    if (engine === "chat") await api(`/api/session/${enc}/engine`, { engine: "terminal" });
+    await api(`/api/session/${enc}/classic`, {});
+  } catch (e) {
+    toast(e.message);      // Claude works or asks something: once it's done
+    return false;
+  }
+  const held = { id, timer: null };
+  held.timer = setInterval(() => beatClassic(held), CLASSIC_BEAT_MS);
+  classicHeld = held;
+  return true;
+}
+
+function beatClassic(held) {
+  api(`/api/session/${encodeURIComponent(held.id)}/classic`, {}).catch((e) => {
+    clearInterval(held.timer);      // no longer on the terminal engine: stop
+    if (classicHeld === held) classicHeld = null;
+    toast(e.message);
+  });
+}
+
+// Let go of Claude's classic terminal: the session goes back to the chat.
+// With an id, only if that session is the one held.
+function releaseClassic(id) {
+  const held = classicHeld;
+  if (!held || (id && held.id !== id)) return;
+  clearInterval(held.timer);
+  classicHeld = null;
+  api(`/api/session/${encodeURIComponent(held.id)}/engine`, { engine: "chat" }).catch(() => {});
 }
 
 // The keys a phone's keyboard hasn't, as a terminal sends them.
@@ -64,7 +108,7 @@ class SessionTerminal {
     // Over Claude's classic terminal: what it is, and the way back.
     this.banner = h("div", { class: "term-banner", hidden: true },
       h("div", { class: "text" }, h("b", {}, "Claude's classic terminal"),
-        h("span", {}, "For what the chat can't do yet: /login, /config, an MCP login…")),
+        h("span", {}, "The chat is the usual way. This is for what it can't do: logins, /config, an MCP login…")),
       h("div", { class: "actions" },
         h("button", { class: "control", type: "button", onclick: () => this.show("term") }, "Project terminal"),
         h("button", { class: "control accent", type: "button", onclick: () => this.back() }, "Back to chat")));
@@ -128,9 +172,10 @@ class SessionTerminal {
 
   async open(id) {
     if (id && id !== this.id) {
+      releaseClassic();
       for (const p of Object.values(this.panes)) p.disconnect();
       this.id = id;
-      this.shown = store.get(`term-shown:${id}`) === "claude" ? "claude" : "term";
+      this.shown = "term";      // Claude's classic terminal is held on only when asked for
     }
     this.closed = false;
     await this.show(this.shown, { quiet: true });
@@ -138,13 +183,16 @@ class SessionTerminal {
 
   close() {
     this.closed = true;
+    releaseClassic(this.id);
     for (const p of Object.values(this.panes)) p.disconnect();
   }
 
-  // Show one of the two (and attach it), the other let go of.
+  // Show one of the two (and attach it), the other let go of. Leaving
+  // Claude's classic terminal lets go of the session (back to the chat).
   async show(which, { quiet } = {}) {
     this.shown = which === "claude" ? "claude" : "term";
     if (this.id) store.set(`term-shown:${this.id}`, this.shown);
+    if (this.shown !== "claude") releaseClassic(this.id);
     this.setCtrl(false);
     const p = this.pane(this.shown);
     const other = this.panes[this.shown === "claude" ? "term" : "claude"];
@@ -175,32 +223,17 @@ class SessionTerminal {
 
   // ---- Claude's classic terminal
 
-  // A chat-engine session runs Claude without its terminal: it switches to
-  // the terminal engine first (the conversation carries on), and Back to
-  // chat switches it back.
+  // Claude's classic terminal: the session moves to the terminal engine (the
+  // conversation carries on) and is held there while this view shows.
   async classic() {
-    const s = this.row();
-    if (s.engine === "chat") {
-      try {
-        await api(`/api/session/${encodeURIComponent(this.id)}/engine`, { engine: "terminal" });
-        store.set(`classic:${this.id}`, "1");
-      } catch (e) {
-        return toast(e.message);      // Claude works or asks something: once it's done
-      }
-    }
+    if (!(await holdClassic(this.id, this.row().engine))) return;
     await this.show("claude");
     if (!this.phone) this.focus();      // (on a phone the keyboard would come up over it)
   }
 
+  // Back to the chat: the session goes back on it.
   async back() {
-    if (store.get(`classic:${this.id}`)) {
-      try {
-        await api(`/api/session/${encodeURIComponent(this.id)}/engine`, { engine: "chat" });
-        store.set(`classic:${this.id}`, "");
-      } catch (e) {
-        return toast(e.message);
-      }
-    }
+    releaseClassic(this.id);
     await this.show("term", { quiet: true });
     if (this.opts.onBack) this.opts.onBack();
   }
@@ -298,6 +331,6 @@ function terminalSettings(draw) {
   return [h("div", { class: "section" }, "Terminals"),
     h("div", { class: "seg" }, ...[[true, "Show"], [false, "Hide"]].map(([value, label]) =>
       h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => set(value) }, label))),
-    h("p", {}, on ? "Each session has its terminal one tap away: the Terminal tab on the phone, the panel beside the chat on a computer. That's where the project runs, and where Claude's classic terminal opens."
+    h("p", {}, on ? "The project's terminal and Claude's classic terminal open in each session: the Terminal tab on the phone, the panel beside the chat on a computer."
                   : "Just the chat. A session's terminals are still in its menu, under Advanced, for when you need one.")];
 }

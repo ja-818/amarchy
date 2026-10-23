@@ -164,6 +164,10 @@ Terminals:
                                         (Advanced). Prints it without one
 
 Updating:
+  amarchy protocol-check [--broker]     run the chat engine's protocol test (about 3 minutes, a few cheap turns
+                                        on your login) for the Claude Code installed, and record the result: a
+                                        failure shows in Settings. --broker also runs a test session. amarchy
+                                        update starts it when Claude Code has changed
   amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
                                         runs from (when it's on main, with nothing uncommitted) and install it.
                                         It does it by itself every 5 minutes (AUTO_UPDATE=off in
@@ -1604,7 +1608,7 @@ def create(repo, name, prompt=None):
     # "setup" until the worktree is there. Working meanwhile, so the list
     # spins on it; Claude's SessionStart hook settles it.
     s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
-         "path": str(WORKTREES / repo / name), "created": int(time.time()), "setup": True}
+         "path": str(WORKTREES / repo / name), "created": int(time.time()), "setup": True, "engine": "chat"}
     if prompt is not None:
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
@@ -1840,6 +1844,7 @@ def cmd_claude(sid):
         s = session(sid)
     if asleep_since(sid) is not None:
         return 0
+    s = settle_engine(s)
     if engine(s) == "chat":
         return Agent(s).run()       # amarchy agent: see "the chat engine"
     other = claim_driver(sid, "terminal")
@@ -2392,6 +2397,7 @@ def cmd_sleep(args):
         return 0 if idle else fail("another amarchy is putting sessions to sleep")
     with lock:
         if idle:
+            follow_engines()
             return sleep_idle()
         if rest[:1] == ["--all"]:
             slept, kept = sleep_all(force)
@@ -2601,7 +2607,8 @@ def cmd_woke(sid, key):
     buf = bytes.fromhex(key.replace(" ", "").strip()) if key.strip() else b""
     if not buf:
         return 3
-    if engine(session(sid) or {}) == "chat":
+    s = session(sid)
+    if s and engine(settle_engine(s)) == "chat":
         return woke_chat(sid, buf)
     draft = (d / "draft").read_text() if (d / "draft").exists() else ""
     text = draft.rstrip("\n")
@@ -3124,8 +3131,8 @@ def agent_context(s):
             f"amarchy app (it shows your conversation, your questions as buttons, and your terminal). You are "
             f"session {s['name']}: a git worktree of {s['repo']} at {s['path']}, on branch {s['branch']} "
             f"(made from {s['base']}). The project's main checkout is {WORK / s['repo']}; other sessions work "
-            f"in worktrees of their own. This session also has a terminal of its own, where the project runs; "
-            f"on a computer the app shows it beside you. The `amarchy` CLI drives all of it and acts on this "
+            f"in worktrees of their own. This session also has a terminal of its own, where the project runs (the "
+            f"user can open it in the app). The `amarchy` CLI drives all of it and acts on this "
             f"session (AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
             f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
             f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the work "
@@ -3134,6 +3141,11 @@ def agent_context(s):
             f"tell them what to open instead. Never ask them to paste an API key, password or token into the "
             f"chat (the transcript keeps it): run `amarchy secret ask NAME --why \"...\"` (the amarchy skill's "
             f"\"Secrets\"), and your commands get it as $NAME. ")
+    if engine(s) == "chat":
+        text += ("You're on amarchy's chat engine: there's no prompt box or keyboard in front of the user, "
+                 "they type to you in the app's composer, and a message they send while you work waits for your "
+                 "turn unless they send it now. Their answers to your questions and their permissions come back "
+                 "as the choices you offered. ")
     if bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
                  f"(reachable only from their private network), and give them http://{name}:<port>. ")
@@ -3672,8 +3684,11 @@ def session_view():
         # Claude's whole title, so a search finds a session by any word of it.
         s["claude_title"] = "" if s.get("setup") else claude_title(s, titles.get(s["id"], ""))
         s["age"] = age(s["id"]) if s["awake"] else ""
-        # Claude Code background sessions (/bg) still running in its worktree.
+        # Claude Code background sessions (/bg) still running in its worktree, and on the
+        # chat engine the background tasks its Claude runs (live.json's tasks).
         s["background"] = len(background_sessions(s, background))
+        if engine(s) == "chat" and s["awake"]:
+            s["background"] += len(agent_live(s["id"]).get("tasks") or [])
         s["priority"] = priority(s)
         # Done, and you haven't opened it since.
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
@@ -4057,11 +4072,97 @@ def self_update():
     return f"updated {before} → {after}"
 
 
+# ---- the chat engine's protocol test: what new sessions default to depends on it
+
+PROTOCOL_TEST = Path(SELF).parent / "amarchy-protocol-test"
+PROTOCOL_LOCK = STATE / "protocol-check.lock"    # held while the test runs
+
+
+def claude_version():
+    """Claude Code's version as `claude --version` says it ("2.1.309"), or None."""
+    try:
+        out = subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=30,
+                             env=clean_env()).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"\d+\.\d+\.\d+", out)
+    return m.group(0) if m else None
+
+
+def protocol_check_due():
+    """Whether the protocol test should run: nothing recorded yet, or the
+    Claude Code installed now isn't the one it last ran on (its version changed)."""
+    version = claude_version()
+    if not version:
+        return False
+    try:
+        check = json.loads(ENGINE_CHECK_FILE.read_text())
+    except (OSError, ValueError):
+        return True
+    return not isinstance(check, dict) or check.get("claude_code") != version
+
+
+def protocol_check_busy():
+    """Whether a protocol test is running now (it holds PROTOCOL_LOCK)."""
+    PROTOCOL_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(PROTOCOL_LOCK, "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+    return False
+
+
+def cmd_protocol_check(args):
+    """amarchy protocol-check [--broker]: runs the chat engine's protocol test
+    (bin/amarchy-protocol-test: a few cheap haiku turns on your login, about 3
+    minutes; --broker also runs a test session) for the Claude Code installed,
+    and records the result. A failure keeps new sessions on the terminal engine
+    and says why (amarchy engine). amarchy update starts it when Claude Code has
+    changed since it last ran."""
+    if args not in ([], ["--broker"]):
+        print(usage("protocol-check"), file=sys.stderr)
+        return 1
+    if protocol_check_busy():
+        return fail("the protocol test is already running")
+    with open(PROTOCOL_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        version = claude_version()
+        if not version:
+            return fail("no claude on PATH: the protocol test can't run")
+        print(f"Running the chat engine's protocol test on Claude Code {version} (about 3 minutes)…", flush=True)
+        why, report = None, None
+        try:
+            r = subprocess.run([str(PROTOCOL_TEST), "--json", *args], capture_output=True, text=True,
+                               timeout=1800, env=clean_env())
+            report = json.loads(r.stdout)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            why = f"the test didn't finish ({gist(str(e))})"
+        checks = report.get("checks", []) if isinstance(report, dict) else []
+        failed = [c for c in checks if c.get("status") == "fail"]
+        if report is not None and (failed or report.get("ok") is not True):
+            first = failed[0] if failed else {}
+            why = f"{first.get('name', 'the test')} failed: {gist(first.get('error') or 'see amarchy protocol-check')}"
+        ok = why is None
+        check = {"ok": ok, "claude_code": version, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                 "failed": [c.get("name") for c in failed], "checks": len(checks), "why": why}
+        write_file(ENGINE_CHECK_FILE, json.dumps(check, indent=2) + "\n")
+    if ok:
+        print(f"The chat engine passes on Claude Code {version}.")
+        return 0
+    print(f"The chat engine fails on Claude Code {version}: {why}. New sessions start on the terminal engine.")
+    return 1
+
+
 def cmd_update(args):
     """`amarchy update`: to the latest amarchy on GitHub (origin's main).
     --auto: as the timer install.sh sets up runs it, every few minutes: one at a time, quiet when there's nothing new, and not at all
     with AUTO_UPDATE=off in ~/.config/amarchy/host."""
     auto = "--auto" in args
+    # Claude Code changed since the chat engine's protocol test last ran: run it
+    # again, in the background, whatever the auto-update setting (see protocol-check).
+    if protocol_check_due() and not protocol_check_busy():
+        detach([ENTRY, "protocol-check"])
     if auto and (host_setting("AUTO_UPDATE") or "").lower() in ("off", "no", "0", "false"):
         return 0
     STATE.mkdir(parents=True, exist_ok=True)
@@ -8081,7 +8182,8 @@ def app_watch(st):
                     "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": st.build,
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
-                    "dictation": dictate_status(), "show_terminals": show_terminals()}
+                    "dictation": dictate_status(), "show_terminals": show_terminals(),
+                    "engine_problem": protocol_problem()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -9178,7 +9280,7 @@ def app_handler(st, users, address):
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
-            m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine|classic)", self.path)
             if m:
                 s = self.session(m.group(1))
                 return self.chat(s, m.group(2), data) if s else None
@@ -9292,11 +9394,20 @@ def app_handler(st, users, address):
             Stop ({everything}: and what's queued), the model ({model}), the
             permission mode ({mode}), a queued message back ({uuid}); GET
             agent: what Claude said it has (commands, models...) and its live
-            state. engine ({engine: chat|terminal}) switches any session."""
+            state. engine ({engine: chat|terminal}) switches any session: terminal
+            is Claude's classic terminal (Show terminals on), held while classic
+            (the heartbeat: what classic does every few seconds while it's open)."""
             sid = s["id"]
             if what == "engine":
+                if data.get("engine") == "terminal" and not show_terminals():
+                    return self.error(409, "Show terminals is off: Claude's classic terminal is under Advanced")
                 why = switch_engine(s, data.get("engine"))
-                return self.error(409, why) if why else self.send(200, {"ok": True, "engine": data.get("engine")})
+                return self.error(409, why) if why else self.send(200, {"ok": True, "engine": engine(session(sid) or s)})
+            if what == "classic":       # the app has Claude's classic terminal open here: keep it on the TUI a while
+                if engine(s) != "terminal":
+                    return self.error(409, "It's not on Claude's classic terminal")
+                touch_classic(sid)
+                return self.send(200, {"ok": True})
             if engine(s) != "chat":
                 return self.error(409, "It's on Claude's classic terminal")
             if what == "agent":
@@ -9358,8 +9469,8 @@ def app_handler(st, users, address):
             Claude is free) | next (into the turn under way) | now (ending
             it)}, to its broker; asleep, it wakes with it. keys: today's card
             (chat_dialog) picks an answer by its keys; Esc says no to what
-            Claude asks and stops it, as in the TUI; other keys go to its pane
-            (Enter starts a Claude that exited)."""
+            Claude asks and stops it, as in the TUI; Enter starts a Claude that
+            exited; other keys are refused (the broker reads text, not keys)."""
             sid = s["id"]
             dialog = screen["dialog"]
             if what == "keys":
@@ -9384,9 +9495,12 @@ def app_handler(st, users, address):
                 elif screen["asleep"]:
                     wake(s)
                     return self.error(409, "It was asleep: Claude is waking up, try again in a moment")
-                else:
-                    why = app_keys(s, keys)
+                elif screen["exited"]:
+                    why = app_keys(s, keys)     # Enter starts the Claude that exited
                     why = (500, why) if why else None
+                else:
+                    # The broker reads what's typed, not keys: the classic terminal has them.
+                    return self.error(409, "Keys are for the classic terminal (the app's chat takes messages)")
                 st.seen[sid] = time.time()
                 return self.error(*why) if why else self.send(200, {})
             text, when = data.get("text", ""), data.get("when") or "idle"
@@ -9911,7 +10025,8 @@ def send_start(s, text):
     since = time.time()
     # What was typed in its prompt when it went to sleep goes back there once
     # Claude has the message.
-    draft = take(d / "draft") if asleep_since(sid) is not None else None
+    # (The chat engine has no prompt to put it in: a draft from the TUI waits for the TUI.)
+    draft = take(d / "draft") if asleep_since(sid) is not None and engine(s) == "terminal" else None
     write_file(d / "send", text)
     if asleep_since(sid) is not None:
         wake(s)
@@ -10000,16 +10115,29 @@ def send_deliver(sid, text, deadline):
         if time.time() > deadline:
             return f"its Claude wasn't free in time ({wait})"
         free, free_since = free_since, None     # set again below while Claude stays free
+        # Left on Claude's classic terminal and nobody has it open: a message brings the
+        # session back to the chat (once idle), and the chat's way delivers it.
+        if engine(s) == "terminal" and not classic_viewed(sid) and not s.get("setup") and asleep_since(sid) is None:
+            if switch_engine(s, "chat") is None:
+                time.sleep(0.5)     # its broker comes up: the chat's way from the next step
+                continue
         if s.get("setup"):
             wait = "it's being set up"
-        elif engine(s) == "chat" and agent_up(sid) and asleep_since(sid) is None:
-            try:
-                answer = agent_call(sid, {"op": "send", "content": text})
-            except OSError as e:
-                answer = {"ok": False, "error": str(e)}
-            if answer.get("ok"):
-                return None     # the broker has it, and gives it to Claude once it's free
-            wait = answer.get("error") or "its broker didn't take it"
+        elif engine(s) == "chat" and asleep_since(sid) is None:
+            # The broker takes it (or is starting up): never the TUI's path, which types into a pane.
+            if agent_up(sid):
+                try:
+                    answer = agent_call(sid, {"op": "send", "content": text})
+                except OSError as e:
+                    answer = {"ok": False, "error": str(e)}
+                if answer.get("ok"):
+                    return None     # the broker has it, and gives it to Claude once it's free
+                wait = answer.get("error") or "its broker didn't take it"
+            else:
+                pane = host_pane(s)
+                if pane and pane_claude(pane, processes()) is None and not starting(sid):
+                    return send_start(s, text)      # its Claude exited: Enter starts it again
+                wait = "its Claude is starting up"
         elif starting(sid):
             wait = "its Claude is starting with another message"
         else:
@@ -10348,9 +10476,51 @@ AGENT_STREAM_MAX = 20_000_000   # bytes of stream.jsonl (Claude's raw output) ke
 AGENT_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
 
+ENGINES = ("chat", "terminal")
+ENGINE_CHECK_FILE = STATE / "engine-check.json"  # the protocol test's last result, for the Claude Code it ran on (see protocol_problem)
+CLASSIC_HOLD = 60   # seconds the app's classic terminal keeps a session on the TUI after its last look (see classic_viewed)
+
+
 def engine(s):
-    """How a session's Claude runs: "terminal" (the TUI) or "chat" (amarchy agent)."""
+    """How a session's Claude runs right now: "chat" (amarchy agent, the only
+    chat there is) or "terminal" (Claude Code's TUI: Claude's classic terminal,
+    for what the chat can't do, while the app has it open). A session with no
+    "engine" in its record runs on the TUI, as every session did before the chat
+    engine, and moves to the chat (follow_engines)."""
     return "chat" if s.get("engine") == "chat" else "terminal"
+
+
+def classic_viewed(sid):
+    """Whether the app has Claude's classic terminal open on the session right
+    now: its heartbeat (the classic file, touched while it's open) is recent."""
+    try:
+        return time.time() - (claude_dir(sid) / "classic").stat().st_mtime < CLASSIC_HOLD
+    except OSError:
+        return False
+
+
+def protocol_problem():
+    """Why the default isn't the chat engine because the protocol test failed,
+    else None. The test records its result for a Claude Code version
+    (ENGINE_CHECK_FILE); one that failed on this version keeps new sessions
+    on the terminal engine until it passes (amarchy update runs it again)."""
+    try:
+        check = json.loads(ENGINE_CHECK_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(check, dict) or check.get("ok") is not False:
+        return None
+    return check.get("why") or "the chat engine's protocol test failed"
+
+
+def settle_engine(s):
+    """Before a session's Claude starts (its pane starts it, or it wakes), a
+    session with nothing running starts on the chat engine, unless the
+    classic terminal is open on the app for it right now. Returns the session."""
+    if engine(s) != "chat" and not claude_driver(s["id"]) and not classic_viewed(s["id"]):
+        s["engine"] = "chat"
+        save_session(s)
+    return s
 
 
 def claude_driver(sid):
@@ -11499,17 +11669,30 @@ class Agent:
         return 0
 
 
+def touch_classic(sid):
+    """The app has Claude's classic terminal open on the session: keep it on
+    the TUI (classic_viewed), for CLASSIC_HOLD seconds from now."""
+    write_file(claude_dir(sid) / "classic", f"{time.time()}\n")
+
+
 def switch_engine(s, want, force=False):
     """Put a session's Claude on the other engine ("chat" or "terminal"),
     with the same conversation: once it's idle (a turn under way, or a
     question, would be cut), unless forced. Running, it stops (as quitting
     it would), and its pane starts again on the other one once it's gone (the
     two never run one conversation at once: claim_driver); asleep or not
-    started, it wakes on it. None once done, else why not."""
+    started, it wakes on it. "terminal" is Claude's classic terminal, and it
+    holds only while the app keeps its heartbeat (touch_classic, classic_viewed):
+    left alone, the session comes back to the chat by itself (follow_engines).
+    None once done, else why not."""
     sid = s["id"]
-    if want not in ("chat", "terminal"):
+    if want not in ENGINES:
         return "the engine is chat or terminal"
     if engine(s) == want:
+        if want == "terminal":
+            touch_classic(sid)
+        else:
+            (claude_dir(sid) / "classic").unlink(missing_ok=True)
         return None
     try:
         status = (STATUS / sid).read_text().strip()
@@ -11518,10 +11701,12 @@ def switch_engine(s, want, force=False):
     if status in ("working", "waiting") and not force:
         return ("Claude is working: switch once it's done" if status == "working"
                 else "Claude is asking you something: answer it first")
+    if want == "terminal":
+        touch_classic(sid)
+    else:
+        (claude_dir(sid) / "classic").unlink(missing_ok=True)
     s = session(sid) or s
     s["engine"] = want
-    if want == "terminal":
-        s.pop("engine")
     save_session(s)
     pane = host_pane(s)
     if pane and asleep_since(sid) is None and not s.get("setup"):
@@ -11536,6 +11721,45 @@ def switch_engine(s, want, force=False):
             time.sleep(0.1)
         host_respawn(s)
     return None
+
+
+def engine_blockers(s):
+    """Why a session's Claude shouldn't go over to the other engine now, if
+    anything: what the move would lose. The things that keep a session awake
+    (sleep_blockers), and what's typed in the TUI's prompt."""
+    pane = host_pane(s)
+    if not pane:
+        return ["its pane isn't running"]
+    reasons = sleep_blockers(s, pane, processes(), auto=False)
+    if not reasons and engine(s) == "terminal":
+        typed = claude_prompt(s)
+        if typed is None:
+            reasons.append("its prompt isn't on screen")
+        elif typed:
+            reasons.append("a message is typed in its prompt")
+    return reasons
+
+
+def follow_engines():
+    """What the timer does with the engines (before sleep_idle): every session
+    runs on the chat engine. One on the TUI (from before the chat engine, or
+    left on Claude's classic terminal with nobody looking at it any more) moves
+    to the chat when it's safe: asleep at once (it wakes on the chat), awake
+    once it's idle with nothing pending, no background task, no message queued
+    and nothing typed in the TUI's prompt (engine_blockers). Its conversation
+    carries over. One the app has its classic terminal open on stays put."""
+    for s in sessions():
+        sid = s["id"]
+        if s.get("setup") or engine(s) == "chat" or classic_viewed(sid):
+            continue
+        if asleep_since(sid) is None:
+            try:
+                status = (STATUS / sid).read_text().strip()
+            except OSError:
+                status = "idle"
+            if status != "idle" or engine_blockers(s):
+                continue
+        switch_engine(s, "chat")
 
 
 def cmd_agent(args):
@@ -11671,6 +11895,7 @@ OPTIONS = {
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "alerts": (set(), set(), set()),
     "update": ({"--auto"}, set(), set()),
+    "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),
     "dictation": ({"--status", "--json"}, set(), set()),
     "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
@@ -11833,6 +12058,8 @@ def main(argv):
         return cmd_secret(args)
     elif cmd == "terminals":
         return cmd_terminals(args)
+    elif cmd == "protocol-check":
+        return cmd_protocol_check(args)
     elif cmd == "shell" and args:
         return cmd_shell(args)
     else:   # a command it knows, with the wrong number of arguments

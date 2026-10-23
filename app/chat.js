@@ -2266,8 +2266,7 @@ class Chat {
       kids = [head("Model"), ...list.map((x) => item({ label: x.displayName || x.value, detail: x.description, disabled: !chat,
                                                          on: current && current.value === x.value, act: () => this.setModel(x) }))];
       if (list !== s.models) kids.push(item({ label: "Other versions…", act: () => { m.all = true; this.drawMenu(); menuFocus(this.menuEl); } }));
-      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes the model with /model, which makes it the model of every new session too. In the new chat you pick it here, for this chat only."),
-                           item({ icon: "spark", label: "Try the new chat", act: () => { this.closeMenu(); switchEngine(this.row, "chat"); } }));
+      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself. Here you change it for this chat only."));
     } else if (m.name === "mode") {
       const now = this.settings().mode;
       const modes = ["default", "acceptEdits", "plan", "auto", ...(["default", "acceptEdits", "plan", "auto"].includes(now) || !now ? [] : [now])];
@@ -2275,8 +2274,7 @@ class Chat {
       kids = [head("How Claude asks"),
               ...modes.map((k) => item({ label: modeWords(k).label, detail: modeWords(k).about, on: k === now, disabled: !chat,
                                          act: () => this.setMode(k) }))];
-      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself (Shift+Tab in it). In the new chat you pick it here."),
-                           item({ icon: "spark", label: "Try the new chat", act: () => { this.closeMenu(); switchEngine(this.row, "chat"); } }));
+      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself. Here you change it for this chat only."));
     } else if (m.name === "slash") {
       kids = this.slashItems(item, head);
     }

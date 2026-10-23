@@ -282,22 +282,6 @@ async function sleepSession(s) {
   } catch (e) { toast(e.message); }
 }
 
-// The session's Claude on the other engine, the same conversation: the new
-// chat (Claude Code as a chat, its questions as data) or Claude's classic
-// terminal (the TUI). Once it's idle.
-async function switchEngine(s, want) {
-  try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/engine`, { engine: want });
-    toast(want === "chat" ? "On the new chat now: same conversation" : "Back on Claude's classic terminal");
-  } catch (e) { toast(e.message); }
-}
-
-function engineButton(s) {
-  if (s.setup) return null;
-  const chat = s.engine === "chat";
-  return h("button", { class: "control wide", onclick: () => { closeSheets(); switchEngine(s, chat ? "terminal" : "chat"); } },
-    chat ? "Back to the classic terminal" : "Try the new chat");
-}
 
 // Wake or sleep, as the session is now.
 function sleepButton(s) {
@@ -1153,17 +1137,18 @@ class SessionView {
     const t = this._terminal;
     const shownTerm = this.mode === "terminal" && t && t.which() === "term";
     const shownClassic = this.mode === "terminal" && t && t.which() === "claude";
-    // With Show terminals off, they're here still, under Advanced.
+    // With Show terminals off, they're here still, under Advanced (the classic
+    // terminal only when Show terminals is on: it's for what the chat can't do).
+    const classicOk = !!(app.view && app.view.show_terminals);
     const terminals = h("div", { class: "menu" },
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
-      item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic")),
+      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []),
       item(this.mode === "screen", "Claude's screen, as text", () => this.setMode("screen")));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
       h("div", { class: "section" }, "Session"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
-      engineButton({ ...row, id: this.id }),
       ...sessionActions({ ...row, id: this.id }),
       closeButton({ ...row, id: this.id }),
       h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);
@@ -1634,12 +1619,10 @@ function newChat({ wide = false, started = null } = {}) {
                              onclick: () => start() }, wide ? "Start" : glyph("send"));
   const micBtn = h("button", { class: "mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
   // What you say, into the box (dictate.js); or, on the phone through
-  // Claude's voice mode, the chat started while you speak (talk, below).
   let saying = null;
   const dictate = new Dictate({ field, button: micBtn,
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
-                                state: (text) => { saying = text; buttons(); },
-                                claude: wide ? undefined : { start: () => talk(), stop: () => letGo() } });
+                                state: (text) => { saying = text; buttons(); } });
   const box = h("div", { class: "prompt new" }, field, micBtn, wide ? null : send);
   const under = h("div", { class: "new-under" }, pick, why, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
@@ -1872,6 +1855,13 @@ function sleepSettings(draw) {
     } }, "Put idle sessions to sleep now")];
 }
 
+// The chat engine's check (the protocol test) failed on this Claude Code:
+// said once, in Settings, only then.
+function engineSettings() {
+  const problem = app.view && app.view.engine_problem;
+  return problem ? [h("p", { class: "note" }, `Claude's chat check failed on this Claude Code: ${problem}. New sessions still use the chat.`)] : [];
+}
+
 async function openSettings() {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
@@ -1936,6 +1926,7 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
+    kids.push(...engineSettings());
     kids.push(...terminalSettings(draw), ...secretsSettings());     // terminal.js, secrets.js
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),

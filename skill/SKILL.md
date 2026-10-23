@@ -5,7 +5,7 @@ description: >
   session started with "This Claude Code session runs inside amarchy". Use this
   skill before running any `amarchy` command, and whenever the work involves this
   session's worktree or branch, other sessions (starting one with a task,
-  messaging another session's Claude), the dev terminal beside you
+  messaging another session's Claude), the session's terminal
   (running, restarting or saving the project's commands), naming the session,
   merging the work back into main ("ship it"), or when you need an API key,
   password or token from the user (`amarchy secret ask`, never the chat).
@@ -20,12 +20,14 @@ desktop. Each **session** is:
   (`$AMARCHY_PATH`, branch `$AMARCHY_BRANCH`), under
   `$AMARCHY_WORK/.worktrees/<project>/<name>` by default (`AMARCHY_WORK` is
   `~/Work` unless the user set it);
-- **you**, Claude Code, in a centered column on the session's own Hyprland
-  workspace;
-- the session's **terminal** on your right, opened in the same worktree. The
-  project runs there (`bin/dev`, `npm run dev`...);
-- one row in the **session list** on your left (and under the Ⓐ in the bar):
-  status glyph, what the session is about, `project · branch`.
+- **you**, Claude Code, in this session's chat in the amarchy app: the user's
+  messages, your answers, and their questions to you as buttons (on the classic
+  terminal engine, your own Claude pane, which the user can see as a terminal);
+- the session's **terminal**, opened in the same worktree. The project runs
+  there (`bin/dev`, `npm run dev`...). The app shows it when the user has
+  terminals on;
+- a row in the **session list** the user sees: status, what the session is
+  about, `project · branch`.
 
 The other sessions are other Claude Code instances, each in a worktree of its
 own. The project's **main checkout** is `$AMARCHY_ROOT` (`$AMARCHY_WORK/<project>`).
@@ -48,7 +50,7 @@ both through amarchy on their own machine. Then:
   what to open instead.
 - `wl-paste` reads what they last pasted (an image, or text) or copied in the
   app, from their phone or browser (or what's copied on a desktop still
-  connected), the way Ctrl+V pastes an image into you there. Use it when they ask you to look
+  connected), the way an image the user pastes in the app reaches you. Use it when they ask you to look
   at what they copied: `wl-paste --list-types`, then
   `wl-paste --type image/png > /tmp/copied.png` and read that file.
 - They may be reading you on their phone (`amarchy app`): your messages show
@@ -57,7 +59,13 @@ both through amarchy on their own machine. Then:
 
 ## Your environment
 
-Set in your shell and in the terminal beside you:
+If `amarchy list` shows this session's `engine` as `chat`, your conversation is
+in the app's chat: there's no prompt box or keyboard on the user's side (they
+type in the app's composer, and what they send while you work waits for your
+turn unless they send it now), and your questions and permissions reach them
+as buttons. Everything below holds for both engines.
+
+Set in your shell and in the session's terminal:
 
 | Variable | |
 | --- | --- |
@@ -91,11 +99,10 @@ command's usage without running it (an option it doesn't know fails instead).
   has, in the user's order (`amarchy projects order` prints just the names).
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
   its saved commands (`name<TAB>command`).
-- `amarchy run`: (re)start the project's run command in the terminal beside
-  you. Use it after a change the running dev server won't pick up by itself
+- `amarchy run`: (re)start the project's run command in the session's
+  terminal. Use it after a change the running dev server won't pick up by itself
   (new dependency, config, migrations, server code without reload), or when the
-  user asks. If this session is on screen, the terminal shows (this leaves zen
-  mode). If not, it restarts quietly in place.
+  user asks. The user sees it in the app when terminals are on.
 - `amarchy run <name>`: run another saved command the same way.
 - `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key
   or password from the user without it going through the chat (see
@@ -109,8 +116,7 @@ dev server). Restart the terminal so the user sees the result too.
 
 - `amarchy sleep [id]` / `amarchy sleep --all` / `amarchy wake [id]`: a
   sleeping session's Claude Code isn't running (it holds no memory); its
-  window keeps Claude's last screen, and what the user types there goes to
-  Claude when it comes back (`claude --resume`). A sleeping session's Claude
+  conversation is kept (`claude --resume`), and a message sent to it wakes it. A sleeping session's Claude
   can't be messaged with SendMessage (its `agent` is empty), but `amarchy
   send` wakes it with the message (see "Talking to other sessions"). Idle sessions off screen (on a
   host: open on no phone or browser) sleep on their own after
@@ -171,8 +177,8 @@ dev server). Restart the terminal so the user sees the result too.
   `~/.local/state/amarchy/` either.
 - Typing into a session (`tmux send-keys`, a browser test on the app, `amarchy
   send`) when it isn't yours to drive. Every session shows up in the user's
-  list, test sessions too, and they may be looking at it or typing in it: what
-  you type mixes with theirs, and clearing its prompt wipes what they wrote.
+  list, test sessions too, and they may be looking at it or typing in it: what you
+  send mixes with theirs, and their unsent text is theirs.
   To test against a live session, start one of your own for it with a name
   that says so (`amarchy new <project> test-<what> --no-jump`), tell the user
   it's a test session they shouldn't use, and close it as soon as you're done.
@@ -237,9 +243,8 @@ the user to paste something into another session: send it yourself.
   subscribe) gets you one notice when that session finishes its turn. Use it to
   hear back instead of polling `ListAgents` or asking "are you done?".
 
-- **`amarchy send <id> "<text>"`** types a message into a session's Claude as
-  if the user typed it (no `<cross-session-message>` around it), once that
-  Claude is free (after its turn, not over a question it's asking), waking
+- **`amarchy send <id> "<text>"`** delivers a message as if the user typed it
+  (no `<cross-session-message>` around it), once that Claude is free (after its turn, not over a question it's asking), waking
   it first if it's asleep or exited. It waits until Claude has it (`--no-wait`
   returns at once; from your own session it never waits). Prefer SendMessage
   to talk to a session; use `amarchy send` when it's asleep, when it should

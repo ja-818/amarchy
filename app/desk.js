@@ -882,6 +882,7 @@ function buildSide() {
 function sideToggle(tab, keep) {
   const now = sideTab();
   const next = tab && (tab !== now || keep) ? tab : null;
+  if (now === "term" && next !== "term") releaseClassic();      // Claude's classic terminal: back to the chat
   if (next === "term" && !showTerminals()) desk.revealed = true;
   desk.sideTab = next || "none";
   if (next) desk.lastTab = next;
@@ -937,12 +938,10 @@ class DeskTerminal {
     this.term = new TermPane("term");
     this.claude = new TermPane("claude", { mic: true });
     this.seg = h("div", { class: "seg term-switch" });
-    this.banner = h("div", { class: "term-banner", hidden: true });
     this.el = h("div", { class: "desk-term" },
       h("div", { class: "term-bar" }, this.seg,
         h("button", { class: "control", type: "button", title: "Run the project (Ctrl+Alt+R)", onclick: () => runProject() }, glyph("send"), "Run"),
         h("button", { class: "control", type: "button", title: "Run a saved command (Ctrl+Alt+C)", onclick: () => pickCommand() }, "Commands…")),
-      this.banner,
       h("div", { class: "term-body" }, this.term.box, this.claude.box));
     this.draw();
   }
@@ -951,7 +950,10 @@ class DeskTerminal {
   which() { return this.showing; }
 
   open(id) {
-    if (this.id !== id) this.id = id;
+    if (this.id !== id) {
+      releaseClassic();
+      this.id = id;
+    }
     const other = this.showing === "claude" ? this.term : this.claude;
     other.disconnect();
     this.pane().open(id);
@@ -959,6 +961,7 @@ class DeskTerminal {
   }
 
   close() {
+    releaseClassic(this.id);
     this.term.disconnect();
     this.claude.disconnect();
     this.id = null;
@@ -966,16 +969,17 @@ class DeskTerminal {
 
   show(which) {
     this.showing = which === "claude" ? "claude" : "term";
+    if (this.showing !== "claude") releaseClassic(this.id);
     if (this.id) this.open(this.id);
     this.draw();
     deskHead();
   }
 
-  // Claude's classic terminal: a chat-engine session goes back on it (same
-  // conversation), and it shows here.
-  classic() {
+  // Claude's classic terminal: held on while it shows (terminal.js), the
+  // same conversation.
+  async classic() {
     const s = row(this.id);
-    if (s && s.engine === "chat") switchEngine(s, "terminal");
+    if (!(await holdClassic(this.id, s && s.engine))) return;
     this.show("claude");
   }
 
@@ -985,12 +989,6 @@ class DeskTerminal {
       h("button", { class: `control${this.showing === k ? " on" : ""}`, type: "button", onclick: () => { this.show(k); this.focus(); } }, label)));
     this.term.box.hidden = this.showing !== "term";
     this.claude.box.hidden = this.showing !== "claude";
-    // On the chat engine, Claude's pane is the broker's log: the classic
-    // terminal is a switch away.
-    const chat = this.showing === "claude" && s && s.engine === "chat";
-    this.banner.hidden = !chat;
-    if (chat) this.banner.replaceChildren(h("span", {}, "Claude runs as a chat here: this is its log."),
-      h("button", { class: "text-btn", type: "button", onclick: () => this.classic() }, "Open Claude's classic terminal"));
   }
 
   fit() { this.pane().fit(); }
@@ -1267,9 +1265,6 @@ class DeskDetails {
       item("Last commit", d.head && d.head[1] ? h("span", {}, h("code", {}, d.head[0]), ` ${d.head[1]}`) : null),
       item("Worktree", h("code", { class: "path" }, d.path), copy(d.path)),
       h("div", { class: "section" }, "Claude"),
-      item("Runs as", chat ? "The new chat" : "Claude's classic terminal",
-           s.setup ? null : h("button", { class: "text-btn", type: "button", onclick: () => switchEngine(s, chat ? "terminal" : "chat") },
-                             chat ? "Back to the classic terminal" : "Try the new chat")),
       // The model and the mode, changed in the composer's own menus (chat.js).
       h("div", { class: "kv-hook", "data-hook": "model-mode" },
         item("Model", d.model ? modelWords(d.model) : "As Claude Code's default", pillButton("model")),
@@ -1683,8 +1678,13 @@ function toggleTerminal() {
 
 // Claude's classic terminal (the TUI) in the side panel, a chat-engine
 // session switched back onto it; asked again, back to the project's terminal.
+// Claude's classic terminal is for when Show terminals is on (the host's setting).
+function classicAllowed() {
+  return !!(app.view && app.view.show_terminals);
+}
+
 function classicTerminal() {
-  if (!desk.current) return;
+  if (!desk.current || !classicAllowed()) return;
   const t = desk.terminal;
   if (sideTab() === "term" && t.which && t.which() === "claude") return toTerminal("term");
   sideToggle("term", true);
@@ -1977,10 +1977,7 @@ function sessionItems(s) {
                                                 act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
       { label: "Open terminal", detail: "the session's own, in the side panel", key: "Ctrl+Alt+Return", act: () => toTerminal("term") },
-      { label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() },
-      ...(s.setup ? [] : [s.engine === "chat" ? { label: "Back to the classic terminal", detail: "Claude runs in its terminal again, same conversation",
-                                                act: () => switchEngine(s, "terminal") }
-                                              : { label: "Try the new chat", detail: "Claude runs as a chat, same conversation", act: () => switchEngine(s, "chat") }]),
+      ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
     { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
   ];
@@ -1993,7 +1990,8 @@ function sessionMenu(s) {
 function showKeys() {
   const keys = [["Ctrl+Alt+J / K", "Next / previous session"], ["Ctrl+Alt+S", "Search sessions"],
     ["Ctrl+Alt+Z", "Zen mode: the list hidden"], ["Ctrl+Alt+Return", "Between the chat and the terminal"],
-    ["Ctrl+Alt+← / →", "The chat / the terminal"], ["Ctrl+Alt+L", "Claude's classic terminal"],
+    ["Ctrl+Alt+← / →", "The chat / the terminal"],
+    ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
     ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"],
