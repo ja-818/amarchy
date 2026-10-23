@@ -1305,6 +1305,7 @@ function typeToChat(e) {
   const at = document.activeElement;
   if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .bar-drop, .card")))
     return;
+  if (e.key === " " && at && at.matches("button, a, summary, [role]")) return;     // Space presses what's focused
   if (!c.dock.contains(c.input)) return;      // a card's up: its keys are its own
   c.input.focus({ preventScroll: true });
 }
