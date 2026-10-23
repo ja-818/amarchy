@@ -6,7 +6,7 @@
 .view-switch { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 12px 0; flex: none; }
 .chat.other > .view-switch { display: none; }
 .vs-btn {
-  font: inherit; font-size: var(--caption); padding: 4px 12px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: var(--caption); padding: 4px 12px; min-height: 44px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--control-border); background: var(--control-bg); color: var(--text-muted);
 }
 .vs-btn.on { color: var(--text); background: var(--control-pressed); border-color: var(--accent); }
