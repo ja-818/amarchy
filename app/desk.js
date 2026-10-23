@@ -617,6 +617,7 @@ function deskChat(id) {
   const chat = new Chat({
     id, row: row(id),
     onSession: (r) => { if (chat === desk.chat) { deskHead(); desk.details.sessionChanged(r); } },
+    onGoal: () => { if (chat === desk.chat) deskHead(); },        // what the chat is for, under its name
     onGone: (why) => {
       // Closed: the list moves on when it drops it. Not reachable (the host
       // restarted): again in a moment.
@@ -645,6 +646,7 @@ function deskHead() {
   if (!s) { desk.head.replaceChildren(); return; }
   const tab = sideTab();
   const st = doneOf(s);
+  const goal = desk.chat && desk.chat.id === s.id ? desk.chat.goal : null;      // what the chat is for (chat.js keepItems)
   const name = s.assistant === "main"
     ? [avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name")]
     : [taskText(s.task || "New chat", s.task ? "" : "untitled")];
@@ -652,9 +654,10 @@ function deskHead() {
     class: `head-btn${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key),
     title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
   desk.head.replaceChildren(
-    h("button", { class: "head-title", type: "button", title: `${where(s)} · rename (Ctrl+Alt+E)`, onclick: () => renameSession() },
-      stateIcon(s), ...name,
-      h("span", { class: `head-state is-${statusTone(s)}` }, statusWords(s)), sleepMark(s)),
+    h("button", { class: `head-title${goal ? " has-goal" : ""}`, type: "button", title: `${where(s)} · rename (Ctrl+Alt+E)`, onclick: () => renameSession() },
+      stateIcon(s), h("span", { class: "head-col" },
+        h("span", { class: "head-row" }, ...name, h("span", { class: `head-state is-${statusTone(s)}` }, statusWords(s)), sleepMark(s)),
+        goal ? h("span", { class: "head-goal", title: goal }, goal) : null)),
     h("div", { class: "head-btns" },
       // The panel's tabs, while it's closed (open, its own head has them).
       ...(tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle)),

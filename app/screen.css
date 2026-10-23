@@ -58,9 +58,8 @@
 .reply-needs { padding-top: 12px; border-top: 1px solid var(--border-faint); }
 .reply-k { font-size: var(--caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .reply-needs > .reply-k { color: var(--warn, #d9a441); }
-.reply-goal { font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; padding-bottom: 2px; }
 .reply-said { max-height: 12em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
-.reply-goal .k, .rsec-label { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.rsec-label { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* A section: its row (what it is, what it holds) opens it below. */
 .rsec { border-top: 1px solid var(--border-faint); min-width: 0; }

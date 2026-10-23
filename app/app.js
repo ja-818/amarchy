@@ -951,6 +951,7 @@ class SessionView {
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({
       id: this.id, row: this.row, noSwitch: true,      // Cards | Chat: in Settings and the menu (⋯)
+      onGoal: () => this.renderHeader(),              // what the chat is for, under its name
       onSession: (row) => { this.row = row; this.renderHeader(); },
       onGone: (why) => {
         toast(why ? "Can't open that chat." : "That chat was closed.");
@@ -1019,10 +1020,13 @@ class SessionView {
           h("div", { class: "status-line" }, task, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)))));
       return;
     }
-    // Its state in words and its project, as the list says them (the branch: in its menu).
+    // Under its name, what the chat is for (the goal in its replies: chat.js), else its state in
+    // words and its project as the list says them (the branch: in its menu; the state: its icon).
+    const goal = this.chat && this.chat.goal;
     this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null].filter(Boolean),
       h("div", { class: "text" }, taskText(r.task || "New chat", r.task ? "" : "untitled"),
-        h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
+        goal ? h("div", { class: "status-line goal", title: goal }, goal)
+             : h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
   }
 
   // The conversation, or the session's terminals (the project's, or Claude's

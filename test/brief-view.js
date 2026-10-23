@@ -223,10 +223,12 @@ async function run(browser, base, layout) {
   check(layout, JSON.stringify(s.open) === "[false,false,true]", `the newest open, the ones before as their title (${JSON.stringify(s.open)})`);
   check(layout, s.titles[0] === "Hi there. What should we build today?" && s.titles[1] === "A plan for the search page" && s.titles[2].startsWith("Search page works: 2 choices for <img"),
     `titles: Original message, an old-style brief, the new (${JSON.stringify(s.titles)})`);
-  check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === "Goal Ship the search page", "where it stands, the goal; nothing runs as markup");
-  check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Summary", "Needs you"]) && s.questions === 2 &&
+  const goal = await page.evaluate(() => window.__chat.goal);
+  check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === undefined && goal === "Ship the search page",
+    `where it stands; the goal isn't on the card, it's the chat's (${goal}); nothing runs as markup`);
+  check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Needs you"]) && s.questions === 2 &&
     JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]),
-    `the goal and the summary first, always there, then what needs you (${JSON.stringify(s.blocks)})`);
+    `the summary right under the title, no label, then what needs you (${JSON.stringify(s.blocks)})`);
   check(layout, JSON.stringify(s.sections) === JSON.stringify(["More"]) && s.more === "1 test failing · Plan · Changes · Checks · Activity · Notes · Original message",
     `the rest waits under More, which says what's there and flags a failing test (${s.more})`);
   await openSec(page, "more");
@@ -367,6 +369,18 @@ async function run(browser, base, layout) {
   check(layout, settings === "Brief,Chat", `Settings: Replies, Brief | Chat (${settings})`);
   await page.evaluate(() => closeSheets());
 
+  // On the phone, the chat's goal is under its name in the header.
+  if (layout === "phone") {
+    const head = await page.evaluate(({ items }) => {
+      window.EventSource = class { constructor() {} addEventListener() {} close() {} };
+      app.session = new SessionView("fake-brief");
+      app.session.row = { id: "fake-brief", task: "Search page", status: "idle", repo: "r", name: "n", engine: "chat" };
+      app.session.chat.conversation({ reset: true, start: 0, items });
+      const t = app.session.titleEl;
+      return { task: t.querySelector(".task")?.textContent, line: t.querySelector(".status-line")?.textContent, goal: !!t.querySelector(".status-line.goal") };
+    }, { items: ITEMS });
+    check(layout, head.goal && head.line === "Ship the search page", `the goal under the chat's name in the header (${JSON.stringify(head)})`);
+  }
   check(layout, errors.length === 0, `no page errors (${errors.join("; ") || "none"})`);
   await ctx.close();
 }

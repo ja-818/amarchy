@@ -856,6 +856,7 @@ class Chat {
     // How the chat shows: the brief (the default) or the conversation. Both
     // are drawn from the same items, kept here in order (see keepItems).
     this.mode = chatView();
+    this.goal = null;           // what the chat is for, from its replies (keepItems)
     this.items = [];
     this.itemKeys = new Set();
     this.sturns = [];           // the turns the brief view shows, in order (newTurn)
@@ -1197,6 +1198,17 @@ class Chat {
     for (const it of fresh) if (it.key) this.itemKeys.add(it.key);
     if (front) this.items.unshift(...fresh);
     else this.items.push(...fresh);
+    // What the chat is for: the goal in the newest reply that says one (shown
+    // under its name, opts.onGoal; not on each reply).
+    let goal = null;
+    for (let i = this.items.length - 1; i >= 0 && goal === null; i--) {
+      const b = this.items[i].brief;
+      if (b && typeof b.goal === "string" && b.goal.trim()) goal = b.goal.trim();
+    }
+    if (goal !== this.goal) {
+      this.goal = goal;
+      if (this.opts.onGoal) this.opts.onGoal(goal);
+    }
   }
 
   // The view: the brief or the conversation (the switch over the chat).
@@ -1364,11 +1376,10 @@ class Chat {
       ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
       icon("chevron", "chev")));
     if (!open) return card;
-    // First what it's about and what came of it: the goal and the summary, always there.
+    // First what came of it: the summary, always there (the chat's goal is in its header).
     const top = h("div", { class: "reply-summary" });
-    if (b && b.goal && last) top.append(h("div", { class: "reply-goal" }, h("span", { class: "k" }, "Goal"), " ", b.goal));
-    if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
-    else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
+    if (b && b.answer.length) top.append(h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
+    else if (!b && !live && t.said) top.append(h("div", { class: "msg claude reply-said", html: md(t.said) }));
     if (top.childElementCount) card.append(top);
     // Then what it needs from you, with that context: the newest reply's questions.
     if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));

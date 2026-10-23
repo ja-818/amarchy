@@ -190,10 +190,12 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   where it stands (done, working, blocked, waiting on you). The newest reply
   is open; the ones before are their title, opened with a tap. A folded reply
   that needs you says so.
-- **Read**: under the title, always there, the chat's *Goal* and the turn's
-  *Summary* (what Claude found, decided, did, concluded, as complete short
-  points, *Details* on one with a tap); then *Needs you* (questions as
-  buttons), after the context that explains them.
+- **Read**: right under the title, always there and without a label, the
+  turn's summary (what Claude found, decided, did, concluded, as complete
+  short points, *Details* on one with a tap); then *Needs you* (questions as
+  buttons), after the context that explains them. The chat's *goal* (from
+  its newest reply that says one) isn't on the cards: it's under the chat's
+  name in the header, on the phone and on a computer.
 - **Look into it**: the rest is what happened, under one *More* row that says
   what's there ("1 test failing · Plan · Changes · Checks · Activity · Notes
   · Original message"), each its own folding section: *Plan* (done / doing /
