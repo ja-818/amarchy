@@ -226,9 +226,9 @@ async function run(browser, base, layout) {
   const goal = await page.evaluate(() => window.__chat.goal);
   check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === undefined && goal === "Ship the search page",
     `where it stands; the goal isn't on the card, it's the chat's (${goal}); nothing runs as markup`);
-  check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Needs you"]) && s.questions === 2 &&
+  check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Summary", "Needs you"]) && s.questions === 2 &&
     JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]),
-    `the summary right under the title, no label, then what needs you (${JSON.stringify(s.blocks)})`);
+    `the summary right under the title, then what needs you (${JSON.stringify(s.blocks)})`);
   check(layout, JSON.stringify(s.sections) === JSON.stringify(["More"]) && s.more === "1 test failing · Plan · Changes · Checks · Activity · Notes · Original message",
     `the rest waits under More, which says what's there and flags a failing test (${s.more})`);
   await openSec(page, "more");

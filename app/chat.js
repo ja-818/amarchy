@@ -1408,8 +1408,8 @@ class Chat {
     if (!open) return card;
     // First what came of it: the summary, always there (the chat's goal is in its header).
     const top = h("div", { class: "reply-summary" });
-    if (b && b.answer.length) top.append(h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
-    else if (!b && !live && t.said) top.append(h("div", { class: "msg claude reply-said", html: md(t.said) }));
+    if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
+    else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
     if (top.childElementCount) card.append(top);
     // Then what it needs from you, with that context: the newest reply's questions.
     if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
