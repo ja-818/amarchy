@@ -53,7 +53,13 @@
 }
 .reply-head .chev { flex: none; width: 16px; height: 16px; transform: rotate(90deg); transition: transform 0.15s ease; opacity: 0.7; }
 .reply.open > .reply-head .chev { transform: rotate(-90deg); }
-.reply-goal { padding: 0 14px 10px; font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+/* What it's about and what came of it, always there under the title; then what it needs from you. */
+.reply-summary, .reply-needs { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; min-width: 0; }
+.reply-needs { padding-top: 12px; border-top: 1px solid var(--border-faint); }
+.reply-k { font-size: var(--caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.reply-needs > .reply-k { color: var(--warn, #d9a441); }
+.reply-goal { font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; padding-bottom: 2px; }
+.reply-said { max-height: 12em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 .reply-goal .k, .rsec-label { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* A section: its row (what it is, what it holds) opens it below. */

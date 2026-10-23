@@ -730,7 +730,6 @@ function briefShape(b) {
     tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
     check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
     notes: texts(b.notes, 4),
-    skip: (Array.isArray(b.skip) ? b.skip : []).filter((x) => ["changes", "checks", "activity", "words"].includes(x)),
   };
 }
 
@@ -1365,39 +1364,44 @@ class Chat {
       ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
       icon("chevron", "chev")));
     if (!open) return card;
-    if (b && b.goal && last) card.append(h("div", { class: "reply-goal" }, h("span", { class: "k" }, "Goal"), " ", b.goal));
+    // First what it's about and what came of it: the goal and the summary, always there.
+    const top = h("div", { class: "reply-summary" });
+    if (b && b.goal && last) top.append(h("div", { class: "reply-goal" }, h("span", { class: "k" }, "Goal"), " ", b.goal));
+    if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
+    else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
+    if (top.childElementCount) card.append(top);
+    // Then what it needs from you, with that context: the newest reply's questions.
+    if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
 
+    // The rest is what happened (plan, changes, checks, activity, notes, the
+    // original message): under More, each its own section. While Claude works,
+    // its activity shows anyway, to watch.
     const results = new Map(t.items.filter((i) => i.kind === "result").map((i) => [i.tool, i]));
-    // The record's sections Claude said this turn doesn't need wait under More.
-    const skip = new Set(b ? b.skip : []);
     const more = this.isOpen(`${key}|more`, false);
-    const held = [];
-    const section = (name, label, summary, build, otherwise = false) => {
+    const held = [], flags = [];
+    const section = (name, label, summary, build, otherwise = false, shown = false) => {
       if (!summary) return;
-      if (skip.has(name) && !more) return held.push(label);
+      if (!shown && !more) return held.push(label);
       const k = `${key}|${name}`;
       const on = this.isOpen(k, otherwise);
       const sec = h("div", { class: `rsec rsec-${name}${on ? " open" : ""}` },
         h("button", { class: "rsec-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
           h("span", { class: "rsec-label" }, label), h("span", { class: "rsec-sum" }, on ? "" : summary), icon("chevron", "chev")));
       if (on) sec.append(h("div", { class: "rsec-body" }, build()));
-      card.append(sec);
+      (shown ? card : extra).append(sec);
     };
-
-    // Needs you: the newest reply's questions, as buttons.
-    if (ask.length) section("needs", "Needs you", `${ask.length} question${ask.length === 1 ? "" : "s"}: ${ask[0].question}`,
-      () => this.briefWaiting({ waiting: ask }, key), true);
-    // Answer: what Claude found, decided, did, concluded (or, before the brief, its words).
-    if (b && b.answer.length) section("answer", "Answer", b.answer[0].point + (b.answer.length > 1 ? ` · +${b.answer.length - 1}` : ""),
-      () => h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))), last);
-    else if (!b && !live && t.said) section("answer", "Answer", cut(firstLine(t.said), 80),
-      () => h("div", { class: "msg claude", html: md(t.said) }), last);
+    const extra = document.createDocumentFragment();
+    // Activity: what Claude did, in order, folded as the conversation folds it (shown while it works).
+    const act = activityOf(t.items, results, (text) => this.userView(text));
+    t.liveAct = null;
+    if (live) section("activity", "Activity", act.steps ? `${act.steps} step${act.steps === 1 ? "" : "s"} so far` : "starting",
+      () => this.activityView(act.entries, t), true, true);
     // Plan: its steps, done / doing / next.
     if (b && b.plan.length) {
       const done = b.plan.filter((x) => x.state === "done").length;
       section("plan", "Plan", `${done} of ${b.plan.length} done${b.plan.find((x) => x.state !== "done") ? ` · next: ${b.plan.find((x) => x.state !== "done").step}` : ""}`,
         () => h("ol", { class: "plan-steps" }, ...b.plan.map((x) => h("li", { class: `is-${x.state}` }, h("span", { class: "mark", html: x.state === "done" ? TICK : "" }),
-          h("span", { html: inline(x.step) })))), last && b.kind === "plan");
+          h("span", { html: inline(x.step) })))));
     }
     // Changes: the files the turn's edits touched (+/−), its commits, pushes, merges; git now, on the newest.
     const ch = changesOf(t.items, results);
@@ -1411,24 +1415,23 @@ class Chat {
     // Checks: tests (Claude's, else the test runs in the record) and how to try it.
     const tests = b && b.tests.length ? b.tests : testsOf(t.items, results);
     const fails = tests.filter((x) => x.result === "fail").length;
+    if (fails) flags.push(`${fails} test${fails === 1 ? "" : "s"} failing`);
     const checkSum = [tests.length ? (fails ? `${fails} failing of ${tests.length}` : `${tests.length} passed`) : null,
       b && b.check.length ? `${b.check.length} way${b.check.length === 1 ? "" : "s"} to try it` : null].filter(Boolean).join(" · ");
-    section("checks", "Checks", checkSum, () => this.checksView(tests, b ? b.check : []), last && fails > 0);
-    // Activity: what Claude did, in order, the looking around grouped.
-    const act = activityOf(t.items, results, (text) => this.userView(text));
-    t.liveAct = null;
-    if (act.entries.length || live) section("activity", "Activity", live ? `${act.steps ? `${act.steps} step${act.steps === 1 ? "" : "s"} so far` : "starting"}` : act.summary,
-      () => this.activityView(act.entries, live ? t : null), live);
+    section("checks", "Checks", checkSum, () => this.checksView(tests, b ? b.check : []), fails > 0);
+    if (!live && act.entries.length) section("activity", "Activity", act.summary, () => this.activityView(act.entries, null));
     // Notes.
     if (b && b.notes.length) section("notes", "Notes", `${b.notes.length} · ${b.notes[0]}`,
       () => h("ul", { class: "brief-list notes" }, ...b.notes.map((x) => h("li", { html: inline(x) }))));
     // The original message: the turn as the conversation shows it.
     const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
     if (t.body.childElementCount) section("words", "Original message", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
-    if (held.length || (more && skip.size)) {
+    if (held.length || (more && extra.childNodes.length)) {
       card.append(h("div", { class: "rsec rsec-more" }, h("button", { class: "rsec-head", type: "button", "aria-expanded": String(more),
         onclick: () => toggle(`${key}|more`, more) },
-        h("span", { class: "rsec-label" }, more ? "Less" : "More"), h("span", { class: "rsec-sum" }, more ? "" : held.join(" · ")), icon("chevron", "chev"))));
+        h("span", { class: "rsec-label" }, more ? "Less" : "More"),
+        h("span", { class: "rsec-sum" }, more ? "" : [...flags, held.join(" · ")].join(" · ")), icon("chevron", "chev"))));
+      card.append(extra);
     }
     return card;
   }
@@ -1440,8 +1443,8 @@ class Chat {
       li.classList.add("has-detail");
       li.append(h("button", { class: "text-btn answer-more", type: "button", onclick: (e) => {
         more.hidden = !more.hidden;
-        e.currentTarget.textContent = more.hidden ? "More" : "Less";
-      } }, "More"), more);
+        e.currentTarget.textContent = more.hidden ? "Details" : "Hide";
+      } }, "Details"), more);
     }
     return li;
   }

@@ -182,8 +182,10 @@ const read = (page) => page.evaluate(() => {
     sections: card ? [...card.querySelectorAll(".rsec-label")].map((x) => x.textContent) : [],
     openSecs: card ? [...card.querySelectorAll(".rsec.open .rsec-label")].map((x) => x.textContent) : [],
     sums: { plan: sum("plan"), changes: sum("changes"), checks: sum("checks"), activity: sum("activity"), notes: sum("notes"), words: sum("words") },
-    answer: card ? [...card.querySelectorAll(".answer-list > li > span:first-child")].map((x) => x.textContent) : [],
-    questions: card ? card.querySelectorAll(".bq").length : 0,
+    answer: card ? [...card.querySelectorAll(".reply-summary .answer-list > li > span:first-child")].map((x) => x.textContent) : [],
+    blocks: card ? [...card.querySelectorAll(":scope > .reply-summary > .reply-k, :scope > .reply-needs > .reply-k")].map((x) => x.textContent) : [],
+    more: card?.querySelector(".rsec-more .rsec-sum")?.textContent,
+    questions: card ? card.querySelectorAll(".reply-needs .bq").length : 0,
     files: card ? [...card.querySelectorAll(".change-files li")].map((li) => li.querySelector(".change-path").textContent + " " + li.querySelector(".change-n").textContent) : [],
     git: card ? [...card.querySelectorAll(".brief-list.git li")].map((x) => x.textContent) : [],
     facts: card ? [...card.querySelectorAll(".fact")].map((f) => f.textContent) : [],
@@ -222,10 +224,15 @@ async function run(browser, base, layout) {
   check(layout, s.titles[0] === "Hi there. What should we build today?" && s.titles[1] === "A plan for the search page" && s.titles[2].startsWith("Search page works: 2 choices for <img"),
     `titles: Original message, an old-style brief, the new (${JSON.stringify(s.titles)})`);
   check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === "Goal Ship the search page", "where it stands, the goal; nothing runs as markup");
-  check(layout, JSON.stringify(s.sections) === JSON.stringify(["Needs you", "Answer", "Plan", "Changes", "Checks", "Activity", "Notes", "Original message"]),
-    `its sections, in order (${JSON.stringify(s.sections)})`);
-  check(layout, JSON.stringify(s.openSecs) === JSON.stringify(["Needs you", "Answer", "Checks"]) && s.questions === 2 &&
-    JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]), `Needs you, Answer and Checks (a test fails) open, the rest folded (${JSON.stringify(s.openSecs)})`);
+  check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Summary", "Needs you"]) && s.questions === 2 &&
+    JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]),
+    `the goal and the summary first, always there, then what needs you (${JSON.stringify(s.blocks)})`);
+  check(layout, JSON.stringify(s.sections) === JSON.stringify(["More"]) && s.more === "1 test failing · Plan · Changes · Checks · Activity · Notes · Original message",
+    `the rest waits under More, which says what's there and flags a failing test (${s.more})`);
+  await openSec(page, "more");
+  s = await read(page);
+  check(layout, JSON.stringify(s.sections) === JSON.stringify(["Less", "Plan", "Changes", "Checks", "Activity", "Notes", "Original message"]) &&
+    JSON.stringify(s.openSecs) === JSON.stringify(["Checks"]), `More opens them, Checks open as a test fails (${JSON.stringify(s.sections)})`);
   check(layout, s.sums.plan === "1 of 3 done · next: Ship to main" && s.sums.changes === "1 file +2 −1 · 1 commit" &&
     /^6 steps · 4 min$/.test(s.sums.activity) &&
     s.sums.notes === "1 · Lint fails on an old file" && s.sums.words === "2 messages · 6 steps",
@@ -292,8 +299,8 @@ async function run(browser, base, layout) {
   // An older reply opens on a tap: a turn from before the brief, Original message as its answer.
   await page.evaluate(() => document.querySelector(".reply .reply-head").click());
   const old = await page.evaluate(() => { const r = document.querySelector(".reply");
-    return { open: r.classList.contains("open"), answer: r.querySelector(".rsec-answer .rsec-sum")?.textContent }; });
-  check(layout, old.open && old.answer === "Hi there. What should we build today?", `an older reply opens on a tap (${JSON.stringify(old)})`);
+    return { open: r.classList.contains("open"), answer: r.querySelector(".reply-summary .reply-said")?.textContent.trim() }; });
+  check(layout, old.open && old.answer === "Hi there. What should we build today?", `an older reply opens on a tap, Claude's words its summary (${JSON.stringify(old)})`);
   await page.evaluate(() => document.querySelector(".reply .reply-head").click());
 
   // A reconnect with the same conversation: nothing drawn again.
@@ -325,21 +332,21 @@ async function run(browser, base, layout) {
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
     c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c20:0", at: "",
-      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }], skip: ["activity", "words"] } }] });
+      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }] } }] });
     c.row = { ...c.row, status: "idle" }; c.live = { state: "idle", pending: [] }; c.renderTail();
   }, { TOOL });
   s = await read(page);
-  check(layout, JSON.stringify(s.open) === "[false,false,false,true]" && s.titles[3] === "Shipped to main" && s.sums.changes === "merged · pushed",
-    `then its reply, the one before folded (${JSON.stringify(s.open)} · ${s.sums.changes})`);
+  check(layout, JSON.stringify(s.open) === "[false,false,false,true]" && s.titles[3] === "Shipped to main" && /Changes/.test(s.more || ""),
+    `then its reply, the one before folded (${JSON.stringify(s.open)} · ${s.more})`);
   const lean = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1);
     return { labels: [...r.querySelectorAll(".rsec-label")].map((x) => x.textContent), more: r.querySelector(".rsec-more .rsec-sum")?.textContent,
              dots: document.querySelectorAll(".reply-dot").length }; });
-  check(layout, JSON.stringify(lean.labels) === JSON.stringify(["Answer", "Changes", "More"]) && lean.more === "Activity · Original message" && lean.dots === 0,
-    `what Claude said isn't needed waits under More; no dot before the title (${JSON.stringify(lean)})`);
+  check(layout, JSON.stringify(lean.labels) === JSON.stringify(["More"]) && lean.more === "Changes · Activity · Original message" && lean.dots === 0,
+    `a short reply: its summary, the rest under More; no dot before the title (${JSON.stringify(lean)})`);
   await shot("done");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
-  check(layout, JSON.stringify(all) === JSON.stringify(["Answer", "Changes", "Activity", "Original message", "Less"]), `More brings them back (${JSON.stringify(all)})`);
+  check(layout, JSON.stringify(all) === JSON.stringify(["Less", "Changes", "Activity", "Original message"]), `More brings them up (${JSON.stringify(all)})`);
 
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));

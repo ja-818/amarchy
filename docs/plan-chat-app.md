@@ -186,31 +186,30 @@ terminals open from the chat's menu; its back arrow returns to the chat.)
 
 Each turn is your message and **Claude's reply as one card**, read in layers:
 
-- **Glance**: the card's title, the turn's outcome, with a mark for where it
-  stands (done, working, blocked, waiting on you). The newest reply is open;
-  the ones before are their title, opened with a tap. A folded reply that
-  needs you says so.
-- **Review**: its sections, each folded to a row that says what it holds:
-  *Needs you* (questions as buttons, open), *Answer* (what Claude found,
-  decided, did, concluded, as complete short points, a tap for more on one;
-  open on the newest), *Plan* (steps done / doing / next: "1 of 3 done ·
-  next: …"), *Changes* ("1 file +2 −1 · 1 commit": each file with its +/−
-  and a bar, commits, merges, pushes, and git now on the newest), *Checks*
-  (tests with their results, ways to try it; opens itself when one fails),
-  *Activity* ("6 steps · 3 actions · 4 min"), *Notes*.
-- **Audit**: *Activity* is a timeline, folded the way the conversation folds
-  Claude's steps: each run of steps between two things it said is one row in
-  the chat's words ("Read 2 files, edited search.js, ran 2 commands and
-  searched once"), with its +/−, what didn't work and how long; a tap lists
-  its steps (their kind, the command in a pill, an edit's +/−, the first line
-  of an error). What Claude said sits between as quiet quotes, background
-  events where they happened. A row whose steps are running spins and says
-  what it's doing; the line Claude is writing shows live at the end. *Original
-  message* is the turn as the conversation shows it.
-- **Only what helps**: every part but the title is optional, so a simple
-  answer is a title and a point or two. Claude also says which of the
-  record's sections don't help this turn (`skip`: changes, checks, activity,
-  words); they wait under one *More* row at the card's foot, a tap away.
+- **Glance**: the card's title, the turn's outcome; its coloured edge says
+  where it stands (done, working, blocked, waiting on you). The newest reply
+  is open; the ones before are their title, opened with a tap. A folded reply
+  that needs you says so.
+- **Read**: under the title, always there, the chat's *Goal* and the turn's
+  *Summary* (what Claude found, decided, did, concluded, as complete short
+  points, *Details* on one with a tap); then *Needs you* (questions as
+  buttons), after the context that explains them.
+- **Look into it**: the rest is what happened, under one *More* row that says
+  what's there ("1 test failing · Plan · Changes · Checks · Activity · Notes
+  · Original message"), each its own folding section: *Plan* (done / doing /
+  next), *Changes* (files with +/− and a bar, commits, merges, pushes; git
+  now on the newest), *Checks* (tests and their results, ways to try it;
+  open when one fails), *Activity*, *Notes*, *Original message*.
+- **Activity** is a timeline, folded the way the conversation folds Claude's
+  steps: each run of steps between two things it said is one row in the
+  chat's words ("Read 2 files, edited search.js, ran 2 commands and searched
+  once"), with its +/−, what didn't work and how long; a tap lists its steps
+  (their kind, the command in a pill, an edit's +/−, the first line of an
+  error). What Claude said sits between as quiet quotes, background events
+  where they happened. *Original message* is the turn as the conversation
+  shows it.
+- Every part but the title is optional, so a simple answer is a title and a
+  point or two.
 
 **Who writes what.** What needs judgment Claude writes itself, in the same
 conversation: when a turn ends, amarchy's Stop hook asks it for this turn's
@@ -228,7 +227,7 @@ reply (`brief_needed`), and never a Claude started before the tool
 (`claude_has_brief`). What Claude says after the call is left out (`aside`).
 
 While Claude works, the turn's card is live: *Working…* and what it's doing
-in its title, its activity open and filling in, ending with a live line: the
+in its title, its activity shown (not under More) and filling in, ending with a live line: the
 step under way ("Running the tests…", "Thinking…") or the line Claude is
 writing as it writes it. A turn from before the brief gets the
 same card, its title and answer from Claude's words. A brief in the older

@@ -9839,10 +9839,10 @@ BRIEF_DEF = {
                                     "plan, a task carried out (an email sent, a clean-up), or a problem."},
             "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in one short sentence. "
                                                       "Keep it unless it changed."},
-            "answer": {"type": "array", "maxItems": 12, "description": "Everything from this turn the person needs, as short "
-                       "points: what you found, decided, did and concluded, with the exact names, numbers, URLs and results. "
-                       "Complete, so they never need your messages: the app folds it, so leave nothing important out, but keep "
-                       "each point short. Not the steps you took (the app shows those).",
+            "answer": {"type": "array", "maxItems": 12, "description": "The summary: everything from this turn the person "
+                       "needs, as short points: what you found, decided, did and concluded, with the exact names, numbers, URLs "
+                       "and results. Complete, so they never need your messages (it's what they read first, under the title), "
+                       "but each point short. Not the steps you took (the app shows those).",
                        "items": {"type": "object", "required": ["point"], "additionalProperties": False,
                                  "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
                                                 "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
@@ -9874,23 +9874,18 @@ BRIEF_DEF = {
             "notes": {"type": "array", "maxItems": 4, "items": {"type": "string"},
                       "description": "Risks, caveats and what isn't done. Never git's state (merged, pushed, committed): the "
                                      "app shows that itself."},
-            "skip": {"type": "array", "items": {"type": "string", "enum": ["changes", "checks", "activity", "words"]},
-                     "description": "The sections the app builds from the record that don't help with this turn, folded "
-                                    "away under More: changes (files and commits), checks (test runs), activity (the "
-                                    "steps), words (your messages). A plain answer needs none of them; a code change "
-                                    "wants changes and checks."},
         },
     },
 }
 BRIEF_ASK = (
     "amarchy: now write this turn's reply by calling update_brief once (ToolSearch can load it). The person reads it "
-    "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, your answer "
-    "as complete points (every finding, decision, name, number, URL and result that matters; the app folds it, so leave "
-    "nothing important out, just keep each point short), the plan if there is one, what needs them, how to check it, and "
+    "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, a summary "
+    "(answer) as complete points (every finding, decision, name, number, URL and result that matters: it's what they read "
+    "first, so leave nothing important out, just keep each point short), the plan if there is one, what needs them, how "
+    "to check it, and "
     "caveats. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
-    "and the plan, tests, checks, notes and questions are left out when there are none; put the record's sections that "
-    "don't help this turn in skip. Write for someone glancing at a phone who may not remember this conversation: name "
-    "things, plain words. "
+    "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
+    "phone who may not remember this conversation: name things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "
     "invent anything. What git says now: {facts}. Your reply was already delivered: after update_brief, end your turn "
     "with no text."
