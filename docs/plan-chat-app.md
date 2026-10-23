@@ -202,7 +202,7 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   command, a helper, a message) a line, the looking around between them one
   line ("Read 2 files, searched 1 time", a tap lists them), what Claude said
   and what came in by itself (a background task that ended) where they
-  happened. *Claude's words* is the turn as the conversation shows it.
+  happened. *Original message* is the turn as the conversation shows it.
 - **Only what helps**: every part but the title is optional, so a simple
   answer is a title and a point or two. Claude also says which of the
   record's sections don't help this turn (`skip`: changes, checks, activity,
@@ -224,7 +224,9 @@ reply (`brief_needed`), and never a Claude started before the tool
 (`claude_has_brief`). What Claude says after the call is left out (`aside`).
 
 While Claude works, the turn's card is live: *Working…* and what it's doing
-in its title, its activity filling in. A turn from before the brief gets the
+in its title, its activity open and filling in, ending with a live line: the
+step under way ("Running the tests…", "Thinking…") or the line Claude is
+writing as it writes it. A turn from before the brief gets the
 same card, its title and answer from Claude's words. A brief in the older
 shape (headline, changed, next) is read as a reply.
 

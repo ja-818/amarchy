@@ -1,7 +1,7 @@
 // The brief view, in a browser: the chat's default view. Each turn is your
 // message and Claude's reply as one card: its title folds and opens it, and
 // its sections (Needs you, Answer, Plan, Changes, Checks, Activity, Notes,
-// Claude's words) each fold to a line saying what they hold. Checked: the
+// Original message) each fold to a line saying what they hold. Checked: the
 // sections and their summaries, what's built from the record (files and
 // their +/−, commits, test runs, the activity with the looking around
 // grouped), the questions answered with taps, the live card while Claude
@@ -217,9 +217,9 @@ async function run(browser, base, layout) {
   check(layout, s.mode === "screen" && s.replies === 3, `each turn is a reply card (${s.replies})`);
   check(layout, JSON.stringify(s.open) === "[false,false,true]", `the newest open, the ones before as their title (${JSON.stringify(s.open)})`);
   check(layout, s.titles[0] === "Hi there. What should we build today?" && s.titles[1] === "A plan for the search page" && s.titles[2].startsWith("Search page works: 2 choices for <img"),
-    `titles: Claude's words, an old-style brief, the new (${JSON.stringify(s.titles)})`);
+    `titles: Original message, an old-style brief, the new (${JSON.stringify(s.titles)})`);
   check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === "Goal Ship the search page", "where it stands, the goal; nothing runs as markup");
-  check(layout, JSON.stringify(s.sections) === JSON.stringify(["Needs you", "Answer", "Plan", "Changes", "Checks", "Activity", "Notes", "Claude's words"]),
+  check(layout, JSON.stringify(s.sections) === JSON.stringify(["Needs you", "Answer", "Plan", "Changes", "Checks", "Activity", "Notes", "Original message"]),
     `its sections, in order (${JSON.stringify(s.sections)})`);
   check(layout, JSON.stringify(s.openSecs) === JSON.stringify(["Needs you", "Answer", "Checks"]) && s.questions === 2 &&
     JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]), `Needs you, Answer and Checks (a test fails) open, the rest folded (${JSON.stringify(s.openSecs)})`);
@@ -243,7 +243,7 @@ async function run(browser, base, layout) {
     "act-said|“On it.”", "act-group|Read 2 files, searched 1 time", "act-step|Edited search.js", "act-step|Run the search tests", "act-step|Commit",
     "act-event|Done in the background: Background build finished", "act-said|“Done. The page runs at http://amarchy:5173/search.”"]),
     `activity: in order, the looking around grouped (${JSON.stringify(s.activity)})`);
-  check(layout, s.words.includes("On it.") && !s.words.includes("The brief is updated."), "Claude's words: the turn as the conversation shows it, without what it said again");
+  check(layout, s.words.includes("On it.") && !s.words.includes("The brief is updated."), "Original message: the turn as the conversation shows it, without what it said again");
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("sections");
   await openSec(page, "activity");
@@ -277,7 +277,7 @@ async function run(browser, base, layout) {
   s = await read(page);
   check(layout, s.open[2] === false && s.badge === "Needs you" && s.sections.length === 0, "a folded reply is its title, marked when it needs you");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-head").click());
-  // An older reply opens on a tap: a turn from before the brief, Claude's words as its answer.
+  // An older reply opens on a tap: a turn from before the brief, Original message as its answer.
   await page.evaluate(() => document.querySelector(".reply .reply-head").click());
   const old = await page.evaluate(() => { const r = document.querySelector(".reply");
     return { open: r.classList.contains("open"), answer: r.querySelector(".rsec-answer .rsec-sum")?.textContent }; });
@@ -303,6 +303,12 @@ async function run(browser, base, layout) {
   const liveNow = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-now")?.textContent);
   check(layout, s.replies === 4 && /working/.test(s.cls) && s.titles[3].startsWith("Working…") && /Merging/.test(liveNow || "") &&
     s.openSecs.includes("Activity"), `while it works: a live card, its activity open (${s.titles[3]})`);
+  const nowRow = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { now: r.querySelector(".act-now .act-text")?.textContent, last: r.querySelector(".activity > li:last-child")?.className }; });
+  check(layout, nowRow.now === "Merging…" && nowRow.last === "act-now", `the live activity ends with what it's doing now (${JSON.stringify(nowRow)})`);
+  await page.evaluate(() => { const c = window.__chat; c.live = { ...c.live, partial: "Merged.\nNow I'm pushing the branch to origin" }; c.renderTail(); });
+  const writing = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".act-now .act-text")?.textContent);
+  check(layout, writing === "Writing: “Now I'm pushing the branch to origin”", `or the line it's writing (${writing})`);
   await shot("live");
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
@@ -316,12 +322,12 @@ async function run(browser, base, layout) {
   const lean = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1);
     return { labels: [...r.querySelectorAll(".rsec-label")].map((x) => x.textContent), more: r.querySelector(".rsec-more .rsec-sum")?.textContent,
              dots: document.querySelectorAll(".reply-dot").length }; });
-  check(layout, JSON.stringify(lean.labels) === JSON.stringify(["Answer", "Changes", "More"]) && lean.more === "Activity · Claude's words" && lean.dots === 0,
+  check(layout, JSON.stringify(lean.labels) === JSON.stringify(["Answer", "Changes", "More"]) && lean.more === "Activity · Original message" && lean.dots === 0,
     `what Claude said isn't needed waits under More; no dot before the title (${JSON.stringify(lean)})`);
   await shot("done");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
-  check(layout, JSON.stringify(all) === JSON.stringify(["Answer", "Changes", "Activity", "Claude's words", "Less"]), `More brings them back (${JSON.stringify(all)})`);
+  check(layout, JSON.stringify(all) === JSON.stringify(["Answer", "Changes", "Activity", "Original message", "Less"]), `More brings them back (${JSON.stringify(all)})`);
 
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));

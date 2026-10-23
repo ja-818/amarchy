@@ -1301,7 +1301,7 @@ class Chat {
   newTurn(rec) {
     const t = { rec, said: "", items: [], sig: null, brief: null, dirty: true };
     t.you = h("div", { class: "turn-you" });
-    t.body = h("div", { class: "turn-work-body" });     // Claude's words and steps, as the conversation shows them
+    t.body = h("div", { class: "turn-work-body" });     // the original message: Claude's words and steps, as the conversation shows them
     t.reply = h("div", { class: "turn-reply" });
     t.el = h("section", { class: "turn" }, t.you, t.reply);
     this.stage.insertBefore(t.el, this.stageWork);
@@ -1349,6 +1349,16 @@ class Chat {
 
   isOpen(k, otherwise) { return this.opened.has(k) ? this.opened.get(k) : otherwise; }
 
+  // The live activity's last line: what Claude is doing now, or the line it's
+  // writing as it writes it (the chat engine's partial text).
+  drawNow(t) {
+    if (!t.liveAct) return;
+    const live = this.engine === "chat" ? this.live : null;
+    const partial = live && live.partial ? String(live.partial).trim().split("\n").filter(Boolean).pop() || "" : "";
+    const now = this.activity(live);
+    t.liveAct.textContent = partial ? `Writing: “${partial.length > 110 ? `…${partial.slice(-110)}` : partial}”` : now ? now.text : "Working…";
+  }
+
   // The newest reply again (git's facts came in).
   drawBrief() {
     if (this.mode === "screen" && this.sturn) this.drawReply(this.sturn);
@@ -1359,7 +1369,7 @@ class Chat {
     const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status : "plain";
     const ask = !!b && last && t.briefKey === (this.brief && this.brief.key) ? b.waiting : [];
     const open = this.isOpen(key, last);
-    const card = h("article", { class: `reply ${st}${open ? " open" : ""}${live ? " live" : ""}` });
+    const card = h("article", { class: `reply st-${st}${open ? " open" : ""}${live ? " live" : ""}` });      // st-: not the chat's own .working
     const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
     const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : firstLine(t.said) || "Claude's reply";
     t.liveNow = live ? h("span", { class: "reply-now" }) : null;
@@ -1420,13 +1430,15 @@ class Chat {
     section("checks", "Checks", checkSum, () => this.checksView(tests, b ? b.check : []), last && fails > 0);
     // Activity: what Claude did, in order, the looking around grouped.
     const act = activityOf(t.items, results, (text) => this.userView(text));
-    if (act.entries.length) section("activity", "Activity", act.summary, () => this.activityView(act.entries), live);
+    t.liveAct = null;
+    if (act.entries.length || live) section("activity", "Activity", live ? `${act.steps ? `${act.steps} step${act.steps === 1 ? "" : "s"} so far` : "starting"}` : act.summary,
+      () => this.activityView(act.entries, live ? t : null), live);
     // Notes.
     if (b && b.notes.length) section("notes", "Notes", `${b.notes.length} · ${b.notes[0]}`,
       () => h("ul", { class: "brief-list notes" }, ...b.notes.map((x) => h("li", { html: inline(x) }))));
-    // Claude's words: the turn as the conversation shows it.
+    // The original message: the turn as the conversation shows it.
     const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
-    if (t.body.childElementCount) section("words", "Claude's words", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
+    if (t.body.childElementCount) section("words", "Original message", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
     if (held.length || (more && skip.size)) {
       card.append(h("div", { class: "rsec rsec-more" }, h("button", { class: "rsec-head", type: "button", "aria-expanded": String(more),
         onclick: () => toggle(`${key}|more`, more) },
@@ -1475,8 +1487,10 @@ class Chat {
     return box;
   }
 
-  activityView(entries) {
-    return h("ol", { class: "activity" }, ...entries.map((e) => {
+  // live: the turn under way, whose activity ends with what it's doing now
+  // (renderTail keeps that line up to date, t.liveAct).
+  activityView(entries, live) {
+    const list = h("ol", { class: "activity" }, ...entries.map((e) => {
       if (e.type === "said") return h("li", { class: "act-said" }, h("span", { class: "act-ic" }, icon("message")), h("span", { class: "act-text" }, `“${e.text}”`));
       if (e.type === "event") return h("li", { class: "act-event" }, h("span", { class: "act-ic" }, icon("clock")), h("span", { class: "act-text" }, e.text));
       if (e.type === "group") {
@@ -1490,6 +1504,12 @@ class Chat {
       return h("li", { class: `act-step${e.error ? " failed" : ""}` }, h("span", { class: "act-ic" }, icon(e.error ? "failed" : CHAT_ICONS[e.w.kind] ? e.w.kind : "other")),
         h("span", { class: "act-text" }, e.w.past, e.cmd ? h("code", { class: "act-cmd" }, e.cmd) : null));
     }));
+    if (live) {
+      live.liveAct = h("span", { class: "act-text" });
+      list.append(h("li", { class: "act-now" }, h("span", { class: "act-ic" }, spinner()), live.liveAct));
+      this.drawNow(live);
+    }
+    return list;
   }
 
   // What git says, as it is (bin/amarchy brief_facts): a row of chips.
@@ -1881,6 +1901,7 @@ class Chat {
       if (this.sturn) this.drawReply(this.sturn);
       const t = this.sturn;
       if (t && t.liveNow) t.liveNow.textContent = now ? ` ${now.text}` : "";
+      if (t) this.drawNow(t);
       this.stageWork.hidden = !(now && !(t && t.liveNow));
       if (now) this.stageWork.querySelector(".now").textContent = now.text;
       if (stick) this.toBottom();
