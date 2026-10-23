@@ -9831,7 +9831,7 @@ BRIEF_DEF = {
                                                           "Shown under their message."},
             "changed": {"type": "array", "maxItems": 6, "items": {"type": "string"},
                         "description": "What has changed toward the goal so far (the whole chat, not only this turn), in plain "
-                                       "words, a few words each."},
+                                       "words, a few words each: what it does now, not git's state (the app shows that)."},
             "tests": {"type": "array", "maxItems": 5, "description": "Tests and checks you ran that tell where things stand now, "
                                                                     "with their real results.",
                       "items": {"type": "object", "required": ["name", "result"], "additionalProperties": False,
@@ -9854,7 +9854,8 @@ BRIEF_DEF = {
                                                          "draft": {"type": "boolean"}}}}}}},
             "next": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "What comes next, a few words each."},
             "notes": {"type": "array", "maxItems": 3, "items": {"type": "string"},
-                      "description": "Heads-ups worth knowing: risks, caveats, what isn't done."},
+                      "description": "Heads-ups worth knowing: risks, caveats, what isn't done. Never git's state (merged, "
+                                     "pushed, committed, uncommitted, branch): the app shows that itself."},
         },
     },
 }
@@ -9898,7 +9899,8 @@ def brief_mcp():
             result = {"tools": [BRIEF_DEF]}
         elif method == "tools/call":
             ok = params.get("name") == BRIEF_DEF["name"]
-            result = {"content": [{"type": "text", "text": "Brief updated. Stop here." if ok else f"No tool {params.get('name')}."}],
+            result = {"content": [{"type": "text", "text": "Brief updated. The person already has your answer: end your turn now, "
+                                                           "with no text." if ok else f"No tool {params.get('name')}."}],
                       "isError": not ok}
         elif method == "ping":
             result = {}
