@@ -834,6 +834,8 @@ class SessionView {
       },
       // Claude's voice mode, for a terminal-engine session's mic.
       claude: { start: () => this.dictate(), stop: () => this.letGo() },
+      // A notification about its card was tapped: the conversation, where the card is.
+      onAsk: () => { if (this.mode !== "chat") this.setMode("chat"); },
       voiceHeld: () => !!this.voice && this.voice.held,
     });
     this.screenEl = h("pre", { class: "screen" });
@@ -2126,6 +2128,8 @@ async function start() {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (e) => {
       if (e.data && e.data.go) go(new URL(e.data.go, location.href).hash || "#/");
+      // A notification about a card: the session's chat shows it (chat.js).
+      if (e.data && e.data.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: e.data.ask } }));
     });
   }
   try {

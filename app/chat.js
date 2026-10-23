@@ -265,10 +265,13 @@ function stepWords(name, input) {
   }
 }
 
+// A step's result when you said no to it.
+const DENIED = /doesn't want to proceed|rejected|denied|not allowed/i;
+
 // What a failed step says, in words.
 function failedWords(name, words, text) {
   const t = String(text || "");
-  if (/doesn't want to proceed|rejected|denied|not allowed/i.test(t)) return `You said no: ${words.now.charAt(0).toLowerCase()}${words.now.slice(1)}`;
+  if (DENIED.test(t)) return `You said no: ${words.now.charAt(0).toLowerCase()}${words.now.slice(1)}`;
   if (/Request interrupted|interrupted by user/i.test(t)) return `Stopped: ${words.past}`;
   if (name === "Bash") return `The command didn't work: ${words.past}`;
   if (name === "Read") return `Couldn't read ${baseName((words.path) || "the file")}`;
@@ -443,9 +446,11 @@ function todoCard(todos) {
 // ---- the cards: Claude's question, a permission, a plan
 //
 // A card is drawn from a model, whichever engine asks:
-//   {kind: "question", questions, answered, step(question, answer), other: text field allowed}
-//   {kind: "permission", tool, input, text, title, details, always (its label), allow(), alwaysAllow(), deny(why)}
-//   {kind: "plan", plan, approve(), approveEdits(), keep(what)}
+//   {kind: "question", questions, answered, submit(answers, annotations), other: text field allowed}
+//     (a terminal-engine one: one question, index and total, picks: each option's pick(), other(text))
+//   {kind: "permission", tool, input, text, title, details, diff, reason, at, count,
+//    always: [{label, pick()}], allow(), deny(why)}
+//   {kind: "plan", plan, back (the mode approving goes on in), approve(), modes: [{mode | label, pick()}], keep(what)}
 //   {kind: "choice", question, options: [{label, detail, on, pick(), write}], hint}: any other menu (scraped)
 // Each action returns a promise; the card waits on it, and on a failure
 // says why and is ready again.
@@ -473,24 +478,89 @@ function permissionWords(tool, input, description) {
   }
 }
 
-// An "always allow" suggestion of the chat engine's, in words: "Always
-// allow “npm install” in this project".
-function ruleWords(suggestions) {
-  const s = (suggestions || []).find((x) => x && x.type === "addRules" && Array.isArray(x.rules) && x.rules.length);
-  if (!s) return null;
-  const words = s.rules.map((r) => {
-    const c = r.ruleContent || "";
-    const mcp = mcpParts(r.toolName);
-    if (mcp) return `using ${mcp.server}`;
-    if (r.toolName === "Bash") return c ? (/:\*$|\s\*$/.test(c) ? `commands starting with “${c.replace(/:?\s?\*$/, "")}”` : `“${cut(c, 50)}”`) : "every command";
-    if (r.toolName === "WebFetch") return c.startsWith("domain:") ? `pages on ${c.slice(7)}` : "web pages";
-    if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(r.toolName)) return c ? `edits to ${c}` : "edits";
-    if (r.toolName === "Read") return c ? `reading ${c}` : "reading files";
-    return camelWords(r.toolName).toLowerCase();
+// The permission modes, in words (the mode picker's too).
+const MODE_WORDS = {
+  default: { label: "Ask before changes", about: "Claude asks before it edits a file or runs a command" },
+  acceptEdits: { label: "Accept edits", about: "Claude edits files without asking, and asks before commands" },
+  auto: { label: "Auto", about: "Claude goes ahead with what's safe, and asks about the rest" },
+  plan: { label: "Plan first", about: "Claude plans, and changes nothing until you approve" },
+  dontAsk: { label: "Only what's allowed", about: "Claude does only what you've always allowed, and asks nothing" },
+  bypassPermissions: { label: "Don't ask", about: "Claude does everything without asking" },
+};
+
+// Where a rule goes, in words.
+const RULE_WHERE = { localSettings: "in this project", projectSettings: "in this project", userSettings: "in every project",
+                     session: "for this chat", cliArg: "for this chat" };
+
+// A folder or files a rule names ("//etc/**", "src/**", "app.js"), in words: "in /etc", "app.js".
+function rulePath(c) {
+  const p = String(c || "").replace(/^\/\//, "/").replace(/^~\//, "your home's ");
+  const dir = p.match(/^(.*?)\/\*\*(\/\*)?$/);
+  return dir ? `files in ${dir[1] || "/"}` : p;
+}
+
+// One rule, in words: "commands starting with “git status”", "pages on example.com".
+function rulePhrase(r) {
+  const c = r.ruleContent || "";
+  const mcp = mcpParts(r.toolName);
+  if (mcp) return c ? `${mcp.server}: ${mcp.what}` : `using ${mcp.server}`;
+  switch (r.toolName) {
+    case "Bash": {
+      if (!c) return "every command";
+      const start = c.match(/^(.*?)(?::\*| \*)$/);
+      return start ? `commands starting with “${cut(start[1], 40)}”` : `the command “${cut(c, 50)}”`;
+    }
+    case "WebFetch": return c.startsWith("domain:") ? `pages on ${c.slice(7)}` : "reading web pages";
+    case "WebSearch": return "searching the web";
+    case "Read": case "Glob": case "Grep": return c ? `reading ${rulePath(c)}` : "reading files";
+    case "Edit": case "Write": case "MultiEdit": case "NotebookEdit": return c ? `changes to ${rulePath(c)}` : "changing files";
+    default: return camelWords(r.toolName).toLowerCase();
+  }
+}
+
+// What "always allow" can mean for a request of the chat engine's, from
+// the suggestions Claude makes with it, each as a button: {label, picks:
+// the suggestions it takes (their indexes)}. Claude's rules go together, as
+// Claude Code's own "Yes, and don't ask again" takes them all: "Always
+// allow commands starting with “git status” in this project, and reading
+// files in /etc for this chat". A mode for the chat ("Allow all edits for
+// this chat") and folders are choices of their own.
+function alwaysChoices(suggestions) {
+  const list = Array.isArray(suggestions) ? suggestions : [];
+  const out = [];
+  const rules = list.map((x, i) => [x, i]).filter(([x]) => x && x.type === "addRules" && Array.isArray(x.rules) && x.rules.length);
+  if (rules.length) {
+    const where = new Map();      // destination -> its phrases, in order
+    for (const [x] of rules) {
+      const at = RULE_WHERE[x.destination] || "";
+      if (!where.has(at)) where.set(at, []);
+      for (const r of x.rules) if (!where.get(at).includes(rulePhrase(r))) where.get(at).push(rulePhrase(r));
+    }
+    const and = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(", ")} and ${ws[ws.length - 1]}` : ws[0]);
+    const parts = [...where].map(([at, ws]) => `${and(ws)}${at ? ` ${at}` : ""}`);
+    out.push({ label: `Always allow ${parts.join(", and ")}`, picks: rules.map(([, i]) => i) });
+  }
+  list.forEach((x, i) => {
+    if (!x) return;
+    if (x.type === "setMode" && x.mode) {
+      const at = RULE_WHERE[x.destination] || "for this chat";
+      const label = x.mode === "acceptEdits" ? `Allow all edits ${at}`
+                  : x.mode === "bypassPermissions" ? `Allow everything ${at}`
+                  : `Switch to “${(MODE_WORDS[x.mode] || { label: x.mode }).label}” ${at}`;
+      out.push({ label, picks: [i] });
+    } else if (x.type === "addDirectories" && Array.isArray(x.directories) && x.directories.length) {
+      const dirs = x.directories.map((d) => String(d).replace(/\/$/, ""));
+      out.push({ label: `Always allow working in ${dirs.length > 1 ? `${dirs.length} folders` : dirs[0]} ${RULE_WHERE[x.destination] || ""}`.trim(),
+                 picks: [i] });
+    }
   });
-  const where = { localSettings: "in this project", projectSettings: "in this project", userSettings: "in every project",
-                  session: "for this chat", cliArg: "for this chat" }[s.destination] || "";
-  return `Always allow ${[...new Set(words)].join(", ")}${where ? ` ${where}` : ""}`;
+  return out;
+}
+
+// A request's reason, when it says more than that it asks.
+function reasonWords(reason) {
+  const r = String(reason || "").trim();
+  return !r || /^(this (command|tool use|operation) )?requires? (approval|permission)\.?$/i.test(r) ? "" : r;
 }
 
 // A scraped "Yes, and don't ask again for … commands in …": the words after "Yes, and".
@@ -501,7 +571,9 @@ function alwaysWords(label) {
 }
 
 // The card's model for a request of the chat engine's (live.pending).
-function requestCard(chat, p) {
+// count: how many requests wait (several tool calls at once ask one after
+// the other), at: which this is.
+function requestCard(chat, p, at = 0, count = 1) {
   // Paths as the worktree sees them (Claude asks with whole ones).
   const root = chat.row && chat.row.path ? `${chat.row.path.replace(/\/$/, "")}/` : null;
   const rel = (v) => (root && typeof v === "string" && v.startsWith(root) ? v.slice(root.length) : v);
@@ -511,19 +583,25 @@ function requestCard(chat, p) {
   }
   const post = (body) => chat.post("answer", { request_id: p.request_id, ...body });
   if (p.tool === "AskUserQuestion") {
-    const qs = Array.isArray(p.input && p.input.questions) ? p.input.questions : [];
+    const qs = Array.isArray(p.input && p.input.questions) ? p.input.questions.filter((q) => q && q.question) : [];
     return { kind: "question", id: p.request_id, questions: qs, answered: p.answered || {}, other: true,
-             step: (question, answer) => post({ question, answer }) };
+             submit: (answers, annotations) => post({ choice: "allow", answers, annotations }) };
   }
   if (p.tool === "ExitPlanMode") {
-    return { kind: "plan", id: p.request_id, plan: (p.input && p.input.plan) || "",
-             approve: () => post({ choice: "allow" }), approveEdits: () => post({ choice: "allow", mode: "acceptEdits" }),
+    const live = chat.live || {};
+    // Approved, Claude goes back to the mode it planned from (else asks before changes).
+    const back = live.before_plan && live.before_plan !== "plan" ? live.before_plan : "default";
+    const others = ["auto", "acceptEdits", "default"].filter((m) => m !== back);
+    return { kind: "plan", id: p.request_id, plan: (p.input && p.input.plan) || "", back,
+             approve: () => post({ choice: "allow" }),
+             modes: others.map((mode) => ({ mode, pick: () => post({ choice: "allow", mode }) })),
              keep: (why) => post({ choice: "deny", message: why || "Keep planning." }) };
   }
   const w = permissionWords(p.tool, p.input, p.description);
-  return { kind: "permission", id: p.request_id, tool: p.tool, input: p.input, ...w, reason: p.reason,
-           diff: stepDiff(p.tool, p.input, null), always: ruleWords(p.suggestions),
-           allow: () => post({ choice: "allow" }), alwaysAllow: () => post({ choice: "always" }),
+  return { kind: "permission", id: p.request_id, tool: p.tool, input: p.input, ...w, reason: reasonWords(p.reason),
+           diff: stepDiff(p.tool, p.input, null), at, count,
+           always: alwaysChoices(p.suggestions).map((c) => ({ label: c.label, pick: () => post({ choice: "always", suggestions: c.picks }) })),
+           allow: () => post({ choice: "allow" }),
            deny: (why) => post({ choice: "deny", ...(why ? { message: why } : {}) }) };
 }
 
@@ -563,9 +641,9 @@ function screenCard(chat, d, step) {
     const plan = step && step.name === "ExitPlanMode" && step.input && step.input.plan ? step.input.plan : "";
     const others = opts.filter((o) => o !== edits && o !== keep && o !== approve)
       .map((o) => ({ label: o.label, detail: o.detail, pick: keys(o) }));
-    return { kind: "plan", id: d.id, plan, approve: approve ? keys(approve) : null, approveEdits: edits ? keys(edits) : null,
-             keep: /tell claude|what to change/i.test(keep.label) ? (why) => (why ? say(keep)(why) : keys(keep)()) : keys(keep),
-             others };
+    return { kind: "plan", id: d.id, plan, approve: approve ? keys(approve) : null,
+             modes: [...(edits ? [{ mode: "acceptEdits", pick: keys(edits) }] : []), ...others],
+             keep: /tell claude|what to change/i.test(keep.label) ? (why) => (why ? say(keep)(why) : keys(keep)()) : keys(keep) };
   }
   // A permission: "Yes", "Yes, and don't ask again…", "No (and tell Claude what to do differently)".
   const no = find(/^no\b/i);
@@ -576,8 +654,8 @@ function screenCard(chat, d, step) {
     const shown = lines.slice(1).filter((l) => !/^do you want/i.test(l));
     return { kind: "permission", id: d.id, tool: tool && tool.name, input: tool && tool.input, ...w,
              details: w.details || shown.join("\n"), diff: tool ? stepDiff(tool.name, tool.input, null) : null,
-             always: always ? alwaysWords(always.label) : null,
-             allow: keys(opts[0]), alwaysAllow: always ? keys(always) : null,
+             always: always ? [{ label: alwaysWords(always.label), pick: keys(always) }] : [],
+             allow: keys(opts[0]),
              deny: (why) => (why ? say(no)(why) : keys(no)()) };
   }
   // Claude's question (AskUserQuestion), single choice: the options in full
@@ -633,6 +711,8 @@ class Chat {
     this.tasks = new Map();     // Claude's tasks (TaskCreate, TaskUpdate), and their checklist
     this.taskCard = null;
     this.lastStep = null;
+    this.said = null;           // the last thing Claude said, as the conversation has it
+    this.endStream();
   }
 
   get engine() { return this.row && this.row.engine === "chat" ? "chat" : "terminal"; }
@@ -699,6 +779,9 @@ class Chat {
   open() {
     const es = new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
     this.es = es;
+    this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
+    window.addEventListener("amarchy-ask", this.onAskEvent);
+    this.clearNotes();
     es.addEventListener("session", (e) => {
       this.row = JSON.parse(e.data);
       if (this.opts.onSession) this.opts.onSession(this.row);
@@ -725,6 +808,9 @@ class Chat {
   close() {
     if (this.es) this.es.close();
     this.es = null;
+    window.removeEventListener("amarchy-ask", this.onAskEvent);
+    clearInterval(this.workingTimer);
+    this.workingEl = null;
     this.closed = true;
     this.talk.cancel();
   }
@@ -733,6 +819,37 @@ class Chat {
     this.close();
     this.closed = false;
     this.open();
+  }
+
+  // A notification about this session's card was tapped: the conversation,
+  // and the card in it (now, or as soon as it's there).
+  showCard() {
+    this.askWanted = Date.now();
+    if (this.opts.onAsk) this.opts.onAsk();
+    else if (this.view.content) this.setView();
+    this.focusCard();
+  }
+
+  focusCard() {
+    if (!this.askWanted || Date.now() - this.askWanted > 15000) { this.askWanted = null; return; }
+    const card = this.dock.querySelector(".card");
+    if (!card) return;
+    this.askWanted = null;
+    this.toBottom(true);
+    (menuStart(card) || card).focus({ preventScroll: true });
+    card.classList.remove("called");
+    void card.offsetWidth;
+    card.classList.add("called");
+  }
+
+  // The notifications about this session: seen, now it's open.
+  clearNotes() {
+    if (!("serviceWorker" in navigator) || !navigator.serviceWorker.getRegistration) return;
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg || !reg.getNotifications) return;
+      return Promise.all([reg.getNotifications({ tag: this.id }), reg.getNotifications({ tag: `assistant-${this.id}` })])
+        .then((lists) => lists.flat().forEach((n) => n.close()));
+    }).catch(() => {});
   }
 
   // A request to the session's routes ("keys", "send", "answer", "interrupt"...).
@@ -841,6 +958,11 @@ class Chat {
                         : h("div", { class: "msg note" }, text));
     } else if (it.kind === "claude") {
       where.append(h("div", { class: "msg claude", html: md(it.text) }));
+      if (!earlier) {
+        // What Claude was writing is in the conversation now.
+        this.said = String(it.text || "").replace(/\s+$/, "");
+        if (this.stream && (this.stream.done || this.said.startsWith(this.stream.text.slice(0, 40)))) this.endStream();
+      }
     }
   }
 
@@ -975,7 +1097,9 @@ class Chat {
     const steps = fold.steps;
     fold.el.classList.toggle("single", steps.length === 1);
     if (steps.length === 1) return;
-    const failed = steps.filter((s) => s.result && s.result.error).length;
+    // What you said no to isn't something that didn't work.
+    const refused = steps.filter((s) => s.result && s.result.error && DENIED.test(String(s.result.text || ""))).length;
+    const failed = steps.filter((s) => s.result && s.result.error).length - refused;
     const running = steps.some((s) => !s.result);
     const times = steps.flatMap((s) => [s.at, s.result && s.result.at]).filter(Boolean).map((t) => Date.parse(t)).filter((t) => !isNaN(t));
     const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
@@ -986,6 +1110,7 @@ class Chat {
                                                                : `${steps[0].words.now}…`),
       diffChip(diffs),
       failed ? h("span", { class: "chip bad" }, `${failed} didn't work`) : null,
+      refused ? h("span", { class: "chip" }, `you said no to ${refused}`) : null,
       took >= 5000 ? h("span", { class: "took" }, duration(took)) : null,
       icon("chevron", "chev")].filter(Boolean));
   }
@@ -1043,11 +1168,14 @@ class Chat {
   askedCard(step) {
     const qs = Array.isArray(step.input.questions) ? step.input.questions : [];
     const answers = (step.result && step.result.answers) || {};
+    const notes = (step.result && step.result.notes) || {};
     const failed = step.result && step.result.error;
-    return h("div", { class: "asked" },
+    // Waiting for your answer, it's the card in the dock: here once answered.
+    return h("div", { class: "asked", hidden: !step.result },
       h("div", { class: "asked-head" }, icon("question"), h("span", {}, "Claude asked")),
       ...qs.map((q) => h("div", { class: "asked-q" }, h("div", { class: "q" }, q.question || ""),
-        answers[q.question] ? h("div", { class: "a" }, h("span", { class: "you" }, "You:"), ` ${answers[q.question]}`)
+        answers[q.question] ? h("div", { class: "a" }, h("span", { class: "you" }, "You:"), ` ${answers[q.question]}`,
+                                notes[q.question] ? h("div", { class: "note" }, notes[q.question]) : null)
           : h("div", { class: "a muted" }, step.result ? (failed ? "Not answered" : "Answered") : "Waiting for your answer…"))));
   }
 
@@ -1078,29 +1206,147 @@ class Chat {
   }
 
   renderTail() {
-    const kids = [];
     const live = this.engine === "chat" ? this.live : null;
-    const partial = live && live.partial && live.partial.trim();
-    if (partial && this.working()) {
-      // Shown until it's in the transcript (the last thing Claude said).
-      const said = this.conv.querySelectorAll(".msg.claude");
-      const last = said.length ? said[said.length - 1].textContent : "";
-      if (!last || !partial.startsWith(last.slice(0, 40)) || partial.length > last.length + 2)
-        kids.push(h("div", { class: "msg claude streaming", html: md(partial) }));
+    const stick = this.atBottom();
+    this.streamTo(live && this.working() ? live.partial || "" : "");
+    // What it's doing, in words, unless that's the step spinning just above,
+    // or the words it's writing say so already.
+    const now = this.activity(live);
+    if (now) {
+      if (!this.workingEl) {
+        this.workingEl = h("div", { class: "working", role: "status" }, spinner(), h("span", { class: "now" }), h("span", { class: "took" }));
+        this.workingTimer = setInterval(() => this.drawWorking(), 1000);
+      }
+      this.workingNow = now;
+      this.drawWorking();
+    } else if (this.workingEl) {
+      clearInterval(this.workingTimer);
+      this.workingEl = null;
     }
-    // What it's doing, unless that's the step spinning just above.
+    const kids = [this.streamEl, this.workingEl].filter(Boolean);
+    if (kids.length !== this.tail.children.length || kids.some((k, i) => this.tail.children[i] !== k)) this.tail.replaceChildren(...kids);
+    if (stick) this.toBottom();
+  }
+
+  // The line under the conversation: what Claude is doing now, or null.
+  activity(live) {
+    if (!this.working()) return null;
+    if (live) {
+      if (live.state === "starting") return { text: "Starting Claude…" };
+      if (Array.isArray(live.pending) && live.pending.length) return null;     // the card asks
+      if (this.stream && !this.stream.done) return null;                        // its words are coming in
+      const since = live.working_since ? live.working_since * 1000 : null;
+      const a = live.activity;
+      if (a && a.tool && !HIDDEN_TOOLS.has(a.tool)) {
+        let text = stepWords(a.tool, a.input || {}).now;
+        // A helper's own step: "A helper is on it: … · reading app.js".
+        if (a.step && a.step.tool && !HIDDEN_TOOLS.has(a.step.tool)) {
+          const w = stepWords(a.step.tool, a.step.input || {}).now;
+          text += ` · ${w.charAt(0).toLowerCase()}${w.slice(1)}`;
+        }
+        return { text: `${text}…`, since };
+      }
+      return { text: live.thinking ? "Thinking…" : "Working…", since };
+    }
     const shown = this.lastStep && !this.lastStep.result && this.lastStep.el && this.tail.previousElementSibling &&
                   this.tail.previousElementSibling.contains(this.lastStep.el) && !this.lastStep.el.closest(".fold:not(.open):not(.single)");
-    if (this.working() && !shown) {
-      let now = "Working…";
-      if (live && live.activity && live.activity.tool) now = `${stepWords(live.activity.tool, live.activity.input || {}).now}…`;
-      else if (live && live.thinking) now = "Thinking…";
-      else if (!live && this.lastStep && !this.lastStep.result && !HIDDEN_TOOLS.has(this.lastStep.name)) now = `${this.lastStep.words.now}…`;
-      kids.push(h("div", { class: "working", role: "status" }, spinner(), h("span", {}, now)));
+    if (shown) return null;
+    if (this.lastStep && !this.lastStep.result && !HIDDEN_TOOLS.has(this.lastStep.name)) return { text: `${this.lastStep.words.now}…` };
+    return { text: "Working…" };
+  }
+
+  drawWorking() {
+    if (!this.workingEl) return;
+    const { text, since } = this.workingNow;
+    this.workingEl.querySelector(".now").textContent = text;
+    const took = since ? Date.now() - since : 0;
+    this.workingEl.querySelector(".took").textContent = took >= 10000 ? duration(took) : "";
+  }
+
+  // Claude's words as it writes them (the chat engine's partial text),
+  // shown at an even pace however they arrive, and kept once written until
+  // the conversation has them (it comes from the transcript, a moment later).
+  streamTo(partial) {
+    const text = partial.replace(/\s+$/, "");
+    const s = this.stream;
+    if (text) {
+      // Already in the conversation (the transcript can be quicker than the live state).
+      if (this.said && (text === this.said || (text.length > 20 && this.said.startsWith(text)))) return this.endStream();
+      if (!s || !text.startsWith(s.text.slice(0, Math.min(s.text.length, 24)))) {
+        this.endStream();
+        this.stream = { text, shown: 0, done: false };
+        this.streamEl = h("div", { class: "msg claude streaming", "aria-live": "off" });
+      } else {
+        s.text = text;
+        s.shown = Math.min(s.shown, text.length);
+        s.done = false;
+      }
+      clearTimeout(this.streamTimer);
+      this.streamTimer = null;
+      this.streamStep();
+    } else if (s && !s.done) {
+      // Written: whole, without its caret, until the conversation has it (or a while).
+      s.done = true;
+      s.shown = s.text.length;
+      this.drawStream();
+      this.streamTimer = setTimeout(() => { this.endStream(); this.renderTail(); }, 6000);
     }
-    const stick = this.atBottom();
-    this.tail.replaceChildren(...kids);
-    if (stick) this.toBottom();
+  }
+
+  streamStep() {
+    if (this.streamFrame) return;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let last = performance.now();
+    const frame = (t) => {
+      this.streamFrame = null;
+      const s = this.stream;
+      if (!s) return;
+      const behind = s.text.length - s.shown;
+      if (behind > 0) {
+        // Catches up in about a quarter of a second, never slower than a fast reader.
+        const dt = Math.min(100, t - last);
+        s.shown = reduce ? s.text.length : Math.min(s.text.length, s.shown + Math.max(1, Math.ceil(dt * Math.max(0.08, behind / 250))));
+        last = t;
+        const stick = this.atBottom();
+        this.drawStream();
+        if (stick) this.toBottom(true);
+      }
+      if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
+    };
+    this.streamFrame = requestAnimationFrame(frame);
+  }
+
+  drawStream() {
+    const s = this.stream;
+    if (!s || !this.streamEl) return;
+    let shown = s.text.slice(0, s.shown);
+    // Half a word, or the ** of bold not closed yet, would flash: up to the last space.
+    if (!s.done && s.shown < s.text.length) shown = shown.replace(/\S*$/, "");
+    if (!s.done) {
+      // (A code fence's ``` aren't inline code's marks.)
+      for (const re of [/\*\*/g, /(?<!`)`(?!`)/g]) {
+        const marks = [...shown.matchAll(re)];
+        if (marks.length % 2) {
+          const at = marks[marks.length - 1].index;
+          shown = shown.slice(0, at) + shown.slice(at + marks[marks.length - 1][0].length);
+        }
+      }
+    }
+    this.streamEl.innerHTML = md(shown || " ");
+    this.streamEl.classList.toggle("done", s.done);
+    // The caret, at the end of the last line written (in a list's last item, not under it).
+    if (!s.done) {
+      const lines = this.streamEl.querySelectorAll("p, li, h2, h3, h4, td, th, pre code");
+      (lines[lines.length - 1] || this.streamEl).append(h("span", { class: "caret", "aria-hidden": "true" }));
+    }
+  }
+
+  endStream() {
+    clearTimeout(this.streamTimer);
+    if (this.streamFrame) cancelAnimationFrame(this.streamFrame);
+    this.streamFrame = this.streamTimer = null;
+    this.stream = null;
+    this.streamEl = null;
   }
 
   // ---- the dock: Claude's question as a card, or the box you type in
@@ -1113,8 +1359,10 @@ class Chat {
     const secret = typeof secretDock === "function" ? secretDock(this) : null;
     if (secret) return secret;
     if (this.engine === "chat") {
-      const p = this.live && Array.isArray(this.live.pending) && this.live.pending[0];
-      if (p) return { card: requestCard(this, p), key: `req:${p.request_id}:${JSON.stringify(p.answered || {})}` };
+      const pending = this.live && Array.isArray(this.live.pending) ? this.live.pending : [];
+      const p = pending[0];
+      if (p) return { card: requestCard(this, p, 0, pending.length),
+                      key: `req:${p.request_id}:${JSON.stringify(p.answered || {})}:${pending.length}:${p.tool === "ExitPlanMode" ? this.live.before_plan : ""}` };
       // (Stopped while asleep is what asleep is: the dock says so already.)
       if (this.live && this.live.state === "exited" && !sleepOf(this.row))
         return { exited: true, key: "exited" };
@@ -1165,6 +1413,14 @@ class Chat {
     this.sendButtons();
     this.grow();
     if (content && stick) this.toBottom();
+    // A question's answers in progress, for requests still waiting only.
+    if (this.drafts) {
+      const waiting = new Set((this.live && this.live.pending || []).map((p) => p.request_id));
+      for (const id of this.drafts.keys()) if (!waiting.has(id)) this.drafts.delete(id);
+    }
+    if (this.askWanted) this.focusCard();
+    // A card came up while you're here: no need for its notification.
+    if (now && now.card && document.visibilityState === "visible") this.clearNotes();
   }
 
   // What you sent while Claude works (the chat engine keeps it until it's
@@ -1226,15 +1482,22 @@ class Chat {
     });
   }
 
-  // A field to say something with (why not, what to change, your own answer).
-  writeField(card, placeholder, label, send) {
+  // A field to say something with (why not, what to change, your own
+  // answer). empty: it goes empty too; direct: send isn't an answer yet (the
+  // next question), so the card stays as it is.
+  writeField(card, placeholder, label, send, { empty = false, direct = false } = {}) {
     const field = h("textarea", { class: "field", rows: 2, placeholder });
-    const go = h("button", { class: "cta primary", type: "button", onclick: () => { if (field.value.trim() || send.empty) this.act(card, () => send(field.value.trim()), go); } }, label);
+    const go = h("button", { class: "cta primary", type: "button", onclick: () => {
+      const text = field.value.trim();
+      if (!text && !empty) return;
+      if (direct) send(text);
+      else this.act(card, () => send(text), go);
+    } }, label);
     const box = h("div", { class: "write", hidden: true }, field, h("div", { class: "card-actions" }, go));
     field.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); go.click(); }
     });
-    return { box, open: () => { box.hidden = false; field.focus(); } };
+    return { box, field, open: () => { box.hidden = false; field.focus(); } };
   }
 
   card(m) {
@@ -1254,61 +1517,212 @@ class Chat {
   }
 
   // Claude's question: in big type, each option a button with what it
-  // means (and its preview), several to pick as boxes with Done, and your
-  // own words. Several questions go one at a time ("1 of 3").
+  // means, several to pick as boxes, and your own words. Several questions
+  // go one at a time ("1 of 3"), with Back and a tab for each, then your
+  // answers to look over and send together. A question whose options have
+  // previews (a mockup, some code) shows the one of the option you're on,
+  // and takes a note with your choice. A terminal-engine session's question
+  // is one of its screen's: each pick is its keys (questionPicks).
   questionCard(m) {
+    if (m.picks) return this.questionPicks(m);
     const qs = m.questions;
-    const done = m.answered || {};
-    const index = typeof m.index === "number" ? m.index : Math.max(0, qs.findIndex((q) => !(q.question in done)));
-    const q = qs[typeof m.index === "number" ? 0 : index] || {};
-    const total = m.total || qs.length;
+    // Where you are, kept while the card is redrawn (a live event, a new
+    // stream): answers so far (the pane's too), your picks, notes.
+    this.drafts = this.drafts || new Map();
+    let d = this.drafts.get(m.id);
+    if (!d) {
+      d = { answers: { ...m.answered }, notes: {}, picked: {}, on: {}, own: {}, at: 0 };
+      d.at = Math.max(0, qs.findIndex((q) => !(q.question in d.answers)));
+      if (qs.every((q) => q.question in d.answers)) d.at = qs.length;
+      this.drafts.set(m.id, d);
+    }
+    const card = this.cardShell("question", "Claude asks", null);
+    const keyed = () => lastInput.keys && card.contains(document.activeElement);
+    const go = (at) => {
+      const keys = keyed() || document.activeElement === card;
+      d.at = at;
+      draw();
+      if (keys) (card.querySelector(".opt.on") || card.querySelector(".opt, .cta.primary") || card).focus({ preventScroll: true });
+    };
+    // Answered: the next question you haven't, else your answers (several), else sent.
+    const next = () => {
+      const left = qs.findIndex((q, n) => n > d.at && !(q.question in d.answers));
+      const any = qs.findIndex((q) => !(q.question in d.answers));
+      if (left >= 0) return go(left);
+      if (any >= 0) return go(any);
+      if (qs.length > 1) return go(qs.length);
+      send();
+    };
+    const send = () => {
+      const notes = {};
+      for (const q of qs) {
+        const chosen = (q.options || []).find((o) => o.label === d.answers[q.question]);
+        const one = {};
+        if (chosen && chosen.preview) one.preview = chosen.preview;
+        if (d.notes[q.question] && d.notes[q.question].trim()) one.notes = d.notes[q.question].trim();
+        if (Object.keys(one).length) notes[q.question] = one;
+      }
+      this.act(card, () => m.submit(d.answers, notes), card.querySelector(".cta.primary"));
+    };
+    const draw = () => {
+      card.querySelectorAll(":scope > :not(.card-head)").forEach((el) => el.remove());
+      const head = card.querySelector(".card-head");
+      head.querySelector(".title").textContent = qs.length > 1 ? "Claude asks" : qs[0].header || "Claude asks";
+      head.querySelector(".count") && head.querySelector(".count").remove();
+      if (qs.length > 1) head.append(h("span", { class: "count" }, d.at < qs.length ? `${d.at + 1} of ${qs.length}` : "Look them over"));
+      // A tab for each question: answered ones ticked, any one a tap away.
+      if (qs.length > 1) {
+        card.append(h("div", { class: "q-tabs", role: "tablist" }, ...qs.map((q, n) => h("button", {
+          class: `q-tab${n === d.at ? " on" : ""}${q.question in d.answers ? " done" : ""}`, type: "button", role: "tab",
+          "aria-selected": String(n === d.at), "aria-label": `${q.header || `Question ${n + 1}`}${q.question in d.answers ? ", answered" : ""}`,
+          onclick: () => go(n) }, q.question in d.answers ? icon("check") : h("span", { class: "dot" }), h("span", {}, q.header || String(n + 1)))),
+          h("button", { class: `q-tab review${d.at === qs.length ? " on" : ""}`, type: "button", role: "tab",
+                        disabled: !qs.every((q) => q.question in d.answers), onclick: () => go(qs.length) }, h("span", {}, "Send"))));
+      }
+      if (d.at >= qs.length) return drawReview();
+      const q = qs[d.at];
+      const multi = !!q.multiSelect;
+      const previews = !multi && (q.options || []).some((o) => o.preview);
+      card.append(h("div", { class: "question" }, q.question || ""));
+      if (multi) card.append(h("div", { class: "card-note" }, "Pick all that apply"));
+      const picked = d.picked[q.question] = d.picked[q.question] ||
+        new Set(multi && d.answers[q.question] ? d.answers[q.question].split(", ").filter((l) => (q.options || []).some((o) => o.label === l)) : []);
+      if (!multi && !(q.question in d.on) && d.answers[q.question]) d.on[q.question] = d.answers[q.question];
+      const opts = h("div", { class: `opts${previews ? " with-preview" : ""}` });
+      const shown = h("pre", { class: "preview", "aria-live": "polite" });
+      const showPreview = (o) => {
+        shown.textContent = (o && o.preview) || "";
+        shown.hidden = !(o && o.preview);
+      };
+      const primary = h("button", { class: "cta primary", type: "button" });
+      const ready = () => {
+        if (multi) {
+          primary.disabled = !picked.size;
+          primary.textContent = qs.length > 1 ? "Next" : "Send";
+        } else {
+          primary.disabled = !d.on[q.question];
+          primary.textContent = d.on[q.question] ? `${qs.length > 1 ? "Choose" : "Send"} “${cut(d.on[q.question], 28)}”` : "Pick one";
+        }
+      };
+      (q.options || []).forEach((o, n) => {
+        const on = multi ? picked.has(o.label) : d.on[q.question] === o.label;
+        const btn = h("button", { class: `opt${multi ? " multi" : ""}${on ? " on" : ""}`, type: "button",
+                                  role: multi ? "checkbox" : previews ? "radio" : null,
+                                  "aria-checked": multi || previews ? String(on) : null },
+          multi ? h("span", { class: "box", "aria-hidden": "true" }, icon("check")) : h("span", { class: "n", "aria-hidden": "true" }, String(n + 1)),
+          h("span", { class: "what" }, h("b", {}, o.label), o.description ? h("small", {}, o.description) : null));
+        if (previews) {
+          btn.addEventListener("mouseenter", () => showPreview(o));
+          btn.addEventListener("focus", () => showPreview(o));
+          btn.addEventListener("mouseleave", () => showPreview((q.options || []).find((x) => x.label === d.on[q.question]) ||
+                                                               (q.options || []).find((x) => x.preview)));
+        }
+        btn.addEventListener("click", () => {
+          if (multi) {
+            if (picked.has(o.label)) picked.delete(o.label); else picked.add(o.label);
+            btn.classList.toggle("on", picked.has(o.label));
+            btn.setAttribute("aria-checked", String(picked.has(o.label)));
+            return ready();
+          }
+          if (previews) {
+            // With a preview, a tap shows it; the button under it chooses.
+            d.on[q.question] = o.label;
+            opts.querySelectorAll(".opt").forEach((x) => { x.classList.toggle("on", x === btn); x.setAttribute("aria-checked", String(x === btn)); });
+            showPreview(o);
+            return ready();
+          }
+          d.answers[q.question] = o.label;
+          delete d.own[q.question];
+          btn.classList.add("chosen");
+          next();
+        });
+        opts.append(btn);
+      });
+      if (!previews) card.append(opts);
+      if (previews) {
+        // The one picked, else the first (as Claude Code shows it).
+        showPreview((q.options || []).find((x) => x.label === d.on[q.question]) || (q.options || []).find((x) => x.preview));
+        card.append(h("div", { class: "preview-pair" }, opts, shown));      // beside each other where there's room
+        // A note with your choice (Claude gets it with the answer).
+        const note = h("textarea", { class: "field note", rows: 1, placeholder: "Add a note for Claude (optional)",
+                                     "aria-label": "A note with your answer" });
+        note.value = d.notes[q.question] || "";
+        note.addEventListener("input", () => { d.notes[q.question] = note.value; });
+        card.append(note);
+      }
+      // Your own words, for when no option fits.
+      const own = m.other ? this.writeField(card, "Your answer", qs.length > 1 ? "Next" : "Send answer", (text) => {
+        d.answers[q.question] = text;
+        d.own[q.question] = true;
+        next();
+      }, { direct: true }) : null;
+      if (own && d.own[q.question]) own.field.value = d.answers[q.question] || "";
+      const actions = h("div", { class: "card-actions" });
+      if (d.at > 0) actions.append(h("button", { class: "cta", type: "button", onclick: () => go(d.at - 1) }, "Back"));
+      if (multi || previews) {
+        primary.addEventListener("click", () => {
+          d.answers[q.question] = multi ? (q.options || []).map((o) => o.label).filter((l) => picked.has(l)).join(", ") : d.on[q.question];
+          delete d.own[q.question];
+          next();
+        });
+        ready();
+        actions.append(primary);
+      }
+      if (own) actions.append(h("button", { class: "cta", type: "button", onclick: () => { actions.hidden = true; own.open(); } },
+                                d.own[q.question] ? "Change your answer…" : "Something else…"));
+      if (actions.children.length) card.append(actions);
+      if (own) {
+        if (d.own[q.question]) { actions.hidden = true; own.box.hidden = false; }
+        card.append(own.box);
+      }
+    };
+    // Your answers, before they go: each a tap away from changing.
+    const drawReview = () => {
+      card.append(h("div", { class: "review" }, ...qs.map((q, n) => h("button", { class: "review-row", type: "button", onclick: () => go(n) },
+        h("span", { class: "q" }, q.question), h("span", { class: "a" }, d.answers[q.question] || "—"),
+        d.notes[q.question] && d.notes[q.question].trim() ? h("span", { class: "note" }, d.notes[q.question].trim()) : null))));
+      const sendBtn = h("button", { class: "cta primary", type: "button", onclick: send }, "Send answers");
+      card.append(h("div", { class: "card-actions" }, h("button", { class: "cta", type: "button", onclick: () => go(qs.length - 1) }, "Back"), sendBtn));
+    };
+    draw();
+    return card;
+  }
+
+  // A question read off a terminal-engine session's screen: one at a time,
+  // as its screen asks it, each option picked by its keys.
+  questionPicks(m) {
+    const q = m.questions[0] || {};
     const card = this.cardShell("question", q.header || "Claude asks", null);
-    if (total > 1) card.querySelector(".card-head").append(h("span", { class: "count" }, `${index + 1} of ${total}`));
+    if (m.total > 1) card.querySelector(".card-head").append(h("span", { class: "count" }, `${m.index + 1} of ${m.total}`));
     card.append(h("div", { class: "question" }, q.question || ""));
     const opts = h("div", { class: "opts" });
-    const multi = !!q.multiSelect && !m.picks;
-    const picked = new Set();
-    let doneBtn = null;
     (q.options || []).forEach((o, n) => {
-      const btn = h("button", { class: `opt${multi ? " multi" : ""}`, type: "button", role: multi ? "checkbox" : null, "aria-checked": multi ? "false" : null },
-        multi ? h("span", { class: "box", "aria-hidden": "true" }, icon("check")) : h("span", { class: "n", "aria-hidden": "true" }, String(n + 1)),
+      const btn = h("button", { class: "opt", type: "button", onclick: () => this.act(card, m.picks[n], btn) },
+        h("span", { class: "n", "aria-hidden": "true" }, String(n + 1)),
         h("span", { class: "what" }, h("b", {}, o.label), o.description ? h("small", {}, o.description) : null));
-      btn.addEventListener("click", () => {
-        if (multi) {
-          if (picked.has(o.label)) picked.delete(o.label); else picked.add(o.label);
-          btn.classList.toggle("on", picked.has(o.label));
-          btn.setAttribute("aria-checked", String(picked.has(o.label)));
-          doneBtn.disabled = !picked.size;
-          return;
-        }
-        this.act(card, m.picks ? m.picks[n] : () => m.step(q.question, o.label), btn);
-      });
       opts.append(btn);
       if (o.preview) opts.append(h("pre", { class: "preview" }, o.preview));
     });
     card.append(opts);
-    const own = m.other ? this.writeField(card, "Your answer", "Send answer",
-                                          (text) => (m.picks ? m.other(text) : m.step(q.question, text))) : null;
-    const actions = h("div", { class: "card-actions" });
-    if (multi) {
-      doneBtn = h("button", { class: "cta primary", type: "button", disabled: true,
-                              onclick: () => this.act(card, () => m.step(q.question, [...picked].join(", ")), doneBtn) }, "Done");
-      actions.append(doneBtn);
+    if (m.other) {
+      const own = this.writeField(card, "Your answer", "Send answer", (text) => m.other(text));
+      const actions = h("div", { class: "card-actions" },
+        h("button", { class: "cta", type: "button", onclick: () => { actions.hidden = true; own.open(); } }, "Something else…"));
+      card.append(actions, own.box);
     }
-    if (own) actions.append(h("button", { class: "cta", type: "button", onclick: () => { actions.hidden = true; own.open(); } }, "Something else…"));
-    if (actions.children.length) card.append(actions);
-    if (own) card.append(own.box);
     return card;
   }
 
   // A permission: what Claude wants to do in words, the exact command (or
-  // the diff) under it, and Allow / Always allow / Don't allow.
+  // the diff) under it, and Allow / Always allow … (each way Claude
+  // suggests, in words) / Don't allow (and why).
   permissionCard(m) {
     const card = this.cardShell("permission", m.title, m.text || null);
+    if (m.count > 1) card.querySelector(".card-head").append(h("span", { class: "count" }, `${m.at + 1} of ${m.count}`));
     if (m.diff && m.diff.length) card.append(diffView(m.diff));
     if (m.details && !(m.diff && m.diff.length)) {
-      const more = h("details", { class: "card-details" }, h("summary", {}, "Details"), h("pre", {}, m.details));
-      if (m.tool === "Bash" && !m.text) more.open = true;
+      const more = h("details", { class: "card-details" }, h("summary", {}, m.tool === "Bash" ? "The command" : "Details"), h("pre", {}, m.details));
+      if (m.tool === "Bash" && (!m.text || m.details.length <= 160)) more.open = true;
       card.append(more);
     }
     if (m.reason) card.append(h("div", { class: "card-note" }, m.reason));
@@ -1317,36 +1731,51 @@ class Chat {
     const actions = h("div", { class: "card-actions stack" });
     const allow = h("button", { class: "cta primary opt", type: "button", onclick: () => this.act(card, m.allow, allow) }, "Allow");
     actions.append(allow);
-    if (m.always && m.alwaysAllow) {
-      const always = h("button", { class: "cta opt", type: "button", onclick: () => this.act(card, m.alwaysAllow, always) }, m.always);
-      actions.append(always);
+    for (const a of m.always || []) {
+      const b = h("button", { class: "cta opt always", type: "button", onclick: () => this.act(card, a.pick, b) }, a.label);
+      actions.append(b);
     }
     actions.append(h("button", { class: "cta opt", type: "button", onclick: () => { actions.hidden = true; no.open(); } }, "Don't allow…"));
     card.append(actions, no.box);
     return card;
   }
 
-  // A plan to approve: the plan as a document, and what to do with it.
+  // A plan to approve: the plan as a document, Approve and start (in the
+  // mode Claude planned from, named), approving in another mode, and Keep
+  // planning with what to change.
   planAsk(m) {
     const card = this.cardShell("plan", "Claude's plan is ready",
                                 m.plan ? "Read it, then say whether Claude should start." : "Say whether Claude should start on it.");
-    if (m.plan) card.append(h("div", { class: "plan-doc", html: md(m.plan) }));
-    const keep = this.writeField(card, "What should change?", "Keep planning", (what) => m.keep(what));
+    if (m.plan) {
+      const doc = h("div", { class: "plan-doc", html: md(m.plan) });
+      const big = h("button", { class: "text-btn plan-grow", type: "button", "aria-expanded": "false", onclick: () => {
+        const open = card.classList.toggle("tall");
+        big.setAttribute("aria-expanded", String(open));
+        big.textContent = open ? "Show less" : "Read it bigger";
+      } }, "Read it bigger");
+      card.append(doc, big);
+      requestAnimationFrame(() => { if (doc.scrollHeight <= doc.clientHeight + 4) big.remove(); });
+    }
+    const keep = this.writeField(card, "What should change? (optional)", "Keep planning", (what) => m.keep(what), { empty: true });
     keep.box.querySelector(".cta").classList.remove("primary");
     const actions = h("div", { class: "card-actions stack" });
+    const mode = (k) => MODE_WORDS[k] || { label: k, about: "" };
     if (m.approve) {
-      const b = h("button", { class: "cta primary opt", type: "button", onclick: () => this.act(card, m.approve, b) }, "Approve and start");
+      const b = h("button", { class: "cta primary opt approve", type: "button", onclick: () => this.act(card, m.approve, b) },
+        h("span", { class: "big" }, "Approve and start"), m.back ? h("small", {}, `${mode(m.back).label}: ${mode(m.back).about}`) : null);
       actions.append(b);
     }
-    if (m.approveEdits) {
-      const b = h("button", { class: "cta opt", type: "button", onclick: () => this.act(card, m.approveEdits, b) },
-                  "Approve, and make the edits without asking");
-      actions.append(b);
+    // The other modes, a tap away (the first way is the one for most).
+    const other = (m.modes || []).length && m.approve
+      ? h("details", { class: "card-details approve-more" }, h("summary", {}, "Approve another way")) : null;
+    for (const o of m.modes || []) {
+      const words = { acceptEdits: "Approve, and accept edits without asking", auto: "Approve, in Auto mode",
+                      default: "Approve, and ask before each change", bypassPermissions: "Approve, and don't ask about anything" }[o.mode];
+      const b = h("button", { class: "cta opt approve", type: "button", onclick: () => this.act(card, o.pick, b) },
+        h("span", { class: "big" }, words || o.label), o.mode ? h("small", {}, mode(o.mode).about) : o.detail ? h("small", {}, o.detail) : null);
+      (other || actions).append(b);
     }
-    for (const o of m.others || []) {
-      const b = h("button", { class: "cta opt", type: "button", onclick: () => this.act(card, o.pick, b) }, o.label);
-      actions.append(b);
-    }
+    if (other) actions.append(other);
     actions.append(h("button", { class: "cta opt", type: "button", onclick: () => { actions.hidden = true; keep.open(); } }, "Keep planning…"));
     card.append(actions, keep.box);
     return card;

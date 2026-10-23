@@ -66,8 +66,8 @@
 .chat .msg.claude a, .chat .plan-doc a { color: var(--link); text-underline-offset: 3px; }
 .chat .msg.claude blockquote { margin-left: 0; border-left: 2px solid var(--border); padding-left: 12px; color: var(--text-muted); }
 .chat .msg.claude hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
-.chat .msg.claude.streaming > :last-child::after {
-  content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em;
+.chat .msg.claude.streaming .caret {
+  display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em;
   background: var(--accent); animation: caret 1s steps(1) infinite;
 }
 @keyframes caret { 50% { opacity: 0; } }
@@ -206,6 +206,7 @@
 .asked .a { margin-top: 2px; }
 .asked .a .you { color: var(--accent); font-weight: 700; }
 .asked .a.muted { color: var(--text-muted); }
+.asked .a .note { font-size: var(--caption); color: var(--text-muted); font-style: italic; }
 .planned .plan-doc { max-height: 180px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 .planned.open .plan-doc { max-height: none; -webkit-mask-image: none; mask-image: none; }
 .plan-more { min-height: 34px; color: var(--link); font-weight: 700; font-size: var(--caption); }
@@ -222,6 +223,10 @@
 .chat-tail { display: flex; flex-direction: column; gap: 14px; }
 .chat-tail:empty { display: none; }
 .working { display: flex; align-items: center; gap: 10px; padding: 0 9px; color: var(--text-muted); }
+.working .now { flex: 1; min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+                display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.working .took { flex: none; font-size: var(--caption); font-variant-numeric: tabular-nums; }
+.working .took:empty { display: none; }
 
 .to-latest {
   position: absolute; right: 14px; bottom: 10px;
@@ -303,6 +308,8 @@
   animation: rise 0.18s ease-out;
 }
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
+.card > * { flex-shrink: 0; }       /* the card scrolls; what's in it keeps its size */
+.card.plan > .plan-doc { flex-shrink: 1; min-height: 8em; }      /* but a plan scrolls in itself, its buttons in sight */
 .keyboard-up .card { max-height: 50vh; }
 .card-head { display: flex; align-items: center; gap: 8px; color: var(--accent); font-size: var(--caption); font-weight: 700;
              letter-spacing: 0.06em; text-transform: uppercase; }
@@ -344,6 +351,60 @@
 .opt .box .ic { width: 14px; height: 14px; }
 .opt.multi.on .box { background: var(--primary-bg); border-color: var(--primary-bg); color: var(--primary-text); }
 .opts .preview { margin: -2px 0 4px; max-height: 24vh; overflow: auto; font-size: var(--caption); }
+
+/* Several questions: a tab for each (ticked once answered), then Send. */
+.q-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: -2px 0 0; }
+.q-tabs::-webkit-scrollbar { display: none; }
+.q-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px;
+         font-size: var(--caption); font-weight: 700; color: var(--text-muted);
+         border: 1px solid var(--border); border-radius: var(--radius-control); background: none; }
+.q-tab .ic { width: 14px; height: 14px; color: var(--success); }
+.q-tab .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--text-muted); }
+.q-tab.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
+.q-tab.on .dot { border-color: currentColor; background: currentColor; }
+.q-tab:disabled { opacity: 0.45; }
+
+/* An option's preview (a mockup, some code): the one you're on, under the options. */
+.card pre.preview { margin: 0; min-height: 3.5em; max-height: 30vh; overflow: auto; padding: 10px 12px;
+                    font-size: var(--caption); line-height: 1.4; white-space: pre;
+                    border: 1px solid var(--code-border); border-radius: var(--radius-item); background: var(--code-bg); }
+.card pre.preview .muted { font-family: var(--font-ui); color: var(--text-muted); white-space: normal; }
+.opts.with-preview .opt.on { border-color: var(--accent); }
+.preview-pair { display: flex; flex-direction: column; gap: 8px; }
+.card.question { container-type: inline-size; }
+@container (min-width: 560px) {
+  .preview-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: start; gap: 10px; }
+  .preview-pair pre.preview { max-height: 40vh; }
+}
+.card .field.note { min-height: 44px; }
+
+/* Your answers, before they go. */
+.review { display: flex; flex-direction: column; gap: 6px; }
+.review-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 12px; text-align: left;
+              border: 1px solid var(--control-border); border-radius: var(--radius-item); background: var(--control-bg); }
+.review-row:hover { background: var(--control-hover); }
+.review-row .q { font-size: var(--caption); color: var(--text-muted); }
+.review-row .a { font-weight: 700; overflow-wrap: anywhere; }
+.review-row .note { font-size: var(--caption); color: var(--text-muted); font-style: italic; overflow-wrap: anywhere; }
+
+/* A permission's "Always allow …", in words: as long as it needs. */
+.cta.opt.always { text-align: left; font-weight: 600; line-height: 1.35; }
+
+/* A plan's ways to approve: what each means under it. */
+.cta.opt.approve { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.cta.opt.approve small { font-weight: 400; font-size: var(--caption); color: var(--text-muted); line-height: 1.4; }
+.cta.primary.approve small { color: inherit; opacity: 0.85; }
+.plan-grow { align-self: flex-start; margin-top: -4px; }
+.approve-more { display: flex; flex-direction: column; }
+.approve-more summary { padding: 4px 2px; }
+.approve-more[open] { gap: 8px; }
+.approve-more > .cta + .cta { margin-top: 8px; }
+.card.plan.tall { max-height: calc(var(--vvh, 100vh) - 120px); }
+.card.plan.tall > .plan-doc { max-height: none; flex-shrink: 0; }
+
+/* The card a notification was about, called up. */
+.card.called { animation: called 0.9s ease-out; }
+@keyframes called { 30% { border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--focus-ring); } }
 
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .card-actions.stack { flex-direction: column; align-items: stretch; }

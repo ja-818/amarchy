@@ -488,11 +488,22 @@ commands"): tap it for each step, and a step for what's behind it (the
 command and its output, an edit's changes in red and green). Claude's
 checklist shows as one, ticked off as it goes. At the bottom, Claude's
 question, a permission ("Claude wants to run a command", with **Allow**,
-**Always allow …** and **Don't allow…**, where you can say why) or a plan to
-approve come up as a card with buttons, and stay in the conversation once
-answered; anything else Claude asks shows with its choices as they are. While
-Claude works, a line under the conversation says what it's doing, and the
-box's Send turns into **Stop**. On a computer, Enter sends (Shift+Enter for a
+each way to **always allow** it in words, e.g. "Always allow commands
+starting with “npm test” in this project", and **Don't allow…**, where you
+can say why) or a plan to approve come up as a card with buttons, and stay
+in the conversation once answered; anything else Claude asks shows with its
+choices as they are. Several questions go one by one, with a tab for each and
+**Back**, then your answers to look over and send together; an option with a
+preview (a mockup, some code) shows it, and you can add a note to your
+choice. A plan reads as a document, with **Approve and start** (in the mode
+Claude planned from, named), **Approve another way** (accept edits without
+asking, ask before each change, Auto) and **Keep planning…** with what to
+change. A notification about a card says what's asked ("Asks: Which theme
+should be the default?", "Wants to run a command: Install the packages") and
+opens the session on that card. While Claude works, its words come in as it
+writes them, a line under the conversation says what it's doing ("Running
+the tests…", and how long it's been at it), and the box's Send turns into
+**Stop**. On a computer, Enter sends (Shift+Enter for a
 new line). The mic button by the box dictates
 (see [Dictation](#dictation)): hold it while you speak, or tap it and tap
 again when you're done, and the words come into the box as you talk, to edit

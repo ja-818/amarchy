@@ -1162,9 +1162,6 @@ function splitDiff(f) {
 // ---- the Details tab: where the session works, how its Claude runs, and
 // what runs in the background
 
-const MODE_WORDS = { default: "Ask before changes", acceptEdits: "Accept edits", plan: "Plan first", auto: "Auto",
-                     dontAsk: "Don't ask", bypassPermissions: "Don't ask (bypass permissions)" };
-
 // "claude-opus-5-5[1m]": "Opus 5.5 (1M context)".
 function modelWords(id) {
   const m = String(id || "").match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i);
@@ -1250,7 +1247,7 @@ class DeskDetails {
       // C2's model and mode pills go here too: data-hook="model-mode".
       h("div", { class: "kv-hook", "data-hook": "model-mode" },
         item("Model", d.model ? modelWords(d.model) : "As Claude Code's default"),
-        item("Mode", d.mode ? MODE_WORDS[d.mode] || d.mode : null)),
+        item("Mode", d.mode ? (MODE_WORDS[d.mode] || { label: d.mode }).label : null)),
       item("State", statusWords(s)),
     ];
     if (chat) {

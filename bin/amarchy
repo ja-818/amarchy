@@ -3206,6 +3206,13 @@ def cmd_hook(sid, state):
     clear_waking(sid)       # it's up
     if asleep_since(sid) is not None and state != "idle":
         clear_asleep(sid)   # it's running after all (woken some other way)
+    # On the chat engine, a tool starting while another one's request waits
+    # (several at once) is still Claude waiting on you: the broker says when
+    # it isn't.
+    if state == "working" and engine(s) == "chat":
+        live = agent_live(sid)
+        if live.get("pending") and live.get("state") not in ("exited", None):
+            return
     set_status(sid, state)
 
 
@@ -5905,6 +5912,11 @@ def result_view(r, s):
         out["diff"] = shown
     if isinstance(t.get("answers"), dict):
         out["answers"] = {str(k)[:2000]: str(v)[:2000] for k, v in t["answers"].items()}
+    if isinstance(t.get("annotations"), dict):      # your notes with them
+        notes = {str(k)[:2000]: str(v.get("notes"))[:2000] for k, v in t["annotations"].items()
+                 if isinstance(v, dict) and isinstance(v.get("notes"), str) and v["notes"].strip()}
+        if notes:
+            out["notes"] = notes
     return out
 
 
@@ -6367,6 +6379,57 @@ def chat_tool_ask(p):
             given.get("command") or given.get("url") or given.get("query") or (str(path) if path else None),
             p.get("reason")]
     return head, [str(x) for x in rest if x]
+
+
+def ask_words(p, root=None):
+    """What one of Claude's requests (live["pending"]) asks, as a
+    notification says it: "Asks: Which theme should be the default?",
+    "Wants to run a command: Install the packages", "Has a plan for you"."""
+    tool, given = p.get("tool") or "", p.get("input") or {}
+
+    def short(text, n=160):
+        t = " ".join(str(text or "").split())
+        return t if len(t) <= n else t[:n - 1] + "…"
+
+    def file(path):
+        path = str(path or "")
+        if root and path.startswith(root.rstrip("/") + "/"):
+            path = path[len(root.rstrip("/")) + 1:]
+        return path or "a file"
+    if tool == "AskUserQuestion":
+        questions = [q for q in given.get("questions") or [] if isinstance(q, dict)]
+        left = [q for q in questions if q.get("question") not in (p.get("answered") or {})] or questions
+        more = len(left) - 1
+        return f"Asks: {short(left[0].get('question') if left else '')}" + \
+            (f" (and {more} more question{'s' if more > 1 else ''})" if more > 0 else "")
+    if tool == "ExitPlanMode":
+        plan = str(given.get("plan") or "")
+        head = next((l.lstrip("# ").strip() for l in plan.splitlines() if l.startswith("#")), "")
+        head = re.sub(r"^plan:\s*", "", head, flags=re.I)
+        return f"Has a plan for you to approve: {short(head, 120)}" if head else "Has a plan for you to approve"
+    mcp = re.fullmatch(r"mcp__(.+?)__(.+)", tool)
+    if mcp:
+        server = re.sub(r"[_-]+", " ", re.sub(r"^claude_ai_", "", mcp.group(1))).strip()
+        return f"Wants to use {server}: {re.sub(r'[_-]+', ' ', mcp.group(2)).lower()}"
+    if tool == "Bash":
+        return f"Wants to run a command: {short(given.get('description') or given.get('command'))}"
+    if tool in ("Edit", "MultiEdit", "NotebookEdit"):
+        return f"Wants to edit {file(given.get('file_path') or given.get('notebook_path'))}"
+    if tool == "Write":
+        return f"Wants to write {file(given.get('file_path'))}"
+    if tool == "Read":
+        return f"Wants to read {file(given.get('file_path'))}"
+    if tool == "WebFetch":
+        host = urllib.parse.urlparse(str(given.get("url") or "")).hostname or "the web"
+        return f"Wants to read a page on {host.removeprefix('www.')}"
+    if tool == "WebSearch":
+        return f"Wants to search the web for “{short(given.get('query'), 100)}”"
+    if tool in ("Agent", "Task"):
+        return f"Wants to ask a helper: {short(given.get('description'))}"
+    if tool == "SendMessage":
+        return f"Wants to message session {given.get('to')}" if given.get("to") else "Wants to message another session"
+    words = re.sub(r"([a-z])([A-Z])", r"\1 \2", tool).lower() or "a tool"
+    return f"Wants to use {words}" + (f": {short(p.get('description'))}" if p.get("description") not in (None, "", tool) else "")
 
 
 def chat_dialog(s, live=None):
@@ -7733,6 +7796,7 @@ class AppState:
     def __init__(self):
         self.changed = threading.Condition()
         self.view, self.version, self.statuses = {}, 0, None
+        self.asked = {}         # session id -> the request it last told the phones about (chat engine)
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
@@ -7804,9 +7868,20 @@ def app_watch(st):
         time.sleep(1)
 
 
+def app_asking(s):
+    """The requests a chat-engine session waits on (live["pending"]), the
+    first one asked first, or []."""
+    if s.get("engine") != "chat":
+        return []
+    live = agent_live(s["id"])
+    return (live.get("pending") or []) if live.get("state") not in ("exited", None) else []
+
+
 def app_moments(st, ss):
     """Notify about each session that went on to need you or finished, as the
-    hook marks it (cmd_hook): unless it's the one on your phone's screen."""
+    hook marks it (cmd_hook): unless it's the one on your phone's screen. A
+    chat-engine session that asks something new while it waits already (the
+    next of two permissions, a question after a plan) tells you that too."""
     now = {s["id"]: s["status"] for s in ss}
     was, st.statuses = st.statuses, now
     if was is None:
@@ -7814,7 +7889,16 @@ def app_moments(st, ss):
     waiting = sum(1 for s in ss if s["status"] == "waiting")
     for s in ss:
         state, prev = s["status"], was.get(s["id"])
-        kind = alert_kind(s, state, prev) if state != prev else None
+        pending = app_asking(s) if state == "waiting" else []
+        asking = pending[0] if pending else None
+        rid = asking.get("request_id") if asking else None
+        told = st.asked.get(s["id"])
+        if state != "waiting":
+            st.asked.pop(s["id"], None)
+        elif rid:
+            st.asked[s["id"]] = rid
+        kind = alert_kind(s, state, prev) if state != prev else \
+            alert_kind(s, "waiting", "working") if rid and told and rid != told else None
         if not kind:
             continue
         if time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
@@ -7822,8 +7906,10 @@ def app_moments(st, ss):
         where = app_where(s)
         body = "Needs you" if state == "waiting" else "Done"
         asks = [a for a in s.get("secret_asks") or [] if a.get("waiting")]
-        if state == "waiting" and asks:
-            body += f": Claude needs your {asks[0]['name']}" + (f" · {asks[0]['why']}" if asks[0].get("why") else "")
+        if state == "waiting" and asks:         # a secret Claude asks for comes first, as its card does
+            body = f"Needs your {asks[0]['name']}" + (f" · {asks[0]['why']}" if asks[0].get("why") else "")
+        elif asking:
+            body = ask_words(asking, s.get("path")) + (f" (and {len(pending) - 1} more)" if len(pending) > 1 else "")
         elif state == "waiting":
             time.sleep(0.3)         # the question is on screen by now
             dialog = app_screen(s).get("dialog")
@@ -7840,6 +7926,8 @@ def app_moments(st, ss):
         else:
             payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
                        "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
+        if state == "waiting":
+            payload["ask"] = s["id"]        # tapped, it opens on the card (sw.js, Chat)
         threading.Thread(target=push_all, args=(payload,), daemon=True).start()
 
 
@@ -8898,7 +8986,8 @@ def app_handler(st, users, address):
                 if "question" in data:
                     request.update(question=data.get("question"), answer=data.get("answer"))
                 else:
-                    request.update({k: data[k] for k in ("choice", "message", "answers", "mode") if k in data})
+                    request.update({k: data[k] for k in ("choice", "message", "answers", "mode", "suggestions",
+                                                         "annotations") if k in data})
                 why = chat_answer(s, request)
                 return self.error(*why) if why else self.send(200, {"ok": True})
             if what == "interrupt":
@@ -10110,13 +10199,17 @@ def message_images(content):
     return sum(1 for b in content if isinstance(b, dict) and b.get("type") == "image") if isinstance(content, list) else 0
 
 
-def agent_response(p, choice, message=None, answers=None, mode=None):
+def agent_response(p, choice, message=None, answers=None, mode=None, suggestions=None, annotations=None):
     """The answer to one of Claude's requests (live["pending"]), from what
-    was chosen: allow, always (allow, and the rule Claude suggests so it
-    doesn't ask again: only that one, the other suggestions reach further),
-    or deny (with why, or what to change in a plan). answers: AskUserQuestion's,
-    {question: answer}. mode: the permission mode to go on in, as a plan is
-    approved ("acceptEdits"). A str when it doesn't add up."""
+    was chosen: allow, always (allow, and the rules Claude suggests so it
+    doesn't ask again: by default only those, addRules, as the other
+    suggestions reach further; suggestions: which of them, by their index
+    in the request's, e.g. its setMode "accept edits for the session"), or
+    deny (with why, or what to change in a plan). answers: AskUserQuestion's,
+    {question: answer}; annotations: {question: {preview, notes}}, the
+    preview of the option picked and your note on it. mode: the permission
+    mode to go on in, as a plan is approved ("acceptEdits"). A str when it
+    doesn't add up."""
     if choice == "deny":
         why = message.strip() if isinstance(message, str) and message.strip() else ""
         no = "The user doesn't want to proceed with this tool use."
@@ -10131,7 +10224,27 @@ def agent_response(p, choice, message=None, answers=None, mode=None):
         if not all(isinstance(answers.get(q), str) and answers[q].strip() for q in asked):
             return "an answer to each question"
         response["updatedInput"] = {**given, "answers": {q: answers[q] for q in asked}}
-    rules = [x for x in p.get("suggestions") or [] if x.get("type") == "addRules"] if choice == "always" else []
+        if annotations is not None:
+            notes = question_annotations(given, annotations)
+            if isinstance(notes, str):
+                return notes
+            if notes:
+                response["updatedInput"]["annotations"] = notes
+    offered = p.get("suggestions") or []
+    if choice != "always":
+        rules = []
+    elif suggestions is None:
+        # The rules; for a request with none (an edit), what the TUI's second
+        # choice does: accept edits for the session.
+        rules = [x for x in offered if x.get("type") == "addRules"] or \
+            [x for x in offered if x.get("type") == "setMode" and x.get("destination") == "session"]
+    elif isinstance(suggestions, list) and suggestions and all(
+            isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(offered) for i in suggestions):
+        rules = [offered[i] for i in dict.fromkeys(suggestions)]
+    else:
+        return "suggestions: the indexes of the suggestions to take"
+    if choice == "always" and not rules:
+        return "Claude suggested no rule to always allow this by"
     if mode is not None:
         if mode not in AGENT_MODES:
             return f"mode is one of {', '.join(AGENT_MODES)}"
@@ -10139,6 +10252,30 @@ def agent_response(p, choice, message=None, answers=None, mode=None):
     if rules:
         response["updatedPermissions"] = rules
     return response
+
+
+def question_annotations(given, annotations):
+    """AskUserQuestion's annotations as Claude takes them ({question:
+    {preview, notes}}, a preview only one of that question's options has),
+    or why not (a str)."""
+    if not isinstance(annotations, dict):
+        return "annotations: {question: {preview, notes}}"
+    questions = {q.get("question"): q for q in given.get("questions") or [] if isinstance(q, dict)}
+    out = {}
+    for question, a in annotations.items():
+        if question not in questions or not isinstance(a, dict):
+            return "annotations: {question: {preview, notes}}, for questions Claude asked"
+        one = {}
+        preview, notes = a.get("preview"), a.get("notes")
+        if isinstance(preview, str) and preview:
+            if preview not in [o.get("preview") for o in questions[question].get("options") or [] if isinstance(o, dict)]:
+                return "a preview that isn't one of the options'"
+            one["preview"] = preview
+        if isinstance(notes, str) and notes.strip():
+            one["notes"] = notes.strip()[:4000]
+        if one:
+            out[question] = one
+    return out
 
 
 class Agent:
@@ -10156,7 +10293,9 @@ class Agent:
                      "pending": [], "partial": "", "thinking": False, "activity": None, "tasks": [],
                      "queue": [], "attachments": 0, "rate_limits": {}, "turns": 0, "cost_usd": 0.0,
                      "last_result": None, "account": None, "version": None, "socket": str(self.sock_path),
-                     "title": None, "error": None}
+                     "title": None, "error": None,
+                     "working_since": None,     # when the turn under way started (a question's wait included)
+                     "before_plan": None}       # the mode plan mode came from: approving a plan goes back to it
         self.version = self.written = 0     # of live, as changed and as written to live.json
         self.queue = []             # our messages waiting for Claude to be free (live["queue"] says what they are)
         self.attached = self.load_attached()    # images for the next message (attach)
@@ -10219,6 +10358,10 @@ class Agent:
             state = "waiting" if self.live["pending"] else "working" if self.busy else "idle"
             if state == self.live["state"]:
                 return
+            if state == "idle":
+                self.live["working_since"] = None
+            elif not self.live["working_since"]:
+                self.live["working_since"] = time.time()
             self.live["state"] = state
         if state == "waiting":
             agent_status(self.sid, "waiting")
@@ -10373,6 +10516,16 @@ class Agent:
     def remember(self, **chosen):
         agent_remember(self.sid, **chosen)
 
+    def set_mode(self, mode):
+        """The permission mode Claude is in now (under the lock), and the one
+        it went into plan mode from: approving a plan goes back to that one."""
+        was = self.live["permission_mode"]
+        if mode == "plan" and was and was != "plan":
+            self.live["before_plan"] = was
+        elif mode and mode != "plan":
+            self.live["before_plan"] = None
+        self.live["permission_mode"] = mode
+
     def restore(self):
         try:
             chosen = json.loads((self.dir / "chosen.json").read_text())
@@ -10380,7 +10533,8 @@ class Agent:
             return
         if chosen.get("mode") in AGENT_MODES and chosen["mode"] != self.live["permission_mode"]:
             if self.control({"subtype": "set_permission_mode", "mode": chosen["mode"]}).get("subtype") == "success":
-                self.live["permission_mode"] = chosen["mode"]
+                with self.lock:
+                    self.set_mode(chosen["mode"])
         if isinstance(chosen.get("model"), str):
             res = self.control({"subtype": "set_model", "model": chosen["model"]})
             if res.get("subtype") == "success":
@@ -10438,7 +10592,8 @@ class Agent:
         elif kind == "system" and sub == "init":
             with self.lock:
                 live.update(conversation=o.get("session_id"), model=o.get("model"),
-                            permission_mode=o.get("permissionMode"), version=o.get("claude_code_version"))
+                            version=o.get("claude_code_version"))
+                self.set_mode(o.get("permissionMode"))
             set_conversation_id(self.sid, o.get("session_id") or "")
             self.changed()
         elif kind == "system" and sub == "status":
@@ -10446,7 +10601,7 @@ class Agent:
                 self.remember(mode=o["permissionMode"])
             with self.lock:
                 if "permissionMode" in o:
-                    live["permission_mode"] = o["permissionMode"]
+                    self.set_mode(o["permissionMode"])
                 if o.get("status") == "requesting":
                     self.busy = True
             self.set_state()
@@ -10499,6 +10654,7 @@ class Agent:
             self.live["pending"].append(pending)
         self.draw_request(pending)
         self.set_state()
+        agent_status(self.sid, "waiting")      # again: a hook may have said working since the first
         self.changed(True)
 
     def draw_request(self, p):
@@ -10553,7 +10709,15 @@ class Agent:
 
     def on_assistant(self, o):
         if o.get("parent_tool_use_id"):
-            return      # a subagent's: its Agent call says what it's about
+            # A helper's (subagent's): the step it's on, under its Agent call's.
+            steps = [b for b in o["message"].get("content") or [] if b.get("type") == "tool_use"]
+            with self.lock:
+                act = self.live["activity"]
+                if steps and act and act.get("id") == o["parent_tool_use_id"]:
+                    act["step"] = {"tool": steps[-1].get("name"), "input": steps[-1].get("input")}
+            if steps:
+                self.changed()
+            return
         for block in o["message"].get("content") or []:
             if block.get("type") == "text":
                 with self.lock:
@@ -10781,7 +10945,8 @@ class Agent:
                 return self.answer_question(p["request_id"], r.get("question"), r.get("answer"))
             response = r.get("response")
             if response is None:
-                response = agent_response(p, r.get("choice"), r.get("message"), r.get("answers"), r.get("mode"))
+                response = agent_response(p, r.get("choice"), r.get("message"), r.get("answers"), r.get("mode"),
+                                          r.get("suggestions"), r.get("annotations"))
                 if isinstance(response, str):
                     return {"ok": False, "error": response}
             if not isinstance(response, dict) or response.get("behavior") not in ("allow", "deny"):
@@ -10806,7 +10971,7 @@ class Agent:
             ok = res.get("subtype") == "success"
             if ok and request["subtype"] == "set_permission_mode":
                 with self.lock:
-                    self.live["permission_mode"] = request.get("mode")
+                    self.set_mode(request.get("mode"))
                 self.remember(mode=request.get("mode"))
                 self.changed(True)
             if ok and request["subtype"] == "set_model":
@@ -10865,9 +11030,12 @@ class Agent:
         elif word in ("y", "yes", "a", "always", "n", "no"):
             choice = {"y": "allow", "a": "always", "n": "deny"}[word[0]]
             plan = p["tool"] == "ExitPlanMode"
-            self.answer(p["request_id"], agent_response(
-                p, "allow" if plan and choice == "always" else choice, rest,
-                mode="acceptEdits" if plan and choice == "always" else None))
+            response = agent_response(p, "allow" if plan and choice == "always" else choice, rest,
+                                      mode="acceptEdits" if plan and choice == "always" else None)
+            if isinstance(response, str):
+                self.out(f"  {response}", dim=True)
+            else:
+                self.answer(p["request_id"], response)
         else:
             self.out("  y, a or n (with why, if you like)", dim=True)
 

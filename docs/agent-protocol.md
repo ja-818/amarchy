@@ -263,7 +263,9 @@ How it fits:
   `activity` (the tool under way), `tasks` (background), `queue` (our
   messages waiting for Claude to be free: `uuid`, `text`, `images` (how
   many), `at`), `attachments` (images waiting for the next message),
-  `rate_limits`, `model`, `permission_mode`, `title`, `conversation`, `turns`,
+  `rate_limits`, `model`, `permission_mode`, `before_plan` (the mode plan mode
+  came from: approving a plan goes back to it), `working_since` (when the turn
+  under way started), `title`, `conversation`, `turns`,
   `cost_usd`, `last_result`, `account`, `version`, `pid`, `claude_pid`,
   `socket`. Beside it: `agent.json` (what `initialize` said: commands, models,
   agents, account), `stream.jsonl` (Claude's raw output and what we sent,
@@ -275,15 +277,21 @@ How it fits:
   is free, today's rule), `next`, `now`, `later` (straight to Claude with that
   priority), `uuid`); `unqueue` (`uuid`); `attach` (`images`: `[{type,
   data}]`, for the next message, whoever sends it); `answer` (`request_id`,
-  then `choice`: `allow|always|deny` with `message`, `answers`, `mode`, or
+  then `choice`: `allow|always|deny` with `message`, `answers`,
+  `annotations`, `mode`, `suggestions`, or
   `question` + `answer` for one of several questions, or `response`: the
   control response as is); `interrupt` (`everything`: drop the queue too);
   `control` (`request`: any control request); `stop`; `watch` (the live
   state, then every event as it comes, for as long as the connection stays
   open). An answer to a request that's gone says `"gone": true`.
-- **Answers** (`agent_response`): `always` adds only the `addRules`
-  suggestion (the others reach further: a whole folder, a mode for the
-  session); `mode` on a plan's approval is a `setMode` permission for the
+- **Answers** (`agent_response`): `always` takes the suggestions named by
+  their indexes in the request's (`suggestions: [0, 2]`), each a choice the
+  app shows in words; without them, the `addRules` ones (the others reach
+  further: a whole folder, a mode for the session), or for a request with
+  none (an edit) its `setMode` for the session, as the TUI's second choice;
+  `annotations` go with AskUserQuestion's answers (`{question: {preview,
+  notes}}`: the preview of the option picked, checked against the options,
+  and your note, which Claude gets with the answer, checked live); `mode` on a plan's approval is a `setMode` permission for the
   session (checked: Claude goes on in `acceptEdits`); `deny` with words sends
   them as "The user doesn't want to proceed with this tool use. The user
   said: ..." (bare, Claude took them for an error message). AskUserQuestion is
@@ -295,8 +303,13 @@ How it fits:
   question waiting (`y`, `a` for always (for a plan: and accept edits), `n
   why`, an option's number). Pastes come bracketed, so a paste arrives as one
   message.
+- **Activity**: `activity` is the tool under way (`tool`, `input`, `id`,
+  `since`); while it's a helper (Agent), `step` is the helper's own tool call
+  under way.
 - **Status**: the hooks set working and idle (and the done mark); the broker
-  sets waiting while a request is pending (no Notification hook fires under
+  sets waiting while a request is pending (on each new one, and a working
+  hook doesn't override it while one waits: several tool calls at once each
+  run PreToolUse before asking) (no Notification hook fires under
   `-p`), working again once it's answered, and idle after a turn that ended
   with no Stop hook: one you stopped (no done mark then, as you were there) or
   one that failed, and when Claude exits.
@@ -329,7 +342,7 @@ phase B2) uses the live state directly.
 | `GET /api/session/<id>/stream` | as before (`session`, `conversation`, `screen`), plus `live`: the live state (without pids and the socket) on open and on every change, chat engine only (`null` once the session goes back to the terminal engine) |
 | the `session` event, `/api/state` | each session has `engine`: `terminal` or `chat` |
 | the `screen` event's `dialog` | for a chat session, built from `pending[0]` (`chat_dialog`) in the scraped dialog's shape (`id`, `question`, `options` with `label`, `detail`, `keys`), plus `request` and each option's `answer`. A multiple-choice question is answered an option at a time (each pick toggles it, then Done) |
-| `POST .../answer` | `{request_id, choice: allow\|always\|deny, message?, answers?, mode?}` or `{request_id, question, answer}`; `{ok}` or `{error}` (409 when the request is gone) |
+| `POST .../answer` | `{request_id, choice: allow\|always\|deny, message?, answers?, annotations?, mode?, suggestions?}` or `{request_id, question, answer}`; `{ok}` or `{error}` (409 when the request is gone) |
 | `POST .../interrupt` | Stop: `{everything?}` drops the queued messages too |
 | `POST .../model`, `.../mode` | `{model}`, `{mode}` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`); kept for the next wake |
 | `POST .../unqueue` | `{uuid}`: a queued message taken back |
@@ -340,8 +353,39 @@ phase B2) uses the live state directly.
 | `GET .../agent` | `agent.json` (commands, models, account) and the live state, for the `/` menu and the pickers |
 | `GET .../voice` | 409 for a chat session: Claude's voice mode is the TUI's (the other dictations work) |
 
-Notifications say what a chat session asks ("Needs you: Claude wants to run a
-command · ..."), from the same dialog.
+Notifications say what a chat session asks, from `pending` (`ask_words`):
+"Asks: Which theme should be the default? (and 2 more questions)", "Wants to
+run a command: Install the packages", "Has a plan for you to approve: …",
+with "(and 1 more)" when several wait, and a new one when Claude asks
+something new while it's still waiting (the next of two permissions). Tapped,
+the app opens that session on its card: the payload's `ask` reaches the page
+(sw.js → app.js) as the window event `amarchy-ask` (`detail.id`), and the
+session's Chat goes back to the conversation and focuses the card (desk.js
+goes to the session first). Opening a session closes its notifications.
+
+## The cards (chat.js, phase C1)
+
+From `live.pending` (the first; "1 of 2" when several wait):
+
+- **Questions**: one at a time with a tab for each and Back, then your
+  answers to look over and send together (`answers`, `annotations`). An
+  option's preview shows for the option you're on (beside the options on a
+  wide screen), with a note field; multiple choice as boxes; "Something
+  else…" for your own words. What the pane answered already is filled in.
+- **Permissions**: what Claude wants in words, the command or the diff, Allow,
+  one button per way to always allow it from Claude's suggestions in words
+  ("Always allow commands starting with “git log” in this project, and
+  reading files in /usr/share for this chat", "Allow all edits for this
+  chat"), and Don't allow with why.
+- **Plans**: the plan as a document (it scrolls inside the card, "Read it
+  bigger"), **Approve and start** naming the mode it goes back to, the other
+  modes under "Approve another way", Keep planning with what to change.
+- **Streaming**: Claude's words at an even pace with a caret, kept whole once
+  written until the transcript has them (no gap, no double).
+- **The activity line**: what it's doing in words ("Running the tests…", "A
+  helper is on it: … · reading app.js…", "Thinking…", "Starting Claude…"),
+  with how long the turn has taken after 10 s; none while a card asks or
+  words come in.
 
 ## Between sessions, for every session
 
@@ -366,9 +410,7 @@ the mode and model chosen before.
 ## Not yet (phase C and on)
 
 - The model and mode pickers, the `/` menu and images from the composer
-  (C2). The new chat (`app/chat.js`, B2) already draws the cards, the
-  streaming text, the activity line, Stop and the queue chip from the live
-  state and these routes.
+  (C2).
 - Drafts: the chat engine has no prompt box; a draft kept from a TUI
   session's sleep stays for the TUI, and the TUI's unsent prompt isn't
   carried over by a switch.

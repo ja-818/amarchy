@@ -4,7 +4,7 @@
 // error page), your assistant's picture too. Everything else always comes
 // from the server.
 
-const SHELL = "amarchy-shell-v8";
+const SHELL = "amarchy-shell-v9";
 const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/terminal.css", "/secrets.css", "/theme.css", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 self.addEventListener("install", (e) => {
@@ -61,7 +61,9 @@ self.addEventListener("push", (e) => {
     // Your assistant's picture on its own (a computer's browser shows it; iOS
     // always shows the app's icon).
     icon: d.icon || "/icon-192.png",
-    data: { url: d.url || "/" },
+    // ask: the session waits on a card (a question, a permission, a plan):
+    // tapped, the app opens on that card.
+    data: { url: d.url || "/", ask: d.ask || null },
   });
   const badge = typeof d.waiting === "number" && navigator.setAppBadge
     ? (d.waiting ? navigator.setAppBadge(d.waiting) : navigator.clearAppBadge()).catch(() => {})
@@ -72,11 +74,12 @@ self.addEventListener("push", (e) => {
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || "/";
+  const ask = (e.notification.data && e.notification.data.ask) || null;
   e.waitUntil((async () => {
     const open = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of open) {
       await c.focus();
-      c.postMessage({ go: url });
+      c.postMessage({ go: url, ask });
       return;
     }
     await self.clients.openWindow(url);
