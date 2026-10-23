@@ -7866,19 +7866,6 @@ class AppState:
         # the sleep timer (on_screen). What the last server knew of when stays.
         self.open, self.viewed, self.viewing_lock = {}, on_screen()[1], threading.Lock()
         self.save_viewing()
-        # Quiet the Mac while you dictate (see "a Mac's helper"): how many
-        # dictations are listening now, and the helpers told (id -> its name).
-        self.hush, self.hushers, self.hush_changed = 0, {}, threading.Condition()
-
-    def dictating(self, n):
-        """A dictation started listening (1) or stopped (-1): the Macs' helpers hear."""
-        with self.hush_changed:
-            self.hush = max(0, self.hush + n)
-            self.hush_changed.notify_all()
-
-    def hush_names(self):
-        with self.hush_changed:
-            return sorted(set(self.hushers.values()))
 
     def row(self, sid):
         return next((s for s in self.view.get("sessions", []) if s["id"] == sid), None)
@@ -7903,22 +7890,6 @@ class AppState:
             write_file(APP_VIEWING, json.dumps({"pid": os.getpid(), "open": sorted(self.open), "at": self.viewed}))
         except OSError as e:
             print(f"amarchy app: couldn't write {APP_VIEWING}: {e}", file=sys.stderr)
-
-
-# ---- a Mac's helper: quiet while you dictate
-#
-# A web page can't turn down another app's sound, so a Mac gets a helper of
-# its own (mac/hush-install.sh, served at /api/hush/mac.sh with this host's
-# address in it: Settings → Dictation → Quiet your Mac). It listens to
-# /api/hush/stream through tailscale serve, as you, and mutes the Mac's
-# speakers while a dictation listens, on any device, and turns them back on
-# after, or when it loses amarchy.
-
-HUSH_INSTALLER = Path(SELF).parent.parent / "mac" / "hush-install.sh"
-
-
-def hush_installer(url):
-    return HUSH_INSTALLER.read_text().replace("{{url}}", url)
 
 
 def app_watch(st):
@@ -7946,7 +7917,7 @@ def app_watch(st):
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
                     "new_model": new_model(), "models": known_models(), "share": share_state(),
-                    "engine_problem": protocol_problem(), "hushers": st.hush_names()}
+                    "engine_problem": protocol_problem()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -8312,11 +8283,8 @@ def app_handler(st, users, address):
                 self.ws_send({"interim": words})
 
             d = Dictation(st.transcriber, heard)
-            listening = False
             try:
                 self.ws_handshake()
-                st.dictating(1)
-                listening = True
                 self.connection.settimeout(MIC_QUIET)      # gone quiet: let go
                 self.ws_send({"state": "listening"})
                 started, ended = time.time(), False
@@ -8335,8 +8303,6 @@ def app_handler(st, users, address):
                         said += len(data)
                     elif op == 9:
                         self.ws_send(data, op=10)
-                st.dictating(-1)        # the microphone's let go: the Mac's sound comes back while it's written down
-                listening = False
                 if not ended and not said:
                     return
                 let_go = time.time()
@@ -8357,8 +8323,6 @@ def app_handler(st, users, address):
             except OSError:
                 pass
             finally:
-                if listening:
-                    st.dictating(-1)
                 d.drop()
                 dictate_log({"engine": "host", "device": device, "said_s": round(said / 32000, 1),
                              "wait_ms": int((time.time() - let_go) * 1000) if let_go else None,
@@ -8474,11 +8438,6 @@ def app_handler(st, users, address):
                 return
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
-            if path == "/api/hush/stream":      # a Mac's helper: whether you're dictating (see "a Mac's helper")
-                return self.hush_stream((args.get("name") or ["a Mac"])[0])
-            if path == "/api/hush/mac.sh":      # the helper's installer, with this address in it
-                return self.send(200, hush_installer(f"https://{self.headers.get('Host', '')}").encode(),
-                                 "text/plain; charset=utf-8")
             # The wide layout's side panel (desk.js, B3): what a session changed, and its details.
             # The composer's (phase C2): its / menu, models and mode; an image
             # in what you said.
@@ -8623,32 +8582,6 @@ def app_handler(st, users, address):
         def event(self, name, data):
             self.wfile.write(f"event: {name}\ndata: {mask_secrets(json.dumps(data))}\n\n".encode())
             self.wfile.flush()
-
-        def hush_stream(self, name):
-            """A Mac's helper: "hush" true while a dictation listens, false
-            when none does, and "still here" every KEEPALIVE seconds."""
-            name = re.sub(r"[^\w .'’-]", "", name)[:60] or "a Mac"
-            self.stream_start()
-            me, said = object(), None
-            with st.hush_changed:
-                st.hushers[me] = name
-            try:
-                while True:
-                    with st.hush_changed:
-                        if (st.hush > 0) == said:
-                            st.hush_changed.wait(KEEPALIVE)
-                        now = st.hush > 0
-                    if now != said:
-                        said = now
-                        self.event("hush", now)
-                    else:
-                        self.wfile.write(b": still here\n\n")
-                        self.wfile.flush()
-            except OSError:
-                pass
-            finally:
-                with st.hush_changed:
-                    st.hushers.pop(me, None)
 
         def list_stream(self):
             """The list, and again on every change."""
