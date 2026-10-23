@@ -53,10 +53,10 @@ both through amarchy on their own machine. Then:
   connected), the way an image the user pastes in the app reaches you. Use it when they ask you to look
   at what they copied: `wl-paste --list-types`, then
   `wl-paste --type image/png > /tmp/copied.png` and read that file.
-- They may be reading you on their phone (`amarchy app`): they read your reply
-  as a screen you draw with `show_screen` (its prompt says how), with your text
-  under it in a fold, and your questions (AskUserQuestion, permission prompts)
-  as buttons. Short option labels read best there.
+- They may be reading you on their phone (`amarchy app`): after each turn,
+  amarchy sums up your reply in a few cards they swipe through (your own text a
+  tap away), and your questions (AskUserQuestion, permission prompts) show as
+  buttons. Write as you normally would; short option labels read best there.
 
 ## Your environment
 

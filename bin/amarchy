@@ -3214,6 +3214,8 @@ def cmd_hook(sid, state):
     # it isn't the session's own Claude: it says nothing about the session.
     if hook_claude().get("kind") == "bg":
         return
+    if state == "idle" and event.get("hook_event_name") == "Stop":
+        detach([ENTRY, "cards", sid])       # the reply for you, from the turn that just ended (cmd_cards)
     set_conversation_id(sid, event.get("session_id", ""))
     clear_waking(sid)       # it's up
     if asleep_since(sid) is not None and state != "idle":
@@ -6132,9 +6134,12 @@ def app_items(records, s):
                 if not isinstance(b, dict):
                     continue
                 if b.get("type") == "text":
-                    found.append(user_item(b.get("text") or ""))
+                    item = user_item(b.get("text") or "")
+                    if item and item["kind"] == "user" and human_message(item["text"]):
+                        item["turn"] = True     # yours: it starts a turn (the cards' and the app's)
+                    found.append(item)
                 elif b.get("type") == "image":       # shown at /api/session/<id>/image/<rec>/<n>
-                    found.append({"kind": "user", "text": "[image]", "rec": rid,
+                    found.append({"kind": "user", "text": "[image]", "rec": rid, "turn": True,
                                   "image": sum(1 for x in found if x and x.get("image") is not None)})
                 elif b.get("type") == "tool_result":
                     text = result_text(b.get("content"))
@@ -6146,10 +6151,6 @@ def app_items(records, s):
                     continue
                 if b.get("type") == "text" and (b.get("text") or "").strip():
                     found.append({"kind": "claude", "text": b["text"].strip()})
-                elif b.get("type") == "tool_use" and b.get("name") == SCREEN_TOOL:
-                    # The screen as Claude drew it: the app draws its blocks (chat.js screenBlocks).
-                    found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""), "summary": "Drew the screen",
-                                  "screen": b.get("input") if isinstance(b.get("input"), dict) else {}})
                 elif b.get("type") == "tool_use":
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
                                   "summary": tool_summary(b.get("name"), b.get("input"), s)[:600],
@@ -9173,6 +9174,7 @@ def app_handler(st, users, address):
                 host_start(s)       # after a reboot, before anyone attached: asleep, until you send it something
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
+            cards_seen = object()       # the cards' folder as last sent (cards_sig): nothing yet
             # On the chat engine, its live state too (live.json, chat_live) as
             # it changes: what Claude is writing, doing and asking.
             live, live_sig, tick = None, None, 0
@@ -9213,6 +9215,10 @@ def app_handler(st, users, address):
                         self.event("conversation", {"reset": True, "items": items, "start": conv.start})
                     elif items:
                         self.event("conversation", {"items": items})
+                    sig = cards_sig(s["id"])
+                    if sig != cards_seen:
+                        cards_seen = sig
+                        self.event("cards", cards_all(s["id"]))
                     seen = app_screen(s)
                     if seen != screen:
                         screen = seen
@@ -9308,6 +9314,16 @@ def app_handler(st, users, address):
                 if why == "gone":
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
+            m = re.fullmatch(r"/api/session/([^/]+)/cards", self.path)
+            if m:       # the cards for a turn, made (again): {turn: its message's record}
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                rec = str(data.get("turn") or "")
+                if not re.fullmatch(r"[0-9A-Za-z-]{8,64}", rec):
+                    return self.error(400, "Which turn?")
+                detach([ENTRY, "cards", s["id"], rec, "--force"])
+                return self.send(200, {})
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine|classic)", self.path)
             if m:
@@ -10504,43 +10520,6 @@ AGENT_LIVE_EVERY = 0.15     # seconds between two writes of live.json while text
 AGENT_STREAM_MAX = 20_000_000   # bytes of stream.jsonl (Claude's raw output) kept, the older half dropped
 AGENT_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
-# The screen: the chat engine's Claude ends each reply by drawing it with
-# show_screen, a tool amarchy serves (`amarchy screen-mcp`, an MCP server on
-# stdio). The app draws the tool's input (app_items gives it as "screen"); the
-# text Claude writes stays in the transcript, one tap away under the screen.
-SCREEN_SERVER = "amarchy"
-SCREEN_TOOL = f"mcp__{SCREEN_SERVER}__show_screen"
-SCREEN_DEF = {
-    "name": "show_screen",
-    "description": "Draws the screen the user reads in amarchy, in place of your chat text. Call it once, at the end "
-                   "of each reply. The blocks, in order: title {text}; text {text} (markdown, a paragraph or two); "
-                   "note {tone: info|ok|warn|error, text}; stats {items: [{label, value, detail?, tone?}]}; "
-                   "steps {items: [{label, state: done|doing|todo}]}; list {items: [string]}; "
-                   "table {columns: [string], rows: [[string]]}; code {language?, code}; link {label, url, detail?} "
-                   "(an http or https URL the user can open); choices {prompt?, options: [{label, detail?, send?}]} "
-                   "(a tap sends send, or the label, to you as the user's next message).",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "The screen's heading, shown big at its top."},
-            "blocks": {"type": "array", "description": "The screen's blocks, in order.",
-                       "items": {"type": "object", "required": ["type"], "additionalProperties": True,
-                                 "properties": {"type": {"type": "string", "enum": [
-                                     "title", "text", "note", "stats", "steps", "list", "table", "code", "link", "choices"]}}}},
-        },
-        "required": ["blocks"],
-    },
-}
-SCREEN_PROMPT = (
-    "Your replies in amarchy are shown as a screen the user reads, not as a chat. End each reply with one call to "
-    "show_screen: the result, what changed, the URL to test, the numbers, and the next choices as buttons. Keep your "
-    "own text to a line or two before it: the user can open all of your text under the screen when they want it. "
-    "Make the screen short and easy to scan on a phone: a title, then a few blocks. A tap on a choices button sends "
-    "its text to you as the user's next message, so write each send text as the message you want back. Use link for "
-    "any URL the user should open, stats for numbers, steps for progress, table for rows, and code only for a short "
-    "snippet. A question that needs an answer comes as choices (AskUserQuestion still works where its own dialog is needed)."
-)
-
 
 ENGINES = ("chat", "terminal")
 ENGINE_CHECK_FILE = STATE / "engine-check.json"  # the protocol test's last result, for the Claude Code it ran on (see protocol_problem)
@@ -10686,11 +10665,8 @@ def claude_resume(s):
 
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
-    claude arguments, its conversation, amarchy's hooks, and the screen
-    (its tool, allowed without asking, and the prompt that asks for it)."""
-    mcp = {"mcpServers": {SCREEN_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "screen-mcp"]}}}
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--mcp-config", json.dumps(mcp),
-            "--allowedTools", SCREEN_TOOL, "--append-system-prompt", SCREEN_PROMPT, "--settings", hook_settings(s["id"])]
+    claude arguments, its conversation, amarchy's hooks."""
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", hook_settings(s["id"])]
 
 
 def agent_env(s=None):
@@ -10738,6 +10714,253 @@ def conversation_title(text):
     lines = [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
     title = lines[0].strip("\"'`*#. ") if r.returncode == 0 and len(lines) == 1 else ""
     return title if 0 < len(title) <= 80 else None
+
+
+# ---- the cards: the reply for you
+#
+# The app's main view (the cards, app/chat.js) gives each turn's reply as a few
+# cards you swipe through, not as Claude's text. Claude answers as it always
+# does; when its turn ends (the Stop hook), `amarchy cards` asks a model for
+# the reply a person would read (CARDS_PROMPT, as CARDS_SCHEMA's JSON), from
+# what you said and what Claude said and did. Claude's own words stay a tap
+# away, as its thinking would. Each turn's cards are a file in the session's
+# folder, named by your message's record (cards_dir); the app streams them
+# (cards_all) and shows each under its turn.
+
+CARDS_MODEL = "sonnet"
+CARDS_INPUT = 40_000        # characters of a turn's work given to it (the end kept: where it lands)
+CARDS_STALE = 180           # seconds before a "pending" that never ended can be asked again
+CARDS_TONES = ("ok", "info", "warn", "error", "ask")
+CARDS_PROMPT = """You write the reply a person reads after their coding agent (Claude) finished a turn of work. They won't read Claude's own words: those are its working notes. You turn the turn into a short deck of cards they swipe through on a phone, one card at a time.
+
+Give them only what matters to them: the result or the answer, what they must decide or do, how to check it (a URL to open, a command to run), and the numbers that count. Leave out how Claude got there, unless it changes what they do.
+
+The cards:
+- 1 to 4 cards. The first is the answer in one glance: what happened, or what Claude needs from them. Add another card only for something they need: a decision, something to test, a problem, what comes next. One card is often enough.
+- Very little text. title: at most 8 words. body: at most 2 short sentences. points: at most 4, each a few words. Never repeat the title in the body, never restate their request, no filler, no "I".
+- label: 1 to 3 words over the title, saying what the card is ("Done", "Test it", "Needs you", "Problem", "Next").
+- tone: ok (done, works), info (to know), warn (partial, needs attention), error (failed, blocked), ask (Claude needs their answer).
+- Copy exact values exactly: URLs, ports, commands, file names, numbers, versions, names.
+- stats: only real numbers from the turn (tests passed, files changed, time, sizes), at most 3.
+- link: a URL Claude gave them to open, if any (http or https only), with a short label.
+- code: only a short command or snippet they need to run or paste.
+- more: optional detail for a tap on "More": a few short lines or a short list (markdown), for what they may want to look into.
+- actions: buttons that send a message to Claude as if they typed it. Offer the answers to any question Claude asked, and the natural next steps. label: 1 to 4 words; send: the full message, clear on its own ("Ship it" sends "Ship it: merge to main and push"). When the person has to add their own words (what to change, what went wrong), set draft to true: the text goes into their message box for them to finish, and send is its start ("Change the cards: "). At most 3 per card, on the card they belong to. No thanks, no "tell me more" without saying about what.
+- If Claude asked them something, or waits for their decision, the first card says so (tone ask), with the options as actions.
+- Never invent anything that isn't in the turn.
+- Write in the language the person wrote in.
+
+The turn:
+
+"""
+CARDS_SCHEMA = {
+    "type": "object", "required": ["cards"], "additionalProperties": False,
+    "properties": {"cards": {"type": "array", "minItems": 1, "maxItems": 4, "items": {
+        "type": "object", "required": ["title", "tone"], "additionalProperties": False,
+        "properties": {
+            "tone": {"type": "string", "enum": list(CARDS_TONES)},
+            "label": {"type": "string"},
+            "title": {"type": "string"},
+            "body": {"type": "string"},
+            "points": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+            "stats": {"type": "array", "maxItems": 3, "items": {
+                "type": "object", "required": ["label", "value"], "additionalProperties": False,
+                "properties": {"label": {"type": "string"}, "value": {"type": "string"}}}},
+            "link": {"type": "object", "required": ["url"], "additionalProperties": False,
+                     "properties": {"label": {"type": "string"}, "url": {"type": "string"}}},
+            "code": {"type": "string"},
+            "more": {"type": "string"},
+            "actions": {"type": "array", "maxItems": 3, "items": {
+                "type": "object", "required": ["label", "send"], "additionalProperties": False,
+                "properties": {"label": {"type": "string"}, "send": {"type": "string"}, "draft": {"type": "boolean"}}}},
+        }}}},
+}
+HIDDEN_STEPS = ("ToolSearch", "TodoRead", "TaskList", "TaskGet")    # as the app hides them (chat.js HIDDEN_TOOLS)
+
+
+def human_message(text):
+    """Whether a message in your name is one you wrote, not one Claude Code
+    put there: a background task that ended, a message from another session,
+    the summary a compacted conversation goes on from."""
+    t = text.lstrip()
+    if re.match(r"<(task-notification|cross-session-message|system-reminder|local-command|command-|bash-)", t):
+        return False
+    return not t.startswith("This session is being continued from a previous conversation")
+
+
+def card_turns(items):
+    """A conversation's items (app_items) as turns: each from one of your
+    messages (its record, rec) to the next, as the app groups them. What came
+    before your first message has nothing to reply to."""
+    turns, cur = [], None
+    for it in items:
+        rec = it.get("rec") or str(it.get("key", "")).split(":")[0]
+        kind = it.get("kind")
+        if kind == "user" and it.get("turn"):
+            if cur is None or cur["rec"] != rec:
+                cur = {"rec": rec, "said": [], "work": []}
+                turns.append(cur)
+            cur["said"].append("[a picture]" if it.get("image") is not None else it.get("text") or "")
+        elif cur is None:
+            continue
+        elif kind == "claude":
+            cur["work"].append(("Claude", it.get("text") or ""))
+        elif kind == "tool" and it.get("name") not in HIDDEN_STEPS:
+            cur["work"].append(("did", it.get("summary") or it.get("name") or ""))
+        elif kind == "result" and it.get("error"):
+            cur["work"].append(("failed", (it.get("text") or "")[:400]))
+        elif kind in ("note", "user", "command"):
+            cur["work"].append(("note", (it.get("text") or "")[:600]))
+    return turns
+
+
+def cards_input(turn):
+    """What the model is given of a turn: what you said, and what Claude said
+    and did in order (the start cut when it's long: the end is where it lands)."""
+    said = "\n\n".join(t for t in turn["said"] if t).strip()[:6000]
+    work = "\n\n".join(f"[Claude]\n{text}" if kind == "Claude" else f"[{kind}] {text}" for kind, text in turn["work"])
+    if len(work) > CARDS_INPUT:
+        work = "…\n" + work[-CARDS_INPUT:]
+    return (f"WHAT THE PERSON SAID:\n{said or '(nothing: Claude went on by itself)'}\n\n"
+            f"WHAT CLAUDE SAID AND DID, IN ORDER:\n{work or '(nothing)'}")
+
+
+def cards_clean(cards):
+    """The cards a model gave, as the app may draw them: known fields, short
+    strings, http(s) links only, at most 4 cards."""
+    def text(v, n):
+        return " ".join(str(v).split())[:n] if isinstance(v, (str, int, float)) else ""
+
+    def block(v, n):
+        return str(v).strip()[:n] if isinstance(v, str) else ""
+    out = []
+    for c in cards if isinstance(cards, list) else []:
+        if not isinstance(c, dict) or not text(c.get("title"), 140):
+            continue
+        card = {"tone": c.get("tone") if c.get("tone") in CARDS_TONES else "info",
+                "label": text(c.get("label"), 40), "title": text(c.get("title"), 140), "body": block(c.get("body"), 500),
+                "points": [text(p, 160) for p in (c.get("points") or [])[:5] if text(p, 160)] if isinstance(c.get("points"), list) else [],
+                "stats": [{"label": text(x.get("label"), 40), "value": text(x.get("value"), 40)}
+                          for x in (c.get("stats") or [])[:4] if isinstance(x, dict) and text(x.get("value"), 40)]
+                         if isinstance(c.get("stats"), list) else [],
+                "code": block(c.get("code"), 1500), "more": block(c.get("more"), 2000),
+                "actions": [{"label": text(a.get("label"), 48), "send": block(a.get("send"), 2000) or text(a.get("label"), 48),
+                             "draft": a.get("draft") is True}
+                            for a in (c.get("actions") or [])[:3] if isinstance(a, dict) and text(a.get("label"), 48)]
+                           if isinstance(c.get("actions"), list) else []}
+        link = c.get("link") if isinstance(c.get("link"), dict) else {}
+        url = text(link.get("url"), 2000)
+        if re.match(r"https?://\S+$", url):
+            card["link"] = {"label": text(link.get("label"), 80), "url": url}
+        out.append(card)
+    return out[:4]
+
+
+def cards_ask(text):
+    """The cards for a turn, from the model: (cards, None), or (None, why)."""
+    try:
+        r = subprocess.run(
+            ["claude", "-p", "--model", CARDS_MODEL, "--no-session-persistence", "--setting-sources", "", "--tools", "",
+             "--strict-mcp-config", "--output-format", "json", "--json-schema", json.dumps(CARDS_SCHEMA)],
+            input=CARDS_PROMPT + text, capture_output=True, text=True, timeout=180, env=agent_env(), cwd=STATE)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"the model didn't answer ({type(e).__name__})"
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        return None, (r.stderr or r.stdout or "no answer").strip()[-300:]
+    out = d.get("structured_output") if isinstance(d, dict) else None
+    if not isinstance(out, dict) and isinstance(d, dict) and isinstance(d.get("result"), str):
+        try:
+            out = json.loads(d["result"])
+        except ValueError:
+            out = None
+    cards = cards_clean(out.get("cards")) if isinstance(out, dict) else []
+    if not cards:
+        return None, (d.get("result") if isinstance(d, dict) and d.get("is_error") else "") or "no cards in its answer"
+    return cards, None
+
+
+def cards_dir(sid):
+    return claude_dir(sid) / "cards"
+
+
+def cards_read(sid, rec):
+    try:
+        d = json.loads((cards_dir(sid) / f"{rec}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def cards_all(sid, most=60):
+    """The session's cards for the app: {rec: {state, cards, at, error}},
+    the newest most."""
+    d = cards_dir(sid)
+    try:
+        files = sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime)[-most:]
+    except OSError:
+        return {}
+    out = {}
+    for f in files:
+        c = cards_read(sid, f.stem)
+        if c:
+            out[f.stem] = {k: c.get(k) for k in ("state", "cards", "at", "error") if k in c}
+    return out
+
+
+def cards_sig(sid):
+    """What changes when any of the session's cards does (each is written
+    whole, by a rename: the folder's time moves)."""
+    try:
+        return cards_dir(sid).stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def cmd_cards(args):
+    """amarchy cards <id> [<rec>] [--force]: the cards for a turn of the
+    session (its last, or the one your message <rec> started), from the
+    model, into the session's folder (the Stop hook starts it, and the app's
+    "Sum it up"). A turn whose cards are made already, from the same work,
+    isn't asked again unless --force."""
+    force = "--force" in args
+    args = [a for a in args if a != "--force"]
+    if not 1 <= len(args) <= 2:
+        return fail("usage: amarchy cards <id> [<rec>] [--force]")
+    sid, want = args[0], args[1] if len(args) == 2 else None
+    s = session(sid)
+    if not s:
+        return fail(f"no session {sid}")
+    if want is None:
+        time.sleep(1)       # from the Stop hook: the turn's last record a moment to land
+    f = transcript(s)
+    if not f:
+        return 0
+    size = f.stat().st_size
+    start = 0
+    if want is None and size > 8_000_000:       # the last turn: the end of a long conversation is enough
+        with open(f, "rb") as fh:
+            start = line_start(fh, size - 8_000_000)
+    turns = card_turns(app_items(read_records(f, start, size), s))
+    turn = next((t for t in turns if t["rec"] == want), None) if want else (turns[-1] if turns else None)
+    if not turn or not turn["work"]:
+        return 0
+    text = cards_input(turn)
+    digest = hashlib.sha1(text.encode()).hexdigest()[:16]
+    had = cards_read(sid, turn["rec"]) or {}
+    if not force and had.get("hash") == digest and (
+            had.get("state") == "ready" or (had.get("state") == "pending" and time.time() - (had.get("at") or 0) < CARDS_STALE)):
+        return 0
+    path = cards_dir(sid) / f"{turn['rec']}.json"
+    base = {"turn": turn["rec"], "hash": digest, "model": CARDS_MODEL}
+    write_file(path, json.dumps({**base, "state": "pending", "at": time.time()}))
+    cards, why = cards_ask(text)
+    if cards:
+        write_file(path, json.dumps({**base, "state": "ready", "cards": cards, "at": time.time()}))
+        return 0
+    write_file(path, json.dumps({**base, "state": "failed", "error": why, "at": time.time()}))
+    return fail(f"no cards: {why}")
 
 
 def our_title(sid, f):
@@ -11831,39 +12054,6 @@ def follow_engines():
         switch_engine(s, "chat")
 
 
-def screen_mcp():
-    """amarchy screen-mcp: the MCP server (stdio, JSON lines) that gives a
-    chat-engine Claude its show_screen tool. The tool only answers: the app
-    draws the screen from what Claude sent (app_items)."""
-    def send(reply):
-        sys.stdout.write(json.dumps(reply) + "\n")
-        sys.stdout.flush()
-    for line in sys.stdin:
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(msg, dict) or "id" not in msg:       # a notification: nothing to answer
-            continue
-        method, params = msg.get("method"), msg.get("params") if isinstance(msg.get("params"), dict) else {}
-        if method == "initialize":
-            result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
-                      "serverInfo": {"name": SCREEN_SERVER, "version": "1"}}
-        elif method == "tools/list":
-            result = {"tools": [SCREEN_DEF]}
-        elif method == "tools/call":
-            ok = params.get("name") == SCREEN_DEF["name"]
-            text = "Shown on the user's screen." if ok else f"No tool named {params.get('name')}."
-            result = {"content": [{"type": "text", "text": text}], "isError": not ok}
-        elif method == "ping":
-            result = {}
-        else:
-            send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": f"Unknown method: {method}"}})
-            continue
-        send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
-    return 0
-
-
 def cmd_agent(args):
     """amarchy agent <id> (the broker, in a session's Claude pane), or one of
     its commands for a session on the chat engine (see usage)."""
@@ -12006,7 +12196,7 @@ OPTIONS = {
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "paste": None, "rec": None, "agent": None, "screen-mcp": None,
+    "paste": None, "rec": None, "agent": None, "cards": ({"--force"}, set(), set()),
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -12138,8 +12328,8 @@ def main(argv):
         return cmd_paste(args)
     elif cmd == "rec":
         return cmd_rec(args)
-    elif cmd == "screen-mcp" and not args:
-        return screen_mcp()
+    elif cmd == "cards":
+        return cmd_cards(args)
     elif cmd == "agent":
         return cmd_agent(args)
     elif cmd == "app":

@@ -209,7 +209,6 @@ const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet"]);
 function stepWords(name, input) {
   const i = input || {};
   const file = baseName(i.file_path || i.notebook_path || i.path);
-  if (name === SCREEN_TOOL_NAME) return { kind: "other", past: "Drew the screen", now: "Drawing the screen" };
   const mcp = mcpParts(name);
   if (mcp) return { kind: "other", past: `Used ${mcp.server}: ${mcp.what}`, now: `Using ${mcp.server}: ${mcp.what}` };
   // Claude's plan file (plan mode keeps it in ~/.claude/plans).
@@ -692,22 +691,21 @@ function screenCard(chat, d, step) {
 
 // ---- the chat
 
-// The screen (bin/amarchy's SCREEN_DEF, the show_screen tool): its tool's name
-// in the transcript, the tones and the states its blocks take.
-const SCREEN_TOOL_NAME = "mcp__amarchy__show_screen";
-const SCREEN_TONES = ["info", "ok", "warn", "error"];
-const SCREEN_STATES = ["done", "doing", "todo"];
+// The cards (bin/amarchy's cmd_cards): the reply for you under each turn, a few
+// cards you swipe through, Claude's own words a tap away. The word over a card
+// that has no label of its own, by its tone.
+const CARD_TONES = { ok: "Done", info: "To know", warn: "Heads up", error: "Problem", ask: "Needs you" };
+const CARDS_WAIT = 20000;       // ms after a turn ends that its cards are awaited, before its words show instead
+const CARDS_STALE = 180000;     // ms a "pending" that never ended is waited on (bin/amarchy CARDS_STALE)
 
-// The chat's markdown styles (.chat .msg.claude) hold for the screen's text too.
-
-// A link block: an http or https address, opened in a new tab (nothing else).
-function screenLink(b) {
+// A card's link: an http or https address, opened in a new tab (nothing else).
+function cardLink(l) {
   let url;
-  try { url = new URL(String(b.url || "")); } catch { return null; }
+  try { url = new URL(String(l.url || "")); } catch { return null; }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-  return h("a", { class: "sb-link", href: url.href, target: "_blank", rel: "noopener" },
-    h("span", { class: "sb-link-label" }, String(b.label || url.host)),
-    h("span", { class: "sb-link-host" }, b.detail ? String(b.detail) : url.host));
+  return h("a", { class: "rcard-link", href: url.href, target: "_blank", rel: "noopener" },
+    h("span", { class: "rcard-link-label" }, String(l.label || url.host)),
+    h("span", { class: "rcard-link-host" }, url.host + (url.pathname.length > 1 ? url.pathname : "")));
 }
 
 class Chat {
@@ -722,12 +720,16 @@ class Chat {
     this.live = null;
     this.placeholder = "Message Claude";
     this.view = { content: null, above: [], composer: true };
-    // How the chat shows: the screen (the default) or the conversation. Both
+    // How the chat shows: the cards (the default) or the conversation. Both
     // are drawn from the same items, kept here in order (see keepItems).
     this.mode = store.get("chatView") === "chat" ? "chat" : "screen";
     this.items = [];
     this.itemKeys = new Set();
-    this.shownScreen = null;    // the key of the screen on show (a new one goes to its top)
+    this.cards = {};            // each turn's cards, by its message's record (the stream's "cards")
+    this.sturns = [];           // the turns the cards view shows, in order (newTurn)
+    this.sturn = null;          // the last of them
+    this.idleSince = 0;         // when Claude last finished working (its cards are awaited a while)
+    this.wasWorking = false;
     this.reset();
     this.build();
   }
@@ -768,7 +770,7 @@ class Chat {
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     // The switch between the two views, over the chat (hidden over the terminal and the other views).
-    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Screen");
+    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Cards");
     this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
     this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
     this.drawSwitch();
@@ -870,6 +872,7 @@ class Chat {
       this.renderTail();
     });
     es.addEventListener("conversation", (e) => this.conversation(JSON.parse(e.data)));
+    es.addEventListener("cards", (e) => this.setCards(JSON.parse(e.data)));
     es.addEventListener("screen", (e) => {
       this.screen = JSON.parse(e.data);
       if (this.opts.onScreen) this.opts.onScreen(this.screen);
@@ -971,7 +974,7 @@ class Chat {
       this.start = d.start;
     }
     this.keepItems(d.items);
-    if (this.mode === "screen") return this.paintScreen();
+    if (this.mode === "screen") return this.screenConversation(d);
     // The page after an update: its scroll, as it was (app.js keptChatScroll).
     const back = d.reset ? keptChatScroll(this.id) : null;
     const stick = back === null && (d.reset || this.atBottom());
@@ -1018,7 +1021,7 @@ class Chat {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "couldn't load it");
       this.keepItems(d.items, true);
-      if (this.mode === "screen") { this.start = d.start; return this.paintScreen(); }
+      if (this.mode === "screen") { this.start = d.start; return this.rebuildScreen(true); }
       // Its own folds: what came before doesn't join the ones after it.
       const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard };
       this.fold = null;
@@ -1040,7 +1043,7 @@ class Chat {
     this.earlierBtn.disabled = false;
   }
 
-  // ---- the two views: the screen (the default), or the conversation
+  // ---- the two views: the cards (the default), or the conversation
 
   body() { return this.mode === "screen" ? this.stage : this.conv; }
 
@@ -1052,15 +1055,16 @@ class Chat {
     else this.items.push(...fresh);
   }
 
-  // The view: the screen or the conversation (the switch over the chat).
+  // The view: the cards or the conversation (the switch over the chat).
   showMode(mode) {
     if (mode === this.mode) return;
     this.mode = mode;
     store.set("chatView", mode);
     this.drawSwitch();
     if (mode === "chat") this.conversation({ reset: true, items: this.items.slice(), start: this.start });
-    else this.paintScreen();
+    else this.rebuildScreen();
     if (!this.view.content) this.scroller.replaceChildren(this.body());
+    this.toBottom(true);
   }
 
   drawSwitch() {
@@ -1070,141 +1074,251 @@ class Chat {
     }
   }
 
-  // The turns of the conversation: each from one of your messages to the next,
-  // with what Claude said in it, the screen it drew (the last), and its steps.
-  turns() {
-    const turns = [];
-    let cur = null;
-    for (const it of this.items) {
-      if (it.kind === "user") {
-        if (typeof it.image === "number") continue;          // a picture: the words of its message start the turn
-        const said = this.userView(it.text);
-        if (said.note || said.summary) continue;             // what Claude Code put in your name, not you
-        cur = { key: it.key, user: String(it.text || "").trim(), said: [], tools: [], screen: null };
-        turns.push(cur);
-        continue;
-      }
-      if (!cur) turns.push(cur = { key: it.key, user: "", said: [], tools: [], screen: null });
-      if (it.kind === "claude") cur.said.push(it.text);
-      else if (it.kind === "tool" && it.screen) cur.screen = it;
-      else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) cur.tools.push(it);
-    }
-    return turns;
-  }
+  // ---- the cards view: each turn (a message of yours, and all Claude did for
+  // it) is your message, Claude's work in a fold (its words and steps, as the
+  // conversation shows them, like its thinking), and the reply: its cards.
+  // Oldest first, as a conversation reads.
 
-  // The screen: the newest turn's, big, with what Claude wrote under it in a
-  // fold; the turns before it below, each a tap away.
-  paintScreen() {
-    const shown = this.turns().filter((t) => t.screen || t.said.length);
-    const now = shown[shown.length - 1];
-    const body = h("div", { class: "screen-body" });
-    if (now) body.append(this.screenCard(now, true));
-    else body.append(h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
-                       h("div", {}, "Write it below, or hold the mic and say it.")));
-    const before = shown.slice(0, -1).reverse();
+  rebuildScreen(keepPlace) {
+    const fromEnd = this.scroller.scrollHeight - this.scroller.scrollTop;
+    this.reset();
+    for (const t of this.sturns) clearTimeout(t.timer);
+    this.conv.replaceChildren(this.tail);       // drawn again when it's shown (and add() mustn't find its bubbles)
+    this.sturns = [];
+    this.sturn = null;
+    this.emptyScreen = null;
     this.earlierBtn = this.start > 0 ? h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages") : null;
-    if (before.length || this.earlierBtn) {
-      body.append(h("section", { class: "screen-past" },
-        before.length ? h("h3", {}, "Earlier") : null,
-        ...before.map((t) => h("details", { class: "screen-old" },
-          h("summary", {}, cut((t.screen && t.screen.screen && t.screen.screen.title) || t.said[0] || t.user || "Earlier", 90)),
-          this.screenCard(t, false))),
-        this.earlierBtn));
-    }
-    this.stage.replaceChildren(body, this.stageWork);
+    this.stage.replaceChildren(...[this.earlierBtn, this.stageWork].filter(Boolean));
+    for (const it of this.items) this.screenAdd(it);
+    this.drawEmpty();
+    for (const t of this.sturns) this.drawReply(t);
     if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
-    const key = now ? now.key : null;
-    if (key !== this.shownScreen) {
-      // A new screen opens at its top: again after the first layout, which can move the position on a fresh page.
-      this.shownScreen = key;
-      this.scroller.scrollTop = 0;
-      requestAnimationFrame(() => { this.scroller.scrollTop = 0; });
+    if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
+  }
+
+  screenConversation(d) {
+    if (d.reset) {
+      this.rebuildScreen();
+      this.toBottom(true);
+      return;
+    }
+    const stick = this.atBottom();
+    for (const it of d.items) this.screenAdd(it);
+    this.drawEmpty();
+    if (this.sturn) this.drawReply(this.sturn);
+    if (stick) this.toBottom();
+    else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
+  }
+
+  // One item into the cards view: a message of yours starts a turn (its
+  // pictures and words one bubble), the rest go into the turn's fold.
+  screenAdd(it) {
+    if (it.key && this.keys.has(it.key)) return;
+    const rec = it.rec || String(it.key || "").split(":")[0];
+    if (it.kind === "user" && it.turn) {
+      if (!this.sturn || this.sturn.rec !== rec) this.newTurn(rec);
+      this.add(it, this.sturn.you);
+      return;
+    }
+    const t = this.sturn || this.newTurn(null);
+    this.add(it, t.body);
+    if (it.kind === "claude") t.said = it.text;
+    else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) t.steps++;
+    if (it.kind !== "result") this.drawWork(t);
+  }
+
+  newTurn(rec) {
+    const t = { rec, said: "", steps: 0, sig: null, timer: null };
+    t.you = h("div", { class: "turn-you" });
+    t.summary = h("summary", {});
+    t.body = h("div", { class: "turn-work-body" });
+    t.work = h("details", { class: "turn-work", hidden: true }, t.summary, t.body);
+    t.reply = h("div", { class: "turn-reply" });
+    t.el = h("section", { class: "turn" }, t.you, t.work, t.reply);
+    this.stage.insertBefore(t.el, this.stageWork);
+    this.sturns.push(t);
+    this.sturn = t;
+    return t;
+  }
+
+  drawEmpty() {
+    const empty = !this.sturns.length;
+    if (empty && !this.emptyScreen) {
+      this.emptyScreen = h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
+                           h("div", {}, "Write it below, or hold the mic and say it."));
+      this.stage.insertBefore(this.emptyScreen, this.stageWork);
+    } else if (!empty && this.emptyScreen) {
+      this.emptyScreen.remove();
+      this.emptyScreen = null;
     }
   }
 
-  screenCard(turn, now) {
-    const card = h("article", { class: `screen-card${now ? " current" : ""}` });
-    if (turn.user) card.append(h("div", { class: "screen-ask" }, cut(turn.user, 240)));
-    if (turn.screen) {
-      const shot = turn.screen.screen || {};
-      if (shot.title) card.append(h("h2", { class: "sb-title" }, String(shot.title)));
-      for (const b of Array.isArray(shot.blocks) ? shot.blocks : []) {
-        const el = this.screenBlock(b);
-        if (el) card.append(el);
-      }
-      if (turn.said.length || turn.tools.length) card.append(this.screenWrote(turn));
-    } else {
-      // No screen (Claude wrote its answer as text): the text is the screen.
-      card.append(h("div", { class: "msg claude screen-text", html: md(turn.said.join("\n\n")) }));
+  // The fold with Claude's work: its words and its steps.
+  drawWork(t) {
+    t.work.hidden = !t.body.childElementCount;
+    const n = t.steps;
+    t.summary.replaceChildren(...[icon("chevron", "chev"), h("span", {}, "Claude's work"),
+                                  n ? h("span", { class: "turn-work-n" }, `${n} step${n === 1 ? "" : "s"}`) : null].filter(Boolean));
+  }
+
+  // A turn's reply: its cards; while they're made, a line saying so; with none
+  // (a turn from before them, or they failed), Claude's last words and a
+  // button to make them. Drawn again only when what it shows changes (a deck
+  // you swiped stays where you left it).
+  drawReply(t) {
+    const c = t.rec ? this.cards[t.rec] : null;
+    const now = Date.now();
+    const pending = !!c && c.state === "pending" && now - (c.at || 0) * 1000 < CARDS_STALE;
+    const awaited = !c && !!t.rec && t === this.sturn && now - this.idleSince < CARDS_WAIT;
+    const state = t === this.sturn && this.working() ? "live"
+      : c && c.state === "ready" && c.cards && c.cards.length ? "ready"
+      : pending || awaited ? "wait"
+      : t.said ? "text" : "none";
+    const sig = `${state}|${c ? `${c.state}|${c.at}` : ""}|${state === "text" ? t.said.length : ""}`;
+    if (sig === t.sig) return;
+    t.sig = sig;
+    clearTimeout(t.timer);
+    if (state === "wait") {
+      const left = pending ? CARDS_STALE - (now - c.at * 1000) : CARDS_WAIT - (now - this.idleSince);
+      t.timer = setTimeout(() => { t.sig = null; this.drawReply(t); }, Math.max(0, left) + 100);
     }
-    return card;
+    if (state === "ready") t.reply.replaceChildren(this.deck(c.cards));
+    else if (state === "wait") t.reply.replaceChildren(h("div", { class: "reply-wait", role: "status" }, spinner(), h("span", {}, "Summing it up…")));
+    else if (state === "text") t.reply.replaceChildren(this.replyText(t, !!c));
+    else t.reply.replaceChildren();
   }
 
-  // What Claude wrote and did under a screen, a tap away.
-  screenWrote(turn) {
-    const n = turn.tools.length;
-    return h("details", { class: "screen-wrote" },
-      h("summary", {}, `What Claude wrote${n ? ` · ${n} step${n === 1 ? "" : "s"}` : ""}`),
-      ...turn.said.map((t) => h("div", { class: "msg claude screen-text", html: md(t) })),
-      n ? h("ul", { class: "screen-steps" }, ...turn.tools.map((t) => h("li", {}, stepWords(t.name, t.input || {}).past))) : null);
-  }
-
-  // One block of a screen, in the vocabulary of SCREEN_DEF (bin/amarchy). Text is
-  // escaped (md escapes first); a block it doesn't know is left out.
-  screenBlock(b) {
-    if (!b || typeof b !== "object") return null;
-    const text = (v) => (v === undefined || v === null ? "" : String(v));
-    const tone = (t) => (SCREEN_TONES.includes(t) ? t : "info");
-    const items = (v) => (Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined) : []);
-    switch (b.type) {
-      case "title": return h("h2", { class: "sb-title" }, text(b.text));
-      case "text": return h("div", { class: "msg claude screen-text", html: md(text(b.text)) });
-      case "note": return h("div", { class: `sb-note ${tone(b.tone)}` }, text(b.text));
-      case "stats": return h("div", { class: "sb-stats" }, ...items(b.items).map((s) => h("div", { class: `sb-stat ${tone(s.tone)}` },
-        h("div", { class: "sb-stat-value" }, text(s.value)), h("div", { class: "sb-stat-label" }, text(s.label)),
-        s.detail ? h("div", { class: "sb-stat-detail" }, text(s.detail)) : null)));
-      case "steps": return h("ol", { class: "sb-steps" }, ...items(b.items).map((s) =>
-        h("li", { class: `sb-step s-${SCREEN_STATES.includes(s.state) ? s.state : "todo"}` }, text(s.label))));
-      case "list": return h("ul", { class: "sb-list" }, ...items(b.items).map((x) => h("li", {}, text(x))));
-      case "table": {
-        const cols = items(b.columns).map(text);
-        const rows = items(b.rows).filter(Array.isArray);
-        return h("div", { class: "sb-table" }, h("table", {},
-          cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c)))) : null,
-          h("tbody", {}, ...rows.map((r) => h("tr", {}, ...r.map((c) => h("td", {}, text(c))))))));
-      }
-      case "code": return h("div", { class: "sb-code", html: codeBlock(text(b.code), text(b.language)) });
-      case "link": return screenLink(b);
-      case "choices": return this.screenChoices(b);
-      default: return null;
+  // Claude's last words, as the reply of a turn without cards (a few lines,
+  // the rest a tap away), and the button that makes them.
+  replyText(t, failed) {
+    const text = h("div", { class: "msg claude reply-text", html: md(t.said) });
+    const box = h("div", { class: "reply-plain" }, text);
+    const all = h("button", { class: "text-btn reply-all", type: "button", hidden: true,
+                              onclick: () => { box.classList.add("open"); all.remove(); } }, "Show all");
+    box.append(all);
+    requestAnimationFrame(() => {
+      all.hidden = text.scrollHeight <= text.clientHeight + 4;
+      box.classList.toggle("long", !all.hidden);
+    });
+    if (t.rec) {
+      const make = h("button", { class: "text-btn reply-make", type: "button", onclick: () => this.makeCards(t, make) },
+                     failed ? "Couldn't sum it up · Try again" : "Sum it up in cards");
+      box.append(make);
     }
-  }
-
-  // Choices: each a button, whose text goes to Claude as your next message.
-  screenChoices(b) {
-    const box = h("div", { class: "sb-choices" });
-    if (b.prompt) box.append(h("div", { class: "sb-prompt" }, String(b.prompt)));
-    const options = (Array.isArray(b.options) ? b.options : []).filter((o) => o && typeof o === "object");
-    box.append(h("div", { class: "sb-options" }, ...options.map((o) => {
-      const send = String(o.send || o.label || "");
-      const btn = h("button", { class: "sb-option", type: "button" },
-        h("span", { class: "sb-option-label" }, String(o.label || send)),
-        o.detail ? h("span", { class: "sb-option-detail" }, String(o.detail)) : null);
-      btn.addEventListener("click", () => this.chooseScreen(box, send, btn));
-      return btn;
-    })));
     return box;
   }
 
-  // A tap on a choice sends its text, once: the others wait with it.
-  async chooseScreen(box, text, btn) {
-    if (!text.trim() || box.classList.contains("sent")) return;
-    box.classList.add("sent");
+  // The session's cards, as the stream sends them ({rec: {state, cards, at}}).
+  setCards(cards) {
+    this.cards = cards && typeof cards === "object" ? cards : {};
+    if (this.mode !== "screen") return;
+    const stick = this.atBottom();
+    for (const t of this.sturns) this.drawReply(t);
+    if (stick) this.toBottom();
+  }
+
+  async makeCards(t, btn) {
+    btn.disabled = true;
+    try {
+      await this.post("cards", { turn: t.rec });
+      this.cards[t.rec] = { state: "pending", at: Date.now() / 1000 };
+      this.drawReply(t);
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message);
+    }
+  }
+
+  // The reply's cards side by side, one on show at a time: swiped, or the
+  // arrows and dots under them, or ← → on the deck.
+  deck(cards) {
+    const deck = h("div", { class: `deck${cards.length > 1 ? " many" : ""}` });
+    const track = h("div", { class: "deck-track", tabindex: "0", role: "group",
+                             "aria-label": `Claude's reply: ${cards.length} card${cards.length === 1 ? "" : "s"}` });
+    cards.forEach((c, i) => track.append(this.replyCard(c, deck, i, cards.length)));
+    deck.append(track);
+    if (cards.length < 2) return deck;
+    let at = 0;
+    const els = () => Array.from(track.children);
+    const go = (i) => {
+      const all = els();
+      const el = all[Math.max(0, Math.min(all.length - 1, i))];
+      track.scrollTo({ left: el.offsetLeft - all[0].offsetLeft, behavior: "smooth" });
+    };
+    const dots = cards.map((_, i) => h("button", { class: "deck-dot", type: "button", "aria-label": `Card ${i + 1}`, onclick: () => go(i) }));
+    const prev = h("button", { class: "deck-arrow", type: "button", "aria-label": "Previous card", onclick: () => go(at - 1) }, icon("chevron", "back"));
+    const next = h("button", { class: "deck-arrow", type: "button", "aria-label": "Next card", onclick: () => go(at + 1) }, icon("chevron"));
+    const mark = () => {
+      const all = els();
+      const first = all[0].offsetLeft;
+      at = all.reduce((best, el, i) => Math.abs(el.offsetLeft - first - track.scrollLeft) <
+                                      Math.abs(all[best].offsetLeft - first - track.scrollLeft) ? i : best, 0);
+      if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 2) at = all.length - 1;
+      dots.forEach((d, i) => { d.classList.toggle("on", i === at); d.setAttribute("aria-current", String(i === at)); });
+      prev.disabled = at === 0;
+      next.disabled = at === all.length - 1;
+    };
+    track.addEventListener("scroll", () => requestAnimationFrame(mark), { passive: true });
+    track.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); go(at + 1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); go(at - 1); }
+    });
+    deck.append(h("div", { class: "deck-nav" }, prev, h("div", { class: "deck-dots" }, ...dots), next));
+    requestAnimationFrame(mark);
+    return deck;
+  }
+
+  // One card: what it is (its label, by its tone), its title, a line or two,
+  // its numbers and points, a link or a command, more on a tap, and buttons.
+  replyCard(c, deck, i, n) {
+    const tone = c.tone in CARD_TONES ? c.tone : "info";
+    const card = h("article", { class: `rcard ${tone}` },
+      h("div", { class: "rcard-top" }, h("span", { class: "rcard-label" }, c.label || CARD_TONES[tone]),
+        n > 1 ? h("span", { class: "rcard-count" }, `${i + 1} / ${n}`) : null),
+      h("h3", { class: "rcard-title" }, c.title || ""));
+    if (c.body) card.append(h("div", { class: "msg claude rcard-body", html: md(c.body) }));
+    if (c.stats && c.stats.length) card.append(h("div", { class: "rcard-stats" }, ...c.stats.map((x) =>
+      h("div", { class: "rcard-stat" }, h("div", { class: "v" }, x.value || ""), h("div", { class: "k" }, x.label || "")))));
+    if (c.points && c.points.length) card.append(h("ul", { class: "rcard-points" }, ...c.points.map((x) => h("li", { html: inline(String(x)) }))));
+    const link = c.link ? cardLink(c.link) : null;
+    if (link) card.append(link);
+    if (c.code) card.append(h("div", { class: "rcard-code", html: codeBlock(c.code, "") }));
+    if (c.more) {
+      const more = h("div", { class: "msg claude rcard-more", hidden: true, html: md(c.more) });
+      const btn = h("button", { class: "text-btn rcard-more-btn", type: "button", "aria-expanded": "false", onclick: () => {
+        more.hidden = !more.hidden;
+        btn.setAttribute("aria-expanded", String(!more.hidden));
+        btn.textContent = more.hidden ? "More" : "Less";
+      } }, "More");
+      card.append(btn, more);
+    }
+    if (c.actions && c.actions.length) card.append(h("div", { class: "rcard-actions" }, ...c.actions.map((a, k) => {
+      const b = h("button", { class: `rcard-action${k === 0 ? " primary" : ""}${a.draft ? " draft" : ""}`, type: "button" }, a.label || a.send);
+      b.addEventListener("click", () => this.cardAction(deck, a, b));
+      return b;
+    })));
+    return card;
+  }
+
+  // A card's button: its message goes to Claude as yours, once (the deck's
+  // other buttons wait with it); a draft goes into the box, for you to finish.
+  async cardAction(deck, a, btn) {
+    const text = String(a.send || a.label || "");
+    if (a.draft) {
+      this.input.value = text;
+      this.typed();
+      this.grow();
+      this.input.focus();
+      this.input.setSelectionRange(text.length, text.length);
+      return;
+    }
+    if (!text.trim() || deck.classList.contains("sent")) return;
+    deck.classList.add("sent");
     btn.classList.add("chosen");
     try {
       await this.post("send", { text });
     } catch (e) {
-      box.classList.remove("sent");
+      deck.classList.remove("sent");
       btn.classList.remove("chosen");
       toast(e.message);
     }
@@ -1506,10 +1620,16 @@ class Chat {
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
     if (this.mode === "screen") {
-      // The screen shows what Claude is doing, in a line under it; its words are in the chat view.
+      // The cards view: what Claude is doing, in a line under the last turn; its words are in the turn's fold.
+      const stick = this.atBottom();
+      const working = this.working();
+      if (this.wasWorking && !working) this.idleSince = Date.now();
+      this.wasWorking = working;
       const now = this.activity(live);
       this.stageWork.hidden = !now;
       if (now) this.stageWork.querySelector(".now").textContent = now.text;
+      if (this.sturn) this.drawReply(this.sturn);
+      if (stick) this.toBottom();
       return;
     }
     const stick = this.atBottom();

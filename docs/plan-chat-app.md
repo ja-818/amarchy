@@ -175,31 +175,37 @@ terminals; after this, the wide layout is chat-first too.
   changed), *Details* (model, mode, context and plan usage, background
   tasks). Zen mode hides the sidebar, as today. Keyboard shortcuts stay.
 
-### The screen: the default view
+### The cards: the default view
 
-The chat's main view is **the screen**, and the conversation is the other
-view, one tap away (the **Screen | Chat** switch over the chat; the choice is
-kept on the device). Both are drawn from the same items.
+The chat's main view is **the cards**; the conversation is the other view,
+one tap away (the **Cards | Chat** switch over the chat; the choice is kept on
+the device). Both are drawn from the same items.
 
-- Claude ends each reply by drawing it with **`show_screen`**, a tool amarchy
-  serves (`amarchy screen-mcp`, an MCP server on stdio, in the broker's
-  argv with `--allowedTools`, so it never asks). Its input is a title and a
-  list of blocks (title, text, note, stats, steps, list, table, code, link,
-  choices): the vocabulary is `SCREEN_DEF` in `bin/amarchy`, drawn by
-  `screenBlock` in `app/chat.js`. Its prompt, `SCREEN_PROMPT`, asks for a short
-  text and the screen.
-- The screen shows the **newest turn's** screen, big, with a fold *What Claude
-  wrote* (its text and its steps); the turns before it sit below, each a fold.
-  A turn without a screen shows its text as the screen, so nothing is lost.
-- **Choices** send their text as your next message (once: the others wait).
-  Links open in a new tab, but only http and https links are made. Text is
-  escaped; a block the vocabulary doesn't have is left out.
-- Phone first: one column, stats two to a row, choices stacked. On a wide
-  screen, a readable column of about 760 px, stats in a row, larger type.
+- **Claude answers as it always does.** Its text is treated like its
+  thinking: it's there, in a fold, but it isn't the reply.
+- **The reply is a few cards**, made after each turn by one extra short
+  prompt: the Stop hook starts `amarchy cards <id>`, which gives a model
+  (`CARDS_MODEL`, Sonnet) what you said and what Claude said and did, and
+  asks for the reply a person reads (`CARDS_PROMPT`), as JSON
+  (`CARDS_SCHEMA`, checked by `--json-schema`, then `cards_clean`). Each
+  turn's cards are a file in the session's folder (`cards_dir`), named by the
+  record of your message; the session's stream sends them (`cards`).
+- **A card** has a label and a tone (done, to know, heads up, problem, needs
+  you), a title, a line or two, a few numbers or points, a link, a short
+  command, **More** for detail on a tap, and **buttons**: each sends its
+  message to Claude as yours (once), or, for one you need to finish ("Change
+  it…"), puts its start in the box.
+- **The turns read oldest first**, as a conversation: your message, *Claude's
+  work* (a closed fold with its words and steps, as the conversation shows
+  them), and the deck. The cards sit side by side, one on show: swipe them
+  on a phone; arrows, dots and ← → on a computer.
+- While Claude works, the working line; when it's done, *Summing it up…*
+  until the cards come (a few seconds). A turn without cards (from before
+  them, or they failed) shows Claude's last words, a few lines of them, and
+  **Sum it up in cards** (or *Try again*).
 - Questions, permissions and plans are still the cards above the composer.
-- Not yet: the screen doesn't stream while Claude draws it (it appears when the
-  call is complete); a turn that ends without a screen isn't re-asked by a Stop
-  hook (its text shows as the screen instead).
+- Phone first: one column, a card at a time with the next peeking in,
+  buttons stacked. On a wide screen, a readable column of about 760 px.
 
 ### The conversation
 
