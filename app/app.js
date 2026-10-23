@@ -421,6 +421,7 @@ function openList() {
     wearLook(app.view.look);
     badge();
     refresh();
+    shareCheck();
   });
   es.addEventListener("open", () => { if (!app.online) { app.online = true; refresh(); } });
   es.addEventListener("error", () => {
@@ -1501,7 +1502,9 @@ function swipeToClose(back, card) {
 // for another), and what the new session's Claude should do.
 // The new chat: "What do you want to do?", typed or dictated, and under it
 // the project it starts in: the one you pick, else one that what you wrote
-// names ("…in jaken…"), else the last one you used. Under the list on the
+// names ("…in jaken…"), else the last one you used; and the model it starts
+// on, the host's for every new chat (Opus until you pick another here, for
+// this chat and the ones after, on every device). Under the list on the
 // phone; on a computer, the middle of the window (wide: desk.js's
 // newSession, Ctrl+Alt+N), where Enter starts it. started(id): where to go
 // once it has started (the phone opens it).
@@ -1513,6 +1516,9 @@ function newChat({ wide = false, started = null } = {}) {
   const pick = h("button", { class: "pick", type: "button", "aria-label": "Project: where Claude works on it", "aria-haspopup": "menu",
                              onclick: () => pickProject() }, h("span", { class: "in" }, "in"), name, glyph("down"));
   const why = h("span", { class: "why" }, "named in what you wrote");
+  const modelLabel = h("b", { class: "name" });
+  const modelPick = h("button", { class: "pick model", type: "button", "aria-label": "Model: which Claude answers", "aria-haspopup": "menu",
+                                  onclick: () => pickModel() }, h("span", { class: "in" }, "on"), modelLabel, glyph("down"));
   const field = h("textarea", { rows: wide ? 3 : 1, placeholder: "What do you want to do?", enterkeyhint: wide ? "go" : "enter",
                                 "aria-label": "What do you want to do?",
                                 oninput: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
@@ -1534,7 +1540,7 @@ function newChat({ wide = false, started = null } = {}) {
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); } });
   const box = h("div", { class: "prompt new" }, field, micBtn, wide ? null : send);
-  const under = h("div", { class: "new-under" }, pick, why, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
+  const under = h("div", { class: "new-under" }, pick, why, modelPick, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
     wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, box, under);
   const projects = () => (app.view && app.view.projects) || [];
@@ -1572,7 +1578,46 @@ function newChat({ wide = false, started = null } = {}) {
     if (ps.length && !added && !ps.some((p) => p.name === repo)) { repo = ps[0].name; guessed = false; }
     name.textContent = projectName(repo);
     why.hidden = !guessed;
+    modelLabel.textContent = modelName(model(), models()) || model();
+    modelPick.title = "Which Claude answers: every new chat starts on it, until you pick another";
     buttons();
+  };
+  // The models Claude said there are (the newest Claude's), else the short list.
+  const models = () => (app.view && app.view.models && app.view.models.length ? app.view.models : FALLBACK_MODELS);
+  const model = () => (app.view && app.view.new_model) || "opus";
+  const setModel = async (m) => {
+    const was = model();
+    if (app.view) app.view.new_model = m.value;
+    update();
+    field.focus({ preventScroll: true });
+    if (m.value === was) return;
+    try {
+      await api("/api/new/model", { model: m.value });
+      toast(`New chats start on ${m.displayName || m.value}`);
+    } catch (e) {
+      if (app.view) app.view.new_model = was;
+      update();
+      toast(e.message);
+    }
+  };
+  // The main ones (opus, sonnet...: each its latest), the dated versions under "Other versions…".
+  const pickModel = () => {
+    const list = models(), on = modelOf(model(), list);
+    const main = list.filter((x) => !/^claude-/.test(x.value));
+    const others = list.filter((x) => !main.includes(x));
+    const row = (x) => ({ label: x.displayName || x.value, detail: x.description || "", icon: on && on.value === x.value ? "check" : "",
+                          act: () => setModel(x) });
+    if (app.desk) return picker({ title: "Which Claude answers? New chats start on it", placeholder: "Model", items: [
+      ...(main.length ? main : list).map(row),
+      ...(main.length && others.length ? [{ label: "Other versions…", always: true, group: () => ({ title: "Other versions", items: others.map(row) }) }] : [])] });
+    const item = (x) => h("button", { class: `menu-item${on && on.value === x.value ? " on" : ""}`, onclick: () => { closeSheets(); setModel(x); } },
+      h("span", { class: "label" }, x.displayName || x.value, x.description ? h("small", {}, x.description) : null),
+      on && on.value === x.value ? glyph("check", "val") : null);
+    const rest = h("div", { class: "menu", hidden: true }, ...others.map(item));
+    sheet(sheetHead("Model", "Which Claude answers: new chats start on it"),
+      h("div", { class: "menu" }, ...(main.length ? main : list).map(item)),
+      main.length && others.length ? h("button", { class: "control wide", onclick: (e) => { rest.hidden = false; e.currentTarget.remove(); } }, "Other versions…") : null,
+      main.length && others.length ? rest : null);
   };
   const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
   const pickProject = () => {
@@ -1609,7 +1654,7 @@ function newChat({ wide = false, started = null } = {}) {
     send.disabled = true;
     el.classList.add("busy");
     try {
-      const { id } = await api("/api/new", { repo, prompt: field.value });
+      const { id } = await api("/api/new", { repo, prompt: field.value, model: model() });
       reset();
       field.blur();
       if (started) started(id);
@@ -1622,6 +1667,130 @@ function newChat({ wide = false, started = null } = {}) {
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
   return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field };
+}
+
+// ---- what you shared into amarchy (bin/amarchy's "sharing into amarchy")
+//
+// A screenshot shared from the phone's share sheet (an iPhone's Shortcut,
+// Android's own) waits on the host until a chat takes it, and shows here on
+// every screen of yours: "Send" on a chat sends it as it is; the chat itself
+// opens with it in the box (Chat.takeShare), to say more first. Closed
+// without either, it's let go.
+
+let shareInbox = null;      // {id: the chat's, files, text}: for that chat's box (Chat.takeShare)
+let shareShown = null;      // the share whose sheet this page showed
+
+function shareCheck() {
+  const s = app.view && app.view.share;
+  const open = document.querySelector(".sheet-back.share");
+  if (open && (!s || open.shareId !== s.id)) {       // taken on another screen, or another came
+    open.taken = true;
+    if (open === Array.from(document.querySelectorAll(".sheet-back")).pop()) closeSheet();
+    else open.remove();
+  }
+  if (s && s.id !== shareShown && app.view.sessions) shareSheet(s);
+}
+
+function shareSheet(s) {
+  shareShown = s.id;
+  const pics = Array.from({ length: s.pictures }, (_, i) => `/api/share/${i}?id=${encodeURIComponent(s.id)}`);
+  const chats = app.view.sessions.filter((x) => !x.setup);
+  let busy = false;
+  const take = async (x, send) => {
+    if (busy) return;
+    busy = true;
+    back.classList.add("busy");
+    try {
+      const files = await Promise.all(pics.map(async (src, i) => {
+        const r = await fetch(src);
+        if (!r.ok) throw new Error("It's gone: share it again");
+        const b = await r.blob();
+        return new File([b], `shared-${i + 1}.${(b.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: b.type });
+      }));
+      if (send) {
+        const images = [];
+        for (const f of files) {
+          const img = await claudeImage(f).catch(() => { throw new Error("This browser can't read that picture: open the chat on the phone"); });
+          images.push({ type: img.type, data: await base64Of(img) });
+        }
+        const r = await api(`/api/session/${encodeURIComponent(x.id)}/send`, { text: s.text || "", ...(images.length ? { images } : {}) });
+        toast(r.waking ? "Sent: waking Claude with it…" : `Sent to ${x.task || "the chat"}`);
+      } else {
+        shareInbox = { id: x.id, files, text: s.text || "" };
+      }
+      back.taken = true;
+      api("/api/share/clear", { id: s.id }).catch(() => {});
+      closeSheets();
+      go(`#/s/${encodeURIComponent(x.id)}`);
+      // Already open: it takes it now (else as it opens).
+      const chat = app.desk ? desk.chat : app.session && app.session.chat;
+      if (!send && chat && chat.id === x.id) chat.takeShare();
+    } catch (e) {
+      toast(e.message);
+    }
+    busy = false;
+    back.classList.remove("busy");
+  };
+  const row = (x) => h("div", { class: "share-row" },
+    h("button", { class: "share-open", title: "Open it with this in the box, to say more", onclick: () => take(x, false) },
+      taskText(x.task || "New chat", x.task ? "" : "untitled"),
+      h("small", {}, [projectName(x.repo), statusLine(x)].filter(Boolean).join(" · "))),
+    h("button", { class: "control share-send", onclick: () => take(x, true) }, "Send"));
+  const n = s.pictures;
+  const back = sheet({ key: "share" },
+    sheetHead(n > 1 ? `Send these ${n} pictures to a chat` : n ? "Send this picture to a chat" : "Send this to a chat",
+              "Send it, or tap a chat to say more"),
+    h("div", { class: "share-preview" }, ...pics.map((src) => h("img", { src, alt: "What you shared" })),
+      s.text ? h("p", { class: "share-text" }, s.text) : null),
+    chats.length ? h("div", { class: "share-list" }, ...chats.map(row))
+      : h("p", { class: "note" }, "No chats yet: start one, then share it again."),
+    h("button", { class: "control wide", onclick: () => closeSheet() }, "Don't send it"));
+  back.classList.add("share");
+  back.shareId = s.id;
+  // Gone without a chat taking it (closed, swiped away): let go on the host.
+  new MutationObserver((_, obs) => {
+    if (back.isConnected) return;
+    obs.disconnect();
+    if (!back.taken) api("/api/share/clear", { id: s.id }).catch(() => {});
+  }).observe(document.body, { childList: true });
+}
+
+// Settings → Share to Amarchy: how to put it in the phone's share sheet.
+function shareSettings() {
+  return [h("div", { class: "section" }, "Share to Amarchy"),
+    h("p", {}, "A screenshot or photo, from the share sheet to a chat: sent as it is, or with more to say."),
+    h("button", { class: "control wide", onclick: () => shareSetup() }, "Put Amarchy in the share sheet…")];
+}
+
+async function shareSetup() {
+  const url = h("code", { class: "share-url" }, "…");
+  const copy = h("button", { class: "control wide accent", disabled: true }, "Copy the address");
+  const step = (...kids) => h("li", {}, ...kids);
+  sheet(sheetHead("Share to Amarchy", "In the share sheet, like any app"),
+    h("div", { class: "section" }, "iPhone, iPad and Mac: a Shortcut"),
+    h("p", {}, "A web app can't be in Apple's share sheet itself; a Shortcut can, and hands what you share to Amarchy."),
+    h("ol", { class: "share-steps" },
+      step("Copy this address (it has your share key: keep it to yourself):", url, copy),
+      step("In the Shortcuts app, tap +. Name it Amarchy (tap its name at the top)."),
+      step("Add the action Get Contents of URL, and paste the address as its URL. Tap the arrow by it: Method POST, Request Body File, and for the file, Shortcut Input."),
+      step("Tap ⓘ at the bottom (or the name's menu, Details): turn on Show in Share Sheet. At the top it then says Receive: set it to Images (and Screenshots)."),
+      step("Done. Share a screenshot (Share, then Amarchy), open Amarchy: pick the chat.")),
+    h("p", {}, "Several pictures at once: put the action in a Repeat with Each (of Shortcut Input), with Repeat Item as the file. Your Mac's share menu has the Shortcut too, through iCloud."),
+    h("div", { class: "section" }, "Android"),
+    h("p", {}, "Add Amarchy to the Home screen from Chrome (installed again, if it was before): it's in the share sheet itself."));
+  try {
+    const r = await fetch("/api/share/key");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "");
+    url.textContent = d.url;
+    copy.disabled = false;
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(d.url); toast("Copied: paste it in the Shortcut"); }
+      catch (e) { toast("Couldn't copy it: hold the address to copy it"); }
+    };
+  } catch (e) {
+    url.textContent = "Couldn't get it: try again in a moment";
+  }
 }
 
 // ---- notifications
@@ -1780,6 +1949,7 @@ async function openSettings() {
     kids.push(h("div", { class: "section" }, "Replies"), chatViewSeg(() => draw()),
       h("p", {}, chatView() === "screen" ? "Brief: each chat's goal, where it stands, what changed and what waits on you, kept up to date by Claude; its own words a tap away."
                                          : "Chat: Claude's replies as it writes them, the whole conversation."));
+    kids.push(...shareSettings());
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
     kids.push(...engineSettings());
@@ -2118,7 +2288,9 @@ async function start() {
   // Started by tapping a notification about a card (sw.js): that card, once
   // the session's chat is up; the address without it, for a reload.
   const asked = new URLSearchParams(location.search).get("ask");
-  if (asked) history.replaceState(null, "", location.pathname + location.hash);
+  // Android's share sheet brought something the host didn't take (bin/amarchy's share_in).
+  const shareError = new URLSearchParams(location.search).get("share-error");
+  if (asked || shareError) history.replaceState(null, "", location.pathname + location.hash);
   // The page after an update: the view it had (on a phone's home screen the
   // address never shows it, so it's kept), and the build it is.
   takeKept();
@@ -2127,6 +2299,8 @@ async function start() {
   if (app.desk) deskStart();
   else route();
   if (asked) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: asked } }));
+  if (shareError) toast(`Couldn't share that: ${shareError}`);
+  shareCheck();     // something you shared, waiting for a chat
   openList();
   if (app.key) pushRefresh();
 }

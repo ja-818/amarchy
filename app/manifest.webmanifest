@@ -14,5 +14,10 @@
     {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
     {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
     {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}
-  ]
+  ],
+  "share_target": {
+    "action": "/api/share", "method": "POST", "enctype": "multipart/form-data",
+    "params": {"title": "title", "text": "text", "url": "url",
+               "files": [{"name": "images", "accept": ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic"]}]}
+  }
 }

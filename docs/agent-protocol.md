@@ -353,6 +353,10 @@ phase B2) uses the live state directly.
 | `POST .../keys` | for a chat session: a card's option (`{keys, dialog}`) does what it says; `Escape` says no to what's asked and stops, or just stops; other keys go to the pane (Enter restarts a Claude that exited) |
 | `POST /api/clip` with `paste` | for a chat session, the image is attached to the next message (what Ctrl+V does in the TUI) |
 | `GET .../agent` | `agent.json` (commands, models, account) and the live state, for the `/` menu and the pickers |
+| `POST /api/new` with `model` | the new chat's model (`amarchy new --model`): kept in its `chosen.json` before its Claude starts, so `restore` sets it before the first message (the classic terminal's first start: `--model`). Without one, the default: `new_model` |
+| `POST /api/new/model` | `{model}`: the model every new chat starts on from now on (`new-model` in the state; Opus until set). `/api/state` has it as `new_model`, with `models`: the newest `agent.json`'s, for the new chat's picker |
+| `POST /api/share` | something shared into amarchy (see bin/amarchy's "sharing into amarchy"): a picture as the body (an iPhone's Shortcut, at the address with `?key=`, the share key: it sends no Origin) or a form (Android's share sheet, the manifest's `share_target`; Sec-Fetch-Site `none` or `same-origin`). Refused from a page elsewhere. `/api/state`'s `share`: `{id, pictures, text, at}` until a chat takes it |
+| `GET /api/share/<n>?id=`, `GET /api/share/key`, `POST /api/share/clear` | a picture of the share; the Shortcut's address (Settings); `{id}`: taken, or let go |
 
 Notifications say what a chat session asks, from `pending` (`ask_words`):
 "Asks: Which theme should be the default? (and 2 more questions)", "Wants to

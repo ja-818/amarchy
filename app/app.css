@@ -564,6 +564,31 @@ th { font-weight: 700; }
 .new-under .pick .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link); font-weight: 700; }
 .new-under .pick .glyph { font-size: 14px; }
 .new-under .why { font-style: italic; }
+.new-under .pick.model { max-width: 50%; }
+.menu-item .label small { display: block; font-size: var(--caption); color: var(--text-muted); font-weight: 400; }
+.menu-item .label:has(small) { flex-direction: column; align-items: flex-start; gap: 1px; }
+
+/* What you shared into amarchy (shareSheet): the pictures, then each chat,
+   tapped to open it with them in the box, or Send to send them as they are. */
+.sheet-back.share.busy .sheet { opacity: 0.6; pointer-events: none; }
+.share-preview { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; margin: 4px 0 12px; }
+.share-preview img {
+  flex: none; max-height: 180px; max-width: 70%; object-fit: contain;
+  border-radius: var(--radius-control); border: 1px solid var(--border);
+}
+.share-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); max-height: 6em; overflow: auto; }
+.share-list { display: flex; flex-direction: column; gap: 2px; }
+.share-row { display: flex; align-items: center; gap: 8px; }
+.share-open {
+  flex: 1; min-width: 0; min-height: 52px; padding: 6px 8px; text-align: left;
+  border-radius: var(--radius-control); display: flex; flex-direction: column; justify-content: center; gap: 2px;
+}
+.share-open:hover, .share-open:active { background: var(--control-hover); }
+.share-open small { font-size: var(--caption); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-row .share-send { flex: none; min-height: 40px; padding: 4px 16px; font-weight: 700; }
+.share-steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 8px; }
+.share-url { display: block; margin: 6px 0; padding: 8px; border-radius: var(--radius-control); background: var(--control-hover);
+             font-size: var(--caption); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
 /* On a computer: the middle of the window, a heading over a bigger box. */
 .start-chat.wide { width: 100%; max-width: var(--chat-column, 760px); margin: 0 auto; gap: 10px; }
 .new-title { margin: 0 0 6px; font-size: var(--display); line-height: 1.2; font-weight: 700; color: var(--text); text-align: center; }

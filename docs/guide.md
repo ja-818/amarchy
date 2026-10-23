@@ -205,9 +205,21 @@ finished, and its priority on the right. Your assistant's card stays on top (see
   look, the sleep time, what tells you, dictation, secrets, the terminals and the
   links. **New project…** is there too, and the project picker under the list.
 - **The box under the list**, **What do you want to do?**, starts a new chat: say
-  it, typed or dictated with its mic, and send. With no project yet, the app opens
-  on a welcome: what it does in a sentence, and **Add a project from GitHub** or
-  **Start an empty project**.
+  it, typed or dictated with its mic, and send. Under it, the project it starts in
+  (**in amarchy ▾**) and the model (**on Opus 5.5 ▾**): the model you pick there
+  stays the one every new chat starts on, on every phone and browser of yours,
+  until you pick another (Opus until you do; a chat's own model is still its
+  composer's to change). With no project yet, the app opens on a welcome: what it
+  does in a sentence, and **Add a project from GitHub** or **Start an empty
+  project**.
+- **Share to Amarchy**: a screenshot or photo, from the phone's share sheet to a
+  chat. Open Amarchy and **Send it to a chat** is waiting, on every screen of
+  yours: **Send** by a chat sends it as it is; a chat tapped opens with it in the
+  box, to say more first; closed, it's let go. On an iPhone it goes through a
+  Shortcut (a web app can't be in Apple's share sheet itself): **Settings → Share
+  to Amarchy** has its address (with your share key in it) and the steps (a
+  Shortcut with one action, Get Contents of URL, shown in the share sheet). On
+  Android, the installed app is in the share sheet itself.
 - **Notifications** (in Settings, iOS 16.4 or newer; iPhones only notify home screen
   apps) say when a chat needs you or is done, at the same moments as a computer's
   chime: "Asks: …", "Wants to run a command: Install the packages", "Needs your
@@ -235,7 +247,8 @@ else installed.
 
 - **The list** shows each chat as the phone does. Over it, the amarchy menu and
   **New chat**: **What do you want to do?** in the middle, a big box with the
-  project under it and the mic. A right click on a chat opens its menu.
+  project and the model under it (the model stays the default of every new chat,
+  as on the phone) and the mic. A right click on a chat opens its menu.
 - **Over the chat**: the chat's name (click: rename) and state, and, while the side
   panel is closed, its tabs as buttons; `⋯` is the chat's menu.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you drag
@@ -765,6 +778,8 @@ amarchy add --new <name> [--github]   start an empty project (and a private GitH
 Sessions (chats):
 amarchy new <project> [name]          create a session (a name like wobbly-bakunin if omitted); prints its id
 amarchy new <project> [name] --prompt <text|->   the same, with the first thing its Claude is asked (- reads stdin)
+amarchy new <project> [name] --model <model>     on that model (opus, sonnet, haiku, a model id) instead of the
+                                      new chat's default (the app's new chat picks it; Opus until you do)
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]   a message for its Claude, once Claude is free
 amarchy list [--compact]              sessions as JSON, in list order (task, age, agent, engine...)
 amarchy close [id] [--force]          close a session (the current one if no id); --force discards uncommitted changes

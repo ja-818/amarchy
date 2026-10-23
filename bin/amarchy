@@ -28,6 +28,9 @@ Sessions:
   amarchy new <project> [name]          create a session (name like wobbly-bakunin if omitted); prints its id
   amarchy new <project> [name] --prompt <text|->
                                         the same, with the first thing its Claude is asked (- reads it from stdin)
+  amarchy new <project> [name] --model <model>
+                                        on that model (opus, sonnet, haiku, a model id) instead of the new
+                                        chat's default (the app's new chat picks it; Opus until you do)
   amarchy send <id> <text|->            a message for a session's Claude, as if typed and sent (- reads it
                                         from stdin), once Claude is free: after the turn under way, not
                                         over a question it asks; a session asleep or whose Claude exited
@@ -1448,6 +1451,54 @@ def cmd_shell(args):
         os.execve("/bin/sh", ["sh"], env)
 
 
+# ---- the model a new chat starts on
+#
+# The new chat's model pill (the app) picks it, and it stays the default of
+# every new chat after (on every device: it's the host's) until you pick
+# another. amarchy new --model picks one for a single chat. Claude Code's own
+# default (its "default", Haiku on some accounts) only if you pick that.
+
+NEW_MODEL_FILE = STATE / "new-model"    # an alias (opus, sonnet...) or a model id
+NEW_MODEL = "opus"                      # until you pick one
+MODEL_RE = r"[\w.:\[\]-]{1,100}"        # a model as Claude Code takes it (set_model, --model)
+
+
+def new_model():
+    try:
+        m = NEW_MODEL_FILE.read_text().strip()
+    except OSError:
+        m = ""
+    return m if re.fullmatch(MODEL_RE, m) else NEW_MODEL
+
+
+_known_models = [None, []]      # (the agent.json read, its mtime), its models
+
+
+def known_models():
+    """The models the newest Claude said there are (its agent.json, from
+    initialize), for the new chat's pill before it has a Claude of its own;
+    [] before any Claude said (the app has a short list of its own then)."""
+    try:
+        f = max(CLAUDE_STATE.glob("*/agent.json"), key=lambda f: f.stat().st_mtime, default=None)
+        key = (f, f.stat().st_mtime) if f else None
+    except OSError:
+        return _known_models[1]
+    if key != _known_models[0]:
+        try:
+            told = json.loads(f.read_text()) if f else {}
+        except (OSError, ValueError):
+            told = {}
+        _known_models[:] = [key, models_of(told)]
+    return _known_models[1]
+
+
+def models_of(told):
+    """The models in what a Claude said (agent.json), as the app has them."""
+    told = told if isinstance(told, dict) else {}
+    return [{k: m.get(k) for k in ("value", "resolvedModel", "displayName", "description", "supportsAutoMode")}
+            for m in told.get("models") or [] if isinstance(m, dict) and m.get("value")]
+
+
 # ---- Show terminals: whether the app shows the sessions' terminals at all
 
 SHOW_TERMINALS = STATE / "show-terminals"   # "on" or "off"; off unless set (an install from before is on)
@@ -1580,11 +1631,11 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name, prompt=None):
+def create(repo, name, prompt=None, model=None):
     """Start a session: its row in the list right away, and its Claude in
     tmux, which makes the worktree first (setup_session) and is then Claude,
-    asked prompt first if given. Returns the session id, or None, having
-    said why not."""
+    asked prompt first if given, on model (else the new chat's, new_model).
+    Returns the session id, or None, having said why not."""
     repo_dir = WORK / repo
     name = slug(name)
     if not (repo_dir / ".git").exists():
@@ -1614,6 +1665,9 @@ def create(repo, name, prompt=None):
     if prompt is not None:
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
+    # Its Claude starts on it (Agent.restore, before the first message; the
+    # classic terminal's first start: claude_argv) and wakes in it.
+    agent_remember(sid, model=model or new_model())
     (STATUS / sid).write_text("working")
     host_start(s)       # its tmux sets it up and becomes Claude
     return sid
@@ -1778,7 +1832,10 @@ def claude_argv(s, prefill="", prompt=None):
     track), with prefill already typed in the prompt, or asked prompt first
     (after --, so it may start with a dash)."""
     first = ["--", prompt] if prompt is not None else []
-    return ["claude", *CLAUDE_ARGS, *claude_resume(s), *(["--prefill", prefill] if prefill and prompt is None else []),
+    # A new session's first start: on the model it was made with (create).
+    model = chosen_model(s["id"]) if prompt is not None else None
+    return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []), *claude_resume(s),
+            *(["--prefill", prefill] if prefill and prompt is None else []),
             *brief_mcp_args(), "--settings", hook_settings(s["id"]), *first]
 
 
@@ -1846,11 +1903,12 @@ def cmd_claude(sid):
 
 
 def cmd_new(args):
-    """amarchy new <project> [name] [--prompt <text>|-]: the new session's id
-    on stdout. --prompt is the first thing its Claude is asked (- reads it
-    from stdin). --no-jump, from when a desktop showed the new session, is
-    still taken, and changes nothing: nothing opens anywhere."""
-    prompt, rest = None, []
+    """amarchy new <project> [name] [--prompt <text>|-] [--model <model>]: the
+    new session's id on stdout. --prompt is the first thing its Claude is
+    asked (- reads it from stdin); --model the model it's on (else the new
+    chat's: new_model). --no-jump, from when a desktop showed the new
+    session, is still taken, and changes nothing: nothing opens anywhere."""
+    prompt, model, rest = None, None, []
     it = iter(args)
     for a in it:
         if a == "--no-jump":
@@ -1861,8 +1919,12 @@ def cmd_new(args):
                 return fail("--prompt needs the text, or - to read it from stdin")
         elif a.startswith("--prompt="):
             prompt = a.split("=", 1)[1]
+        elif a == "--model" or a.startswith("--model="):
+            model = a.split("=", 1)[1] if "=" in a else next(it, None)
+            if not model or not re.fullmatch(MODEL_RE, model):
+                return fail("--model needs a model: opus, sonnet, haiku, or a model id (claude-opus-5-5)")
         elif a.startswith("--"):
-            return fail(f"amarchy new doesn't know {a} (it takes --prompt)")
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt and --model)")
         else:
             rest.append(a)
     if not rest or len(rest) > 2:
@@ -1873,7 +1935,7 @@ def cmd_new(args):
     if prompt is not None and not prompt.strip():
         return fail("--prompt is empty")
     repo = rest[0]
-    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt)
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model)
     if not sid:
         return 1
     print(sid)
@@ -6703,8 +6765,7 @@ def composer_info(s):
             mode = chosen.get("mode") or mode if isinstance(chosen, dict) else mode
     else:
         model, mode = transcript_settings(s)
-    models = [{k: m.get(k) for k in ("value", "resolvedModel", "displayName", "description", "supportsAutoMode")}
-              for m in told.get("models") or [] if isinstance(m, dict) and m.get("value")]
+    models = models_of(told)
     return {"engine": "chat" if chat else "terminal", "commands": commands, "models": models,
             "model": model, "mode": mode, "up": agent_up(sid) if chat else None}
 
@@ -7494,6 +7555,152 @@ def cmd_dictation(args):
     return 0
 
 
+# ---- sharing into amarchy: a screenshot from the phone's share sheet, to a chat
+#
+# What you share waits here (SHARE) until a chat takes it: the app shows it
+# on every screen ("Send it to a chat", app.js's shareSheet), where you send
+# it to a chat as it is, or open a chat with it in the box to say more. It
+# comes in at POST /api/share (Handler.share_in):
+#
+# - from an iPhone, through a Shortcut in its share sheet ("Amarchy"): a web
+#   app can't be in an iPhone's share sheet itself (WebKit has no Web Share
+#   Target). The Shortcut posts the picture as it is, at an address with the
+#   share key in it (Settings shows it): a Shortcut sends no Origin, and the
+#   key is what says it's yours and not a page elsewhere;
+# - from Android's share sheet, the installed app's own (the manifest's
+#   share_target): a form, from the app's own origin.
+#
+# Pictures shared moments apart are one share (a Shortcut posts several one
+# by one); one nobody takes goes after a day.
+
+SHARE = STATE / "share"             # meta.json and the pictures (0.png, 1.jpg...)
+SHARE_KEY = APP / "share-key"       # in the Shortcut's address
+SHARE_MAX = 20                      # pictures in one share (what one message takes)
+SHARE_BODY_MAX = 60_000_000         # bytes of one POST /api/share
+SHARE_JOIN = 90                     # seconds: what's shared within this of the last share joins it
+SHARE_KEEP = 24 * 3600              # seconds a share nobody took waits
+SHARE_LOCK = threading.Lock()
+
+
+def share_key():
+    """The key in the Shortcut's address (made the first time it's asked for)."""
+    try:
+        key = SHARE_KEY.read_text().strip()
+    except OSError:
+        key = ""
+    if len(key) < 20:
+        key = base64.urlsafe_b64encode(os.urandom(18)).decode()
+        write_file(SHARE_KEY, key + "\n")
+        os.chmod(SHARE_KEY, 0o600)
+    return key
+
+
+def share_type(data):
+    """A picture's type and file extension, read off its first bytes, or None."""
+    for magic, kind, ext in ((b"\x89PNG\r\n\x1a\n", "image/png", "png"), (b"\xff\xd8\xff", "image/jpeg", "jpg"),
+                             (b"GIF87a", "image/gif", "gif"), (b"GIF89a", "image/gif", "gif")):
+        if data.startswith(magic):
+            return kind, ext
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    if data[4:8] == b"ftyp" and data[8:12] in (b"heic", b"heix", b"heim", b"heis", b"hevc", b"mif1", b"msf1"):
+        return "image/heic", "heic"     # a photo from an iPhone's library: the phone's browser reads it
+    return None
+
+
+def share_meta():
+    try:
+        meta = json.loads((SHARE / "meta.json").read_text())
+    except (OSError, ValueError):
+        return None
+    ok = isinstance(meta, dict) and isinstance(meta.get("id"), str) and isinstance(meta.get("files"), list)
+    return meta if ok else None
+
+
+def share_state():
+    """What's shared and no chat took yet, for the app: {id, pictures, text,
+    at}, or None. One older than SHARE_KEEP goes now."""
+    meta = share_meta()
+    if not meta:
+        return None
+    if time.time() - (meta.get("last") or 0) > SHARE_KEEP:
+        share_clear(meta["id"])
+        return None
+    return {"id": meta["id"], "pictures": len(meta["files"]), "text": str(meta.get("text") or ""), "at": meta.get("at")}
+
+
+def share_add(images, text=""):
+    """What was shared (images: [bytes], text) to what waits for a chat: with
+    the share before it if that came moments ago, else as a new one. An
+    error in words, or None."""
+    kinds = [share_type(d) for d in images]
+    if any(k is None for k in kinds):
+        return "only pictures (PNG, JPEG, GIF, WebP or HEIC)"
+    text = text.strip()
+    if not images and not text:
+        return "nothing came: share a picture or some text"
+    with SHARE_LOCK:
+        now, meta = time.time(), share_meta()
+        if not meta or now - (meta.get("last") or 0) > SHARE_JOIN:
+            shutil.rmtree(SHARE, ignore_errors=True)
+            meta = {"id": os.urandom(6).hex(), "at": now, "files": [], "text": ""}
+        if len(meta["files"]) + len(images) > SHARE_MAX:
+            return f"{SHARE_MAX} pictures at most at once"
+        for data, (kind, ext) in zip(images, kinds):
+            name = f"{len(meta['files'])}.{ext}"
+            write_file(SHARE / name, data)
+            meta["files"].append({"name": name, "type": kind})
+        if text and text not in meta["text"]:
+            meta["text"] = f"{meta['text']}\n\n{text}".strip()
+        meta["last"] = now
+        write_file(SHARE / "meta.json", json.dumps(meta))
+    return None
+
+
+def share_picture(n, sid=None):
+    """The nth picture of the share (sid: that share's, not one after it):
+    (type, bytes), or None."""
+    meta = share_meta()
+    if not meta or sid and meta["id"] != sid or not 0 <= n < len(meta["files"]):
+        return None
+    f = meta["files"][n]
+    try:
+        return f["type"], (SHARE / Path(f["name"]).name).read_bytes()
+    except (OSError, KeyError, TypeError):
+        return None
+
+
+def share_clear(sid):
+    """A chat took the share (or you let it go): it goes, unless another came since."""
+    with SHARE_LOCK:
+        meta = share_meta()
+        if meta and meta["id"] == sid:
+            shutil.rmtree(SHARE, ignore_errors=True)
+
+
+def share_parse(ctype, body):
+    """What a POST /api/share brings: ([picture bytes], text). A form's
+    (Android's share sheet: files, title, text, url), or the body as it is: a
+    picture (the Shortcut's), or text."""
+    images, words = [], []
+    if ctype.lower().startswith("multipart/form-data"):
+        from email.parser import BytesParser
+        from email.policy import HTTP
+        msg = BytesParser(policy=HTTP).parsebytes(b"Content-Type: " + ctype.encode("latin-1") + b"\r\n\r\n" + body)
+        for part in msg.iter_parts() if msg.is_multipart() else []:
+            data = part.get_payload(decode=True) or b""
+            if part.get_filename() is not None or share_type(data):
+                if data:        # (an empty file field: nothing picked)
+                    images.append(data)
+            elif part.get_param("name", header="content-disposition") in ("title", "text", "url"):
+                words.append(data.decode("utf-8", "replace").strip())
+    elif ctype.lower().startswith("text/") and not share_type(body):
+        words.append(body.decode("utf-8", "replace").strip())
+    elif body:
+        images.append(body)     # not a picture: share_add says so
+    return images, "\n".join(w for w in words if w)
+
+
 # ---- the app in a browser on your computer (its wide layout, desk.js)
 #
 # On a wide screen the app is the list, and beside it the session's real
@@ -7709,6 +7916,7 @@ def app_watch(st):
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
+                    "new_model": new_model(), "models": known_models(), "share": share_state(),
                     "engine_problem": protocol_problem()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
@@ -8217,6 +8425,17 @@ def app_handler(st, users, address):
                                                                    "so its repos can't be listed"})
                 return self.send(200, {"repos": [{"name": x.get("name"), "private": bool(x.get("private")),
                                                   "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
+            if path == "/api/share/key":    # the Shortcut's address, for Settings (see "sharing into amarchy")
+                return self.send(200, {"url": f"https://{self.headers.get('Host', '')}/api/share?key={share_key()}"})
+            m = re.fullmatch(r"/api/share/(\d{1,2})", path)
+            if m:       # a picture of what you shared: ?id= says which share's
+                found = share_picture(int(m.group(1)), (args.get("id") or [None])[0])
+                if not found:
+                    return self.error(404, "that share is gone")
+                self.head(200, found[0], [("Content-Length", str(len(found[1])))], cache="private, no-cache")
+                self.end_headers()
+                self.wfile.write(found[1])
+                return
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
             # The wide layout's side panel (desk.js, B3): what a session changed, and its details.
@@ -8455,6 +8674,8 @@ def app_handler(st, users, address):
                 st.looking(s["id"], False)
 
         def do_POST(self):
+            if self.path.partition("?")[0] == "/api/share":     # from the phone's share sheet: not a page's
+                return self.share_in()
             if not self.allowed(write=True):
                 return
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper") \
@@ -8482,6 +8703,17 @@ def app_handler(st, users, address):
                 return self.dictate_fetch()
             if self.path == "/api/new":
                 return self.new(data)
+            if self.path == "/api/share/clear":   # a chat took what you shared, or you let it go: {id}
+                if not isinstance(data.get("id"), str):
+                    return self.error(400, "which share (id)")
+                share_clear(data["id"])
+                return self.send(200, {})
+            if self.path == "/api/new/model":     # the model every new chat starts on, from now on
+                model = data.get("model")
+                if not isinstance(model, str) or not re.fullmatch(MODEL_RE, model):
+                    return self.error(400, "which model")
+                write_file(NEW_MODEL_FILE, model + "\n")
+                return self.send(200, {"new_model": new_model()})
             if self.path == "/api/add":
                 return self.add(data)
             if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
@@ -8650,7 +8882,7 @@ def app_handler(st, users, address):
                 # Asleep: it wakes in it.
                 value = data.get(what)
                 if what == "mode" and value not in AGENT_MODES or what == "model" and not (
-                        isinstance(value, str) and re.fullmatch(r"[\w.:\[\]-]{1,100}", value)):
+                        isinstance(value, str) and re.fullmatch(MODEL_RE, value)):
                     return self.error(400, f"which {what}")
                 agent_remember(sid, **{what: value})
                 return self.send(200, {"ok": True, "later": True})
@@ -8676,7 +8908,7 @@ def app_handler(st, users, address):
                 request = {"op": "unqueue", "uuid": data["uuid"]}
             elif what == "model":
                 model = data.get("model")
-                if not isinstance(model, str) or not re.fullmatch(r"[\w.:\[\]-]{1,100}", model):
+                if not isinstance(model, str) or not re.fullmatch(MODEL_RE, model):
                     return self.error(400, "which model")
                 request = {"op": "control", "request": {"subtype": "set_model", "model": model}}
             else:   # mode
@@ -8956,17 +9188,21 @@ def app_handler(st, users, address):
             return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
 
         def new(self, data):
-            repo, prompt = data.get("repo"), data.get("prompt")
+            repo, prompt, model = data.get("repo"), data.get("prompt"), data.get("model")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])} \
                     and repo not in {p["name"] for p in projects()}:      # one just added: not in the list yet
                 return self.error(400, "no such project")
+            # The model the new chat's pill shows (else the default: new_model).
+            if model is not None and not (isinstance(model, str) and re.fullmatch(MODEL_RE, model)):
+                return self.error(400, "which model")
+            on = ["--model", model] if model else []
             # Without a prompt when it's to be dictated, once it's up.
             if prompt is None or isinstance(prompt, str) and not prompt.strip():
-                r = run_amarchy("new", repo, timeout=300)
+                r = run_amarchy("new", repo, *on, timeout=300)
             elif not isinstance(prompt, str) or len(prompt) > 60_000:
                 return self.error(400, "say what it's for")
             else:
-                r = run_amarchy("new", repo, "--prompt", "-", input=prompt, timeout=300)
+                r = run_amarchy("new", repo, *on, "--prompt", "-", input=prompt, timeout=300)
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
@@ -8977,6 +9213,63 @@ def app_handler(st, users, address):
                 while st.row(sid) is None and time.time() < until:
                     st.changed.wait(until - time.time())
             return self.send(200, {"id": sid})
+
+        def read_body(self, limit):
+            """The request's body as it came (with a Content-Length, or
+            chunked), or None when it's over limit bytes."""
+            if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+                parts, size = [], 0
+                while True:
+                    try:
+                        n = int(self.rfile.readline(100).split(b";")[0].strip() or b"0", 16)
+                    except ValueError:
+                        return b""
+                    if n == 0:
+                        self.rfile.readline(100)
+                        return b"".join(parts)
+                    size += n
+                    if size > limit:
+                        return None
+                    parts.append(self.rfile.read(n))
+                    self.rfile.readline(100)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return b""
+            return None if n > limit else self.rfile.read(n) if n > 0 else b""
+
+        def share_in(self):
+            """POST /api/share: something shared into amarchy (see "sharing
+            into amarchy"). From a browser, only one of its own doing: the
+            app's pages or Android's share sheet (Sec-Fetch-Site same-origin,
+            or none: no page asked for it), never a page elsewhere. From
+            anything else (an iPhone's Shortcut: it says nothing of where it
+            comes from), only at the address with the share key. To Android's
+            share sheet the app's page; to the Shortcut a line it can show."""
+            if not self.allowed():
+                return
+            args = urllib.parse.parse_qs(self.path.partition("?")[2])
+            site = self.headers.get("Sec-Fetch-Site")
+            key = (args.get("key") or [""])[0]
+            if site not in ("same-origin", "none") and (site is not None or not hmac.compare_digest(key.encode(), share_key().encode())):
+                return self.error(403, "only from your share sheet: Settings, Share to Amarchy, has the address")
+            body = self.read_body(SHARE_BODY_MAX)
+            if body is None:
+                return self.error(413, "too big: 60 MB at most")
+            if not body:
+                return self.error(400, "nothing came")
+            images, text = share_parse(self.headers.get("Content-Type", ""), body)
+            text = "\n".join(x for x in (text, *(args.get("text") or [])) if x.strip())
+            why = share_add(images, text)
+            if self.headers.get("Sec-Fetch-Mode") == "navigate":       # Android's share sheet opened the app with it
+                self.head(303, "text/plain", [("Location", "/" if not why else f"/?share-error={urllib.parse.quote(why)}"),
+                                              ("Content-Length", "0")])
+                return self.end_headers()
+            if why:
+                return self.error(400, why)
+            n = share_state()["pictures"] if share_state() else 0
+            return self.send(200, {"ok": True, "pictures": n,
+                                   "said": "In Amarchy: open it, and pick the chat to send it to"})
 
         def push(self, data):
             if self.path == "/api/push/test":
@@ -10033,6 +10326,15 @@ def our_title(sid, f):
         return ""
     ok = isinstance(t, dict) and t.get("conversation") == f.stem and isinstance(t.get("title"), str)
     return t["title"] if ok else ""
+
+
+def chosen_model(sid):
+    """The model chosen for a session (chosen.json), or None."""
+    try:
+        m = json.loads((claude_dir(sid) / "chosen.json").read_text()).get("model")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return m if isinstance(m, str) and re.fullmatch(MODEL_RE, m) else None
 
 
 def agent_remember(sid, **chosen):
@@ -11223,7 +11525,7 @@ def cmd_agent(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt", "--no-jump"}, {"--prompt"}, set()),
+    "new": ({"--prompt", "--no-jump", "--model"}, {"--prompt", "--model"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact"}, set(), set()),

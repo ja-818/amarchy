@@ -973,6 +973,19 @@ class Chat {
     this.queueEl = h("div", { class: "queue" });
     this.drawPills();
     this.drawTray();
+    this.takeShare();
+  }
+
+  // What you shared into amarchy, opened in this chat to say more first
+  // (app.js's share sheet): in the box, as if pasted, its words before yours.
+  takeShare() {
+    const s = typeof shareInbox !== "undefined" ? shareInbox : null;
+    if (!s || s.id !== this.id) return;
+    shareInbox = null;
+    this.addFiles(s.files);
+    if (s.text) this.input.value = this.input.value.trim() ? `${s.text}\n\n${this.input.value}` : `${s.text}\n\n`;
+    this.typed();
+    requestAnimationFrame(() => this.input.focus({ preventScroll: true }));
   }
 
   // A file dropped on the chat goes with the message too (the wide layout
