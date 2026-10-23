@@ -186,16 +186,18 @@ the device). Both are drawn from the same items.
   thinking: it's there, in a fold, but it isn't the reply.
 - **The reply is a few cards**, made after each turn by one extra short
   prompt: the Stop hook starts `amarchy cards <id>`, which gives a model
-  (`CARDS_MODEL`, Sonnet) what you said and what Claude said and did, and
+  (`CARDS_MODEL`, Haiku: a few seconds) what you said and what Claude said and did, and
   asks for the reply a person reads (`CARDS_PROMPT`), as JSON
   (`CARDS_SCHEMA`, checked by `--json-schema`, then `cards_clean`). Each
   turn's cards are a file in the session's folder (`cards_dir`), named by the
   record of your message; the session's stream sends them (`cards`).
-- **A card** has a label and a tone (done, to know, heads up, problem, needs
-  you), a title, a line or two, a few numbers or points, a link, a short
-  command, **More** for detail on a tap, and **buttons**: each sends its
-  message to Claude as yours (once), or, for one you need to finish ("Change
-  it…"), puts its start in the box.
+- **Less is more**: one card is the usual (three at most), and a title can be
+  the whole card. People glance; whoever wants the details opens Claude's
+  work. A card has a label and a tone (done, to know, heads up, problem,
+  needs you), a title, and only if needed: a **checklist** (done and still to
+  do), a few points, numbers, a link, a command, **More** on a tap, and
+  **buttons**: each sends its message to Claude as yours (once), or, for one
+  you need to finish ("Change it…"), puts its start in the box.
 - **The turns read oldest first**, as a conversation: your message, *Claude's
   work* (a closed fold with its words and steps, as the conversation shows
   them), and the deck. The cards sit side by side, one on show: swipe them

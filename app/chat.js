@@ -1274,6 +1274,9 @@ class Chat {
     if (c.body) card.append(h("div", { class: "msg claude rcard-body", html: md(c.body) }));
     if (c.stats && c.stats.length) card.append(h("div", { class: "rcard-stats" }, ...c.stats.map((x) =>
       h("div", { class: "rcard-stat" }, h("div", { class: "v" }, x.value || ""), h("div", { class: "k" }, x.label || "")))));
+    if (c.checklist && c.checklist.length) card.append(h("ul", { class: "rcard-checks" }, ...c.checklist.map((x) =>
+      h("li", { class: x.done ? "is-done" : "is-todo" }, h("span", { class: "box", "aria-label": x.done ? "Done" : "To do", html: x.done ? TICK : "" }),
+        h("span", { html: inline(String(x.text || "")) })))));
     if (c.points && c.points.length) card.append(h("ul", { class: "rcard-points" }, ...c.points.map((x) => h("li", { html: inline(String(x)) }))));
     const link = c.link ? cardLink(c.link) : null;
     if (link) card.append(link);

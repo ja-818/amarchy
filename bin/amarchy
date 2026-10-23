@@ -9806,42 +9806,42 @@ def conversation_title(text):
 # folder, named by your message's record (cards_dir); the app streams them
 # (cards_all) and shows each under its turn.
 
-CARDS_MODEL = "sonnet"
+CARDS_MODEL = "haiku"
 CARDS_INPUT = 40_000        # characters of a turn's work given to it (the end kept: where it lands)
 CARDS_STALE = 180           # seconds before a "pending" that never ended can be asked again
 CARDS_TONES = ("ok", "info", "warn", "error", "ask")
-CARDS_PROMPT = """You write the reply a person reads after their coding agent (Claude) finished a turn of work. They won't read Claude's own words: those are its working notes. You turn the turn into a short deck of cards they swipe through on a phone, one card at a time.
+CARDS_PROMPT = """A person's coding agent (Claude) just finished a turn of work. Write what they see instead of Claude's text: a card, or a few, on a phone. People don't read. They glance. Whoever wants the details opens Claude's own text, so leave the details out.
 
-Give them only what matters to them: the result or the answer, what they must decide or do, how to check it (a URL to open, a command to run), and the numbers that count. Leave out how Claude got there, unless it changes what they do.
-
-The cards:
-- 1 to 4 cards. The first is the answer in one glance: what happened, or what Claude needs from them. Add another card only for something they need: a decision, something to test, a problem, what comes next. One card is often enough.
-- Very little text. title: at most 8 words. body: at most 2 short sentences. points: at most 4, each a few words. Never repeat the title in the body, never restate their request, no filler, no "I".
-- label: 1 to 3 words over the title, saying what the card is ("Done", "Test it", "Needs you", "Problem", "Next").
-- tone: ok (done, works), info (to know), warn (partial, needs attention), error (failed, blocked), ask (Claude needs their answer).
-- Copy exact values exactly: URLs, ports, commands, file names, numbers, versions, names.
-- stats: only real numbers from the turn (tests passed, files changed, time, sizes), at most 3.
-- link: a URL Claude gave them to open, if any (http or https only), with a short label.
-- code: only a short command or snippet they need to run or paste.
-- more: optional detail for a tap on "More": a few short lines or a short list (markdown), for what they may want to look into.
-- actions: buttons that send a message to Claude as if they typed it. Offer the answers to any question Claude asked, and the natural next steps. label: 1 to 4 words; send: the full message, clear on its own ("Ship it" sends "Ship it: merge to main and push"). When the person has to add their own words (what to change, what went wrong), set draft to true: the text goes into their message box for them to finish, and send is its start ("Change the cards: "). At most 3 per card, on the card they belong to. No thanks, no "tell me more" without saying about what.
-- If Claude asked them something, or waits for their decision, the first card says so (tone ask), with the options as actions.
-- Never invent anything that isn't in the turn.
-- Write in the language the person wrote in.
+Less is more:
+- One card is the usual. Add a second (at most a third) only for something they must act on separately: a decision, something to test, a problem.
+- Never add a card only to ask for feedback or say what's next: a button on the main card does that.
+- A title can be the whole card. Say the outcome in it, in at most 7 words ("Search page works", "Tests fail: 3 broken", "Shipped to main").
+- No subtitles. Leave body empty unless one short sentence says something the title and lists can't.
+- Prefer a list to a sentence. checklist: what got done (done: true) and what's left (done: false), each item 2 to 6 words. points: a few words each, for facts that aren't tasks. At most 5 items in all; often none.
+- stats: only when a number is the point (tests, files, time). At most 3.
+- link: a URL Claude gave them to open (http or https), with a 1 to 3 word label. code: only a command they must run.
+- more: leave empty unless there's one thing they may want to look into; then at most 3 short lines.
+- label: 1 or 2 words over the title ("Done", "Needs you", "Problem", "Test it"); tone: ok (done, works), info, warn (partial), error (failed, blocked), ask (Claude waits for them).
+- actions: only when there's an obvious next step or Claude asked something; then the options, 1 to 3 words each. send is the full message as they'd type it ("Ship it" sends "Ship it: merge to main and push"). When they'd need to add their own words, draft: true and send is its start ("Change it: "). At most 3.
+- If Claude asked them something or waits for them, that is the first card (tone ask), the options as actions.
+- Copy exact values exactly (URLs, ports, commands, names, numbers). Never invent anything. Write in the language the person wrote in.
 
 The turn:
 
 """
 CARDS_SCHEMA = {
     "type": "object", "required": ["cards"], "additionalProperties": False,
-    "properties": {"cards": {"type": "array", "minItems": 1, "maxItems": 4, "items": {
+    "properties": {"cards": {"type": "array", "minItems": 1, "maxItems": 3, "items": {
         "type": "object", "required": ["title", "tone"], "additionalProperties": False,
         "properties": {
             "tone": {"type": "string", "enum": list(CARDS_TONES)},
             "label": {"type": "string"},
             "title": {"type": "string"},
             "body": {"type": "string"},
-            "points": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+            "checklist": {"type": "array", "maxItems": 5, "items": {
+                "type": "object", "required": ["text", "done"], "additionalProperties": False,
+                "properties": {"text": {"type": "string"}, "done": {"type": "boolean"}}}},
+            "points": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
             "stats": {"type": "array", "maxItems": 3, "items": {
                 "type": "object", "required": ["label", "value"], "additionalProperties": False,
                 "properties": {"label": {"type": "string"}, "value": {"type": "string"}}}},
@@ -9919,6 +9919,9 @@ def cards_clean(cards):
         card = {"tone": c.get("tone") if c.get("tone") in CARDS_TONES else "info",
                 "label": text(c.get("label"), 40), "title": text(c.get("title"), 140), "body": block(c.get("body"), 500),
                 "points": [text(p, 160) for p in (c.get("points") or [])[:5] if text(p, 160)] if isinstance(c.get("points"), list) else [],
+                "checklist": [{"text": text(x.get("text"), 120), "done": x.get("done") is True}
+                              for x in (c.get("checklist") or [])[:6] if isinstance(x, dict) and text(x.get("text"), 120)]
+                             if isinstance(c.get("checklist"), list) else [],
                 "stats": [{"label": text(x.get("label"), 40), "value": text(x.get("value"), 40)}
                           for x in (c.get("stats") or [])[:4] if isinstance(x, dict) and text(x.get("value"), 40)]
                          if isinstance(c.get("stats"), list) else [],
@@ -9932,7 +9935,7 @@ def cards_clean(cards):
         if re.match(r"https?://\S+$", url):
             card["link"] = {"label": text(link.get("label"), 80), "url": url}
         out.append(card)
-    return out[:4]
+    return out[:3]
 
 
 def cards_ask(text):

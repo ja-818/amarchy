@@ -117,6 +117,7 @@ const CARDS = {
   [NEW]: { state: "ready", at: 1000, cards: [
     { tone: "ok", label: "Done", title: "Search page is ready", body: "It **filters** as you type.",
       stats: [{ label: "Tests", value: "42" }, { label: "Files", value: "2" }],
+      checklist: [{ text: "Page built", done: true }, { text: "Ship to main", done: false }],
       link: { label: "Open the page", url: "http://amarchy:5173/search" },
       actions: [{ label: "Ship it", send: "Ship it: merge to main and push" }, { label: "Change it", send: "Change the search page: ", draft: true }] },
     { tone: "info", label: "To know", title: "<img src=x onerror=\"window.__pwned = 1\"> Two things", points: ["Debounced at 200 ms", "Empty query shows all"],
@@ -184,6 +185,8 @@ async function run(browser, base, layout) {
       label: last?.querySelector(".rcard .rcard-label")?.textContent,
       bold: last?.querySelector(".rcard .rcard-body strong")?.textContent,
       stats: last?.querySelectorAll(".rcard:first-child .rcard-stat").length,
+      checks: [...last.querySelectorAll(".rcard:first-child .rcard-checks li")].map((li) => li.className.replace("is-", "")).join(","),
+      ticks: last?.querySelectorAll(".rcard:first-child .rcard-checks li.is-done .box svg").length,
       links: [...last.querySelectorAll(".rcard-link")].map((a) => a.getAttribute("href")),
       dots: last?.querySelectorAll(".deck-dot").length, dotOn: [...last.querySelectorAll(".deck-dot")].findIndex((d) => d.classList.contains("on")),
       oldText: first?.querySelector(".reply-plain .reply-text")?.textContent.trim(),
@@ -201,6 +204,7 @@ async function run(browser, base, layout) {
   check(layout, s.workText.includes("On it.") && s.workText.includes("Edited search.js"), "the fold holds Claude's words and steps");
   check(layout, s.cards === 3 && s.title === "Search page is ready" && s.label === "Done", `the reply is a deck of 3 cards (got ${s.cards})`);
   check(layout, s.bold === "filters" && s.stats === 2, "a card's body (markdown) and numbers draw");
+  check(layout, s.checks === "done,todo" && s.ticks === 1, `a checklist draws, done ticked (got ${s.checks}, ${s.ticks} tick)`);
   check(layout, JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]), `only the http(s) link is made (got ${JSON.stringify(s.links)})`);
   check(layout, s.pwned === undefined, "a card's markup does not run");
   check(layout, s.dots === 3 && s.dotOn === 0, `three dots, the first on (on: ${s.dotOn})`);
