@@ -6,8 +6,9 @@ description: >
   skill before running any `amarchy` command, and whenever the work involves this
   session's worktree or branch, other sessions (starting one with a task,
   messaging another session's Claude), the dev terminal beside you
-  (running, restarting or saving the project's commands), naming the session, or
-  merging the work back into main ("ship it").
+  (running, restarting or saving the project's commands), naming the session,
+  merging the work back into main ("ship it"), or when you need an API key,
+  password or token from the user (`amarchy secret ask`, never the chat).
 ---
 
 # amarchy
@@ -96,6 +97,9 @@ command's usage without running it (an option it doesn't know fails instead).
   user asks. If this session is on screen, the terminal shows (this leaves zen
   mode). If not, it restarts quietly in place.
 - `amarchy run <name>`: run another saved command the same way.
+- `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key
+  or password from the user without it going through the chat (see
+  "Secrets" below).
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the
@@ -172,6 +176,47 @@ dev server). Restart the terminal so the user sees the result too.
   To test against a live session, start one of your own for it with a name
   that says so (`amarchy new <project> test-<what> --no-jump`), tell the user
   it's a test session they shouldn't use, and close it as soon as you're done.
+
+## Secrets: API keys, passwords, tokens
+
+**Never ask the user to paste a key, password or token into the chat**, and
+never write one into a file in the repo. The transcript keeps everything said
+in the chat, and you'd read it back. Ask for it with:
+
+```
+amarchy secret ask OPENAI_API_KEY --why "to run the integration tests against OpenAI"
+```
+
+Run it with the Bash tool's longest timeout (600000 ms): it waits until the
+user answers. The app shows them a card with a password field and your
+`--why` (one plain sentence a non-technical person understands: what it's
+for). It prints only whether it was saved, never the value. Then:
+
+- Your Bash commands have it as an environment variable, `$OPENAI_API_KEY`,
+  from the next command on, with no restart; so do the session's terminal
+  (from its next prompt) and its run commands (`amarchy run`). A dev server
+  already running needs `amarchy run` again to get it.
+- **Use it by name only.** Never `echo`, `cat`, `printenv`, log or print its
+  value, and don't copy it into a file (`.env`) in the repo. If a tool needs
+  it in a file, point the tool at the variable instead (most read the
+  environment), or write the file outside the repo with `umask 077` and say
+  where.
+- Exit 0: saved (or set already: it says so, and isn't asked again; add
+  `--again` only if the user says the one kept is wrong). Exit 1: the user
+  declined (it prints what they said). Exit 2: no answer yet; tell them you
+  need it and ask again later. The card stays up, and if they save it after
+  you stopped waiting, you get a message saying so.
+- It's kept for this project's sessions; `--all` suggests every project's
+  (the user picks on the card).
+- **`ANTHROPIC_API_KEY` (and Claude's other credentials) is refused**: in
+  your environment it would switch Claude Code from the user's subscription
+  to API billing. If the project itself calls Anthropic's API, ask for a key
+  under a name of the project's own (`MYAPP_ANTHROPIC_KEY`) and have the
+  project read that.
+- `amarchy secret list` names the secrets this project's commands have
+  (names only). Reading the secrets' folder is refused: use the variables.
+- The user can also add one themselves: Settings → Secrets in the app, or a
+  session's menu → Add a secret.
 
 ## Talking to other sessions
 

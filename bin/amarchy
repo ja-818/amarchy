@@ -139,6 +139,30 @@ on this machine that knows Spanish, English and 23 more languages and tells them
                                         way it was written down, how long it took) and what came of it
   amarchy dictation transcribe <file>   write down a recording (anything ffmpeg reads), as a dictation would be
 
+Secrets (a key or password a project needs, given in the app, never in the chat; kept in
+~/.config/amarchy/secrets, 0600, outside every repo; the session's commands, its terminal and its run
+commands have each one as an environment variable, $NAME):
+  amarchy secret ask <NAME> [--why <text>] [--all] [--again] [--timeout <seconds>]
+                                        from a session's Claude: ask the user for it in the app (a card with
+                                        a password field) and wait (590 s at most) until it's saved; prints
+                                        only that it is, never the value. For this project's sessions, or
+                                        --all projects' (the user can change that on the card); a name set
+                                        already isn't asked again unless --again. Exits 1 if they decline,
+                                        2 if they haven't answered yet. Never ANTHROPIC_API_KEY or Claude's
+                                        other credentials: they'd switch Claude to API billing
+  amarchy secret list [--json]          the secrets' names and for which project (never a value)
+  amarchy secret set <NAME> [--project <name>|--all]
+                                        keep one, its value read from stdin (or asked for, in a terminal);
+                                        from a session, for its project unless --all
+  amarchy secret forget <NAME> [--project <name>|--all]
+                                        drop one (also: secret rm)
+
+Terminals:
+  amarchy terminals [on|off]            Show terminals: whether the app shows the sessions' terminals (the
+                                        Terminal tab, the panel beside the chat). Off on a new install,
+                                        on for one from before; off, a session's menu still opens them
+                                        (Advanced). Prints it without one
+
 Updating:
   amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
                                         runs from (when it's on main, with nothing uncommitted) and install it.
@@ -152,6 +176,9 @@ Plumbing:
   amarchy held <id>                     after its Claude exits, Enter starts it again
   amarchy attach <id> [claude|term]     show a session's Claude or terminal (tmux) in this terminal: what the
                                         app's terminals run, or you over ssh
+  amarchy shell <id> [command]          the shell in a session's terminal (tmux starts it): with the project's
+                                        secrets, read again at each prompt when they change (bash); with a
+                                        command (a run command), that first
   amarchy sleep --idle                  put the sessions idle long enough to sleep (the timer runs it)
   amarchy reap <id>                     the rest of closing a session, detached from what closed it
   amarchy shorten <repo> <title>        cut Claude's title for the list down to "Keyword: a few words"
@@ -858,6 +885,586 @@ def cmd_run(args):
     return host_run(s, command)
 
 
+# ------------------------------------------------------------------ secrets
+#
+# A key or a password a project needs (an OpenAI key for its tests, a Stripe
+# secret...), given in the app, never in the chat: the transcript keeps
+# everything said there, and Claude reads it all. Claude asks for one with
+# `amarchy secret ask NAME --why "..."` (the amarchy skill says when): the
+# app shows a card with a password field, the session waits for you as it
+# does for a question, and Claude hears back only that it's saved. You can
+# also add one in Settings → Secrets, or with `amarchy secret set`.
+#
+# Kept in ~/.config/amarchy/secrets/ (a 0700 folder, 0600 files, outside every
+# repo, so nothing commits them): projects/<project>.env for one project's
+# sessions, all.env for every project's (a project's own wins over one for
+# all). As shell assignments, NAME='value', that a shell sources.
+#
+# They reach, as environment variables by name ($OPENAI_API_KEY):
+# - Claude's commands: its SessionStart hook writes a line into Claude Code's
+#   CLAUDE_ENV_FILE that sources the files, and Claude Code sources that
+#   before each Bash command (checked on 2.1.309, -p and the TUI), so one
+#   saved or forgotten mid-session counts from the next command, no restart.
+#   Claude Code itself starts with them too (an MCP server's ${NAME}).
+# - the session's terminal and its run commands: `amarchy shell` starts the
+#   shell with them, and a bash there reads them again at each prompt when
+#   they changed. A program already running (a dev server) has the ones it
+#   started with: Run starts it again.
+# Never Claude's own credentials (ANTHROPIC_API_KEY...): with one, Claude
+# Code bills that API account instead of your subscription. Claude's Read and
+# Edit of the folder are denied (hook_settings), a Bash command naming it is
+# refused (secret_guard), and the app masks a secret's value wherever it
+# would show (mask_secrets).
+
+SECRETS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy/secrets"
+SECRETS_ALL = SECRETS / "all.env"
+SECRET_ASKS = "secret-asks"     # in claude_dir(<session>): <ask id>.json, Claude's ask waiting; <ask id>.answer
+SECRET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+SECRET_MAX = 64 * 1024
+SECRET_MASK = "••••••••"
+SECRET_MASK_MIN = 8             # shorter values aren't masked: they'd match ordinary words
+SECRET_WAIT = 590               # seconds `secret ask` waits by default (Claude's Bash allows 600 at most)
+# What a shell or amarchy needs as it is: kept as a secret it would break it.
+SECRET_SYSTEM = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD", "TERM", "COLORTERM", "LANG",
+                 "LANGUAGE", "TZ", "TMUX", "TMUX_PANE", "SHLVL", "TMPDIR", "DISPLAY", "WAYLAND_DISPLAY",
+                 "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+                 "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH",
+                 "PYTHONHOME", "NODE_OPTIONS", "BASH_ENV", "ENV", "PROMPT_COMMAND", "IFS", "PS1", "PS2", "PS4",
+                 "CDPATH", "MAIL", "EDITOR", "VISUAL", "PAGER", "HISTFILE", "SUDO_ASKPASS", "GIT_DIR",
+                 "GIT_WORK_TREE", "GIT_SSH_COMMAND", "GIT_TERMINAL_PROMPT"}
+SECRET_SUGGESTIONS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "STRIPE_SECRET_KEY", "GITHUB_TOKEN", "DATABASE_URL",
+                      "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+                      "RESEND_API_KEY", "HF_TOKEN", "SENTRY_AUTH_TOKEN", "CLOUDFLARE_API_TOKEN")
+
+
+def secret_refused(name):
+    """Why a name can't be a secret, or None."""
+    if not isinstance(name, str) or not SECRET_NAME.fullmatch(name):
+        return "a secret's name is letters, digits and _, not starting with a digit (like OPENAI_API_KEY)"
+    up = name.upper()
+    if up.startswith("ANTHROPIC_") or up in ("CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_API_KEY"):
+        return (f"{name} can't be kept as a secret: Claude Code reads it, and with an Anthropic key or token "
+                f"in its environment Claude bills that API account instead of your Claude subscription (the "
+                f"login it runs on here). If the project itself calls Anthropic's API, keep its key under a "
+                f"name of the project's own (say MYAPP_ANTHROPIC_KEY) and have the project read that one")
+    if up.startswith("CLAUDE_"):
+        return f"{name} is one of Claude Code's own settings, not a secret: it can't be kept as one"
+    if up.startswith("AMARCHY"):
+        return f"{name} is amarchy's own: it can't be kept as a secret"
+    if up in SECRET_SYSTEM:
+        return f"{name} is the system's own: as a secret it would break the shell"
+    return None
+
+
+def secret_file(repo):
+    """Where a project's secrets are kept (repo None: every project's)."""
+    if repo is None:
+        return SECRETS_ALL
+    return SECRETS / "projects" / f"{repo}.env"
+
+
+def secret_quote(value):
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def secrets_read(f):
+    """The secrets in one file: {name: (value, set at)}, in its order."""
+    try:
+        text = f.read_text()
+    except OSError:
+        return {}
+    at = dict(re.findall(r"^# (\w+) set (\d+)$", text, re.M))
+    out = {}
+    try:
+        words = shlex.split(text, comments=True)
+    except ValueError:      # not one of ours
+        return {}
+    for w in words:
+        name, eq, value = w.partition("=")
+        if eq and SECRET_NAME.fullmatch(name):
+            out[name] = (value, int(at.get(name) or 0))
+    return out
+
+
+def secrets_write(f, secrets):
+    """Write one file of secrets (or remove it when there are none), 0600 in
+    0700 folders, all at once."""
+    for d in (SECRETS, f.parent):
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(d, 0o700)
+    if not secrets:
+        f.unlink(missing_ok=True)
+        return
+    text = "# amarchy's secrets (amarchy secret list): kept out of every repo and every chat\n" + "".join(
+        f"# {name} set {at}\n{name}={secret_quote(value)}\n" for name, (value, at) in secrets.items())
+    tmp = f.with_name(f".{f.name}.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as out:
+        out.write(text)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, f)
+
+
+def secrets_lock():
+    SECRETS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = open(SECRETS / ".lock", "a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def secret_set(repo, name, value):
+    """Keep a secret for a project (None: for all of them). Why not, or None."""
+    why = secret_refused(name)
+    if why:
+        return why
+    if not isinstance(value, str) or not value.strip("\n"):
+        return "the secret is empty"
+    value = value.rstrip("\n").removesuffix("\r")       # a pasted line's end isn't part of it
+    if "\0" in value or len(value.encode()) > SECRET_MAX:
+        return "that isn't a secret amarchy can keep (64 KB of text at most)"
+    if repo is not None and not (WORK / repo / ".git").exists():
+        return f"no project {repo!r}"
+    f = secret_file(repo)
+    with secrets_lock():
+        secrets = secrets_read(f)
+        secrets[name] = (value, int(time.time()))
+        secrets_write(f, secrets)
+    return None
+
+
+def secret_forget(repo, name):
+    """Drop a secret: whether there was one."""
+    f = secret_file(repo)
+    with secrets_lock():
+        secrets = secrets_read(f)
+        if name not in secrets:
+            return False
+        del secrets[name]
+        secrets_write(f, secrets)
+    return True
+
+
+def secrets_list():
+    """Every secret's name (never its value) and when it was set, per scope:
+    {"all": [{name, at}], "projects": {project: [{name, at}]}}."""
+    def names(f):
+        return [{"name": n, "at": at} for n, (_, at) in sorted(secrets_read(f).items())]
+    projects = {}
+    for f in sorted((SECRETS / "projects").glob("*.env")):
+        if names(f):
+            projects[f.stem] = names(f)
+    return {"all": names(SECRETS_ALL), "projects": projects}
+
+
+def secret_scope(repo, name):
+    """Where a project's commands get a secret from: "project", "all" or None."""
+    if name in secrets_read(secret_file(repo)):
+        return "project"
+    return "all" if name in secrets_read(SECRETS_ALL) else None
+
+
+def session_secrets(repo):
+    """The secrets a project's sessions get: {name: value}, its own over the ones for all."""
+    out = {n: v for n, (v, _) in secrets_read(SECRETS_ALL).items()}
+    out.update({n: v for n, (v, _) in secrets_read(secret_file(repo)).items()})
+    return {n: v for n, v in out.items() if not secret_refused(n)}
+
+
+def secret_env(s):
+    """A session's secrets, for the environment Claude Code or its terminal
+    starts in, and AMARCHY_SECRET_NAMES: which they were (so a forgotten one
+    can be taken away again, see secrets_sh)."""
+    found = session_secrets(s["repo"])
+    return {**found, "AMARCHY_SECRET_NAMES": " ".join(found)}
+
+
+def secrets_sh(repo):
+    """A line of shell that takes the project's secrets as they are now:
+    the ones it started with away, then the files' (exported)."""
+    files = " ".join(shlex.quote(str(f)) for f in (SECRETS_ALL, secret_file(repo)))
+    return (f'[ -n "${{AMARCHY_SECRET_NAMES:-}}" ] && unset $AMARCHY_SECRET_NAMES; '
+            f'for __amarchy_f in {files}; do [ -r "$__amarchy_f" ] && {{ set -a; . "$__amarchy_f"; set +a; }}; '
+            f'done; unset __amarchy_f')
+
+
+_MASKS = {"sig": None, "values": ()}
+
+
+def secret_values():
+    """Every secret's value long enough to mask, longest first (read again
+    when a file changes)."""
+    files = [SECRETS_ALL, *sorted((SECRETS / "projects").glob("*.env"))]
+    sig = []
+    for f in files:
+        try:
+            st_ = f.stat()
+            sig.append((str(f), st_.st_mtime_ns, st_.st_size))
+        except OSError:
+            pass
+    if sig != _MASKS["sig"]:
+        values = {v for f in files for v, _ in secrets_read(f).values() if len(v) >= SECRET_MASK_MIN}
+        _MASKS.update(sig=sig, values=tuple(sorted(values, key=len, reverse=True)))
+    return _MASKS["values"]
+
+
+def mask_secrets(text):
+    """Text with every secret's value in it masked: as it is, and as JSON
+    writes it (for a payload already encoded)."""
+    values = secret_values()
+    if not values or not text:
+        return text
+    for v in values:
+        if v in text:
+            text = text.replace(v, SECRET_MASK)
+        encoded = json.dumps(v)[1:-1]
+        if encoded != v and encoded in text:
+            text = text.replace(encoded, SECRET_MASK)
+    return text
+
+
+SECRET_READERS = ("cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|sed|awk|gawk|cut|sort|uniq|strings|"
+                  "xxd|od|hexdump|base64|base32|cp|mv|scp|rsync|tar|zip|gzip|ln|tee|diff|cmp|python|python3|node|"
+                  "perl|ruby|php|source|\\.|env|dotenv|jq|yq|vim?|nvim|nano|emacs|code|open|xdg-open|curl|wget|"
+                  "find|ls|stat|file|wc|md5sum|sha\\w*sum|openssl|gpg|printf|echo|eval|exec|sh|bash|zsh|fish")
+
+
+def secret_guard(event):
+    """PreToolUse: a Bash command that reads the secrets' folder is refused
+    (Claude's Read and Edit of it are denied by its settings), so a value
+    doesn't end up in the conversation. The reason Claude gets, or None."""
+    if not isinstance(event, dict) or event.get("tool_name") != "Bash":
+        return None
+    command = str((event.get("tool_input") or {}).get("command") or "")
+    home = str(HOME)
+    folder = str(SECRETS)
+    spelled = {folder, folder.replace(home, "~", 1), folder.replace(home, "$HOME", 1),
+               folder.replace(home, "${HOME}", 1)}
+    if not any(p in command for p in spelled):
+        return None
+    # Only what reads it: a command that reads files with the folder on the
+    # same line after it, or the folder as a redirect's input. Naming it (in
+    # a doc being written, a grep for the words) is fine.
+    paths = "|".join(re.escape(p) for p in sorted(spelled, key=len, reverse=True))
+    if not re.search(rf"(?:^|[\s;&|(`$])(?:{SECRET_READERS})(?:\s[^\n;&|]*)?\s[\"']?(?:{paths})"
+                     rf"|<\s*[\"']?(?:{paths})", command):
+        return None
+    return ("amarchy keeps secrets out of the conversation, so this command can't read their folder. Your "
+            "commands already have each one as an environment variable ($NAME, see `amarchy secret list`); "
+            "use it by name, and never print it. To get one that's missing: amarchy secret ask NAME --why \"...\"")
+
+
+# ---- Claude asks for one: amarchy secret ask
+
+def secret_asks_dir(sid):
+    return claude_dir(sid) / SECRET_ASKS
+
+
+def secret_asks(sid):
+    """What a session's Claude asks for now: [{id, name, why, scope, repo,
+    again, at, waiting}] (waiting: the asking command is still there, so
+    Claude hears the answer itself)."""
+    out = []
+    for f in sorted(secret_asks_dir(sid).glob("*.json")):
+        try:
+            a = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(a, dict) or (f.with_suffix(".answer")).exists():
+            continue
+        a["waiting"] = pid_alive(a.get("pid"))
+        a.pop("pid", None)
+        out.append(a)
+    return sorted(out, key=lambda a: a.get("at", 0))
+
+
+def secret_answer(s, ask_id, value=None, scope="project", decline=False, message=""):
+    """Your answer to what Claude asked (secret ask): the secret kept, or
+    not given. The asking command tells Claude; when it's gone (Claude
+    stopped waiting), Claude is told in a message. Why not, or None."""
+    sid = s["id"]
+    if not isinstance(ask_id, str) or not re.fullmatch(r"[0-9a-f]{12}", ask_id):
+        return "which request?"
+    f = secret_asks_dir(sid) / f"{ask_id}.json"
+    try:
+        a = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return "gone"
+    name = a.get("name")
+    if decline:
+        answer = {"declined": True, "message": str(message or "")[:2000]}
+    else:
+        if scope not in ("project", "all"):
+            return "scope: project or all"
+        why = secret_set(None if scope == "all" else s["repo"], name, value)
+        if why:
+            return why
+        answer = {"saved": True, "scope": scope}
+    write_file(f.with_suffix(".answer"), json.dumps(answer))
+    if not pid_alive(a.get("pid")):
+        f.unlink(missing_ok=True)
+        f.with_suffix(".answer").unlink(missing_ok=True)
+        if answer.get("saved"):
+            note = (f"[amarchy] The user saved the secret {name} you asked for. It's in your Bash commands' "
+                    f"environment now as ${name} (and in the session's terminal and run commands); use it by "
+                    f"name and never print its value.")
+            detach([ENTRY, "send", sid, note, "--no-wait"])
+    return None
+
+
+def cmd_secret_ask(s, args):
+    name, why, scope, again, wait = None, "", "project", False, SECRET_WAIT
+    it = iter(args)
+    for a in it:
+        if a == "--why":
+            why = next(it, "")
+        elif a.startswith("--why="):
+            why = a[6:]
+        elif a in ("--all", "--all-projects", "--global"):
+            scope = "all"
+        elif a == "--again":
+            again = True
+        elif a == "--timeout":
+            try:
+                wait = max(5, int(next(it, "")))
+            except ValueError:
+                return fail("--timeout <seconds>")
+        elif name is None and not a.startswith("-"):
+            name = a
+        else:
+            return fail(usage("secret"))
+    if not name:
+        return fail(usage("secret"))
+    why_not = secret_refused(name)
+    if why_not:
+        return fail(why_not)
+    sid, repo = s["id"], s["repo"]
+    have = secret_scope(repo, name)
+    if have and not again:
+        print(f"{name} is set already ({'for this project' if have == 'project' else 'for every project'}): "
+              f"your commands have it as ${name}. Use it by name, never print it. If the user says it's wrong, "
+              f"ask again with --again.")
+        return 0
+    ask_id = uuid.uuid4().hex[:12]
+    d = secret_asks_dir(sid)
+    f = d / f"{ask_id}.json"
+    answer_f = f.with_suffix(".answer")
+    write_file(f, json.dumps({"id": ask_id, "name": name, "why": " ".join(why.split())[:500], "scope": scope,
+                              "repo": repo, "again": bool(have), "at": int(time.time()), "pid": os.getpid()}))
+
+    def done(*_):
+        f.unlink(missing_ok=True)
+        answer_f.unlink(missing_ok=True)
+        # Back to working, unless something else waits for you meanwhile.
+        if (STATUS / sid).exists() and (STATUS / sid).read_text().strip() == "waiting" and not secret_asks(sid) \
+                and not (agent_live(sid).get("pending") if engine(s) == "chat" else None):
+            set_status(sid, "working")
+
+    def stopped(signum, _):
+        # Claude stopped waiting (its command's time ran out, or you pressed
+        # Stop): the card stays, and saving it then tells Claude in a message.
+        if (STATUS / sid).exists() and (STATUS / sid).read_text().strip() == "waiting":
+            set_status(sid, "working")
+        sys.exit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, stopped)
+    set_status(sid, "waiting")
+    print(f"Asked the user for {name} in the amarchy app (a card with a password field)… waiting for them.",
+          file=sys.stderr, flush=True)
+    end = time.time() + wait
+    while time.time() < end:
+        if answer_f.exists() or not f.exists():
+            break
+        if not session(sid):
+            break
+        time.sleep(0.3)
+    try:
+        answer = json.loads(answer_f.read_text())
+    except (OSError, ValueError):
+        answer = None
+    if answer is None and f.exists():
+        done()
+        print(f"The user hasn't given {name} yet (asked {wait // 60} minutes ago). Don't ask for it in the chat: "
+              f"tell them you need it, and run `amarchy secret ask {name}` again when they're ready (or they add "
+              f"it in Settings → Secrets).")
+        return 2
+    done()
+    if not answer:      # the card was dismissed with the session, or the folder cleared
+        print(f"The request for {name} was withdrawn.")
+        return 1
+    if answer.get("declined"):
+        said = answer.get("message") or ""
+        print(f"The user chose not to give {name}." + (f" They said: \"{said}\"." if said else "") +
+              " Don't ask for it in the chat.")
+        return 1
+    where = "every project's sessions" if answer.get("scope") == "all" else f"{repo}'s sessions"
+    print(f"Saved. {name} is set for {where}: your Bash commands have it as ${name} from now on (no restart), "
+          f"and so do the session's terminal (from its next prompt) and its run commands. Refer to it by name "
+          f"(${name}) and never print, echo or log its value. A program already running (a dev server) "
+          f"needs restarting to get it: amarchy run.")
+    return 0
+
+
+def cmd_secret(args):
+    """amarchy secret ask|set|list|forget ... (see usage)."""
+    if not args:
+        print(usage("secret"), file=sys.stderr)
+        return 1
+    sub, rest = args[0], args[1:]
+    sid = own_session_id()
+    s = session(sid) if sid else None
+    if sub == "ask":
+        if not s:
+            return fail("amarchy secret ask runs from a session's Claude: the card shows in that session")
+        return cmd_secret_ask(s, rest)
+    scope_all = any(a in ("--all", "--all-projects", "--global") for a in rest)
+    project = None
+    words = []
+    it = iter(rest)
+    for a in it:
+        if a == "--project":
+            project = next(it, "")
+        elif a in ("--all", "--all-projects", "--global", "--json"):
+            continue
+        else:
+            words.append(a)
+    repo = None if scope_all else (project or (s["repo"] if s else None))
+    if sub == "list":
+        listed = secrets_list()
+        if "--json" in rest:
+            print(json.dumps(listed, indent=2))
+            return 0
+        for scope, names in [("every project", listed["all"]), *listed["projects"].items()]:
+            for n in names:
+                print(f"{n['name']}\t{scope}")
+        return 0
+    if sub in ("set", "forget", "rm"):
+        if len(words) != 1:
+            return fail(usage("secret"))
+        name = words[0]
+        if repo is None and not scope_all:
+            return fail("which project? --project <name>, or --all for every project (from a session: its own)")
+        if sub == "set":
+            why = secret_refused(name)
+            if why:
+                return fail(why)
+            # Never on the command line: it would be in the shell's history,
+            # and in Claude's transcript when Claude runs it.
+            if sys.stdin.isatty():
+                import getpass
+                value = getpass.getpass(f"{name}: ")
+            else:
+                value = sys.stdin.read()
+            why = secret_set(repo, name, value)
+            if why:
+                return fail(why)
+            print(f"{name} saved for {'every project' if repo is None else repo}")
+            return 0
+        if not secret_forget(repo, name):
+            return fail(f"no secret {name} for {'every project' if repo is None else repo}")
+        print(f"{name} forgotten for {'every project' if repo is None else repo}")
+        return 0
+    print(usage("secret"), file=sys.stderr)
+    return 1
+
+
+# ---- the session's terminal: amarchy shell
+
+SHELL_RC = STATE / "shell" / "bashrc"
+
+
+def shell_rc():
+    """The rc file of a session terminal's bash: the login files it would
+    read as tmux starts it, then a prompt hook that takes its secrets again
+    when they changed (an interactive bash doesn't read them by itself)."""
+    text = r'''# amarchy: a session terminal's bash (amarchy shell). Read as a login shell is.
+[ -r /etc/profile ] && . /etc/profile
+if [ -r ~/.bash_profile ]; then . ~/.bash_profile
+elif [ -r ~/.bash_login ]; then . ~/.bash_login
+elif [ -r ~/.profile ]; then . ~/.profile
+fi
+# The project's secrets (amarchy secret), again when they changed.
+__amarchy_secrets() {
+  local sig names n said=""
+  sig=$(command stat -c '%Y.%s' -- $AMARCHY_SECRET_FILES 2>/dev/null | command tr '\n' ' ')
+  [ "$sig" = "${__amarchy_sig-}" ] && return
+  names=$(command sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' -- $AMARCHY_SECRET_FILES 2>/dev/null | command sort -u | command tr '\n' ' ')
+  if [ -n "${__amarchy_sig+x}" ]; then
+    for n in $names; do case " ${AMARCHY_SECRET_NAMES:-} " in *" $n "*) ;; *) said="$said +$n" ;; esac; done
+    for n in ${AMARCHY_SECRET_NAMES:-}; do case " $names " in *" $n "*) ;; *) said="$said -$n" ;; esac; done
+    [ -n "$said" ] && printf '\033[2mamarchy secrets:%s\033[0m\n' "$said"
+  fi
+  __amarchy_sig=$sig
+  [ -n "${AMARCHY_SECRET_NAMES:-}" ] && unset $AMARCHY_SECRET_NAMES
+  for n in $AMARCHY_SECRET_FILES; do [ -r "$n" ] && { set -a; . "$n"; set +a; }; done
+  AMARCHY_SECRET_NAMES=$names
+}
+__amarchy_secrets
+PROMPT_COMMAND="__amarchy_secrets${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+'''
+    try:
+        if SHELL_RC.read_text() == text:
+            return SHELL_RC
+    except OSError:
+        pass
+    write_file(SHELL_RC, text)
+    return SHELL_RC
+
+
+def cmd_shell(args):
+    """amarchy shell <id> [command]: the shell of a session's terminal (tmux
+    starts it), with the project's secrets in its environment; with a command,
+    that command first (a run command), then the shell."""
+    if not args:
+        return fail("usage: amarchy shell <id> [command]")
+    s = session(args[0])
+    shell = os.environ.get("SHELL") or "/bin/bash"
+    env = dict(os.environ)
+    if s:
+        env.update(secret_env(s))
+        env["AMARCHY_SECRET_FILES"] = f"{SECRETS_ALL} {secret_file(s['repo'])}"
+    bash = Path(shell).name == "bash"
+    if len(args) > 1:
+        script = args[1]
+        if bash:
+            script = f"{script}; exec {shlex.quote(shell)} --rcfile {shlex.quote(str(shell_rc()))}"
+        else:
+            script = f"{script}; exec {shlex.quote(shell)}"
+        argv = [shell, "-ic", script]
+    elif bash:
+        argv = [shell, "--rcfile", str(shell_rc())]
+    else:
+        argv = ["-" + Path(shell).name]       # a login shell, as tmux starts one
+    try:
+        os.execve(shell, argv, env)
+    except OSError as e:
+        print(f"amarchy shell: {e}", file=sys.stderr)
+        os.execve("/bin/sh", ["sh"], env)
+
+
+# ---- Show terminals: whether the app shows the sessions' terminals at all
+
+SHOW_TERMINALS = STATE / "show-terminals"   # "on" or "off"; off unless set (an install from before is on)
+
+
+def show_terminals():
+    try:
+        return SHOW_TERMINALS.read_text().strip() == "on"
+    except OSError:
+        return False
+
+
+def cmd_terminals(args):
+    """amarchy terminals [on|off]: prints it, or sets it."""
+    if len(args) > 1 or args and args[0] not in ("on", "off"):
+        print(usage("terminals"), file=sys.stderr)
+        return 1
+    if args:
+        write_file(SHOW_TERMINALS, args[0] + "\n")
+    print("on" if show_terminals() else "off")
+    return 0
+
+
 # ------------------------------------------------------------------ new / close
 
 def has_origin(repo_dir):
@@ -937,6 +1544,9 @@ def hook_settings(sid):
     # session in another class (bypass vs. asking) for the user to approve,
     # and a chat-engine session can't approve anything: docs/agent-protocol.md.
     settings["crossSessionInbound"] = "accept"
+    # The secrets' folder isn't Claude's to read (see "secrets"): their values
+    # would be in the conversation. Its commands have them by name.
+    settings["permissions"] = {"deny": [f"{tool}(/{SECRETS}/**)" for tool in ("Read", "Edit")]}     # Edit: every writing tool
     if CLAUDE_THEME.exists():       # the app's theme (see look_claude)
         settings["theme"] = "custom:amarchy"
     return json.dumps(settings)
@@ -1256,6 +1866,7 @@ def cmd_claude(sid):
     # Ctrl+V pastes what you pasted in the app (see "clipboard"), and voice
     # mode records the phone's or the browser's microphone (amarchy rec).
     os.environ["PATH"] = paste_path()
+    os.environ.update(secret_env(s))      # the project's secrets (its Bash commands read them afresh: cmd_hook)
     argv = claude_argv(s, prefill.strip("\n"), prompt)
     try:
         os.execvp(argv[0], argv)
@@ -2520,7 +3131,9 @@ def agent_context(s):
             f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the work "
             f"involves other sessions, worktrees, that terminal or merging back into main. The user's browser "
             f"isn't on this machine, and nothing you open here (a browser, a GUI app) reaches their screen: "
-            f"tell them what to open instead. ")
+            f"tell them what to open instead. Never ask them to paste an API key, password or token into the "
+            f"chat (the transcript keeps it): run `amarchy secret ask NAME --why \"...\"` (the amarchy skill's "
+            f"\"Secrets\"), and your commands get it as $NAME. ")
     if bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
                  f"(reachable only from their private network), and give them http://{name}:<port>. ")
@@ -2568,10 +3181,23 @@ def cmd_hook(sid, state):
     if state == "waiting" and kind and kind not in NEEDS_YOU:
         return
     if state == "start":
-        # SessionStart: Claude is ready (idle), and learns where it is.
+        # SessionStart: Claude is ready (idle), and learns where it is. Its
+        # Bash commands source the project's secrets, as they are at each one.
+        env_file = os.environ.get("CLAUDE_ENV_FILE")
+        if env_file:
+            try:
+                with open(env_file, "a") as f:
+                    f.write(secrets_sh(s["repo"]) + "\n")
+            except OSError:
+                pass
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": agent_context(s)}}))
         state = "idle"
+    if state == "working" and event.get("hook_event_name") == "PreToolUse":
+        refused = secret_guard(event)
+        if refused:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                     "permissionDecisionReason": refused}}))
     # A background session forked from this one (/bg) carries its hooks, but
     # it isn't the session's own Claude: it says nothing about the session.
     if hook_claude().get("kind") == "bg":
@@ -3044,6 +3670,8 @@ def session_view():
         s["priority"] = priority(s)
         # Done, and you haven't opened it since.
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
+        # The secrets its Claude asks you for (amarchy secret ask): a card each.
+        s["secret_asks"] = secret_asks(s["id"])
     mine = assistant()
     for s in ss:
         s["assistant"] = assistant_role(s, mine)
@@ -3685,7 +4313,8 @@ def host_start(s, wake=False):
              *host_loop(sid))
         tmux("select-pane", "-t", f"={claude}:", "-T", f"amarchy:{sid}")
     if not s.get("setup") and path.is_dir() and not tmux_has(term):
-        tmux("new-session", "-d", "-s", term, "-x", "100", "-y", "50", "-c", str(path), *tmux_env(s))
+        tmux("new-session", "-d", "-s", term, "-x", "100", "-y", "50", "-c", str(path), *tmux_env(s),
+             ENTRY, "shell", sid)       # the shell, with the project's secrets (cmd_shell)
 
 
 def host_pane(s):
@@ -3715,11 +4344,9 @@ def host_run(s, command):
     """Restart the session's terminal on command: it shows the command, runs
     it, and leaves you in a shell when it ends."""
     host_start(s)
-    shell = os.environ.get("SHELL") or "bash"
-    script = (f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; "
-              f"{command}; exec {shlex.quote(shell)}")
+    script = f"printf '\\033[2m$ %s\\033[0m\\n' {shlex.quote(command)}; {command}"
     r = tmux("respawn-pane", "-k", "-t", f"={tmux_name(s['id'], 'term')}:", "-c", s["path"], *tmux_env(s),
-             shell, "-ic", script)
+             ENTRY, "shell", s["id"], script)     # then the shell; the project's secrets in both (cmd_shell)
     return 0 if r.returncode == 0 else fail(f"couldn't run it: {r.stderr.strip()}")
 
 
@@ -4009,6 +4636,7 @@ def push_send(sub, payload):
 def push_all(payload):
     """Send a notification to every phone, dropping the ones that are gone.
     The number that took it."""
+    payload = json.loads(mask_secrets(json.dumps(payload)))
     sent, gone = 0, set()
     for sub in app_subscriptions():
         try:
@@ -7162,7 +7790,7 @@ def app_watch(st):
                     "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": st.build,
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
-                    "dictation": dictate_status()}
+                    "dictation": dictate_status(), "show_terminals": show_terminals()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -7193,7 +7821,10 @@ def app_moments(st, ss):
             continue
         where = app_where(s)
         body = "Needs you" if state == "waiting" else "Done"
-        if state == "waiting":
+        asks = [a for a in s.get("secret_asks") or [] if a.get("waiting")]
+        if state == "waiting" and asks:
+            body += f": Claude needs your {asks[0]['name']}" + (f" · {asks[0]['why']}" if asks[0].get("why") else "")
+        elif state == "waiting":
             time.sleep(0.3)         # the question is on screen by now
             dialog = app_screen(s).get("dialog")
             if dialog and dialog["question"]:
@@ -7244,7 +7875,8 @@ def app_handler(st, users, address):
                 self.send_header(k, v)
 
         def send(self, code, body, ctype="application/json"):
-            data = json.dumps(body).encode() if ctype == "application/json" else body
+            # A secret's value never goes out (see "secrets"), whatever said it.
+            data = mask_secrets(json.dumps(body)).encode() if ctype == "application/json" else body
             self.head(code, ctype, [("Content-Length", str(len(data)))])
             self.end_headers()
             self.wfile.write(data)
@@ -7726,6 +8358,25 @@ def app_handler(st, users, address):
                          **({"error": str(data["error"])[:300]} if data.get("error") else {})})
             return self.send(200, {})
 
+        def secrets(self, data):
+            """Settings → Secrets: keep a secret ({name, value, project}:
+            project null for every project) or forget one ({name, project,
+            forget: true}). Answers with the names, never a value."""
+            name, project = data.get("name"), data.get("project")
+            if project is not None and (not isinstance(project, str) or not (WORK / project / ".git").exists()):
+                return self.error(400, "no such project")
+            if not isinstance(name, str):
+                return self.error(400, "which secret?")
+            if data.get("forget") is True:
+                if not secret_forget(project, name):
+                    return self.error(404, f"no secret {name}")
+            else:
+                why = secret_set(project, name, data.get("value"))
+                if why:
+                    return self.error(400, why)
+            return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
+                                   "projects_known": project_names()})
+
         def dictate_fetch(self):
             """Settings' "Set up dictation": the model's download, in the
             background (amarchy dictation setup); the list says how far."""
@@ -7834,6 +8485,9 @@ def app_handler(st, users, address):
                     return
                 d = app_changes(s) if m.group(2) == "changes" else app_details(s)
                 return self.error(410, d["error"]) if d.get("error") else self.send(200, d)
+            if path == "/api/secrets":      # the secrets' names (never a value): Settings → Secrets
+                return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
+                                       "projects_known": project_names()})
             m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))
@@ -7944,7 +8598,7 @@ def app_handler(st, users, address):
             self.close_connection = True
 
         def event(self, name, data):
-            self.wfile.write(f"event: {name}\ndata: {json.dumps(data)}\n\n".encode())
+            self.wfile.write(f"event: {name}\ndata: {mask_secrets(json.dumps(data))}\n\n".encode())
             self.wfile.flush()
 
         def list_stream(self):
@@ -8078,6 +8732,24 @@ def app_handler(st, users, address):
                 return self.error(400, why) if why else self.send(200, {})
             if self.path == "/api/sleep":     # when idle sessions sleep (amarchy sleep --after), or all of them now
                 return self.sleep(data)
+            # The terminals and the secrets (phase C3 of docs/plan-chat-app.md).
+            if self.path == "/api/terminals":     # Show terminals (amarchy terminals on|off)
+                if not isinstance(data.get("on"), bool):
+                    return self.error(400, "on: true or false")
+                write_file(SHOW_TERMINALS, ("on" if data["on"] else "off") + "\n")
+                return self.send(200, {"show_terminals": data["on"]})
+            if self.path == "/api/secrets":       # keep one, or forget it: {name, value, project|null} / {name, project, forget}
+                return self.secrets(data)
+            m = re.fullmatch(r"/api/session/([^/]+)/secret", self.path)
+            if m:       # what Claude asked for (amarchy secret ask): {ask, value, scope} or {ask, decline, message}
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                why = secret_answer(s, data.get("ask"), data.get("value"), data.get("scope") or "project",
+                                    decline=data.get("decline") is True, message=data.get("message") or "")
+                if why == "gone":
+                    return self.error(409, "Claude doesn't ask for it any more")
+                return self.error(400, why) if why else self.send(200, {})
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine)", self.path)
             if m:
@@ -9098,8 +9770,9 @@ def cmd_notify(args):
 
 MIGRATED = STATE / "migrated"       # the last of MIGRATIONS done
 # 1: the desktop's look as amarchy's theme of the same name (its colors
-# weren't quite the desktop's); 2: as a theme of your own.
-MIGRATIONS = 2
+# weren't quite the desktop's); 2: as a theme of your own; 3: Show terminals
+# on for an install from before it (a new one starts with them hidden).
+MIGRATIONS = 3
 DESKTOP_STATE = ("zen", "layout.lua", "last", "keys.lua", "keys.bound", "remote", "remote.json",
                  "remote-assistant.png", "preview", "watch.lock", "theme.log", "clipboard.sock", "host",
                  "theme", "notes")
@@ -9113,6 +9786,9 @@ def migrate():
     except (OSError, ValueError):
         pass
     STATE.mkdir(parents=True, exist_ok=True)
+    # An install from before (it has sessions, or migrated already) keeps its
+    # terminals in sight: they were all it had. A new one starts without.
+    before = MIGRATED.exists() or any(SESSIONS.glob("*.json"))
     with open(STATE / "migrate.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
@@ -9139,6 +9815,8 @@ def migrate():
                 for k in ("prefix", "workspace", "no_jump"):
                     s.pop(k, None)
                 save_session(s)
+        if before and not SHOW_TERMINALS.exists():
+            write_file(SHOW_TERMINALS, "on\n")
         write_file(MIGRATED, f"{MIGRATIONS}\n")
 
 
@@ -9347,9 +10025,11 @@ def agent_argv(s):
     return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", hook_settings(s["id"])]
 
 
-def agent_env():
+def agent_env(s=None):
     env = {k: v for k, v in os.environ.items() if k not in INHERITED_CLAUDE_ENV + API_CREDENTIALS}
     env["PATH"] = paste_path()
+    if s:
+        env.update(secret_env(s))       # the project's secrets (see "secrets"); never an API credential
     return env
 
 
@@ -9494,6 +10174,7 @@ class Agent:
     # ---- output to the pane
 
     def out(self, text, dim=False, newline=True):
+        text = mask_secrets(text)       # a secret's value, should Claude say it, isn't shown
         with self.write_lock:
             if not self.at_line_start and newline:
                 sys.stdout.write("\n")
@@ -9714,7 +10395,7 @@ class Agent:
                 data = f.read_bytes()
                 f.write_bytes(data[len(data) // 2:].split(b"\n", 1)[-1])
             with open(f, "a") as fh:
-                fh.write(json.dumps(o) + "\n")
+                fh.write(mask_secrets(json.dumps(o)) + "\n")     # no secret's value in the log
         except OSError:
             pass
 
@@ -10241,7 +10922,7 @@ class Agent:
         argv = agent_argv(s)
         try:
             self.claude = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                           text=True, bufsize=1, env=agent_env(), cwd=path,
+                                           text=True, bufsize=1, env=agent_env(s), cwd=path,
                                            start_new_session=True)    # the pane's Ctrl+C is ours (Stop), not its
         except OSError as e:
             self.out(f"  \033[31mCouldn't start Claude Code: {e}\033[0m")
@@ -10482,6 +11163,10 @@ OPTIONS = {
     "update": ({"--auto"}, set(), set()),
     "migrate": (set(), set(), set()),
     "dictation": ({"--status", "--json"}, set(), set()),
+    "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
+               {"--why", "--timeout", "--project"}, set()),
+    "terminals": (set(), set(), set()),
+    "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
     "paste": None, "rec": None, "agent": None,
@@ -10634,6 +11319,12 @@ def main(argv):
         migrate()
     elif cmd == "dictation":
         return cmd_dictation(args)
+    elif cmd == "secret":
+        return cmd_secret(args)
+    elif cmd == "terminals":
+        return cmd_terminals(args)
+    elif cmd == "shell" and args:
+        return cmd_shell(args)
     else:   # a command it knows, with the wrong number of arguments
         print(usage(cmd), file=sys.stderr)
         return 1

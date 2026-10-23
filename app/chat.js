@@ -1109,6 +1109,9 @@ class Chat {
   current() {
     const sc = this.screen, r = this.row;
     if (r && r.setup) return { note: "Setting up…" };
+    // A secret Claude asks for (amarchy secret ask): secrets.js's card, first.
+    const secret = typeof secretDock === "function" ? secretDock(this) : null;
+    if (secret) return secret;
     if (this.engine === "chat") {
       const p = this.live && Array.isArray(this.live.pending) && this.live.pending[0];
       if (p) return { card: requestCard(this, p), key: `req:${p.request_id}:${JSON.stringify(p.answered || {})}` };
@@ -1235,7 +1238,8 @@ class Chat {
   }
 
   card(m) {
-    const card = m.kind === "question" ? this.questionCard(m) : m.kind === "permission" ? this.permissionCard(m)
+    const card = m.kind === "secret" ? secretCard(this, m)      // secrets.js
+               : m.kind === "question" ? this.questionCard(m) : m.kind === "permission" ? this.permissionCard(m)
                : m.kind === "plan" ? this.planAsk(m) : this.choiceCard(m);
     menuKeys(card, { close: m.kind === "choice" && m.escape ? () => this.act(card, m.escape) : null });
     // A choice's number picks it, as on Claude's own menu.

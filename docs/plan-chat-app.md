@@ -372,20 +372,26 @@ Never through the chat (the transcript keeps everything, and Claude reads it).
 - **You add one**: Settings → Secrets, or the session menu → *Add a secret*:
   a name (with suggestions: `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`…), the
   value, and the scope (this project, or all projects).
-- **Stored** in `~/.config/amarchy/secrets/<project>.env`, mode 0600,
-  outside every repo. Never written into the worktree, so it can't be
-  committed.
-- **Delivered** to the project terminal's environment (`run_env`) and to
-  Claude's commands without a restart, through Claude Code's
-  `CLAUDE_ENV_FILE` (sourced before each Bash command: ❓ confirm its exact
-  behaviour in C3; else a restart-with-resume, which the chat engine makes
-  cheap). Claude is told the *name* is available as `$NAME`, never the value.
+- **Stored** in `~/.config/amarchy/secrets/projects/<project>.env` (and
+  `all.env` for every project), mode 0600 in a 0700 folder, outside every
+  repo. Never written into the worktree, so it can't be committed.
+- **Delivered** to the project terminal (`amarchy shell` starts its shell
+  with them, and bash takes them again at each prompt when they change),
+  its run commands, and Claude's commands without a restart, through Claude
+  Code's `CLAUDE_ENV_FILE`: ✅ (C3, 2.1.309, TUI and `-p`) the SessionStart
+  hook's file is sourced before every Bash command, so the line amarchy's
+  hook writes there (it sources the secret files, never a value) gives a
+  secret saved or forgotten mid-session from the next command on. Claude is
+  told the *name* is available as `$NAME`, never the value; its Read/Edit
+  of the folder are denied, and a Bash command reading it is refused (the
+  PreToolUse hook).
 - **Never** `ANTHROPIC_API_KEY` or other Claude credentials: refused with an
   explanation, since it would switch Claude from the subscription to API
   billing.
 - The app masks a known secret value wherever it would appear in the chat
   (tool output), as a backstop.
-- `amarchy secret list | set | rm` for the CLI and for scripts.
+- `amarchy secret ask | list | set | forget` for the CLI and for scripts
+  (done in C3: see docs/guide.md, "Secrets").
 
 ---
 

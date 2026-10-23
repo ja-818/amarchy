@@ -1959,6 +1959,7 @@ function sessionItems(s) {
   return [
     { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
     { label: "Paste an image into Claude…", detail: "it goes with your next message", act: () => pickImageInto({ id: s.id }) },
+    { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo }) },
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",

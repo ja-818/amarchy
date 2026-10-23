@@ -343,6 +343,7 @@ function openList() {
 function refresh() {
   if (app.desk) deskList();
   else if (!app.session) renderList();
+  else app.session.renderTabs();       // Show terminals may have changed
 }
 
 function closeList() {
@@ -840,9 +841,34 @@ class SessionView {
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
         h("button", { class: "control", onclick: () => this.press([key]) }, label)));
-    this.el = h("div", { class: "view" }, bar, this.chat.el);
+    // Chat | Terminal (with Show terminals on, or while the terminal shows).
+    this.tabs = h("div", { class: "seg session-tabs", role: "tablist", "aria-label": "Show" });
+    this.el = h("div", { class: "view" }, bar, this.tabs, this.chat.el);
     root.replaceChildren(this.el);
     this.renderHeader();
+  }
+
+  // The session's terminals (terminal.js): the project's, and Claude's
+  // classic one; made the first time one shows.
+  get terminal() {
+    if (!this._terminal) {
+      this._terminal = new SessionTerminal({ id: this.id, phone: true,
+        onBack: () => this.setMode("chat") });
+      this.el.append(this._terminal.el);
+    }
+    return this._terminal;
+  }
+
+  // What restyleTerminals() wears the look again on.
+  get pane() { return this._terminal || null; }
+
+  renderTabs() {
+    const on = this.mode === "terminal" || terminalsShown();
+    this.tabs.hidden = !on;
+    if (!on) return;
+    const tab = (mode, label) => h("button", { class: `control${this.mode === mode ? " on" : ""}`, type: "button", role: "tab",
+                                              "aria-selected": String(this.mode === mode), onclick: () => this.setMode(mode) }, label);
+    this.tabs.replaceChildren(tab("chat", "Chat"), tab("terminal", "Terminal"));
   }
 
   open() { this.chat.open(); }
@@ -850,7 +876,7 @@ class SessionView {
   close() {
     this.chat.close();
     this.closed = true;
-    if (this.pane) this.pane.disconnect();
+    if (this._terminal) this._terminal.close();
     clearInterval(this.seen);
   }
 
@@ -988,7 +1014,7 @@ class SessionView {
   reopen() {
     this.chat.reopen();
     this.closed = false;
-    if (this.mode === "terminal") this.pane.open(this.id);
+    if (this.mode === "terminal") this.terminal.open(this.id);
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
   }
@@ -1000,6 +1026,7 @@ class SessionView {
 
   // The strip above Claude: its state, what it's about, project · name.
   renderHeader() {
+    this.renderTabs();
     if (!this.row) {
       this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
       return;
@@ -1026,46 +1053,29 @@ class SessionView {
     if (stick) this.chat.toBottom(true);
   }
 
-  // The conversation, Claude's real terminal, or its screen as text; under
-  // the last two, the keys the phone's keyboard hasn't.
-  setMode(mode) {
+  // The conversation, the session's terminals (the project's, or Claude's
+  // classic one: terminal.js, its keys under it), or Claude's screen as
+  // text (with keys for its menus).
+  setMode(mode, which) {
     this.mode = mode;
     this.el.classList.toggle("terminal", mode === "terminal");
-    if (mode !== "terminal" && this.pane) this.pane.disconnect();
-    if (mode === "terminal") {
-      // Claude's real terminal (desk.js), as in the wide layout: what you type
-      // goes to it, the keys below for what the phone's keyboard hasn't.
-      if (!this.pane) this.pane = new TermPane("claude", { size: phoneSize, mic: true });
-      this.chat.setView({ content: this.pane.box, above: [this.toolsRow(), this.keysRow], composer: false });
-      this.pane.open(this.id).then(() => this.pane.fit());
+    const term = mode === "terminal";
+    if (!term && this._terminal) this._terminal.close();
+    this.chat.el.hidden = term;
+    if (this._terminal) this._terminal.el.hidden = !term;
+    if (term) {
+      const t = this.terminal;
+      t.el.hidden = false;
+      if (which === "classic") t.classic();
+      else t.open(this.id).then(() => { if (which) t.show(which); });
     } else if (mode === "screen") {
-      this.chat.setView({ content: this.screenEl, above: [this.toolsRow(), this.keysRow], composer: true });
+      this.chat.setView({ content: this.screenEl, above: [this.keysRow], composer: true });
       this.renderScreen();
       this.chat.toBottom(true);
     } else {
       this.chat.setView();
     }
-  }
-
-  // Over Claude's terminal or its screen: the text bigger or smaller (kept
-  // for next time), and in the terminal the mic, held to dictate as you'd
-  // hold Claude's key: the words come up in its prompt as it writes them.
-  toolsRow() {
-    if (!this.toolsEl) {
-      const size = (d) => {
-        store.set("phone-size", String(Math.max(7, Math.min(24, phoneSize() + d))));
-        wearPhoneSize();
-        if (this.pane) this.pane.restyle();
-      };
-      this.talkBtn = h("button", { class: "control talk", "aria-label": "Hold to dictate" }, glyph("mic"), "Hold to talk");
-      holdToTalk(this.talkBtn, () => { this.talkBtn.classList.add("on"); talkStart(this.pane); },
-                 () => { this.talkBtn.classList.remove("on"); talkStop(this.pane); });
-      this.toolsEl = h("div", { class: "keys tools" }, this.talkBtn,
-        h("button", { class: "control", "aria-label": "Smaller text", onclick: () => size(-1) }, "A−"),
-        h("button", { class: "control", "aria-label": "Bigger text", onclick: () => size(1) }, "A+"));
-    }
-    this.talkBtn.hidden = this.mode !== "terminal" || !(app.view && app.view.voice);
-    return this.toolsEl;
+    this.renderTabs();
   }
 
   async press(keys) {
@@ -1079,19 +1089,26 @@ class SessionView {
   menu() {
     const row = this.row || { id: this.id };
     const seg = prioritySeg(row);
-    const shown = (mode, label) =>
-      h("button", { class: `menu-item${this.mode === mode ? " on" : ""}`, onclick: () => { closeSheets(); this.setMode(mode); } },
-        label, this.mode === mode ? glyph("check", "val") : null);
+    const item = (on, label, act) =>
+      h("button", { class: `menu-item${on ? " on" : ""}`, onclick: () => { closeSheets(); act(); } },
+        label, on ? glyph("check", "val") : null);
+    const t = this._terminal;
+    const shownTerm = this.mode === "terminal" && t && t.which() === "term";
+    const shownClassic = this.mode === "terminal" && t && t.which() === "claude";
+    // With Show terminals off, they're here still, under Advanced.
+    const terminals = h("div", { class: "menu" },
+      item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
+      item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic")),
+      item(this.mode === "screen", "Claude's screen, as text", () => this.setMode("screen")));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
-      h("div", { class: "section" }, "Show"),
-      h("div", { class: "menu" }, shown("chat", "Conversation"), shown("terminal", "Claude's terminal"),
-        shown("screen", "Claude's screen, as text")),
       h("div", { class: "section" }, "Session"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
+      h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
       engineButton({ ...row, id: this.id }),
       ...sessionActions({ ...row, id: this.id }),
-      closeButton({ ...row, id: this.id }));
+      closeButton({ ...row, id: this.id }),
+      h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);
   }
 }
 
@@ -1810,6 +1827,7 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
+    kids.push(...terminalSettings(draw), ...secretsSettings());     // terminal.js, secrets.js
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),

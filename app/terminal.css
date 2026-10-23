@@ -1,0 +1,51 @@
+/* A session's terminals (terminal.js): the project's terminal and Claude's
+   classic one, under a toolbar (Run, the commands; the way to Claude's
+   classic terminal and back), with the phone's row of keys under them.
+   The phone's Terminal tab and the wide layout's side panel. Design tokens
+   only (docs/design-tokens.md). */
+
+.session-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.session-term[hidden] { display: none; }
+.chat[hidden] { display: none; }
+
+.term-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }
+.term-bar .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; white-space: nowrap; }
+.term-bar .control .glyph { font-size: 14px; }
+.term-bar .term-gap { flex: 1; }
+.term-bar .control[hidden] { display: none; }
+.session-term.classic .term-bar { display: none; }
+
+/* Over Claude's classic terminal: what it's for, and back to the chat. */
+.term-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--selected-bg);
+}
+.term-banner[hidden] { display: none; }
+.term-banner .text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.term-banner .text b { color: var(--selected-text); }
+.term-banner .text span { color: var(--text-muted); font-size: var(--caption); }
+.term-banner .actions { display: flex; gap: 6px; }
+.term-banner .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; }
+
+/* The terminal fills what's left; on the phone it's on the app's glass, as
+   the chat is. */
+.term-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.session-term.phone .term-body > .term-box { --term-pad: 4px 6px; background: transparent; }
+
+/* The phone's keys, under the terminal: Claude's menus' keys and Hold to
+   talk over the classic one, the keys a phone's keyboard hasn't always. */
+.term-keyrows { padding: 6px 8px calc(6px + var(--bottom, 0px)); border-top: 1px solid var(--border-faint); }
+.keyboard-up .term-keyrows { padding-bottom: 6px; }
+.term-keys { margin-bottom: 0; }
+.term-keys + .term-keys { margin-top: 6px; }
+.term-keys[hidden] { display: none; }
+.term-keys .control { min-width: 40px; padding: 4px 8px; }
+.term-keys .control.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.term-keys .control.talk[hidden] { display: none; }
+
+/* Chat | Terminal, under a session's header on the phone. */
+.session-tabs { padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }
+.session-tabs[hidden] { display: none; }
+.session-tabs .control { min-height: 34px; font-size: var(--caption); font-weight: 700; }

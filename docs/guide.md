@@ -525,6 +525,21 @@ mode is the terminal app's, so dictation there uses the other ways. **Back to
 the classic terminal** switches back; either way waits until Claude is idle.
 Details in [the chat engine's protocol](agent-protocol.md).
 
+With **Show terminals** on (Settings → Terminals; the host's, for every phone
+and browser: off for a new install, on for one from before), a session has
+**Chat | Terminal** under its header. **Terminal** is the session's own
+terminal, where the project runs, on the phone too: **Run** and
+**Commands…** over it (the project's saved commands, or a new one), and
+under it the keys a phone's keyboard hasn't (Esc, Tab, **Ctrl**, which waits
+for the next key, the arrows, ^C, ^D, `|` `~` `/` `-`, and **A−**/**A+** for
+the text size). **Claude's classic** there opens Claude's classic terminal,
+Claude Code's own app on the same conversation, for what the chat can't do
+(`/login`, `/config`, an MCP login): a session on the new chat switches to it,
+and **Back to chat** switches it back. Over it the keys for Claude's menus
+(⇧Tab, ⏎, 1 2 3) and **Hold to talk**, which holds Claude's key for you while
+the phone's microphone is Claude's `rec`. With Show terminals off, the
+session's ••• menu still opens them, under **Advanced**.
+
 It needs [Tailscale](https://tailscale.com) on the host and on the phone, with
 HTTPS certificates turned on for your tailnet (in the Tailscale admin console:
 DNS → HTTPS Certificates). On the host:
@@ -643,12 +658,9 @@ each a see-through pane over your whole wallpaper in your theme and font.
 It picks the layout by the window: a wide one with a mouse gets this, a
 phone the list and conversation. Settings (in the amarchy menu) can fix it to either, change the terminals' font size (they
 start at your desktop terminal's), and turn on WebGL drawing (faster; the DOM
-is the default, since a headless test drew WebGL's text too big at 2x). On
-the phone, a session's ••• menu shows **Claude's terminal**, the real one, on
-the app's glass like the conversation, with keys under it: **A−**/**A+** for
-the text size (Claude's screen as text too), and **Hold to talk**, which holds
-Claude's key for you while the phone's microphone is Claude's `rec`, so the
-words come up in its prompt as on your desktop.
+is the default, since a headless test drew WebGL's text too big at 2x). The
+phone has the same two terminals in its **Terminal** tab (see [Your
+phone](#your-phone)).
 
 The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have
 (`Ctrl+Alt+M` → Settings → Keys lists them too):
@@ -865,6 +877,53 @@ With `needs-you`, a session that asks a question or a permission notifies
 you; one that's done doesn't, and is marked done in the list (the filled
 check) until you open it. A desktop showing a host's sessions goes by the
 host's setting, so one `amarchy alerts` sets both.
+
+## Secrets
+
+A key or password a project needs (an OpenAI key for its tests, a Stripe
+secret) is given in the app, never in the chat: the transcript keeps
+everything said there, and Claude reads it all.
+
+- **Claude asks**: when it needs one, a session's Claude runs `amarchy secret
+  ask OPENAI_API_KEY --why "..."` (the amarchy skill and the session's start
+  tell it to, instead of asking in the chat). The session needs you, as for
+  a question (a notification says what for), and its chat shows a card:
+  *Claude needs your OpenAI API key*, why, a password field (**Show** to
+  check it), for this project only or **All projects**, and **Save** (or
+  **Don't give it…**, with why if you like). Claude hears only that it's
+  saved, or what you said.
+- **You add one**: Settings → **Secrets…** lists them by name (never a
+  value), each with **Forget**, and **Add a secret…** (a name, with the
+  usual ones to tap, its value, for which project). A session's ••• menu has
+  **Add a secret…** too. Or on the host: `echo "$value" | amarchy secret set
+  NAME --project <name>` (or `--all`; in a terminal it asks for the value).
+- **Kept** in `~/.config/amarchy/secrets/` (a 0700 folder, 0600 files),
+  outside every repo, so nothing commits them: `projects/<project>.env` for
+  one project, `all.env` for every one (a project's own wins).
+- **Delivered** by name, as environment variables (`$OPENAI_API_KEY`): to
+  Claude's commands from the next one, no restart (Claude Code sources them
+  before each Bash command, through its `CLAUDE_ENV_FILE`; Claude Code itself
+  starts with them too, for an MCP server's `${NAME}`); to the session's
+  terminal from its next prompt (bash: other shells when the terminal starts);
+  to its run commands (`amarchy run`). A program already running (a dev
+  server) gets one when it starts again (**Run**). Forgotten, it's gone from
+  each the same way.
+- **Never shown**: Claude can't read the folder (its Read and Edit of it are
+  denied, a command reading it is refused), the app masks a secret's value
+  wherever it would show (the chat, notifications, the chat engine's log),
+  and `amarchy secret list` prints names only.
+- **`ANTHROPIC_API_KEY` is refused** (and Claude's other credentials): with
+  one in its environment Claude Code bills that API account instead of your
+  subscription. A project that calls Anthropic's API keeps its key under a
+  name of its own.
+
+```sh
+amarchy secret ask NAME [--why "..."] [--all] [--again]   # from a session's Claude: the card, and wait
+amarchy secret list [--json]                              # names, and for which project
+amarchy secret set NAME [--project <name>|--all]          # its value from stdin
+amarchy secret forget NAME [--project <name>|--all]
+amarchy terminals [on|off]                                # Show terminals
+```
 
 ## From scripts and agents
 

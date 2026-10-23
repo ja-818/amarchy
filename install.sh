@@ -26,8 +26,9 @@
 #                            desktops too, does the same)
 #   ./install.sh --uninstall remove all of the above, an Omarchy desktop's
 #                            amarchy from before too (sessions and worktrees
-#                            untouched; the dictation model and Omarchy's
-#                            wallpapers, only downloads, go)
+#                            untouched, and the secrets you gave in the app;
+#                            the dictation model and Omarchy's wallpapers,
+#                            only downloads, go)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
 #                            asks in a terminal, and stops without one)
@@ -240,6 +241,11 @@ if ((uninstall)); then
   systemctl --user stop 'amarchy-wallpapers-*.service' >/dev/null 2>&1 || true
   rm -rf "$state/wallpapers"
   say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone (but for the dictation model and Omarchy's wallpapers)."
+  # Your secrets (amarchy secret) are yours, not a download: kept, and said where.
+  secrets="${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/secrets"
+  if compgen -G "$secrets/*.env" >/dev/null || compgen -G "$secrets/projects/*.env" >/dev/null; then
+    echo "Your secrets (the keys you gave in the app) are still in $secrets: delete that folder if they shouldn't stay."
+  fi
   exit 0
 fi
 
