@@ -345,7 +345,7 @@ phase B2) uses the live state directly.
 | `POST .../answer` | `{request_id, choice: allow\|always\|deny, message?, answers?, annotations?, mode?, suggestions?}` or `{request_id, question, answer}`; `{ok}` or `{error}` (409 when the request is gone) |
 | `POST .../interrupt` | Stop: `{everything?}` drops the queued messages too |
 | `POST .../model`, `.../mode` | `{model}`, `{mode}` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`); kept for the next wake |
-| `POST .../unqueue` | `{uuid}`: a queued message taken back |
+| `POST .../unqueue` | `{uuid}`: a queued message taken back (its content in `response`) |
 | `POST .../engine` | `{engine: chat\|terminal}`: the switch, any session; 409 while Claude works or asks |
 | `POST .../send` | as before, and for a chat session `images: [{type, data}]` and `when: idle\|next\|now`; to the broker (no typing into a pane). Asleep, it wakes with it |
 | `POST .../keys` | for a chat session: a card's option (`{keys, dialog}`) does what it says; `Escape` says no to what's asked and stops, or just stops; other keys go to the pane (Enter restarts a Claude that exited) |
@@ -387,6 +387,41 @@ From `live.pending` (the first; "1 of 2" when several wait):
   with how long the turn has taken after 10 s; none while a card asks or
   words come in.
 
+## The composer (phase C2)
+
+The box you type in (`chat.js`, the same on the phone and the wide layout),
+on either engine:
+
+| Route | What |
+| --- | --- |
+| `GET /api/session/<id>/composer` | `{engine, commands, models, model, mode, up}`: the `/` menu's commands and skills (`name`, `description`, `argumentHint`, `aliases`, `builtin`, `where: "project"` for the project's own), the models (`value`, `resolvedModel`, `displayName`, `description`), and the model and mode Claude is in. A chat-engine session's from its `agent.json` and live state (asleep: what it wakes in, `chosen.json`); a classic-terminal one's from the newest `agent.json` any session's Claude wrote (without other projects' own), its project's `.claude/commands` and `.claude/skills`, and its conversation (`transcript_settings`) |
+| `POST /api/session/<id>/upload` | `{name, data (base64)}`: the file into the worktree's `.amarchy/uploads/` (with a `.amarchy/.gitignore` of `*`, so it's never committed; a name taken gets " (2)"), 50 MB at most: `{path, size}`. `{remove: path}` deletes one taken off before it was sent |
+| `GET /api/session/<id>/image/<record>/<n>` | the n-th image of a message in the session's conversation (the record's `uuid`), for the bubble: `app_items` gives an image item `rec` and `image` (its index) |
+| `POST .../unqueue` | now answers with the message taken back (`response.content`: its text and image blocks), so Send now and Edit keep its pictures |
+
+- **Pictures** go as image blocks with the message (`/send` `images`), made
+  at most 2000 px and 3.7 MB first (a phone's photo), PNG, JPEG, GIF or
+  WebP; one the browser can't read (HEIC on a computer) is uploaded as a
+  file instead. On the classic terminal each is pasted into Claude's prompt
+  (`/api/clip` with `paste`, as Ctrl+V), the session woken first if it
+  sleeps, then the words sent.
+- **Files** are uploaded as they're added and named in the message as
+  `[File: .amarchy/uploads/<name>]` (Claude reads them there; the bubble
+  shows them as a chip).
+- **The `/` menu**: Claude Code's commands that work under `-p` in words
+  (`/compact`, `/clear`, `/context`, `/effort`, `/usage`, `/init` checked;
+  `/model` and the mode open the pills' menus), then the project's, then the
+  rest; the ones that need the terminal app (menus, logins) left out.
+- **The model**: `set_model` (the `/model` route) and `/model <x>` sent to
+  `-p` as a message are for the session only ("for this session only"), but
+  the TUI's `/model` also saves it as the default model of **every new
+  session** (`~/.claude/settings.json`; all checked). So the composer
+  doesn't offer the model on the classic terminal, and turns a `/model x`
+  written in the chat's box into the route (as a message, the live state's
+  `model` wouldn't know of it).
+- **Stop** takes the queued messages back into the box (as Esc does in
+  Claude Code), then interrupts.
+
 ## Between sessions, for every session
 
 `hook_settings` sets `crossSessionInbound: "accept"` for **every** session's
@@ -409,8 +444,6 @@ the mode and model chosen before.
 
 ## Not yet (phase C and on)
 
-- The model and mode pickers, the `/` menu and images from the composer
-  (C2).
 - Drafts: the chat engine has no prompt box; a draft kept from a TUI
   session's sleep stays for the TUI, and the TUI's unsent prompt isn't
   carried over by a switch.

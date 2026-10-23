@@ -473,10 +473,7 @@ priority or close it (from its ••• menu too): it asks first, as the
 desktop does, and says if uncommitted work would go with it. The same menu
 renames it, runs its project or one of its saved commands in its terminal
 (**Run…**: run, change or forget each, save a new one, set the run command:
-`amarchy run --set/--save/--forget`), and makes it your assistant. **Paste an
-image into Claude…** there, the picture button by the box, or an image pasted
-into the box sends one from the phone's photos to Claude's prompt, as
-`Ctrl+V` would (it shows as `[Image #1]`, for what you send next).
+`amarchy run --set/--save/--forget`), and makes it your assistant.
 **Settings** picks the chimes, sets up your assistant, adds a **new
 project** (one of your GitHub repos, any git URL, or an empty one, with a
 private GitHub repo if you like) and orders them; the project picker under
@@ -504,7 +501,47 @@ opens the session on that card. While Claude works, its words come in as it
 writes them, a line under the conversation says what it's doing ("Running
 the tests…", and how long it's been at it), and the box's Send turns into
 **Stop**. On a computer, Enter sends (Shift+Enter for a
-new line). The mic button by the box dictates
+new line).
+
+**The box you type in** takes more than words:
+
+- **+** adds **Photos** (or **A picture** on a computer), **Take a photo**
+  (on a phone) or **A file**; pasting a picture into the box, or dropping
+  pictures and files on the chat (on a computer), does the same, and so does
+  **Add a picture or a file…** in a session's menu. They wait over the box
+  (each with its ✕) and go with what you send. A picture goes to Claude as
+  a picture (a big photo is made smaller first, as Claude sees no more); it
+  shows in your bubble, and tapping it shows it whole. Any other file is
+  saved in the project, in `.amarchy/uploads/` (which git ignores, so it's
+  never committed), the box says where, and your message names it for
+  Claude to read; taking it off before sending deletes it again.
+- **/** at the start of the box opens Claude Code's commands that work in a
+  chat, in words: **Compact the conversation** (`/compact`), **Start fresh**
+  (`/clear`), **How full is the conversation?** (`/context`), **Change the
+  model**, **Change how Claude asks**, **How hard Claude thinks**
+  (`/effort`), **How much of your plan is used** (`/usage`), **Write notes
+  about this project** (`/init`); then the project's own commands and
+  skills, then every other skill. Type to narrow it down; the arrows and
+  Enter (or a tap) pick one. One that needs no more runs at once; the others
+  go into the box, with what they take shown under it. Commands that need
+  Claude's own terminal (`/config`, `/mcp`, `/resume`, logins…) aren't
+  listed.
+- Over the box, the **model** (Opus, Sonnet, Haiku… in words) and **how
+  Claude asks** ("Ask before changes", "Accept edits", "Plan first", "Auto",
+  each explained), each a menu, for this chat only (asleep, it wakes in
+  them). The wide layout's Details has them too (**Change**).
+- What you send while Claude works waits over the box, "Will send when
+  Claude finishes", with **Send now**, **Edit** (back into the box, its
+  pictures too) and ✕ (not sent). **Stop** brings what was waiting back into
+  the box, as Esc does in Claude Code.
+
+In Claude's classic terminal the box does what that terminal can: pictures
+are pasted into Claude's prompt (woken first if it sleeps), files and the
+`/` menu work the same, Stop presses Esc, and what you send while it works
+queues in Claude's own prompt. The model and the mode stay its own: it
+changes the model with `/model`, which makes it every new session's too,
+and the mode with Shift+Tab, so their menus say so and offer **Try the new
+chat**. The mic button by the box dictates
 (see [Dictation](#dictation)): hold it while you speak, or tap it and tap
 again when you're done, and the words come into the box as you talk, to edit
 and send. The phone asks whether Amarchy may use the microphone the first
@@ -529,8 +566,9 @@ doesn't matter which Anthropic account each one's Claude Code uses.
 same conversation going on: Claude Code runs as `claude -p` behind a small
 broker instead of its terminal app, so what it asks (a permission, its
 questions, a plan to approve) reaches the app as data rather than read off
-its screen, answers go straight to it, Stop stops it, images go with your
-next message, and messages queue until Claude is free. Everything else works
+its screen, answers go straight to it, Stop stops it, pictures go with your
+message as pictures, the model and the mode change from the box, and
+messages queue until Claude is free. Everything else works
 as before: the list, sleep, notifications, `amarchy send`. Claude's voice
 mode is the terminal app's, so dictation there uses the other ways. **Back to
 the classic terminal** switches back; either way waits until Claude is idle.
@@ -716,10 +754,11 @@ On a Mac, Option is Alt in the terminals (Settings turns that off,
 for typing accented letters with it), and `Shift+Enter` is a new line in
 Claude's prompt. `Ctrl+Alt+T` picks the theme, the font and the wallpaper.
 
-**Pasting an image**: `⌘V` in the chat's box, or dropping an image on the
-chat, and it goes with your next message (in Claude's classic terminal, `⌘V`
-or `Ctrl+V` as on your desktop). The page hands the image to the host, and
-Claude's `Ctrl+V` gets it from amarchy's `wl-paste` there. No desktop is involved: the host keeps what you
+**Pasting an image**: `⌘V` in the chat's box, or dropping it (or any file)
+on the chat, and it goes with your message (see "The box you type in"
+above); in Claude's classic terminal, `⌘V` or `Ctrl+V` as on your desktop.
+There the page hands the image to the host, and Claude's `Ctrl+V` gets it
+from amarchy's `wl-paste`. No desktop is involved: the host keeps what you
 last pasted, from any browser or phone, as its clipboard (the **web
 clipboard**, `~/.local/state/amarchy/clipboard/web.clip`, yours only), text
 you paste or copy in its terminals too, so `wl-paste` in any session (Claude's

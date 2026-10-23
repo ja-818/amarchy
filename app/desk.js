@@ -1244,10 +1244,10 @@ class DeskDetails {
       item("Runs as", chat ? "The new chat" : "Claude's classic terminal",
            s.setup ? null : h("button", { class: "text-btn", type: "button", onclick: () => switchEngine(s, chat ? "terminal" : "chat") },
                              chat ? "Back to the classic terminal" : "Try the new chat")),
-      // C2's model and mode pills go here too: data-hook="model-mode".
+      // The model and the mode, changed in the composer's own menus (chat.js).
       h("div", { class: "kv-hook", "data-hook": "model-mode" },
-        item("Model", d.model ? modelWords(d.model) : "As Claude Code's default"),
-        item("Mode", d.mode ? (MODE_WORDS[d.mode] || { label: d.mode }).label : null)),
+        item("Model", d.model ? modelWords(d.model) : "As Claude Code's default", pillButton("model")),
+        item("Mode", d.mode ? (MODE_WORDS[d.mode] || { label: d.mode }).label : "As Claude Code's default", chat ? pillButton("mode") : null)),
       item("State", statusWords(s)),
     ];
     if (chat) {
@@ -1272,6 +1272,14 @@ class DeskDetails {
       item("Conversation", d.conversation ? h("code", {}, d.conversation) : null));
     this.el.replaceChildren(...kids.filter(Boolean));
   }
+}
+
+// Details' Change: the composer's model or mode menu, over the chat's box.
+function pillButton(which) {
+  return h("button", { class: "text-btn", type: "button", onclick: () => {
+    if (desk.chat && desk.chat.dock.contains(desk.chat.box)) desk.chat.openMenu(which);
+    else toast("Answer what Claude asks first");
+  } }, "Change");
 }
 
 function when(t) {
@@ -1307,9 +1315,9 @@ function typeToChat(e) {
   c.input.focus({ preventScroll: true });
 }
 
-// An image dropped on the chat goes with your next message (manage.js), as one pasted in its box.
+// A picture or file dropped on the chat goes with your message (chat.js's
+// composer: the chat takes the drops on it, this the rest of the column).
 function dropImages() {
-  const image = (list) => Array.from(list || []).find((f) => /^image\//.test(f.type));
   desk.column.addEventListener("dragover", (e) => {
     if (desk.chat && e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
       e.preventDefault();
@@ -1320,10 +1328,10 @@ function dropImages() {
   desk.column.addEventListener("drop", (e) => {
     desk.column.classList.remove("dropping");
     if (e.defaultPrevented || !desk.chat) return;
-    const f = e.dataTransfer && image(e.dataTransfer.files);
-    if (!f) return;
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (!files.length) return;
     e.preventDefault();
-    pasteImageInto({ id: desk.current }, f);
+    desk.chat.addFiles(files);
     desk.chat.input.focus();
   });
 }
@@ -1955,7 +1963,8 @@ function sessionItems(s) {
   const on = (x) => (x ? "on" : "");
   return [
     { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
-    { label: "Paste an image into Claude…", detail: "it goes with your next message", act: () => pickImageInto({ id: s.id }) },
+    { label: "Add a picture or a file…", detail: "it goes with your next message",
+      act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
     { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo }) },
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),

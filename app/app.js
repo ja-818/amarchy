@@ -1105,7 +1105,7 @@ class SessionView {
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
       h("div", { class: "section" }, "Session"),
-      h("button", { class: "control wide", onclick: () => { closeSheets(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
+      h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
       engineButton({ ...row, id: this.id }),
       ...sessionActions({ ...row, id: this.id }),

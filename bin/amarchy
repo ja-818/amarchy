@@ -5978,8 +5978,9 @@ def app_items(records, s):
                     continue
                 if b.get("type") == "text":
                     found.append(user_item(b.get("text") or ""))
-                elif b.get("type") == "image":
-                    found.append({"kind": "user", "text": "[image]"})
+                elif b.get("type") == "image":       # shown at /api/session/<id>/image/<rec>/<n>
+                    found.append({"kind": "user", "text": "[image]", "rec": rid,
+                                  "image": sum(1 for x in found if x and x.get("image") is not None)})
                 elif b.get("type") == "tool_result":
                     text = result_text(b.get("content"))
                     found.append({"kind": "result", "tool": b.get("tool_use_id", ""), "error": bool(b.get("is_error")),
@@ -6554,6 +6555,181 @@ def chat_attach(s, images):
 def chat_live(live):
     """live.json as the app gets it (the stream's live event)."""
     return {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket")} if live else None
+
+
+# ---- the composer (phase C2 of docs/plan-chat-app.md): the / menu, the
+# model and mode pills, the images in what you said, files you hand Claude
+
+UPLOAD_MAX = 70_000_000         # bytes of one uploaded file, as base64 in its JSON (about 50 MB)
+UPLOADS = Path(".amarchy") / "uploads"      # in the worktree, git-ignored by .amarchy/.gitignore
+
+
+def front_matter(f):
+    """A skill's or command's markdown front matter ({key: value}, plain
+    values only) and the first line of its text after it."""
+    try:
+        text = f.read_text(errors="replace")[:20_000]
+    except OSError:
+        return {}, ""
+    meta, body = {}, text
+    m = re.match(r"---\s*\n(.*?)\n---\s*(?:\n|$)", text, re.S)
+    if m:
+        body = text[m.end():]
+        for line in m.group(1).splitlines():
+            kv = re.match(r"([\w-]+):\s*(.*)$", line)
+            if kv:
+                meta[kv.group(1)] = kv.group(2).strip().strip("\"'")
+    first = next((l.strip().lstrip("#").strip() for l in body.splitlines() if l.strip()), "")
+    return meta, first
+
+
+def skills_in(root, where):
+    """The commands (.claude/commands/**.md) and skills
+    (.claude/skills/<name>/SKILL.md) under a folder (a project, or ~), as
+    initialize lists them: {name, description, argumentHint, where}."""
+    out = []
+    commands = Path(root) / ".claude" / "commands"
+    for f in sorted(commands.rglob("*.md")) if commands.is_dir() else []:
+        meta, first = front_matter(f)
+        out.append({"name": ":".join(f.relative_to(commands).with_suffix("").parts),
+                    "description": meta.get("description") or first, "argumentHint": meta.get("argument-hint") or "",
+                    "where": where})
+    skills = Path(root) / ".claude" / "skills"
+    for f in sorted(skills.glob("*/SKILL.md")) if skills.is_dir() else []:
+        meta, first = front_matter(f)
+        out.append({"name": meta.get("name") or f.parent.name, "description": meta.get("description") or first,
+                    "argumentHint": meta.get("argument-hint") or "", "where": where})
+    return out
+
+
+def composer_info(s):
+    """What the composer offers for a session, whichever engine it's on:
+    the commands and skills for its / menu (its project's own marked
+    "project"), the models, and the model and permission mode it's in. A
+    chat-engine Claude said what it has (agent.json, from initialize); for
+    the classic terminal it's the newest any session's Claude said, without
+    other projects' own, and this project's read off its folder."""
+    sid, chat = s["id"], engine(s) == "chat"
+    told, its = {}, chat and (claude_dir(sid) / "agent.json").exists()
+    if its:
+        f = claude_dir(sid) / "agent.json"
+    else:
+        others = [f for f in CLAUDE_STATE.glob("*/agent.json")] if CLAUDE_STATE.is_dir() else []
+        f = max(others, key=lambda f: f.stat().st_mtime, default=None)
+    try:
+        told = json.loads(f.read_text()) if f else {}
+    except (OSError, ValueError):
+        told = {}
+    told = told if isinstance(told, dict) else {}
+    own = skills_in(s["path"], "project")
+    mine = {c["name"] for c in own}
+    commands = []
+    for c in told.get("commands") or []:
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        desc = str(c.get("description") or "")
+        if not its and desc.rstrip().endswith("(project)") and c["name"] not in mine:
+            continue        # another project's own
+        commands.append({"name": c["name"], "description": desc, "argumentHint": c.get("argumentHint") or "",
+                         "aliases": c.get("aliases") or [], "builtin": bool(c.get("builtin")),
+                         "where": "project" if c["name"] in mine or desc.rstrip().endswith("(project)") else ""})
+    known = {c["name"] for c in commands}
+    if not told.get("commands"):
+        own += [c for c in skills_in(Path.home(), "user") if c["name"] not in mine]
+    commands += [c for c in own if c["name"] not in known]
+    if chat:
+        live = agent_live(sid)
+        model, mode = live.get("model") or "", live.get("permission_mode") or ""
+        if not agent_up(sid):       # asleep: it wakes in what you chose last
+            try:
+                chosen = json.loads((claude_dir(sid) / "chosen.json").read_text())
+            except (OSError, ValueError):
+                chosen = {}
+            model = chosen.get("model") or model if isinstance(chosen, dict) else model
+            mode = chosen.get("mode") or mode if isinstance(chosen, dict) else mode
+    else:
+        model, mode = transcript_settings(s)
+    models = [{k: m.get(k) for k in ("value", "resolvedModel", "displayName", "description", "supportsAutoMode")}
+              for m in told.get("models") or [] if isinstance(m, dict) and m.get("value")]
+    return {"engine": "chat" if chat else "terminal", "commands": commands, "models": models,
+            "model": model, "mode": mode, "up": agent_up(sid) if chat else None}
+
+
+def upload_name(name):
+    """A file's name as it's kept in the uploads folder: its own, without a
+    path or anything a shell would trip on."""
+    base = re.sub(r"[^\w.()+ -]+", "_", Path(str(name or "")).name).strip(" .")[:120]
+    return base or "file"
+
+
+def app_upload(s, data):
+    """A file you gave Claude, kept in the session's worktree under
+    .amarchy/uploads/ (git-ignored, so it's never committed): {name, data
+    (base64)} -> {path (from the worktree's top), size}, or (code, why).
+    {remove: path}: one taken back before it was sent."""
+    root = Path(s["path"])
+    if not root.is_dir():
+        return 409, "The session's folder isn't there"
+    folder = root / UPLOADS
+    if "remove" in data:
+        f = root / str(data.get("remove") or "")
+        if f.parent != folder or not f.is_file():
+            return 400, "not an uploaded file"
+        f.unlink()
+        return {"removed": str(f.relative_to(root))}
+    try:
+        raw = base64.b64decode(data.get("data") or "", validate=True)
+    except (ValueError, TypeError):
+        return 400, "a file that isn't base64"
+    if not raw and data.get("data"):
+        return 400, "an empty file"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        ignore = root / ".amarchy" / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text("# amarchy's own (files you gave Claude): never committed\n*\n")
+        name = upload_name(data.get("name"))
+        stem, ext = Path(name).stem, Path(name).suffix
+        f, n = folder / name, 2
+        while f.exists():
+            f, n = folder / f"{stem} ({n}){ext}", n + 1
+        tmp = folder / f".{f.name}.part"
+        tmp.write_bytes(raw)
+        tmp.replace(f)
+    except OSError as e:
+        return 500, f"couldn't keep it: {e}"
+    return {"path": str(f.relative_to(root)), "size": len(raw)}
+
+
+def transcript_image(s, rec, n):
+    """The n-th image of a message in the session's conversation (rec: its
+    uuid): (media type, bytes), or None."""
+    f = transcript(s)
+    if not f or not re.fullmatch(r"[\w-]{8,80}", rec):
+        return None
+    key = rec.encode()
+    try:
+        with open(f, "rb") as fh:
+            for line in fh:
+                if key not in line or b'"image"' not in line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("uuid") != rec:
+                    continue
+                content = (r.get("message") or {}).get("content")
+                images = [b for b in content if isinstance(b, dict) and b.get("type") == "image"] \
+                    if isinstance(content, list) else []
+                src = images[n].get("source") or {} if 0 <= n < len(images) else {}
+                kind = src.get("media_type") or ""
+                if src.get("type") != "base64" or not CLIP_TYPES.fullmatch(kind):
+                    return None
+                return kind, base64.b64decode(src.get("data") or "")
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 def chat_answer(s, request):
@@ -8566,6 +8742,24 @@ def app_handler(st, users, address):
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
             # The wide layout's side panel (desk.js, B3): what a session changed, and its details.
+            # The composer's (phase C2): its / menu, models and mode; an image
+            # in what you said.
+            m = re.fullmatch(r"/api/session/([^/]+)/composer", path)
+            if m:
+                s = self.session(m.group(1))
+                return self.send(200, composer_info(s)) if s else None
+            m = re.fullmatch(r"/api/session/([^/]+)/image/([\w-]+)/(\d{1,2})", path)
+            if m:
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                found = transcript_image(s, m.group(2), int(m.group(3)))
+                if not found:
+                    return self.error(404, "no such image")
+                self.head(200, found[0], [("Content-Length", str(len(found[1])))], cache="private, max-age=604800, immutable")
+                self.end_headers()
+                self.wfile.write(found[1])
+                return
             m = re.fullmatch(r"/api/session/([^/]+)/(changes|details)", path)
             if m:
                 s = self.session(m.group(1))
@@ -8772,7 +8966,17 @@ def app_handler(st, users, address):
                 return
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper") \
                 or bool(re.fullmatch(r"/api/session/[^/]+/send", self.path))      # images, on the chat engine
-            data = self.body(CLIP_MAX if big else 200_000)
+            upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
+            data = self.body(UPLOAD_MAX if upload else CLIP_MAX if big else 200_000)
+            if upload:      # a file for Claude, into the worktree (the composer's, phase C2)
+                if len(data.get("data") or "") == 0 and "remove" not in data and \
+                        int(self.headers.get("Content-Length") or 0) > UPLOAD_MAX:
+                    return self.error(413, "That file is too big (50 MB at most)")
+                s = self.session(self.path.split("/")[3])
+                if not s:
+                    return
+                r = app_upload(s, data)
+                return self.error(*r) if isinstance(r, tuple) else self.send(200, r)
             if self.path == "/api/clip":
                 return self.clip(data)
             if self.path in ("/api/sound", "/api/sound/add"):
@@ -10927,12 +11131,14 @@ class Agent:
         if op == "attach":
             return self.attach(r.get("images"))
         if op == "unqueue":
+            # Taken back: its content comes with the answer (Send now, Edit
+            # keep its images).
             with self.lock:
-                before = len(self.queue)
-                self.queue = [m for m in self.queue if m["uuid"] != r.get("uuid")]
-                gone = before != len(self.queue)
+                taken = next((m for m in self.queue if m["uuid"] == r.get("uuid")), None)
+                self.queue = [m for m in self.queue if m is not taken]
             self.queue_changed()
-            return {"ok": gone, **({} if gone else {"error": "no such message waiting"})}
+            return {"ok": True, "response": {"content": taken["content"]}} if taken \
+                else {"ok": False, "error": "no such message waiting"}
         if op == "answer":
             # {request_id, choice: allow|always|deny, message, answers, mode},
             # {request_id, question, answer} (one of several questions), or

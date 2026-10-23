@@ -143,6 +143,9 @@ const CHAT_ICONS = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
 };
 
 function icon(name, cls) {
@@ -735,30 +738,37 @@ class Chat {
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     this.el = h("div", { class: "chat" }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    this.listenDrops();
     this.renderDock();
   }
 
   buildComposer() {
     this.input = h("textarea", { rows: 1, placeholder: this.placeholder, enterkeyhint: "enter", "aria-label": "Message",
-                                 oninput: () => this.typed() });
+                                 "aria-autocomplete": "list", oninput: () => this.typed() });
     this.input.value = store.get(`draft:${this.id}`) || "";
-    // An image pasted into the box goes with the next message (manage.js).
+    // A picture or a file pasted into the box goes with the message (text
+    // pasted is text, even when an image of it comes along, as from a sheet).
     this.input.addEventListener("paste", (e) => {
-      const item = e.clipboardData && Array.from(e.clipboardData.items).find((i) => i.kind === "file" && /^image\//.test(i.type));
-      if (!item) return;
+      const d = e.clipboardData;
+      const files = d ? Array.from(d.files || []) : [];
+      if (!files.length || (d.getData("text/plain") || "").trim()) return;
       e.preventDefault();
-      pasteImageInto({ id: this.id }, item.getAsFile());
+      this.addFiles(files);
     });
-    // On a computer, Enter sends and Shift+Enter is a new line; on a phone
-    // its keyboard's return is a new line, the arrow sends.
     this.input.addEventListener("keydown", (e) => {
+      if (this.slashKeys(e)) return;
+      // On a computer, Enter sends and Shift+Enter is a new line; on a phone
+      // its keyboard's return is a new line, the arrow sends.
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(hover: hover) and (pointer: fine)").matches) {
         e.preventDefault();
         this.send();
       }
     });
-    this.attachBtn = h("button", { class: "cbtn attach", type: "button", "aria-label": "Add an image",
-                                   onclick: () => pickImageInto({ id: this.id }) }, icon("plus"));
+    this.input.addEventListener("blur", () => setTimeout(() => {
+      if (this.menu && this.menu.name === "slash" && !this.box.contains(document.activeElement)) this.closeMenu();
+    }, 150));
+    this.attachBtn = h("button", { class: "cbtn attach", type: "button", "aria-label": "Add a photo or a file", "aria-haspopup": "menu",
+                                   onclick: () => this.toggleMenu("add") }, icon("plus"));
     this.micBtn = h("button", { class: "cbtn mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true },
                     glyph("mic"));
     this.sendBtn = h("button", { class: "cbtn send", type: "button", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
@@ -770,13 +780,46 @@ class Chat {
                               changed: () => this.typed(),
                               state: (text) => this.listening(text),
                               claude: claude ? { ...claude, off: () => this.engine === "chat" } : undefined });
-    this.composer = h("div", { class: "composer" }, this.attachBtn, this.input, this.micBtn, this.stopBtn, this.sendBtn);
+    // The pictures and files going with the message, over the line you type on.
+    this.tray = [];
+    this.trayEl = h("div", { class: "tray", hidden: true });
+    this.composer = h("div", { class: "composer" }, this.trayEl,
+      h("div", { class: "composer-row" }, this.attachBtn, this.input, this.micBtn, this.stopBtn, this.sendBtn));
+    // Over it: the model and the mode, and the menu that's open (+, /, a pill's).
+    this.info = null;           // /composer: the commands, the models, the model and mode
+    this.modelPill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("model") });
+    this.modePill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("mode") });
+    this.pills = h("div", { class: "pills" }, this.modelPill, this.modePill);
+    this.menuEl = h("div", { class: "cmenu", role: "menu", tabindex: "-1", hidden: true });
+    menuKeys(this.menuEl, { close: () => this.closeMenu(true) });
+    this.box = h("div", { class: "composer-wrap" }, this.menuEl, this.pills, this.composer);
     this.queueEl = h("div", { class: "queue" });
+    this.drawPills();
+    this.drawTray();
+  }
+
+  // A file dropped on the chat goes with the message too (the wide layout
+  // hands its drops here as well).
+  listenDrops() {
+    this.el.addEventListener("dragover", (e) => {
+      if (!this.canDrop(e)) return;
+      e.preventDefault();
+      this.el.classList.add("dropping");
+    });
+    this.el.addEventListener("dragleave", (e) => { if (!this.el.contains(e.relatedTarget)) this.el.classList.remove("dropping"); });
+    this.el.addEventListener("drop", (e) => {
+      this.el.classList.remove("dropping");
+      if (!this.canDrop(e)) return;
+      e.preventDefault();
+      this.addFiles(Array.from(e.dataTransfer.files || []));
+      this.input.focus();
+    });
   }
 
   // ---- the stream
 
   open() {
+    this.loadInfo();
     const es = new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
     this.es = es;
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
@@ -903,6 +946,12 @@ class Chat {
     for (const item of d.items) this.add(item, frag);
     this.tail.before(frag);
     this.renderTail();
+    // The classic terminal's model and mode are read off its conversation:
+    // again once Claude said something (the chat engine's are live).
+    if (this.engine !== "chat" && d.items.some((i) => i.kind === "claude" || i.kind === "command") && !d.reset) {
+      clearTimeout(this.infoTimer);
+      this.infoTimer = setTimeout(() => this.loadInfo(), 1500);
+    }
     if (this.screen && this.screen.dialog) this.renderDock();     // the card may be about what came in
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
@@ -945,10 +994,31 @@ class Chat {
     if (it.kind === "tool") return this.tool(it, where, earlier);
     this.fold = null;       // anything else ends the steps before it
     if (it.kind === "user") {
+      // A message's pictures and its words are items of their own (keyed
+      // "<its record>:<n>"): one bubble.
+      const rec = it.rec || String(it.key || "").split(":")[0];
+      const prev = rec && (where.lastElementChild || (!earlier && this.tail.previousElementSibling));
+      const same = prev && prev.matches(".msg.user") && prev.dataset.rec === rec ? prev.querySelector(".bubble") : null;
+      if (typeof it.image === "number") {
+        const url = `/api/session/${encodeURIComponent(this.id)}/image/${encodeURIComponent(rec)}/${it.image}`;
+        const shot = h("button", { class: "shot", type: "button", "aria-label": "Show the picture",
+                                   onclick: () => sheet(sheetHead("Your picture"), h("img", { class: "shot-full", src: url, alt: "A picture you sent" })) },
+                       h("img", { src: url, alt: "A picture you sent", loading: "lazy" }));
+        const bubble = same || h("div", { class: "bubble" });
+        let shots = bubble.querySelector(".shots");
+        if (!shots) bubble.prepend(shots = h("div", { class: "shots" }));
+        shots.append(shot);
+        bubble.querySelectorAll(".chip.image").forEach((c) => c.remove());      // [Image #1]: the picture's here
+        if (!same) where.append(h("div", { class: "msg user", "data-rec": rec }, bubble));
+        return;
+      }
       const said = this.userView(it.text);
       if (said.note) where.append(h("div", { class: "msg note" }, said.note));
       else if (said.summary) where.append(h("details", { class: "msg note long" }, h("summary", {}, said.summary), h("pre", {}, said.text)));
-      else where.append(h("div", { class: "msg user" }, h("div", { class: "bubble" }, ...said.parts)));
+      else if (same) {
+        const parts = same.querySelector(".shots") ? said.parts.filter((p) => !(p instanceof Node && p.matches(".chip.image"))) : said.parts;
+        same.append(h("div", { class: "said" }, ...parts));
+      } else where.append(h("div", { class: "msg user", "data-rec": rec || null }, h("div", { class: "bubble" }, ...said.parts)));
     } else if (it.kind === "command") {
       where.append(h("div", { class: "msg command" }, h("span", { class: "chip" }, it.text)));
     } else if (it.kind === "note") {
@@ -981,12 +1051,14 @@ class Chat {
     if (/^This session is being continued from a previous conversation/.test(t))
       return { summary: "Continued from an earlier conversation", text: t };
     const parts = [];
-    const re = /\[(?:image|Image #\d+)\]|<pasted_content[^>]*>([\s\S]*?)<\/pasted_content>/g;
+    const re = /\[(?:image|Image #\d+)\]|<pasted_content[^>]*>([\s\S]*?)<\/pasted_content>|^\[File: ([^\]\n]+)\]$/gm;
     let at = 0, m;
     while ((m = re.exec(t))) {
       if (m.index > at) parts.push(t.slice(at, m.index));
-      parts.push(m[0].startsWith("<") ? h("span", { class: "pasted" }, m[1].trim())
-                                      : h("span", { class: "chip image" }, icon("image"), "Image"));
+      // A file you gave Claude (the composer names it so): its name, where it is.
+      parts.push(m[2] ? h("span", { class: "chip file", title: m[2] }, icon("file"), baseName(m[2]))
+                 : m[0].startsWith("<") ? h("span", { class: "pasted" }, m[1].trim())
+                 : h("span", { class: "chip image" }, icon("image"), "Image"));
       at = m.index + m[0].length;
     }
     if (at < t.length) parts.push(t.slice(at));
@@ -1382,6 +1454,7 @@ class Chat {
     const sleep = sleepOf(this.row);
     const key = [now ? now.key || now.note : "composer", sleep, this.view.composer, this.view.above.length, content].join("|");
     this.renderQueue();
+    this.drawPills();
     if (key === this.cardKey) { this.sendButtons(); return; }
     this.cardKey = key;
     const kids = [...this.view.above];
@@ -1398,10 +1471,11 @@ class Chat {
         h("span", {}, "Asleep to save memory. Send something to wake it."),
         h("button", { class: "text-btn", type: "button", onclick: () => wakeSession(this.row) }, "Wake")));
       else if (sleep === "waking") kids.push(h("div", { class: "dock-note" }, glyph("asleep", "sleep waking"), h("span", {}, "Waking Claude…")));
-      kids.push(this.queueEl, this.composer);
+      kids.push(this.queueEl, this.box);
     }
     // The keys, if they were here, stay: on the card (its first choice), and
     // back in the box you type in once it's answered.
+    if (!kids.includes(this.box)) this.closeMenu();
     const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
     const stick = this.atBottom();
     this.dock.replaceChildren(...kids);
@@ -1424,36 +1498,80 @@ class Chat {
   }
 
   // What you sent while Claude works (the chat engine keeps it until it's
-  // free): each with Send now and Edit. And the images going with the next.
+  // free): each with Send now, Edit and Remove. And the images Claude's
+  // terminal pasted, going with the next.
   renderQueue() {
     const live = this.engine === "chat" ? this.live : null;
     const queue = live && Array.isArray(live.queue) ? live.queue : [];
-    const kids = queue.map((q) => h("div", { class: "queued" },
-      icon("clock"), h("div", { class: "text" }, h("div", { class: "what" }, q.text || (q.images ? "An image" : "")),
-        h("div", { class: "when" }, "Will send when Claude finishes")),
-      h("button", { class: "text-btn", type: "button", onclick: () => this.sendNow(q) }, "Send now"),
-      h("button", { class: "text-btn", type: "button", onclick: () => this.editQueued(q) }, "Edit")));
+    const kids = queue.map((q) => {
+      const pics = q.images ? (q.images === 1 ? "an image" : `${q.images} images`) : "";
+      const btn = (label, fn, aria) => h("button", { class: "text-btn", type: "button", "aria-label": aria, onclick: fn }, label);
+      return h("div", { class: "queued" },
+        icon("clock"), h("div", { class: "text" }, h("div", { class: "what" }, q.text || (pics ? pics.charAt(0).toUpperCase() + pics.slice(1) : "")),
+          h("div", { class: "when" }, `Will send when Claude finishes${q.text && pics ? ` · with ${pics}` : ""}`)),
+        btn("Send now", () => this.sendNow(q), "Send it now"),
+        btn("Edit", () => this.editQueued(q), "Edit it"),
+        h("button", { class: "cbtn small", type: "button", "aria-label": "Don't send it", title: "Don't send it",
+                      onclick: () => this.removeQueued(q) }, icon("failed")));
+    });
     const n = live && live.attachments;
     if (n) kids.push(h("div", { class: "queued images" }, icon("image"),
       h("div", { class: "text" }, h("div", { class: "what" }, n === 1 ? "An image goes with your next message" : `${n} images go with your next message`))));
     this.queueEl.replaceChildren(...kids);
   }
 
-  async sendNow(q) {
+  // A queued message taken back from Claude's broker: its content (text,
+  // and the images in it), or null if it went already.
+  async unqueue(q) {
     try {
-      await this.post("unqueue", { uuid: q.uuid });
-      await this.post("send", { text: q.text, when: "now" });
-    } catch (e) { toast(e.message); }
+      const r = await this.post("unqueue", { uuid: q.uuid });
+      const c = r.response && r.response.content;
+      return Array.isArray(c) ? c : [{ type: "text", text: typeof c === "string" ? c : q.text || "" }];
+    } catch (e) {
+      toast(/no such message/i.test(e.message) ? "It went to Claude already" : e.message);
+      return null;
+    }
+  }
+
+  async sendNow(q) {
+    const content = await this.unqueue(q);
+    if (!content) return;
+    const text = content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    const images = content.filter((b) => b.type === "image" && b.source).map((b) => ({ type: b.source.media_type, data: b.source.data }));
+    try {
+      await this.post("send", { text, images, when: "now" });
+    } catch (e) {
+      toast(e.message);
+      this.restore(content);
+    }
   }
 
   async editQueued(q) {
-    try {
-      await this.post("unqueue", { uuid: q.uuid });
-      const now = this.input.value.trim();
-      this.input.value = now ? `${q.text}\n${now}` : q.text;
-      this.typed();
-      this.input.focus();
-    } catch (e) { toast(e.message); }
+    const content = await this.unqueue(q);
+    if (content) this.restore(content);
+  }
+
+  async removeQueued(q) {
+    if (await this.unqueue(q)) toast("Taken back: it won't be sent");
+  }
+
+  // What was taken back, into the box: its text before what's there, its
+  // images on the tray.
+  restore(content) {
+    const text = content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    for (const b of content) {
+      if (b.type !== "image" || !b.source || !b.source.data) continue;
+      const bin = atob(b.source.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: b.source.media_type });
+      this.tray.push({ kind: "image", type: blob.type, data: b.source.data, url: URL.createObjectURL(blob), name: "image" });
+    }
+    const now = this.input.value.trim();
+    if (text) this.input.value = now ? `${text}\n${now}` : text;
+    this.drawTray();
+    this.typed();
+    this.input.focus();
   }
 
   // ---- a card
@@ -1812,6 +1930,7 @@ class Chat {
     this.grow();
     store.set(`draft:${this.id}`, this.input.value);
     this.sendButtons();
+    this.slashCheck();
   }
 
   grow() {
@@ -1821,36 +1940,92 @@ class Chat {
 
   sendButtons() {
     this.micBtn.hidden = !this.talk.available();
-    const empty = !this.input.value.trim();
+    const empty = !this.input.value.trim() && !this.tray.length;
+    const busy = this.tray.some((a) => a.state === "reading" || a.state === "uploading");
     const stop = this.working() && empty;
     this.stopBtn.hidden = !stop;
     this.sendBtn.hidden = stop;
-    this.sendBtn.disabled = empty || this.talk.on();     // what you say is still coming into the box
+    // (What you say is still coming into the box, a file still on its way.)
+    this.sendBtn.disabled = empty || busy || this.sending || this.talk.on();
     this.composer.classList.toggle("ready", !empty);
   }
 
+  // What's in the box goes: its text, the files it names (uploaded into the
+  // worktree already), its images as image blocks (the chat engine) or
+  // pasted into Claude's prompt (its classic terminal, as Ctrl+V does).
   async send() {
     const text = this.input.value;
-    if (!text.trim() || this.talk.on()) return;
-    this.sendBtn.disabled = true;
+    const tray = this.tray.slice();
+    if ((!text.trim() && !tray.length) || this.talk.on() || this.sending) return;
+    if (tray.some((a) => a.state === "reading" || a.state === "uploading")) return toast("A file is still on its way: a moment");
+    const failed = tray.find((a) => a.state === "failed");
+    if (failed) return toast(`${failed.name} didn't upload: take it off, or add it again`);
+    // /model written out, in the chat: as its menu does it (sent as a
+    // message, the live state wouldn't know of it).
+    const model = this.engine === "chat" && !tray.length && text.trim().match(/^\/model(?:\s+(\S+))?$/);
+    if (model) {
+      this.input.value = "";
+      this.typed();
+      if (!model[1]) return this.openMenu("model");
+      const s = this.settings();
+      const m = modelOf(model[1], s.models) || { value: model[1], displayName: modelName(model[1], s.models) };
+      return this.setModel(m);
+    }
+    const files = tray.filter((a) => a.kind === "file").map((a) => `[File: ${a.path}]`);
+    const message = files.length ? `${text.replace(/\s+$/, "")}${text.trim() ? "\n\n" : ""}${files.join("\n")}` : text;
+    const images = tray.filter((a) => a.kind === "image").map((a) => ({ type: a.type, data: a.data }));
+    this.sending = true;
+    this.sendButtons();
     try {
-      const r = await this.post("send", { text });
+      const r = images.length && this.engine !== "chat" ? await this.pasteIntoTerminal(images, message)
+        : await this.post("send", { text: message, ...(images.length ? { images } : {}) });
       if (r.waking) toast("Waking Claude with it…");
       this.input.value = "";
       store.set(`draft:${this.id}`, "");
+      for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
+      this.tray = this.tray.filter((a) => !tray.includes(a));
+      this.drawTray();
+      this.closeMenu();
       this.grow();
       this.toBottom();
     } catch (e) {
       toast(e.message);
     }
+    this.sending = false;
     this.sendButtons();
   }
 
-  // Stop: the chat engine's interrupt, or Esc in Claude's terminal.
+  // Images into Claude's classic terminal: each pasted into its prompt (it
+  // shows [Image #1]), then the words, sent as you'd press Enter.
+  async pasteIntoTerminal(images, text) {
+    const up = () => { const sc = this.screen || {}; return !sleepOf(this.row) && sc.live && !sc.exited && !sc.asleep; };
+    if (!up()) {
+      // Asleep: woken, and the pictures go in once its prompt is back.
+      if (sleepOf(this.row) === "asleep" || (this.screen && this.screen.asleep)) wakeSession(this.row);
+      toast("Waking Claude to give it the pictures…");
+      for (let i = 0; i < 60 && !up() && !this.closed; i++) await new Promise((ok) => setTimeout(ok, 500));
+      if (!up()) throw new Error("Claude's terminal isn't running: start it, then send the pictures again");
+      await new Promise((ok) => setTimeout(ok, 2000));      // its prompt drawn
+    }
+    for (const im of images) {
+      await api("/api/clip", { ...im, session: this.id, paste: true });
+      await new Promise((ok) => setTimeout(ok, 400));       // Claude reads the clipboard
+    }
+    return text.trim() ? this.post("send", { text }) : this.post("keys", { keys: ["Enter"] });
+  }
+
+  // Stop: the chat engine's interrupt, or Esc in Claude's terminal. As Esc
+  // does in Claude Code, what was waiting to go comes back into the box.
   async stop() {
     try {
-      if (this.engine === "chat") await this.post("interrupt", {});
-      else await this.post("keys", { keys: ["Escape"] });
+      if (this.engine === "chat") {
+        const queue = (this.live && Array.isArray(this.live.queue) && this.live.queue) || [];
+        for (const q of queue.slice().reverse()) {
+          const content = await this.unqueue(q);
+          if (content) this.restore(content);
+        }
+        await this.post("interrupt", {});
+      } else await this.post("keys", { keys: ["Escape"] });
     } catch (e) {
       toast(e.message);
     }
@@ -1867,6 +2042,469 @@ class Chat {
     this.placeholder = text;
     if (!this.composer.classList.contains("listening")) this.input.placeholder = text;
   }
+
+  // ---- what goes with the message: pictures and files (the tray)
+
+  // Files picked, pasted or dropped: an image goes as an image (made small
+  // enough for Claude first), anything else is uploaded into the worktree.
+  addFiles(files) {
+    for (const f of files) {
+      if (!f) continue;
+      if (/^image\//.test(f.type) && !/svg/.test(f.type)) this.addImage(f);
+      else this.upload(f);
+    }
+  }
+
+  async addImage(file) {
+    if (this.tray.filter((a) => a.kind === "image").length >= IMAGES_MAX)
+      return toast(`${IMAGES_MAX} images at most in one message`);
+    const a = { kind: "image", name: file.name || "image", state: "reading" };
+    this.tray.push(a);
+    this.drawTray();
+    try {
+      const img = await claudeImage(file);
+      if (a.removed) return;
+      Object.assign(a, { type: img.type, data: await base64Of(img), url: URL.createObjectURL(img), state: "ready" });
+      this.drawTray();
+    } catch (e) {
+      // An image the browser can't read (HEIC on a computer...): a file then.
+      this.tray = this.tray.filter((x) => x !== a);
+      if (!a.removed) this.upload(file);
+      else this.drawTray();
+    }
+  }
+
+  // A file into the worktree's .amarchy/uploads/ (git-ignored), named in
+  // the message so Claude reads it there.
+  async upload(file) {
+    if (file.size > UPLOAD_MAX) return toast(`${file.name} is too big (50 MB at most)`);
+    const a = { kind: "file", name: file.name || "file", size: file.size, state: "uploading" };
+    this.tray.push(a);
+    this.drawTray();
+    try {
+      const r = await this.post("upload", { name: a.name, data: await base64Of(file) });
+      a.path = r.path;
+      a.state = "ready";
+      if (a.removed) this.post("upload", { remove: r.path }).catch(() => {});
+      else toast(`Saved in the project as ${r.path}`);
+    } catch (e) {
+      a.state = "failed";
+      a.error = e.message;
+    }
+    this.drawTray();
+  }
+
+  unattach(a) {
+    a.removed = true;
+    this.tray = this.tray.filter((x) => x !== a);
+    if (a.url) URL.revokeObjectURL(a.url);
+    // Uploaded and not sent: out of the worktree again.
+    if (a.kind === "file" && a.path) this.post("upload", { remove: a.path }).catch(() => {});
+    this.drawTray();
+    this.input.focus({ preventScroll: true });
+  }
+
+  drawTray() {
+    this.trayEl.hidden = !this.tray.length;
+    this.trayEl.replaceChildren(...this.tray.map((a) => {
+      const x = h("button", { class: "att-x", type: "button", "aria-label": `Take ${a.name} off`, title: "Take it off",
+                              onclick: () => this.unattach(a) }, icon("failed"));
+      if (a.kind === "image")
+        return h("div", { class: `att image${a.url ? "" : " busy"}`, title: a.name },
+                 a.url ? h("img", { src: a.url, alt: a.name }) : spinner(), x);
+      const where = a.state === "uploading" ? "Uploading…" : a.state === "failed" ? a.error || "Didn't upload" : `Saved in the project: ${a.path}`;
+      return h("div", { class: `att file ${a.state}`, title: a.path || a.name },
+        a.state === "uploading" ? spinner() : icon(a.state === "failed" ? "failed" : "file", a.state === "failed" ? "bad" : ""),
+        h("div", { class: "att-text" }, h("div", { class: "name" }, a.name), h("div", { class: "where" }, where)), x);
+    }));
+    this.sendButtons();
+  }
+
+  // The + menu's choices, or a session menu's "Add a photo".
+  async pick(what) {
+    this.closeMenu();
+    const files = await pickFiles(what === "files" ? "" : "image/*", { multiple: what !== "camera", capture: what === "camera" });
+    if (files.length) this.addFiles(files);
+    this.input.focus({ preventScroll: true });
+  }
+
+  canDrop(e) {
+    return !this.view.content && e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  }
+
+  // ---- the model, the mode, the commands (GET /composer)
+
+  async loadInfo() {
+    const want = this.engine;
+    this.infoAt = Date.now();
+    try {
+      const r = await fetch(`/api/session/${encodeURIComponent(this.id)}/composer`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "");
+      this.info = d;
+      this.infoEngine = want;
+    } catch (e) {
+      this.infoAt = 0;
+    }
+    this.drawPills();
+    if (this.menu) this.drawMenu();
+  }
+
+  // The model and mode the session's Claude is in: the live state's on the
+  // chat engine, else what its conversation said last.
+  settings() {
+    const live = this.engine === "chat" ? this.live : null;
+    const info = this.info || {};
+    const fresh = info.engine === this.engine;
+    return { model: (live && live.model) || (fresh && info.model) || "", mode: (live && live.permission_mode) || (fresh && info.mode) || "",
+             models: info.models && info.models.length ? info.models : FALLBACK_MODELS };
+  }
+
+  drawPills() {
+    if (this.row && this.infoEngine && this.infoEngine !== this.engine && !this.infoLoading) {
+      this.infoLoading = true;      // switched engines: what it offers changed
+      this.loadInfo().then(() => { this.infoLoading = false; });
+    }
+    const s = this.settings();
+    const mode = s.mode ? modeWords(s.mode).label : "";
+    this.modelPill.replaceChildren(icon("spark"), h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
+    this.modelPill.title = "Which Claude answers";
+    this.modePill.replaceChildren(icon("shield"), h("span", { class: "k" }, mode || "How Claude asks"), icon("chevron", "chev"));
+    this.modePill.title = s.mode ? modeWords(s.mode).about || "" : "How Claude asks before it changes things";
+    this.modePill.classList.toggle("off", this.engine !== "chat");
+    for (const [p, n] of [[this.modelPill, "model"], [this.modePill, "mode"]])
+      p.setAttribute("aria-expanded", String(!!this.menu && this.menu.name === n));
+  }
+
+  async setModel(m) {
+    this.closeMenu(true);
+    try {
+      // For this chat only (set_model): not the classic terminal's /model,
+      // which makes it the default of every new session too.
+      const r = await this.post("model", { model: m.value });
+      toast(r.later ? `${m.displayName} once Claude wakes` : `Now on ${m.displayName}`);
+      if (this.info) this.info.model = m.value;
+      if (this.live && this.engine === "chat") this.live.model = m.resolvedModel || m.value;
+      this.drawPills();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  async setMode(mode) {
+    this.closeMenu(true);
+    try {
+      const r = await this.post("mode", { mode });
+      toast(r.later ? `${modeWords(mode).label} once Claude wakes` : modeWords(mode).label);
+      if (this.info) this.info.mode = mode;
+      if (this.live) this.live.permission_mode = mode;
+      this.drawPills();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  // ---- the menus over the box: + (add), / (commands), the model, the mode
+
+  toggleMenu(name) {
+    if (this.menu && this.menu.name === name) this.closeMenu(true);
+    else this.openMenu(name);
+  }
+
+  openMenu(name) {
+    this.menu = { name, at: 0, all: false };
+    this.menuEl.hidden = false;
+    this.menuEl.setAttribute("aria-label", { add: "Add", slash: "Commands", model: "Model", mode: "Mode" }[name]);
+    if (!this.outside) {
+      this.outside = (e) => { if (this.menu && !this.box.contains(e.target)) this.closeMenu(); };
+      document.addEventListener("pointerdown", this.outside, true);
+    }
+    if ((name === "slash" || name === "model") && (!this.info || Date.now() - (this.infoAt || 0) > 30000)) this.loadInfo();
+    this.drawMenu();
+    this.drawPills();
+    if (name !== "slash") menuFocus(this.menuEl);
+  }
+
+  // back: the keys go back where the menu was opened from.
+  closeMenu(back) {
+    if (!this.menu) return;
+    const was = this.menu.name;
+    this.menu = null;
+    this.menuEl.hidden = true;
+    this.menuEl.replaceChildren();
+    this.input.removeAttribute("aria-activedescendant");
+    if (this.outside) document.removeEventListener("pointerdown", this.outside, true);
+    this.outside = null;
+    this.drawPills();
+    if (back) ({ add: this.attachBtn, model: this.modelPill, mode: this.modePill }[was] || this.input).focus({ preventScroll: true });
+  }
+
+  drawMenu() {
+    const m = this.menu;
+    if (!m) return;
+    const head = (text) => h("div", { class: "cm-head" }, text);
+    const item = (o) => h("button", { class: `cm-item${o.on ? " on" : ""}`, type: "button", role: "menuitem", disabled: o.disabled || null,
+                                      onclick: o.act },
+      o.icon ? icon(o.icon) : null,
+      h("span", { class: "what" }, h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null),
+      o.on ? icon("check", "on-mark") : null);
+    let kids = [];
+    if (m.name === "add") {
+      const phone = matchMedia("(pointer: coarse)").matches;
+      kids = [
+        item({ icon: "image", label: phone ? "Photos" : "A picture", detail: "Claude sees it", act: () => this.pick("photos") }),
+        phone ? item({ icon: "camera", label: "Take a photo", act: () => this.pick("camera") }) : null,
+        item({ icon: "file", label: "A file", detail: "Saved in the project, for Claude to read", act: () => this.pick("files") }),
+        h("div", { class: "cm-note" }, phone ? "You can paste a picture into the box too." : "You can paste a picture into the box, or drop files on the chat."),
+      ];
+    } else if (m.name === "model") {
+      const s = this.settings();
+      const current = modelOf(s.model, s.models);
+      const main = s.models.filter((x) => !/^claude-/.test(x.value));
+      const list = m.all || !main.length ? s.models : main;
+      const chat = this.engine === "chat";
+      kids = [head("Model"), ...list.map((x) => item({ label: x.displayName || x.value, detail: x.description, disabled: !chat,
+                                                         on: current && current.value === x.value, act: () => this.setModel(x) }))];
+      if (list !== s.models) kids.push(item({ label: "Other versions…", act: () => { m.all = true; this.drawMenu(); menuFocus(this.menuEl); } }));
+      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes the model with /model, which makes it the model of every new session too. In the new chat you pick it here, for this chat only."),
+                           item({ icon: "spark", label: "Try the new chat", act: () => { this.closeMenu(); switchEngine(this.row, "chat"); } }));
+    } else if (m.name === "mode") {
+      const now = this.settings().mode;
+      const modes = ["default", "acceptEdits", "plan", "auto", ...(["default", "acceptEdits", "plan", "auto"].includes(now) || !now ? [] : [now])];
+      const chat = this.engine === "chat";
+      kids = [head("How Claude asks"),
+              ...modes.map((k) => item({ label: modeWords(k).label, detail: modeWords(k).about, on: k === now, disabled: !chat,
+                                         act: () => this.setMode(k) }))];
+      if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself (Shift+Tab in it). In the new chat you pick it here."),
+                           item({ icon: "spark", label: "Try the new chat", act: () => { this.closeMenu(); switchEngine(this.row, "chat"); } }));
+    } else if (m.name === "slash") {
+      kids = this.slashItems(item, head);
+    }
+    this.menuEl.replaceChildren(...kids.filter(Boolean));
+    if (m.name === "slash") this.lightSlash();
+  }
+
+  // ---- the / menu: Claude Code's commands that work in a chat, in plain
+  // words, then the project's own, then every other skill and command.
+
+  slashCheck() {
+    const m = this.input.value.match(/^\/(\S*)$/);
+    if (m) {
+      if (!this.menu || this.menu.name !== "slash") this.openMenu("slash");
+      else { this.menu.at = 0; this.drawMenu(); }
+    } else if (this.menu && this.menu.name === "slash") this.closeMenu();
+    this.drawHint();
+  }
+
+  // Every command, as the menu shows it: {name, label, about, where, core, run, menu, arg}.
+  commands() {
+    const info = this.info || {};
+    const seen = new Set();
+    const out = [];
+    for (const c of CORE_COMMANDS) { seen.add(c.name); out.push({ ...c, core: true }); }
+    for (const c of info.commands || []) {
+      if (seen.has(c.name) || HIDDEN_COMMANDS.has(c.name) || /^__/.test(c.name)) continue;
+      seen.add(c.name);
+      out.push({ name: c.name, label: `/${c.name}`, about: plainAbout(c.description), where: c.where || "", arg: c.argumentHint || "",
+                 aliases: c.aliases || [] });
+    }
+    return out;
+  }
+
+  slashItems(item, head) {
+    const q = (this.input.value.match(/^\/(\S*)$/) || [])[1] || "";
+    const all = this.commands();
+    const ql = q.toLowerCase();
+    const starts = (c) => [c.name, ...(c.aliases || [])].some((n) => n.toLowerCase().startsWith(ql));
+    const has = (c) => ql.length > 1 && `${c.name} ${c.core ? c.label : ""} ${c.about}`.toLowerCase().includes(ql);
+    const draw = (c) => {
+      const el = item({ label: c.core ? c.label : `/${c.name}`, detail: c.core ? `/${c.name} · ${c.about}` : c.about, act: () => this.slashPick(c) });
+      el.classList.add("slash");
+      el.tabIndex = -1;
+      el.id = `${this.id}-cmd-${c.name.replace(/[^\w-]/g, "_")}`;
+      el.cmd = c;
+      return el;
+    };
+    if (!q) {
+      const groups = [["In this chat", all.filter((c) => c.core)], ["This project", all.filter((c) => !c.core && c.where === "project")],
+                      ["Skills and commands", all.filter((c) => !c.core && c.where !== "project")]];
+      const kids = [];
+      for (const [name, list] of groups) if (list.length) kids.push(head(name), ...list.map(draw));
+      if (!this.info) kids.push(h("div", { class: "cm-note" }, "Reading the skills and commands…"));
+      return kids;
+    }
+    const found = [...all.filter(starts), ...all.filter((c) => !starts(c) && has(c))].slice(0, 60);
+    return found.length ? found.map(draw) : [h("div", { class: "cm-note" }, `No command starts with /${q}. Send it as it is if you know it.`)];
+  }
+
+  // The command under the keys' cursor, lit (the cursor stays in the box).
+  lightSlash() {
+    const items = Array.from(this.menuEl.querySelectorAll(".cm-item.slash"));
+    if (!items.length) return this.input.removeAttribute("aria-activedescendant");
+    this.menu.at = Math.max(0, Math.min(this.menu.at, items.length - 1));
+    items.forEach((el, n) => el.classList.toggle("lit", n === this.menu.at));
+    const lit = items[this.menu.at];
+    this.input.setAttribute("aria-activedescendant", lit.id);
+    lit.scrollIntoView({ block: "nearest" });
+  }
+
+  // The keys in the box while the / menu is open: arrows move, Enter or Tab
+  // picks, Esc closes it. true: handled.
+  slashKeys(e) {
+    if (!this.menu || this.menu.name !== "slash" || e.isComposing) return false;
+    const items = this.menuEl.querySelectorAll(".cm-item.slash");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeMenu();
+      return true;
+    }
+    if (!items.length) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      this.menu.at = (this.menu.at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      this.lightSlash();
+      return true;
+    }
+    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+      e.preventDefault();
+      this.slashPick(items[this.menu.at].cmd);
+      return true;
+    }
+    return false;
+  }
+
+  slashPick(c) {
+    this.closeMenu();
+    if (c.menu) {           // the model, the mode: their menus
+      this.input.value = "";
+      this.typed();
+      this.openMenu(c.menu);
+      return;
+    }
+    this.input.value = `/${c.name}${c.run ? "" : " "}`;
+    this.typed();
+    if (c.run) this.send();
+    else this.input.focus();
+  }
+
+  // Under a command being written: what it takes after it.
+  drawHint() {
+    const m = this.input.value.match(/^\/(\S+)\s/);
+    const c = m && this.commands().find((x) => x.name === m[1]);
+    const hint = c && (c.argHelp || c.arg);
+    if (!this.hintEl) {
+      this.hintEl = h("div", { class: "slash-hint" });
+      this.box.insertBefore(this.hintEl, this.composer);
+    }
+    this.hintEl.hidden = !hint;
+    this.hintEl.replaceChildren(...(hint ? [h("code", {}, `/${c.name}`), ` ${hint}`] : []));
+  }
+}
+
+// ---- the composer's helpers
+
+const IMAGES_MAX = 20;              // images in one message (the server's limit)
+const IMAGE_EDGE = 2000;            // px: a bigger picture is made this size (Claude sees no more)
+const IMAGE_BYTES = 3_700_000;      // a picture bigger than this is made smaller (Claude takes 5 MB, in base64)
+const UPLOAD_MAX = 50_000_000;      // bytes of a file you upload
+
+// Claude Code's commands that work in a chat, in plain words, friendliest
+// first. run: sent as soon as it's picked; menu: opens the composer's own.
+const CORE_COMMANDS = [
+  { name: "compact", label: "Compact the conversation", about: "Claude sums up what's been said, to make room for more", run: true },
+  { name: "clear", label: "Start fresh", about: "A new conversation (this one stays saved)", run: true },
+  { name: "context", label: "How full is the conversation?", about: "What fills Claude's memory of this chat", run: true },
+  { name: "model", label: "Change the model", about: "Which Claude answers", menu: "model" },
+  { name: "mode", label: "Change how Claude asks", about: "Before changes, never, or plan first", menu: "mode" },
+  { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max" },
+  { name: "usage", label: "How much of your plan is used", about: "This session's and this week's share of your Claude plan", run: true },
+  { name: "init", label: "Write notes about this project", about: "Claude studies the project and writes a CLAUDE.md for itself", run: true },
+];
+
+// Claude Code's own that need its terminal (menus, logins, its screen) or
+// that amarchy does itself: not in the menu.
+const HIDDEN_COMMANDS = new Set(["config", "mcp", "resume", "login", "logout", "voice", "bg", "rewind", "color", "focus", "heapdump",
+  "agents", "auto-mode-setup", "import", "reload-plugins", "output-style", "rename", "design-consent", "design-revoke",
+  "extra-usage", "usage-credits", "team-onboarding", "workflow-launch-exec", "exit", "quit", "terminal-setup", "ide",
+  "permissions", "hooks", "theme", "vim", "statusline", "memory", "add-dir", "doctor", "release-notes", "upgrade",
+  "privacy-settings", "status", "feedback", "bug", "export", "keybindings", "remote-control", "plugin", "plugins",
+  "install-github-app", "install-slack-app", "tasks", "todos", "pr-comments", "migrate-installer", "sandbox"]);
+
+// The models when no Claude has said which there are yet.
+const FALLBACK_MODELS = [
+  { value: "default", displayName: "Default (recommended)", description: "Claude Code's choice" },
+  { value: "opus", displayName: "Opus", description: "For complex work and everyday tasks" },
+  { value: "sonnet", displayName: "Sonnet", description: "For simpler tasks" },
+  { value: "haiku", displayName: "Haiku", description: "Fastest for quick answers" },
+];
+
+// A model as the menu has it, for an id or alias Claude says it's on.
+function modelOf(id, models) {
+  if (!id) return null;
+  const list = models || [];
+  return list.find((x) => x.value === id) || list.find((x) => x.resolvedModel === id && x.value !== "default")
+    || list.find((x) => x.resolvedModel === id) || null;
+}
+
+// "claude-opus-5-5[1m]": "Opus 5.5 (1M)"; an alias as its model's name.
+function modelName(id, models) {
+  const m = modelOf(id, models);
+  if (m && m.value === "default") return "Default";
+  if (m) return m.displayName || m.value;
+  const r = String(id || "").match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i);
+  return r ? `${r[1][0].toUpperCase()}${r[1].slice(1)} ${r[2]}${r[3] ? `.${r[3]}` : ""}${r[4] ? " (1M)" : ""}` : String(id || "");
+}
+
+// A mode in words (MODE_WORDS, shared with the plan card).
+function modeWords(k) {
+  return MODE_WORDS[k] || { label: k || "", about: "" };
+}
+
+// A skill's description, short: its first sentence, without "(user)" and
+// the plugin's name.
+function plainAbout(text) {
+  const t = String(text || "").replace(/^\([\w:-]+\)\s*/, "").replace(/\s*\((user|project|plugin|bundled|[\w-]+:[\w-]+)\)\s*$/i, "")
+    .replace(/\s+/g, " ").trim();
+  const first = t.match(/^.{20,}?[.!?](?=\s|$)/);
+  return cut(first ? first[0] : t, 110);
+}
+
+// Files from the browser's chooser: pictures (the camera's, with capture),
+// or any.
+function pickFiles(accept, { multiple, capture } = {}) {
+  return new Promise((ok) => {
+    const input = h("input", { type: "file", accept: accept || null, multiple: multiple || null,
+                               capture: capture ? "environment" : null, class: "hidden-file" });
+    input.addEventListener("change", () => { ok(Array.from(input.files || [])); input.remove(); });
+    input.addEventListener("cancel", () => { ok([]); input.remove(); });
+    document.body.append(input);
+    input.click();
+  });
+}
+
+// A picture as Claude takes it: PNG, JPEG, GIF or WebP, at most IMAGE_EDGE
+// on its long side and IMAGE_BYTES big (a photo off a phone is made
+// smaller). Throws for one the browser can't read.
+async function claudeImage(file) {
+  const fits = /^image\/(png|jpeg|gif|webp)$/.test(file.type);
+  let bmp = null;
+  try { bmp = await createImageBitmap(file); } catch (e) { if (!fits) throw e; }
+  if (fits && file.size <= IMAGE_BYTES && (!bmp || Math.max(bmp.width, bmp.height) <= IMAGE_EDGE)) return file;
+  if (!bmp) throw new Error("couldn't read the image");
+  const k = Math.min(1, IMAGE_EDGE / Math.max(bmp.width, bmp.height));
+  const encode = (type, quality) => {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(bmp.width * k));
+    c.height = Math.max(1, Math.round(bmp.height * k));
+    const g = c.getContext("2d");
+    if (type === "image/jpeg") { g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); }      // no see-through in a JPEG
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("couldn't read the image"))), type, quality));
+  };
+  let out = file.type === "image/png" ? await encode("image/png") : null;
+  for (const q of [0.85, 0.7, 0.5]) if (!out || out.size > IMAGE_BYTES) out = await encode("image/jpeg", q);
+  return out;
 }
 
 function unescapeHTML(s) {
