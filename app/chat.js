@@ -711,6 +711,136 @@ function texts(v, n = 8) {
   return (Array.isArray(v) ? v : []).filter((x) => typeof x === "string" && x.trim()).slice(0, n);
 }
 
+// A reply as update_brief gave it, in one shape: the per-turn reply (title,
+// answer, plan…), or the brief before it (headline, changed, next), read the
+// same way. Only what a model wrote that the app can draw; null for none.
+function briefShape(b) {
+  if (!b || typeof b !== "object") return null;
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const objs = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
+  const answer = Array.isArray(b.answer)
+    ? b.answer.map((x) => (typeof x === "string" ? { point: x } : x)).filter((x) => x && str(x.point)).map((x) => ({ point: str(x.point), detail: str(x.detail) }))
+    : texts(b.changed, 8).map((point) => ({ point }));
+  const plan = Array.isArray(b.plan)
+    ? objs(b.plan).filter((x) => str(x.step)).map((x) => ({ step: str(x.step), state: ["done", "doing", "next"].includes(x.state) ? x.state : "next" }))
+    : texts(b.next, 4).map((step) => ({ step, state: "next" }));
+  return {
+    title: str(b.title) || str(b.headline), status: b.status, kind: str(b.kind), goal: str(b.goal), answer, plan,
+    waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
+    tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
+    check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
+    notes: texts(b.notes, 4),
+  };
+}
+
+// The first line of what Claude said (its markdown's marks left out).
+function firstLine(text) {
+  const line = String(text || "").split("\n").map((l) => l.replace(/^[#>*\-\s]+/, "").replace(/[*_`]/g, "").trim()).find(Boolean) || "";
+  return cut(line, 120);
+}
+
+const TEST_RUN = /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\bpytest\b|\bgo test\b|\bcargo test\b|\bnode\s+\S*test\S*\.js\b|\bplaywright\b|\bjest\b|\bvitest\b|\brspec\b|\bphpunit\b|\bmake\s+test\b|\btest\/\S+|-protocol-test\b/;
+
+// What a turn changed, from its record: the files its edits touched (+/−,
+// summed by file) and the git commands that went through (commit, push, merge).
+function changesOf(items, results) {
+  const files = new Map(), git = [];
+  for (const it of items) {
+    if (it.kind !== "tool") continue;
+    const res = results.get(it.id);
+    if (res && res.error) continue;
+    if (/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(it.name)) {
+      for (const f of stepDiff(it.name, it.input || {}, res) || []) {
+        const path = f.path || (it.input || {}).file_path || "";
+        if (!path) continue;
+        const had = files.get(path) || { path, add: 0, del: 0, created: false };
+        had.add += f.add || 0;
+        had.del += f.del || 0;
+        had.created = had.created || !!f.created;
+        files.set(path, had);
+      }
+    } else if (it.name === "Bash") {
+      const cmd = String((it.input || {}).command || "");
+      for (const m of cmd.matchAll(/git\s+(?:-C\s+\S+\s+)?commit\b[^\n]*?-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g))
+        git.push({ kind: "commit", text: `Committed “${cut((m[1] || m[2] || m[3] || "").split("\n")[0], 80)}”` });
+      if (/git\s+(?:-C\s+\S+\s+)?commit\b[^\n]*-F\s+-/.test(cmd) && !/-m\s/.test(cmd)) {
+        const subject = (cmd.match(/<<'?EOF'?\n([^\n]*)/) || [])[1] || "";
+        git.push({ kind: "commit", text: subject ? `Committed “${cut(subject, 80)}”` : "Committed" });
+      }
+      const merge = cmd.match(/git\s+(?:-C\s+\S+\s+)?merge\s+(?:--no-edit\s+|-q\s+)*([^\s;&|]+)/);
+      if (merge) git.push({ kind: "merge", text: `Merged ${merge[1]}` });
+      if (/git\s+(?:-C\s+\S+\s+)?push\b/.test(cmd) && !git.some((g) => g.kind === "push")) git.push({ kind: "push", text: "Pushed" });
+    }
+  }
+  const all = [...files.values()];
+  const commits = git.filter((g) => g.kind === "commit").length;
+  const short = [commits ? `${commits} commit${commits === 1 ? "" : "s"}` : null,
+    git.some((g) => g.kind === "merge") ? "merged" : null, git.some((g) => g.kind === "push") ? "pushed" : null].filter(Boolean).join(" · ");
+  return { files: all, add: all.reduce((n, f) => n + f.add, 0), del: all.reduce((n, f) => n + f.del, 0), git, short };
+}
+
+// The test runs in a turn's record, with how they went.
+function testsOf(items, results) {
+  const out = [];
+  for (const it of items) {
+    if (it.kind !== "tool" || it.name !== "Bash") continue;
+    const cmd = String((it.input || {}).command || "");
+    if (!TEST_RUN.test(cmd)) continue;
+    const res = results.get(it.id);
+    out.push({ name: (it.input || {}).description || cut(cmd.replace(/\s+/g, " "), 70), result: !res ? "skipped" : res.error ? "fail" : "pass" });
+  }
+  return out.slice(-6);
+}
+
+// What a turn did, in order: each step that acts (an edit, a command, a
+// helper, a message) a line; the looking around between them (reading,
+// searching, the web) one line saying how much; what Claude said, and what
+// came in by itself (a background task that ended), as they happened.
+function activityOf(items, results, userView) {
+  const entries = [];
+  let group = null, steps = 0, acts = 0;
+  for (const it of items) {
+    if (it.kind === "tool") {
+      if (HIDDEN_TOOLS.has(it.name)) continue;
+      steps++;
+      const w = stepWords(it.name, it.input || {});
+      const res = results.get(it.id);
+      if (["read", "search", "web"].includes(w.kind)) {
+        if (!group) entries.push(group = { type: "group", steps: [] });
+        group.steps.push({ w, it });
+        continue;
+      }
+      group = null;
+      acts++;
+      const cmd = it.name === "Bash" && (it.input || {}).description ? cut(String((it.input || {}).command || "").split("\n")[0], 70) : "";
+      entries.push({ type: "step", w, error: !!(res && res.error), cmd });
+    } else if (it.kind === "claude" && !it.aside) {
+      group = null;
+      entries.push({ type: "said", text: cut(firstLine(it.text), 110) });
+    } else if (it.kind === "user" && !it.turn) {
+      const v = userView(it.text);
+      group = null;
+      entries.push({ type: "event", text: typeof v.note === "string" ? v.note : v.summary || cut(String(it.text || ""), 100) });
+    } else if (it.kind === "note") {
+      group = null;
+      entries.push({ type: "event", text: it.text === "Interrupted" ? "You stopped Claude" : cut(it.text, 100) });
+    }
+  }
+  for (const e of entries) {
+    if (e.type !== "group") continue;
+    const n = (k) => e.steps.filter((x) => x.w.kind === k).length;
+    const parts = [n("read") ? `read ${n("read")} file${n("read") === 1 ? "" : "s"}` : null,
+      n("search") ? `searched ${n("search")} time${n("search") === 1 ? "" : "s"}` : null,
+      n("web") ? `${n("web")} web look${n("web") === 1 ? "" : "s"}` : null].filter(Boolean);
+    e.label = parts.join(", ").replace(/^./, (c) => c.toUpperCase());
+  }
+  const times = items.map((i) => Date.parse(i.at)).filter((x) => !isNaN(x));
+  const mins = times.length > 1 ? Math.round((Math.max(...times) - Math.min(...times)) / 60000) : 0;
+  const summary = [`${steps} step${steps === 1 ? "" : "s"}`, acts ? `${acts} action${acts === 1 ? "" : "s"}` : null,
+    mins ? `${mins} min` : null].filter(Boolean).join(" · ");
+  return { entries, steps, summary };
+}
+
 // How the chats show on this device: "screen" (the brief) or "chat" (the
 // conversation). Settings and a chat's menu set it; every chat open takes it.
 function chatView() { return store.get("chatView") === "chat" ? "chat" : "screen"; }
@@ -748,8 +878,7 @@ class Chat {
     this.brief = null;          // the latest brief: {key, data} (update_brief's input)
     this.facts = null;          // what git says (the stream's "facts": bin/amarchy brief_facts)
     this.answers = new Map();   // your answers to a brief's questions, by its key: {picks, sent}
-    this.briefsOpen = new Set();    // briefs (their keys) whose details are open
-    this.briefsShown = new Set();   // older turns' briefs opened from their line
+    this.opened = new Map();    // replies and their sections you opened or closed: "<reply>" / "<reply>|<section>" -> open
     this.reset();
     this.build();
   }
@@ -1133,11 +1262,15 @@ class Chat {
       return;
     }
     const stick = this.atBottom();
-    const had = this.brief;
+    const had = this.brief, last = this.sturn;
     for (const it of d.items) this.screenAdd(it);
     this.drawEmpty();
-    if (this.sturn) this.drawReply(this.sturn);
-    if (this.brief !== had) for (const t of this.sturns) if (t.brief) this.drawReply(t);     // the newest brief in full, the ones before as a line
+    // A new turn: the replies before it fold again (only the newest is open
+    // unless you open another; the sections you opened stay as you left them).
+    if (this.sturn !== last) for (const k of [...this.opened.keys()]) if (!k.includes("|")) this.opened.delete(k);
+    // What changed: the turns that got items, and with a new brief or a new
+    // turn, the ones before (the newest reply is open, its questions live).
+    for (const t of this.sturns) if (t.dirty || this.brief !== had || this.sturn !== last) this.drawReply(t);
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
   }
@@ -1154,24 +1287,22 @@ class Chat {
     }
     const t = this.sturn || this.newTurn(null);
     this.add(it, t.body);
+    t.items.push(it);
+    t.dirty = true;
     if (it.kind === "tool" && it.brief) {
       t.brief = it.brief;
       t.briefKey = it.key;
       this.brief = { key: it.key, data: it.brief };
     }
     if (it.kind === "claude" && !it.aside) t.said = it.text;
-    else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) t.steps++;
-    if (it.kind !== "result") this.drawWork(t);
   }
 
   newTurn(rec) {
-    const t = { rec, said: "", steps: 0, sig: null, brief: null };
+    const t = { rec, said: "", items: [], sig: null, brief: null, dirty: true };
     t.you = h("div", { class: "turn-you" });
-    t.summary = h("summary", {});
-    t.body = h("div", { class: "turn-work-body" });
-    t.work = h("details", { class: "turn-work", hidden: true }, t.summary, t.body);
+    t.body = h("div", { class: "turn-work-body" });     // Claude's words and steps, as the conversation shows them
     t.reply = h("div", { class: "turn-reply" });
-    t.el = h("section", { class: "turn" }, t.you, t.work, t.reply);
+    t.el = h("section", { class: "turn" }, t.you, t.reply);
     this.stage.insertBefore(t.el, this.stageWork);
     this.sturns.push(t);
     this.sturn = t;
@@ -1191,110 +1322,163 @@ class Chat {
   }
 
   // The fold with Claude's work: its words and its steps.
-  drawWork(t) {
-    t.work.hidden = !t.body.childElementCount;
-    const n = t.steps;
-    t.summary.replaceChildren(...[icon("chevron", "chev"), h("span", {}, "Claude's work"),
-                                  n ? h("span", { class: "turn-work-n" }, `${n} step${n === 1 ? "" : "s"}`) : null].filter(Boolean));
-  }
-
-  // Claude's reply to a turn, as the brief view shows it: the brief it wrote at
-  // the turn's end, as a message. The newest in full; the ones before it as
-  // their headline, opened in place with a tap. While Claude works, nothing
-  // (the working line says what); a turn from before the brief, Claude's last
-  // words.
+  // Claude's reply to a turn, as one card: its title (the outcome) opens and
+  // folds it; under it, sections that each fold to a line saying what they
+  // hold. What needs judgment Claude wrote (update_brief: the answer, plan,
+  // questions, checks, notes); what it did comes from the record (the
+  // turn's items: activity, files changed, commits, test runs). While it
+  // works, the card says so and its activity fills in; a turn from before the
+  // brief gets the same card from Claude's words.
   drawReply(t) {
-    const latest = !!t.brief && !!this.brief && t.briefKey === this.brief.key;
-    const full = !!t.brief && (latest || this.briefsShown.has(t.briefKey));
-    const state = t.brief ? (full ? "card" : "line") : t === this.sturn && this.working() ? "live" : t.said ? "text" : "none";
-    const sig = `${state}|${t.briefKey || ""}|${state === "card" ? JSON.stringify([latest, latest ? this.facts : null, this.briefsOpen.has(t.briefKey)])
-      : state === "text" ? t.said.length : ""}`;
+    t.dirty = false;
+    const last = t === this.sturn;
+    const live = last && !t.brief && this.working();
+    const key = t.briefKey || `turn:${t.rec || t.items[0] && t.items[0].key}`;
+    const sig = JSON.stringify([key, t.items.length, live, last, last ? this.facts : null, this.openedSig(key)]);
     if (sig === t.sig) return;
     t.sig = sig;
-    if (state === "card") t.reply.replaceChildren(this.briefCard(t, latest));
-    else if (state === "line") {
-      const st = t.brief.status in BRIEF_STATES ? t.brief.status : "working";
-      t.reply.replaceChildren(h("button", { class: `turn-headline ${st}`, type: "button", "aria-label": "Show this brief",
-        onclick: () => { this.briefsShown.add(t.briefKey); this.drawReply(t); } },
-        h("span", { class: "dot" }), h("span", { class: "text" }, String(t.brief.headline || BRIEF_STATES[st])),
-        h("span", { class: "turn-headline-more" }, "Brief", icon("chevron", "chev"))));
-    } else if (state === "text") {
-      const text = h("div", { class: "msg claude reply-text", html: md(t.said) });
-      const box = h("div", { class: "reply-plain" }, text);
-      const all = h("button", { class: "text-btn reply-all", type: "button", hidden: true,
-                                onclick: () => { box.classList.add("open"); all.remove(); } }, "Show all");
-      box.append(all);
-      requestAnimationFrame(() => {
-        all.hidden = text.scrollHeight <= text.clientHeight + 4;
-        box.classList.toggle("long", !all.hidden);
-      });
-      t.reply.replaceChildren(box);
-    } else t.reply.replaceChildren();
+    if (!t.items.length && !live) return t.reply.replaceChildren();
+    t.reply.replaceChildren(this.replyCard(t, key, last, live));
   }
 
-  // The newest brief again (git's facts came in).
+  // The sections opened or closed in a reply, for its sig.
+  openedSig(key) {
+    return [...this.opened].filter(([k]) => k === key || k.startsWith(`${key}|`)).map(([k, v]) => `${k}=${v}`).join(",");
+  }
+
+  isOpen(k, otherwise) { return this.opened.has(k) ? this.opened.get(k) : otherwise; }
+
+  // The newest reply again (git's facts came in).
   drawBrief() {
-    const t = this.mode === "screen" && this.brief && this.sturns.find((x) => x.briefKey === this.brief.key);
-    if (t) this.drawReply(t);
+    if (this.mode === "screen" && this.sturn) this.drawReply(this.sturn);
   }
 
-  // ---- the brief, as a message: what it is and where it stands, this turn's
-  // headline, the chat's goal, what waits on you (the newest brief's only:
-  // the ones before were answered, or overtaken), and the details behind a
-  // row that says what they hold (what changed, tests, how to check it,
-  // what's next, heads-ups; git's facts on the newest).
-  briefCard(t, latest) {
-    const b = t.brief, key = t.briefKey;
-    const st = b.status in BRIEF_STATES ? b.status : "working";
-    const open = this.briefsOpen.has(key);
-    const card = h("article", { class: `brief-card ${st}${open ? " open" : ""}${latest ? " latest" : ""}` });
-    const top = h("div", { class: "brief-top" }, h("span", { class: "brief-label" }, "Brief"),
-      h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]));
-    if (!latest) top.append(h("button", { class: "text-btn brief-fold", type: "button", "aria-label": "Show as a line",
-      onclick: () => { this.briefsShown.delete(key); this.drawReply(t); } }, "Fold"));
-    card.append(top, h("div", { class: "brief-headline" }, String(b.headline || BRIEF_STATES[st])));
-    if (b.goal) card.append(h("div", { class: "brief-goal" }, h("span", { class: "k" }, "Goal"), " ", String(b.goal)));
-    const waiting = latest ? this.briefWaiting(b, key) : null;
-    if (waiting) card.append(waiting);
-    const changedN = texts(b.changed, 8).length;
-    const tests = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string").slice(0, 6);
-    const failing = tests.filter((x) => x.result === "fail").length;
-    const sums = [changedN ? `${changedN} change${changedN === 1 ? "" : "s"}` : null,
-      tests.length ? (failing ? `${failing} test${failing === 1 ? "" : "s"} failing` : `${tests.length} test${tests.length === 1 ? "" : "s"} passed`) : null,
-      texts(b.next, 4).length ? "next steps" : null].filter(Boolean);
-    const details = this.briefDetails(b, tests, latest);
-    if (details) {
-      card.append(h("button", { class: "brief-toggle", type: "button", "aria-expanded": String(open), onclick: () => {
-        if (open) this.briefsOpen.delete(key); else this.briefsOpen.add(key);
-        this.drawReply(t);
-      } },
-        h("span", { class: "brief-toggle-label" }, open ? "Hide details" : "Show details"),
-        !open && sums.length ? h("span", { class: "brief-toggle-sum" }, sums.join(" · ")) : null,
-        icon("chevron", "chev")));
-      if (open) card.append(details);
+  replyCard(t, key, last, live) {
+    const b = briefShape(t.brief);
+    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status : "plain";
+    const ask = !!b && last && t.briefKey === (this.brief && this.brief.key) ? b.waiting : [];
+    const open = this.isOpen(key, last);
+    const card = h("article", { class: `reply ${st}${open ? " open" : ""}${live ? " live" : ""}` });
+    const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
+    const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : firstLine(t.said) || "Claude's reply";
+    t.liveNow = live ? h("span", { class: "reply-now" }) : null;
+    card.append(h("button", { class: "reply-head", type: "button", "aria-expanded": String(open), onclick: () => toggle(key, open) },
+      live ? spinner() : h("span", { class: "reply-dot" }),
+      h("span", { class: "reply-title" }, h("span", {}, title), t.liveNow),
+      ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
+      icon("chevron", "chev")));
+    if (!open) return card;
+    if (b && b.goal && last) card.append(h("div", { class: "reply-goal" }, h("span", { class: "k" }, "Goal"), " ", b.goal));
+
+    const results = new Map(t.items.filter((i) => i.kind === "result").map((i) => [i.tool, i]));
+    const section = (name, label, summary, build, otherwise = false) => {
+      if (!summary) return;
+      const k = `${key}|${name}`;
+      const on = this.isOpen(k, otherwise);
+      const sec = h("div", { class: `rsec rsec-${name}${on ? " open" : ""}` },
+        h("button", { class: "rsec-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+          h("span", { class: "rsec-label" }, label), h("span", { class: "rsec-sum" }, on ? "" : summary), icon("chevron", "chev")));
+      if (on) sec.append(h("div", { class: "rsec-body" }, build()));
+      card.append(sec);
+    };
+
+    // Needs you: the newest reply's questions, as buttons.
+    if (ask.length) section("needs", "Needs you", `${ask.length} question${ask.length === 1 ? "" : "s"}: ${ask[0].question}`,
+      () => this.briefWaiting({ waiting: ask }, key), true);
+    // Answer: what Claude found, decided, did, concluded (or, before the brief, its words).
+    if (b && b.answer.length) section("answer", "Answer", b.answer[0].point + (b.answer.length > 1 ? ` · +${b.answer.length - 1}` : ""),
+      () => h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))), last);
+    else if (!b && !live && t.said) section("answer", "Answer", cut(firstLine(t.said), 80),
+      () => h("div", { class: "msg claude", html: md(t.said) }), last);
+    // Plan: its steps, done / doing / next.
+    if (b && b.plan.length) {
+      const done = b.plan.filter((x) => x.state === "done").length;
+      section("plan", "Plan", `${done} of ${b.plan.length} done${b.plan.find((x) => x.state !== "done") ? ` · next: ${b.plan.find((x) => x.state !== "done").step}` : ""}`,
+        () => h("ol", { class: "plan-steps" }, ...b.plan.map((x) => h("li", { class: `is-${x.state}` }, h("span", { class: "mark", html: x.state === "done" ? TICK : "" }),
+          h("span", { html: inline(x.step) })))), last && b.kind === "plan");
     }
+    // Changes: the files the turn's edits touched (+/−), its commits, pushes, merges; git now, on the newest.
+    const ch = changesOf(t.items, results);
+    const facts = last ? this.briefFacts() : null;
+    const chSum = [ch.files.length ? `${ch.files.length} file${ch.files.length === 1 ? "" : "s"} +${ch.add} −${ch.del}` : null,
+      ch.short || null].filter(Boolean).join(" · ");
+    const f = this.facts;
+    const factsSum = facts && f ? [f.branch, f.commits ? `${f.commits} commit${f.commits === 1 ? "" : "s"} on it` : null,
+      f.uncommitted ? `${f.uncommitted} uncommitted` : null].filter(Boolean).join(" · ") : null;
+    section("changes", "Changes", chSum || factsSum, () => this.changesView(ch, facts));
+    // Checks: tests (Claude's, else the test runs in the record) and how to try it.
+    const tests = b && b.tests.length ? b.tests : testsOf(t.items, results);
+    const fails = tests.filter((x) => x.result === "fail").length;
+    const checkSum = [tests.length ? (fails ? `${fails} failing of ${tests.length}` : `${tests.length} passed`) : null,
+      b && b.check.length ? `${b.check.length} way${b.check.length === 1 ? "" : "s"} to try it` : null].filter(Boolean).join(" · ");
+    section("checks", "Checks", checkSum, () => this.checksView(tests, b ? b.check : []), last && fails > 0);
+    // Activity: what Claude did, in order, the looking around grouped.
+    const act = activityOf(t.items, results, (text) => this.userView(text));
+    if (act.entries.length) section("activity", "Activity", act.summary, () => this.activityView(act.entries), live);
+    // Notes.
+    if (b && b.notes.length) section("notes", "Notes", `${b.notes.length} · ${b.notes[0]}`,
+      () => h("ul", { class: "brief-list notes" }, ...b.notes.map((x) => h("li", { html: inline(x) }))));
+    // Claude's words: the turn as the conversation shows it.
+    const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
+    if (t.body.childElementCount) section("words", "Claude's words", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
     return card;
   }
 
-  briefDetails(b, tests, latest) {
-    const body = h("div", { class: "brief-body" });
-    const facts = latest ? this.briefFacts() : null;
-    if (facts) body.append(facts);
-    const section = (title, ...rows) => body.append(h("div", { class: "brief-section" }, h("h4", {}, title), ...rows));
-    const changed = texts(b.changed, 8);
-    if (changed.length) section("What changed", h("ul", { class: "brief-list ticks" }, ...changed.map((x) => h("li", { html: inline(x) }))));
-    if (tests.length) section("Tests", h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
+  answerPoint(x) {
+    const li = h("li", {}, h("span", { html: inline(x.point) }));
+    if (x.detail) {
+      const more = h("div", { class: "answer-detail", hidden: true, html: inline(x.detail) });
+      li.classList.add("has-detail");
+      li.append(h("button", { class: "text-btn answer-more", type: "button", onclick: (e) => {
+        more.hidden = !more.hidden;
+        e.currentTarget.textContent = more.hidden ? "More" : "Less";
+      } }, "More"), more);
+    }
+    return li;
+  }
+
+  changesView(ch, facts) {
+    const box = h("div", { class: "changes" });
+    if (ch.files.length) {
+      const most = Math.max(...ch.files.map((f) => f.add + f.del), 1);
+      box.append(h("ul", { class: "change-files" }, ...ch.files.map((f) =>
+        h("li", {}, h("span", { class: "change-path", title: f.path }, baseName(f.path) || f.path),
+          f.created ? h("span", { class: "change-new" }, "new") : null,
+          h("span", { class: "change-n" }, h("span", { class: "add" }, `+${f.add}`), " ", h("span", { class: "del" }, `−${f.del}`)),
+          h("span", { class: "change-bar" }, h("span", { class: "add", style: `width:${(f.add / most) * 100}%` }),
+            h("span", { class: "del", style: `width:${(f.del / most) * 100}%` }))))));
+    }
+    if (ch.git.length) box.append(h("ul", { class: "brief-list git" }, ...ch.git.map((g) => h("li", {}, g.text))));
+    if (facts) box.append(facts);
+    return box;
+  }
+
+  checksView(tests, checks) {
+    const box = h("div", { class: "checks" });
+    if (tests.length) box.append(h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
       h("li", { class: `is-${["pass", "fail", "skipped"].includes(x.result) ? x.result : "skipped"}` },
         h("span", { class: "mark", html: x.result === "pass" ? TICK : "" }, x.result === "fail" ? "✕" : x.result === "skipped" ? "–" : ""),
         h("span", { html: inline(x.name) }), x.detail ? h("span", { class: "detail" }, ` · ${x.detail}`) : null))));
-    const checks = (Array.isArray(b.check) ? b.check : []).filter((x) => x && typeof x.label === "string").slice(0, 4);
-    if (checks.length) section("Check it", ...checks.map((x) => briefLink(x.url, x.label) ||
-      h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null)));
-    const next = texts(b.next, 4);
-    if (next.length) section("Next", h("ul", { class: "brief-list" }, ...next.map((x) => h("li", { html: inline(x) }))));
-    const notes = texts(b.notes, 4);
-    if (notes.length) section("Heads up", h("ul", { class: "brief-list notes" }, ...notes.map((x) => h("li", { html: inline(x) }))));
-    return body.childElementCount ? body : null;
+    for (const x of checks) box.append(briefLink(x.url, x.label) ||
+      h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null));
+    return box;
+  }
+
+  activityView(entries) {
+    return h("ol", { class: "activity" }, ...entries.map((e) => {
+      if (e.type === "said") return h("li", { class: "act-said" }, h("span", { class: "act-ic" }, icon("message")), h("span", { class: "act-text" }, `“${e.text}”`));
+      if (e.type === "event") return h("li", { class: "act-event" }, h("span", { class: "act-ic" }, icon("clock")), h("span", { class: "act-text" }, e.text));
+      if (e.type === "group") {
+        const list = h("ul", { class: "act-group-steps", hidden: true }, ...e.steps.map((x) => h("li", {}, x.w.past)));
+        return h("li", { class: "act-group" }, h("span", { class: "act-ic" }, icon("search")),
+          h("span", { class: "act-text" }, h("button", { class: "act-group-btn", type: "button", onclick: (ev) => {
+            list.hidden = !list.hidden;
+            ev.currentTarget.setAttribute("aria-expanded", String(!list.hidden));
+          }, "aria-expanded": "false" }, e.label), list));
+      }
+      return h("li", { class: `act-step${e.error ? " failed" : ""}` }, h("span", { class: "act-ic" }, icon(e.error ? "failed" : CHAT_ICONS[e.w.kind] ? e.w.kind : "other")),
+        h("span", { class: "act-text" }, e.w.past, e.cmd ? h("code", { class: "act-cmd" }, e.cmd) : null));
+    }));
   }
 
   // What git says, as it is (bin/amarchy brief_facts): a row of chips.
@@ -1680,12 +1864,14 @@ class Chat {
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
     if (this.mode === "screen") {
-      // The brief view: what Claude is doing, in a line under the last turn; its words are in the turn's fold.
+      // The brief view: what Claude is doing, in the live reply's title (its activity fills in under it).
       const stick = this.atBottom();
       const now = this.activity(live);
-      this.stageWork.hidden = !now;
-      if (now) this.stageWork.querySelector(".now").textContent = now.text;
       if (this.sturn) this.drawReply(this.sturn);
+      const t = this.sturn;
+      if (t && t.liveNow) t.liveNow.textContent = now ? ` ${now.text}` : "";
+      this.stageWork.hidden = !(now && !(t && t.liveNow));
+      if (now) this.stageWork.querySelector(".now").textContent = now.text;
       if (stick) this.toBottom();
       return;
     }

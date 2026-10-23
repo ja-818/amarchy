@@ -1,12 +1,14 @@
-// The brief view, in a browser: the chat's default view. The brief over the
-// timeline: where the chat stands and its goal on one line that opens to the
-// rest (what changed, tests, how to check it, what's next, heads-ups, git's
-// facts), what waits on you always there and answered with taps; the
-// timeline oldest first, each turn your message, its headline and Claude's
-// work in a fold. Also: only http(s) links, nothing running as markup, the
-// brief updating live, a reconnect that moves nothing, and the Brief / Chat
-// switch (in Settings on the phone). On a phone and on a wide screen, with
-// screenshots.
+// The brief view, in a browser: the chat's default view. Each turn is your
+// message and Claude's reply as one card: its title folds and opens it, and
+// its sections (Needs you, Answer, Plan, Changes, Checks, Activity, Notes,
+// Claude's words) each fold to a line saying what they hold. Checked: the
+// sections and their summaries, what's built from the record (files and
+// their +/−, commits, test runs, the activity with the looking around
+// grouped), the questions answered with taps, the live card while Claude
+// works, older replies as their title, an old-style brief and a turn from
+// before the brief, only http(s) links, nothing running as markup, a
+// reconnect that moves nothing, and the Brief / Chat switch. On a phone and
+// on a wide screen, with screenshots.
 //
 //   node test/brief-view.js            both layouts
 //   node test/brief-view.js phone      one layout (phone | wide)
@@ -102,30 +104,44 @@ const LAYOUTS = {
 
 const TOOL = "mcp__amarchy__update_brief";
 const BRIEF = {
-  goal: "Ship the <img src=x onerror=\"window.__pwned = 1\"> search page",
-  status: "waiting", headline: "Search page works: 2 choices for you",
-  changed: ["Search page added", "Filters as you type"],
-  tests: [{ name: "Search tests", result: "pass", detail: "42 passed" }, { name: "Lint", result: "fail" }],
-  check: [{ label: "Open the page", url: "http://amarchy:5173/search" }, { label: "Bad", url: "javascript:window.__pwned=2" }, { label: "On the phone", how: "tap **Search**" }],
+  title: "Search page works: 2 choices for <img src=x onerror=\"window.__pwned = 1\">", status: "waiting", kind: "change",
+  goal: "Ship the search page",
+  answer: [{ point: "The page filters as you type", detail: "Debounced at 200 ms" }, { point: "Empty query shows all 120 items" }],
+  plan: [{ step: "Build the page", state: "done" }, { step: "Ship to main", state: "doing" }, { step: "Add filters", state: "next" }],
   waiting: [
     { question: "Ship it to main?", options: [{ label: "Ship it", send: "Ship it: merge to main and push" }, { label: "Not yet", send: "Don't ship yet" }] },
     { question: "Add filters?", options: [{ label: "Yes", send: "Yes, add filters" }, { label: "No", send: "No filters" }, { label: "Other", send: "Filters: ", draft: true }] },
   ],
-  next: ["Ship after your answer"], notes: ["Lint fails on an old file"],
+  tests: [{ name: "Search tests", result: "pass", detail: "42 passed" }, { name: "Lint", result: "fail" }],
+  check: [{ label: "Open the page", url: "http://amarchy:5173/search" }, { label: "Bad", url: "javascript:window.__pwned=2" }],
+  notes: ["Lint fails on an old file"],
 };
 const FACTS = { branch: "search-page", base: "origin/main", commits: 3, recent: ["Search page"], files: 4, added: 120, removed: 8, uncommitted: 2, merged: false };
 const OLD = "11111111-aaaa-4aaa-8aaa-000000000001";
+const MID = "44444444-dddd-4ddd-8ddd-000000000004";
 const NEW = "22222222-bbbb-4bbb-8bbb-000000000002";
 const ITEMS = [
   { kind: "user", text: "Hello", turn: true, key: `${OLD}:0`, at: "" },
-  { kind: "claude", text: "Hi there. What should we build today?", key: "c1:0", at: "" },
-  { kind: "user", text: "Build the search page", turn: true, key: `${NEW}:0`, at: "" },
-  { kind: "claude", text: "On it.", key: "c2:0", at: "" },
-  { kind: "tool", id: "t1", name: "Edit", input: { file_path: "/x/search.js" }, summary: "Edited search.js", key: "c3:0", at: "" },
-  { kind: "result", tool: "t1", error: false, text: "ok", key: "c4:0", at: "" },
-  { kind: "claude", text: "Done. The page runs at http://amarchy:5173/search.", key: "c5:0", at: "" },
-  { kind: "tool", id: "t2", name: TOOL, summary: "Updated the brief", brief: BRIEF, key: "c6:0", at: "" },
-  { kind: "claude", text: "The brief is updated.", aside: true, key: "c6b:0", at: "" },
+  { kind: "claude", text: "Hi there. **What** should we build today?", key: "c1:0", at: "" },
+  { kind: "user", text: "Plan it", turn: true, key: `${MID}:0`, at: "" },
+  { kind: "claude", text: "Here's a plan.", key: "m1:0", at: "" },
+  { kind: "tool", id: "m2", name: TOOL, summary: "Updated the brief", key: "m2:0", at: "",
+    brief: { headline: "A plan for the search page", status: "done", changed: ["Plan written"], next: ["Build it"] } },
+  { kind: "user", text: "Build the search page", turn: true, key: `${NEW}:0`, at: "2026-10-23T10:00:00Z" },
+  { kind: "claude", text: "On it.", key: "c2:0", at: "2026-10-23T10:00:05Z" },
+  { kind: "tool", id: "r1", name: "Read", input: { file_path: "/x/app.js" }, key: "c3:0", at: "" },
+  { kind: "tool", id: "r2", name: "Read", input: { file_path: "/x/list.js" }, key: "c4:0", at: "" },
+  { kind: "tool", id: "g1", name: "Grep", input: { pattern: "search" }, key: "c5:0", at: "" },
+  { kind: "tool", id: "e1", name: "Edit", input: { file_path: "/x/search.js", old_string: "a\nb", new_string: "a\nc\nd" }, key: "c6:0", at: "" },
+  { kind: "result", tool: "e1", error: false, text: "ok", key: "c7:0", at: "" },
+  { kind: "tool", id: "b1", name: "Bash", input: { command: "node test/search.js", description: "Run the search tests" }, key: "c8:0", at: "" },
+  { kind: "result", tool: "b1", error: false, text: "42 passed", key: "c9:0", at: "" },
+  { kind: "tool", id: "b2", name: "Bash", input: { command: "git add -A && git commit -q -m \"Add search page\"", description: "Commit" }, key: "c10:0", at: "" },
+  { kind: "result", tool: "b2", error: false, text: "", key: "c11:0", at: "" },
+  { kind: "user", text: "<task-notification><tool-use-id>x</tool-use-id><status>completed</status><summary>Background build finished</summary></task-notification>", key: "c12:0", at: "" },
+  { kind: "claude", text: "Done. The page runs at http://amarchy:5173/search.", key: "c13:0", at: "2026-10-23T10:04:10Z" },
+  { kind: "tool", id: "t2", name: TOOL, summary: "Updated the brief", brief: BRIEF, key: "c14:0", at: "" },
+  { kind: "claude", text: "The brief is updated.", aside: true, key: "c15:0", at: "" },
 ];
 
 const failures = [];
@@ -152,28 +168,32 @@ async function mount(page) {
 }
 
 const read = (page) => page.evaluate(() => {
-  const c = window.__chat, card = document.querySelector(".brief-card.latest"), turns = [...document.querySelectorAll(".turn")];
-  const sec = (t) => card && [...card.querySelectorAll(".brief-section")].find((x) => x.querySelector("h4").textContent === t);
+  const replies = [...document.querySelectorAll(".reply")], card = replies.at(-1);
+  const sec = (name) => card && card.querySelector(`.rsec-${name}`);
+  const sum = (name) => sec(name)?.querySelector(".rsec-sum")?.textContent;
   return {
-    mode: c.mode, pinned: document.querySelectorAll(".chat > .brief").length,
-    inLast: !!(card && turns.at(-1).contains(card)), open: !!(card && card.classList.contains("open")),
-    state: card?.querySelector(".brief-state")?.textContent, headline: card?.querySelector(".brief-headline")?.textContent,
-    goal: card?.querySelector(".brief-goal")?.textContent, toggle: card?.querySelector(".brief-toggle")?.textContent,
+    mode: window.__chat.mode, replies: replies.length,
+    open: replies.map((r) => r.classList.contains("open")),
+    titles: replies.map((r) => r.querySelector(".reply-title")?.textContent),
+    cls: card?.className, goal: card?.querySelector(".reply-goal")?.textContent,
+    sections: card ? [...card.querySelectorAll(".rsec-label")].map((x) => x.textContent) : [],
+    openSecs: card ? [...card.querySelectorAll(".rsec.open .rsec-label")].map((x) => x.textContent) : [],
+    sums: { plan: sum("plan"), changes: sum("changes"), checks: sum("checks"), activity: sum("activity"), notes: sum("notes"), words: sum("words") },
+    answer: card ? [...card.querySelectorAll(".answer-list > li > span:first-child")].map((x) => x.textContent) : [],
     questions: card ? card.querySelectorAll(".bq").length : 0,
-    changed: sec("What changed")?.querySelectorAll("li").length || 0,
-    tests: sec("Tests") ? [...sec("Tests").querySelectorAll("li")].map((li) => li.className).join(",") : "",
-    links: card ? [...card.querySelectorAll(".brief-link")].map((x) => x.getAttribute("href")) : [],
-    how: card ? [...card.querySelectorAll(".brief-how")].map((x) => x.textContent).join(" | ") : "",
-    next: !!sec("Next"), notes: !!sec("Heads up"),
+    files: card ? [...card.querySelectorAll(".change-files li")].map((li) => li.querySelector(".change-path").textContent + " " + li.querySelector(".change-n").textContent) : [],
+    git: card ? [...card.querySelectorAll(".brief-list.git li")].map((x) => x.textContent) : [],
     facts: card ? [...card.querySelectorAll(".fact")].map((f) => f.textContent) : [],
-    cards: document.querySelectorAll(".brief-card").length, lines: [...document.querySelectorAll(".turn-headline .text")].map((x) => x.textContent),
-    turns: turns.length, firstSaid: turns[0]?.querySelector(".turn-you")?.textContent.trim(),
-    oldText: turns[0]?.querySelector(".reply-text")?.textContent.trim(),
-    work: turns.at(-1)?.querySelector(".turn-work > summary")?.textContent,
+    tests: card ? [...card.querySelectorAll(".brief-list.tests li")].map((li) => li.className).join(",") : "",
+    links: card ? [...card.querySelectorAll(".brief-link")].map((x) => x.getAttribute("href")) : [],
+    activity: card ? [...card.querySelectorAll(".activity > li")].map((li) => `${li.className}|${li.querySelector(".act-text").firstChild?.textContent || li.querySelector(".act-text").textContent}`) : [],
+    words: sec("words")?.querySelector(".turn-work-body")?.textContent || "",
+    badge: card?.querySelector(".reply-badge")?.textContent || null,
     pwned: window.__pwned,
-    overflow: c.stage.scrollWidth - c.stage.clientWidth,
+    overflow: window.__chat.stage.scrollWidth - window.__chat.stage.clientWidth,
   };
 });
+const openSec = (page, name) => page.evaluate((n) => [...document.querySelectorAll(".reply")].at(-1).querySelector(`.rsec-${n} .rsec-head`).click(), name);
 
 async function run(browser, base, layout) {
   console.log(`\n${layout}`);
@@ -194,98 +214,114 @@ async function run(browser, base, layout) {
   const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) });
 
   let s = await read(page);
-  check(layout, s.mode === "screen" && s.pinned === 0 && s.inLast, "the brief is a message: in the last turn, nothing pinned over the chat");
-  check(layout, s.state === "Waiting on you" && s.headline === "Search page works: 2 choices for you" && s.goal.startsWith("Goal Ship the <img"),
-    `the card: where it stands, this turn's headline, the goal, as text (${s.state} · ${s.headline})`);
-  check(layout, s.pwned === undefined, "nothing in the brief runs as markup");
-  check(layout, !s.open && s.questions === 2, "its details closed, what waits on you there");
-  check(layout, s.toggle === "Show details2 changes · 1 test failing · next steps", `the details' row says what they hold (${s.toggle})`);
-  check(layout, s.turns === 2 && s.firstSaid === "Hello" && s.oldText === "Hi there. What should we build today?", "the timeline, oldest first; a turn from before the brief shows Claude's words");
-  check(layout, /1 step/.test(s.work || ""), `the brief's own call isn't a step in Claude's work (${s.work})`);
-  const aside = await page.evaluate(() => document.body.textContent.includes("The brief is updated."));
-  check(layout, !aside, "what Claude says again after the brief isn't shown");
+  check(layout, s.mode === "screen" && s.replies === 3, `each turn is a reply card (${s.replies})`);
+  check(layout, JSON.stringify(s.open) === "[false,false,true]", `the newest open, the ones before as their title (${JSON.stringify(s.open)})`);
+  check(layout, s.titles[0] === "Hi there. What should we build today?" && s.titles[1] === "A plan for the search page" && s.titles[2].startsWith("Search page works: 2 choices for <img"),
+    `titles: Claude's words, an old-style brief, the new (${JSON.stringify(s.titles)})`);
+  check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === "Goal Ship the search page", "where it stands, the goal; nothing runs as markup");
+  check(layout, JSON.stringify(s.sections) === JSON.stringify(["Needs you", "Answer", "Plan", "Changes", "Checks", "Activity", "Notes", "Claude's words"]),
+    `its sections, in order (${JSON.stringify(s.sections)})`);
+  check(layout, JSON.stringify(s.openSecs) === JSON.stringify(["Needs you", "Answer", "Checks"]) && s.questions === 2 &&
+    JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]), `Needs you, Answer and Checks (a test fails) open, the rest folded (${JSON.stringify(s.openSecs)})`);
+  check(layout, s.sums.plan === "1 of 3 done · next: Ship to main" && s.sums.changes === "1 file +2 −1 · 1 commit" &&
+    /^6 steps · 3 actions · 4 min$/.test(s.sums.activity) &&
+    s.sums.notes === "1 · Lint fails on an old file" && s.sums.words === "2 messages · 6 steps",
+    `each folded section says what it holds (${JSON.stringify(s.sums)})`);
   check(layout, s.overflow <= 1, `no sideways scroll (${s.overflow}px)`);
-  await shot("closed");
+  await shot("reply");
 
-  // The details' row opens them: sections, git's facts, links; again, closes.
-  await page.evaluate(() => document.querySelector(".brief-card.latest .brief-toggle").click());
+  // What's built from the record.
+  await openSec(page, "changes");
+  await openSec(page, "activity");
+  await openSec(page, "words");
   s = await read(page);
-  check(layout, s.open && s.toggle === "Hide details", `the row opens the details (${s.toggle})`);
-  check(layout, s.changed === 2 && s.tests === "is-pass,is-fail" && s.next && s.notes, `its sections: changed, tests (${s.tests}), next, heads up`);
-  check(layout, JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]) && s.how.includes("On the phone") && s.how.includes("Search"),
-    `check it: the http(s) link only, and how (${JSON.stringify(s.links)})`);
-  check(layout, JSON.stringify(s.facts) === JSON.stringify(["search-page", "3 commits", "4 files +120 −8", "2 uncommitted", "not in main yet"]),
-    `git's facts, as they are (${JSON.stringify(s.facts)})`);
+  check(layout, JSON.stringify(s.files) === JSON.stringify(["search.js +2 −1"]) && JSON.stringify(s.git) === JSON.stringify(["Committed “Add search page”"]),
+    `changes: the file and its +/−, the commit (${JSON.stringify(s.files)} ${JSON.stringify(s.git)})`);
+  check(layout, JSON.stringify(s.facts) === JSON.stringify(["search-page", "3 commits", "4 files +120 −8", "2 uncommitted", "not in main yet"]), "git now, on the newest");
+  check(layout, s.tests === "is-pass,is-fail" && JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]), "checks: tests, the http(s) link only");
+  check(layout, JSON.stringify(s.activity) === JSON.stringify([
+    "act-said|“On it.”", "act-group|Read 2 files, searched 1 time", "act-step|Edited search.js", "act-step|Run the search tests", "act-step|Commit",
+    "act-event|Done in the background: Background build finished", "act-said|“Done. The page runs at http://amarchy:5173/search.”"]),
+    `activity: in order, the looking around grouped (${JSON.stringify(s.activity)})`);
+  check(layout, s.words.includes("On it.") && !s.words.includes("The brief is updated."), "Claude's words: the turn as the conversation shows it, without what it said again");
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
-  await shot("open");
-  await page.evaluate(() => document.querySelector(".brief-card.latest .brief-toggle").click());
+  await shot("sections");
+  await openSec(page, "activity");
+  await openSec(page, "changes");
+  await openSec(page, "checks");
   s = await read(page);
-  check(layout, !s.open, "and closes them");
+  check(layout, s.sums.checks === "1 failing of 2 · 2 ways to try it", `folded, Checks says what it holds (${s.sums.checks})`);
+  await openSec(page, "words");
+
+  // An answer's detail, on a tap.
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-more").click());
+  const detail = await page.evaluate(() => { const d = [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-detail"); return !d.hidden && d.textContent; });
+  check(layout, detail === "Debounced at 200 ms", "a point's detail opens on a tap");
 
   // Answers: the first marks its question; the last sends both, once.
-  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[0].querySelector(".bq-opt").click());
-  const half = await page.evaluate(() => { const b = document.querySelector(".brief-card.latest"); return { answered: b.querySelectorAll(".bq.answered").length,
-    status: b.querySelector(".bq-status").textContent, send: !b.querySelector(".bq-send").hidden }; });
-  check(layout, half.answered === 1 && half.status === "1 of 2 answered" && half.send && !posts.some((p) => p.url.endsWith("/send")),
-    `an answer marks its question and waits for the other (${JSON.stringify(half)})`);
-  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[1].querySelectorAll(".bq-opt")[2].click());
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".bq")[0].querySelector(".bq-opt").click());
+  const half = await page.evaluate(() => { const b = [...document.querySelectorAll(".reply")].at(-1);
+    return { answered: b.querySelectorAll(".bq.answered").length, status: b.querySelector(".bq-status").textContent }; });
+  check(layout, half.answered === 1 && half.status === "1 of 2 answered" && !posts.some((p) => p.url.endsWith("/send")), `an answer marks its question (${JSON.stringify(half)})`);
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".bq")[1].querySelectorAll(".bq-opt")[2].click());
   const draft = await page.evaluate(() => window.__chat.input.value);
-  check(layout, draft === "Filters: " && !posts.some((p) => p.url.endsWith("/send")), `a draft option fills the box (${JSON.stringify(draft)})`);
+  check(layout, draft === "Filters: ", `a draft option fills the box (${JSON.stringify(draft)})`);
   await page.evaluate(() => { window.__chat.input.value = ""; window.__chat.typed(); });
-  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[1].querySelectorAll(".bq-opt")[1].click());
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".bq")[1].querySelectorAll(".bq-opt")[1].click());
   await page.waitForTimeout(300);
   const sent = posts.filter((p) => p.url.endsWith("/send"));
-  check(layout, sent.length === 1 && sent[0].body === JSON.stringify({ text: "Ship it: merge to main and push\n\nNo filters" }),
-    `the answers go to Claude together, once (${sent.map((p) => p.body)})`);
+  check(layout, sent.length === 1 && sent[0].body === JSON.stringify({ text: "Ship it: merge to main and push\n\nNo filters" }), "the answers go to Claude together, once");
 
-  // A reconnect with the same conversation: nothing drawn again, the answers kept.
-  await page.evaluate(({ items }) => { window.__card = document.querySelector(".brief-card.latest");
-    window.__chat.conversation({ reset: true, start: 0, items: [...items, { kind: "note", text: "Conversation compacted", key: "n1:0", at: "" }] }); }, { items: ITEMS });
-  const kept = await page.evaluate(() => ({ same: document.querySelector(".brief-card.latest") === window.__card,
-    status: document.querySelector(".brief-card.latest .bq-status").textContent }));
-  check(layout, kept.same && kept.status === "Sent", `a reconnect moves nothing, the answers stay sent (${JSON.stringify(kept)})`);
+  // Folding the whole reply: its title, and a mark that it needs you.
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-head").click());
+  s = await read(page);
+  check(layout, s.open[2] === false && s.badge === "Needs you" && s.sections.length === 0, "a folded reply is its title, marked when it needs you");
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-head").click());
+  // An older reply opens on a tap: a turn from before the brief, Claude's words as its answer.
+  await page.evaluate(() => document.querySelector(".reply .reply-head").click());
+  const old = await page.evaluate(() => { const r = document.querySelector(".reply");
+    return { open: r.classList.contains("open"), answer: r.querySelector(".rsec-answer .rsec-sum")?.textContent }; });
+  check(layout, old.open && old.answer === "Hi there. What should we build today?", `an older reply opens on a tap (${JSON.stringify(old)})`);
+  await page.evaluate(() => document.querySelector(".reply .reply-head").click());
 
-  // A new turn: while Claude works, no reply yet (the working line says it's writing the brief); then its brief, the one before as a line.
+  // A reconnect with the same conversation: nothing drawn again.
+  await page.evaluate(({ items }) => { window.__card = [...document.querySelectorAll(".reply")].at(-1);
+    window.__chat.conversation({ reset: true, start: 0, items: [...items] }); }, { items: ITEMS });
+  const same = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1) === window.__card);
+  check(layout, same, "a reconnect moves nothing");
+
+  // A new turn: a live card while Claude works (its activity filling in), then its reply; the one before folds.
   await page.evaluate(() => {
     const c = window.__chat;
     c.row = { ...c.row, status: "working" };
-    c.live = { state: "working", activity: { tool: "mcp__amarchy__update_brief", input: {} }, pending: [] };
+    c.live = { state: "working", activity: { tool: "Bash", input: { description: "Merging" } }, pending: [] };
     c.conversation({ items: [{ kind: "user", text: "Ship it", turn: true, key: "33333333-cccc-4ccc-8ccc-000000000003:0", at: "" },
-      { kind: "claude", text: "Shipping.", key: "c7:0", at: "" }] });
+      { kind: "tool", id: "s1", name: "Bash", input: { command: "git merge x && git push", description: "Merge and push" }, key: "s1:0", at: "" }] });
     c.renderTail();
   });
-  const live = await page.evaluate(() => ({ reply: [...document.querySelectorAll(".turn")].at(-1).querySelector(".turn-reply").childElementCount,
-    line: document.querySelector(".screen-work .now")?.textContent }));
-  check(layout, live.reply === 0 && /Updating the brief/.test(live.line || ""), `while it writes the brief: the working line says so (${live.line})`);
+  s = await read(page);
+  const liveNow = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-now")?.textContent);
+  check(layout, s.replies === 4 && /working/.test(s.cls) && s.titles[3].startsWith("Working…") && /Merging/.test(liveNow || "") &&
+    s.openSecs.includes("Activity"), `while it works: a live card, its activity open (${s.titles[3]})`);
+  await shot("live");
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
-    c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c8:0", at: "",
-      brief: { goal: "Ship the search page", status: "done", headline: "Shipped to main", changed: ["Search page on main"] } }] });
+    c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c20:0", at: "",
+      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }] } }] });
     c.row = { ...c.row, status: "idle" }; c.live = { state: "idle", pending: [] }; c.renderTail();
   }, { TOOL });
   s = await read(page);
-  check(layout, s.state === "Done" && s.headline === "Shipped to main" && s.questions === 0 && s.cards === 1 &&
-    JSON.stringify(s.lines) === JSON.stringify(["Search page works: 2 choices for you"]),
-    `then its brief in full, the one before as its line (${JSON.stringify(s.lines)})`);
+  check(layout, JSON.stringify(s.open) === "[false,false,false,true]" && s.titles[3] === "Shipped to main" && s.sums.changes === "merged · pushed",
+    `then its reply, the one before folded (${JSON.stringify(s.open)} · ${s.sums.changes})`);
   await shot("done");
-  // The line opens that brief in place (its questions gone: overtaken); Fold makes it a line again.
-  await page.evaluate(() => document.querySelector(".turn-headline").click());
-  const older = await page.evaluate(() => { const cards = document.querySelectorAll(".brief-card");
-    const o = [...cards].find((x) => !x.classList.contains("latest"));
-    return { cards: cards.length, headline: o?.querySelector(".brief-headline")?.textContent, questions: o ? o.querySelectorAll(".bq").length : -1 }; });
-  check(layout, older.cards === 2 && older.headline === "Search page works: 2 choices for you" && older.questions === 0,
-    `an older brief opens in place, without its old questions (${JSON.stringify(older)})`);
-  await page.evaluate(() => document.querySelector(".brief-card:not(.latest) .brief-fold").click());
-  const folded = await page.evaluate(() => document.querySelectorAll(".brief-card").length);
-  check(layout, folded === 1, "Fold makes it a line again");
 
-  // The conversation view has no brief; back again.
+  // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));
-  const chat = await page.evaluate(() => ({ cards: document.querySelectorAll(".brief-card").length, users: document.querySelectorAll(".msg.user").length }));
-  check(layout, chat.cards === 0 && chat.users === 3, `the Chat view: the conversation, no brief (${JSON.stringify(chat)})`);
+  const chat = await page.evaluate(() => ({ replies: document.querySelectorAll(".reply").length, users: document.querySelectorAll(".msg.user").length }));
+  check(layout, chat.replies === 0 && chat.users === 4, `the Chat view: the conversation (${JSON.stringify(chat)})`);
   await page.evaluate(() => window.__chat.showMode("screen"));
   s = await read(page);
-  check(layout, s.state === "Done" && s.turns === 3 && s.inLast, "back to the brief");
+  check(layout, s.replies === 4 && s.titles[3] === "Shipped to main", "back to the brief view");
 
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());

@@ -1,10 +1,11 @@
-/* The brief view (chat.js drawBrief, rebuildScreen): the chat's brief over its
-   timeline. The brief: where it stands and the goal on one line (it opens to
-   the rest), what waits on you always there, git's facts. The timeline,
-   oldest first: your message, the brief's headline for that turn, Claude's
-   work in a fold. Phone first; a readable column on a wide screen. The
-   switch between the brief and the conversation sits over the chat (on a
-   computer; on the phone it's in Settings and the chat's menu). */
+/* The brief view (chat.js replyCard): the conversation as you'd want to read
+   it. Each turn is your message and Claude's reply as one card: its title (the
+   outcome) folds and opens it; its sections (Needs you, Answer, Plan,
+   Changes, Checks, Activity, Notes, Claude's words) each fold to a line saying
+   what they hold. The newest reply is open, the ones before are their title.
+   Phone first; a readable column on a wide screen. The switch between this
+   and the plain conversation sits over the chat (on a computer; on the phone
+   it's in Settings and the chat's menu). */
 
 .view-switch { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 12px 0; flex: none; }
 .chat.other > .view-switch { display: none; }
@@ -15,42 +16,98 @@
 .vs-btn.on { color: var(--text); background: var(--control-pressed); border-color: var(--accent); }
 .vs-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ---- the brief, as a message under each turn */
+/* ---- the timeline */
 
-.brief-card {
+.screen-stage {
+  width: 100%; max-width: var(--chat-column, 760px); margin: 0 auto; box-sizing: border-box;
+  padding: 18px 16px 12px; display: flex; flex-direction: column; gap: 18px;
+}
+.turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.turn-you:empty { display: none; }
+.screen-work[hidden] { display: flex; visibility: hidden; }     /* its line kept: nothing moves when it comes and goes */
+
+/* ---- a reply */
+
+.reply {
   --tone: var(--text-muted);
   display: flex; flex-direction: column; min-width: 0; background: var(--surface);
   border: 1px solid var(--border); border-left: 3px solid var(--tone); border-radius: var(--radius-card);
 }
-.brief-card.done, .turn-headline.done { --tone: var(--success); }
-.brief-card.working, .turn-headline.working { --tone: var(--accent); }
-.brief-card.blocked, .turn-headline.blocked { --tone: var(--danger); }
-.brief-card.waiting, .turn-headline.waiting { --tone: var(--warn, #d9a441); }
-.brief-top { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; }
-.brief-label { font-size: var(--caption); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.brief-state { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--tone); font-size: var(--caption); font-weight: 700; }
-.brief-state .dot, .turn-headline .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); flex: none; }
-.brief-fold { min-height: 0; padding: 0 0 0 4px; font-size: var(--caption); }
-.brief-headline { padding: 6px 14px 0; font-size: 1.08rem; font-weight: 700; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
-.brief-goal { padding: 6px 14px 12px; font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; }
-.brief-goal .k { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-.brief-headline:last-child { padding-bottom: 12px; }
-
-/* The details: a row that says what they hold, and opens them below it. */
-.brief-toggle {
-  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 10px 14px; box-sizing: border-box;
-  font: inherit; text-align: left; cursor: pointer; color: var(--link); background: none;
-  border: 0; border-top: 1px solid var(--border-faint);
+.reply.done { --tone: var(--success); }
+.reply.working { --tone: var(--accent); }
+.reply.blocked { --tone: var(--danger); }
+.reply.waiting { --tone: var(--warn, #d9a441); }
+.reply-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 12px 14px; box-sizing: border-box;
+  font: inherit; text-align: left; color: var(--text); cursor: pointer; background: none; border: 0; border-radius: var(--radius-card);
 }
-.brief-card:not(.open) .brief-toggle { border-radius: 0 0 var(--radius-card) var(--radius-card); }
-.brief-toggle:hover { background: var(--control-hover); }
-.brief-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.brief-toggle-label { font-weight: 700; flex: none; }
-.brief-toggle-sum { flex: 1; min-width: 0; font-size: var(--caption); color: var(--text-muted); overflow-wrap: anywhere; }
-.brief-toggle .chev { margin-left: auto; flex: none; width: 16px; height: 16px; transform: rotate(90deg); transition: transform 0.15s ease; }
-.brief-card.open .brief-toggle .chev { transform: rotate(-90deg); }
+.reply-head:hover { background: var(--control-hover); }
+.reply-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.reply-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); }
+.reply-head > .spinner, .reply-head > [class*="spin"] { flex: none; }
+.reply-title { flex: 1; min-width: 0; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.reply.open .reply-title { font-size: 1.05rem; }
+.reply-now { font-weight: 400; color: var(--text-muted); font-size: var(--caption); }
+.reply-badge {
+  flex: none; font-size: var(--caption); font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  color: var(--warn, #d9a441); border: 1px solid color-mix(in srgb, var(--warn, #d9a441) 45%, transparent);
+}
+.reply-head .chev { flex: none; width: 16px; height: 16px; transform: rotate(90deg); transition: transform 0.15s ease; opacity: 0.7; }
+.reply.open > .reply-head .chev { transform: rotate(-90deg); }
+.reply-goal { padding: 0 14px 10px; font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+.reply-goal .k, .rsec-label { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 
-.brief-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 14px 14px; }
+/* A section: its row (what it is, what it holds) opens it below. */
+.rsec { border-top: 1px solid var(--border-faint); min-width: 0; }
+.rsec-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 10px 14px; box-sizing: border-box;
+  font: inherit; text-align: left; cursor: pointer; color: var(--text); background: none; border: 0;
+}
+.rsec-head:hover { background: var(--control-hover); }
+.rsec-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rsec-label { flex: none; font-size: var(--caption); color: var(--text-muted); min-width: 6.5em; }
+.rsec-needs .rsec-label { color: var(--warn, #d9a441); }
+.rsec-sum { flex: 1; min-width: 0; font-size: var(--caption); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsec-head .chev { flex: none; width: 14px; height: 14px; transform: rotate(90deg); transition: transform 0.15s ease; opacity: 0.6; }
+.rsec.open > .rsec-head .chev { transform: rotate(-90deg); }
+.rsec-body { padding: 2px 14px 14px; min-width: 0; }
+.rsec:last-child .rsec-head { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+.rsec.open:last-child .rsec-head { border-radius: 0; }
+
+/* Answer: points, each with more on a tap. */
+.answer-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.answer-list > li { position: relative; padding-left: 18px; line-height: 1.45; overflow-wrap: anywhere; }
+.answer-list > li::before { content: ""; position: absolute; left: 3px; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
+.answer-more { min-height: 0; padding: 0 0 0 6px; font-size: var(--caption); }
+.answer-detail { margin-top: 4px; font-size: var(--caption); color: var(--text-muted); }
+.answer-list code, .brief-list code, .plan-steps code { font-size: 0.92em; padding: 1px 4px; border-radius: 4px; background: var(--code-bg); }
+
+/* Plan: steps, done / doing / next. */
+.plan-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; counter-reset: step; }
+.plan-steps li { display: flex; align-items: flex-start; gap: 10px; overflow-wrap: anywhere; }
+.plan-steps .mark {
+  flex: none; width: 18px; height: 18px; margin-top: 0.1em; box-sizing: border-box; display: grid; place-items: center;
+  border-radius: 50%; border: 2px solid var(--text-muted); color: var(--on-accent);
+}
+.plan-steps .mark svg { width: 11px; height: 11px; }
+.plan-steps .is-done .mark { background: var(--success); border-color: var(--success); }
+.plan-steps .is-done > span:last-child { color: var(--text-muted); }
+.plan-steps .is-doing .mark { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 9px var(--accent); }
+.plan-steps .is-doing > span:last-child { font-weight: 700; }
+
+/* Changes: files with their +/− and a bar, then git. */
+.changes { display: flex; flex-direction: column; gap: 10px; }
+.change-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.change-files li { display: grid; grid-template-columns: minmax(0, 1fr) auto 64px; align-items: center; gap: 8px; }
+.change-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, inherit); font-size: var(--caption); }
+.change-new { grid-column: 1; justify-self: start; font-size: 11px; padding: 0 6px; border-radius: 999px; color: var(--success); border: 1px solid currentColor; }
+.change-files li:has(.change-new) .change-path { grid-row: 1; }
+.change-n { font-size: var(--caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.change-n .add, .change-bar .add { color: var(--success); }
+.change-n .del, .change-bar .del { color: var(--danger); }
+.change-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--border-faint); }
+.change-bar .add { background: var(--success); }
+.change-bar .del { background: var(--danger); }
 .brief-facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .fact {
   font-size: var(--caption); padding: 3px 8px; border-radius: 999px; color: var(--text-muted);
@@ -59,14 +116,13 @@
 .fact.branch { color: var(--text); }
 .fact.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
 .fact.warn { color: var(--warn, #d9a441); border-color: color-mix(in srgb, var(--warn, #d9a441) 40%, transparent); }
-.brief-section h4 {
-  margin: 0 0 6px; font-size: var(--caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
-}
+
+/* Lists: notes, git, tests. */
 .brief-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .brief-list li { position: relative; padding-left: 18px; overflow-wrap: anywhere; }
 .brief-list li::before { content: ""; position: absolute; left: 3px; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
-.brief-list.ticks li::before { background: var(--success); }
 .brief-list.notes li::before { background: var(--warn, #d9a441); }
+.brief-list.git li::before { background: var(--accent); }
 .brief-list.tests li { padding-left: 26px; }
 .brief-list.tests li::before { display: none; }
 .brief-list.tests .mark {
@@ -77,20 +133,42 @@
 .brief-list.tests .is-pass .mark { background: var(--success); }
 .brief-list.tests .is-fail .mark { background: var(--danger); }
 .brief-list.tests .detail { color: var(--text-muted); font-size: var(--caption); }
-.brief-list code { font-size: 0.92em; padding: 1px 4px; border-radius: 4px; background: var(--code-bg); }
+.checks { display: flex; flex-direction: column; gap: 8px; }
 .brief-link {
-  display: flex; flex-direction: column; gap: 2px; min-height: 44px; box-sizing: border-box; padding: 10px 12px; margin-top: 6px;
+  display: flex; flex-direction: column; gap: 2px; min-height: 44px; box-sizing: border-box; padding: 10px 12px;
   border: 1px solid var(--control-border); border-radius: var(--radius-item); background: var(--control-bg);
   color: var(--link); text-decoration: none; overflow-wrap: anywhere;
 }
-.brief-link:first-of-type { margin-top: 0; }
 .brief-link:hover { background: var(--control-hover); }
 .brief-link-label { font-weight: 700; }
 .brief-link-host { font-size: var(--caption); color: var(--text-muted); }
-.brief-how { margin-top: 6px; overflow-wrap: anywhere; }
+.brief-how { overflow-wrap: anywhere; }
 
-/* What waits on you: in the newest brief, over its details. */
-.brief-waiting { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border-faint); }
+/* Activity: a timeline, a line per step that acts, the looking around grouped. */
+.activity { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.activity > li { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; font-size: var(--caption); line-height: 1.45; }
+.activity > li::after { content: ""; position: absolute; left: 10px; top: 28px; bottom: -4px; width: 1px; background: var(--border-faint); }
+.activity > li:last-child::after { display: none; }
+.act-ic {
+  flex: none; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--control-bg); border: 1px solid var(--border-faint); color: var(--text-muted);
+}
+.act-ic .ic, .act-ic svg { width: 12px; height: 12px; display: block; }
+.act-text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.act-said .act-text { color: var(--text-muted); font-style: italic; }
+.act-event .act-text { color: var(--text-muted); }
+.act-step.failed .act-ic { color: var(--danger); border-color: var(--danger); }
+.act-step.failed .act-text { color: var(--danger); }
+.act-cmd { display: block; margin-top: 2px; font-size: 0.92em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-group-btn { font: inherit; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.act-group-steps { margin: 4px 0 0; padding-left: 14px; color: var(--text-muted); }
+.act-group-steps li { margin: 2px 0; }
+
+/* Claude's words: the turn as the conversation shows it. */
+.turn-work-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Needs you: questions, their options as buttons. */
+.brief-waiting { display: flex; flex-direction: column; gap: 10px; }
 .bq { display: flex; flex-direction: column; gap: 8px; }
 .bq + .bq { padding-top: 10px; border-top: 1px solid var(--border-faint); }
 .bq-q { font-weight: 600; overflow-wrap: anywhere; }
@@ -113,51 +191,7 @@
 .bq-foot:has(.bq-status:empty):has(.bq-send[hidden]) { display: none; }
 .bq-status { font-size: var(--caption); color: var(--text-muted); }
 
-/* ---- the timeline */
-
-.screen-stage {
-  width: 100%; max-width: var(--chat-column, 760px); margin: 0 auto; box-sizing: border-box;
-  padding: 18px 16px 12px; display: flex; flex-direction: column; gap: 22px;
-}
-.turn { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.turn-you:empty { display: none; }
-.screen-work[hidden] { display: flex; visibility: hidden; }     /* its line kept: nothing moves when it comes and goes */
-
-/* An older turn's brief, as its headline: a tap opens it in place. */
-.turn-headline {
-  --tone: var(--text-muted);
-  align-self: stretch; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px; box-sizing: border-box;
-  font: inherit; font-weight: 600; color: var(--text); text-align: left; cursor: pointer;
-  background: none; border: 1px solid var(--border-faint); border-radius: var(--radius-item);
-}
-.turn-headline:hover { background: var(--control-hover); }
-.turn-headline .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.turn-headline-more { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: var(--caption); color: var(--link); }
-.turn-headline-more .chev { width: 14px; height: 14px; }
-.turn-headline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* Claude's work: a quiet line that opens to its words and steps. */
-.turn-work { min-width: 0; }
-.turn-work > summary {
-  list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 2px; cursor: pointer;
-  color: var(--text-muted); font-size: var(--caption); border-radius: var(--radius-control); user-select: none;
-}
-.turn-work > summary::-webkit-details-marker { display: none; }
-.turn-work > summary:hover { color: var(--text); }
-.turn-work > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.turn-work[open] > summary .chev { transform: rotate(90deg); }
-.turn-work-n::before { content: "·"; margin: 0 6px 0 0; }
-.turn-work-body {
-  margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border-faint);
-  display: flex; flex-direction: column; gap: 12px; min-width: 0;
-}
-
-/* A turn from before the brief: Claude's last words, a few lines of them. */
-.reply-plain { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.reply-plain .reply-text { width: 100%; max-height: 4.8em; overflow: hidden; color: var(--text-muted); }
-.reply-plain.long:not(.open) .reply-text { -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
-.reply-plain.open .reply-text { max-height: none; }
-
 @media (max-width: 600px) {
-  .screen-stage { padding: 14px 12px 10px; gap: 18px; }
+  .screen-stage { padding: 14px 12px 10px; gap: 16px; }
+  .rsec-label { min-width: 0; }
 }

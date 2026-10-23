@@ -178,42 +178,51 @@ terminals; after this, the wide layout is chat-first too.
 
 ### The brief: the default view
 
-The chat's main view is **the brief**; the conversation is the other view,
-one tap away: on a computer the **Brief | Chat** switch over the chat; on the
-phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*. The
-choice is kept on the device and every chat open takes it. (The phone's
+The chat's main view is the **brief view**; the plain conversation is the
+other, one tap away: on a computer the **Brief | Chat** switch over the chat;
+on the phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*.
+The choice is kept on the device and every chat open takes it. (The phone's
 terminals open from the chat's menu; its back arrow returns to the chat.)
 
-- **One living document per chat, as Claude's reply**: at the end of each
-  turn, under your message, a card: *Brief*, where it stands (done, working,
-  blocked, waiting on you), this turn's headline and the chat's goal. A row
-  under it, *Show details*, says what they hold ("6 changes · 3 tests passed
-  · next steps") and opens them below it: *What changed*, *Tests* (with
-  their results), *Check it* (links, what to tap), *Next*, *Heads up*, and
-  git's facts as chips (branch, commits, files and lines changed,
-  uncommitted, not pushed, merged or not). The newest brief is in full; the
-  ones before it are their headline, opened in place with a tap (*Fold*
-  makes them a line again). It scrolls with the conversation: nothing is
-  pinned.
-- **What waits on you** is in the newest brief, over its details: each question with its
-  options as buttons. One question: a tap sends. Several: a tap marks it
-  answered, they go together once all are (or with *Send*). An option you
-  finish yourself puts its start in the box.
-- **Written by Claude itself**, not guessed by another model: when a turn
-  ends, amarchy's Stop hook asks the same Claude, in the same conversation
-  (all it knows, its cache), to update the brief (`BRIEF_ASK`, with git's
-  facts: `brief_facts`). It calls `update_brief`, a tool amarchy serves
-  (`amarchy brief-mcp`, in both engines' arguments, allowed without asking).
-  The session stays *working* until it has, so you're told it's done once
-  the brief is there. The hook asks once a stop, and only when Claude did
-  something the brief doesn't have yet (`brief_needed`); a Claude started
-  before the tool isn't asked (`claude_has_brief`).
-- The app draws the brief from the transcript (`app_items` gives the call as
-  `brief`); git's facts come live from the server (`facts` on the stream).
-  The ask and the call stay out of what you read.
-- **The timeline**, oldest first: your message, *Claude's work* in a closed
-  fold (its words and steps), and its brief. A turn from before the brief
-  shows Claude's last words, three lines of them.
+Each turn is your message and **Claude's reply as one card**, read in layers:
+
+- **Glance**: the card's title, the turn's outcome, with a mark for where it
+  stands (done, working, blocked, waiting on you). The newest reply is open;
+  the ones before are their title, opened with a tap. A folded reply that
+  needs you says so.
+- **Review**: its sections, each folded to a row that says what it holds:
+  *Needs you* (questions as buttons, open), *Answer* (what Claude found,
+  decided, did, concluded, as complete short points, a tap for more on one;
+  open on the newest), *Plan* (steps done / doing / next: "1 of 3 done ·
+  next: …"), *Changes* ("1 file +2 −1 · 1 commit": each file with its +/−
+  and a bar, commits, merges, pushes, and git now on the newest), *Checks*
+  (tests with their results, ways to try it; opens itself when one fails),
+  *Activity* ("6 steps · 3 actions · 4 min"), *Notes*.
+- **Audit**: *Activity* is a timeline: each step that acts (an edit, a
+  command, a helper, a message) a line, the looking around between them one
+  line ("Read 2 files, searched 1 time", a tap lists them), what Claude said
+  and what came in by itself (a background task that ended) where they
+  happened. *Claude's words* is the turn as the conversation shows it.
+
+**Who writes what.** What needs judgment Claude writes itself, in the same
+conversation: when a turn ends, amarchy's Stop hook asks it for this turn's
+reply (`BRIEF_ASK`, with git's facts: `brief_facts`), and it calls
+`update_brief` (a tool amarchy serves, `amarchy brief-mcp`, in both
+engines' arguments, allowed without asking) with the title, status, kind,
+the chat's goal, the answer (complete: the app folds it, so nothing important
+is left out), the plan, the questions, tests, ways to check it and notes.
+What Claude *did* comes from the record, never from the model: the activity,
+the files changed and their +/−, commits and pushes, test runs (`changesOf`,
+`testsOf`, `activityOf` in app/chat.js, from the turn's items). The session
+stays *working* until the reply is written, so you're told it's done once it
+is. The hook asks once a stop, only when Claude did something since its last
+reply (`brief_needed`), and never a Claude started before the tool
+(`claude_has_brief`). What Claude says after the call is left out (`aside`).
+
+While Claude works, the turn's card is live: *Working…* and what it's doing
+in its title, its activity filling in. A turn from before the brief gets the
+same card, its title and answer from Claude's words. A brief in the older
+shape (headline, changed, next) is read as a reply.
 
 ### The conversation
 

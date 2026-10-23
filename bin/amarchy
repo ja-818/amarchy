@@ -9822,31 +9822,35 @@ BRIEF_SERVER = "amarchy"
 BRIEF_TOOL = f"mcp__{BRIEF_SERVER}__update_brief"
 BRIEF_DEF = {
     "name": "update_brief",
-    "description": "Updates this chat's brief: the live summary the person reads in amarchy instead of your messages. "
-                   "amarchy asks for it when a turn ends; call it then, once.",
+    "description": "Writes this turn's reply as the person reads it in amarchy, instead of your messages: a title, your answer "
+                   "as points, the plan, what needs them, checks and notes. amarchy adds what you did (the activity, files "
+                   "changed, commits, test runs) from the record itself, so don't list those. Call it once, when amarchy asks "
+                   "at the end of a turn.",
     "inputSchema": {
-        "type": "object", "additionalProperties": False, "required": ["goal", "status", "headline"],
+        "type": "object", "additionalProperties": False, "required": ["title", "status", "answer"],
         "properties": {
-            "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in their terms, in "
-                                                      "one short sentence. Keep it unless the goal changed."},
+            "title": {"type": "string", "description": "The outcome of this turn in at most 10 words, as a person would say it: "
+                                                       "what happened, what you found, or what you need."},
             "status": {"type": "string", "enum": ["done", "working", "blocked", "waiting"],
-                       "description": "Where the goal stands after this turn: done (reached), working (more steps under way or "
-                                      "planned), blocked (can't go on), waiting (needs the person)."},
-            "headline": {"type": "string", "description": "This turn in at most 10 words: what happened, or what you need. "
-                                                          "Shown under their message."},
-            "changed": {"type": "array", "maxItems": 6, "items": {"type": "string"},
-                        "description": "What has changed toward the goal so far (the whole chat, not only this turn), in plain "
-                                       "words, a few words each: what it does now, not git's state (the app shows that)."},
-            "tests": {"type": "array", "maxItems": 5, "description": "Tests and checks you ran that tell where things stand now, "
-                                                                    "with their real results.",
-                      "items": {"type": "object", "required": ["name", "result"], "additionalProperties": False,
-                                "properties": {"name": {"type": "string"},
-                                               "result": {"type": "string", "enum": ["pass", "fail", "skipped"]},
-                                               "detail": {"type": "string"}}}},
-            "check": {"type": "array", "maxItems": 3, "description": "How the person can see or try the result themselves: a URL "
-                                                                    "to open, or what to tap.",
-                      "items": {"type": "object", "required": ["label"], "additionalProperties": False,
-                                "properties": {"label": {"type": "string"}, "url": {"type": "string"}, "how": {"type": "string"}}}},
+                       "description": "done (the turn's job is finished), working (more steps under way or planned), blocked "
+                                      "(you can't go on), waiting (you need the person)."},
+            "kind": {"type": "string", "enum": ["answer", "change", "investigation", "plan", "task", "problem"],
+                     "description": "What this turn was: an answer to a question, a change made, an investigation or report, a "
+                                    "plan, a task carried out (an email sent, a clean-up), or a problem."},
+            "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in one short sentence. "
+                                                      "Keep it unless it changed."},
+            "answer": {"type": "array", "maxItems": 12, "description": "Everything from this turn the person needs, as short "
+                       "points: what you found, decided, did and concluded, with the exact names, numbers, URLs and results. "
+                       "Complete, so they never need your messages: the app folds it, so leave nothing important out, but keep "
+                       "each point short. Not the steps you took (the app shows those).",
+                       "items": {"type": "object", "required": ["point"], "additionalProperties": False,
+                                 "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
+                                                "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
+            "plan": {"type": "array", "maxItems": 12, "description": "The steps toward the goal, when there's a plan: done, "
+                                                                    "doing (under way) or next.",
+                     "items": {"type": "object", "required": ["step", "state"], "additionalProperties": False,
+                               "properties": {"step": {"type": "string"},
+                                              "state": {"type": "string", "enum": ["done", "doing", "next"]}}}},
             "waiting": {"type": "array", "maxItems": 3,
                         "description": "Decisions only the person can make, each a question with its options as buttons: label "
                                        "(1 to 4 words) and send (the full message as they'd type it); draft: true when they "
@@ -9857,21 +9861,31 @@ BRIEF_DEF = {
                                           "type": "object", "required": ["label", "send"], "additionalProperties": False,
                                           "properties": {"label": {"type": "string"}, "send": {"type": "string"},
                                                          "draft": {"type": "boolean"}}}}}}},
-            "next": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "What comes next, a few words each."},
-            "notes": {"type": "array", "maxItems": 3, "items": {"type": "string"},
-                      "description": "Heads-ups worth knowing: risks, caveats, what isn't done. Never git's state (merged, "
-                                     "pushed, committed, uncommitted, branch): the app shows that itself."},
+            "tests": {"type": "array", "maxItems": 6, "description": "Tests and checks you ran, with their real results and a "
+                                                                    "few words on what they cover.",
+                      "items": {"type": "object", "required": ["name", "result"], "additionalProperties": False,
+                                "properties": {"name": {"type": "string"},
+                                               "result": {"type": "string", "enum": ["pass", "fail", "skipped"]},
+                                               "detail": {"type": "string"}}}},
+            "check": {"type": "array", "maxItems": 3, "description": "How the person can see or try the result themselves: a URL "
+                                                                    "to open, or what to tap.",
+                      "items": {"type": "object", "required": ["label"], "additionalProperties": False,
+                                "properties": {"label": {"type": "string"}, "url": {"type": "string"}, "how": {"type": "string"}}}},
+            "notes": {"type": "array", "maxItems": 4, "items": {"type": "string"},
+                      "description": "Risks, caveats and what isn't done. Never git's state (merged, pushed, committed): the "
+                                     "app shows that itself."},
         },
     },
 }
 BRIEF_ASK = (
-    "amarchy: now update this chat's brief by calling update_brief once (ToolSearch can load it). The person reads the "
-    "brief instead of your messages: they rarely read those. It is one living document for the whole chat: keep what's "
-    "still true from the brief you wrote last, change what changed, drop what's finished or no longer matters. Write for "
-    "someone glancing at a phone who may not remember this conversation: name things, use plain words, a few words per "
-    "item, and copy exact values (URLs, commands, names, numbers) exactly. Never invent anything. What git says now, to "
-    "go by: {facts}. The app shows these facts itself (branch, commits, files, merged, pushed, uncommitted), so don't "
-    "put them in the brief's items. Your reply was already delivered: after update_brief, end your turn with no text."
+    "amarchy: now write this turn's reply by calling update_brief once (ToolSearch can load it). The person reads it "
+    "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, your answer "
+    "as complete points (every finding, decision, name, number, URL and result that matters; the app folds it, so leave "
+    "nothing important out, just keep each point short), the plan if there is one, what needs them, how to check it, and "
+    "caveats. Write for someone glancing at a phone who may not remember this conversation: name things, plain words. "
+    "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "
+    "invent anything. What git says now: {facts}. Your reply was already delivered: after update_brief, end your turn "
+    "with no text."
 )
 
 
