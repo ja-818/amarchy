@@ -128,7 +128,8 @@
   border: 1px solid transparent;
   border-radius: var(--radius-item);
 }
-.fold-head { border-color: var(--border-faint); background: var(--control-bg); }
+.fold-head { border-color: var(--border-faint); background: var(--control-bg); min-height: 44px; }
+.fold-head, .step-head { min-height: 44px; }
 .fold-head:hover, .step-head:hover { background: var(--control-hover); }
 .fold-head:active, .step-head:active { background: var(--control-pressed); }
 .fold-head .what, .step-head .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -272,7 +273,7 @@
 .composer-row { display: flex; align-items: flex-end; gap: 2px; }
 .composer textarea {
   flex: 1; min-width: 0;
-  min-height: 40px; max-height: 40vh;
+  min-height: 44px; max-height: 40vh;
   resize: none; border: 0; background: none; outline: none;
   padding: 9px 6px;
   font-size: 16px;      /* less, and iOS zooms in on it */
@@ -280,7 +281,7 @@
 }
 .composer textarea::placeholder { color: var(--text-muted); }
 .cbtn {
-  flex: none; width: 40px; height: 40px;
+  flex: none; width: 44px; height: 44px;     /* a finger's target */
   display: grid; place-items: center;
   font-size: 19px;
   color: var(--text-muted);
@@ -356,7 +357,7 @@
 /* Several questions: a tab for each (ticked once answered), then Send. */
 .q-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: -2px 0 0; }
 .q-tabs::-webkit-scrollbar { display: none; }
-.q-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px;
+.q-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px 10px;
          font-size: var(--caption); font-weight: 700; color: var(--text-muted);
          border: 1px solid var(--border); border-radius: var(--radius-control); background: none; }
 .q-tab .ic { width: 14px; height: 14px; color: var(--success); }
@@ -457,7 +458,7 @@
 .pill {
   display: inline-flex; align-items: center; gap: 5px;
   flex: 0 1 auto; min-width: 0;
-  min-height: 30px; padding: 3px 8px 3px 9px;
+  min-height: 44px; padding: 3px 8px 3px 9px;
   color: var(--text-muted);
   font-size: var(--caption);
   border: 1px solid var(--border-faint);

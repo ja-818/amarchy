@@ -86,6 +86,10 @@ const TERM_KEYS = [
 // Claude's classic terminal also takes these: its menus are picked with them.
 const CLASSIC_KEYS = [["⇧Tab", "\x1b[Z"], ["⏎", "\r"], ["1", "1"], ["2", "2"], ["3", "3"]];
 const ARROWS = { up: "A", down: "B", right: "C", left: "D" };
+// What a key button says to a screen reader (its label is a symbol).
+const SPOKEN = { "⇧Tab": "Shift+Tab", "⏎": "Enter", "↑": "Up arrow", "↓": "Down arrow", "←": "Left arrow", "→": "Right arrow",
+                 "^C": "Control+C", "^D": "Control+D", "|": "Pipe", "~": "Tilde", "/": "Slash", "-": "Dash", "Ctrl": "Control",
+                 "A−": "Smaller text", "A+": "Bigger text" };
 
 class SessionTerminal {
   constructor(opts) {
@@ -122,8 +126,7 @@ class SessionTerminal {
   buildKeys() {
     this.ctrlBtn = null;
     const button = ([label, key]) => {
-      const b = h("button", { class: "control", type: "button", "aria-label": label === "^C" ? "Ctrl+C" : label === "^D" ? "Ctrl+D" : label },
-                  label);
+      const b = h("button", { class: "control", type: "button", "aria-label": SPOKEN[label] || label }, label);
       // A tap mustn't take the keyboard away from the terminal.
       b.addEventListener("pointerdown", (e) => e.preventDefault());
       b.addEventListener("click", () => this.key(key));
@@ -235,7 +238,7 @@ class SessionTerminal {
 
   setCtrl(on) {
     this.ctrl = on;
-    if (this.ctrlBtn) this.ctrlBtn.classList.toggle("on", on);
+    if (this.ctrlBtn) { this.ctrlBtn.classList.toggle("on", on); this.ctrlBtn.setAttribute("aria-pressed", String(on)); }
   }
 
   key(key) {

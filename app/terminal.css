@@ -47,4 +47,4 @@
 /* Chat | Terminal, under a session's header on the phone. */
 .session-tabs { padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }
 .session-tabs[hidden] { display: none; }
-.session-tabs .control { min-height: 34px; font-size: var(--caption); font-weight: 700; }
+.session-tabs .control { min-height: 44px; font-size: var(--caption); font-weight: 700; }

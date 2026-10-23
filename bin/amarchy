@@ -4742,6 +4742,34 @@ def qt_darker(c, factor):
     return (*(round(x * 255) for x in colorsys.hsv_to_rgb(h, s, v / factor)), c[3])
 
 
+def wcag_contrast(a, b):
+    """The WCAG contrast ratio of two colors (their red, green and blue)."""
+    def lum(c):
+        def channel(v):
+            v /= 255
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+        return 0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def readable(c, surfaces, fg, target=4.5):
+    """A color the app uses as text too, eased toward the text color in tenths
+    until it has the target contrast on every surface it sits on (the surface,
+    the raised and the sunken one, and the glass over a wallpaper that lightens
+    or darkens them); itself when it has it already."""
+    def ok(x):
+        return min(wcag_contrast(x, b) for b in surfaces) >= target
+    if ok(c):
+        return c
+    for tenth in range(1, 11):
+        t = tenth / 10
+        m = (*(round(c[i] * (1 - t) + fg[i] * t) for i in range(3)), c[3])
+        if ok(m):
+            return m
+    return fg
+
+
 def app_look_vars(colors, shell, rounding):
     """The app's base design tokens (app.css, docs/design-tokens.md) from a
     theme's colors.toml and shell.toml (as dicts): a terminal palette mapped
@@ -4776,7 +4804,9 @@ def app_look_vars(colors, shell, rounding):
 
     bg = color("menu", "background", base("background", "#1a1b26"))
     fg = color("menu", "text", base("foreground", "#a9b1d6"))
-    accent = base("accent", "#7aa2f7")
+    # The surfaces the text sits on: the surface, and the raised and the sunken one.
+    surfaces = [bg, base("lighter_background", "#24283b"), base("dark_background", "#13141c")]
+    accent = readable(base("accent", "#7aa2f7"), surfaces, fg)     # a title, a status word: text on the surface too
     border, angle = colors_of(section("popups").get("border", "hyprland.active-border"))
     border = border or [accent]
     # Hyprland's 0deg runs left to right, CSS's bottom to top.
@@ -4791,7 +4821,11 @@ def app_look_vars(colors, shell, rounding):
         "surface-raised": css_rgba(base("lighter_background", "#24283b")),
         "scrim": css_rgba(color("menu", "scrim", bg), number("menu", "scrim-alpha", 0.5)),
         "text": css_rgba(fg),
-        "text-muted": css_rgba(qt_darker(fg, 1.4)),
+        # The shell dims its text by Qt's darker(140); dimmed that far it can fall below 4.5:1 on a dark
+        # surface (WCAG AA for small text), so the dimming eases off until it has 5:1 (a margin for the
+        # glass over a wallpaper, which lightens what's behind the text a little).
+        "text-muted": css_rgba(next((c for c in (qt_darker(fg, f) for f in (1.4, 1.3, 1.2, 1.1, 1.0))
+                                     if min(wcag_contrast(c, b) for b in surfaces) >= 5.0), fg)),
         "text-selection": css_rgba(base("selection", "#292e42")),
         "accent": css_rgba(accent),
         "border-faint": css_rgba(fg, 0.12),
@@ -4813,7 +4847,7 @@ def app_look_vars(colors, shell, rounding):
     # Its hues, by name.
     for key, fallback in (("red", "#f7768e"), ("yellow", "#e0af68"), ("green", "#9ece6a"), ("blue", "#7aa2f7"),
                           ("magenta", "#ad8ee6"), ("cyan", "#449dab"), ("orange", "#eb927b")):
-        out[key] = css_rgba(base(key, fallback))
+        out[key] = css_rgba(readable(base(key, fallback), surfaces, fg))
     # The terminals' own colors (the 16 ANSI ones, the cursor, the
     # selection), for the app's real terminals: Claude's and the session's.
     for key, fallback in (("foreground", "#a9b1d6"), ("background", "#1a1b26"), ("cursor", "#c0caf5"),
