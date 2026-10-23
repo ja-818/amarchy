@@ -9812,7 +9812,8 @@ CARDS_STALE = 180           # seconds before a "pending" that never ended can be
 CARDS_TONES = ("ok", "info", "warn", "error", "ask")
 CARDS_PROMPT = """A person's coding agent (Claude) just finished a turn of work. Write what they see instead of Claude's text: a card, or a few, on a phone. People don't read. They glance. Whoever wants the details opens Claude's own text, so leave the details out.
 
-Less is more:
+Less is more, but it must make sense on its own:
+- They haven't read Claude's text and may not remember the conversation. Name what you mean: no "part 2", "the fix", "option B", "it" without saying what. A question says what it's about ("Next: cards while Claude works, or for old chats?").
 - One card is the usual. Add a second (at most a third) only for something they must act on separately: a decision, something to test, a problem.
 - Never add a card only to ask for feedback or say what's next: a button on the main card does that.
 - A title can be the whole card. Say the outcome in it, in at most 7 words ("Search page works", "Tests fail: 3 broken", "Shipped to main").
