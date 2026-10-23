@@ -97,6 +97,7 @@ terminal or Claude; no screen needed).
 | Ctrl+V of an image into Claude | the host's `wl-paste` asked the desktop's clipboard over ssh | picture button by the box, ••• → Paste an image into Claude…, or an image pasted into the box | `⌘V`/`Ctrl+V` or a drop on Claude | done: the host keeps it as the web clipboard, no desktop needed |
 | `wl-paste` in a session reads the clipboard | the desktop's, while connected | what you last pasted | what you last pasted (images and text) or copied in a terminal | done |
 | Dictation (Claude's `/voice`) | the desktop's microphone over PulseAudio | hold the mic | hold Space | done |
+| Dictation into the app's boxes, without Claude | none | the mic by the box: hold, or tap and tap again; written down on the host (Parakeet), or by the browser | the phone layout's boxes (the wide layout has none yet) | done: `amarchy dictation` |
 
 ## Look and the desktop itself
 

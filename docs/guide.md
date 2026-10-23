@@ -482,20 +482,10 @@ project** (one of your GitHub repos, any git URL, or an empty one, with a
 private GitHub repo if you like) and orders them; the project picker under
 the list has **New project…** too. In a
 session, its conversation, a box to send it messages, and Claude's questions
-and permission prompts as buttons. Hold the mic button by the box to
-dictate with Claude Code's own voice mode (it has to be on: `/voice`): the
-box says "Listening…" once the microphone hears (it takes a moment to come
-on; what's said before is lost), and what
-the phone hears goes to that session's Claude as if you held its key on the
-desktop, and the words come up in the phone's box as Claude writes them
-down, to edit and send when you let go (the microphone stays on half a second
-after you let go, and Claude then hears silence until it stops recording,
-which it needs to keep the last word). Meanwhile your desktop's view of that
-session says it's dictating on your phone, and is back on Claude once the
-words are on the phone. (On the host, Claude's `rec` is amarchy's, which
-`install.sh --host` links into `~/.local/bin`: the phone's microphone while
-you dictate, the real `rec` the rest of the time, so your desktop's mic works
-as before.) The phone asks whether Amarchy may use the microphone the first
+and permission prompts as buttons. The mic button by the box dictates
+(see [Dictation](#dictation)): hold it while you speak, or tap it and tap
+again when you're done, and the words come into the box as you talk, to edit
+and send. The phone asks whether Amarchy may use the microphone the first
 time you dictate after opening the app; after that the app keeps the
 microphone, turned off between dictations, so it doesn't ask again while
 it's open. What iOS kills meanwhile (a call, Siri, the app in the
@@ -503,9 +493,10 @@ background) is made anew when you next hold the mic, and a microphone that
 gives only silence once held is opened afresh on the spot; the host logs
 each dictation (`journalctl --user -u amarchy-app`). The bar under the list starts a new
 session: say what its Claude should do (tap the project on its left for
-another of the host's projects), or hold its mic and say it: the session
-starts while you speak, opens when you let go, and what you said goes to its
-Claude's dictation once Claude is up, the words coming into its box to send. When a session needs you (or is done, with `amarchy alerts
+another of the host's projects), typed or dictated with its mic. (Dictated
+with Claude's voice mode, the session starts while you speak, opens when you
+let go, and what you said goes to its Claude's dictation once Claude is up,
+the words coming into its box to send.) When a session needs you (or is done, with `amarchy alerts
 all`), the phone gets a notification, at the same moments as the desktop's
 chime (not for the one you're looking at on the phone); your assistant's
 always (see [Your assistant](#your-assistant)). Since it reads the sessions on the host, it
@@ -678,6 +669,54 @@ app's own server, taken only from the Tailscale login that owns the host
 connection to it on localhost comes from Tailscale (`tailscaled`) or from you,
 so another user on the host can't pass for Tailscale. What a terminal gives is
 what your desktop's windows give: Claude and a shell on the host, as you.
+
+## Dictation
+
+The mic button by a box in the app (a session's, the new-session bar's) writes
+what you say into that box: hold it while you speak, or tap it and tap again
+when you're done. The words come up as you talk, and the box is yours to edit
+and send. Three things can write them down; the app takes the first one there
+is, and **Settings → Dictation** on each phone or browser picks another:
+
+- **On the host** (`amarchy dictation setup`, or **Set up dictation on the
+  host** in Settings). A speech-to-text model on the host, NVIDIA's
+  [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+  through whisper.cpp's `libparakeet`, writes it down. It knows 25 European
+  languages, Spanish and English among them, and tells them apart by itself:
+  dictate in either, or start in one and go on in the other after a pause.
+  It costs nothing, and the audio never leaves the host. It needs whisper.cpp
+  1.9 or newer installed there (Arch: `sudo pacman -S whisper-cpp`) and the
+  model (670 MB, fetched into `~/.local/state/amarchy/dictation`). The model
+  is loaded (about 1 GB of memory) when a dictation starts, while you speak,
+  and let go of ten minutes after the last one. While you talk, each piece
+  between your pauses is written down for you to see; what's kept is written
+  again from longer stretches with their context, and once you let go the
+  text is there in about half a second.
+- **This browser's**: the browser's own speech recognition (Web Speech:
+  Apple's in Safari, Google's in Chrome), in one language you pick in
+  Settings, and sending what you say to Apple or Google. Not in the
+  home-screen app on an iPhone, where WebKit's often hears nothing.
+- **Claude's voice mode** (`/voice` on): what the phone hears goes to the
+  session's Claude Code as if you held its key, and what Claude writes down
+  comes into the box. Only for sessions whose Claude runs in its terminal.
+
+Claude's terminal keeps its own dictation either way: **Hold to talk** over
+it on the phone, Space held in it in a computer's browser. And the keyboard's
+own dictation (its mic key) works in every box too.
+
+How the host did on recordings with known text, on this project's 16-vCPU
+server (October 2026): 2.5% of the words wrong in Latin American Spanish
+(Google's FLEURS, 15 clips), 8.5% in English read by native Spanish speakers
+(the Speech Accent Archive, 13 speakers), writing about 10 seconds of speech
+per second. Whisper small did 3.4% and 9.3%, three times slower; Whisper
+large-v3-turbo 1.7% and 6.9%, but slower than real time on that CPU (a
+10-second dictation would take 15 to write down).
+
+`amarchy dictation log` lists the last dictations from every phone and
+browser (which way, the device, how long you spoke, how long it took after
+you let go, and what came of it or why nothing did), to see how each way does
+on your devices. `amarchy dictation transcribe <file>` writes down a
+recording the same way; `amarchy dictation remove` deletes the model.
 
 ## Your assistant
 

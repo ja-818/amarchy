@@ -24,6 +24,7 @@ The Ⓐ in your bar lights up when one of them needs you.
 - **Light on memory.** Idle sessions sleep and free their memory. Start typing and they wake up mid-conversation.
 - **Keeps going with the lid shut.** Put your sessions on a server. They keep working while your laptop sleeps.
 - **On your phone.** A home-screen web app to read, answer and start sessions, with push notifications.
+- **Talk instead of typing.** Hold the mic and speak Spanish, English or 23 more languages: a speech model on your own server writes it down, free, and the audio never leaves it.
 - **In a browser.** The same app on a computer's wide screen is amarchy as your desktop has it, with Claude's and the session's real terminals: no Omarchy needed there.
 
 It's all plain Omarchy: ordinary Hyprland windows, `Super+arrows`, the Omarchy menu, your theme.
