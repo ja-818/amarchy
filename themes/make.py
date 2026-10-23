@@ -5,9 +5,9 @@ names. Run it after changing a theme's colors or a style:
 
     python3 themes/make.py [theme...]
 
-They're drawn rather than copied from Omarchy, whose wallpapers come without
-a word on who made them or under what license (see CREDITS). The same theme
-always draws the same picture: the randomness is seeded with its name."""
+They stand in for Omarchy's own wallpapers until a host has downloaded them
+(see CREDITS and backgrounds.py), or if it can't. The same theme always draws
+the same picture: the randomness is seeded with its name."""
 import math
 import random
 import sys

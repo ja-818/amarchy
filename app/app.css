@@ -689,6 +689,23 @@ body.desk .sheet .head::before { display: none; }
 .theme-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .theme-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .theme-card.busy, .control.busy { opacity: 0.55; }
+/* The wallpapers to pick (the theme's, your own, none): smaller cards, the
+   picture over its name; one not on the host yet says so over the one
+   drawn for the theme. */
+.theme-grid.wall-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.wall-card .thumb { display: flex; align-items: flex-end; }
+.wall-card .thumb small {
+  margin: 4px; padding: 1px 6px;
+  border-radius: var(--radius-item);
+  background: var(--card-bg); color: var(--card-fg);
+  font-size: var(--caption); opacity: 0.9;
+}
+.wall-card .name { padding-top: 6px; font-weight: 400; }
+.wall-card.on .name { font-weight: 700; }
+/* How far the host is with Omarchy's wallpapers. */
+.wall-fetch p { margin-bottom: 6px; }
+.wall-bar { display: block; height: 4px; border-radius: 2px; background: var(--control-border); overflow: hidden; }
+.wall-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
 .menu { display: flex; flex-direction: column; gap: 2px; }
 .menu-item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

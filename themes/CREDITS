@@ -10,12 +10,23 @@ colors.toml
   authors.
 
 theme.toml
-  amarchy's: the theme's name, the style its wallpaper is drawn in, and what
-  Omarchy's hyprland.lua for the theme changes (its border colors, rounded
-  corners, how see-through its terminals are).
+  amarchy's: the theme's name, the style its stand-in wallpaper is drawn in,
+  and what Omarchy's hyprland.lua for the theme changes (its border colors,
+  rounded corners, how see-through its terminals are).
+
+Omarchy's wallpapers (backgrounds.json)
+  The wallpapers the app offers for each theme are Omarchy's own, the
+  pictures in themes/<name>/backgrounds/ of basecamp/omarchy. They come
+  without a word on who made them or under what license, so they are not in
+  this repository and amarchy doesn't redistribute them: each host downloads
+  them itself from Omarchy's repository on GitHub (amarchy theme
+  --refresh-wallpapers, which install.sh starts) into
+  ~/.local/state/amarchy/wallpapers, for its own use. backgrounds.json lists
+  only their names, sizes and git hashes, at the commit it names (written by
+  backgrounds.py), so every host gets exactly those pictures; the rights to
+  them stay with whoever made them.
 
 wallpaper.svg, wallpaper-wide.svg
   amarchy's own, drawn by make.py from the palette, for a phone and for a
-  computer's screen. Run it to draw them again. Omarchy's own wallpapers
-  aren't here: they come without a word on who made them or under what
-  license.
+  computer's screen: what a theme wears until Omarchy's wallpapers are
+  downloaded, or if they can't be. Run it to draw them again.

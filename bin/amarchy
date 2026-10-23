@@ -92,10 +92,17 @@ Theme (the app's look, on every phone and browser; Settings, Look in the app):
                                         amarchy migrate, keeps Claude Code's own colors)
   amarchy theme --font <name>           the font: JetBrains Mono (the default), Caskaydia Mono, Fira Code,
                                         System (the device's own), or one a theme of yours came with
-  amarchy theme --wallpaper theme|own|none|<picture>
-                                        the theme's wallpaper, your own (a picture you give it here or in
-                                        the app, cut for a phone and a computer), or none
-  amarchy theme --list [--json]         the themes, fonts and wallpapers, * on the ones worn
+  amarchy theme --wallpaper theme|<one of the theme's>|own|none|<picture>
+                                        the theme's wallpaper: Omarchy's own (theme: the one picked for it,
+                                        Omarchy's first until you pick; or one of its others, by name,
+                                        see --list), your own (a picture you give it here or in the
+                                        app, cut for a phone and a computer), or none
+  amarchy theme --list [--json]         the themes, fonts and wallpapers, * on the ones worn, and how far
+                                        Omarchy's wallpapers are fetched
+  amarchy theme --refresh-wallpapers [--in-background]
+                                        fetch Omarchy's wallpapers that aren't here yet from its repository on
+                                        GitHub (install.sh and the app start it; until one is here, its theme
+                                        wears a wallpaper drawn for it)
 
 Sound (the chime the app plays in a browser when a session needs you or is done):
   amarchy sound [--show]                print it
@@ -4115,8 +4122,8 @@ TERM_COLORS = ("#32344a", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#ad8ee6",
 
 # The look is picked in the app (Settings, Look) or with `amarchy theme` here,
 # and every phone and browser wears it: one of amarchy's themes (themes/:
-# Omarchy's palettes, with wallpapers drawn for them), a font (fonts/) and a
-# wallpaper (the theme's, your own picture, or none). Until one is picked,
+# Omarchy's palettes), a font (fonts/) and a wallpaper (the theme's: one of
+# Omarchy's own, see omarchy_backgrounds; your own picture; or none). Until one is picked,
 # Tokyo Night, Omarchy's own.
 #
 # Besides amarchy's, a theme of your own (custom_themes): a look kept whole on
@@ -4342,7 +4349,9 @@ def look_fonts(custom=None):
 
 def look_worn():
     """The look the app wears now: the theme picked (else Tokyo Night), its
-    font and its wallpaper. "sig" changes with any of it."""
+    font and its wallpaper ("wallpapers": the theme's, your own or none;
+    "background": which of Omarchy's is the theme's). "sig" changes with any
+    of it, a wallpaper of Omarchy's coming in too."""
     choice, themes, custom = look_choice(), look_themes(), custom_themes()
     key = choice.get("theme") if choice.get("theme") in themes or choice.get("theme") in custom else LOOK_DEFAULT
     terminal = dict(LOOK_TERMINAL)
@@ -4352,9 +4361,11 @@ def look_worn():
         look = {"name": c["name"], "mode": c["mode"], "vars": c["vars"], "claude": None}
         terminal.update(c["terminal"])
         wallpaper = {w: custom_url(key, f) for w, f in c["wallpaper"].items()} if c["wallpaper"] else None
+        background = None
     elif not t:     # no themes/ (an amarchy from before them): app.css's own Tokyo Night
         return {"theme": key, "name": "Tokyo Night", "mode": "dark", "vars": {}, "claude": None, "terminal": terminal,
-                "font": {"key": "system", "name": "System", "nerd": False, "files": {}}, "wallpaper": None, "sig": ""}
+                "font": {"key": "system", "name": "System", "nerd": False, "files": {}}, "wallpaper": None,
+                "wallpapers": "none", "background": None, "sig": ""}
     else:
         rounding = t["meta"].get("rounding", 0)
         variables, mode = app_look_vars(t["colors"], look_shell(t["colors"], t["meta"]),
@@ -4363,8 +4374,11 @@ def look_worn():
         alpha = t["meta"].get("terminal-alpha")
         if isinstance(alpha, (int, float)):
             terminal["alpha"] = min(max(float(alpha), 0.0), 1.0)
-        wallpaper = {w: f"/themes/{key}/{f}?v={file_sig(THEMES / key / f)}"
-                     for w, f in (("phone", "wallpaper.svg"), ("wide", "wallpaper-wide.svg"))}
+        # Omarchy's wallpaper picked for it, once it's here; till then the one drawn for it.
+        bg = wall_pick(key, choice)
+        background = bg["key"] if bg else None
+        wallpaper = wall_look(key, bg) or {w: f"/themes/{key}/{f}?v={file_sig(THEMES / key / f)}"
+                                           for w, f in (("phone", "wallpaper.svg"), ("wide", "wallpaper-wide.svg"))}
     fonts = look_fonts(custom)
     font_key = choice.get("font") if choice.get("font") in fonts else LOOK_FONT
     font = {"key": font_key, **fonts[font_key]}
@@ -4373,7 +4387,7 @@ def look_worn():
         wallpaper = look_own()
     elif walls == "none":
         wallpaper = None
-    look.update(theme=key, terminal=terminal, font=font, wallpaper=wallpaper, wallpapers=walls)
+    look.update(theme=key, terminal=terminal, font=font, wallpaper=wallpaper, wallpapers=walls, background=background)
     look["sig"] = hashlib.sha1(json.dumps(look, sort_keys=True).encode()).hexdigest()
     return look
 
@@ -4386,7 +4400,9 @@ def look_stamp(look=None):
 
 
 def app_theme_css():
-    """/theme.css: the look over app.css's own (Tokyo Night), and the font."""
+    """/theme.css: the look over app.css's own (Tokyo Night), and the font.
+    Omarchy's wallpapers are fetched first thing, if they aren't here."""
+    walls_kick()
     look = look_worn()
     out = [f"/* {look['name']}, as picked in the app (amarchy theme). */", ":root {"]
     out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
@@ -4455,11 +4471,13 @@ def look_claude(colors):
     write_file(CLAUDE_THEME, json.dumps({"name": "Amarchy", "base": colors["mode"], "overrides": overrides}, indent=2))
 
 
-def look_set(theme=None, font=None, wallpaper=None, own=None, claude=True):
+def look_set(theme=None, font=None, wallpaper=None, own=None, background=None, claude=True):
     """Pick a theme (a key of look_themes() or custom_themes()), a font (a
     key of look_fonts()) and/or a wallpaper ("theme", "own" or "none"); own:
-    your own picture, (phone, wide) as image bytes. Claude Code takes a new
-    theme too, unless not claude. The look worn after, or an error."""
+    your own picture, (phone, wide) as image bytes; background: which of
+    Omarchy's wallpapers is the theme's (its key, for the theme picked here
+    or else the one worn), which wears it. Claude Code takes a new theme
+    too, unless not claude. The look worn after, or an error."""
     if theme is not None and theme not in look_themes() and theme not in custom_themes():
         return f"no theme called {theme!r} (see amarchy theme --list)"
     fonts = look_fonts()
@@ -4468,6 +4486,16 @@ def look_set(theme=None, font=None, wallpaper=None, own=None, claude=True):
     if wallpaper is not None and wallpaper not in LOOK_WALLPAPERS:
         return "the wallpaper is theme, own or none"
     choice = look_choice()
+    if background is not None:
+        target = theme if theme is not None else look_worn()["theme"]
+        bgs = omarchy_backgrounds().get(target) or []
+        if not any(b["key"] == background for b in bgs):
+            name = (look_themes().get(target) or custom_themes().get(target) or {}).get("name", target)
+            return (f"{name} has no wallpaper called {background!r} (amarchy theme --list)" if bgs else
+                    f"{name} has no wallpapers of Omarchy's")
+        picked = choice.get("backgrounds") if isinstance(choice.get("backgrounds"), dict) else {}
+        choice["backgrounds"] = {**picked, target: background}
+        wallpaper = wallpaper or "theme"
     if own:
         names = {}
         for which, raw in zip(("phone", "wide"), own):
@@ -4497,56 +4525,402 @@ def look_set(theme=None, font=None, wallpaper=None, own=None, claude=True):
     return look
 
 
-def look_info():
-    """Everything the app's picker shows: the themes (with their colors and
-    wallpaper), the fonts, the wallpapers, and what's worn."""
+def look_info(kick=True):
+    """Everything the app's picker shows: the themes (with their colors,
+    their wallpaper and Omarchy's to pick from), the fonts, the wallpapers,
+    how far Omarchy's are here ("fetch"), and what's worn. Starts fetching
+    those that aren't here yet (unless not kick)."""
+    if kick:
+        walls_kick()
     look, custom = look_worn(), custom_themes()
+    fetch = walls_status()
+    choice = look_choice()
+
+    def wall_state(theme, bg):
+        if wall_here(theme, bg):
+            return "here"
+        name = f"{theme}/{bg['file']}"
+        return ("fetching" if fetch["current"] == name else "waiting" if fetch["running"] else
+                "failed" if name in fetch["errors"] or fetch["error"] else "missing")
+
+    def drawn(k):
+        return f"/themes/{k}/wallpaper-wide.svg?v={file_sig(THEMES / k / 'wallpaper-wide.svg')}"
+
+    def thumb(k, bg):
+        f = wall_cut(k, bg, "thumb") or (WALLS / k / bg["file"] if wall_here(k, bg) else None)
+        return wall_url(k, bg, f) if f else ""
     # Your own first, then amarchy's.
     themes = [{"key": k, "name": t["name"], "mode": t["mode"], "custom": True,
                "colors": [t["vars"].get(c, "") for c in ("surface", "text", "accent", "red", "yellow", "green", "blue",
                                                          "magenta")],
                "wallpaper": custom_url(k, t["wallpaper"]["wide"]) if t["wallpaper"] else ""}
               for k, t in custom.items()]
-    themes += [{"key": k, "name": t["name"], "mode": t["mode"],
-                "colors": [t["colors"].get(c, "") for c in ("background", "foreground", "accent", "red", "yellow",
-                                                            "green", "blue", "magenta")],
-                "wallpaper": f"/themes/{k}/wallpaper-wide.svg?v={file_sig(THEMES / k / 'wallpaper-wide.svg')}"}
-               for k, t in look_themes().items()]
+    for k, t in look_themes().items():
+        bgs = omarchy_backgrounds().get(k) or []
+        picked = wall_pick(k, choice)
+        themes.append({"key": k, "name": t["name"], "mode": t["mode"],
+                       "colors": [t["colors"].get(c, "") for c in ("background", "foreground", "accent", "red", "yellow",
+                                                                   "green", "blue", "magenta")],
+                       "wallpaper": (thumb(k, picked) if picked else "") or drawn(k), "drawn": drawn(k),
+                       "background": picked["key"] if picked else None,
+                       "backgrounds": [{"key": b["key"], "name": b["name"], "thumb": thumb(k, b),
+                                        "state": wall_state(k, b)} for b in bgs]})
     own = look_own()
+    repo, commit = walls_source()
     return {"theme": look["theme"], "font": look["font"]["key"], "wallpaper": look["wallpapers"], "look": look_stamp(look),
             "nerd": look["font"]["nerd"], "themes": themes,
             "fonts": [{"key": k, "name": f["name"], "nerd": f["nerd"]} for k, f in look_fonts(custom).items()],
-            "own": own["phone"] if own else ""}
+            "own": own["phone"] if own else "",
+            "fetch": {**{k: fetch[k] for k in ("total", "have", "size", "got", "running", "error")},
+                      "failed": len(fetch["errors"]), "why": next(iter(fetch["errors"].values()), None),
+                      "source": f"{repo}@{commit[:7]}" if repo else ""}}
 
 
-def wallpaper_cut(path, wide=False):
+def wallpaper_cut(path, wide=False, thumb=False, webp=False):
     """A picture as the app shows it: cut to a phone's screen (its middle),
-    or the whole of it at most a laptop's screen in size (wide), as a JPEG.
-    With ImageMagick, else ffmpeg; without either, the picture as it is if
-    it isn't too big. None if it can't be read."""
-    cut = ["-resize", LOOK_WIDE + ">"] if wide else \
-        ["-resize", LOOK_PHONE + "^", "-gravity", "center", "-extent", LOOK_PHONE]
-    pw, ph = LOOK_PHONE.split("x")
+    or the whole of it at most a laptop's screen in size (wide), or a little
+    one for the picker (thumb, its middle at WALL_THUMB), as a JPEG (or a
+    WebP, smaller, if webp and it can). With ImageMagick, else ffmpeg;
+    without either, the picture as it is if it isn't too big. None if it
+    can't be read."""
+    box = WALL_THUMB if thumb else LOOK_PHONE
+    cut = ["-resize", LOOK_WIDE + ">"] if wide else ["-resize", box + "^", "-gravity", "center", "-extent", box]
+    pw, ph = box.split("x")
     dw, dh = LOOK_WIDE.split("x")
     scale = (f"scale='min({dw},iw)':'min({dh},ih)':force_original_aspect_ratio=decrease" if wide else
              f"scale={pw}:{ph}:force_original_aspect_ratio=increase,crop={pw}:{ph}")
     with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "wallpaper.jpg"
-        if shutil.which("magick"):
-            r = sh("magick", f"{path}[0]", *cut, "-quality", "82", "-strip", str(out))
-        elif shutil.which("ffmpeg"):
-            r = sh("ffmpeg", "-loglevel", "error", "-y", "-i", str(path), "-frames:v", "1", "-vf", scale,
-                   "-q:v", "3", str(out))
-        else:
+        for kind in ("webp", "jpg") if webp else ("jpg",):
+            out = Path(tmp) / f"wallpaper.{kind}"
+            if shutil.which("magick"):
+                r = sh("magick", f"{path}[0]", *cut, "-quality", "78" if kind == "webp" else "82", "-strip", str(out))
+            elif shutil.which("ffmpeg"):
+                r = sh("ffmpeg", "-loglevel", "error", "-y", "-i", str(path), "-frames:v", "1", "-vf", scale,
+                       *(("-c:v", "libwebp", "-quality", "78") if kind == "webp" else ("-q:v", "3")), str(out))
+            else:
+                try:
+                    raw = Path(path).read_bytes() if os.path.getsize(path) <= APP_WALLPAPER_MAX else b""
+                except OSError:
+                    raw = b""
+                return raw if image_kind(raw) else None
             try:
-                raw = Path(path).read_bytes() if os.path.getsize(path) <= APP_WALLPAPER_MAX else b""
+                raw = out.read_bytes() if r.returncode == 0 else b""
             except OSError:
                 raw = b""
-            return raw if image_kind(raw) else None
-        try:
-            return out.read_bytes() if r.returncode == 0 else None
-        except OSError:
-            return None
+            if image_kind(raw):
+                return raw
+        return None
+
+
+# Omarchy's own wallpapers for each theme, as themes/backgrounds.json lists
+# them (themes/<name>/backgrounds/ in basecamp/omarchy, at one commit). They
+# come without a word on who made them or under what license, so amarchy
+# doesn't carry them: each host fetches them from Omarchy's repository itself
+# (amarchy theme --refresh-wallpapers; install.sh starts it, and so does the
+# app when one is missing), checks each against its git hash and keeps it in
+# WALLS, with a phone's cut of it and a thumbnail for the picker. The wide
+# layout wears the original. Until one is here, or if it can't be fetched,
+# its theme wears the wallpaper drawn for it (themes/<name>/wallpaper*.svg).
+
+BACKGROUNDS = THEMES / "backgrounds.json"
+WALLS = STATE / "wallpapers"                # <theme>/<file> and its cuts, status.json (the last fetch)
+WALLS_STATUS = WALLS / "status.json"
+WALLS_LOCK = WALLS / "fetch.lock"           # held by the fetch under way; gone (--uninstall), it stops
+WALLS_UNIT = "amarchy-wallpapers"           # the fetch, run in the background (systemctl --user status ...)
+WALL_THUMB = "480x300"      # the picker's thumbnails, in pixels (16:10)
+WALL_CUTS = "1"             # how they're cut: another number, and they're cut again
+WALLS_RETRY = 600           # seconds after a fetch that failed before the app tries again by itself
+WALL_FILE = re.compile(r"[\w-]+\.(?:jpe?g|png|webp)")
+
+_backgrounds = {}
+
+
+def wall_name(file):
+    """A wallpaper's name as people read it: 2-dusk-guardian.webp is "Dusk
+    guardian"."""
+    words = re.sub(r"^\d+-", "", Path(file).stem).replace("-", " ").strip() or Path(file).stem
+    return words[:1].upper() + words[1:]
+
+
+def omarchy_backgrounds():
+    """Omarchy's wallpapers by theme (backgrounds.json): [{"key" (its name
+    without the extension), "file", "name", "sha" (git's), "size"}], in
+    Omarchy's order (its first is the theme's own). Read again when it
+    changes; {} without it. walls_source() says where they come from."""
+    try:
+        stamp = BACKGROUNDS.stat().st_mtime_ns
+    except OSError:
+        stamp = None
+    if "found" in _backgrounds and _backgrounds.get("stamp") == stamp:
+        return _backgrounds["found"]
+    found, source = {}, ("", "")
+    try:
+        raw = json.loads(BACKGROUNDS.read_text())
+        source = (str(raw["repo"]), str(raw["commit"]))
+        if re.fullmatch(r"[\w.-]+/[\w.-]+", source[0]) and re.fullmatch(r"[0-9a-f]{40}", source[1]):
+            for theme, files in raw["themes"].items():
+                walls = [{"key": Path(f["file"]).stem, "file": f["file"], "name": wall_name(f["file"]),
+                          "sha": f["sha"], "size": int(f["size"])}
+                         for f in files if isinstance(f, dict) and WALL_FILE.fullmatch(str(f.get("file")))
+                         and re.fullmatch(r"[0-9a-f]{40}", str(f.get("sha")))]
+                if re.fullmatch(r"[\w-]+", theme) and walls:
+                    found[theme] = walls
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        found = {}
+    _backgrounds.update(stamp=stamp, found=found, source=source if found else ("", ""))
+    return found
+
+
+def walls_source():
+    """(repo, commit) Omarchy's wallpapers come from."""
+    omarchy_backgrounds()
+    return _backgrounds["source"]
+
+
+def wall_cut(theme, bg, which):
+    """A wallpaper's cut ("phone" or "thumb") if it's been made, else None."""
+    for kind in ("webp", "jpg"):
+        f = WALLS / theme / f"{bg['key']}.{which}{WALL_CUTS}.{kind}"
+        if f.is_file():
+            return f
+    return None
+
+
+def wall_here(theme, bg):
+    """Whether one of Omarchy's wallpapers is here, whole."""
+    try:
+        return (WALLS / theme / bg["file"]).stat().st_size == bg["size"]
+    except OSError:
+        return False
+
+
+def wall_url(theme, bg, f):
+    # Asked for with its hash: the same address is always the same picture.
+    return f"/wallpapers/{theme}/{f.name}?v={bg['sha'][:12]}"
+
+
+def wall_pick(theme, choice=None):
+    """The wallpaper of Omarchy's picked for a theme (Omarchy's first until
+    one is), or None for a theme without them."""
+    bgs = omarchy_backgrounds().get(theme) or []
+    picked = (choice if choice is not None else look_choice()).get("backgrounds")
+    want = picked.get(theme) if isinstance(picked, dict) else None
+    return next((b for b in bgs if b["key"] == want), bgs[0] if bgs else None)
+
+
+def wall_look(theme, bg):
+    """{"phone": url, "wide": url} of one of Omarchy's wallpapers, if it's
+    here: the phone's cut (the original until it's made) and the original."""
+    if not bg or not wall_here(theme, bg):
+        return None
+    original = WALLS / theme / bg["file"]
+    return {"phone": wall_url(theme, bg, wall_cut(theme, bg, "phone") or original),
+            "wide": wall_url(theme, bg, original)}
+
+
+def wall_served(theme, name):
+    """The file of WALLS that /wallpapers/<theme>/<name> is, if it's one of
+    Omarchy's wallpapers or their cuts: else None."""
+    for bg in omarchy_backgrounds().get(theme) or ():
+        if name == bg["file"] or re.fullmatch(re.escape(bg["key"]) + rf"\.(phone|thumb){WALL_CUTS}\.(webp|jpg)", name):
+            f = WALLS / theme / name
+            return f if f.is_file() else None
+    return None
+
+
+def walls_status():
+    """How far Omarchy's wallpapers are here: {"total", "have" (how many),
+    "size", "got" (bytes), "running" (a fetch under way), "current" (what
+    it's fetching: "<theme>/<file>"), "errors" ({"<theme>/<file>": why}, of
+    the last fetch, for those still not here), "error" (why it stopped, if
+    it did), "at" (when it last did anything)}."""
+    bgs = omarchy_backgrounds()
+    total = have = size = got = 0
+    for theme, walls in bgs.items():
+        for bg in walls:
+            total, size = total + 1, size + bg["size"]
+            if wall_here(theme, bg):
+                have, got = have + 1, got + bg["size"]
+    try:
+        st = json.loads(WALLS_STATUS.read_text())
+        st = st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        st = {}
+    running = bool(st.get("running")) and pid_alive(st.get("pid"))
+    # Started from here a moment ago, and not under way yet: it will be.
+    starting = time.time() - _walls_kicked["at"] < 30 and (st.get("at") or 0) < _walls_kicked["at"]
+    if starting:
+        st = {"running": True}
+    running = running or starting
+    errors = st.get("errors") if isinstance(st.get("errors"), dict) else {}
+    errors = {k: str(v) for k, v in errors.items()
+              if isinstance(k, str) and k.partition("/")[0] in bgs and not (WALLS / k).is_file()}
+    partial = st.get("partial") if running and isinstance(st.get("partial"), int) else 0
+    return {"total": total, "have": have, "size": size, "got": got + partial, "running": running,
+            "current": st.get("current") if running else None, "errors": errors,
+            "error": str(st.get("error") or "") or None, "at": st.get("at") or 0,
+            "stopped": bool(st.get("running")) and not running}
+
+
+_walls_kicked = {"at": 0.0}
+
+
+def walls_fetch(quiet=False):
+    """Fetch Omarchy's wallpapers that aren't here yet (amarchy theme
+    --refresh-wallpapers): each checked against its git hash, then cut for a
+    phone and the picker. Those no longer listed go. The theme worn (and
+    each theme's own) come first, so the app has them soonest. How far it
+    got goes to WALLS_STATUS for the app. None, or what went wrong."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    bgs = omarchy_backgrounds()
+    repo, commit = walls_source()
+    if not bgs:
+        return f"no list of Omarchy's wallpapers ({BACKGROUNDS} doesn't read)"
+    WALLS.mkdir(parents=True, exist_ok=True)
+    lock = open(WALLS_LOCK, "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return "a fetch is already under way (amarchy theme --list shows how far)"
+    cutter = bool(shutil.which("magick") or shutil.which("ffmpeg"))
+    tty = not quiet and sys.stderr.isatty()
+    st = {"pid": os.getpid(), "running": True, "commit": commit, "errors": {}, "at": time.time()}
+
+    def note(**kw):
+        st.update(kw, at=time.time())
+        if WALLS_LOCK.exists():
+            write_file(WALLS_STATUS, json.dumps(st) + "\n")
+
+    def show(final=False):
+        if tty:
+            s = walls_status()
+            print(f"\r  {s['have']} of {s['total']} of Omarchy's wallpapers ({s['got'] // 1_000_000} of "
+                  f"{s['size'] // 1_000_000} MB)", end="\n" if final else "", file=sys.stderr, flush=True)
+
+    def cut(theme, bg):
+        for which in ("phone", "thumb"):
+            if cutter and not wall_cut(theme, bg, which):
+                raw = wallpaper_cut(WALLS / theme / bg["file"], thumb=which == "thumb", webp=True)
+                if raw:
+                    write_file(WALLS / theme / f"{bg['key']}.{which}{WALL_CUTS}.{image_kind(raw)}", raw)
+
+    try:
+        note()
+        # What's no longer listed (a newer Omarchy, a theme gone, an older cut) goes.
+        for d in WALLS.iterdir():
+            if not d.is_dir():
+                continue
+            if d.name not in bgs:
+                shutil.rmtree(d, ignore_errors=True)
+                continue
+            # One that isn't whole (not the size listed) is fetched again, and cut again.
+            whole = [b for b in bgs[d.name] if wall_here(d.name, b)]
+            keep = {b["file"] for b in whole}
+            keep |= {f"{b['key']}.{w}{WALL_CUTS}.{k}" for b in whole for w in ("phone", "thumb") for k in ("webp", "jpg")}
+            for f in d.iterdir():
+                if f.name not in keep:
+                    f.unlink(missing_ok=True)
+        # Those here already but not cut yet (no ffmpeg then, say).
+        for theme, walls in bgs.items():
+            for bg in walls:
+                if wall_here(theme, bg):
+                    cut(theme, bg)
+        unreachable = 0
+        while WALLS_LOCK.exists():
+            choice = look_choice()
+            worn = choice.get("theme") if choice.get("theme") in bgs else LOOK_DEFAULT
+            todo = [(t, b) for t, walls in bgs.items() for b in walls
+                    if not wall_here(t, b) and f"{t}/{b['file']}" not in st["errors"]]
+            if not todo:
+                break
+            firsts = {(t, (wall_pick(t, choice) or {}).get("key")) for t in bgs}
+            theme, bg = min(todo, key=lambda tb: (tb[0] != worn or tb[1]["key"] != (wall_pick(worn, choice) or {}).get("key"),
+                                                  (tb[0], tb[1]["key"]) not in firsts, tb[0] != worn))
+            name = f"{theme}/{bg['file']}"
+            note(current=name, partial=0)
+            show()
+            url = (f"https://raw.githubusercontent.com/{repo}/{commit}/themes/{urllib.parse.quote(theme)}/backgrounds/"
+                   f"{urllib.parse.quote(bg['file'])}")
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "amarchy"})
+                data = bytearray()
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    last = time.time()
+                    while chunk := r.read(1 << 18):
+                        data += chunk
+                        if len(data) > bg["size"]:
+                            break
+                        if time.time() - last > 0.5:
+                            last = time.time()
+                            note(partial=len(data))
+                            show()
+                git = hashlib.sha1(b"blob %d\0" % len(data) + bytes(data)).hexdigest()
+                if len(data) != bg["size"] or git != bg["sha"]:
+                    raise ValueError(f"what came isn't the picture listed ({len(data)} bytes, git hash {git[:7]})")
+                if not image_kind(bytes(data)):
+                    raise ValueError("what came isn't a JPEG, PNG or WebP")
+            except urllib.error.HTTPError as e:
+                st["errors"][name] = f"GitHub said {e.code} {e.reason}"
+            except (urllib.error.URLError, OSError) as e:
+                why = str(getattr(e, "reason", None) or e)
+                st["errors"][name] = f"couldn't reach GitHub: {why}"
+                unreachable += 1
+                if unreachable >= 3:        # offline: the rest would fail the same way
+                    note(error=f"couldn't reach GitHub ({why})")
+                    break
+            except ValueError as e:
+                st["errors"][name] = str(e)
+            else:
+                unreachable = 0
+                try:
+                    write_file(WALLS / theme / bg["file"], bytes(data))
+                except OSError as e:        # the disk, not GitHub: the rest won't fit either
+                    note(error=f"couldn't keep it here ({e.strerror or e})")
+                    break
+                note(partial=0)
+                cut(theme, bg)
+    finally:
+        note(running=False, current=None, partial=0)
+        show(final=True)
+        lock.close()
+    s = walls_status()
+    if s["error"]:
+        return f"{s['error']}: {s['have']} of {s['total']} of Omarchy's wallpapers here"
+    if s["errors"]:
+        name, why = next(iter(s["errors"].items()))
+        more = len(s["errors"]) - 1
+        return f"{name} wasn't fetched ({why}){f', nor {more} more' if more else ''}"
+    return None
+
+
+def walls_kick(force=False):
+    """Start fetching Omarchy's wallpapers in the background, if some aren't
+    here and none is under way: by itself (not force) only when the last
+    fetch didn't fail a moment ago (WALLS_RETRY). True if it started one."""
+    if not omarchy_backgrounds():
+        return False
+    s = walls_status()
+    failed = (s["errors"] or s["error"]) and not s["stopped"]
+    if s["running"] or (not force and (s["have"] == s["total"] or time.time() - _walls_kicked["at"] < 30
+                                       or failed and time.time() - s["at"] < WALLS_RETRY)):
+        return False
+    _walls_kicked["at"] = time.time()
+    argv = [sys.executable, SELF, "theme", "--refresh-wallpapers", "--quiet"]
+    # Its own unit, so restarting the app (which started it) doesn't stop it.
+    if shutil.which("systemd-run"):
+        env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
+        if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={WALLS_UNIT}-{int(time.time())}",
+              *env, *argv).returncode == 0:
+            return True
+    try:
+        detach(argv)
+    except OSError:
+        _walls_kicked["at"] = 0.0
+        return False
+    return True
 
 
 def look_find(name, table):
@@ -4558,10 +4932,32 @@ def look_find(name, table):
     return None
 
 
+def wall_find(theme, v):
+    """One of Omarchy's wallpapers of a theme, by its key ("2-waves") or
+    its name ("waves"), or None."""
+    bgs = omarchy_backgrounds().get(theme) or []
+    key = look_find(v, {b["key"]: b["name"] for b in bgs})
+    return next((b for b in bgs if b["key"] == key), None)
+
+
+def walls_said(fetch):
+    """How far Omarchy's wallpapers are here, in a line."""
+    if not fetch["total"]:
+        return "Omarchy's wallpapers: no list of them here (themes/backgrounds.json)"
+    head = f"Omarchy's wallpapers: {fetch['have']} of {fetch['total']} here"
+    mb = f"{fetch['got'] // 1_000_000} of {fetch['size'] // 1_000_000} MB"
+    if fetch["running"]:
+        return f"{head} ({mb}), fetching the rest"
+    if fetch["have"] == fetch["total"]:
+        return head
+    why = fetch["error"] or next(iter(fetch["errors"].values()), None) or "not fetched yet"
+    return f"{head} ({mb}): {why}. amarchy theme --refresh-wallpapers fetches them"
+
+
 def cmd_theme(args):
     """`amarchy theme`: the app's theme, font and wallpaper."""
-    theme = font = wallpaper = None
-    own, listing, as_json = None, False, False
+    theme = font = wallpaper = wall_arg = None
+    own, listing, as_json, refresh, later, quiet = None, False, False, False, False, False
     it = iter(args)
     for a in it:
         if a in ("--font", "--wallpaper"):
@@ -4576,15 +4972,17 @@ def cmd_theme(args):
             elif v in LOOK_WALLPAPERS:
                 wallpaper = v
             else:
-                if not Path(v).is_file():
-                    return fail(f"theme --wallpaper: theme, own, none or a picture ({v} isn't a file)")
-                own = (wallpaper_cut(v), wallpaper_cut(v, wide=True))
-                if not all(own):
-                    return fail(f"couldn't read {v} as a picture")
+                wall_arg = v        # one of the theme's (once it's known which theme), or a picture
         elif a == "--list":
             listing = True
         elif a == "--json":
             as_json = True
+        elif a == "--refresh-wallpapers":
+            refresh = True
+        elif a == "--in-background":
+            later = True
+        elif a == "--quiet":
+            quiet = True
         elif a == "--show":
             pass
         elif a.startswith("-"):
@@ -4594,24 +4992,63 @@ def cmd_theme(args):
                                   **{k: t["name"] for k, t in look_themes().items()}})
             if not theme:
                 return fail(f"no theme called {a!r} (see amarchy theme --list)")
+    if refresh:
+        if later:
+            started = walls_kick(force=True)
+            if not quiet:
+                print(walls_said(walls_status()) if not started else
+                      "Fetching Omarchy's wallpapers in the background (amarchy theme --list shows how far).")
+            return 0
+        why = walls_fetch(quiet=quiet)
+        if why:
+            return fail(why)
+        if not quiet:
+            print(walls_said(walls_status()))
+        return 0
+    background = None
+    if wall_arg is not None:
+        target = theme if theme is not None else look_worn()["theme"]
+        bg = wall_find(target, wall_arg)
+        if bg:
+            background = bg["key"]
+        elif Path(wall_arg).expanduser().is_file():
+            own = (wallpaper_cut(Path(wall_arg).expanduser()), wallpaper_cut(Path(wall_arg).expanduser(), wide=True))
+            if not all(own):
+                return fail(f"couldn't read {wall_arg} as a picture")
+        else:
+            names = ", ".join(b["key"] for b in omarchy_backgrounds().get(target) or [])
+            return fail(f"theme --wallpaper: theme, own, none, {f'one of {names}, ' if names else ''}"
+                        f"or a picture ({wall_arg} is none of them)")
     if listing:
-        info = look_info()
+        info = look_info(kick=False)
         if as_json:
-            print(json.dumps({k: info[k] for k in ("theme", "font", "wallpaper", "themes", "fonts")}, indent=1))
+            print(json.dumps({k: info[k] for k in ("theme", "font", "wallpaper", "themes", "fonts", "fetch")}, indent=1))
             return 0
         for t in info["themes"]:
             mark = "*" if t["key"] == info["theme"] else " "
+            n = len(t.get("backgrounds") or [])
             print(f"{mark} {t['key']:<18} {t['name']}{' (light)' if t['mode'] == 'light' else ''}"
-                  f"{' (your own)' if t.get('custom') else ''}")
+                  f"{' (your own)' if t.get('custom') else ''}{f' · {n} wallpaper' + 's' * (n != 1) if n else ''}")
         print("fonts: " + ", ".join(f"{f['key']}{'*' if f['key'] == info['font'] else ''}" for f in info["fonts"]))
-        print("wallpapers: " + ", ".join(f"{k}{'*' if k == info['wallpaper'] else ''}" for k in LOOK_WALLPAPERS))
+        worn = next((t for t in info["themes"] if t["key"] == info["theme"]), {})
+        walls = [f"{b['key']}{'*' if info['wallpaper'] == 'theme' and b['key'] == worn.get('background') else ''}"
+                 f"{'' if b['state'] == 'here' else ' (not here yet)'}" for b in worn.get("backgrounds") or []]
+        walls = walls or [f"theme{'*' if info['wallpaper'] == 'theme' else ''}"]
+        print(f"wallpapers of {worn.get('name', info['theme'])}: " + ", ".join(walls)
+              + "".join(f", {k}{'*' if k == info['wallpaper'] else ''}" for k in ("own", "none")))
+        print(walls_said(walls_status()))
         return 0
-    if any(v is not None for v in (theme, font, wallpaper, own)):
-        look = look_set(theme, font, wallpaper, own)
+    if any(v is not None for v in (theme, font, wallpaper, own, background)):
+        look = look_set(theme, font, wallpaper, own, background)
         if isinstance(look, str):
             return fail(look)
     look = look_worn()
-    walls = {"theme": "the theme's wallpaper", "own": "your own wallpaper", "none": "no wallpaper"}[look["wallpapers"]]
+    if look["wallpapers"] == "theme" and look["background"]:
+        bg = next(b for b in omarchy_backgrounds()[look["theme"]] if b["key"] == look["background"])
+        walls = f"Omarchy's {bg['name']}" + ("" if wall_here(look["theme"], bg) else
+                                            " (a drawn one until it's fetched: amarchy theme --list)")
+    else:
+        walls = {"theme": "the theme's wallpaper", "own": "your own wallpaper", "none": "no wallpaper"}[look["wallpapers"]]
     print(f"{look['name']} · {look['font']['name']} · {walls}")
     return 0
 
@@ -6921,6 +7358,18 @@ def app_handler(st, users, address):
                 return
             if path == "/api/look":       # the themes, fonts and wallpapers to pick from
                 return self.send(200, look_info())
+            # Omarchy's wallpapers fetched here, and their cuts.
+            m = re.fullmatch(r"/wallpapers/([\w-]+)/([\w.-]+)", path)
+            if m:
+                f = wall_served(m.group(1), m.group(2))
+                if not f:
+                    return self.error(404, "not found")
+                data = f.read_bytes()
+                kind = APP_LOOK_TYPES.get(f.suffix[1:].lower(), "image/jpeg")
+                self.head(200, kind, [("Content-Length", str(len(data)))], cache="max-age=31536000, immutable")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             # The look's own files: a theme's wallpapers, a font, your own wallpaper.
             m = re.fullmatch(r"/themes/([\w-]+)/(wallpaper|wallpaper-wide)\.svg", path) or \
                 re.fullmatch(r"/fonts/([\w-]+)/(regular|bold)\.woff2", path) or \
@@ -7050,6 +7499,9 @@ def app_handler(st, users, address):
                     return self.error(400, "all, needs-you or assistant")
                 write_file(ALERTS_FILE, data["alerts"] + "\n")
                 return self.send(200, {})
+            if self.path == "/api/look/fetch":     # fetch Omarchy's wallpapers again (amarchy theme --refresh-wallpapers)
+                walls_kick(force=True)
+                return self.send(200, look_info(kick=False))
             if self.path in ("/api/look", "/api/look/wallpaper"):     # the theme, font, wallpaper (amarchy theme)
                 own = None
                 if self.path == "/api/look/wallpaper":
@@ -7059,9 +7511,9 @@ def app_handler(st, users, address):
                         own = None
                     if not own or not all(own):
                         return self.error(400, "no picture came (at most 8 MB)")
-                pick = {k: data.get(k) for k in ("theme", "font", "wallpaper")}
+                pick = {k: data.get(k) for k in ("theme", "font", "wallpaper", "background")}
                 if any(v is not None and not isinstance(v, str) for v in pick.values()):
-                    return self.error(400, "theme, font and wallpaper are names")
+                    return self.error(400, "theme, font, wallpaper and background are names")
                 look = look_set(**pick, own=own)
                 return self.error(400, look) if isinstance(look, str) else self.send(200, look_info())
             if self.path == "/api/projects/move":     # a project up, down... in your order (amarchy projects move)
@@ -8971,7 +9423,8 @@ OPTIONS = {
     "order": (set(), set(), set()),
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
-    "theme": ({"--show", "--list", "--json", "--font", "--wallpaper"}, {"--font", "--wallpaper"}, set()),
+    "theme": ({"--show", "--list", "--json", "--font", "--wallpaper", "--refresh-wallpapers", "--in-background",
+               "--quiet"}, {"--font", "--wallpaper"}, set()),
     "sound": ({"--show", "--list", "--json", "--assistant"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),

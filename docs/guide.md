@@ -529,12 +529,26 @@ yours wears it at once:
 - **Font**: JetBrains Mono (Omarchy's), Caskaydia Mono or Fira Code, the Nerd
   Font builds with the icons the session list uses, or System (the device's
   own monospace, SF Mono on Apple's).
-- **Wallpaper**: the theme's (drawn for it), your own (choose a picture: it's
-  cut to a phone's screen and a computer's, in the browser), or none. The app
-  is a window over it with the gaps around it and a see-through background.
+- **Wallpaper**: one of Omarchy's own for the theme, every one Omarchy ships
+  with it (a little picture of each to pick from; a theme remembers which),
+  your own (choose a picture: it's cut to a phone's screen and a computer's,
+  in the browser), or none. The app is a window over it with the gaps around
+  it and a see-through background.
+
+  Omarchy's wallpapers aren't amarchy's to hand out, so the host fetches them
+  from Omarchy's own repository on GitHub (`basecamp/omarchy`, at the commit
+  `themes/backgrounds.json` names, each checked against its hash) and keeps
+  them in `~/.local/state/amarchy/wallpapers`, with a phone's cut and a
+  thumbnail of each; a computer's browser gets the original. `install.sh`
+  starts that in the background (about 60 MB) and the app does when one is
+  missing; the picker shows how far it is, and what couldn't be fetched with
+  a button to try again (`amarchy theme --refresh-wallpapers` on the host).
+  Once they're there it needs no internet. Until one is, its theme wears a
+  wallpaper drawn for it.
 
 On the host, `amarchy theme` does the same (`amarchy theme nord --font "fira
-code" --wallpaper ~/beach.jpg`, `--list` for the names). The host keeps what's
+code" --wallpaper ~/beach.jpg`, `amarchy theme retro-82 --wallpaper "zen
+boat"`, `--list` for the names and how far Omarchy's wallpapers are). The host keeps what's
 picked in `~/.local/state/amarchy/app/theme`, the themes and fonts are
 amarchy's (`themes/`, `fonts/`, with their credits). Until something is
 picked, the app wears the look an Omarchy desktop last sent it (`amarchy
@@ -967,7 +981,8 @@ amarchy sleep --after [minutes|off]   how long an idle session waits off screen 
 amarchy wake [id]                     wake a session without typing in it
 amarchy menu                          everything you can do from here, with its key, in the Omarchy menu
 amarchy theme [name|system]           amarchy in its own Omarchy theme (Omarchy's theme switcher without a name; --show prints it)
-                                      on a host, the app's look: a theme, --font <name>, --wallpaper theme|own|none|<picture>, --list
+                                      on a host, the app's look: a theme, --font <name>, --wallpaper theme|<one of Omarchy's>|own|none|<picture>,
+                                      --list, --refresh-wallpapers (fetch Omarchy's wallpapers again)
 amarchy sound [name|off]              the notification chime (the picker without a name; --show, --list, --play [name], --add;
                                       --assistant [name|off] for your assistant's)
 amarchy keys [inside|anywhere <mod>]  the modifiers of amarchy's keys (the picker without one; --show, reset)

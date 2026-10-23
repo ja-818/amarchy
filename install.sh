@@ -15,6 +15,9 @@
 #   - restarts the app (amarchy app on serves it) on what's installed now
 #   - says whether dictation in the app is set up (amarchy dictation setup:
 #     a speech model, not fetched by itself: 670 MB)
+#   - fetches Omarchy's wallpapers for the themes from Omarchy's repository,
+#     in the background (amarchy theme --refresh-wallpapers: 60 MB, kept in
+#     ~/.local/state/amarchy/wallpapers)
 #   - takes away what an amarchy from before left on an Omarchy desktop (its
 #     Hyprland keys, shell plugin, menu entries and theme hook), and brings
 #     its state up to date (amarchy migrate)
@@ -23,7 +26,8 @@
 #                            desktops too, does the same)
 #   ./install.sh --uninstall remove all of the above, an Omarchy desktop's
 #                            amarchy from before too (sessions and worktrees
-#                            untouched)
+#                            untouched; the dictation model and Omarchy's
+#                            wallpapers, only downloads, go)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
 #                            asks in a terminal, and stops without one)
@@ -231,7 +235,11 @@ if ((uninstall)); then
   # The dictation model is only a download (670 MB): fetched again by
   # amarchy dictation setup.
   rm -rf "$state/dictation"
-  say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone (but for the dictation model)."
+  # Omarchy's wallpapers too, only downloads (amarchy theme
+  # --refresh-wallpapers): a fetch under way stops once they're gone.
+  systemctl --user stop 'amarchy-wallpapers-*.service' >/dev/null 2>&1 || true
+  rm -rf "$state/wallpapers"
+  say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone (but for the dictation model and Omarchy's wallpapers)."
   exit 0
 fi
 
@@ -357,6 +365,10 @@ for timer in amarchy-sleep amarchy-update; do
 done
 # The app, if it's on, runs from the checkout installed now.
 systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
+# Omarchy's wallpapers for the themes: fetched from Omarchy's repository on
+# GitHub, not carried by amarchy (themes/CREDITS), in the background. Those
+# already here stay; until one is, its theme wears a drawn one.
+"$bin_dir/amarchy" theme --refresh-wallpapers --in-background --quiet >/dev/null 2>&1 || true
 
 say "amarchy installed."
 if [[ -f $units/amarchy-app.service ]]; then
@@ -370,3 +382,4 @@ echo "  Idle sessions open nowhere sleep after $("$bin_dir/amarchy" sleep --afte
 # Dictation into the app's boxes, written down here (amarchy dictation): set
 # up, or how.
 echo "  $("$bin_dir/amarchy" dictation 2>&1 | head -1 || true)"
+echo "  $("$bin_dir/amarchy" theme --list 2>/dev/null | tail -1 || true)"

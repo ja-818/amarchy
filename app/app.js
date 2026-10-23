@@ -2177,15 +2177,34 @@ async function openSettings() {
 
 // ---- the look
 //
-// The theme (amarchy's: Omarchy's palettes, with wallpapers drawn for them),
-// the font and the wallpaper, picked here for every phone and browser of
-// yours: they're kept on the host (amarchy theme there does the same).
+// The theme (amarchy's: Omarchy's palettes), the font and the wallpaper
+// (Omarchy's own for the theme, which the host fetches from Omarchy's
+// repository: one drawn for it until then), picked here for every phone and
+// browser of yours: they're kept on the host (amarchy theme there does the
+// same).
 
 async function openLook() {
   const body = h("div", {}, h("p", {}, "…"));
   const back = sheet(sheetHead("Look", "On every phone and browser of yours"), body);
   back.classList.add("look");
-  let info;
+  let info, polling = null;
+  // While the host fetches Omarchy's wallpapers: how far, every moment, and
+  // each one as it comes (the one worn too).
+  const poll = () => {
+    clearTimeout(polling);
+    if (!info.fetch || !info.fetch.running) return;
+    polling = setTimeout(async () => {
+      if (!back.isConnected) return;
+      try {
+        const res = await fetch("/api/look");
+        if (!res.ok) throw new Error();
+        const was = info.look && info.look.look;
+        info = await res.json();
+        if (info.look && info.look.look !== was) wearIt();
+      } catch (err) { /* the next one, then */ }
+      if (back.isConnected) draw();
+    }, 1500);
+  };
   const pick = async (change, el) => {
     if (el) el.classList.add("busy");
     try {
@@ -2221,9 +2240,49 @@ async function openLook() {
     };
     const fonts = info.fonts.map((f) => h("button", { class: `control${f.key === info.font ? " on" : ""}`,
       onclick: (e) => pick({ font: f.key }, e.currentTarget) }, f.name));
-    const walls = [["theme", "Theme's"], ["own", "Your own"], ["none", "None"]].map(([v, label]) =>
-      h("button", { class: `control${info.wallpaper === v ? " on" : ""}`, disabled: v === "own" && !info.own,
-                    onclick: (e) => pick({ wallpaper: v }, e.currentTarget) }, label));
+    // The wallpapers: Omarchy's for the theme worn (a theme of yours, its
+    // own), your own picture, none. Each a little picture of itself.
+    const worn = info.themes.find((t) => t.key === info.theme) || { colors: [], backgrounds: [] };
+    const tile = (label, on, thumb, act, note) => {
+      const el = h("button", { class: `theme-card wall-card${on ? " on" : ""}${note ? " pending" : ""}`,
+                               "aria-pressed": on ? "true" : "false", "aria-label": note ? `${label}, ${note}` : label,
+                               onclick: (e) => { if (!on) act(e.currentTarget); } },
+        h("span", { class: "thumb" }, note ? h("small", {}, note) : null),
+        h("span", { class: "name" }, label));
+      el.style.setProperty("--card-bg", worn.colors[0] || "var(--surface)");
+      el.style.setProperty("--card-fg", worn.colors[1] || "var(--text)");
+      if (thumb) el.style.setProperty("--thumb", `url("${thumb}")`);
+      return el;
+    };
+    const notes = { fetching: "Downloading…", waiting: "Waiting to download", failed: "Not downloaded", missing: "Not downloaded" };
+    const walls = (worn.backgrounds || []).length
+      ? worn.backgrounds.map((b) => tile(b.name, info.wallpaper === "theme" && b.key === worn.background,
+          b.thumb || worn.drawn, (el) => pick({ background: b.key }, el), b.state === "here" ? "" : notes[b.state]))
+      : [tile("The theme's", info.wallpaper === "theme", worn.wallpaper, (el) => pick({ wallpaper: "theme" }, el))];
+    walls.push(tile("Your own", info.wallpaper === "own", info.own,
+                    (el) => (info.own ? pick({ wallpaper: "own" }, el) : file.click()), info.own ? "" : "Choose a picture"),
+               tile("None", info.wallpaper === "none", "", (el) => pick({ wallpaper: "none" }, el)));
+    // How far the host is with Omarchy's wallpapers, when they aren't all there.
+    const f = info.fetch || {};
+    const mb = (n) => Math.round((n || 0) / 1e6);
+    let fetching = null;
+    if (f.total && f.running) {
+      const bar = h("span", { class: "wall-bar" }, h("i", {}));
+      bar.firstChild.style.width = `${Math.round(100 * (f.got || 0) / (f.size || 1))}%`;
+      fetching = h("div", { class: "wall-fetch", role: "status" },
+        h("p", {}, `Downloading Omarchy's wallpapers to your host: ${f.have} of ${f.total} (${mb(f.got)} of ${mb(f.size)} MB). ` +
+                   "A wallpaper drawn for the theme stands in until each one is there."), bar);
+    } else if (f.total && f.have < f.total) {
+      const why = f.error || f.why;
+      fetching = h("div", { class: "wall-fetch" },
+        h("p", {}, `${f.total - f.have} of Omarchy's ${f.total} wallpapers aren't on your host` +
+                   (why ? ` (${why})` : "") + ": those show one drawn for the theme instead."),
+        h("button", { class: "control wide", onclick: async (e) => {
+          e.currentTarget.classList.add("busy");
+          try { info = await api("/api/look/fetch", {}); } catch (err) { toast(err.message); }
+          draw();
+        } }, "Download them again"));
+    }
     const file = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => {
       const f = file.files[0];
       if (!f) return;
@@ -2242,10 +2301,15 @@ async function openLook() {
       h("div", { class: "section" }, "Font"),
       h("div", { class: "seg wrap" }, ...fonts),
       h("div", { class: "section" }, "Wallpaper"),
-      h("div", { class: "seg" }, ...walls),
-      h("p", {}, info.own ? "Your own: the picture you chose." : "Choose a picture to have one of your own."),
+      wallGrid(walls),
+      fetching,
+      h("p", {}, (worn.backgrounds || []).length
+        ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
+          (info.own ? "the picture you chose." : "choose a picture.")
+        : info.own ? "Your own: the picture you chose." : "Choose a picture to have one of your own."),
       h("button", { class: "control wide", onclick: () => file.click() }, info.own ? "Choose another picture…" : "Choose a picture…"),
       file].filter(Boolean)));
+    poll();
   };
   try {
     const res = await fetch("/api/look");
@@ -2257,6 +2321,13 @@ async function openLook() {
   }
   draw();
   if (back.firstChild === document.activeElement) menuFocus(back.firstChild);
+}
+
+// The wallpapers in rows, smaller than the themes.
+function wallGrid(tiles) {
+  const grid = themeGrid(tiles);
+  grid.classList.add("wall-grid");
+  return grid;
 }
 
 // The themes in rows: the arrows go along them, and up and down a row.
