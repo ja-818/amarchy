@@ -10338,9 +10338,11 @@ def claude_has_brief():
 
 
 def brief_needed(path, tail=4_000_000):
-    """Whether a conversation's Claude has done something since it last wrote
-    the brief (or since your last message, if it hasn't): its turn ended
-    with words or steps the brief doesn't have yet."""
+    """Whether a conversation's Claude has done something its reply (the
+    brief) doesn't have yet: steps since it last called update_brief, or,
+    with no call since your last message, any words or steps. Words after a
+    call don't count: they're what Claude says again once it's written
+    (app_items marks them aside), and asking again would only repeat it."""
     try:
         with open(path, "rb") as fh:
             end = fh.seek(0, 2)
@@ -10348,6 +10350,7 @@ def brief_needed(path, tail=4_000_000):
             lines = fh.read().splitlines()
     except (OSError, TypeError):
         return False
+    steps = words = False       # since the newest record, going back
     for line in reversed(lines):
         if b'"type":"assistant"' not in line and b'"type":"user"' not in line:
             continue
@@ -10356,17 +10359,18 @@ def brief_needed(path, tail=4_000_000):
         except ValueError:
             continue
         if human_record(r):
-            return False        # your message, and nothing from Claude after it
+            return steps or words       # your message, and what Claude did after it
         if r.get("type") != "assistant" or r.get("isSidechain"):
             continue
-        for b in (r.get("message") or {}).get("content") or []:
+        for b in reversed((r.get("message") or {}).get("content") or []):
             if not isinstance(b, dict):
                 continue
             if b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
-                return False    # the brief is the last thing it did
-            if (b.get("type") == "text" and (b.get("text") or "").strip()) or \
-                    (b.get("type") == "tool_use" and b.get("name") != "ToolSearch"):
-                return True
+                return steps            # its reply is written: only steps after it need another
+            if b.get("type") == "tool_use" and b.get("name") != "ToolSearch":
+                steps = True
+            elif b.get("type") == "text" and (b.get("text") or "").strip():
+                words = True
     return False
 
 
