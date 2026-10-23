@@ -699,15 +699,46 @@ def t_hooks(t):
 
 @checked
 def t_subagents(t):
-    """Subagents: the Agent tool's own messages carry parent_tool_use_id; their result comes back as the
-    Agent's tool_result."""
+    """Subagents: the Agent tool's own messages carry parent_tool_use_id (the Agent call's id); the Agent call
+    gets its launch tool_result, and its report reaches Claude when the background task ends."""
     c = Claude(t, "a", "--permission-mode", "acceptEdits", auto_allow=True)
-    c.ask("Use the Agent tool (subagent_type general-purpose, model haiku) to answer: what is 17 + 25? "
-          "Then tell me its answer in one line.", timeout=180)
-    nested = c.all(lambda e: e.get("parent_tool_use_id"))
-    check(nested, "no message with parent_tool_use_id")
-    check("42" in c.text(), "no 42 in the answer")
-    t.note(f"{len(nested)} messages with parent_tool_use_id ({sorted({e['type'] for e in nested})})")
+
+    def agent_calls(since):
+        return [b for e in c.all(lambda e: e.get("type") == "assistant", since)
+                for b in e["message"].get("content") or [] if b.get("type") == "tool_use" and b.get("name") == "Agent"]
+
+    prompt = ("Delegate this: call the Agent tool (subagent_type general-purpose, model haiku) with the prompt "
+              "'What is 17 + 25? Reply with the number only.' Do not work it out yourself. Then tell me the "
+              "subagent's answer in one line.")
+    since = c.mark()
+    c.ask(prompt, timeout=180)
+    # The model sometimes answers 17 + 25 itself and never calls the tool. That is the model's choice, not the
+    # protocol's, so ask once more in the same conversation before failing; a missing parent_tool_use_id or
+    # tool_result is a real failure and is not retried.
+    if not agent_calls(since):
+        since = c.mark()
+        c.ask("You must delegate this one: call the Agent tool now, as I described. Do not answer it yourself.",
+              timeout=180)
+    calls = agent_calls(since)
+    check(calls, "Claude did not call the Agent tool (in two turns)")
+    call = calls[-1]
+    # Here the Agent call runs in the background: its tool_result is only the launch notice ("Async agent
+    # launched"), and the subagent's messages arrive while its task runs. Its end (task_notification) makes
+    # Claude take a turn on the report, so the turn's result is the one after that notification. ask()'s
+    # result can come earlier, while the subagent still runs: that was the flake (no parent_tool_use_id yet).
+    launch = [b for e in c.all(lambda e: e.get("type") == "user", since)
+              for b in e["message"].get("content") or []
+              if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") == call["id"]]
+    check(launch, "the Agent call's tool_result never came back")
+    done = c.wait(lambda e: e.get("subtype") == "task_notification", since=since, timeout=180,
+                  what="the subagent's task_notification")
+    c.result(c.events.index(done), timeout=120)
+    nested = c.all(lambda e: e.get("parent_tool_use_id") == call["id"], since)
+    check(nested, f"no message with parent_tool_use_id {call['id']} (the Agent call's id)")
+    check("42" in c.text(since), "Claude's answer, after the subagent's report, has no 42")
+    t.note(f"{len(nested)} messages with parent_tool_use_id = the Agent call "
+           f"({sorted({e['type'] for e in nested})}); task_notification {done.get('status')!r}, "
+           f"then Claude's turn on the report")
 
 
 @checked

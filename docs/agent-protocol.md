@@ -108,7 +108,9 @@ A user message, one JSON line:
 | `control_cancel_request` | Claude withdraws a request (an interrupt during a permission question) |
 
 Subagents (the Agent tool): their messages carry `parent_tool_use_id` (the
-Agent call's id); their final report comes back as the Agent's `tool_result`.
+Agent call's id). The Agent runs in the background: its `tool_result` is only
+the launch notice, and its report comes when the task ends (`task_notification`),
+on a turn Claude takes of its own. The turn's `result` can come before that.
 
 ## Control requests we send
 
