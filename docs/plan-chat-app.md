@@ -203,6 +203,10 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   line ("Read 2 files, searched 1 time", a tap lists them), what Claude said
   and what came in by itself (a background task that ended) where they
   happened. *Claude's words* is the turn as the conversation shows it.
+- **Only what helps**: every part but the title is optional, so a simple
+  answer is a title and a point or two. Claude also says which of the
+  record's sections don't help this turn (`skip`: changes, checks, activity,
+  words); they wait under one *More* row at the card's foot, a tap away.
 
 **Who writes what.** What needs judgment Claude writes itself, in the same
 conversation: when a turn ends, amarchy's Stop hook asks it for this turn's

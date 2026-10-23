@@ -9827,7 +9827,7 @@ BRIEF_DEF = {
                    "changed, commits, test runs) from the record itself, so don't list those. Call it once, when amarchy asks "
                    "at the end of a turn.",
     "inputSchema": {
-        "type": "object", "additionalProperties": False, "required": ["title", "status", "answer"],
+        "type": "object", "additionalProperties": False, "required": ["title", "status"],
         "properties": {
             "title": {"type": "string", "description": "The outcome of this turn in at most 10 words, as a person would say it: "
                                                        "what happened, what you found, or what you need."},
@@ -9874,6 +9874,11 @@ BRIEF_DEF = {
             "notes": {"type": "array", "maxItems": 4, "items": {"type": "string"},
                       "description": "Risks, caveats and what isn't done. Never git's state (merged, pushed, committed): the "
                                      "app shows that itself."},
+            "skip": {"type": "array", "items": {"type": "string", "enum": ["changes", "checks", "activity", "words"]},
+                     "description": "The sections the app builds from the record that don't help with this turn, folded "
+                                    "away under More: changes (files and commits), checks (test runs), activity (the "
+                                    "steps), words (your messages). A plain answer needs none of them; a code change "
+                                    "wants changes and checks."},
         },
     },
 }
@@ -9882,7 +9887,10 @@ BRIEF_ASK = (
     "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, your answer "
     "as complete points (every finding, decision, name, number, URL and result that matters; the app folds it, so leave "
     "nothing important out, just keep each point short), the plan if there is one, what needs them, how to check it, and "
-    "caveats. Write for someone glancing at a phone who may not remember this conversation: name things, plain words. "
+    "caveats. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
+    "and the plan, tests, checks, notes and questions are left out when there are none; put the record's sections that "
+    "don't help this turn in skip. Write for someone glancing at a phone who may not remember this conversation: name "
+    "things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "
     "invent anything. What git says now: {facts}. Your reply was already delivered: after update_brief, end your turn "
     "with no text."

@@ -307,13 +307,21 @@ async function run(browser, base, layout) {
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
     c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c20:0", at: "",
-      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }] } }] });
+      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }], skip: ["activity", "words"] } }] });
     c.row = { ...c.row, status: "idle" }; c.live = { state: "idle", pending: [] }; c.renderTail();
   }, { TOOL });
   s = await read(page);
   check(layout, JSON.stringify(s.open) === "[false,false,false,true]" && s.titles[3] === "Shipped to main" && s.sums.changes === "merged · pushed",
     `then its reply, the one before folded (${JSON.stringify(s.open)} · ${s.sums.changes})`);
+  const lean = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { labels: [...r.querySelectorAll(".rsec-label")].map((x) => x.textContent), more: r.querySelector(".rsec-more .rsec-sum")?.textContent,
+             dots: document.querySelectorAll(".reply-dot").length }; });
+  check(layout, JSON.stringify(lean.labels) === JSON.stringify(["Answer", "Changes", "More"]) && lean.more === "Activity · Claude's words" && lean.dots === 0,
+    `what Claude said isn't needed waits under More; no dot before the title (${JSON.stringify(lean)})`);
   await shot("done");
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
+  const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
+  check(layout, JSON.stringify(all) === JSON.stringify(["Answer", "Changes", "Activity", "Claude's words", "Less"]), `More brings them back (${JSON.stringify(all)})`);
 
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));

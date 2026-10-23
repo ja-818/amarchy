@@ -43,7 +43,6 @@
 }
 .reply-head:hover { background: var(--control-hover); }
 .reply-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.reply-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); }
 .reply-head > .spinner, .reply-head > [class*="spin"] { flex: none; }
 .reply-title { flex: 1; min-width: 0; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .reply.open .reply-title { font-size: 1.05rem; }
@@ -67,6 +66,7 @@
 .rsec-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rsec-label { flex: none; font-size: var(--caption); color: var(--text-muted); min-width: 6.5em; }
 .rsec-needs .rsec-label { color: var(--warn, #d9a441); }
+.rsec-more .rsec-label { color: var(--link); }
 .rsec-sum { flex: 1; min-width: 0; font-size: var(--caption); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rsec-head .chev { flex: none; width: 14px; height: 14px; transform: rotate(90deg); transition: transform 0.15s ease; opacity: 0.6; }
 .rsec.open > .rsec-head .chev { transform: rotate(-90deg); }

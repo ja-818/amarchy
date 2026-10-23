@@ -730,6 +730,7 @@ function briefShape(b) {
     tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
     check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
     notes: texts(b.notes, 4),
+    skip: (Array.isArray(b.skip) ? b.skip : []).filter((x) => ["changes", "checks", "activity", "words"].includes(x)),
   };
 }
 
@@ -1363,7 +1364,7 @@ class Chat {
     const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : firstLine(t.said) || "Claude's reply";
     t.liveNow = live ? h("span", { class: "reply-now" }) : null;
     card.append(h("button", { class: "reply-head", type: "button", "aria-expanded": String(open), onclick: () => toggle(key, open) },
-      live ? spinner() : h("span", { class: "reply-dot" }),
+      live ? spinner() : null,
       h("span", { class: "reply-title" }, h("span", {}, title), t.liveNow),
       ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
       icon("chevron", "chev")));
@@ -1371,8 +1372,13 @@ class Chat {
     if (b && b.goal && last) card.append(h("div", { class: "reply-goal" }, h("span", { class: "k" }, "Goal"), " ", b.goal));
 
     const results = new Map(t.items.filter((i) => i.kind === "result").map((i) => [i.tool, i]));
+    // The record's sections Claude said this turn doesn't need wait under More.
+    const skip = new Set(b ? b.skip : []);
+    const more = this.isOpen(`${key}|more`, false);
+    const held = [];
     const section = (name, label, summary, build, otherwise = false) => {
       if (!summary) return;
+      if (skip.has(name) && !more) return held.push(label);
       const k = `${key}|${name}`;
       const on = this.isOpen(k, otherwise);
       const sec = h("div", { class: `rsec rsec-${name}${on ? " open" : ""}` },
@@ -1421,6 +1427,11 @@ class Chat {
     // Claude's words: the turn as the conversation shows it.
     const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
     if (t.body.childElementCount) section("words", "Claude's words", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
+    if (held.length || (more && skip.size)) {
+      card.append(h("div", { class: "rsec rsec-more" }, h("button", { class: "rsec-head", type: "button", "aria-expanded": String(more),
+        onclick: () => toggle(`${key}|more`, more) },
+        h("span", { class: "rsec-label" }, more ? "Less" : "More"), h("span", { class: "rsec-sum" }, more ? "" : held.join(" · ")), icon("chevron", "chev"))));
+    }
     return card;
   }
 
