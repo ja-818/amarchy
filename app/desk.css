@@ -72,7 +72,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   display: flex; flex-direction: column; gap: 14px;
   padding: 16px 12px 0;
   background: var(--pane-bg);
-  border-right: 1px solid var(--border-faint);
 }
 .zen .panel { display: none; }
 .panel-buttons { display: flex; gap: 8px; flex: none; }
@@ -148,7 +147,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   height: var(--head-height);
   display: flex; align-items: center; gap: 8px;
   padding: 0 8px 0 10px;
-  border-bottom: 1px solid var(--border-faint);
 }
 .zen .desk-head { padding-left: 46px; }
 .desk-head:empty { display: none; }
@@ -189,12 +187,11 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   display: none; flex-direction: column;
   min-width: 0;
   background: var(--pane-bg);
-  border-left: 1px solid var(--border-faint);
 }
 .side-open .sidepanel { display: flex; }
 /* No room beside the chat: over it, from the right. */
 .side-over .sidepanel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; box-shadow: var(--shadow-popup); background: var(--surface); }
-.side-wide .sidepanel { flex: 1; border-left: 0; }
+.side-wide .sidepanel { flex: 1; }
 .side-grip {
   position: absolute; z-index: 2; top: 0; bottom: 0; left: -4px; width: 8px;
   cursor: col-resize; touch-action: none;
@@ -206,7 +203,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   height: var(--head-height);
   display: flex; align-items: center; gap: 4px;
   padding: 0 6px 0 8px;
-  border-bottom: 1px solid var(--border-faint);
 }
 .side-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow: hidden; }
 .side-tab {
@@ -234,12 +230,14 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 /* The Terminal tab: the project's terminal or Claude's classic one, with
    Run and the saved commands over it. */
 .desk-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.term-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border-faint); }
+.term-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; }
 .term-bar .control { min-height: 30px; padding: 2px 10px; gap: 6px; font-size: var(--caption); white-space: nowrap; }
 .term-bar .term-switch { flex: 1; min-width: 0; }
 .term-bar .term-switch .control { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
-.term-banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: var(--caption); color: var(--text-muted); border-bottom: 1px solid var(--border-faint); }
+.term-banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: var(--caption); color: var(--text-muted); }
 .term-banner span { flex: 1; }
+/* terminal.css draws the phone's lines under these two: not on the desk. */
+.desk-root .term-bar, .desk-root .term-banner { border-bottom: 0; }
 .term-body { position: relative; flex: 1; min-height: 0; }
 .term-body > .term-box[hidden] { display: none; }
 
