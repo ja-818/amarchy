@@ -230,8 +230,11 @@ finished, and its priority on the right. Your assistant's card stays on top (see
   which of the others do.
 
 The phone asks whether amarchy may use the microphone the first time you dictate
-after opening the app; after that it keeps the microphone, turned off between
-dictations, so it doesn't ask again while the app is open.
+after opening the app. After a dictation it keeps the microphone, turned off, for
+30 seconds, so the next dictation starts at once without asking. Then, or as soon
+as you leave the app, it lets the microphone go entirely, so the microphone
+indicator goes away and music playing alongside isn't turned down. The phone may
+ask again after that.
 
 It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see

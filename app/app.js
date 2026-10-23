@@ -1089,9 +1089,12 @@ function wearPhoneSize() {
 //
 // iOS asks again whether Amarchy may use it once the page has gone a minute
 // without it (WebKit's rule; and each time the app starts). So once it's
-// allowed it's kept while the app is open: between dictations its track is
-// off (nothing is heard, and iOS turns the microphone itself off) and the
-// audio stops, and holding the button turns them back on, unasked.
+// allowed it's kept a little after a dictation: its track off (nothing is
+// heard) and the audio stopped, and holding the button again turns them back
+// on, unasked and at once. But kept, the browser still has the microphone
+// (a Mac shows it in use, and the music you're playing goes quieter), so
+// MIC_KEEP after the last dictation, or as soon as the app is out of sight,
+// it's let go entirely; the next dictation opens it anew.
 //
 // What's kept can die meanwhile, and iOS doesn't say so: a call, Siri or the
 // app in the background interrupts the audio (and resuming it may never
@@ -1101,7 +1104,8 @@ function wearPhoneSize() {
 // at all (not a sample but 0) once held is opened afresh, there and then.
 
 const mic = { stream: null, ctx: null, ready: null, source: null, node: null, take: null,
-              pieces: 0, loud: 0, watch: null, fresh: false, gen: 0, hears: null };
+              pieces: 0, loud: 0, watch: null, fresh: false, gen: 0, hears: null, idle: null };
+const MIC_KEEP = 30000;   // ms the microphone is kept, off, after a dictation: then let go
 const MIC_TAIL = 500;     // ms the microphone stays on after you let go: the end of the last word
 const MIC_START = 3000;   // ms the phone's audio may take to start
 const MIC_DEAD = 1200;    // ms held before the microphone is looked at: dead, it's opened afresh
@@ -1110,6 +1114,7 @@ const MIC_SILENT = 40;    // pieces (20 ms) of nothing but 0 in a row that only 
 // retry: the microphone opened afresh while held (see micWatch), not a new hold.
 async function micOpen(retry) {
   const gen = ++mic.gen;
+  clearTimeout(mic.idle);
   if (!retry) mic.fresh = false;
   // An AudioContext is made and resumed in the touch itself (iOS starts it
   // only then): nothing awaited before.
@@ -1231,7 +1236,21 @@ function micRelease() {
   clearTimeout(mic.watch);
   if (mic.stream) mic.stream.getTracks().forEach((t) => { t.enabled = false; });
   if (mic.ctx) mic.ctx.suspend().catch(() => {});
+  clearTimeout(mic.idle);
+  mic.idle = setTimeout(micLetGo, MIC_KEEP);
 }
+
+// Not dictating: the microphone and the audio let go entirely.
+function micLetGo() {
+  clearTimeout(mic.idle);
+  if (mic.take || !(mic.stream || mic.ctx)) return;
+  mic.gen++;        // an opening under way gives back what it gets
+  micReset();
+}
+
+// Out of sight (another app, another tab, the phone locked): let it go.
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") micLetGo(); });
+window.addEventListener("pagehide", micLetGo);
 
 function micClose() {
   clearTimeout(mic.watch);
