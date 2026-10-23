@@ -15,7 +15,7 @@
 //           the home-screen app on an iPhone, where WebKit's misses words or
 //           never answers.
 //   claude: Claude Code's own voice mode, in a session's terminal Claude (or
-//           the new session it starts): SessionView.dictate and newBar's talk,
+//           the new session it starts): SessionView.dictate and newChat's talk,
 //           handed in as opts.claude.
 
 const DICTATE_TAP = 350;      // ms: let go sooner and it's a tap: it listens until tapped again

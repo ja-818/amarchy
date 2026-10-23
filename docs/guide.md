@@ -462,9 +462,13 @@ running there; `amarchy remote <host>` again brings them back).
 
 A host can put its sessions on your phone too: `amarchy app` is a web app you
 add to the home screen, made for an iPhone (any phone with a current browser
-works). It shows the list as amarchy does beside Claude (what each session
-is about, project · branch, needs you / working / idle, priority and groups),
-with the same search, and the same group & sort menu: it's one setting with
+works). It shows your sessions as **chats**, the same list as on a computer:
+each one's name, its state in words and color ("Needs your answer",
+"Working · running the tests", "Done", "Ready", "Asleep") and its project,
+then what it asks you ("Asks: Which theme should be the default?") or the
+last thing its Claude wrote; its time, a dot while you haven't read what it
+finished, and its priority on the right. Your assistant's card stays on top.
+The same search (by name, project or branch), and the same group & sort menu: it's one setting with
 your desktop's, so the phone's list is grouped and sorted as the desktop's,
 and changing it on either changes both. The order of your projects too: tap
 a project's header (or **Order projects…** in that menu) for all of them,
@@ -550,15 +554,25 @@ microphone, turned off between dictations, so it doesn't ask again while
 it's open. What iOS kills meanwhile (a call, Siri, the app in the
 background) is made anew when you next hold the mic, and a microphone that
 gives only silence once held is opened afresh on the spot; the host logs
-each dictation (`journalctl --user -u amarchy-app`). The bar under the list starts a new
-session: say what its Claude should do (tap the project on its left for
-another of the host's projects), typed or dictated with its mic. (Dictated
-with Claude's voice mode, the session starts while you speak, opens when you
-let go, and what you said goes to its Claude's dictation once Claude is up,
-the words coming into its box to send.) When a session needs you (or is done, with `amarchy alerts
+each dictation (`journalctl --user -u amarchy-app`). The box under the list,
+**What do you want to do?**, starts a new chat: say it, typed or dictated
+with its mic, and send. It starts in the project shown under the box ("in
+amarchy ▾"): the one you tap to pick, else one that what you wrote names
+("fix the login page in jaken" starts in jaken, and says so), else the last
+one you used. (Dictated with Claude's voice mode, the chat starts while you
+speak, opens when you let go, and what you said goes to its Claude's
+dictation once Claude is up, the words coming into its box to send.) With
+no project yet, the app opens on a welcome: what it does in a sentence, and
+**Add a project from GitHub** or **Start an empty project**; once there's
+one, the box is there to start the first chat. When a session needs you (or is done, with `amarchy alerts
 all`), the phone gets a notification, at the same moments as the desktop's
 chime (not for the one you're looking at on the phone); your assistant's
-always (see [Your assistant](#your-assistant)). Since it reads the sessions on the host, it
+always (see [Your assistant](#your-assistant)). It's worded as the list is,
+for someone who has never seen a terminal: the chat's name, then what it
+wants ("Asks: …", "Wants to run a command: Install the packages", "Needs
+your OpenAI API key: to run the tests", "Has a plan for you to approve") or
+"Done:" and the start of its answer, then its project. Tapped, it opens that
+chat, on the card when it asks something, whether the app was open or not. Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.
 
 **Try the new chat** in a session's ••• menu (and in the wide layout's
@@ -672,9 +686,16 @@ as text, its steps folded into a line, its questions, permissions and plans as
 cards with buttons, the box you type in), and beside it the **side panel**,
 each a see-through pane over your whole wallpaper in your theme and font.
 
-- **The list** shows each session's name, its state in words ("Needs your
-  answer", "Working", "Done", "Ready", "Asleep") and its project; a right
-  click opens its menu. Over it, the amarchy menu and **New session**.
+- **The list** shows each chat as the phone does: its name, its state in
+  words ("Needs your answer", "Working · reading app.js", "Done", "Ready",
+  "Asleep") and its project, then what it asks you or the last thing its
+  Claude wrote, in a line; a right click opens its menu. Over it, the
+  amarchy menu and **New chat**: **What do you want to do?** in the middle,
+  a big box with the project under it (picked, or named in what you write,
+  as on the phone) and the mic; `Enter` starts it, `Shift+Enter` is a new
+  line, and `Esc` in the empty box goes back to the chat you were in. With
+  no project yet, the middle is the welcome (add one from GitHub, or start
+  an empty one).
 - **Over the chat**: the session's name (click: rename) and state, and, while
   the side panel is closed, its tabs as buttons; `⋯` is the session's menu.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you
@@ -726,10 +747,10 @@ The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have
 | `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
 | `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
-| `Ctrl+Alt+N` / `P` | New session (`Super+Alt+N` on Omarchy) / new project. |
+| `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the session's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the session. |
-| `Ctrl+Alt+Space` | Dictate into the chat's box: hold it while you speak, or tap it, and tap again when you're done. |
+| `Ctrl+Alt+Space` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
 
 In the chat, `Enter` sends and `Shift+Enter` is a new line; `Esc` in the
 empty box stops Claude while it works; typing anywhere else on the page goes
@@ -1025,7 +1046,8 @@ sends it there.
 **`amarchy notify`** sends a notification of your own to every phone (and
 browser) the app notifies, through the same Web Push as the app's own ones
 (`amarchy app --test`). Each one stays: it doesn't replace the one before it.
-With `--session <id>`, tapping it opens that session in the app. It works from
+Tapping it opens the session it was sent from (a session's Claude sending
+it), or `--session <id>`'s; from elsewhere, the app's list. It works from
 anywhere on the host (a desktop's `amarchy notify` sends it there), and fails
 when no phone has turned notifications on. `--urgent` asks for all a web app
 may: a push sent at the highest urgency (all of amarchy's are), and on a

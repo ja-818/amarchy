@@ -101,14 +101,11 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .row .meta { font-size: var(--caption); }
 .desk .row .side { font-size: 11px; }
 .desk .row > .state { flex: none; width: 16px; text-align: center; }
-/* A session in the list: what it's about, its state in words under it. */
-.desk-row .task { font-size: var(--body); }
-.desk-row .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
-.desk-row .status { font-weight: 700; }
-.desk-row .status.is-waiting { color: var(--warning); }
-.desk-row .status.is-working { color: var(--accent); }
-.desk-row .status.is-done { color: var(--success); }
-.desk-row.sleeping .task { opacity: 0.7; }
+/* A session in the list (app.css's .session-row), a size smaller: its
+   preview one line. */
+.desk .session-row .task { font-size: var(--body); }
+.desk .session-row .preview { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.desk .row.cursor .preview { color: var(--text); }
 /* Your assistant's card keeps its size beside the chat too, selected like any row. */
 .desk .row.assistant { padding: 11px 10px 11px 8px; gap: 13px; }
 .desk .row.assistant .avatar-wrap { width: 52px; height: 52px; }
@@ -142,6 +139,8 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   color: var(--text-muted);
 }
 .desk-empty .big { font-size: var(--title); font-weight: 700; color: var(--text); }
+/* The new chat: up from the middle, where your eyes are. */
+.desk-empty.new { justify-content: flex-start; padding: max(12vh, 48px) 24px 24px; }
 
 /* Over the chat: the session's state and name (click: rename), its state in
    words, and the side panel's tabs. */

@@ -81,9 +81,9 @@ terminals; reachable only on your Tailscale network):
   amarchy app --test                    send each phone a test notification
   amarchy notify <title> [body] [--session <id>] [--urgent]
                                         a notification of your own on each phone (and browser) the app
-                                        notifies; a tap opens that session. --urgent: it stays until
-                                        dismissed where the browser lets it (a computer's; iOS shows it as
-                                        any other)
+                                        notifies; a tap opens the session it's sent from (or
+                                        --session's). --urgent: it stays until dismissed where the
+                                        browser lets it (a computer's; iOS shows it as any other)
 
 Theme (the app's look, on every phone and browser; Settings, Look in the app):
   amarchy theme [--show]                print it: the theme, the font and the wallpaper
@@ -3944,32 +3944,81 @@ def alert_kind(s, state, prev):
 
 _said = {}
 
+# What of a step's input the list needs to say it in words (app.js's
+# stepWords): never a file's content or an edit's text.
+STEP_KEYS = ("file_path", "notebook_path", "path", "description", "pattern", "query", "url",
+             "skill", "to", "run_in_background")
 
-def last_said(s, limit=240):
-    """The last thing the session's Claude wrote, in a line (a brief's first
-    words, for its notification), or "". Read again only when its
-    conversation has moved."""
+
+def step_input(given):
+    """What of a step's input says it in words (STEP_KEYS), and for a
+    question or a plan what ask_words needs: the questions, the plan's title."""
+    given = given if isinstance(given, dict) else {}
+    out = {k: (v[:200] if isinstance(v, str) else v) for k, v in given.items()
+           if k in STEP_KEYS and isinstance(v, (str, bool))}
+    if isinstance(given.get("questions"), list):
+        out["questions"] = [{"question": str(q.get("question") or "")[:200]}
+                            for q in given["questions"][:8] if isinstance(q, dict)]
+    if isinstance(given.get("plan"), str):
+        out["plan"] = next((l for l in given["plan"].splitlines() if l.startswith("#")), "")[:200]
+    return out
+
+
+def last_words(s, limit=240):
+    """From the end of the session's conversation: the last thing its Claude
+    wrote, in a line (said: a brief's first words, the list's preview), and
+    the step it's on, if its last tool call has no result yet (step: {tool,
+    input}, or None). Read again only when the conversation has moved."""
     f = transcript(s)
     if not f:
-        return ""
+        return {"said": "", "step": None}
     try:
-        stamp = f.stat().st_mtime_ns
+        stamp, size = f.stat().st_mtime_ns, f.stat().st_size
     except OSError:
-        return ""
+        return {"said": "", "step": None}
     if _said.get(str(f), (None,))[0] == stamp:
         return _said[str(f)][1]
-    said = ""
-    for r in reversed(conversation_records(f, tail=400_000)):
-        message = r.get("message") if isinstance(r, dict) and r.get("type") == "assistant" else None
-        content = message.get("content") if isinstance(message, dict) else None
-        text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
-            if isinstance(content, list) else content if isinstance(content, str) else ""
-        text = " ".join(re.sub(r"[*_`#>]+", "", text).split())
-        if text:
-            said = text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+    said, step = "", None
+    # The last 64 KB has it nearly always; a long tool result can push it further back.
+    for tail in (64_000, 400_000):
+        said, step, done, looking = "", None, set(), True
+        for r in reversed(conversation_records(f, tail=tail)):
+            if not isinstance(r, dict) or r.get("isSidechain"):
+                continue
+            message = r.get("message") if isinstance(r.get("message"), dict) else {}
+            content = message.get("content")
+            if r.get("type") == "user" and isinstance(content, list):
+                done.update(b.get("tool_use_id") for b in content if isinstance(b, dict) and b.get("type") == "tool_result")
+            if r.get("type") != "assistant":
+                continue
+            if looking and isinstance(content, list):
+                uses = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+                if uses:
+                    looking = False
+                    if uses[-1].get("id") not in done:
+                        step = {"tool": uses[-1].get("name") or "", "input": step_input(uses[-1].get("input"))}
+            text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
+                if isinstance(content, list) else content if isinstance(content, str) else ""
+            # Markdown's marks and list bullets out: words, in a line.
+            # (Only emphasis marks: TEST_KEY keeps its underscore.)
+            text = re.sub(r"(?m)^\s*(?:[-*+•]|\d+[.)]|#+|>)\s+", "", text)
+            text = re.sub(r"\*\*|__|`|(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)", "", text)
+            text = " ".join(text.split())
+            if text:
+                said = text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+                break
+        if said or size <= tail:
             break
-    _said[str(f)] = (stamp, said)
-    return said
+    words = {"said": said, "step": step}
+    _said[str(f)] = (stamp, words)
+    if len(_said) > 500:        # sessions long closed
+        _said.clear()
+    return words
+
+
+def last_said(s, limit=240):
+    """The last thing the session's Claude wrote, in a line, or "" (last_words)."""
+    return last_words(s, limit)["said"]
 
 
 # ------------------------------------------------------------------ update
@@ -7973,6 +8022,7 @@ class AppState:
         self.changed = threading.Condition()
         self.view, self.version, self.statuses = {}, 0, None
         self.asked = {}         # session id -> the request it last told the phones about (chat engine)
+        self.screen_asks = {}   # session id -> (when, what its terminal's screen asks): app_words
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
@@ -8019,6 +8069,7 @@ def app_watch(st):
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
             ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
+            app_words(st, ss)
             look = look_worn()
             # One finished while it was on your phone's screen: you've seen it.
             for s in ss:
@@ -8053,11 +8104,96 @@ def app_asking(s):
     return (live.get("pending") or []) if live.get("state") not in ("exited", None) else []
 
 
+# What a secret's name is, in words, for the ones people mostly have (as
+# app/secrets.js's SECRET_WORDS has them).
+SECRET_WORDS = {
+    "OPENAI_API_KEY": "OpenAI API key", "GEMINI_API_KEY": "Gemini API key", "GOOGLE_API_KEY": "Google API key",
+    "STRIPE_SECRET_KEY": "Stripe secret key", "STRIPE_API_KEY": "Stripe API key", "GITHUB_TOKEN": "GitHub token",
+    "GH_TOKEN": "GitHub token", "DATABASE_URL": "database address", "AWS_ACCESS_KEY_ID": "AWS access key",
+    "AWS_SECRET_ACCESS_KEY": "AWS secret key", "SUPABASE_SERVICE_ROLE_KEY": "Supabase service key",
+    "RESEND_API_KEY": "Resend API key", "HF_TOKEN": "Hugging Face token", "SENTRY_AUTH_TOKEN": "Sentry token",
+    "CLOUDFLARE_API_TOKEN": "Cloudflare API token", "OPENROUTER_API_KEY": "OpenRouter API key",
+    "MISTRAL_API_KEY": "Mistral API key", "GROQ_API_KEY": "Groq API key", "ELEVENLABS_API_KEY": "ElevenLabs API key",
+}
+
+
+def secret_words(name):
+    return SECRET_WORDS.get(name) or name
+
+
+def screen_ask(s):
+    """What a terminal-engine session's Claude asks on its screen, in a line, or ""."""
+    dialog = app_screen(s).get("dialog")
+    if not dialog or not dialog.get("question"):
+        return ""
+    lines = [l.strip() for l in dialog["question"].splitlines() if l.strip()]
+    # The screen's: its last lines, what it asks. The chat engine's: its first, then what.
+    return " · ".join(lines[:2] if dialog.get("request") else lines[-3:])[:300]
+
+
+def ask_line(s, screen=None):
+    """What a session waits on you for, in words a notification and the list
+    say: the secret its Claude asks for first (as its card comes first), else
+    the chat engine's request, else the question on a terminal's screen
+    (screen: that, read already), else "Needs your answer". "" when it isn't
+    waiting on you."""
+    asks = [a for a in s.get("secret_asks") or [] if a.get("waiting")]
+    if asks:
+        why = str(asks[0].get("why") or "").strip().rstrip(".")
+        return f"Needs your {secret_words(asks[0].get('name'))}" + (f": {why}" if why else "")
+    if s.get("status") != "waiting":
+        return ""
+    pending = app_asking(s)
+    if pending:
+        more = len(pending) - 1
+        return ask_words(pending[0], s.get("path")) + (f" (and {more} more)" if more > 0 else "")
+    q = screen_ask(s) if screen is None else screen
+    if not q:
+        return "Needs your answer"
+    # On a terminal: what its screen asks is the step it's on (the transcript
+    # has it, with its words), else the screen's own lines.
+    step = last_words(s)["step"]
+    return ask_words(step, s.get("path")) if step else f"Needs your answer: {q}"
+
+
+def app_words(st, ss):
+    """The list's words for each session: the last thing its Claude wrote
+    (said), the step it's on while it works (doing: {tool, input}, which
+    app.js says in words), and what it waits on you for (asks). A terminal's
+    screen is read again every few seconds, not every second."""
+    now = time.time()
+    for s in ss:
+        if s.get("setup"):
+            s["said"], s["doing"], s["asks"] = "", None, ""
+            continue
+        words = last_words(s)
+        if not s.get("assistant"):
+            s["said"] = words["said"]
+        s["doing"] = None
+        if s.get("status") == "working":
+            act = agent_live(s["id"]).get("activity") if s.get("engine") == "chat" else None
+            s["doing"] = {"tool": act.get("tool") or "", "input": step_input(act.get("input"))} \
+                if isinstance(act, dict) and act.get("tool") else words["step"]
+        screen = None
+        if s.get("status") == "waiting" and s.get("engine") != "chat":
+            at, said = st.screen_asks.get(s["id"], (0, ""))
+            if now - at > 3:
+                said = screen_ask(s)
+                st.screen_asks[s["id"]] = (now, said)
+            screen = said
+        else:
+            st.screen_asks.pop(s["id"], None)
+        s["asks"] = ask_line(s, screen)
+
+
 def app_moments(st, ss):
     """Notify about each session that went on to need you or finished, as the
     hook marks it (cmd_hook): unless it's the one on your phone's screen. A
     chat-engine session that asks something new while it waits already (the
-    next of two permissions, a question after a plan) tells you that too."""
+    next of two permissions, a question after a plan) tells you that too.
+    In words for someone who has never seen a terminal: the session's name,
+    then what it asks or that it's done and what it said, then its project;
+    tapped, it opens on that session (at its card, when it asks)."""
     now = {s["id"]: s["status"] for s in ss}
     was, st.statuses = st.statuses, now
     if was is None:
@@ -8079,28 +8215,24 @@ def app_moments(st, ss):
             continue
         if time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
             continue
-        where = app_where(s)
-        body = "Needs you" if state == "waiting" else "Done"
-        asks = [a for a in s.get("secret_asks") or [] if a.get("waiting")]
-        if state == "waiting" and asks:         # a secret Claude asks for comes first, as its card does
-            body = f"Needs your {asks[0]['name']}" + (f" · {asks[0]['why']}" if asks[0].get("why") else "")
-        elif asking:
-            body = ask_words(asking, s.get("path")) + (f" (and {len(pending) - 1} more)" if len(pending) > 1 else "")
-        elif state == "waiting":
-            time.sleep(0.3)         # the question is on screen by now
-            dialog = app_screen(s).get("dialog")
-            if dialog and dialog["question"]:
-                lines = dialog["question"].splitlines()
-                # The screen's: its last lines, what it asks. The chat engine's: its first, then what.
-                body += ": " + " · ".join(lines[:2] if dialog.get("request") else lines[-3:])[:300]
+        if state == "waiting":
+            if not asking and s.get("engine") != "chat" and not s.get("secret_asks"):
+                time.sleep(0.3)         # the question is on screen by now
+                body = ask_line(s, screen_ask(s))
+            else:
+                body = ask_line(s)
+        else:
+            said = s.get("said") or last_said(s)
+            body = f"Done: {said}" if said and kind != "assistant" else said or "Done"
         if kind == "assistant":
-            # Under its name and picture, what it said (a brief's first words).
-            said = s.get("said") or last_said(s) if state == "idle" else ""
-            payload = {"title": s.get("assistant_name") or "Your assistant", "body": said or body,
+            # Under its name and picture, what it said (a brief's first words) or asks.
+            payload = {"title": s.get("assistant_name") or "Your assistant", "body": body,
                        "tag": f"assistant-{s['id']}", "url": f"/#/s/{s['id']}", "waiting": waiting,
                        "icon": assistant_icon()}
         else:
-            payload = {"title": s.get("task") or where, "body": f"{body}\n{where}" if s.get("task") else body,
+            # Its name, else the project it's in; under what it says, the project.
+            title = s.get("task") or f"A new chat in {s['repo']}"
+            payload = {"title": title, "body": f"{body}\n{s['repo']}" if s.get("task") else body,
                        "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
         if state == "waiting":
             payload["ask"] = s["id"]        # tapped, it opens on the card (sw.js, Chat)
@@ -8939,6 +9071,9 @@ def app_handler(st, users, address):
                     if now is None and (not session(s["id"]) or (CLOSING / f"{s['id']}.json").exists()):
                         self.event("gone", {})
                         return
+                    # The list's preview of it (app_words) isn't news to its own chat.
+                    if now is not None and not now.get("assistant"):
+                        now = {k: v for k, v in now.items() if k not in ("said", "doing")}
                     if now is not None and now != row:
                         row = now
                         self.event("session", row)
@@ -10032,8 +10167,9 @@ def cmd_notify(args):
     # name and picture, and a tap opens it unless it says where.
     me = session(os.environ.get("AMARCHY_SESSION", ""))
     mine = assistant() if me and assistant_role(me) else None
+    # Sent from a session: tapped, it opens that session, unless it says where.
+    sid = sid or (me["id"] if me else None)
     if mine:
-        sid = sid or me["id"]
         if not title.lower().startswith(mine["name"].lower()):
             title = f"{mine['name']}: {title}"
     if not app_subscriptions():

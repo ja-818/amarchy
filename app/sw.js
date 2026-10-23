@@ -82,7 +82,8 @@ self.addEventListener("notificationclick", (e) => {
       c.postMessage({ go: url, ask });
       return;
     }
-    await self.clients.openWindow(url);
+    // Not open: the app starts there, and on the card (?ask=, app.js's start).
+    await self.clients.openWindow(ask ? url.replace(/^([^#?]*)/, `$1?ask=${encodeURIComponent(ask)}`) : url);
   })());
 });
 

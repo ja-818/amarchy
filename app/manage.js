@@ -327,7 +327,7 @@ async function pictureSheet(s) {
 
 // ---- a new project (amarchy add): one of your GitHub repos, a git URL, or an empty one
 
-function newProjectSheet(added) {
+function newProjectSheet(added, how) {
   let repos = null;
   const list = h("div", { class: "menu" });
   const repo = field({ placeholder: "owner/repo or a git URL" }, () => add({ repo: repo.value.trim() }));
@@ -357,12 +357,15 @@ function newProjectSheet(added) {
     : typeof repos === "string" ? [h("p", {}, repos)]
     : repos.filter((r) => !r.added).map((r) => h("button", { class: "menu-item", onclick: () => add({ repo: r.name }) },
       h("span", { class: "label" }, h("span", { class: "text" }, r.name, r.private ? h("small", {}, "private") : null))))));
-  sheet(sheetHead("New project", "Cloned into your work folder on the host"),
-    h("div", { class: "section" }, "From GitHub, or any git URL"), repo,
+  const fromGithub = [h("div", { class: "section" }, "From GitHub, or any git URL"), repo,
     h("button", { class: "control wide accent", onclick: () => add({ repo: repo.value.trim() }) }, "Add it"),
-    h("div", { class: "section" }, "Your GitHub repos"), list,
-    h("div", { class: "section" }, "Or an empty one"), empty, github,
-    h("button", { class: "control wide", onclick: () => add({ new: empty.value.trim() }) }, "Start it"));
+    h("div", { class: "section" }, "Your GitHub repos"), list];
+  const fromNothing = [h("div", { class: "section" }, how === "empty" ? "What's it called?" : "Or an empty one"), empty, github,
+    h("button", { class: `control wide${how === "empty" ? " accent" : ""}`, onclick: () => add({ new: empty.value.trim() }) }, "Start it")];
+  sheet(sheetHead(how === "empty" ? "An empty project" : how === "github" ? "A project from GitHub" : "New project",
+                  how === "empty" ? "A new folder on your server" : "Copied to your server"),
+    ...(how === "empty" ? fromNothing : how === "github" ? fromGithub : [...fromGithub, ...fromNothing]));
+  if (how === "empty") setTimeout(() => empty.focus(), 50);
   drawRepos();
   fetch("/api/github").then(async (r) => {
     const d = await r.json();

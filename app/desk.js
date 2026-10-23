@@ -572,7 +572,7 @@ function deskStart() {
   desk.changes = new DeskChanges();
   desk.details = new DeskDetails();
   desk.listEl = h("div", { class: "list" });
-  desk.search = h("input", { type: "search", placeholder: "Search sessions", title: "Search sessions (Ctrl+Alt+S)", autocomplete: "off", spellcheck: "false",
+  desk.search = h("input", { type: "search", placeholder: "Search chats", title: "Search chats (Ctrl+Alt+S)", autocomplete: "off", spellcheck: "false",
                              oninput: () => { desk.query = desk.search.value; desk.cursor = null; deskList(); },
                              onkeydown: (e) => searchKeys(e, desk.search, () => desk.listEl) });
   const organizeBtn = h("button", { class: "control organize", title: "Group and sort the list", "aria-haspopup": "menu",
@@ -584,10 +584,9 @@ function deskStart() {
     h("div", { class: "panel-buttons" },
       desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
                      h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
-      // The new chat: C5 gives it its own look ("What do you want to do?");
-      // newSession() is the hook.
-      h("button", { class: "control new-chat", title: "Ctrl+Alt+N", onclick: () => newSession() }, glyph("plus"), "New session")),
-    h("div", { class: "toolbar" },
+      // The new chat ("What do you want to do?") in the middle: newSession().
+      h("button", { class: "control new-chat", title: "New chat (Ctrl+Alt+N)", onclick: () => newSession() }, glyph("plus"), "New chat")),
+    desk.toolbar = h("div", { class: "toolbar" },
       h("label", { class: "searchbox" }, glyph("search"), desk.search,
         h("span", { class: "hint" }, "Ctrl+Alt+S")),
       organizeBtn, desk.organize),
@@ -598,7 +597,7 @@ function deskStart() {
   desk.column = h("main", { class: "column" }, desk.head, desk.chatSlot, desk.empty);
   desk.side = buildSide();
   // In zen mode, with no list, the way to your sessions: the Ⓐ in the corner.
-  desk.ball = h("button", { class: "ball", title: "Your sessions (Ctrl+Alt+A; right click: new session)",
+  desk.ball = h("button", { class: "ball", title: "Your chats (Ctrl+Alt+A; right click: a new chat)",
                             onclick: () => barDrop(), oncontextmenu: (e) => { e.preventDefault(); newSession(); } }, "Ⓐ");
   desk.el = h("div", { class: "desk-root" }, h("div", { class: "stage" }, desk.panel, desk.column, desk.side.el), desk.ball);
   root.replaceChildren(desk.el);
@@ -684,6 +683,7 @@ function row(id) { return app.view && app.view.sessions.find((s) => s.id === id)
 // One you just started that the list doesn't have yet: it shows when it does.
 function deskRoute() {
   closeSheets();
+  if (here() === "#/new") return show(null, true);
   const m = here().match(/^#\/s\/(.+)$/);
   let id = m ? decodeURIComponent(m[1]) : null;
   const p = desk.pending;
@@ -696,10 +696,14 @@ function deskRoute() {
   show(id);
 }
 
-function show(id) {
+// The session's chat in the middle, or (id null) the new chat: "What do
+// you want to do?" (#/new, Ctrl+Alt+N, and what there is with no chat yet),
+// or with no project yet the welcome.
+function show(id, fresh = false) {
   if (id && app.view && !row(id)) id = null;
-  const changed = id !== desk.current;
+  const changed = id !== desk.current || (!id && fresh !== !!desk.fresh);
   desk.current = id;
+  desk.fresh = !id && fresh;
   desk.empty.hidden = !!id || !app.view;
   desk.chatSlot.hidden = !id;
   if (changed) {
@@ -720,12 +724,47 @@ function show(id) {
     desk.terminal.close();
     desk.changes.close();
     desk.details.close();
-    desk.empty.replaceChildren(h("div", { class: "big" }, app.view ? "No sessions yet" : (app.failed || "Connecting…")),
-      app.view ? h("div", {}, "Start one to talk to Claude about a project.") : null,
-      app.view ? h("button", { class: "control", onclick: () => newSession() }, "New session (Ctrl+Alt+N)") : null);
+    drawEmpty(changed);
     deskLayout();
   }
   deskList();
+}
+
+// The middle with no chat in it: the new chat, the welcome (no project yet),
+// or what's wrong.
+function drawEmpty(changed) {
+  const v = app.view;
+  const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);
+  const kind = !v ? "off" : first ? "welcome" : "new";
+  if (kind === "new") {
+    if (!desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
+      desk.pending = { id, until: Date.now() + 15000 };
+      go2(id);
+    } });
+    if (desk.emptyKind !== "new") desk.empty.replaceChildren(desk.newChat.el);
+    desk.newChat.update();
+    if (changed || desk.emptyKind !== "new") requestAnimationFrame(() => {
+      if (!desk.current && !document.querySelector(".picker-back, .sheet-back")) desk.newChat.focus();
+    });
+  } else if (kind === "welcome") {
+    if (desk.emptyKind !== "welcome") desk.empty.replaceChildren(welcome((p) => newChatIn(p)));
+  } else {
+    desk.empty.replaceChildren(h("div", { class: "big" }, app.failed || "Connecting…"));
+  }
+  desk.empty.classList.toggle("new", kind === "new");
+  desk.emptyKind = kind;
+}
+
+// The new chat, in that project (one just added).
+function newChatIn(name) {
+  newSession();
+  if (desk.newChat) desk.newChat.use(name);
+}
+
+// Escape in an empty new chat: back to the chat you were in.
+function leaveNewChat() {
+  const last = store.get("desk-last");
+  if (row(last)) go2(last);
 }
 
 // The session's chat (chat.js): its conversation, its cards, the box you
@@ -764,7 +803,7 @@ function deskHead() {
   const st = doneOf(s);
   const name = s.assistant === "main"
     ? [avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name")]
-    : [taskText(s.task || "New session", s.task ? "" : "untitled")];
+    : [taskText(s.task || "New chat", s.task ? "" : "untitled")];
   const toggle = ([key, label, keys]) => h("button", {
     class: `head-btn${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key),
     title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
@@ -794,19 +833,6 @@ function deskIcon(name, cls) {
   return h("span", { class: `ic${cls ? ` ${cls}` : ""}`, "aria-hidden": "true",
                      html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
                            `stroke-linecap="round" stroke-linejoin="round">${DESK_ICONS[name]}</svg>` });
-}
-
-// A session's state in words, as the list and the header say it.
-// Its tone, for the color of those words: asleep is quiet, whatever it did last.
-function statusTone(s) {
-  return s.setup || sleepOf(s) ? "quiet" : doneOf(s);
-}
-
-function statusWords(s) {
-  if (s.setup) return "Setting up…";
-  const sl = sleepOf(s);
-  if (sl) return SLEEP[sl];
-  return { waiting: "Needs your answer", working: "Working", done: "Done", idle: "Ready" }[doneOf(s)] || "";
 }
 
 // ---- the side panel: the session's Terminal, Changes and Details, a tab
@@ -1306,11 +1332,14 @@ function chatKeys() {
 // Typing with the keyboard nowhere in particular: into the box you type in.
 function typeToChat(e) {
   const c = desk.chat;
-  if (!c || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
+  // No chat: the new chat's box, when it's there.
+  const fresh = !c && desk.newChat && desk.newChat.el.isConnected && !desk.empty.hidden ? desk.newChat : null;
+  if ((!c && !fresh) || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
   const at = document.activeElement;
   if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .bar-drop, .card")))
     return;
   if (e.key === " " && at && at.matches("button, a, summary, [role]")) return;     // Space presses what's focused
+  if (fresh) return fresh.focus();
   if (!c.dock.contains(c.input)) return;      // a card's up: its keys are its own
   c.input.focus({ preventScroll: true });
 }
@@ -1373,7 +1402,8 @@ function deskList() {
     if (next) return go2(next);
     return show(null);
   }
-  if (v && !desk.current && v.sessions.length) return deskRoute();
+  if (v && !desk.current && !desk.fresh && v.sessions.length) return deskRoute();
+  if (!desk.current) drawEmpty(false);      // the welcome, once there's a project: the new chat
   if (desk.pending && (row(desk.pending.id) || Date.now() > desk.pending.until)) return deskRoute();
   chime(v);
   const waiting = v ? v.sessions.filter((s) => s.status === "waiting").length : 0;
@@ -1382,6 +1412,7 @@ function deskList() {
   // Show terminals turned on or off: the panel and the header follow.
   const shows = showTerminals();
   if (shows !== desk.shows) { desk.shows = shows; deskLayout(); } else deskHead();
+  desk.toolbar.hidden = !v || !v.sessions.length;      // nothing to search yet
   desk.organize.hidden = desk.organize.hidden || !v || !v.sessions.length;
   if (!desk.organize.hidden) keepFocus(desk.organize, () => desk.organize.replaceChildren(...organizeMenu()));
   const shown = fillList(desk.listEl, desk.query, desk.cursor || desk.current);
@@ -1400,8 +1431,8 @@ function fillList(list, query, cursorId) {
     return [];
   }
   const shown = matching(v.sessions, query);
-  if (!v.sessions.length) list.append(h("div", { class: "empty" }, "No sessions yet."));
-  else if (!shown.length) list.append(h("div", { class: "empty" }, `No session called “${query.trim()}”`));
+  if (!v.sessions.length) list.append(h("div", { class: "empty" }, (v.projects || []).length ? "No chats yet" : "No projects yet"));
+  else if (!shown.length) list.append(h("div", { class: "empty" }, `No chat matches “${query.trim()}”`));
   const place = (el, s) => {
     el.dataset.id = s.id;
     el.classList.toggle("cursor", s.id === cursorId);
@@ -1412,32 +1443,11 @@ function fillList(list, query, cursorId) {
   const mine = shown.filter((s) => s.assistant);
   if (mine.length)
     list.append(h("div", { class: "assistant-section" },
-      ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : deskRow(s, [], true), s))));
-  grouped(list, shown, v.group || [], (s) => place(deskRow(s, v.group || []), s));
+      ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true), s))));
+  grouped(list, shown, v.group || [], (s) => place(sessionRow(s, v.group || []), s));
   const cur = list.querySelector(".row.cursor");
   if (cur) cur.scrollIntoView({ block: "nearest" });
   return shown;
-}
-
-// One session in the list beside the chat: what it's about, and under it
-// its state in words and its project (unless a header says it); its time,
-// unread dot, priority and sleep on the right.
-function deskRow(s, groups, near = false) {
-  const st = doneOf(s);
-  const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "New session");
-  const prio = !groups.includes("priority") && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
-  const bg = s.background > 0 ? ` · ${s.background} in the background` : "";
-  const unread = near && s.unseen && s.said;
-  return h("button", { class: `row desk-row is-${st}${s.priority === "low" ? " low" : ""}${sleepOf(s) ? " sleeping" : ""}`,
-                       "data-id": s.id, title: where(s), onclick: () => go2(s.id) },
-    stateIcon(s),
-    near ? avatar(s, "small") : null,
-    h("span", { class: "main" },
-      taskText(task, s.task ? "" : "untitled"),
-      unread ? h("div", { class: "meta said" }, s.said)
-        : h("div", { class: "meta" }, h("span", { class: `status is-${statusTone(s)}` }, statusWords(s)),
-            groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${s.repo}`), bg)),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio));
 }
 
 // In the search (beside the chat, or under the Ⓐ): ↑/↓ move, ↵ goes there, Esc leaves.
@@ -1593,18 +1603,20 @@ function talkKey(e) {
   e.preventDefault();
   e.stopPropagation();
   const c = desk.chat;
-  if (e.repeat || !c || !c.dock.contains(c.input)) return;
-  const t = c.talk;
+  const fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;     // into the new chat's box
+  if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
+  const t = fresh ? fresh.dictate : c.talk;
   if (t.locked) { t.stop(); return; }
   if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
-  c.input.focus({ preventScroll: true });
+  if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
   t.start();
 }
 
 function deskKeysUp(e) {
   if (e.code !== "Space" || desk.talkDown === undefined || desk.talkDown === null) return;
-  const c = desk.chat, t = c && c.talk;
+  const c = desk.chat, fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
+  const t = fresh ? fresh.dictate : c && c.talk;
   const tapped = e.timeStamp - desk.talkDown < DICTATE_TAP;
   desk.talkDown = null;
   if (!t || !t.run) return;
@@ -1612,7 +1624,7 @@ function deskKeysUp(e) {
   if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
     t.locked = true;
     t.say("Listening… Ctrl+Alt+Space again when you're done");
-    c.micBtn.classList.add("on");
+    (fresh ? fresh.dictate.opts.button : c.micBtn).classList.add("on");
     return;
   }
   t.stop();
@@ -1760,24 +1772,13 @@ function ask(title, value, act, opts) {
 
 // ---- what the keys do
 
-async function newSession() {
-  const projects = (app.view && app.view.projects) || [];
-  picker({ title: "New session", placeholder: "Project", items: [
-    ...projects.map((p) => ({ label: p.name, icon: "project", detail: p.sessions ? `${p.sessions} session${p.sessions === 1 ? "" : "s"}` : "",
-                               act: () => startSession(p.name) })),
-    { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", always: true, act: () => newProject() }] });
-}
-
-async function startSession(repo, prompt) {
-  toast(`Starting a session in ${repo}…`);
-  try {
-    const { id } = await api("/api/new", prompt ? { repo, prompt } : { repo });
-    store.set("last-project", repo);
-    desk.pending = { id, until: Date.now() + 15000 };
-    go2(id);
-  } catch (e) {
-    toast(e.message);
+// The new chat, in the middle: "What do you want to do?" (drawEmpty).
+function newSession() {
+  if (here() === "#/new" && !desk.current) {
+    if (desk.newChat) desk.newChat.focus();
+    return;
   }
+  go("#/new");
 }
 
 // A project: one of your GitHub repos, a git URL, or an empty one.
@@ -1815,7 +1816,8 @@ async function addProject(body) {
     const d = await api("/api/add", body);
     const name = (body.new || d.name || body.repo.split("/").pop()).replace(/\.git$/, "");
     const known = ((app.view && app.view.projects) || []).map((p) => p.name);
-    await startSession(known.includes(name) ? name : (d.name || name));
+    toast(`${name} is one of your projects now`);
+    newChatIn(known.includes(name) ? name : (d.name || name));
   } catch (e) {
     toast(e.message);
   }
@@ -1914,7 +1916,7 @@ function deskMenu() {
   const s = row(desk.current);
   const on = (x) => (x ? "on" : "");
   const items = [
-    { label: "New session", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
+    { label: "New chat", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
     { label: "New project", icon: "plus", key: "Ctrl+Alt+P", act: () => newProject() },
   ];
   if (s) items.push(
@@ -1994,7 +1996,7 @@ function showKeys() {
     ["Ctrl+Alt+← / →", "The chat / the terminal"], ["Ctrl+Alt+L", "Claude's classic terminal"],
     ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
-    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New session / new project"],
+    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
     ["Ctrl+Alt+Space", "Dictate into the chat: hold, or tap and tap again"],

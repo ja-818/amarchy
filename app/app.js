@@ -6,7 +6,7 @@
 const root = document.getElementById("root");
 const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
               query: "", organize: null };
-const STATUS = { waiting: "Needs you", working: "Working", done: "Done", idle: "Idle", asleep: "Asleep" };
+const STATUS = { waiting: "Needs your answer", working: "Working", done: "Done", idle: "Ready", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // The glyphs of amarchy's list (Nerd Font icons), when the
@@ -249,6 +249,28 @@ function sleepMark(s) {
   return el;
 }
 
+// A session's state in words, as the list and the chat's header say it,
+// and its tone (the color of those words): asleep is quiet, whatever it did last.
+function statusTone(s) {
+  return s.setup || sleepOf(s) ? "quiet" : doneOf(s);
+}
+
+function statusWords(s) {
+  if (s.setup) return "Setting up…";
+  const sl = sleepOf(s);
+  if (sl) return SLEEP[sl];
+  return STATUS[doneOf(s)] || "";
+}
+
+// The list's: what it's doing too, while it works ("Working · reading app.js").
+function statusLine(s) {
+  const words = statusWords(s);
+  const d = s.doing;
+  if (statusTone(s) !== "working" || !d || !d.tool || typeof stepWords !== "function" || HIDDEN_TOOLS.has(d.tool)) return words;
+  const now = stepWords(d.tool, d.input || {}).now;
+  return `${words} · ${now.charAt(0).toLowerCase()}${now.slice(1)}`;
+}
+
 async function wakeSession(s) {
   try { await api(`/api/session/${encodeURIComponent(s.id)}/wake`); } catch (e) { toast(e.message); }
 }
@@ -370,7 +392,7 @@ function listView() {
     h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));
   // Above the list, as in the wide layout beside Claude: the search, and how
   // the list is grouped and sorted.
-  const search = h("input", { type: "search", placeholder: "Search sessions", enterkeyhint: "search",
+  const search = h("input", { type: "search", placeholder: "Search chats", enterkeyhint: "search",
                               autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
                               oninput: () => { app.query = search.value; renderList(); },
                               onkeydown: (e) => {
@@ -396,9 +418,10 @@ function listView() {
     }
   }, true);
   const scroll = h("div", { class: "scroll" }, list);
-  app.newBar = newBar();
-  app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, h("div", { class: "dock" }, app.newBar.el));
-  Object.assign(app.listEl, { meta, offline, list, scroll, toolbar, clear, organize, menu, shade });
+  app.newChat = newChat();
+  const dock = h("div", { class: "dock" }, app.newChat.el);
+  app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, dock);
+  Object.assign(app.listEl, { meta, offline, list, scroll, toolbar, clear, organize, menu, shade, dock });
   return app.listEl;
 }
 
@@ -409,14 +432,16 @@ function renderList() {
     view.scroll.scrollTop = 0;
   }
   const v = app.view;
+  const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);      // a new user: the welcome
   view.meta.replaceChildren();
-  if (v) {
+  if (v && v.sessions.length) {
     const waiting = v.sessions.filter((s) => s.status === "waiting").length;
-    view.meta.append(`${v.sessions.length} session${v.sessions.length === 1 ? "" : "s"}`);
+    view.meta.append(`${v.sessions.length} chat${v.sessions.length === 1 ? "" : "s"}`);
     if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
   }
   view.offline.hidden = app.online || !v;
   view.toolbar.hidden = !v || !v.sessions.length;
+  view.dock.hidden = first;
   view.clear.hidden = !app.query;
   if (view.toolbar.hidden) view.menu.hidden = true;
   view.shade.hidden = view.menu.hidden;
@@ -428,12 +453,13 @@ function renderList() {
     const shown = v ? matching(v.sessions, app.query) : [];
     if (!v) {
       list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
+    } else if (first) {
+      list.append(welcome((p) => app.newChat.use(p)));
     } else if (!v.sessions.length) {
-      list.append(h("div", { class: "empty" }, "No sessions yet.", h("br"),
-        v.projects && v.projects.length ? "Say what Claude should do, below, to start one."
-          : h("button", { class: "control accent", onclick: () => newProjectSheet((p) => app.newBar.use(p)) }, "Add a project…")));
+      list.append(noChats());
     } else if (!shown.length) {
-      list.append(h("div", { class: "empty" }, `No session called “${app.query.trim()}”`));
+      list.append(h("div", { class: "empty" }, `No chat matches “${app.query.trim()}”`, h("br"),
+        h("button", { class: "control", onclick: () => { app.listEl.querySelector(".clear").click(); } }, "Show them all")));
     } else {
       // Your assistant first, in a place of its own above the groups (amarchy
       // assistant): its card, the other sessions of its project under it.
@@ -446,7 +472,30 @@ function renderList() {
       grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
     }
   });
-  app.newBar.update();
+  app.newChat.update();
+}
+
+// A new user's first screen, with no projects yet: what Amarchy is, in a
+// sentence or two, and the two ways to start: a project of theirs from
+// GitHub, or an empty one for something new. added(name): the project
+// they added, for the new chat to start in.
+function welcome(added) {
+  const add = (how) => (app.desk ? (how === "github" ? newProject() : emptyProject("")) : newProjectSheet(added, how));
+  return h("div", { class: "welcome" },
+    h("div", { class: "welcome-mark", "aria-hidden": "true" }, "Ⓐ"),
+    h("h2", {}, "Welcome to Amarchy"),
+    h("p", {}, "Tell Claude what you want, and it does the work on your projects: reads them, writes the code, runs it, and asks you whenever it needs you."),
+    h("p", { class: "muted" }, "Start with a project: one of yours on GitHub, or an empty one for something new."),
+    h("div", { class: "welcome-actions" },
+      h("button", { class: "cta primary", onclick: () => add("github") }, "Add a project from GitHub"),
+      h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
+}
+
+// Projects, but no chat yet: the new chat is the way to start one.
+function noChats() {
+  return h("div", { class: "empty no-chats" },
+    h("div", { class: "big" }, "No chats yet"),
+    h("div", {}, app.desk ? "Say what you want to do, and Claude starts on it." : "Say what you want to do below, and Claude starts on it."));
 }
 
 // The sessions under your assistant's section, grouped as amarchy groups
@@ -760,7 +809,7 @@ function assistantCard(s) {
   const name = s.assistant_name || "Assistant";
   const task = s.task && s.task.toLowerCase() !== name.toLowerCase() ? s.task : "";
   const unread = s.unseen && !!s.said;
-  const line = s.setup ? "Setting up…" : st === "waiting" ? "Needs you" : unread ? s.said
+  const line = s.setup ? "Setting up…" : st === "waiting" ? s.asks || STATUS.waiting : unread ? s.said
     : task || (st === "working" ? "On it…" : "Here for you");
   return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`, "data-id": s.id,
                                 onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
@@ -768,8 +817,9 @@ function assistantCard(s) {
     h("span", { class: "main" },
       h("div", { class: "name" }, name, unread ? h("span", { class: "new" }, "New") : null),
       h("div", { class: `line${st === "waiting" ? " waiting" : ""}${unread ? " said" : ""}` }, line),
-      h("div", { class: "meta" }, unread ? (task ? `${task} · unread` : "Unread") : STATUS[st])),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), sleepMark(s))), () => rowMenu(s));
+      h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(s)}` }, statusLine(s)),
+        unread && task ? ` · ${task}` : "")),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s))), () => rowMenu(s));
 }
 
 // A session that finished a turn you haven't opened yet: a dot by its time.
@@ -777,25 +827,30 @@ function unreadDot(s) {
   return s.unseen ? h("span", { class: "dot", title: "Unread", "aria-label": "Unread" }) : null;
 }
 
-// One session in the list: the project and the priority
-// only when no header above it says them already. near: another session of
-// your assistant's project, under it, with its picture small.
+// One session in the list, the same on the phone and beside the chat on a
+// computer: what it's about (the keyword in bold); its state in words, in
+// its color ("Needs your answer", "Working · reading app.js", "Done",
+// "Ready", "Asleep") and its project, unless a header above says it; then
+// what it asks you, or the last thing its Claude wrote. Its time, the unread
+// dot and its priority (unless a header says it) on the right. near:
+// another session of your assistant's project, under it, with its picture small.
 function sessionRow(s, groups, near = false) {
-  const showRepo = !groups.includes("project"), showPriority = !groups.includes("priority");
-  const prio = showPriority && s.priority && s.priority !== "normal"
+  const st = doneOf(s), tone = statusTone(s);
+  const prio = !groups.includes("priority") && s.priority && s.priority !== "normal"
     ? glyph(s.priority, `prio ${s.priority}`) : null;
-  const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "new session");
-  const bg = s.background > 0 ? ` · +${s.background} bg` : "";
-  return holdable(h("button", { class: `row${s.priority === "low" ? " low" : ""}`, "data-id": s.id,
-                       onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
+  const task = s.setup ? title(s) : (s.task || "New chat");
+  const bg = s.background > 0 ? ` · ${s.background} in the background` : "";
+  const preview = s.setup ? "" : st === "waiting" ? s.asks || "" : s.said || "";
+  return holdable(h("button", { class: `row session-row is-${tone}${s.priority === "low" ? " low" : ""}${s.unseen ? " unread" : ""}`,
+                                "data-id": s.id, onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
     stateIcon(s),
     near ? avatar(s, "small") : null,
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
-      // Your assistant's other sessions, unread: what it wrote, in a line.
-      near && s.unseen && s.said ? h("div", { class: "meta said" }, s.said)
-        : h("div", { class: "meta" }, `${showRepo ? `${s.repo} · ` : ""}${s.name}${bg}`)),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio, sleepMark(s))), () => rowMenu(s));
+      h("div", { class: "status-line" }, h("span", { class: `status is-${tone}` }, statusLine(s)),
+        groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${s.repo}`), bg),
+      preview ? h("div", { class: `preview${st === "waiting" ? " asks" : ""}` }, preview) : null),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio)), () => rowMenu(s));
 }
 
 // ---- a session
@@ -1041,12 +1096,13 @@ class SessionView {
       this.chat.setPlaceholder(`Message ${name}`);
       this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(r), stateIcon(r)),
         h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
-          h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
+          h("div", { class: "status-line" }, task, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)))));
       return;
     }
-    this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null, sleepMark(r)].filter(Boolean),
-      h("div", { class: "text" }, taskText(r.task || "New session", r.task ? "" : "untitled"),
-        h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
+    // Its state in words and its project, as the list says them (the branch: in its menu).
+    this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null].filter(Boolean),
+      h("div", { class: "text" }, taskText(r.task || "New chat", r.task ? "" : "untitled"),
+        h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${r.repo}`)));
   }
 
   renderScreen() {
@@ -1550,59 +1606,111 @@ function swipeToClose(back, card) {
 
 // The bar under the list, as omalauncher's: the project on its left (tap it
 // for another), and what the new session's Claude should do.
-function newBar() {
+// The new chat: "What do you want to do?", typed or dictated, and under it
+// the project it starts in: the one you pick, else one that what you wrote
+// names ("…in jaken…"), else the last one you used. Under the list on the
+// phone; on a computer, the middle of the window (wide: desk.js's
+// newSession, Ctrl+Alt+N), where Enter starts it. started(id): where to go
+// once it has started (the phone opens it).
+function newChat({ wide = false, started = null } = {}) {
   let repo = store.get("last-project");
-  const name = h("span", { class: "name" });
-  const pick = h("button", { class: "pick", "aria-label": "Project", onclick: () => pickProject() }, name, glyph("down"));
-  const field = h("textarea", { rows: 1, placeholder: "What should Claude do?", enterkeyhint: "enter",
-                                oninput: () => { store.set("draft:new", field.value); grow(); buttons(); } });
+  let picked = false;       // you picked the project for this one: no guessing
+  let guessed = false;      // what you wrote named it
+  const name = h("b", { class: "name" });
+  const pick = h("button", { class: "pick", type: "button", "aria-label": "Project: where Claude works on it", "aria-haspopup": "menu",
+                             onclick: () => pickProject() }, h("span", { class: "in" }, "in"), name, glyph("down"));
+  const why = h("span", { class: "why" }, "named in what you wrote");
+  const field = h("textarea", { rows: wide ? 3 : 1, placeholder: "What do you want to do?", enterkeyhint: wide ? "go" : "enter",
+                                "aria-label": "What do you want to do?",
+                                oninput: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
+                                onkeydown: (e) => {
+                                  // A computer's: Enter starts it (Shift+Enter, a new line); Escape, back to the chat you were in.
+                                  if (!wide || e.isComposing) return;
+                                  if (e.key === "Enter" && !e.shiftKey && !e.altKey) { e.preventDefault(); start(); }
+                                  else if (e.key === "Escape" && !field.value.trim() && typeof leaveNewChat === "function") { e.preventDefault(); leaveNewChat(); }
+                                } });
   field.value = store.get("draft:new") || "";
-  const send = h("button", { class: "send", "aria-label": "Start session", onclick: () => start() }, glyph("send"));
-  const micBtn = h("button", { class: "mic", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
-  // What you say, into the box (dictate.js); or, through Claude's voice mode,
-  // the session started while you speak (talk, below).
+  const send = h("button", { class: wide ? "cta primary go" : "send", type: "button", "aria-label": "Start the chat", title: wide ? "Start (Enter)" : null,
+                             onclick: () => start() }, wide ? "Start" : glyph("send"));
+  const micBtn = h("button", { class: "mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
+  // What you say, into the box (dictate.js); or, on the phone through
+  // Claude's voice mode, the chat started while you speak (talk, below).
   let saying = null;
   const dictate = new Dictate({ field, button: micBtn,
-                                changed: () => { store.set("draft:new", field.value); grow(); buttons(); },
+                                changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); },
-                                claude: { start: () => talk(), stop: () => letGo() } });
-  const el = h("div", { class: "prompt new" }, pick, field, micBtn, send);
+                                claude: wide ? undefined : { start: () => talk(), stop: () => letGo() } });
+  const box = h("div", { class: "prompt new" }, field, micBtn, wide ? null : send);
+  const under = h("div", { class: "new-under" }, pick, why, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
+  const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
+    wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, box, under);
   const projects = () => (app.view && app.view.projects) || [];
   const grow = () => {
     field.style.height = "auto";
     field.style.height = `${Math.min(field.scrollHeight + 2, window.innerHeight * 0.4)}px`;
   };
+  // A project what you wrote names, as a word of its own ("the jaken app",
+  // "houston os"): the longest name that fits, so "houston-os" beats "houston".
+  const guess = () => {
+    if (picked) return;
+    const text = ` ${field.value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+    const hit = projects().map((p) => p.name)
+      .filter((n) => text.includes(` ${n.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `))
+      .sort((x, y) => y.length - x.length)[0];
+    const was = repo;
+    if (hit) { repo = hit; guessed = true; }
+    else if (guessed) { repo = store.get("last-project") || repo; guessed = false; }
+    if (repo !== was) update();
+    else why.hidden = !guessed;
+  };
   const buttons = () => {
     const none = !projects().length;
     send.disabled = none || !field.value.trim() || !!said || dictate.on();
-    pick.hidden = none;
+    under.hidden = none;
     micBtn.hidden = none || !dictate.available();
     micBtn.classList.toggle("on", (!!said && said.held) || (dictate.on() && dictate.run.held));
-    el.classList.toggle("listening", !!said || saying !== null);
-    field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…")
-      : said ? (!said.held ? "Starting the session…" : said.hearing ? "Listening…" : "Starting the microphone…")
-      : saying !== null ? saying : "What should Claude do?";
+    box.classList.toggle("listening", !!said || saying !== null);
+    field.placeholder = none ? (app.view ? "Add a project first" : "Connecting…")
+      : said ? (!said.held ? "Starting the chat…" : said.hearing ? "Listening…" : "Starting the microphone…")
+      : saying !== null ? saying : wide ? "Say it in your own words: what you want, and anything Claude should know" : "What do you want to do?";
   };
   const update = () => {
     const ps = projects();
     if (added && ps.some((p) => p.name === added)) added = null;      // the list has it now
-    if (ps.length && !added && !ps.some((p) => p.name === repo)) repo = ps[0].name;
+    if (ps.length && !added && !ps.some((p) => p.name === repo)) { repo = ps[0].name; guessed = false; }
     name.textContent = repo || "";
+    why.hidden = !guessed;
     buttons();
   };
-  const pickProject = () => sheet(sheetHead("Project", "Where the new session starts"),
-    h("div", { class: "menu" }, ...projects().map((p) =>
-      h("button", { class: `menu-item${p.name === repo ? " on" : ""}`,
-                    onclick: () => { repo = p.name; store.set("last-project", repo); closeSheets(); update(); field.focus(); } },
-        p.name, p.name === repo ? glyph("check", "val") : null))),
-    h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
-  // A project just added: the next session starts there (once the list has it).
+  const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
+  const pickProject = () => {
+    if (app.desk) return picker({ title: "Where should Claude work on it?", placeholder: "Project", items: [
+      ...projects().map((p) => ({ label: p.name, icon: p.name === repo ? "check" : "project",
+                                  detail: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : "", act: () => choose(p.name) })),
+      { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", always: true, act: () => newProject() }] });
+    sheet(sheetHead("Project", "Where Claude works on it"),
+      h("div", { class: "menu" }, ...projects().map((p) =>
+        h("button", { class: `menu-item${p.name === repo ? " on" : ""}`, onclick: () => { closeSheets(); choose(p.name); } },
+          p.name, p.name === repo ? glyph("check", "val") : null))),
+      h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
+  };
+  // A project just added: the next chat starts there (once the list has it).
   let added = null;
   const use = (project) => {
     repo = added = project;
+    picked = true;
+    guessed = false;
     store.set("last-project", project);
     update();
     field.focus();
+  };
+  const reset = () => {
+    field.value = "";
+    store.set("draft:new", "");
+    store.set("last-project", repo);
+    picked = guessed = false;
+    grow();
+    update();
   };
   const start = async () => {
     if (!field.value.trim() || !repo || said) return;
@@ -1610,12 +1718,10 @@ function newBar() {
     el.classList.add("busy");
     try {
       const { id } = await api("/api/new", { repo, prompt: field.value });
-      field.value = "";
-      store.set("draft:new", "");
-      store.set("last-project", repo);
-      grow();
+      reset();
       field.blur();
-      go(`#/s/${encodeURIComponent(id)}`);
+      if (started) started(id);
+      else go(`#/s/${encodeURIComponent(id)}`);
     } catch (e) {
       toast(e.message);
     }
@@ -1673,12 +1779,13 @@ function newBar() {
     field.value = "";
     store.set("draft:new", "");
     store.set("last-project", repo);
+    picked = guessed = false;
     grow();
     app.handed = { id: s.id, queue: s.queue };
     go(`#/s/${encodeURIComponent(s.id)}`);
   };
-  requestAnimationFrame(grow);
-  return { el, update, use };
+  requestAnimationFrame(() => { grow(); guess(); update(); });
+  return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field };
 }
 
 // ---- notifications
@@ -1825,7 +1932,7 @@ async function openSettings() {
       helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
              : h("p", {}, "None yet: open a session's menu (⋯, or hold it in the list) and make it your assistant."),
       h("div", { class: "section" }, "Projects"),
-      h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newBar) app.newBar.use(p); }) }, "New project…"),
+      h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
@@ -2150,8 +2257,13 @@ async function start() {
     routed.hash = location.hash;
     route();
   });
+  // Started by tapping a notification about a card (sw.js): that card, once
+  // the session's chat is up; the address without it, for a reload.
+  const asked = new URLSearchParams(location.search).get("ask");
+  if (asked) history.replaceState(null, "", location.pathname + location.hash);
   if (app.desk) deskStart();
   else route();
+  if (asked) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: asked } }));
   openList();
   if (app.key) pushRefresh();
 }
