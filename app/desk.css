@@ -181,9 +181,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 /* Narrow: the tabs as icons only. */
 @media (max-width: 1180px) { .head-btn .label { display: none; } .head-btn { width: 34px; padding: 0; justify-content: center; } }
 
-/* The pane with the keyboard: a hairline of the accent along its top. */
-.column.active .desk-head, .sidepanel.active .side-head { box-shadow: inset 0 2px 0 -1px color-mix(in srgb, var(--accent) 70%, transparent); }
-
 /* ---- the side panel, on the right: Terminal, Changes, Details */
 
 .sidepanel {
