@@ -324,6 +324,11 @@ async function run(browser, base, layout) {
   const liveNow = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-now")?.textContent);
   check(layout, s.replies === 4 && /working/.test(s.cls) && s.titles[3].startsWith("Working…") && /Merging/.test(liveNow || "") &&
     s.openSecs.includes("Activity"), `while it works: a live card, its activity open (${s.titles[3]})`);
+  // The live reply says what it's doing: the line under the turns doesn't too, even before the next live update.
+  await page.evaluate(() => { const c = window.__chat; c.stageWork.hidden = false;
+    c.conversation({ items: [] }); });
+  const stale = await page.evaluate(() => window.__chat.stageWork.hidden);
+  check(layout, stale, "with a live reply, no second working line (synced as the reply is drawn)");
   const nowRow = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1), f = r.querySelector(".act-fold.going");
     return { going: f && f.querySelector(".act-title").textContent, spin: !!(f && f.querySelector(".act-node .spinner")), nowHidden: r.querySelector(".act-now").hidden }; });
   check(layout, nowRow.going === "Merge and push…" && nowRow.spin && nowRow.nowHidden, `while a step runs, its row says so, spinning (${JSON.stringify(nowRow)})`);

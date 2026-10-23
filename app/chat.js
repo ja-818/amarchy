@@ -1248,6 +1248,7 @@ class Chat {
     for (const it of this.items) this.screenAdd(it);
     this.drawEmpty();
     for (const t of this.sturns) this.drawReply(t);
+    this.drawLive();
     if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
     if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
   }
@@ -1268,6 +1269,7 @@ class Chat {
     // What changed: the turns that got items, and with a new brief or a new
     // turn, the ones before (the newest reply is open, its questions live).
     for (const t of this.sturns) if (t.dirty || this.brief !== had || this.sturn !== last) this.drawReply(t);
+    this.drawLive();
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
   }
@@ -1344,6 +1346,21 @@ class Chat {
   }
 
   isOpen(k, otherwise) { return this.opened.has(k) ? this.opened.get(k) : otherwise; }
+
+  // What Claude is doing now, where the brief view says it: in the live
+  // reply (its title, its activity's last line), else (no live reply yet) in
+  // the line under the last turn. Again whenever the replies are drawn, not
+  // only when the live state moves, or a reply that just went live would sit
+  // under a stale line until the next step.
+  drawLive() {
+    const live = this.engine === "chat" ? this.live : null;
+    const now = this.activity(live);
+    const t = this.sturn;
+    if (t && t.liveNow) t.liveNow.textContent = now ? ` ${now.text}` : "";
+    if (t) this.drawNow(t);
+    this.stageWork.hidden = !(now && !(t && t.liveNow));
+    if (now) this.stageWork.querySelector(".now").textContent = now.text;
+  }
 
   // The live activity's last line: what Claude is doing now, or the line it's
   // writing as it writes it (the chat engine's partial text).
@@ -1936,13 +1953,8 @@ class Chat {
     if (this.mode === "screen") {
       // The brief view: what Claude is doing, in the live reply's title (its activity fills in under it).
       const stick = this.atBottom();
-      const now = this.activity(live);
       if (this.sturn) this.drawReply(this.sturn);
-      const t = this.sturn;
-      if (t && t.liveNow) t.liveNow.textContent = now ? ` ${now.text}` : "";
-      if (t) this.drawNow(t);
-      this.stageWork.hidden = !(now && !(t && t.liveNow));
-      if (now) this.stageWork.querySelector(".now").textContent = now.text;
+      this.drawLive();
       if (stick) this.toBottom();
       return;
     }
