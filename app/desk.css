@@ -1,8 +1,8 @@
 /* amarchy in a browser on your computer (desk.js), its wide layout. Your
-   sessions in the gap left of Claude's column (900px,
-   centered), the session's terminal in the gap on its right, each a
-   see-through panel from the top of the screen to the bottom over your
-   wallpaper, with no bar and no borders.
+   sessions on the left, the session's chat in the middle (chat.css), and the
+   side panel on the right (its Terminal, Changes, Details): each a
+   see-through pane from the top of the screen to the bottom over your
+   wallpaper. Design tokens only (docs/design-tokens.md).
    The terminals' colors are your theme's (theme.css puts them over these,
    Tokyo Night's). */
 
@@ -30,21 +30,26 @@ body.desk .toast.action { cursor: pointer; }
 
 .desk-root {
   --pad: 8px;
-  /* The panel's type sizes. */
+  /* The panes' type sizes. */
   --caption: 12px;
   --body: 14px;
   --title: 15.5px;
   --icon-large: 19px;
+  /* Each pane a see-through panel over your wallpaper, as the terminals are. */
+  --pane-bg: color-mix(in srgb, var(--surface) calc(var(--term-alpha) * 100%), transparent);
+  --head-height: 46px;
   position: fixed; inset: 0;
   display: flex; flex-direction: column;
   font-size: var(--body);
 }
+.desk-root.resizing { cursor: col-resize; user-select: none; }
+.desk-root.resizing iframe, .desk-root.resizing .term-box { pointer-events: none; }
 
-/* No bar: the windows go from the top of the screen to the bottom. In zen
+/* No bar: the panes go from the top of the screen to the bottom. In zen
    mode, with no list, an Ⓐ in the corner opens your sessions (lit when one
    needs you); a red dot on it, and on the menu's, while you dictate. */
 .ball {
-  position: fixed; z-index: 7; top: 0; left: 8px;
+  position: fixed; z-index: 7; top: 8px; left: 8px;
   display: none;
   width: 30px; height: 30px; border-radius: var(--radius-control);
   font-size: 21px; line-height: 30px; text-align: center;
@@ -57,42 +62,54 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 }
 .panel-buttons .brand .a { position: relative; }
 
-.stage { position: relative; flex: 1; min-height: 0; }
+/* The list, the chat and the side panel, side by side; the panel over the
+   chat when the window is too narrow for both. */
+.stage { position: relative; flex: 1; min-height: 0; display: flex; }
 
-/* ---- your sessions, in the gap left of Claude */
+/* ---- your sessions, on the left */
 
 .panel {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  width: calc((100% - var(--column)) / 2 - var(--pad));
-  display: flex; flex-direction: column; gap: 16px;
-  padding: 20px 20px 0;
-  background: color-mix(in srgb, var(--surface) calc(var(--term-alpha) * 100%), transparent);
+  flex: none; width: var(--sidebar);
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 12px 0;
+  background: var(--pane-bg);
+  border-right: 1px solid var(--border-faint);
 }
 .zen .panel { display: none; }
-.panel-buttons { display: flex; gap: 9px; flex: none; }
+.panel-buttons { display: flex; gap: 8px; flex: none; }
 /* The menu as wide as its name, New session the rest. */
 .panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
 .panel-buttons .brand { flex: none; }
-.panel-buttons .control:last-child { flex: 1; min-width: 0; justify-content: center; }
+.panel-buttons .new-chat { flex: 1; min-width: 0; justify-content: center; color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); font-weight: 700; }
+.panel-buttons .new-chat:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
 .panel-buttons .a { font-size: var(--title); line-height: 1; }
 .desk .control:hover { background: var(--control-hover); }
 .desk .toolbar { padding: 0; flex: none; }
 .desk .searchbox { height: 38px; }
 .desk .searchbox input { font-size: var(--body); }
-.desk .searchbox .hint { flex: none; padding-right: 8px; font-size: var(--caption); color: var(--text-muted); }
+.desk .searchbox .hint { display: none; flex: none; padding-right: 8px; font-size: var(--caption); color: var(--text-muted); }
 .desk .searchbox:focus-within .hint { display: none; }
 .desk .control.organize { width: 38px; height: 38px; min-height: 38px; font-size: 16px; }
 .desk .organize-menu { right: 0; top: 100%; }
 .desk .organize-menu .menu-item:hover { background: var(--selected-bg); }
-.panel .scroll { margin: 0 -4px; padding-bottom: 12px; }
-.desk .list { padding: 0 4px; gap: 1px; }
-.desk .row { padding: 9px 10px 9px 4px; gap: 12px; }
+.panel .scroll { margin: 0 -6px; padding-bottom: 12px; }
+.desk .list { padding: 0 6px; gap: 2px; }
+.desk .row { padding: 8px 10px 8px 6px; gap: 10px; }
 .desk .row:hover { background: var(--control-hover); }
-.desk .row.cursor { background: var(--selected-bg); border-color: transparent; }
+.desk .row.cursor { background: var(--selected-bg); border-color: var(--selected-border); }
 .desk .row.cursor .task, .desk .row.cursor .state { color: var(--selected-text); opacity: 1; }
-.desk .row .meta { font-size: 11px; }
+.desk .row .meta { font-size: var(--caption); }
 .desk .row .side { font-size: 11px; }
-/* Your assistant's card keeps its size beside Claude too, selected like any row. */
+.desk .row > .state { flex: none; width: 16px; text-align: center; }
+/* A session in the list: what it's about, its state in words under it. */
+.desk-row .task { font-size: var(--body); }
+.desk-row .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.desk-row .status { font-weight: 700; }
+.desk-row .status.is-waiting { color: var(--warning); }
+.desk-row .status.is-working { color: var(--accent); }
+.desk-row .status.is-done { color: var(--success); }
+.desk-row.sleeping .task { opacity: 0.7; }
+/* Your assistant's card keeps its size beside the chat too, selected like any row. */
 .desk .row.assistant { padding: 11px 10px 11px 8px; gap: 13px; }
 .desk .row.assistant .avatar-wrap { width: 52px; height: 52px; }
 .desk .row.assistant .name { font-size: 22px; }
@@ -102,32 +119,204 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .project-head.ruled:hover::after { margin-right: 48px; }
 .desk .empty { padding: 32px 12px; }
 
-/* ---- Claude's column, and the terminal in the gap on its right */
+/* ---- the chat, in the middle */
 
 .column {
-  position: absolute; top: 0; bottom: 0;
-  left: calc((100% - var(--column)) / 2);
-  width: var(--column);
-  display: flex; flex-direction: column;
-}
-/* Windows without borders: see-through panels from top to bottom. */
-.window {
   position: relative;
-  min-height: 0;
-  overflow: hidden;
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--pane-bg);
 }
-.window.claude { flex: 1; }
-.window.term {
-  position: absolute; top: 0; bottom: 0; right: 0;
-  width: calc((100% - var(--column)) / 2 - var(--pad));
+.side-wide .column { display: none; }
+.column.dropping::after {
+  content: ""; position: absolute; inset: 8px; pointer-events: none;
+  border: 2px dashed var(--accent); border-radius: var(--radius-card);
 }
-.zen .window.term, .window.term.none { display: none; }
+.desk-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.desk-chat > .chat { flex: 1; }
+.desk-chat .chat-dock { padding: 0 16px 14px; }
+.desk-chat .chat-conv { padding-top: 22px; }
 .desk-empty {
   flex: 1;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface) calc(var(--term-alpha) * 100%), transparent);
 }
+.desk-empty .big { font-size: var(--title); font-weight: 700; color: var(--text); }
+
+/* Over the chat: the session's state and name (click: rename), its state in
+   words, and the side panel's tabs. */
+.desk-head {
+  flex: none;
+  height: var(--head-height);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.zen .desk-head { padding-left: 46px; }
+.desk-head:empty { display: none; }
+.head-title {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 9px;
+  height: 36px; padding: 0 8px;
+  border-radius: var(--radius-control);
+  text-align: left; white-space: nowrap; overflow: hidden;
+}
+.head-title:hover { background: var(--control-hover); }
+.head-title .state { font-size: var(--body); width: var(--body); flex: none; }
+.head-title .task { font-size: var(--title); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.head-title .avatar.small { width: 22px; height: 22px; }
+.head-state { flex: none; font-size: var(--caption); color: var(--text-muted); }
+.head-state.is-waiting { color: var(--warning); font-weight: 700; }
+.head-state.is-working { color: var(--accent); }
+.head-btns { flex: none; display: flex; gap: 2px; }
+.head-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-muted); font-size: var(--caption); font-weight: 700;
+}
+.head-btn .ic { width: 16px; height: 16px; }
+.head-btn:hover { color: var(--text); background: var(--control-hover); }
+.head-btn.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
+.head-btn.more { width: 34px; padding: 0; justify-content: center; font-size: 16px; }
+/* Narrow: the tabs as icons only. */
+@media (max-width: 1180px) { .head-btn .label { display: none; } .head-btn { width: 34px; padding: 0; justify-content: center; } }
+
+/* The pane with the keyboard: a hairline of the accent along its top. */
+.column.active .desk-head, .sidepanel.active .side-head { box-shadow: inset 0 2px 0 -1px color-mix(in srgb, var(--accent) 70%, transparent); }
+
+/* ---- the side panel, on the right: Terminal, Changes, Details */
+
+.sidepanel {
+  position: relative;
+  flex: none; width: var(--side);
+  display: none; flex-direction: column;
+  min-width: 0;
+  background: var(--pane-bg);
+  border-left: 1px solid var(--border-faint);
+}
+.side-open .sidepanel { display: flex; }
+/* No room beside the chat: over it, from the right. */
+.side-over .sidepanel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; box-shadow: var(--shadow-popup); background: var(--surface); }
+.side-wide .sidepanel { flex: 1; border-left: 0; }
+.side-grip {
+  position: absolute; z-index: 2; top: 0; bottom: 0; left: -4px; width: 8px;
+  cursor: col-resize; touch-action: none;
+}
+.side-grip:hover, .resizing .side-grip { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.side-wide .side-grip { display: none; }
+.side-head {
+  flex: none;
+  height: var(--head-height);
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.side-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow: hidden; }
+.side-tab {
+  height: 32px; padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-muted); font-weight: 700; font-size: var(--caption);
+  white-space: nowrap;
+}
+.side-tab:hover { color: var(--text); background: var(--control-hover); }
+.side-tab.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
+.side-btn {
+  flex: none; width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--text-muted); font-size: 14px;
+}
+.side-btn .ic { width: 16px; height: 16px; }
+.side-btn:hover { color: var(--text); background: var(--control-hover); }
+.side-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.side-body.fill { overflow: hidden; display: flex; flex-direction: column; }
+.side-note { padding: 14px 16px; color: var(--text-muted); font-size: var(--caption); text-align: center; }
+.side-note.left { text-align: left; padding: 4px 0; }
+
+/* The Terminal tab: the project's terminal or Claude's classic one, with
+   Run and the saved commands over it. */
+.desk-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.term-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border-faint); }
+.term-bar .control { min-height: 30px; padding: 2px 10px; gap: 6px; font-size: var(--caption); white-space: nowrap; }
+.term-bar .term-switch { flex: 1; min-width: 0; }
+.term-bar .term-switch .control { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.term-banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: var(--caption); color: var(--text-muted); border-bottom: 1px solid var(--border-faint); }
+.term-banner span { flex: 1; }
+.term-body { position: relative; flex: 1; min-height: 0; }
+.term-body > .term-box[hidden] { display: none; }
+
+/* The Changes tab: what the session changed, file by file. */
+.changes { padding: 12px 12px 24px; display: flex; flex-direction: column; gap: 10px; }
+.changes-head { display: flex; flex-direction: column; gap: 6px; }
+.changes-sum { display: flex; align-items: center; gap: 8px; font-size: var(--title); }
+.changes-since { color: var(--text-muted); font-size: var(--caption); }
+.changes .diff-layout { align-self: flex-start; margin-top: 2px; }
+.changes .diff-layout .control { min-height: 28px; padding: 2px 10px; font-size: var(--caption); flex: none; }
+.changes .chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 7px; min-height: 20px; font-size: var(--caption); font-weight: 700;
+                 color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-item); white-space: nowrap; }
+.changes .chip .add { color: var(--diff-add); }
+.changes .chip .del { color: var(--diff-del); }
+.changes-commits summary { cursor: pointer; color: var(--link); font-size: var(--caption); font-weight: 700; }
+.changes-commits .commit { display: flex; gap: 8px; align-items: baseline; padding: 3px 0 3px 14px; font-size: var(--caption); }
+.changes-commits .commit span:not(.age) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-commits .age { color: var(--text-muted); flex: none; }
+.changes-index { display: flex; flex-direction: column; border: 1px solid var(--border-faint); border-radius: var(--radius-item); padding: 4px; }
+.file-row, .change-head {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 30px; padding: 3px 8px;
+  text-align: left; border-radius: var(--radius-item);
+}
+.file-row:hover, .change-head:hover { background: var(--control-hover); }
+.file-row .name, .change-head .name { font-weight: 700; white-space: nowrap; }
+.file-row .dir, .change-head .dir { flex: 1; min-width: 0; color: var(--text-muted); font-size: var(--caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { flex: none; min-width: 54px; padding: 0 6px; font-size: 11px; font-weight: 700; text-align: center;
+         border: 1px solid currentColor; border-radius: var(--radius-item); line-height: 18px; color: var(--info); }
+.badge.added, .badge.untracked { color: var(--success); }
+.badge.deleted { color: var(--danger); }
+.badge.renamed { color: var(--warning); }
+.change { border: 1px solid var(--code-border); border-radius: var(--radius-item); overflow: hidden; background: var(--code-bg); }
+.change-head { position: sticky; top: 0; z-index: 1; border-radius: 0; background: var(--surface); border-bottom: 1px solid var(--code-border); }
+.change.folded .change-head { border-bottom: 0; }
+.change-head .chev { width: 14px; height: 14px; flex: none; color: var(--text-muted); transform: rotate(90deg); transition: transform 0.15s ease; }
+.change.folded .change-head .chev { transform: none; }
+.change .diff-lines { max-height: none; font-family: var(--font-code); font-size: var(--caption); }
+.change > .side-note { text-align: left; }
+/* Side by side: what it was | what it is. */
+.diff-lines.split { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); line-height: 1.5; }
+.split .ln { min-width: 3ch; padding: 0 6px 0 8px; text-align: right; color: var(--text-muted); opacity: 0.7; user-select: none; }
+.split .tx { white-space: pre-wrap; word-break: break-word; padding-right: 10px; }
+.split .tx .sg { display: inline-block; width: 1.4em; margin-left: -0.2em; text-align: center; user-select: none; font-weight: 700; }
+.split .tx.ctx { color: var(--text-muted); padding-left: 1.2em; }
+.split .del { background: var(--diff-del-bg); color: var(--diff-del-text); }
+.split .del .sg { color: var(--diff-del); }
+.split .tx.del { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--diff-del-text) 55%, transparent); }
+.split .tx.del .sg { text-decoration: none; }
+.split .add { background: var(--diff-add-bg); color: var(--diff-add-text); }
+.split .add .sg { color: var(--diff-add); }
+.split .none { background: var(--control-bg); }
+.split .ln.none, .split .ln.ctx { border-left: 1px solid var(--border-faint); }
+.split .ln:nth-child(4n+1) { border-left: 0; }
+.split .gap { grid-column: 1 / -1; padding: 0 12px; color: var(--text-muted); }
+.split .diff-more { grid-column: 1 / -1; }
+
+/* The Details tab: label and value, a row each. */
+.details { padding: 4px 16px 24px; }
+.details .section { margin: 16px 0 6px; font-size: var(--caption); font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.details .kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 5px 0; align-items: baseline; border-bottom: 1px solid var(--border-faint); }
+.details .k { color: var(--text-muted); font-size: var(--caption); }
+.details .v { min-width: 0; overflow-wrap: anywhere; }
+.details .v .text-btn { min-height: 0; padding: 0 0 0 8px; font-size: var(--caption); }
+.details .muted { color: var(--text-muted); }
+.details code.path { font-size: var(--caption); }
+.details .bg-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.details .bg-row .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.details .bg-row .muted { font-size: var(--caption); }
+.details .ic, .changes .ic { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; }
+.details .ic svg, .changes .ic svg, .desk-head .ic svg, .side-head .ic svg { width: 100%; height: 100%; display: block; }
+.desk-head .ic, .side-head .ic { display: inline-grid; place-items: center; }
 
 /* A real terminal (xterm.js), on your theme's background, a little
    see-through (--term-alpha). */
@@ -150,25 +339,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   color: var(--text-muted);
   font-size: var(--caption);
 }
-
-/* The strip with the session's name above Claude, in zen mode: what it's
-   about, and on hover project · branch and a pencil (click to rename). */
-.strip {
-  flex: none;
-  height: var(--header);
-  display: none; align-items: center; justify-content: center; gap: 10px;
-  padding: 0 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  overflow: hidden; white-space: nowrap;
-}
-.zen .strip { display: flex; }
-.strip .state { font-size: var(--body); width: var(--body); }
-.strip .task { font-size: var(--body); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.strip .more { display: none; color: var(--text-muted); }
-.strip .avatar.small { width: 18px; height: 18px; }
-.strip:hover { background: color-mix(in srgb, var(--surface) 88%, var(--accent)); }
-.strip:hover .more { display: inline; }
 
 /* ---- your sessions under the Ⓐ (in zen mode, the way to them) */
 

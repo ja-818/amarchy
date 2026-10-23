@@ -600,20 +600,45 @@ localhost, default 7397) and `APP_HTTPS=` (443, 8443 or 10000) in
 
 ## In a browser on your computer
 
-The same app (`amarchy app`, same address) on a computer's wide screen is
-amarchy as your desktop lays it out, so a Mac or any other computer with
-Tailscale and a browser can use the host's sessions without Omarchy: your
-sessions on the left, the session's Claude in the 900px column in the middle
-and its terminal on the right, each a see-through panel from the top of the
-window to the bottom with no bar and no borders, zen mode with the strip with
-the session's name (and an Ⓐ in the corner for your sessions, lit when one
-needs you), all over your whole wallpaper in your theme and font. Claude and the terminal are the real thing: terminals
-(xterm.js) attached to the session's tmux on the host as your desktop's
-windows are, so the desktop, the phone and the browser show the same session
-at once (a session's window takes the size of whichever of them showed it or
-typed in it last, as with two desktops). Typing, the mouse wheel (tmux's scrollback), selecting (it copies to
-your clipboard, as tmux does there), resizing and the Nerd Font icons work as
-in your desktop's terminal; links open in a new tab.
+The same app (`amarchy app`, same address) on a computer's wide screen is a
+chat app, so a Mac or any other computer with Tailscale and a browser can use
+the host's sessions without Omarchy: your sessions on the left, the session's
+**chat** in the middle (the phone's: what you said in bubbles, Claude's words
+as text, its steps folded into a line, its questions, permissions and plans as
+cards with buttons, the box you type in), and beside it the **side panel**,
+each a see-through pane over your whole wallpaper in your theme and font.
+
+- **The list** shows each session's name, its state in words ("Needs your
+  answer", "Working", "Done", "Ready", "Asleep") and its project; a right
+  click opens its menu. Over it, the amarchy menu and **New session**.
+- **Over the chat**: the session's name (click: rename) and state, and, while
+  the side panel is closed, its tabs as buttons; `⋯` is the session's menu.
+- **The side panel** has three tabs, a click (or a key) away, as wide as you
+  drag its left edge (double-click: back to its width), or the whole window
+  (`⤢`, `Ctrl+Alt+F`); `✕` closes it. Short of room, the list goes first (zen
+  mode), then the panel lies over the chat.
+  - **Terminal**: the session's own terminal (Run and the saved commands over
+    it), or **Claude's classic terminal**, Claude Code's own TUI on the same
+    conversation (a session on the new chat switches back to it). Both are
+    the real thing: terminals (xterm.js) attached to the session's tmux on
+    the host, so the phone and every browser show the same session at once.
+    Typing, the mouse wheel (tmux's scrollback), selecting (it copies to your
+    clipboard), resizing and the Nerd Font icons work as in a terminal of its
+    own; links open in a new tab.
+  - **Changes**: everything the session changed, committed or not, new files
+    too, against where its branch left its base: a list of the files (New,
+    Edited, Deleted, Moved, with their `+`/`−`), then each file's lines, side
+    by side where the panel is wide enough (Auto), or as you pick (Side by
+    side, Stacked); the branch's own commits above. It reads them again every
+    few seconds while Claude works.
+  - **Details**: the project, branch, base (commits ahead and behind), what's
+    not committed, the last commit and the worktree; how Claude runs (the
+    new chat or the classic terminal, with the switch), its model and mode,
+    the plan's use (chat engine); background sessions and tasks; the ids.
+- **Show terminals** (Settings, the host's: off for a new install, on for an
+  install from before) decides whether the Terminal tab shows at all. Off, it's
+  still in the session's menu under **Advanced** (Open terminal, Open Claude's
+  classic terminal), and its key opens it for that session.
 
 It picks the layout by the window: a wide one with a mouse gets this, a
 phone the list and conversation. Settings (in the amarchy menu) can fix it to either, change the terminals' font size (they
@@ -625,20 +650,29 @@ the text size (Claude's screen as text too), and **Hold to talk**, which holds
 Claude's key for you while the phone's microphone is Claude's `rec`, so the
 words come up in its prompt as on your desktop.
 
-The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have:
+The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have
+(`Ctrl+Alt+M` → Settings → Keys lists them too):
 
 | Key | |
 | --- | --- |
 | `Ctrl+Alt+J` / `K` | The session below / above in the list. |
 | `Ctrl+Alt+S` | Search the list (in zen mode, under the Ⓐ). |
 | `Ctrl+Alt+A` | Your sessions under the Ⓐ (`Super+Alt+A` on Omarchy): `j`/`k`, `↵`, `/`, `+`/`-`, `g`, `p`/`f`/`s`, `o`, `Esc`, as there. |
-| `Ctrl+Alt+Z` | Zen mode (this browser's own). |
-| `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. |
-| `Ctrl+Alt+←` / `→` | Claude / the terminal (`Super+arrows` on Omarchy, which the browser keeps). |
+| `Ctrl+Alt+Z` | Zen mode: the list hidden (this browser's own). |
+| `Ctrl+Alt+Return` | Move the keyboard between the chat and the terminal (opening the side panel on it). |
+| `Ctrl+Alt+←` / `→` | The chat / the terminal (`Super+arrows` on Omarchy, which the browser keeps). |
+| `Ctrl+Alt+L` | Claude's classic terminal in the side panel; again, back to the project's terminal. |
+| `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
+| `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
 | `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
 | `Ctrl+Alt+N` / `P` | New session (`Super+Alt+N` on Omarchy) / new project. |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the session's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the session. |
+| `Ctrl+Alt+Space` | Dictate into the chat's box: hold it while you speak, or tap it, and tap again when you're done. |
+
+In the chat, `Enter` sends and `Shift+Enter` is a new line; `Esc` in the
+empty box stops Claude while it works; typing anywhere else on the page goes
+into the box. A card's choices take their number, as in Claude's own.
 
 Every menu takes the keys, in the browser on your computer and on a phone
 or tablet with a keyboard: a session's menu (its ••• or a right click on it),
@@ -647,7 +681,7 @@ the project for a new session, Claude's questions, and the phone's list
 itself. `↑`/`↓` go from line to line (buttons side by side, as High · Normal ·
 Low, are one line: `←`/`→` go along it), `Home`/`End` to the ends, `↵` or
 `Space` picks, `Tab` stays inside, `Esc` closes and gives the keys back where
-they were (on a computer, to Claude or the terminal). One you open with the
+they were (on a computer, to the chat or the terminal). One you open with the
 keys has its cursor, in the accent, on its first line (or the one that's on)
 at once; one you click, once you press an arrow. In Claude's question a
 choice's number picks it and `Esc` says no, as in Claude's own; in the order
@@ -655,23 +689,25 @@ of your projects `Shift+↵` on an arrow sends the project to the top or
 bottom; on a session in the list, the menu key (or `Shift+F10`) opens its
 menu, and `↓` from the search goes into the list.
 
-The keyboard follows the pointer between Claude and the terminal, as on
-Omarchy. On a Mac, Option is Alt in the terminals (Settings turns that off,
+On a Mac, Option is Alt in the terminals (Settings turns that off,
 for typing accented letters with it), and `Shift+Enter` is a new line in
 Claude's prompt. `Ctrl+Alt+T` picks the theme, the font and the wallpaper.
 
-**Pasting an image** works as on your desktop: `⌘V` (or `Ctrl+V`, once the
-browser lets the page read the clipboard) or dropping an image on Claude.
-The page hands the image to the host, and Claude's `Ctrl+V` gets it from
-amarchy's `wl-paste` there. No desktop is involved: the host keeps what you
+**Pasting an image**: `⌘V` in the chat's box, or dropping an image on the
+chat, and it goes with your next message (in Claude's classic terminal, `⌘V`
+or `Ctrl+V` as on your desktop). The page hands the image to the host, and
+Claude's `Ctrl+V` gets it from amarchy's `wl-paste` there. No desktop is involved: the host keeps what you
 last pasted, from any browser or phone, as its clipboard (the **web
 clipboard**, `~/.local/state/amarchy/clipboard/web.clip`, yours only), text
 you paste or copy in its terminals too, so `wl-paste` in any session (Claude's
 own, or yours in the terminal) prints it. A desktop still connected with
 `amarchy remote` answers first only for keys pressed on it.
 
-**Dictating** (`/voice`): hold Space in Claude, as on your desktop. While the
-page has the keyboard in a session's Claude, that session's `rec` on the host
+**Dictating**: the mic in the chat's box (or `Ctrl+Alt+Space`) writes what
+you say into it, on the host or by the browser (`amarchy dictation`). In
+Claude's classic terminal, Claude's own (`/voice`): hold Space, as on your
+desktop. While the page has the keyboard in a session's Claude, that
+session's `rec` on the host
 is the browser's microphone: the page turns it on as soon as Space goes down
 (not once the key repeats, half a second later; a space only typed turns it
 off again), what's said before Claude listens waits on the host, the host

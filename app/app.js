@@ -111,9 +111,10 @@ function wearLook(look) {
   paintBars();
 }
 
-// The real terminals wear it too (desk.js).
+// The real terminals wear it too (desk.js's, the phone's).
 function restyleTerminals() {
-  for (const p of [desk.claude, desk.term, app.session && app.session.pane]) if (p) p.restyle();
+  if (app.desk) deskRestyle();
+  if (app.session && app.session.pane) app.session.pane.restyle();
 }
 
 function paintBars() {
@@ -1476,8 +1477,7 @@ function closeSheet() {
   }
   if (!(app.desk || lastInput.keys)) return;
   if (to && to !== document.body && to.isConnected) to.focus({ preventScroll: true });
-  else if (app.desk && typeof desk !== "undefined" && desk.current)
-    (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
+  else if (app.desk) deskRefocus();     // desk.js: the chat, or the terminal you were in
 }
 
 // Every sheet goes: what you did in them is done.

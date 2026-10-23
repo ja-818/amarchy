@@ -20,7 +20,7 @@ terminal or Claude; no screen needed).
 
 | Feature | Desktop | Phone | Wide browser | Status |
 | --- | --- | --- | --- | --- |
-| The list: state, task, project · branch, age, priority, unread dot | SessionList / bar popup | list view | list beside Claude | done |
+| The list: state, task, project · branch, age, priority, unread dot | SessionList / bar popup | list view | the list beside the chat (state in words, project) | done |
 | Group (project, priority, status, nested) and sort | group & sort menu, `amarchy group`/`sort` | organize menu | organize menu, `g p f s o` under the Ⓐ | done |
 | Order of projects | `amarchy projects move` | Order projects… (list menu, project header, Settings) | the same | done |
 | Search | `amarchy search`, `Super+…+S` | search box | `Ctrl+Alt+S` | done |
@@ -33,9 +33,9 @@ terminal or Claude; no screen needed).
 | Close, asking first, saying what's lost | `amarchy close --confirm`, `X` | ••• or hold → Close session | `Ctrl+Alt+X`, menu, Close one… | done |
 | Close one from a picker | `amarchy pick close` | hold any row → Close | Sessions → Close one… | done |
 | Sleep / wake a session, sleep the idle ones, `sleep --after` | `amarchy sleep`/`wake` | session menu: Wake / Put to sleep; Settings → Sleep (minutes, Never, sleep the idle ones now) | the same, and Wake / Put to sleep under This session in the amarchy menu | done |
-| Zen mode | `amarchy zen`, `Z` | (the phone is always one column) | `Ctrl+Alt+Z` | done (wide) |
-| Claude ↔ terminal | `amarchy terminal`, `Return`, `Super+arrows` | ••• → Claude's terminal | `Ctrl+Alt+Return`, `Ctrl+Alt+←`/`→` | done |
-| The session's name strip above Claude | SessionHeader | the bar of the session view | the strip in zen mode | done |
+| Zen mode | `amarchy zen`, `Z` | (the phone is always one column) | `Ctrl+Alt+Z`: the list hidden | done (wide) |
+| Claude ↔ terminal | `amarchy terminal`, `Return`, `Super+arrows` | ••• → Claude's terminal | the chat ↔ the side panel's Terminal: `Ctrl+Alt+Return`, `Ctrl+Alt+←`/`→`; Claude's classic terminal: `Ctrl+Alt+L` | done |
+| The session's name strip above Claude | SessionHeader | the bar of the session view | the header over the chat (click: rename) | done |
 | Status glyph lit when one needs you (the Ⓐ) | BarWidget | "N need you" in the list's head; app icon badge | the Ⓐ lit; tab title `(N) Amarchy`, `•` for unread finished ones; a dot on the tab's icon; Dock/installed app badge | done |
 
 ## Run
@@ -48,7 +48,9 @@ terminal or Claude; no screen needed).
 | Save a command | `amarchy run --save` | Run… → Save a new command… | `Ctrl+Alt+C` → Save a new command…; Saved commands… | done |
 | Change / forget a command | `amarchy run --save` again / `--forget` | Run… → Edit / Forget | Run → Saved commands… | done |
 | List them | `amarchy run --list` | Run… | Saved commands… | done |
-| See the terminal's output | the terminal window | ••• → Claude's terminal (Claude's only) | the terminal beside Claude | done (wide); the phone shows Claude's terminal only |
+| See the terminal's output | the terminal window | ••• → Claude's terminal (Claude's only) | the side panel's Terminal tab | done (wide); the phone shows Claude's terminal only |
+| What the session changed (its diff against its base, new files too) | `git diff` in the terminal | — | the side panel's Changes: side by side where wide, stacked else (`Ctrl+Alt+G`) | done (wide) |
+| Branch, worktree, base, model, mode, engine, background sessions | `amarchy list`, the terminal | — | the side panel's Details (`Ctrl+Alt+I`) | done (wide) |
 
 ## Projects
 
@@ -94,10 +96,10 @@ terminal or Claude; no screen needed).
 
 | Feature | Desktop | Phone | Wide browser | Status |
 | --- | --- | --- | --- | --- |
-| Ctrl+V of an image into Claude | the host's `wl-paste` asked the desktop's clipboard over ssh | picture button by the box, ••• → Paste an image into Claude…, or an image pasted into the box | `⌘V`/`Ctrl+V` or a drop on Claude | done: the host keeps it as the web clipboard, no desktop needed |
+| Ctrl+V of an image into Claude | the host's `wl-paste` asked the desktop's clipboard over ssh | picture button by the box, ••• → Paste an image into Claude…, or an image pasted into the box | `⌘V` in the chat's box or a drop on the chat; `⌘V`/`Ctrl+V` in Claude's classic terminal | done: the host keeps it as the web clipboard, no desktop needed |
 | `wl-paste` in a session reads the clipboard | the desktop's, while connected | what you last pasted | what you last pasted (images and text) or copied in a terminal | done |
-| Dictation (Claude's `/voice`) | the desktop's microphone over PulseAudio | hold the mic | hold Space | done |
-| Dictation into the app's boxes, without Claude | none | the mic by the box: hold, or tap and tap again; written down on the host (Parakeet), or by the browser | the phone layout's boxes (the wide layout has none yet) | done: `amarchy dictation` |
+| Dictation (Claude's `/voice`) | the desktop's microphone over PulseAudio | hold the mic | hold Space in Claude's classic terminal | done |
+| Dictation into the app's boxes, without Claude | none | the mic by the box: hold, or tap and tap again; written down on the host (Parakeet), or by the browser | the chat's box: its mic, or `Ctrl+Alt+Space` (hold, or tap and tap again) | done: `amarchy dictation` |
 
 ## Look and the desktop itself
 

@@ -5436,6 +5436,166 @@ def app_closing(s):
     return {"changes": changes, "amarchy": installed_from(path)}
 
 
+# ---- the wide layout's side panel (desk.js): a session's Changes and Details
+
+CHANGES_FILES = 300         # files shown in Changes, at most
+CHANGES_LINES = 4000        # lines of one file's diff, at most (the rest: "cut")
+CHANGES_TOTAL = 40000       # lines of the whole diff, at most
+CHANGES_NEW = 256_000       # bytes of a new (untracked) file read to show it
+DIFF_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def git_base(s):
+    """What a session's branch is compared with: (the base it was made from,
+    the commit where it left it). Without a common commit, its own HEAD."""
+    path = s["path"]
+    base = s.get("base") or default_base(path) or "HEAD"
+    mb = sh("git", "merge-base", "HEAD", base, cwd=path).stdout.strip()
+    return base, mb or sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=path).stdout.strip()
+
+
+def parse_diff(text, total=0):
+    """`git diff`'s unified output as files, the chat's diffs' shape: {path,
+    old_path, status, binary, hunks: [{old, new, lines: ["+x", "-x", " x"]}],
+    add, del, cut}. At most CHANGES_LINES lines a file and CHANGES_TOTAL in
+    all (counting from total) are kept; the counts are whole."""
+    files, f = [], None
+    for line in text.split("\n"):
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(.*) b/(.*)$", line)
+            f = {"path": m.group(2) if m else line[11:], "old_path": None, "status": "modified",
+                 "binary": False, "hunks": [], "add": 0, "del": 0, "cut": False}
+            files.append(f)
+            continue
+        if f is None:
+            continue
+        m = DIFF_HUNK.match(line)
+        if m:
+            f["hunks"].append({"old": int(m.group(1)), "new": int(m.group(2)), "lines": []})
+            continue
+        if not f["hunks"]:       # the file's header
+            if line.startswith("new file mode"):
+                f["status"] = "added"
+            elif line.startswith("deleted file mode"):
+                f["status"] = "deleted"
+            elif line.startswith("rename from "):
+                f["old_path"], f["status"] = line[12:], "renamed"
+            elif line.startswith("rename to "):
+                f["path"] = line[10:]
+            elif line.startswith("Binary files") or line == "GIT binary patch":
+                f["binary"] = True
+            continue
+        if not line or line[0] not in "+- ":      # "\ No newline at end of file"
+            continue
+        if line[0] == "+":
+            f["add"] += 1
+        elif line[0] == "-":
+            f["del"] += 1
+        if sum(len(h["lines"]) for h in f["hunks"]) >= CHANGES_LINES or total >= CHANGES_TOTAL:
+            f["cut"] = True
+            continue
+        f["hunks"][-1]["lines"].append(line)
+        total += 1
+    return files
+
+
+def app_changes(s):
+    """Everything a session changed, for the side panel's Changes: its
+    worktree (committed or not, new files too) against where its branch left
+    its base, file by file; and its own commits."""
+    path = Path(s["path"])
+    if not path.is_dir():
+        return {"error": "Its worktree isn't there"}
+    base, mb = git_base(s)
+    if not mb:
+        return {"base": base, "files": [], "commits": [], "add": 0, "del": 0, "sig": ""}
+    diff = sh("git", "-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff", "-M", "-U3", mb, "--",
+              cwd=path).stdout
+    files = parse_diff(diff)
+    total = sum(len(h["lines"]) for f in files for h in f["hunks"])
+    # Files git doesn't know yet: new, shown whole (if text, and not huge).
+    new = [n for n in sh("git", "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
+                         cwd=path).stdout.split("\0") if n]
+    sig = hashlib.sha1(diff.encode(errors="replace"))
+    for name in new[:CHANGES_FILES]:
+        p = path / name
+        f = {"path": name, "old_path": None, "status": "untracked", "binary": False, "hunks": [],
+             "add": 0, "del": 0, "cut": False}
+        try:
+            st_ = p.stat()
+            sig.update(f"{name}\0{st_.st_size}\0{st_.st_mtime_ns}".encode())
+            data = p.read_bytes()[:CHANGES_NEW] if p.is_file() else b""
+        except OSError:
+            continue
+        if b"\0" in data[:8000]:
+            f["binary"] = True
+        else:
+            text = data.decode(errors="replace")
+            lines = text.split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
+            f["add"] = len(lines)
+            keep = max(0, min(len(lines), CHANGES_LINES, CHANGES_TOTAL - total))
+            f["hunks"] = [{"old": 0, "new": 1, "lines": ["+" + l for l in lines[:keep]]}] if lines else []
+            f["cut"] = keep < len(lines) or st_.st_size > CHANGES_NEW
+            total += keep
+        files.append(f)
+    head = sh("git", "rev-parse", "HEAD", cwd=path).stdout.strip()
+    sig.update(head.encode())
+    log = sh("git", "log", "--format=%h%x00%s%x00%ct", f"{mb}..HEAD", "-n", "50", cwd=path).stdout
+    commits = [dict(zip(("sha", "subject", "at"), c.split("\0"))) for c in log.splitlines() if c.count("\0") == 2]
+    for c in commits:
+        c["at"] = int(c["at"])
+    files.sort(key=lambda f: f["path"])
+    return {"base": base, "since": mb[:12], "files": files[:CHANGES_FILES], "more": max(0, len(files) - CHANGES_FILES),
+            "commits": commits, "add": sum(f["add"] for f in files), "del": sum(f["del"] for f in files),
+            "sig": sig.hexdigest()[:16]}
+
+
+def transcript_settings(s):
+    """The model and permission mode a session's Claude was last seen with,
+    from its conversation (the TUI's): (model, mode), either ""."""
+    f = transcript(s)
+    model = mode = ""
+    for r in reversed(conversation_records(f, tail=300_000) if f else []):
+        if not isinstance(r, dict):
+            continue
+        if not model and r.get("type") == "assistant" and isinstance(r.get("message"), dict):
+            m = r["message"].get("model") or ""
+            model = "" if m.startswith("<") else m       # "<synthetic>": no model's words
+        if not mode and isinstance(r.get("permissionMode"), str):
+            mode = r["permissionMode"]
+        if model and mode:
+            break
+    return model, mode
+
+
+def app_details(s):
+    """The side panel's Details: where the session works (branch, worktree,
+    base), how its Claude runs (engine, model, mode, usage), and the
+    background sessions in its worktree."""
+    path = Path(s["path"])
+    out = {"id": s["id"], "repo": s["repo"], "name": s.get("name"), "branch": s.get("branch"), "path": s["path"],
+           "base": s.get("base"), "created": s.get("created"), "engine": engine(s), "conversation": conversation_id(s["id"])}
+    if path.is_dir():
+        base, mb = git_base(s)
+        counts = sh("git", "rev-list", "--left-right", "--count", f"{base}...HEAD", cwd=path).stdout.split()
+        if len(counts) == 2:
+            out["behind"], out["ahead"] = int(counts[0]), int(counts[1])
+        out["uncommitted"] = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines())
+        out["head"] = sh("git", "log", "-1", "--format=%h%x00%s%x00%ct", cwd=path).stdout.strip().split("\0")
+    if engine(s) == "chat":
+        live = agent_live(s["id"])
+        out["model"], out["mode"] = live.get("model") or "", live.get("permission_mode") or ""
+        out["live"] = {k: live.get(k) for k in ("state", "tasks", "rate_limits", "cost_usd", "turns", "version")}
+    else:
+        out["model"], out["mode"] = transcript_settings(s)
+    out["background"] = [{"name": d.get("name") or d.get("jobId") or (d.get("sessionId") or "")[:8],
+                          "status": d.get("status"), "started": (d.get("startedAt") or 0) / 1000,
+                          "cwd": d.get("cwd")} for d in background_sessions(s)]
+    return out
+
+
 def app_earlier(s, before):
     """The part of the conversation before an offset: (items, its start)."""
     f = transcript(s)
@@ -7666,6 +7826,14 @@ def app_handler(st, users, address):
                                                   "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
+            # The wide layout's side panel (desk.js, B3): what a session changed, and its details.
+            m = re.fullmatch(r"/api/session/([^/]+)/(changes|details)", path)
+            if m:
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                d = app_changes(s) if m.group(2) == "changes" else app_details(s)
+                return self.error(410, d["error"]) if d.get("error") else self.send(200, d)
             m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))

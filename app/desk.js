@@ -1,28 +1,34 @@
 // amarchy on your computer: the app in a browser on a wide screen (its wide
-// layout). Your sessions on the left, the session's Claude in the column in
-// the middle and its terminal on the right, both of them real terminals
-// (xterm.js) attached to the session's tmux on the host: the phone and every
-// browser show the same session at once. The keys are amarchy's (Ctrl+Alt+…), the
-// look the one picked in the app (openLook). Loaded before app.js, whose helpers it uses (h, glyph,
-// api, toast, sessionRow…); app.js starts it on a wide screen (deskStart).
+// layout). Your sessions on the left, the session's chat in the middle
+// (chat.js, the phone's), and beside it a side panel with its Terminal (the
+// session's own, and Claude's classic one: real terminals, xterm.js, attached
+// to the session's tmux on the host), its Changes and its Details. The phone
+// and every browser show the same session at once. The keys are amarchy's
+// (Ctrl+Alt+…), the look the one picked in the app (openLook). Loaded before
+// app.js, whose helpers it uses (h, glyph, api, toast, sessionRow…); app.js
+// starts it on a wide screen (deskStart).
 "use strict";
 
 const desk = {
   current: null,        // the session on screen
-  focus: "claude",      // which of its terminals has the keyboard
-  zen: false,           // Claude alone in the column (Ctrl+Alt+Z)
-  claude: null,         // its two terminals (TermPane)
-  term: null,
+  chat: null,           // its chat (chat.js's Chat)
+  focus: "chat",        // where the keyboard is: chat, side (the panel), term (a terminal in it)
+  focusPane: null,      // the terminal (TermPane) with the keyboard, micPane the last Claude one
+  micPane: null,
+  zen: false,           // the list hidden (Ctrl+Alt+Z)
+  sideTab: null,        // the side panel's tab you left open: term, changes, details, none (closed)
+  sideWide: false,      // the side panel over the whole width (Ctrl+Alt+F)
+  sideWidth: 0,
+  revealed: false,      // a terminal asked for with Show terminals off: shown, for this session
+  terminal: null,       // the side panel's views
+  changes: null,
+  details: null,
   cursor: null,         // the session under the list's cursor, while searching it
   pending: null,        // a session just started, {id, until}: shown once the list has it
   query: "",
   statuses: null,       // each session's status as last seen, for the chime
   el: null,
 };
-const COLUMN = 900;     // Claude's column
-const PAD = 8;          // between it and the panels beside it
-const MIN_SIDE = 200;   // narrower than this beside the column, and it's zen mode
-const HEADER = 30;      // the strip with the session's name above Claude, in zen mode
 const enc = new TextEncoder();
 
 // The terminals style themselves with <style> elements of their own, which
@@ -422,8 +428,10 @@ async function copyText(text) {
 const voice = { ws: null, sid: null, on: false, warmed: null, idle: null, held: false, typed: null };
 const MIC_KEEP = 600000;  // ms the microphone is kept, off, after the last dictation (on a computer)
 
+// Claude's terminal has the keyboard (in the side panel, or the phone's).
 function micWanted() {
-  return !!desk.claude && desk.focus === "claude" && document.hasFocus() && document.visibilityState === "visible";
+  const p = desk.micPane;
+  return !!p && desk.focusPane === p && !!p.sid && document.hasFocus() && document.visibilityState === "visible";
 }
 
 function voiceWarm(sid, held) {
@@ -526,20 +534,45 @@ async function talkStop(pane) {
 
 // Whether the page's microphone is Claude's now: it has the keyboard in Claude.
 function micFocus() {
-  if (desk.claude) desk.claude.control({ mic: micWanted() });
+  if (desk.micPane) desk.micPane.control({ mic: micWanted() });
   if (!micWanted() && voice.ws && !voice.on) voiceStop();
   if (app.desk && document.visibilityState === "hidden" && !voice.ws && mic.stream) micClose();     // out of sight: let it go
 }
 
-// ---- the layout
+// ---- the layout: your sessions on the left, the session's chat in the
+// middle, and beside it the side panel: its Terminal, Changes and Details
+
+const SIDEBAR = 300;        // the list's width
+const MIN_CHAT = 440;       // the chat no narrower than this beside the side panel
+const SIDE_MIN = 340;       // the side panel's narrowest
+const SIDE_START = 560;     // and its width until you drag its edge
+const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+Return"], ["changes", "Changes", "Ctrl+Alt+G"], ["details", "Details", "Ctrl+Alt+I"]];
+
+// Whether the terminals show (Settings → Show terminals, the host's, on
+// unless it says off). Off, they're under the session's menu (Advanced), and
+// asking for one by its key shows it in this window until it reloads.
+function showTerminals() {
+  return desk.revealed || !(app.view && app.view.show_terminals === false);
+}
+
+// The side panel's tab open now, or null: the one you left open (or closed),
+// else the terminal if terminals show (as the terminal beside Claude was).
+function sideTab() {
+  const t = desk.sideTab === null ? (showTerminals() ? "term" : "none") : desk.sideTab;
+  if (t === "none" || (t === "term" && !showTerminals())) return null;
+  return SIDE_TABS.some(([k]) => k === t) ? t : null;
+}
 
 function deskStart() {
   document.body.classList.add("desk");
   desk.zen = store.get("zen") === "on";
-  desk.claude = new TermPane("claude", { mic: true });
-  desk.term = new TermPane("term");
+  desk.sideTab = store.get("desk-side") || null;
+  desk.sideWidth = parseInt(store.get("desk-side-width"), 10) || SIDE_START;
+  desk.terminal = makeTerminal();
+  desk.changes = new DeskChanges();
+  desk.details = new DeskDetails();
   desk.listEl = h("div", { class: "list" });
-  desk.search = h("input", { type: "search", placeholder: "Search sessions", autocomplete: "off", spellcheck: "false",
+  desk.search = h("input", { type: "search", placeholder: "Search sessions", title: "Search sessions (Ctrl+Alt+S)", autocomplete: "off", spellcheck: "false",
                              oninput: () => { desk.query = desk.search.value; desk.cursor = null; deskList(); },
                              onkeydown: (e) => searchKeys(e, desk.search, () => desk.listEl) });
   const organizeBtn = h("button", { class: "control organize", title: "Group and sort the list", "aria-haspopup": "menu",
@@ -547,36 +580,46 @@ function deskStart() {
                                     onkeydown: (e) => { if (e.key === "ArrowDown" && desk.organize.hidden) { e.preventDefault(); toggleOrganize(desk.organize, organizeBtn, deskList); } } },
                         glyph("organize"));
   desk.organize = organizeBox(() => organizeBtn, deskList);
-  desk.panel = h("aside", { class: "panel" },
+  desk.panel = h("aside", { class: "panel", "aria-label": "Your sessions" },
     h("div", { class: "panel-buttons" },
       desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
                      h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
-      h("button", { class: "control", title: "Ctrl+Alt+N", onclick: () => newSession() }, glyph("plus"), "New session")),
+      // The new chat: C5 gives it its own look ("What do you want to do?");
+      // newSession() is the hook.
+      h("button", { class: "control new-chat", title: "Ctrl+Alt+N", onclick: () => newSession() }, glyph("plus"), "New session")),
     h("div", { class: "toolbar" },
       h("label", { class: "searchbox" }, glyph("search"), desk.search,
         h("span", { class: "hint" }, "Ctrl+Alt+S")),
       organizeBtn, desk.organize),
     h("div", { class: "scroll" }, desk.listEl));
-  desk.strip = h("button", { class: "strip", title: "Rename (Ctrl+Alt+E)", onclick: () => renameSession() });
-  desk.claudeWin = h("section", { class: "window claude" }, desk.claude.box);
-  desk.termWin = h("section", { class: "window term" }, desk.term.box);
-  for (const [pane, win] of [[desk.claude, desk.claudeWin], [desk.term, desk.termWin]]) {
-    // The keyboard follows the pointer between the terminals.
-    win.addEventListener("pointerenter", () => {
-      if (!document.querySelector(".sheet-back, .picker-back, .bar-drop") && document.activeElement !== desk.search
-          && desk.focus !== pane.which) pane.focus();
-    });
-    win.addEventListener("mousedown", () => pane.focus());
-  }
+  desk.head = h("header", { class: "desk-head" });
+  desk.chatSlot = h("div", { class: "desk-chat" });
   desk.empty = h("div", { class: "desk-empty", hidden: true });
-  desk.column = h("main", { class: "column" }, desk.strip, desk.claudeWin, desk.empty);
+  desk.column = h("main", { class: "column" }, desk.head, desk.chatSlot, desk.empty);
+  desk.side = buildSide();
   // In zen mode, with no list, the way to your sessions: the Ⓐ in the corner.
   desk.ball = h("button", { class: "ball", title: "Your sessions (Ctrl+Alt+A; right click: new session)",
                             onclick: () => barDrop(), oncontextmenu: (e) => { e.preventDefault(); newSession(); } }, "Ⓐ");
-  desk.el = h("div", { class: "desk-root" }, h("div", { class: "stage" }, desk.panel, desk.column, desk.termWin), desk.ball);
+  desk.el = h("div", { class: "desk-root" }, h("div", { class: "stage" }, desk.panel, desk.column, desk.side.el), desk.ball);
   root.replaceChildren(desk.el);
+  // Where the keyboard is: the chat, the side panel, or a terminal in it
+  // (its TermPane says so itself, paneFocused).
+  desk.column.addEventListener("focusin", () => { desk.focus = "chat"; desk.focusPane = null; deskPanes(); });
+  desk.side.el.addEventListener("focusin", (e) => {
+    if (!e.target.closest(".term-box")) { desk.focus = "side"; desk.focusPane = null; deskPanes(); }
+  });
+  chatKeys();
+  dropImages();
   window.addEventListener("keydown", deskKeys, true);
+  window.addEventListener("keyup", deskKeysUp, true);
+  window.addEventListener("keydown", typeToChat);
   window.addEventListener("resize", () => deskLayout());
+  // A notification's card, tapped (chat.js answers it in its Chat): another
+  // session's, and the chat goes there first.
+  window.addEventListener("amarchy-ask", (e) => {
+    const id = e.detail && e.detail.id;
+    if (id && id !== desk.current && row(id)) go2(id);
+  });
   window.addEventListener("focus", () => { micFocus(); markSeen(); });
   window.addEventListener("blur", micFocus);
   document.addEventListener("visibilitychange", micFocus);
@@ -585,26 +628,54 @@ function deskStart() {
   deskRoute();
 }
 
-// Zen when you said so, or when the window has no room beside the column.
+// Zen: the list is hidden, because you said so (Ctrl+Alt+Z) or because the
+// window has no room for it.
 function zenNow() {
-  return desk.zen || (window.innerWidth - COLUMN) / 2 < MIN_SIDE;
+  return !!desk.el && desk.el.classList.contains("zen");
 }
 
+// The widths: the list (unless zen), the side panel (if open) as wide as you
+// dragged it, the chat the rest. Short of room, the list goes first, then
+// the panel goes over the chat.
 function deskLayout() {
-  const zen = zenNow();
-  desk.el.classList.toggle("zen", zen);
-  desk.el.style.setProperty("--column", `${Math.min(COLUMN, window.innerWidth)}px`);
-  desk.el.style.setProperty("--header", `${zen ? HEADER : 0}px`);
-  if (zen && desk.focus === "term") desk.claude.focus();
-  if (!zen && desk.current) desk.term.open(desk.current);
-  requestAnimationFrame(() => { desk.claude.fit(); desk.term.fit(); });
+  if (!desk.el) return;
+  const W = window.innerWidth, tab = desk.current ? sideTab() : null;
+  const wide = !!tab && desk.sideWide;
+  let list = desk.zen ? 0 : SIDEBAR;
+  if (list && W - list - (tab ? SIDE_MIN : 0) < MIN_CHAT) list = 0;
+  let side = 0, over = false;
+  if (tab) {
+    const room = W - list - MIN_CHAT;
+    if (wide) side = W - list;
+    else if (room >= SIDE_MIN) side = Math.max(SIDE_MIN, Math.min(desk.sideWidth, room));
+    else { over = true; side = Math.min(Math.max(desk.sideWidth, SIDE_MIN), W - 48); }
+  }
+  desk.el.classList.toggle("zen", !list);
+  desk.el.classList.toggle("side-open", !!tab);
+  desk.el.classList.toggle("side-over", over);
+  desk.el.classList.toggle("side-wide", wide);
+  desk.el.style.setProperty("--sidebar", `${list}px`);
+  desk.el.style.setProperty("--side", `${side}px`);
+  renderSide();
+  deskHead();
+  requestAnimationFrame(() => { desk.terminal.fit(); if (desk.chat) desk.chat.grow(); });
+}
+
+// The panes' outlines: which one has the keyboard.
+function deskPanes() {
+  desk.column.classList.toggle("active", desk.focus === "chat");
+  desk.side.el.classList.toggle("active", desk.focus !== "chat");
+  micFocus();
 }
 
 function paneFocused(pane) {
-  if (pane) desk.focus = pane.which;
-  desk.claudeWin.classList.toggle("active", desk.focus === "claude");
-  desk.termWin.classList.toggle("active", desk.focus === "term");
-  micFocus();
+  if (pane) {
+    desk.focus = "term";
+    desk.focusPane = pane;
+    if (pane.which === "claude" && pane.opts.mic) desk.micPane = pane;
+  }
+  if (desk.el) deskPanes();
+  else micFocus();
 }
 
 function row(id) { return app.view && app.view.sessions.find((s) => s.id === id) || null; }
@@ -630,24 +701,46 @@ function show(id) {
   const changed = id !== desk.current;
   desk.current = id;
   desk.empty.hidden = !!id || !app.view;
-  desk.claudeWin.hidden = !id;
-  desk.termWin.classList.toggle("none", !id);
+  desk.chatSlot.hidden = !id;
+  if (changed) {
+    if (desk.chat) desk.chat.close();
+    desk.chat = id ? deskChat(id) : null;
+    desk.chatSlot.replaceChildren(...(desk.chat ? [desk.chat.el] : []));
+    if (desk.chat) desk.chat.open();
+    if (desk.revealed && !(app.view && app.view.show_terminals !== false)) desk.revealed = false;     // shown for that session
+  }
   if (id) {
     store.set("desk-last", id);
-    desk.claude.open(id);
-    if (!zenNow()) desk.term.open(id);
     if (changed) {
-      desk.claude.focus();
-      paneFocused(desk.claude);
+      deskLayout();
+      toChat();
       markSeen();
     }
   } else {
-    desk.claude.disconnect();
-    desk.term.disconnect();
-    desk.empty.replaceChildren(h("div", {}, app.view ? "No sessions yet." : (app.failed || "Connecting…")),
+    desk.terminal.close();
+    desk.changes.close();
+    desk.details.close();
+    desk.empty.replaceChildren(h("div", { class: "big" }, app.view ? "No sessions yet" : (app.failed || "Connecting…")),
+      app.view ? h("div", {}, "Start one to talk to Claude about a project.") : null,
       app.view ? h("button", { class: "control", onclick: () => newSession() }, "New session (Ctrl+Alt+N)") : null);
+    deskLayout();
   }
   deskList();
+}
+
+// The session's chat (chat.js): its conversation, its cards, the box you
+// type in, read from its stream.
+function deskChat(id) {
+  const chat = new Chat({
+    id, row: row(id),
+    onSession: (r) => { if (chat === desk.chat) { deskHead(); desk.details.sessionChanged(r); } },
+    onGone: (why) => {
+      // Closed: the list moves on when it drops it. Not reachable (the host
+      // restarted): again in a moment.
+      if (why && chat === desk.chat) setTimeout(() => { if (chat === desk.chat && !chat.closed) chat.reopen(); }, 3000);
+    },
+  });
+  return chat;
 }
 
 function go2(id) {
@@ -660,7 +753,608 @@ function markSeen() {
     api(`/api/session/${encodeURIComponent(desk.current)}/seen`).catch(() => {});
 }
 
-// The list changed (app.js's events): the panel, the strip, the Ⓐ, and the
+// ---- over the chat: the session's name, its state in words, and the side
+// panel's tabs
+
+function deskHead() {
+  if (!desk.head) return;
+  const s = row(desk.current);
+  if (!s) { desk.head.replaceChildren(); return; }
+  const tab = sideTab();
+  const st = doneOf(s);
+  const name = s.assistant === "main"
+    ? [avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name")]
+    : [taskText(s.task || "New session", s.task ? "" : "untitled")];
+  const toggle = ([key, label, keys]) => h("button", {
+    class: `head-btn${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key),
+    title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
+  desk.head.replaceChildren(
+    h("button", { class: "head-title", type: "button", title: `${where(s)} · rename (Ctrl+Alt+E)`, onclick: () => renameSession() },
+      stateIcon(s), ...name,
+      h("span", { class: `head-state is-${statusTone(s)}` }, statusWords(s)), sleepMark(s)),
+    h("div", { class: "head-btns" },
+      // The panel's tabs, while it's closed (open, its own head has them).
+      ...(tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle)),
+      h("button", { class: "head-btn more", type: "button", title: "This session (Ctrl+Alt+M)", "aria-label": "This session",
+                    onclick: () => sessionMenu(s) }, glyph("more"))));
+}
+
+const SIDE_ICONS = { term: "run", changes: "diff", details: "info" };
+
+// The desk's own icons, drawn as the chat's are (chat.js's icon()).
+const DESK_ICONS = {
+  diff: '<path d="M12 4v8M8 8h8M8 18h8"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+  wide: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  narrow: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
+};
+
+function deskIcon(name, cls) {
+  if (!DESK_ICONS[name]) return icon(name, cls);
+  return h("span", { class: `ic${cls ? ` ${cls}` : ""}`, "aria-hidden": "true",
+                     html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+                           `stroke-linecap="round" stroke-linejoin="round">${DESK_ICONS[name]}</svg>` });
+}
+
+// A session's state in words, as the list and the header say it.
+// Its tone, for the color of those words: asleep is quiet, whatever it did last.
+function statusTone(s) {
+  return s.setup || sleepOf(s) ? "quiet" : doneOf(s);
+}
+
+function statusWords(s) {
+  if (s.setup) return "Setting up…";
+  const sl = sleepOf(s);
+  if (sl) return SLEEP[sl];
+  return { waiting: "Needs your answer", working: "Working", done: "Done", idle: "Ready" }[doneOf(s)] || "";
+}
+
+// ---- the side panel: the session's Terminal, Changes and Details, a tab
+// at a time, as wide as you drag its edge (or the whole width)
+
+function buildSide() {
+  const side = {};
+  side.tabs = h("div", { class: "side-tabs", role: "tablist" });
+  side.body = h("div", { class: "side-body" });
+  side.wideBtn = h("button", { class: "side-btn", type: "button", onclick: () => sideWide() });
+  side.grip = h("div", { class: "side-grip", title: "Drag to resize; double-click: back to its width", role: "separator",
+                         "aria-orientation": "vertical" });
+  side.el = h("aside", { class: "sidepanel", "aria-label": "Side panel" }, side.grip,
+    h("div", { class: "side-head" }, side.tabs, side.wideBtn,
+      h("button", { class: "side-btn", type: "button", title: "Close the panel (Ctrl+Alt+B)", "aria-label": "Close the panel",
+                    onclick: () => sideToggle(null) }, glyph("close"))),
+    side.body);
+  // Its edge, dragged: its width (kept in this browser).
+  side.grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    side.grip.setPointerCapture(e.pointerId);
+    desk.el.classList.add("resizing");
+    const move = (ev) => {
+      desk.sideWide = false;
+      desk.sideWidth = Math.max(SIDE_MIN, Math.round(window.innerWidth - ev.clientX));
+      deskLayout();
+    };
+    const up = () => {
+      side.grip.removeEventListener("pointermove", move);
+      desk.el.classList.remove("resizing");
+      store.set("desk-side-width", String(desk.sideWidth));
+    };
+    side.grip.addEventListener("pointermove", move);
+    side.grip.addEventListener("pointerup", up, { once: true });
+    side.grip.addEventListener("pointercancel", up, { once: true });
+  });
+  side.grip.addEventListener("dblclick", () => {
+    desk.sideWidth = SIDE_START;
+    store.set("desk-side-width", "");
+    deskLayout();
+  });
+  return side;
+}
+
+// The panel's tab: open it (or close the panel with null). Asked for again,
+// an open tab closes, unless keep.
+function sideToggle(tab, keep) {
+  const now = sideTab();
+  const next = tab && (tab !== now || keep) ? tab : null;
+  if (next === "term" && !showTerminals()) desk.revealed = true;
+  desk.sideTab = next || "none";
+  if (next) desk.lastTab = next;
+  if (!next) desk.sideWide = false;
+  store.set("desk-side", desk.sideTab);
+  deskLayout();
+  // The keyboard was in what's gone (the terminal, the panel): to the chat.
+  if (desk.focus !== "chat" && (!next || (desk.focus === "term" && next !== "term") || !desk.side.el.contains(document.activeElement))) toChat();
+}
+
+function sideWide(on) {
+  desk.sideWide = on === undefined ? !desk.sideWide : on;
+  deskLayout();
+}
+
+// What the panel shows: its tabs, and the open one's view (a view not shown
+// lets go of its terminal, or stops reading).
+function renderSide() {
+  const side = desk.side, tab = desk.current ? sideTab() : null;
+  side.tabs.replaceChildren(...SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) =>
+    h("button", { class: `side-tab${tab === key ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(tab === key),
+                  title: `${label} (${keys})`, onclick: () => sideToggle(key, true) }, label)));
+  side.wideBtn.title = desk.sideWide ? "Back beside the chat (Ctrl+Alt+F)" : "Full width (Ctrl+Alt+F)";
+  side.wideBtn.setAttribute("aria-label", side.wideBtn.title);
+  side.wideBtn.replaceChildren(deskIcon(desk.sideWide ? "narrow" : "wide"));
+  const views = { term: desk.terminal, changes: desk.changes, details: desk.details };
+  for (const [key, view] of Object.entries(views)) {
+    if (key === tab && desk.current) {
+      if (view.el.parentNode !== side.body) side.body.replaceChildren(view.el);
+      view.open(desk.current);
+    } else {
+      view.close();
+    }
+  }
+  if (!tab) side.body.replaceChildren();
+  side.body.classList.toggle("fill", tab === "term");
+}
+
+// ---- the Terminal tab: the session's own terminal, and Claude's classic
+// terminal (the TUI). terminal.js's SessionTerminal (C3) when it's there,
+// else the same two terminals with a switch of their own.
+
+function makeTerminal() {
+  if (typeof SessionTerminal === "function")
+    return new SessionTerminal({ id: null, phone: false, onShow: () => deskHead() });
+  return new DeskTerminal();
+}
+
+class DeskTerminal {
+  constructor() {
+    this.id = null;
+    this.showing = "term";
+    this.term = new TermPane("term");
+    this.claude = new TermPane("claude", { mic: true });
+    this.seg = h("div", { class: "seg term-switch" });
+    this.banner = h("div", { class: "term-banner", hidden: true });
+    this.el = h("div", { class: "desk-term" },
+      h("div", { class: "term-bar" }, this.seg,
+        h("button", { class: "control", type: "button", title: "Run the project (Ctrl+Alt+R)", onclick: () => runProject() }, glyph("send"), "Run"),
+        h("button", { class: "control", type: "button", title: "Run a saved command (Ctrl+Alt+C)", onclick: () => pickCommand() }, "Commands…")),
+      this.banner,
+      h("div", { class: "term-body" }, this.term.box, this.claude.box));
+    this.draw();
+  }
+
+  pane() { return this.showing === "claude" ? this.claude : this.term; }
+  which() { return this.showing; }
+
+  open(id) {
+    if (this.id !== id) this.id = id;
+    const other = this.showing === "claude" ? this.term : this.claude;
+    other.disconnect();
+    this.pane().open(id);
+    this.draw();
+  }
+
+  close() {
+    this.term.disconnect();
+    this.claude.disconnect();
+    this.id = null;
+  }
+
+  show(which) {
+    this.showing = which === "claude" ? "claude" : "term";
+    if (this.id) this.open(this.id);
+    this.draw();
+    deskHead();
+  }
+
+  // Claude's classic terminal: a chat-engine session goes back on it (same
+  // conversation), and it shows here.
+  classic() {
+    const s = row(this.id);
+    if (s && s.engine === "chat") switchEngine(s, "terminal");
+    this.show("claude");
+  }
+
+  draw() {
+    const s = row(this.id);
+    this.seg.replaceChildren(...[["term", "Project terminal"], ["claude", "Claude's classic terminal"]].map(([k, label]) =>
+      h("button", { class: `control${this.showing === k ? " on" : ""}`, type: "button", onclick: () => { this.show(k); this.focus(); } }, label)));
+    this.term.box.hidden = this.showing !== "term";
+    this.claude.box.hidden = this.showing !== "claude";
+    // On the chat engine, Claude's pane is the broker's log: the classic
+    // terminal is a switch away.
+    const chat = this.showing === "claude" && s && s.engine === "chat";
+    this.banner.hidden = !chat;
+    if (chat) this.banner.replaceChildren(h("span", {}, "Claude runs as a chat here: this is its log."),
+      h("button", { class: "text-btn", type: "button", onclick: () => this.classic() }, "Open Claude's classic terminal"));
+  }
+
+  fit() { this.pane().fit(); }
+  restyle() { this.term.restyle(); this.claude.restyle(); }
+  focus() { this.pane().focus(); }
+}
+
+// ---- the Changes tab: everything the session changed (its worktree
+// against where its branch left its base), file by file, side by side
+// where it's wide enough
+
+const SPLIT_AT = 760;       // the panel's width from which a diff goes side by side
+const BIG_FILE = 1500;      // lines: a file this big starts folded
+
+class DeskChanges {
+  constructor() {
+    this.el = h("div", { class: "changes" });
+    this.id = null;
+    this.data = null;
+    this.layout = store.get("diff-layout") || "auto";      // auto, split, stacked
+    new ResizeObserver(() => { if (this.data && this.split() !== this.drawnSplit) this.draw(); }).observe(this.el);
+  }
+
+  open(id) {
+    if (id !== this.id) {
+      this.id = id;
+      this.data = null;
+      this.sig = null;
+      this.folded = new Set();
+      this.opened = new Set();
+      this.el.replaceChildren(h("div", { class: "side-note" }, "Reading the changes…"));
+    }
+    if (!this.timer) { this.load(); this.tick(); }
+  }
+
+  close() {
+    clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  // Read again: every few seconds while Claude works, now and then while not.
+  tick() {
+    clearTimeout(this.timer);
+    const s = row(this.id);
+    this.timer = setTimeout(() => {
+      if (document.visibilityState === "visible") this.load();
+      this.tick();
+    }, s && s.status === "working" ? 4000 : 15000);
+  }
+
+  async load() {
+    const id = this.id;
+    try {
+      const r = await fetch(`/api/session/${encodeURIComponent(id)}/changes`);
+      const d = await r.json();
+      if (id !== this.id) return;
+      if (!r.ok) throw new Error(d.error || "Couldn't read the changes");
+      if (this.data && d.sig === this.data.sig) return;
+      this.data = d;
+      this.draw();
+    } catch (e) {
+      if (id === this.id && !this.data)
+        this.el.replaceChildren(h("div", { class: "side-note" }, e instanceof TypeError ? "Can't reach Amarchy" : e.message));
+    }
+  }
+
+  split() {
+    return this.layout === "split" || (this.layout === "auto" && this.el.clientWidth >= SPLIT_AT);
+  }
+
+  draw() {
+    const d = this.data;
+    const scroller = this.el.parentNode;
+    const top = scroller ? scroller.scrollTop : 0;
+    this.drawnSplit = this.split();
+    const files = d.files || [];
+    const kids = [];
+    const summary = files.length
+      ? h("div", { class: "changes-sum" }, h("b", {}, `${files.length}${d.more ? `+${d.more}` : ""} file${files.length === 1 ? "" : "s"} changed`),
+          diffChip(files) || null)
+      : h("div", { class: "changes-sum" }, h("b", {}, "No changes yet"));
+    const layoutSeg = h("div", { class: "seg diff-layout" }, ...[["auto", "Auto"], ["split", "Side by side"], ["stacked", "Stacked"]].map(([k, label]) =>
+      h("button", { class: `control${this.layout === k ? " on" : ""}`, type: "button", onclick: () => {
+        this.layout = k;
+        store.set("diff-layout", k === "auto" ? "" : k);
+        this.draw();
+      } }, label)));
+    kids.push(h("div", { class: "changes-head" }, summary,
+      h("div", { class: "changes-since" }, `Since it left ${d.base || "its base"}${d.since ? ` (${d.since.slice(0, 7)})` : ""}, committed or not`),
+      files.length ? layoutSeg : null));
+    if (d.commits && d.commits.length)
+      kids.push(h("details", { class: "changes-commits" },
+        h("summary", {}, `${d.commits.length} commit${d.commits.length === 1 ? "" : "s"} on its branch`),
+        ...d.commits.map((c) => h("div", { class: "commit" }, h("code", {}, c.sha), h("span", {}, c.subject),
+                                  h("span", { class: "age" }, ago(c.at))))));
+    if (files.length) {
+      const index = h("div", { class: "changes-index" });
+      for (const f of files) index.append(h("button", { class: "file-row", type: "button", title: f.path,
+          onclick: () => { this.folded.delete(f.path); this.opened.add(f.path); this.draw(); this.reveal(f.path); } },
+        h("span", { class: `badge ${f.status}` }, STATUS_WORD[f.status] || f.status),
+        h("span", { class: "name" }, baseName(f.path)), h("span", { class: "dir" }, dirOf(f.path)), diffChip([f])));
+      kids.push(index);
+      for (const f of files) kids.push(this.file(f));
+    }
+    this.el.replaceChildren(...kids);
+    if (scroller) scroller.scrollTop = top;
+  }
+
+  reveal(path) {
+    const el = Array.from(this.el.querySelectorAll(".change")).find((x) => x.dataset.path === path);
+    if (el) el.scrollIntoView({ block: "start" });
+  }
+
+  // One file: its name, what happened to it, and its lines (folded if huge).
+  file(f) {
+    const lines = (f.hunks || []).reduce((n, hk) => n + hk.lines.length, 0);
+    const folded = this.folded.has(f.path) || (lines > BIG_FILE && !this.opened.has(f.path));
+    const head = h("button", { class: "change-head", type: "button", "aria-expanded": String(!folded), onclick: () => {
+      if (folded) { this.folded.delete(f.path); this.opened.add(f.path); } else { this.folded.add(f.path); this.opened.delete(f.path); }
+      this.draw();
+    } }, icon("chevron", "chev"), h("span", { class: `badge ${f.status}` }, STATUS_WORD[f.status] || f.status),
+      h("span", { class: "name" }, baseName(f.path)),
+      h("span", { class: "dir" }, f.old_path ? `from ${f.old_path}` : dirOf(f.path)), diffChip([f]));
+    const box = h("section", { class: `change${folded ? " folded" : ""}`, "data-path": f.path }, head);
+    if (folded) return box;
+    if (f.binary) box.append(h("div", { class: "side-note" }, "A binary file: not shown"));
+    else if (!lines) box.append(h("div", { class: "side-note" }, f.status === "renamed" ? "Moved, unchanged" : "An empty file"));
+    else box.append(this.split() ? splitDiff(f) : stackedDiff(f));
+    if (f.cut) box.append(h("div", { class: "side-note" }, "The rest of this file's changes isn't shown here"));
+    return box;
+  }
+}
+
+const STATUS_WORD = { added: "New", untracked: "New", modified: "Edited", deleted: "Deleted", renamed: "Moved" };
+
+function dirOf(p) {
+  const s = String(p || "");
+  return s.includes("/") ? s.slice(0, s.lastIndexOf("/")) : "";
+}
+
+function ago(t) {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+// A file's lines one under the other (the chat's diff, chat.js).
+function stackedDiff(f) {
+  const view = diffView([{ ...f, created: false }]);
+  return view.querySelector(".diff-lines");
+}
+
+// A file's lines side by side: what it was on the left, what it is on the
+// right, each change's removed lines beside the lines that replaced them.
+function splitDiff(f) {
+  const body = h("div", { class: "diff-lines split" });
+  const cell = (cls, n, sg, text) => [h("span", { class: `ln ${cls}` }, n === null ? "" : String(n)),
+                                      h("span", { class: `tx ${cls}` }, sg ? h("span", { class: "sg" }, sg) : null, text)];
+  let drawn = 0;
+  const more = [];
+  const put = (els) => { if (drawn++ < DIFF_SHOWN) body.append(...els); else more.push(...els); };
+  (f.hunks || []).forEach((hk, n) => {
+    if (n) put([h("span", { class: "gap" }, "⋯")]);
+    let o = typeof hk.old === "number" ? hk.old : null, w = typeof hk.new === "number" ? hk.new : null;
+    const ls = hk.lines || [];
+    for (let i = 0; i < ls.length;) {
+      if (ls[i][0] !== "-" && ls[i][0] !== "+") {
+        const t = ls[i].slice(1) || " ";
+        put([...cell("ctx", o, "", t), ...cell("ctx", w, "", t)]);
+        if (o !== null) o++;
+        if (w !== null) w++;
+        i++;
+        continue;
+      }
+      const dels = [], adds = [];
+      while (i < ls.length && ls[i][0] === "-") dels.push(ls[i++].slice(1));
+      while (i < ls.length && ls[i][0] === "+") adds.push(ls[i++].slice(1));
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+        const left = k < dels.length ? cell("del", o === null ? null : o++, "−", dels[k] || " ") : cell("none", null, "", "");
+        const right = k < adds.length ? cell("add", w === null ? null : w++, "+", adds[k] || " ") : cell("none", null, "", "");
+        put([...left, ...right]);
+      }
+    }
+  });
+  if (more.length) {
+    const btn = h("button", { class: "diff-more", type: "button", onclick: () => btn.replaceWith(...more) },
+                  `Show ${Math.ceil(more.length / 4)} more lines`);
+    body.append(btn);
+  }
+  return body;
+}
+
+// ---- the Details tab: where the session works, how its Claude runs, and
+// what runs in the background
+
+const MODE_WORDS = { default: "Ask before changes", acceptEdits: "Accept edits", plan: "Plan first", auto: "Auto",
+                     dontAsk: "Don't ask", bypassPermissions: "Don't ask (bypass permissions)" };
+
+// "claude-opus-5-5[1m]": "Opus 5.5 (1M context)".
+function modelWords(id) {
+  const m = String(id || "").match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i);
+  if (!m) return id || "";
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}${m[4] ? " (1M context)" : ""}`;
+}
+
+class DeskDetails {
+  constructor() {
+    this.el = h("div", { class: "details" });
+    this.id = null;
+    this.data = null;
+  }
+
+  open(id) {
+    if (id !== this.id) {
+      this.id = id;
+      this.data = null;
+      this.el.replaceChildren(h("div", { class: "side-note" }, "Reading…"));
+    }
+    if (!this.timer) { this.load(); this.tick(); }
+  }
+
+  close() {
+    clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  tick() {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      if (document.visibilityState === "visible") this.load();
+      this.tick();
+    }, 10000);
+  }
+
+  // The session's row changed (its engine, its state): read again, soon.
+  sessionChanged(r) {
+    if (!this.timer || !r || r.id !== this.id) return;
+    const key = `${r.engine}|${r.status}|${r.sleeping}|${r.background}`;
+    if (key === this.rowKey) return;
+    this.rowKey = key;
+    clearTimeout(this.soon);
+    this.soon = setTimeout(() => this.load(), 600);
+  }
+
+  async load() {
+    const id = this.id;
+    try {
+      const r = await fetch(`/api/session/${encodeURIComponent(id)}/details`);
+      const d = await r.json();
+      if (id !== this.id) return;
+      if (!r.ok) throw new Error(d.error || "Couldn't read it");
+      if (this.data && JSON.stringify(d) === JSON.stringify(this.data)) return;
+      this.data = d;
+      this.draw();
+    } catch (e) {
+      if (id === this.id && !this.data)
+        this.el.replaceChildren(h("div", { class: "side-note" }, e instanceof TypeError ? "Can't reach Amarchy" : e.message));
+    }
+  }
+
+  draw() {
+    const d = this.data, s = row(this.id) || {};
+    const item = (label, value, extra) => value === undefined || value === null || value === "" ? null
+      : h("div", { class: "kv" }, h("span", { class: "k" }, label), h("span", { class: "v" }, value, extra || null));
+    const copy = (text) => h("button", { class: "text-btn", type: "button", onclick: () => copyText(text).then(() => toast("Copied")) }, "Copy");
+    const chat = d.engine === "chat";
+    const live = d.live || {};
+    const kids = [
+      h("div", { class: "section" }, "Where it works"),
+      item("Project", d.repo),
+      item("Branch", h("code", {}, d.branch || d.name || "")),
+      item("Made from", d.base ? h("code", {}, d.base) : null,
+           d.ahead !== undefined ? h("span", { class: "muted" }, ` · ${d.ahead} commit${d.ahead === 1 ? "" : "s"} ahead, ${d.behind} behind`) : null),
+      item("Not committed", d.uncommitted !== undefined ? (d.uncommitted ? `${d.uncommitted} file${d.uncommitted === 1 ? "" : "s"}` : "Nothing") : null),
+      item("Last commit", d.head && d.head[1] ? h("span", {}, h("code", {}, d.head[0]), ` ${d.head[1]}`) : null),
+      item("Worktree", h("code", { class: "path" }, d.path), copy(d.path)),
+      h("div", { class: "section" }, "Claude"),
+      item("Runs as", chat ? "The new chat" : "Claude's classic terminal",
+           s.setup ? null : h("button", { class: "text-btn", type: "button", onclick: () => switchEngine(s, chat ? "terminal" : "chat") },
+                             chat ? "Back to the classic terminal" : "Try the new chat")),
+      // C2's model and mode pills go here too: data-hook="model-mode".
+      h("div", { class: "kv-hook", "data-hook": "model-mode" },
+        item("Model", d.model ? modelWords(d.model) : "As Claude Code's default"),
+        item("Mode", d.mode ? MODE_WORDS[d.mode] || d.mode : null)),
+      item("State", statusWords(s)),
+    ];
+    if (chat) {
+      const lim = (live.rate_limits && live.rate_limits.unifiedWindows) || {};
+      const use = (w, label) => w && typeof w.utilization === "number"
+        ? item(label, `${Math.round(w.utilization * 100)}% used`, w.resetsAt ? h("span", { class: "muted" }, ` · resets ${when(w.resetsAt)}`) : null) : null;
+      kids.push(use(lim.five_hour, "Plan, 5 hours"), use(lim.seven_day, "Plan, this week"),
+        live.turns ? item("This run", `${live.turns} turn${live.turns === 1 ? "" : "s"}${live.cost_usd ? ` · $${live.cost_usd.toFixed(2)} at API prices` : ""}`) : null);
+    }
+    const tasks = Array.isArray(live.tasks) ? live.tasks : [];
+    const bg = d.background || [];
+    kids.push(h("div", { class: "section" }, "In the background"));
+    if (!tasks.length && !bg.length) kids.push(h("div", { class: "side-note left" }, "Nothing runs in the background."));
+    for (const t of tasks)
+      kids.push(h("div", { class: "bg-row" }, icon("clock"), h("span", { class: "what" }, cut(t.description || t.summary || t.command || t.task_id || t.id || "A task", 90)),
+                  t.status ? h("span", { class: "muted" }, t.status) : null));
+    for (const b of bg)
+      kids.push(h("div", { class: "bg-row" }, icon("helper"), h("span", { class: "what" }, `Background session ${b.name}`),
+                  h("span", { class: "muted" }, [b.status, b.started ? `since ${ago(b.started)}` : ""].filter(Boolean).join(" · "))));
+    kids.push(h("div", { class: "section" }, "Ids"),
+      item("Session", h("code", {}, d.id)),
+      item("Conversation", d.conversation ? h("code", {}, d.conversation) : null));
+    this.el.replaceChildren(...kids.filter(Boolean));
+  }
+}
+
+function when(t) {
+  const d = new Date(t * 1000);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+               : d.toLocaleDateString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// ---- the chat's keys on a computer
+
+// Esc in the box (empty) while Claude works stops it, as Esc in its terminal did.
+function chatKeys() {
+  desk.column.addEventListener("keydown", (e) => {
+    const c = desk.chat;
+    if (e.key !== "Escape" || !c || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.target === c.input && !c.input.value.trim() && c.working()) {
+      e.preventDefault();
+      c.stop();
+    }
+  });
+}
+
+// Typing with the keyboard nowhere in particular: into the box you type in.
+function typeToChat(e) {
+  const c = desk.chat;
+  if (!c || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
+  const at = document.activeElement;
+  if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .bar-drop, .card")))
+    return;
+  if (!c.dock.contains(c.input)) return;      // a card's up: its keys are its own
+  c.input.focus({ preventScroll: true });
+}
+
+// An image dropped on the chat goes with your next message (manage.js), as one pasted in its box.
+function dropImages() {
+  const image = (list) => Array.from(list || []).find((f) => /^image\//.test(f.type));
+  desk.column.addEventListener("dragover", (e) => {
+    if (desk.chat && e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+      e.preventDefault();
+      desk.column.classList.add("dropping");
+    }
+  });
+  desk.column.addEventListener("dragleave", (e) => { if (!desk.column.contains(e.relatedTarget)) desk.column.classList.remove("dropping"); });
+  desk.column.addEventListener("drop", (e) => {
+    desk.column.classList.remove("dropping");
+    if (e.defaultPrevented || !desk.chat) return;
+    const f = e.dataTransfer && image(e.dataTransfer.files);
+    if (!f) return;
+    e.preventDefault();
+    pasteImageInto({ id: desk.current }, f);
+    desk.chat.input.focus();
+  });
+}
+
+// The keyboard to the chat: its card if it asks something, else the box.
+function toChat() {
+  const c = desk.chat;
+  if (!c) return;
+  const card = c.dock.querySelector(".card");
+  if (card) (menuStart(card) || card).focus({ preventScroll: true });
+  else c.input.focus({ preventScroll: true });
+  desk.focus = "chat";
+  desk.focusPane = null;
+  deskPanes();
+}
+
+// Where the keyboard goes back to (a sheet or menu closed): where it was.
+function deskRefocus() {
+  if (!desk.current) return;
+  if (desk.focus === "term" && sideTab() === "term") desk.terminal.focus();
+  else toChat();
+}
+
+// The look changed: the terminals wear it again.
+function deskRestyle() {
+  if (desk.terminal) desk.terminal.restyle();
+}
+
+// The list changed (app.js's events): the panel, the header, the Ⓐ, and the
 // chime for a session that went on to need you or finished.
 function deskList() {
   if (!desk.el) return;
@@ -670,7 +1364,6 @@ function deskList() {
     const at = ids.indexOf(desk.current);
     const next = [...ids.slice(at + 1), ...ids.slice(0, Math.max(at, 0)).reverse()].find((id) => row(id))
       || (v.sessions[0] || {}).id;
-    desk.current = null;
     if (next) return go2(next);
     return show(null);
   }
@@ -680,14 +1373,9 @@ function deskList() {
   const waiting = v ? v.sessions.filter((s) => s.status === "waiting").length : 0;
   document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
   for (const b of [desk.brand, desk.ball]) b.classList.toggle("lit", waiting > 0);
-  // The strip above Claude in zen mode: what it is, project · branch on hover.
-  const s = row(desk.current);
-  desk.strip.replaceChildren(...(!s ? [] : s.assistant === "main"
-    ? [stateIcon(s), avatar(s, "small"), taskText(s.assistant_name || "Assistant", "assistant-name"), sleepMark(s),
-       h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]
-    : [stateIcon(s), taskText(s.task || "New session", s.task ? "" : "untitled"), sleepMark(s),
-       h("span", { class: "more" }, `${where(s)}  \u{F03EB}`)]));
-  // The panel.
+  // Show terminals turned on or off: the panel and the header follow.
+  const shows = showTerminals();
+  if (shows !== desk.shows) { desk.shows = shows; deskLayout(); } else deskHead();
   desk.organize.hidden = desk.organize.hidden || !v || !v.sessions.length;
   if (!desk.organize.hidden) keepFocus(desk.organize, () => desk.organize.replaceChildren(...organizeMenu()));
   const shown = fillList(desk.listEl, desk.query, desk.cursor || desk.current);
@@ -696,7 +1384,7 @@ function deskList() {
   if (drop) drop.refresh();
 }
 
-// The sessions as the list beside Claude draws them, the cursor's on the
+// The sessions as the list beside the chat draws them, the cursor's on the
 // one you're in (or the one you move it to).
 function fillList(list, query, cursorId) {
   const v = app.view;
@@ -718,14 +1406,35 @@ function fillList(list, query, cursorId) {
   const mine = shown.filter((s) => s.assistant);
   if (mine.length)
     list.append(h("div", { class: "assistant-section" },
-      ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true), s))));
-  grouped(list, shown, v.group || [], (s) => place(sessionRow(s, v.group || []), s));
+      ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : deskRow(s, [], true), s))));
+  grouped(list, shown, v.group || [], (s) => place(deskRow(s, v.group || []), s));
   const cur = list.querySelector(".row.cursor");
   if (cur) cur.scrollIntoView({ block: "nearest" });
   return shown;
 }
 
-// In the search (beside Claude, or under the Ⓐ): ↑/↓ move, ↵ goes there, Esc leaves.
+// One session in the list beside the chat: what it's about, and under it
+// its state in words and its project (unless a header says it); its time,
+// unread dot, priority and sleep on the right.
+function deskRow(s, groups, near = false) {
+  const st = doneOf(s);
+  const task = s.setup ? `${title(s)} (setting up…)` : (s.task || "New session");
+  const prio = !groups.includes("priority") && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
+  const bg = s.background > 0 ? ` · ${s.background} in the background` : "";
+  const unread = near && s.unseen && s.said;
+  return h("button", { class: `row desk-row is-${st}${s.priority === "low" ? " low" : ""}${sleepOf(s) ? " sleeping" : ""}`,
+                       "data-id": s.id, title: where(s), onclick: () => go2(s.id) },
+    stateIcon(s),
+    near ? avatar(s, "small") : null,
+    h("span", { class: "main" },
+      taskText(task, s.task ? "" : "untitled"),
+      unread ? h("div", { class: "meta said" }, s.said)
+        : h("div", { class: "meta" }, h("span", { class: `status is-${statusTone(s)}` }, statusWords(s)),
+            groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${s.repo}`), bg)),
+    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio));
+}
+
+// In the search (beside the chat, or under the Ⓐ): ↑/↓ move, ↵ goes there, Esc leaves.
 function searchKeys(e, input, listOf, done) {
   const ids = Array.from(listOf().querySelectorAll(".row")).map((r) => r.dataset.id);
   const at = ids.indexOf(desk.cursor || desk.current);
@@ -754,7 +1463,7 @@ function leaveSearch(input) {
   desk.cursor = null;
   input.blur();
   deskList();
-  if (desk.current) (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
+  deskRefocus();
 }
 
 // The chime this page plays when a session needs you or is done (the one
@@ -800,7 +1509,7 @@ function barDrop(search) {
     h("div", { class: "scroll" }, list));
   let query = "";
   drop.refresh = () => fillList(list, query, desk.cursor || desk.current);
-  drop.close = () => { back.remove(); drop.remove(); desk.cursor = null; if (desk.current) desk.claude.focus(); };
+  drop.close = () => { back.remove(); drop.remove(); desk.cursor = null; deskRefocus(); };
   input.addEventListener("input", () => { query = input.value; desk.cursor = null; drop.refresh(); });
   // The session list's keys: j/k and ↵ in the list, / to search,
   // +/- for priority, g for group & sort, p/f/s to group, o to sort.
@@ -849,7 +1558,10 @@ function barDrop(search) {
 const DESK_KEYS = {
   KeyJ: () => step(1), KeyK: () => step(-1),
   KeyS: () => deskSearch(), KeyZ: () => toggleZen(), Enter: () => toggleTerminal(),
-  ArrowLeft: () => toPane("claude"), ArrowRight: () => toPane("term"),
+  ArrowLeft: () => toChat(), ArrowRight: () => toTerminal(),
+  KeyG: () => desk.current && sideToggle("changes"), KeyI: () => desk.current && sideToggle("details"),
+  KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
+  KeyL: () => classicTerminal(),
   KeyR: () => runProject(), KeyC: () => pickCommand(),
   KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(),
   ArrowUp: () => desk.current && setPriority(row(desk.current), "up"),
@@ -859,6 +1571,7 @@ const DESK_KEYS = {
 
 function deskKeys(e) {
   if (!(e.ctrlKey && e.altKey) || e.metaKey) return;
+  if (e.code === "Space") return talkKey(e);
   const act = DESK_KEYS[e.code];
   if (!act) return;
   e.preventDefault();
@@ -866,6 +1579,37 @@ function deskKeys(e) {
   if (e.repeat && !["KeyJ", "KeyK"].includes(e.code)) return;
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
   act();
+}
+
+// Ctrl+Alt+Space: dictate into the chat's box, held as its mic is (let go
+// and it's written down), or tapped (it listens until tapped again).
+function talkKey(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const c = desk.chat;
+  if (e.repeat || !c || !c.dock.contains(c.input)) return;
+  const t = c.talk;
+  if (t.locked) { t.stop(); return; }
+  if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
+  c.input.focus({ preventScroll: true });
+  desk.talkDown = e.timeStamp;
+  t.start();
+}
+
+function deskKeysUp(e) {
+  if (e.code !== "Space" || desk.talkDown === undefined || desk.talkDown === null) return;
+  const c = desk.chat, t = c && c.talk;
+  const tapped = e.timeStamp - desk.talkDown < DICTATE_TAP;
+  desk.talkDown = null;
+  if (!t || !t.run) return;
+  e.preventDefault();
+  if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
+    t.locked = true;
+    t.say("Listening… Ctrl+Alt+Space again when you're done");
+    c.micBtn.classList.add("on");
+    return;
+  }
+  t.stop();
 }
 
 function step(n) {
@@ -883,7 +1627,7 @@ function flashDrop() {
   if (!document.querySelector(".bar-drop")) barDrop();
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { const d = document.querySelector(".bar-drop"); if (d && !d.contains(document.activeElement)) d.close(); }, 1200);
-  requestAnimationFrame(() => { if (desk.current) desk.claude.focus(); });
+  requestAnimationFrame(() => deskRefocus());
 }
 
 function deskSearch() {
@@ -898,23 +1642,36 @@ function toggleZen(on) {
   deskLayout();
 }
 
-function toPane(which) {
-  if (which === "term" && !leaveZen()) return;
-  (which === "term" ? desk.term : desk.claude).focus();
+// The side panel closed, or back on the tab it had.
+function toggleSide() {
+  if (sideTab()) return sideToggle(null);
+  const last = desk.lastTab || (showTerminals() ? "term" : "changes");
+  sideToggle(last, true);
 }
 
+// The session's terminal, in the side panel, with the keyboard.
+function toTerminal(which) {
+  if (!desk.current) return;
+  sideToggle("term", true);
+  if (which && desk.terminal.which && desk.terminal.which() !== which) desk.terminal.show(which);
+  requestAnimationFrame(() => desk.terminal.focus());
+}
+
+// Between the chat and the terminal (Ctrl+Alt+Return).
 function toggleTerminal() {
-  toPane(desk.focus === "term" && !zenNow() ? "claude" : "term");
+  if (desk.focus === "term" && sideTab() === "term") toChat();
+  else toTerminal();
 }
 
-// The terminal lives beside Claude: asking for it leaves zen mode.
-function leaveZen() {
-  if (desk.zen) toggleZen(false);
-  if (zenNow()) {
-    toast("No room for the terminal beside Claude in this window.");
-    return false;
-  }
-  return true;
+// Claude's classic terminal (the TUI) in the side panel, a chat-engine
+// session switched back onto it; asked again, back to the project's terminal.
+function classicTerminal() {
+  if (!desk.current) return;
+  const t = desk.terminal;
+  if (sideTab() === "term" && t.which && t.which() === "claude") return toTerminal("term");
+  sideToggle("term", true);
+  t.classic();
+  requestAnimationFrame(() => t.focus());
 }
 
 // ---- pickers: a menu card, for everything amarchy asks
@@ -934,7 +1691,7 @@ function picker(opts) {
   let level, items = [], at = 0;
   const close = back.close = () => {
     back.remove();
-    if (desk.current) (desk.focus === "term" && !zenNow() ? desk.term : desk.claude).focus();
+    deskRefocus();
   };
   const enter = (o) => {
     level = o;
@@ -1090,10 +1847,9 @@ async function closeCurrent() {
 async function runProject(name) {
   const s = row(desk.current);
   if (!s) return;
-  if (!leaveZen()) return;
   try {
     await api(`/api/session/${encodeURIComponent(s.id)}/run`, name ? { name } : {});
-    desk.term.open(s.id);
+    toTerminal("term");
   } catch (e) {
     if (/No run command/.test(e.message))
       return ask(`Run command for ${s.repo}`, "", async (cmd) => {
@@ -1156,24 +1912,13 @@ function deskMenu() {
     { label: "New project", icon: "plus", key: "Ctrl+Alt+P", act: () => newProject() },
   ];
   if (s) items.push(
+    { label: "View", icon: "status", group: () => ({ title: "View", items: viewItems() }) },
     { label: "Run", icon: "send", group: () => ({ title: "Run", items: [
       { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
-      { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, (n) => { if (leaveZen()) desk.term.open(s.id); }) },
-      { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toPane("term") }] }) },
-    { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: [
-      { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
-      ...(s.setup ? [] : [s.engine === "chat" ? { label: "Back to the classic terminal", detail: "Claude Code's own, same conversation",
-                                                act: () => switchEngine(s, "terminal") }
-                                              : { label: "Try the new chat", detail: "same conversation", act: () => switchEngine(s, "chat") }]),
-      ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
-                                                : { label: "Put to sleep", act: () => sleepSession(s) }]),
-      { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
-        act: () => assistantSheet(s) },
-      ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),
-                                                  key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
-                                                  act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
-      { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() }] }) });
+      { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, () => toTerminal("term")) },
+      { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toTerminal("term") }] }) },
+    { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: sessionItems(s) }) });
   items.push(
     { label: "Sessions", icon: "status", group: () => ({ title: "Sessions", items: [
       { label: "Next", key: "Ctrl+Alt+J", act: () => step(1) },
@@ -1191,16 +1936,63 @@ function deskMenu() {
   picker({ title: "Amarchy", items });
 }
 
+// What the window shows: the chat, the side panel's tabs, its width.
+function viewItems() {
+  const tab = sideTab(), on = (x) => (x ? "on" : "");
+  return [
+    { label: "The chat", key: "Ctrl+Alt+←", act: () => toChat() },
+    ...(showTerminals() ? [
+      { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+Return", act: () => toTerminal("term") },
+      { label: "Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
+    { label: "Changes", detail: on(tab === "changes"), key: "Ctrl+Alt+G", act: () => sideToggle("changes", true) },
+    { label: "Details", detail: on(tab === "details"), key: "Ctrl+Alt+I", act: () => sideToggle("details", true) },
+    { label: tab ? "Close the side panel" : "Open the side panel", key: "Ctrl+Alt+B", act: () => toggleSide() },
+    ...(tab ? [{ label: "Side panel full width", detail: on(desk.sideWide), key: "Ctrl+Alt+F", act: () => sideWide() }] : []),
+    { label: "Zen mode", detail: on(desk.zen), key: "Ctrl+Alt+Z", act: () => toggleZen() },
+  ];
+}
+
+// What you can do to a session (the menu's This session, the header's ⋯).
+function sessionItems(s) {
+  const on = (x) => (x ? "on" : "");
+  return [
+    { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
+    { label: "Paste an image into Claude…", detail: "it goes with your next message", act: () => pickImageInto({ id: s.id }) },
+    ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
+                                              : { label: "Put to sleep", act: () => sleepSession(s) }]),
+    { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
+      act: () => assistantSheet(s) },
+    ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),
+                                                key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
+                                                act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
+    { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
+      { label: "Open terminal", detail: "the session's own, in the side panel", key: "Ctrl+Alt+Return", act: () => toTerminal("term") },
+      { label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() },
+      ...(s.setup ? [] : [s.engine === "chat" ? { label: "Back to the classic terminal", detail: "Claude runs in its terminal again, same conversation",
+                                                act: () => switchEngine(s, "terminal") }
+                                              : { label: "Try the new chat", detail: "Claude runs as a chat, same conversation", act: () => switchEngine(s, "chat") }]),
+      { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
+    { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
+  ];
+}
+
+function sessionMenu(s) {
+  picker({ title: s.task || where(s), items: sessionItems(s) });
+}
+
 function showKeys() {
   const keys = [["Ctrl+Alt+J / K", "Next / previous session"], ["Ctrl+Alt+S", "Search sessions"],
-    ["Ctrl+Alt+Z", "Zen mode"], ["Ctrl+Alt+Return", "Between Claude and the terminal"],
-    ["Ctrl+Alt+← / →", "Claude / the terminal"], ["Ctrl+Alt+R", "Run the project"],
+    ["Ctrl+Alt+Z", "Zen mode: the list hidden"], ["Ctrl+Alt+Return", "Between the chat and the terminal"],
+    ["Ctrl+Alt+← / →", "The chat / the terminal"], ["Ctrl+Alt+L", "Claude's classic terminal"],
+    ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
+    ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New session / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
-    ["Hold Space", "Dictate to Claude (/voice), with this computer's microphone"],
-    ["⌘V / Ctrl+V", "Paste an image into Claude (or drop it there); wl-paste on the host reads it"],
-    ["Shift+Enter", "A new line in Claude's prompt"]];
+    ["Ctrl+Alt+Space", "Dictate into the chat: hold, or tap and tap again"],
+    ["Enter / Shift+Enter", "Send / a new line, in the chat"], ["Esc", "Stop Claude, in the chat's empty box"],
+    ["⌘V / drop", "An image goes with your next message"],
+    ["Hold Space", "In Claude's classic terminal: dictate (/voice) with this computer's microphone"]];
   sheet(sheetHead("Keys", "amarchy's, in the browser"),
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what)))));
 }
@@ -1210,17 +2002,17 @@ function deskSettings() {
   const size = termSize();
   const sizeBtn = (d) => h("button", { class: "control", onclick: () => {
     store.set("term-size", String(Math.max(6, Math.min(40, termSize() + d))));
-    for (const p of [desk.claude, desk.term, app.session && app.session.pane]) if (p) p.restyle();
+    deskRestyle();
     openSettings();
   } }, d > 0 ? "A+" : "A−");
   const meta = store.get("option-meta") !== "off";
   return [
     h("div", { class: "section" }, "Terminals"),
     h("div", { class: "seg" }, sizeBtn(-1), h("span", { class: "control size" }, `${size}px`), sizeBtn(1),
-      h("button", { class: "control", onclick: () => { store.set("term-size", ""); for (const p of [desk.claude, desk.term]) if (p) p.restyle(); openSettings(); } }, "As the theme")),
+      h("button", { class: "control", onclick: () => { store.set("term-size", ""); deskRestyle(); openSettings(); } }, "As the theme")),
     h("button", { class: `control wide${meta ? " on" : ""}`, onclick: () => {
       store.set("option-meta", meta ? "off" : "");
-      for (const p of [desk.claude, desk.term]) if (p) p.restyle();
+      deskRestyle();
       openSettings();
     } }, meta ? "Option is Alt in the terminals (on)" : "Option types characters (Option isn't Alt)"),
     h("button", { class: `control wide${webgl() ? " on" : ""}`, onclick: () => {

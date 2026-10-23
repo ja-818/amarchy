@@ -86,8 +86,11 @@ its background's lightness.
 `--caption` `--body` `--title` `--display` `--icon-large` (font sizes; the
 wide layout sets its own in `.desk-root`), `--gap`, and the safe areas `--top`
 `--bottom`; `--chat-column`, the chat's readable column (760px unless a
-layout sets it). The scripts set `--vvh`, `--vv-top`, `--screen-size`, `--column`,
-`--header`, and the theme cards' `--card-bg` `--card-fg` `--dot` `--thumb`.
+layout sets it). The scripts set `--vvh`, `--vv-top`, `--screen-size`, the wide
+layout's `--sidebar` and `--side` (the list's and the side panel's widths),
+and the theme cards' `--card-bg` `--card-fg` `--dot` `--thumb`. The wide
+layout's panes wear `--pane-bg` (`.desk-root`: `--surface` as see-through as
+the terminals, `--term-alpha`) and `--head-height` (their heads).
 
 ## The terminals
 
