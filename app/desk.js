@@ -546,7 +546,7 @@ const SIDEBAR = 300;        // the list's width
 const MIN_CHAT = 440;       // the chat no narrower than this beside the side panel
 const SIDE_MIN = 340;       // the side panel's narrowest
 const SIDE_START = 560;     // and its width until you drag its edge
-const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+Return"], ["changes", "Changes", "Ctrl+Alt+G"], ["details", "Details", "Ctrl+Alt+I"]];
+const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+→"], ["changes", "Changes", "Ctrl+Alt+G"], ["details", "Details", "Ctrl+Alt+I"]];
 
 // Whether the terminals show (Settings → Show terminals, the host's, on
 // unless it says off). Off, they're under the session's menu (Advanced), and
@@ -1569,7 +1569,7 @@ function barDrop(search) {
 
 const DESK_KEYS = {
   KeyJ: () => step(1), KeyK: () => step(-1),
-  KeyS: () => deskSearch(), KeyZ: () => toggleZen(), Enter: () => toggleTerminal(),
+  KeyS: () => deskSearch(), KeyZ: () => toggleZen(),
   ArrowLeft: () => toChat(), ArrowRight: () => toTerminal(),
   KeyG: () => desk.current && sideToggle("changes"), KeyI: () => desk.current && sideToggle("details"),
   KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
@@ -1583,7 +1583,7 @@ const DESK_KEYS = {
 
 function deskKeys(e) {
   if (!(e.ctrlKey && e.altKey) || e.metaKey) return;
-  if (e.code === "Space") return talkKey(e);
+  if (TALK_KEYS.includes(e.code)) return talkKey(e);
   const act = DESK_KEYS[e.code];
   if (!act) return;
   e.preventDefault();
@@ -1593,8 +1593,11 @@ function deskKeys(e) {
   act();
 }
 
-// Ctrl+Alt+Space: dictate into the chat's box, held as its mic is (let go
-// and it's written down), or tapped (it listens until tapped again).
+// Ctrl+Alt+Space or Ctrl+Alt+Enter: dictate into the chat's box, held as its
+// mic is (let go and it's written down), or tapped (it listens until tapped
+// again).
+const TALK_KEYS = ["Space", "Enter", "NumpadEnter"];
+
 function talkKey(e) {
   e.preventDefault();
   e.stopPropagation();
@@ -1606,11 +1609,12 @@ function talkKey(e) {
   if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
   if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
+  desk.talkCode = e.code;
   t.start();
 }
 
 function deskKeysUp(e) {
-  if (e.code !== "Space" || desk.talkDown === undefined || desk.talkDown === null) return;
+  if (e.code !== desk.talkCode || desk.talkDown === undefined || desk.talkDown === null) return;
   const c = desk.chat, fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
   const t = fresh ? fresh.dictate : c && c.talk;
   const tapped = e.timeStamp - desk.talkDown < DICTATE_TAP;
@@ -1619,7 +1623,7 @@ function deskKeysUp(e) {
   e.preventDefault();
   if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
     t.locked = true;
-    t.say("Listening… Ctrl+Alt+Space again when you're done");
+    t.say(`Listening… ${e.code === "Space" ? "Ctrl+Alt+Space" : "Ctrl+Alt+Enter"} again when you're done`);
     (fresh ? fresh.dictate.opts.button : c.micBtn).classList.add("on");
     return;
   }
@@ -1669,12 +1673,6 @@ function toTerminal(which) {
   sideToggle("term", true);
   if (which && desk.terminal.which && desk.terminal.which() !== which) desk.terminal.show(which);
   requestAnimationFrame(() => desk.terminal.focus());
-}
-
-// Between the chat and the terminal (Ctrl+Alt+Return).
-function toggleTerminal() {
-  if (desk.focus === "term" && sideTab() === "term") toChat();
-  else toTerminal();
 }
 
 // Claude's classic terminal (the TUI) in the side panel, a chat-engine
@@ -1926,7 +1924,7 @@ function deskMenu() {
       { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
       { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, () => toTerminal("term")) },
-      { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toTerminal("term") }] }) },
+      { label: "The terminal", key: "Ctrl+Alt+→", act: () => toTerminal("term") }] }) },
     { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: sessionItems(s) }) });
   items.push(
     { label: "Sessions", icon: "status", group: () => ({ title: "Sessions", items: [
@@ -1951,7 +1949,7 @@ function viewItems() {
   return [
     { label: "The chat", key: "Ctrl+Alt+←", act: () => toChat() },
     ...(showTerminals() ? [
-      { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+Return", act: () => toTerminal("term") },
+      { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       { label: "Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
     { label: "Changes", detail: on(tab === "changes"), key: "Ctrl+Alt+G", act: () => sideToggle("changes", true) },
     { label: "Details", detail: on(tab === "details"), key: "Ctrl+Alt+I", act: () => sideToggle("details", true) },
@@ -1977,7 +1975,7 @@ function sessionItems(s) {
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
                                                 act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
-      { label: "Open terminal", detail: "the session's own, in the side panel", key: "Ctrl+Alt+Return", act: () => toTerminal("term") },
+      { label: "Open terminal", detail: "the session's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
     { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
@@ -1990,7 +1988,7 @@ function sessionMenu(s) {
 
 function showKeys() {
   const keys = [["Ctrl+Alt+J / K", "Next / previous session"], ["Ctrl+Alt+S", "Search sessions"],
-    ["Ctrl+Alt+Z", "Zen mode: the list hidden"], ["Ctrl+Alt+Return", "Between the chat and the terminal"],
+    ["Ctrl+Alt+Z", "Zen mode: the list hidden"],
     ["Ctrl+Alt+← / →", "The chat / the terminal"],
     ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
     ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
@@ -1998,7 +1996,7 @@ function showKeys() {
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
-    ["Ctrl+Alt+Space", "Dictate into the chat: hold, or tap and tap again"],
+    ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],
     ["Enter / Shift+Enter", "Send / a new line, in the chat"], ["Esc", "Stop Claude, in the chat's empty box"],
     ["⌘V / drop", "An image goes with your next message"],
     ["Hold Space", "In Claude's classic terminal: dictate (/voice) with this computer's microphone"]];

@@ -34,7 +34,7 @@ terminal or Claude; no screen needed).
 | Close one from a picker | `amarchy pick close` | hold any row → Close | Sessions → Close one… | done |
 | Sleep / wake a session, sleep the idle ones, `sleep --after` | `amarchy sleep`/`wake` | session menu: Wake / Put to sleep; Settings → Sleep (minutes, Never, sleep the idle ones now) | the same, and Wake / Put to sleep under This session in the amarchy menu | done |
 | Zen mode | `amarchy zen`, `Z` | (the phone is always one column) | `Ctrl+Alt+Z`: the list hidden | done (wide) |
-| Claude ↔ terminal | `amarchy terminal`, `Return`, `Super+arrows` | ••• → Claude's terminal | the chat ↔ the side panel's Terminal: `Ctrl+Alt+Return`, `Ctrl+Alt+←`/`→`; Claude's classic terminal: `Ctrl+Alt+L` | done |
+| Claude ↔ terminal | `amarchy terminal`, `Return`, `Super+arrows` | ••• → Claude's terminal | the chat ↔ the side panel's Terminal: `Ctrl+Alt+←`/`→`; Claude's classic terminal: `Ctrl+Alt+L` | done |
 | The session's name strip above Claude | SessionHeader | the bar of the session view | the header over the chat (click: rename) | done |
 | Status glyph lit when one needs you (the Ⓐ) | BarWidget | "N need you" in the list's head; app icon badge | the Ⓐ lit; tab title `(N) Amarchy`, `•` for unread finished ones; a dot on the tab's icon; Dock/installed app badge | done |
 
@@ -99,7 +99,7 @@ terminal or Claude; no screen needed).
 | Ctrl+V of an image into Claude | the host's `wl-paste` asked the desktop's clipboard over ssh | picture button by the box, ••• → Paste an image into Claude…, or an image pasted into the box | `⌘V` in the chat's box or a drop on the chat; `⌘V`/`Ctrl+V` in Claude's classic terminal | done: the host keeps it as the web clipboard, no desktop needed |
 | `wl-paste` in a session reads the clipboard | the desktop's, while connected | what you last pasted | what you last pasted (images and text) or copied in a terminal | done |
 | Dictation (Claude's `/voice`) | the desktop's microphone over PulseAudio | hold the mic | hold Space in Claude's classic terminal | done |
-| Dictation into the app's boxes, without Claude | none | the mic by the box: hold, or tap and tap again; written down on the host (Parakeet), or by the browser | the chat's box: its mic, or `Ctrl+Alt+Space` (hold, or tap and tap again) | done: `amarchy dictation` |
+| Dictation into the app's boxes, without Claude | none | the mic by the box: hold, or tap and tap again; written down on the host (Parakeet), or by the browser | the chat's box: its mic, or `Ctrl+Alt+Space` or `Ctrl+Alt+Enter` (hold, or tap and tap again) | done: `amarchy dictation` |
 
 ## Look and the desktop itself
 
@@ -128,7 +128,7 @@ Mac), which a page gets:
 | `Super+Space` → Amarchy (the menu) | `Ctrl+Alt+M` |
 | `Super+Alt+…` keys moved by `amarchy keys` | not configurable: always `Ctrl+Alt` |
 
-The rest (`Ctrl+Alt+J/K/S/Z/Return/R/C/N/P/E/M/X/Up/Down`) are the
+The rest (`Ctrl+Alt+J/K/S/Z/R/C/N/P/E/M/X/Up/Down`) are the
 desktop's own keys, unchanged. `Ctrl+Alt+T` (theme) is theme-web's.
 
 ## Still depends on a desktop

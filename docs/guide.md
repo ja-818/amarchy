@@ -80,7 +80,7 @@ mode and outside amarchy, the list under the Ⓐ.
 
 **Zen mode** (`Ctrl+Alt+Z`) leaves Claude alone in the column. Claude doesn't
 move: the panels beside it just step away, for every session, until you press
-it again or ask for the terminal (`Ctrl+Alt+Return`, or running something in
+it again or ask for the terminal (`Ctrl+Alt+→`, or running something in
 it). Your sessions are still under the **Ⓐ in the bar**, which lights up when
 one needs you, and the list drops from it for a moment when you move between
 sessions:
@@ -153,7 +153,7 @@ move one.
 | `Ctrl+Alt+J` / `K` | Inside amarchy: the session below / above in the list, wrapping around. |
 | `Ctrl+Alt+S` | Search, the same as clicking the search: on a session, the list beside Claude; in zen mode, the list drops from the Ⓐ. Type to find a session by name, `↵` jumps to it, `Esc` leaves the search. Under the Ⓐ, `Esc` goes to the list itself: `j`/`k` and `↵` to jump, `/` to search again, `+` / `-` to raise / lower a session's priority, `g` for the group & sort menu, `p` / `f` / `s` to switch grouping by project / priority / status, `o` for the next sort (priority, newest, oldest), `Esc` to dismiss. |
 | `Ctrl+Alt+Z` | Zen mode: Claude alone, without the sessions and the terminal beside it. Again brings them back. |
-| `Ctrl+Alt+Return` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
+| `Ctrl+Alt+→` / `←` | Move the keyboard between Claude and the terminal. In zen mode it leaves zen mode, since the terminal lives beside Claude. |
 | `Ctrl+Alt+R` | Run the project in that terminal (`bin/dev`, `npm run dev`, `cargo run`... guessed from the repo; it asks when it can't tell). Again restarts it. Change it with `amarchy run --set`. |
 | `Ctrl+Alt+C` | The project's other saved commands: pick one to run in that terminal, or save a new one. |
 | `Ctrl+Alt+N` / `P` | New session / new project. |
@@ -746,7 +746,6 @@ The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have
 | `Ctrl+Alt+S` | Search the list (in zen mode, under the Ⓐ). |
 | `Ctrl+Alt+A` | Your sessions under the Ⓐ (`Super+Alt+A` on Omarchy): `j`/`k`, `↵`, `/`, `+`/`-`, `g`, `p`/`f`/`s`, `o`, `Esc`, as there. |
 | `Ctrl+Alt+Z` | Zen mode: the list hidden (this browser's own). |
-| `Ctrl+Alt+Return` | Move the keyboard between the chat and the terminal (opening the side panel on it). |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal (`Super+arrows` on Omarchy, which the browser keeps). |
 | `Ctrl+Alt+L` | Claude's classic terminal in the side panel; again, back to the project's terminal. |
 | `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
@@ -755,7 +754,7 @@ The keys are amarchy's, `Ctrl+Alt+…`, which a browser lets a page have
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the session's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the session. |
-| `Ctrl+Alt+Space` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
+| `Ctrl+Alt+Space` / `Ctrl+Alt+Enter` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
 
 In the chat, `Enter` sends and `Shift+Enter` is a new line; `Esc` in the
 empty box stops Claude while it works; typing anywhere else on the page goes
@@ -791,7 +790,7 @@ you paste or copy in its terminals too, so `wl-paste` in any session (Claude's
 own, or yours in the terminal) prints it. A desktop still connected with
 `amarchy remote` answers first only for keys pressed on it.
 
-**Dictating**: the mic in the chat's box (or `Ctrl+Alt+Space`) writes what
+**Dictating**: the mic in the chat's box (or `Ctrl+Alt+Space` or `Ctrl+Alt+Enter`) writes what
 you say into it, on the host or by the browser (`amarchy dictation`). In
 Claude's classic terminal, Claude's own (`/voice`): hold Space, as on your
 desktop. While the page has the keyboard in a session's Claude, that
