@@ -26,7 +26,6 @@ body.desk { overflow: hidden; }
 body.desk::before { background-image: var(--wallpaper-wide, var(--wallpaper, none)); }
 body.desk #root { background: transparent; padding: 0; height: 100vh; }
 body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
-body.desk .toast.action { cursor: pointer; }
 
 .desk-root {
   --pad: 8px;
@@ -80,8 +79,8 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 /* The menu as wide as its name, New session the rest. */
 .panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
 .panel-buttons .brand { flex: none; }
-.panel-buttons .new-chat { flex: 1; min-width: 0; justify-content: center; color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); font-weight: 700; }
-.panel-buttons .new-chat:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
+/* Outline, like the rest of the buttons here: not filled. */
+.panel-buttons .new-chat { flex: 1; min-width: 0; justify-content: center; }
 .panel-buttons .a { font-size: var(--title); line-height: 1; }
 .desk .control:hover { background: var(--control-hover); }
 .desk .toolbar { padding: 0; flex: none; }

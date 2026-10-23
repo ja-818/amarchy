@@ -22,6 +22,12 @@ const DICTATE_TAP = 350;      // ms: let go sooner and it's a tap: it listens un
 const DICTATE_STOP = 6000;    // ms the browser's recognition may take to finish once stopped
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 const iPhoneApp = standaloneApple();
+const live = new Set();       // the dictations under way, in any box (dictationUnderWay)
+
+// Words being written down, or listened to, anywhere: a reload would lose them.
+function dictationUnderWay() {
+  return live.size > 0 || document.body.classList.contains("dictating");
+}
 
 function standaloneApple() {
   const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -102,6 +108,16 @@ class Dictate {
 
   available() { return !!this.way(); }
 
+  // Enter or Esc while dictating: it stops, and what was said stays in the box,
+  // unsent (a second Enter sends, once the words are in). True when the key was
+  // the dictation's, so the box leaves it be; while the words are still being
+  // written down, the key is held back all the same.
+  keyStops(e) {
+    if (!this.run || e.isComposing || (e.key !== "Enter" && e.key !== "Escape")) return false;
+    this.stop();
+    return true;
+  }
+
   start() {
     if (this.run) return;
     const way = this.way();
@@ -109,6 +125,7 @@ class Dictate {
     const field = this.opts.field;
     const base = field.value.replace(/\s+$/, "");
     const r = this.run = { way, base, first: base, held: true, words: "", wrote: false, started: Date.now() };
+    live.add(r);
     this.opts.button.classList.add("on");
     if (way === "claude") return this.opts.claude.start();
     if (this.opts.changed) this.opts.changed();
@@ -124,6 +141,7 @@ class Dictate {
     this.opts.button.classList.remove("on");
     if (r.way === "claude") {
       this.run = null;
+      live.delete(r);
       return this.opts.claude.stop();
     }
     r.letGo = Date.now();
@@ -159,6 +177,7 @@ class Dictate {
   }
 
   done(r) {
+    live.delete(r);
     if (this.run !== r) return;
     this.run = null;
     this.locked = false;

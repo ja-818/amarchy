@@ -3,36 +3,64 @@
 // when the server can't be reached (it then says so, rather than Safari's
 // error page), your assistant's picture too. Everything else always comes
 // from the server.
+//
+// The app's files are kept by build: the server writes its build into this
+// file (bin/amarchy's page) and sends it with each app file (X-Amarchy-Build).
+// A cache keeps only files of this build, so an offline page never gets old
+// and new files mixed. A new build is a new worker: it takes over at once
+// (skipWaiting), the old one's files go, and the page reloads (app.js).
 
-const SHELL = "amarchy-shell-v9";
+const BUILD = "{{build}}";
+const SHELL = `amarchy-shell-${BUILD}`;
+const PICTURES = "amarchy-pictures";     // not a build's: kept until a newer one of yours replaces it
 const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/terminal.css", "/secrets.css", "/theme.css", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
+// A response that may be kept: it worked, and it's this build's (a file with
+// no build, as theme.css, belongs to none).
+function ofBuild(res) {
+  const build = res.headers.get("X-Amarchy-Build");
+  return res.ok && (build === null || build === BUILD);
+}
+
+// Each file as this build has it, kept now (the ones the server can't give
+// yet, as it's still being updated, are kept when a page first loads them).
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const cache = await caches.open(SHELL);
+    await Promise.all(FILES.map(async (f) => {
+      try {
+        const res = await fetch(f, { cache: "no-cache" });
+        if (ofBuild(res)) await cache.put(f, res);
+      } catch (err) { /* offline: kept the next time */ }
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
-    for (const key of await caches.keys()) if (key !== SHELL) await caches.delete(key);
+    for (const key of await caches.keys()) if (key !== SHELL && key !== PICTURES) await caches.delete(key);
     await self.clients.claim();
   })());
 });
 
-// The app's files: from the server when it answers (and kept), else as kept.
+// The app's files: from the server when it answers (and kept, if they're this
+// build's), else as kept.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   const path = url.pathname === "/index.html" ? "/" : url.pathname;
-  if (!FILES.includes(path) && !path.startsWith("/picture/")) return;     // and your assistant's picture
+  const picture = path.startsWith("/picture/");     // your assistant's picture
+  if (!FILES.includes(path) && !picture) return;
   e.respondWith((async () => {
     try {
       const res = await fetch(e.request);
-      if (res.ok) {
+      if (ofBuild(res)) {
         const copy = res.clone();
-        caches.open(SHELL).then(async (c) => {
+        caches.open(picture ? PICTURES : SHELL).then(async (c) => {
           await c.put(path, copy);
           // A new picture: the one before it isn't needed any more.
-          if (path.startsWith("/picture/")) {
+          if (picture) {
             const sig = path.slice(9, 21);
             for (const req of await c.keys()) {
               const p = new URL(req.url).pathname;

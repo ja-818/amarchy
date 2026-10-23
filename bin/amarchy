@@ -8106,18 +8106,32 @@ def mic_record(conn, args):
 
 # ---- the server
 
+APP_BUILD_MEMO = {"seen": None, "build": None}
+
 def app_build():
-    """Which app pages this server has (a hash of its files): open pages
-    that loaded others offer to reload once amarchy was updated."""
-    h = hashlib.sha1()
+    """The app's build: a hash of its files as they are on disk now, so an
+    open page that loaded others reloads once they differ (app.js). It's read
+    again only when a file's stat changed: the list asks every second."""
+    seen = []
     for f in sorted(APP_PAGES.rglob("*")):
-        if f.is_file():
-            h.update(f.relative_to(APP_PAGES).as_posix().encode() + b"\0")
-            try:
-                h.update(f.read_bytes())
-            except OSError:
-                pass
-    return h.hexdigest()[:12]
+        try:
+            if f.is_file():
+                st = f.stat()
+                seen.append((f.relative_to(APP_PAGES).as_posix(), st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
+    if seen == APP_BUILD_MEMO["seen"]:
+        return APP_BUILD_MEMO["build"]
+    h = hashlib.sha1()
+    for name, _, _ in seen:
+        h.update(name.encode() + b"\0")
+        try:
+            h.update((APP_PAGES / name).read_bytes())
+        except OSError:
+            pass
+    build = h.hexdigest()[:12]
+    APP_BUILD_MEMO.update(seen=seen, build=build)
+    return build
 
 
 class AppState:
@@ -8133,7 +8147,6 @@ class AppState:
         self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
         self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
         self.lock = threading.Lock()
-        self.build = app_build()
         # Which sessions are open on a device (a phone's conversation, a
         # browser's terminals: id -> how many), and when each last was, for
         # the sleep timer (on_screen). What the last server knew of when stays.
@@ -8185,7 +8198,7 @@ def app_watch(st):
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": sound_name(),
-                    "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": st.build,
+                    "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
                     "engine_problem": protocol_problem()}
@@ -9103,8 +9116,15 @@ def app_handler(st, users, address):
             f = APP_PAGES / folder / name
             if not re.fullmatch(r"[\w-]+(\.[\w-]+)+", name) or Path(name).suffix not in APP_TYPES or not f.is_file():
                 return self.error(404, "not found")
+            # The build this page is (index.html knows it, sw.js caches by it,
+            # and every app file says which build it is: a worker keeps only
+            # files of one build, never a mix of two).
+            build = app_build()
             extra = [("Service-Worker-Allowed", "/")] if name == "sw.js" else []
+            extra.append(("X-Amarchy-Build", build))
             data, nonce = f.read_bytes(), None
+            if name in ("index.html", "sw.js"):
+                data = data.replace(b"{{build}}", build.encode())
             if name == "index.html":
                 nonce = b64u(os.urandom(16))
                 data = data.replace(b"{{nonce}}", nonce.encode())

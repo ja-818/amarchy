@@ -575,6 +575,7 @@ function deskStart() {
   desk.search = h("input", { type: "search", placeholder: "Search chats", title: "Search chats (Ctrl+Alt+S)", autocomplete: "off", spellcheck: "false",
                              oninput: () => { desk.query = desk.search.value; desk.cursor = null; deskList(); },
                              onkeydown: (e) => searchKeys(e, desk.search, () => desk.listEl) });
+  if (kept && kept.search) desk.search.value = desk.query = kept.search;      // kept over an update (app.js)
   const organizeBtn = h("button", { class: "control organize", title: "Group and sort the list", "aria-haspopup": "menu",
                                     onclick: () => toggleOrganize(desk.organize, organizeBtn, deskList),
                                     onkeydown: (e) => { if (e.key === "ArrowDown" && desk.organize.hidden) { e.preventDefault(); toggleOrganize(desk.organize, organizeBtn, deskList); } } },

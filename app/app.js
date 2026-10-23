@@ -315,16 +315,83 @@ if (window.visualViewport) {
 
 // ---- the list
 
-// amarchy was updated on the host (its app came back with other pages):
-// the new ones, at once if you're not looking, else when you click.
+// ---- updates: amarchy was updated on the host, and this page loads the new one
+// by itself, at a moment that loses nothing. Until then it waits and tries
+// again; it never asks.
+
+const KEPT = "amarchy-kept";        // the page's own state, across the reload (sessionStorage)
+const KEPT_FOR = 30000;             // ms it's taken back for, at most
+const RELOAD_WAIT = 1500;           // ms between the looks while a reload waits
+const NOT_WORDS = ["checkbox", "radio", "hidden", "range", "file", "button", "submit", "reset", "color", "search"];
+let kept = null;                    // what the page held before its reload, taken once
+
 function updated() {
-  if (app.reloading) return;
-  app.reloading = true;
-  if (document.hidden) return document.addEventListener("visibilitychange", () => location.reload(), { once: true });
-  const t = h("div", { class: "toast action stay", role: "status", onclick: () => location.reload() },
-              "Amarchy was updated: click here to load it");
-  document.body.append(t);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) location.reload(); });
+  if (app.updating) return;
+  app.updating = true;
+  // The new service worker first, so the new page is served by it (sw.js).
+  if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistration().then((reg) => reg && reg.update()).catch(() => {});
+  loadWhenSafe();
+}
+
+function loadWhenSafe() {
+  if (reloadWait()) return setTimeout(loadWhenSafe, RELOAD_WAIT);
+  keepForReload();
+  location.reload();
+}
+
+// Waits while a dictation is under way, a picture or a file is on its way to a
+// message, a card has an answer begun, or a box holds words not sent. The
+// composer's and the new chat's words are no reason: they're kept as drafts
+// (chat.js, newChat) and come back with the page.
+function reloadWait() {
+  if (dictationUnderWay()) return true;
+  if ([app.session && app.session.chat, desk.chat].some((c) => c && c.tray.length)) return true;
+  if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done")) return true;     // an answer picked, not sent
+  return [...document.querySelectorAll("textarea, input")].some((f) =>
+    !NOT_WORDS.includes(f.type) && f.value.trim() && !f.closest(".composer-wrap, .start-chat"));
+}
+
+// What only this page holds, for the new one to take back: the view (on a
+// phone the address stays as it opened, so the view is kept as here() says),
+// the scrolls, the search. The drafts are in the store already.
+function keepForReload() {
+  const chat = (app.session && app.session.chat) || desk.chat;
+  const list = app.desk ? desk.listEl && desk.listEl.parentElement : app.listEl && app.listEl.scroll;
+  const search = app.desk ? desk.search : app.listEl && app.listEl.search;
+  try {
+    sessionStorage.setItem(KEPT, JSON.stringify({
+      at: Date.now(), hash: here(),
+      list: list ? list.scrollTop : null,
+      chat: chat ? { id: chat.id, top: chat.scroller.scrollTop } : null,
+      search: search ? search.value : "",
+    }));
+  } catch (e) { /* no session storage: the page loads as it is */ }
+}
+
+function takeKept() {
+  try {
+    const d = JSON.parse(sessionStorage.getItem(KEPT) || "null");
+    sessionStorage.removeItem(KEPT);
+    if (d && Date.now() - d.at < KEPT_FOR) kept = d;
+  } catch (e) { /* none */ }
+  if (kept && kept.search) app.query = kept.search;      // the list's search, whether or not the list is on screen
+}
+
+// The list's scroll, once the list is on screen.
+function keptListScroll() {
+  if (!kept || kept.list === null) return;
+  const el = app.desk ? desk.listEl && desk.listEl.parentElement : (!app.session && app.listEl && app.listEl.scroll);
+  if (!el || !el.childElementCount) return;
+  el.scrollTop = kept.list;
+  kept.list = null;
+}
+
+// The chat's scroll, once its conversation is drawn (chat.js conversation).
+function keptChatScroll(id) {
+  if (!kept || !kept.chat || kept.chat.id !== id) return null;
+  const top = kept.chat.top;
+  kept.chat = null;
+  return top;
 }
 
 function openList() {
@@ -339,7 +406,7 @@ function openList() {
     app.failed = "";
     app.nerd = !!app.view.nerd;
     if (app.view.build && app.build && app.view.build !== app.build) updated();
-    app.build = app.build || app.view.build;
+    app.build = app.build || app.view.build;     // the page's own: index.html's (start)
     wearLook(app.view.look);
     badge();
     refresh();
@@ -356,6 +423,7 @@ function refresh() {
   if (app.desk) deskList();
   else if (!app.session) renderList();
   else app.session.renderTabs();       // Show terminals may have changed
+  keptListScroll();
 }
 
 function closeList() {
@@ -389,6 +457,7 @@ function listView() {
                                 if (e.key === "Enter") search.blur();
                                 else if (e.key === "ArrowDown") { e.preventDefault(); const first = menuItems(list)[0]; if (first) first.focus(); }
                               } });
+  if (app.query) search.value = app.query;
   const clear = h("button", { class: "clear", "aria-label": "Clear the search",
                               onclick: () => { search.value = app.query = ""; renderList(); search.focus(); } }, glyph("close"));
   const organize = h("button", { class: "control organize", "aria-label": "Group and sort the list", "aria-haspopup": "menu",
@@ -411,7 +480,7 @@ function listView() {
   app.newChat = newChat();
   const dock = h("div", { class: "dock" }, app.newChat.el);
   app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, dock);
-  Object.assign(app.listEl, { meta, offline, list, scroll, toolbar, clear, organize, menu, shade, dock });
+  Object.assign(app.listEl, { meta, offline, list, scroll, search, toolbar, clear, organize, menu, shade, dock });
   return app.listEl;
 }
 
@@ -477,7 +546,7 @@ function welcome(added) {
     h("p", {}, "Tell Claude what you want, and it does the work on your projects: reads them, writes the code, runs it, and asks you whenever it needs you."),
     h("p", { class: "muted" }, "Start with a project: one of yours on GitHub, or an empty one for something new."),
     h("div", { class: "welcome-actions" },
-      h("button", { class: "cta primary", onclick: () => add("github") }, "Add a project from GitHub"),
+      h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),
       h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
 }
 
@@ -1615,13 +1684,15 @@ function newChat({ wide = false, started = null } = {}) {
                                 "aria-label": "What do you want to do?",
                                 oninput: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 onkeydown: (e) => {
+                                  // Dictating: Enter or Escape stops it, the words stay here (dictate.js), unsent.
+                                  if (dictate.keyStops(e)) { e.preventDefault(); e.stopPropagation(); return; }
                                   // A computer's: Enter starts it (Shift+Enter, a new line); Escape, back to the chat you were in.
                                   if (!wide || e.isComposing) return;
                                   if (e.key === "Enter" && !e.shiftKey && !e.altKey) { e.preventDefault(); start(); }
                                   else if (e.key === "Escape" && !field.value.trim() && typeof leaveNewChat === "function") { e.preventDefault(); leaveNewChat(); }
                                 } });
   field.value = store.get("draft:new") || "";
-  const send = h("button", { class: wide ? "cta primary go" : "send", type: "button", "aria-label": "Start the chat", title: wide ? "Start (Enter)" : null,
+  const send = h("button", { class: wide ? "cta go" : "send", type: "button", "aria-label": "Start the chat", title: wide ? "Start (Enter)" : null,
                              onclick: () => start() }, wide ? "Start" : glyph("send"));
   const micBtn = h("button", { class: "mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
   // What you say, into the box (dictate.js); or, on the phone through
@@ -2258,6 +2329,11 @@ async function start() {
   // the session's chat is up; the address without it, for a reload.
   const asked = new URLSearchParams(location.search).get("ask");
   if (asked) history.replaceState(null, "", location.pathname + location.hash);
+  // The page after an update: the view it had (on a phone's home screen the
+  // address never shows it, so it's kept), and the build it is.
+  takeKept();
+  if (kept && standalone && kept.hash) routed.hash = kept.hash;
+  app.build = (document.querySelector('meta[name="app-build"]') || {}).content || null;
   if (app.desk) deskStart();
   else route();
   if (asked) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: asked } }));

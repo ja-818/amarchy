@@ -756,6 +756,9 @@ class Chat {
       this.addFiles(files);
     });
     this.input.addEventListener("keydown", (e) => {
+      // Dictating: Enter or Esc stops it, the words stay in the box (dictate.js),
+      // and the key goes no further (not to send, not to stop Claude).
+      if (this.talk.keyStops(e)) { e.preventDefault(); e.stopPropagation(); return; }
       if (this.slashKeys(e)) return;
       // On a computer, Enter sends and Shift+Enter is a new line; on a phone
       // its keyboard's return is a new line, the arrow sends.
@@ -927,7 +930,9 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
-    const stick = d.reset || this.atBottom();
+    // The page after an update: its scroll, as it was (app.js keptChatScroll).
+    const back = d.reset ? keptChatScroll(this.id) : null;
+    const stick = back === null && (d.reset || this.atBottom());
     if (d.reset) {
       this.reset();
       this.conv.replaceChildren(this.tail);
@@ -955,6 +960,13 @@ class Chat {
     if (this.screen && this.screen.dialog) this.renderDock();     // the card may be about what came in
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
+    if (back !== null) {
+      // Now, and after the frame: a bottom asked for while the conversation was
+      // still empty (renderTail's toBottom) lands on the frame, over this.
+      const to = () => { this.scroller.scrollTop = back; this.latest.hidden = this.atBottom(); };
+      to();
+      requestAnimationFrame(to);
+    }
   }
 
   async earlier() {
