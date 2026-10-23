@@ -10199,10 +10199,16 @@ BRIEF_DEF = {
                                     "plan, a task carried out (an email sent, a clean-up), or a problem."},
             "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in one short sentence. "
                                                       "Keep it unless it changed."},
+            "explanation": {"type": "string", "description": "When they asked you to explain, teach, compare or answer "
+                            "something: the explanation itself, complete, in markdown (short paragraphs, lists, a table or "
+                            "code where it helps), as you'd want to read it. Not a description of it. Leave it out for a turn "
+                            "that only did work."},
             "answer": {"type": "array", "maxItems": 12, "description": "The summary: everything from this turn the person "
                        "needs, as short points: what you found, decided, did and concluded, with the exact names, numbers, URLs "
                        "and results. Complete, so they never need your messages (it's what they read first, under the title), "
-                       "but each point short. Not the steps you took (the app shows those).",
+                       "but each point short. Each point says the thing itself (\"The login loop comes from a stale cookie\"), "
+                       "never only that you did something (\"Explained the login loop\"). Not the steps you took (the app "
+                       "shows those).",
                        "items": {"type": "object", "required": ["point"], "additionalProperties": False,
                                  "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
                                                 "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
@@ -10242,8 +10248,8 @@ BRIEF_ASK = (
     "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, a summary "
     "(answer) as complete points (every finding, decision, name, number, URL and result that matters: it's what they read "
     "first, so leave nothing important out, just keep each point short), the plan if there is one, what needs them, how "
-    "to check it, and "
-    "caveats. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
+    "to check it, and caveats. If they asked you to explain or answer something, the explanation itself goes in "
+    "explanation, in full: a point never says you explained or found something without saying what. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
     "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
     "phone who may not remember this conversation: name things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "

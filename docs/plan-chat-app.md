@@ -192,7 +192,10 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   that needs you says so.
 - **Read**: right under the title, always there, the turn's *Summary* (what Claude found, decided, did, concluded, as complete
   short points, *Details* on one with a tap); then *Needs you* (questions as
-  buttons), after the context that explains them. The chat's *goal* (from
+  buttons), after the context that explains them. When you asked Claude to
+  explain, teach, compare or answer something, the *Explanation* itself
+  comes after the summary, in full (`explanation`, markdown): a summary point
+  says the thing, never only that Claude explained it. The chat's *goal* (from
   its newest reply that says one) isn't on the cards: it's under the chat's
   name in the header, on the phone and on a computer.
 - **Look into it**: the rest is what happened, under one *More* row that says

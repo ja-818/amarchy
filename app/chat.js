@@ -726,6 +726,7 @@ function briefShape(b) {
     : texts(b.next, 4).map((step) => ({ step, state: "next" }));
   return {
     title: str(b.title) || str(b.headline), status: b.status, kind: str(b.kind), goal: str(b.goal), answer, plan,
+    explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
     waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
     tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
     check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
@@ -1411,6 +1412,9 @@ class Chat {
     if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
     else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
     if (top.childElementCount) card.append(top);
+    // What it explained, when you asked: the explanation itself, in full.
+    if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
+      h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
     // Then what it needs from you, with that context: the newest reply's questions.
     if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
 

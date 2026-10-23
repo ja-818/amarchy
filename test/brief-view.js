@@ -339,7 +339,8 @@ async function run(browser, base, layout) {
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
     c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c20:0", at: "",
-      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }] } }] });
+      brief: { title: "Shipped to main", status: "done", kind: "task", answer: [{ point: "Merged and pushed" }],
+        explanation: "Merging takes the branch's **3 commits** into main.\n\n- `git merge` joins them\n- `git push` sends main to GitHub" } }] });
     c.row = { ...c.row, status: "idle" }; c.live = { state: "idle", pending: [] }; c.renderTail();
   }, { TOOL });
   s = await read(page);
@@ -350,6 +351,12 @@ async function run(browser, base, layout) {
              dots: document.querySelectorAll(".reply-dot").length }; });
   check(layout, JSON.stringify(lean.labels) === JSON.stringify(["More"]) && lean.more === "Changes · Activity · Original message" && lean.dots === 0,
     `a short reply: its summary, the rest under More; no dot before the title (${JSON.stringify(lean)})`);
+  const explain = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1), e = r.querySelector(".reply-explain");
+    const kids = [...r.children].map((x) => x.className.split(" ")[0]);
+    return { label: e?.querySelector(".reply-k")?.textContent, bold: e?.querySelector("strong")?.textContent, items: e ? e.querySelectorAll("li").length : 0,
+             order: kids.slice(1, 3).join(",") }; });
+  check(layout, explain.label === "Explanation" && explain.bold === "3 commits" && explain.items === 2 && explain.order === "reply-summary,reply-explain",
+    `an explanation shows in full, after the summary (${JSON.stringify(explain)})`);
   await shot("done");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));

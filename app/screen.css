@@ -56,6 +56,9 @@
 /* What it's about and what came of it, always there under the title; then what it needs from you. */
 .reply-summary, .reply-needs { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; min-width: 0; }
 .reply-needs { padding-top: 12px; border-top: 1px solid var(--border-faint); }
+.reply-explain { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; border-top: 1px solid var(--border-faint); min-width: 0; }
+.chat .reply .explain-body { line-height: 1.6; overflow-wrap: anywhere; }
+.chat .reply .explain-body > :last-child { margin-bottom: 0; }
 .reply-k { font-size: var(--caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .reply-needs > .reply-k { color: var(--warn, #d9a441); }
 .reply-said { max-height: 12em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
