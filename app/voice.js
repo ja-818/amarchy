@@ -1,6 +1,6 @@
 // The phone's microphone, for dictating to a session's Claude (see
 // "dictation" in app.js): what it hears, as 16 kHz 16-bit mono, in 20 ms
-// pieces, the way Claude's voice mode records it.
+// pieces, the way the host's dictation takes it.
 
 const RATE = 16000;
 const PIECE = 320;      // samples: 20 ms

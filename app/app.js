@@ -935,17 +935,11 @@ class SessionView {
   constructor(id) {
     this.id = id;
     this.row = app.view && app.view.sessions.find((s) => s.id === id) || null;
-    this.screen = null;
     this.mode = "chat";
     this.build();
     this.open();
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
-    if (app.handed && app.handed.id === id) {     // said on the new-session bar, for this one
-      const handed = app.handed;
-      app.handed = null;
-      this.dictate(handed);
-    }
   }
 
   build() {
@@ -958,22 +952,13 @@ class SessionView {
     this.chat = new Chat({
       id: this.id, row: this.row,
       onSession: (row) => { this.row = row; this.renderHeader(); },
-      onScreen: (screen) => { this.screen = screen; if (this.mode === "screen") this.renderScreen(); },
       onGone: (why) => {
         toast(why ? "Can't open that session." : "That session was closed.");
         go("#/");
       },
-      // Claude's voice mode, for a terminal-engine session's mic.
-      claude: { start: () => this.dictate(), stop: () => this.letGo() },
       // A notification about its card was tapped: the conversation, where the card is.
       onAsk: () => { if (this.mode !== "chat") this.setMode("chat"); },
-      voiceHeld: () => !!this.voice && this.voice.held,
     });
-    this.screenEl = h("pre", { class: "screen" });
-    this.keysRow = h("div", { class: "keys" },
-      ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
-          ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
-        h("button", { class: "control", onclick: () => this.press([key]) }, label)));
     // Chat | Terminal (with Show terminals on, or while the terminal shows).
     this.tabs = h("div", { class: "seg session-tabs", role: "tablist", "aria-label": "Show" });
     this.el = h("div", { class: "view" }, bar, this.tabs, this.chat.el);
@@ -1011,136 +996,6 @@ class SessionView {
     this.closed = true;
     if (this._terminal) this._terminal.close();
     clearInterval(this.seen);
-  }
-
-  // Claude's own dictation (its voice mode), from the phone's microphone:
-  // while the button is held, what the phone hears goes to the session's
-  // Claude as if its voice key were held down; let go, and what Claude
-  // made of it comes into the box, to send from there. What's said before
-  // Claude can listen (it's starting, in a session just made) waits for it.
-  // handed: said already, on the new-session bar ({queue}: its audio).
-  async dictate(handed) {
-    if (this.voice) return;
-    // What was in the box before: the words go after it, as they come.
-    const v = this.voice = { held: !handed, ws: null, queue: handed ? handed.queue : [], heard: false,
-                             base: this.chat.input.value.replace(/\s+$/, "") };
-    const write = (words) => {
-      this.chat.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
-      this.chat.grow();
-      this.chat.sendButtons();
-    };
-    const done = () => {
-      if (this.voice === v) this.voice = null;
-      this.chat.listening(null);
-    };
-    if (!handed) {
-      // Listening once the microphone hears: what's said before is lost.
-      this.chat.listening("Starting the microphone…");
-      mic.hears = () => { if (v.held) this.chat.listening("Listening…"); };
-      try {
-        await micOpen();
-      } catch (e) {
-        done();
-        toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
-                                          : `The microphone didn't start: ${e.message}`);
-        return;
-      }
-      if (!v.held) {      // let go already (the first time, while the phone asked about the microphone)
-        done();
-        micRelease();
-        return;
-      }
-      mic.take = (pcm) => {
-        if (v.ws && v.ws.readyState === WebSocket.OPEN) v.ws.send(pcm);
-        else if (v.queue.length < 15000) v.queue.push(pcm);      // 5 minutes, as long as one can be
-      };
-    }
-    const url = `/api/session/${encodeURIComponent(this.id)}/voice`;
-    const why = await this.voiceReady(v, url);
-    if (why !== null) {
-      if (v.held) micRelease();
-      v.held = false;
-      done();
-      if (why) toast(why);
-      return;
-    }
-    const ws = v.ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`);
-    ws.binaryType = "arraybuffer";
-    ws.onopen = () => {
-      for (const pcm of v.queue) ws.send(pcm);
-      v.queue = [];
-      if (!v.held) this.end(v);
-    };
-    ws.onmessage = (e) => {
-      let d = {};
-      try { d = JSON.parse(e.data); } catch (err) { return; }
-      v.heard = true;
-      if (d.state === "transcribing") this.chat.listening("Claude is writing it down…");
-      if (typeof d.interim === "string") write(d.interim);
-      if (typeof d.text === "string") {
-        ws.send("got");     // it can go from Claude's prompt now
-        write(d.text);
-        store.set(`draft:${this.id}`, this.chat.input.value);
-      }
-      if (d.error) {
-        write("");
-        toast(d.error);
-      }
-    };
-    ws.onclose = async () => {
-      if (v.held) micRelease();       // gone while the button was still held
-      v.held = false;
-      done();
-      if (!v.heard) {     // it didn't take it: ask why
-        try {
-          const r = await fetch(url);
-          const d = await r.json();
-          toast(d.error || "Dictation didn't connect");
-        } catch (e) {
-          toast("Can't reach Amarchy");
-        }
-      }
-    };
-  }
-
-  // Whether Claude can take a dictation now: null when it can, else why not
-  // ("" when there's nothing to say: the session was left). While it can't
-  // yet (it's starting, or asking something), it's asked again, for a while.
-  async voiceReady(v, url) {
-    const until = Date.now() + 120000;
-    for (;;) {
-      if (this.closed || this.voice !== v) return "";
-      let d = {};
-      try {
-        const r = await fetch(url);
-        d = await r.json();
-        if (r.ok) return null;
-      } catch (e) {
-        return "Can't reach Amarchy";
-      }
-      if (!d.wait || Date.now() > until) return d.error || "Dictation didn't connect";
-      if (!v.held) this.chat.listening("Waiting for Claude to start…");
-      await new Promise((ok) => setTimeout(ok, 700));
-    }
-  }
-
-  // Let go: the rest of what it heard, then "end" (once it's connected).
-  // Let go: the microphone keeps on a moment (the last word is still being
-  // said as the finger lifts), then the rest of it and "end".
-  async letGo() {
-    const v = this.voice;
-    if (!v || !v.held) return;
-    v.held = false;
-    this.chat.micBtn.classList.remove("on");
-    await new Promise((ok) => setTimeout(ok, MIC_TAIL));
-    micRelease();
-    if (v.ws && v.ws.readyState === WebSocket.OPEN) this.end(v);
-    else this.chat.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
-  }
-
-  end(v) {
-    v.ws.send("end");
-    this.chat.listening("Claude is writing it down…");
   }
 
   // Back from the background: everything from scratch.
@@ -1181,15 +1036,8 @@ class SessionView {
         h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
   }
 
-  renderScreen() {
-    const stick = this.chat.atBottom();
-    this.screenEl.textContent = this.screen ? this.screen.text : "";
-    if (stick) this.chat.toBottom(true);
-  }
-
-  // The conversation, the session's terminals (the project's, or Claude's
-  // classic one: terminal.js, its keys under it), or Claude's screen as
-  // text (with keys for its menus).
+  // The conversation, or the session's terminals (the project's, or Claude's
+  // classic one: terminal.js, its keys under it).
   setMode(mode, which) {
     this.mode = mode;
     this.el.classList.toggle("terminal", mode === "terminal");
@@ -1202,22 +1050,8 @@ class SessionView {
       t.el.hidden = false;
       if (which === "classic") t.classic();
       else t.open(this.id).then(() => { if (which) t.show(which); });
-    } else if (mode === "screen") {
-      this.chat.setView({ content: this.screenEl, above: [this.keysRow], composer: true });
-      this.renderScreen();
-      this.chat.toBottom(true);
-    } else {
-      this.chat.setView();
     }
     this.renderTabs();
-  }
-
-  async press(keys) {
-    try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/keys`, { keys });
-    } catch (e) {
-      toast(e.message);
-    }
   }
 
   menu() {
@@ -1234,8 +1068,7 @@ class SessionView {
     const classicOk = !!(app.view && app.view.show_terminals);
     const terminals = h("div", { class: "menu" },
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
-      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []),
-      item(this.mode === "screen", "Claude's screen, as text", () => this.setMode("screen")));
+      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
       h("div", { class: "section" }, "Session"),
@@ -1247,7 +1080,7 @@ class SessionView {
   }
 }
 
-// The text size of Claude's terminal and screen on the phone (A−/A+ there).
+// The text size of the terminals on the phone (A−/A+ there).
 function phoneSize() {
   const n = parseFloat(store.get("phone-size") || "");
   return n >= 7 && n <= 24 ? n : 12;
@@ -1418,17 +1251,6 @@ function micReset() {
   micClose();
   if (mic.ctx) mic.ctx.close().catch(() => {});
   mic.ctx = mic.ready = null;
-}
-
-// Held down: start(); let go (or the finger slides off): stop().
-function holdToTalk(el, start, stop) {
-  el.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    try { el.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
-    start();
-  });
-  for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(end, () => stop());
-  el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
 // ---- the keys in a menu
@@ -1742,13 +1564,12 @@ function newChat({ wide = false, started = null } = {}) {
   };
   const buttons = () => {
     const none = !projects().length;
-    send.disabled = none || !field.value.trim() || !!said || dictate.on();
+    send.disabled = none || !field.value.trim() || dictate.on();
     under.hidden = none;
     micBtn.hidden = none || !dictate.available();
-    micBtn.classList.toggle("on", (!!said && said.held) || (dictate.on() && dictate.run.held));
-    box.classList.toggle("listening", !!said || saying !== null);
+    micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
+    box.classList.toggle("listening", saying !== null);
     field.placeholder = none ? (app.view ? "Add a project first" : "Connecting…")
-      : said ? (!said.held ? "Starting the chat…" : said.hearing ? "Listening…" : "Starting the microphone…")
       : saying !== null ? saying : wide ? "Say it in your own words: what you want, and anything Claude should know" : "What do you want to do?";
   };
   const update = () => {
@@ -1790,7 +1611,7 @@ function newChat({ wide = false, started = null } = {}) {
     update();
   };
   const start = async () => {
-    if (!field.value.trim() || !repo || said) return;
+    if (!field.value.trim() || !repo) return;
     send.disabled = true;
     el.classList.add("busy");
     try {
@@ -1804,62 +1625,6 @@ function newChat({ wide = false, started = null } = {}) {
     }
     el.classList.remove("busy");
     buttons();
-  };
-  // Or hold the mic and say it: the session starts while you speak (once
-  // it's clearly held, not just tapped), and when you let go it opens, what
-  // you said going to its Claude's dictation as soon as Claude is up. The
-  // words come into its box, after what was typed here, to send from there.
-  let said = null;
-  const talk = async () => {
-    if (said || !repo) return;
-    const s = said = { held: true, hearing: false, queue: [], id: null, failed: null, making: null };
-    mic.hears = () => { s.hearing = true; buttons(); };
-    buttons();
-    try {
-      await micOpen();
-    } catch (e) {
-      said = null;
-      buttons();
-      toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
-                                        : `The microphone didn't start: ${e.message}`);
-      return;
-    }
-    if (!s.held) {      // let go already (the first time, while the phone asked about the microphone)
-      micRelease();
-      return;
-    }
-    mic.take = (pcm) => { if (s.queue.length < 15000) s.queue.push(pcm); };      // 5 minutes, as long as one can be
-    s.timer = setTimeout(() => {
-      s.making = api("/api/new", { repo }).then((d) => { s.id = d.id; }, (e) => { s.failed = e.message; });
-    }, 400);
-  };
-  const letGo = async () => {
-    const s = said;
-    if (!s || !s.held) return;
-    s.held = false;
-    clearTimeout(s.timer);
-    buttons();
-    await new Promise((ok) => setTimeout(ok, MIC_TAIL));     // the end of the last word
-    micRelease();
-    if (!s.making) {        // only tapped (or let go while the phone asked about the microphone)
-      said = null;
-      buttons();
-      if (s.queue.length) toast("Hold the mic while you speak");
-      return;
-    }
-    buttons();
-    await s.making;
-    said = null;
-    buttons();
-    if (s.failed) return toast(s.failed);
-    store.set(`draft:${s.id}`, field.value.trim());
-    field.value = "";
-    store.set("draft:new", "");
-    store.set("last-project", repo);
-    picked = guessed = false;
-    grow();
-    app.handed = { id: s.id, queue: s.queue };
-    go(`#/s/${encodeURIComponent(s.id)}`);
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
   return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field };

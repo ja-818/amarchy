@@ -186,15 +186,12 @@ Plumbing:
   amarchy sleep --idle                  put the sessions idle long enough to sleep (the timer runs it)
   amarchy reap <id>                     the rest of closing a session, detached from what closed it
   amarchy shorten <repo> <title>        cut Claude's title for the list down to "Keyword: a few words"
-  amarchy editor <file>                 Claude's $VISUAL in a session (bin/amarchy-editor)
   amarchy hook <id> <state>             Claude Code hook: record working/waiting/idle and the conversation
                                         (start: idle, and tell Claude it's in amarchy)
   amarchy seen <id>                     you've opened a session that finished: its row drops the done mark
   amarchy paste [wl-paste options]      wl-paste for a session's Claude (bin/amarchy-paste): what you last
                                         pasted or copied in the app (phone or browser), so Ctrl+V pastes an
                                         image there
-  amarchy rec [rec options]             SoX's rec for a session's Claude (bin/amarchy-rec): the phone's or the
-                                        browser's microphone while you dictate there, else the real rec
   amarchy dictation worker              keeps the dictation model loaded for the app's server (Transcriber)
   amarchy agent <id>                    the chat engine's broker in a session's Claude pane: Claude Code on
                                         claude -p, with a live state, a socket and a log of the conversation
@@ -1792,35 +1789,6 @@ def pane_claude(pane, procs):
     return next((p for p in descendants(pane["pid"], procs) if procs[p][1] == "claude"), None)
 
 
-def your_editor():
-    """The editor you set for Claude Code's Ctrl+G, as a command line."""
-    visual = os.environ.get("VISUAL", "")
-    if visual.startswith(str(STATE / "editor")):    # ours, from a Claude it started
-        visual = ""
-    return os.environ.get("AMARCHY_VISUAL") or visual or os.environ.get("EDITOR") or "vi"
-
-
-def editor_shim(editor):
-    """What Claude runs as $VISUAL (Ctrl+G, "edit the prompt in your editor"):
-    bin/amarchy-editor, which hands the prompt to amarchy when it's putting
-    the session to sleep, and opens your editor any other time. Claude takes
-    $VISUAL as one command, without arguments, and names it in a hint ("ctrl+g
-    to edit in Nvim"), so it's a link named after your editor."""
-    name = Path(shlex.split(editor)[0] if editor.strip() else "vi").name
-    link = STATE / "editor" / name
-    target = Path(SELF).parent / "amarchy-editor"
-    try:
-        if not link.is_symlink() or os.readlink(link) != str(target):
-            link.parent.mkdir(parents=True, exist_ok=True)
-            tmp = link.with_name(f".{name}.{os.getpid()}")
-            tmp.unlink(missing_ok=True)
-            tmp.symlink_to(target)
-            os.replace(tmp, link)
-    except OSError:
-        return None
-    return link
-
-
 def take(f):
     """A file's text, removing the file (a prompt meant for Claude once)."""
     try:
@@ -1857,19 +1825,11 @@ def cmd_claude(sid):
     prompt = s.pop("prompt", None)
     if prompt is not None:
         save_session(s)
-    sent = take(claude_dir(sid) / "send")
-    prompt = sent if sent is not None and prompt is None else prompt
-    prefill = take(claude_dir(sid) / "draft") or ""
+    prefill = take(claude_dir(sid) / "draft") or ""     # what was typed in the sleeping session's prompt
     path = Path(s["path"])
     os.chdir(path)
     os.environ["PWD"] = str(path)
-    editor = your_editor()
-    shim = editor_shim(editor)
-    if shim:
-        os.environ["AMARCHY_VISUAL"] = editor
-        os.environ["VISUAL"] = str(shim)
-    # Ctrl+V pastes what you pasted in the app (see "clipboard"), and voice
-    # mode records the phone's or the browser's microphone (amarchy rec).
+    # Ctrl+V pastes what you pasted in the app (see "clipboard").
     os.environ["PATH"] = paste_path()
     os.environ.update(secret_env(s))      # the project's secrets (its Bash commands read them afresh: cmd_hook)
     argv = claude_argv(s, prefill.strip("\n"), prompt)
@@ -1927,10 +1887,9 @@ def cmd_new(args):
 # (`claude --resume <conversation> -- <message>`), its first screen replacing
 # the old one in a single repaint. Anything the stand-in doesn't do (arrows,
 # Ctrl keys, a new line, scrolling, a line too long) brings Claude back at
-# once, with what you typed already in its prompt (--prefill). Whatever was
-# typed in the prompt and not sent yet comes back too: before Claude exits,
-# amarchy asks it for the prompt with Ctrl+G (Claude's "edit the prompt in your
-# editor"), with amarchy-editor as the editor.
+# once, with what you typed already in its prompt (--prefill). A message typed
+# in the prompt of a classic terminal keeps it awake instead (sleep_blockers):
+# nothing hands it over.
 #
 # A session whose tmux is gone (after a reboot) comes back asleep as well:
 # there's no screen of Claude's to keep then, so amarchy draws the
@@ -1948,9 +1907,6 @@ def cmd_new(args):
 SLEEP_AFTER_DEFAULT = 1         # minutes
 QUIET = 30                      # seconds the conversation has to have been still
 BUSY_CPU = 0.05                 # share of a core above which an idle-looking Claude is still doing something
-HANDOVER_TIMEOUT = 3            # seconds Claude has to hand its prompt over
-HANDOVER_STALE = 15             # seconds a request for the prompt counts
-REPAINT = 0.3                   # seconds Claude gets to draw its prompt again after handing it over
 
 
 def sleep_after():
@@ -2064,83 +2020,6 @@ def stop_background(s, only_idle=True):
     return stopped
 
 
-def claude_key(name):
-    """The key Claude Code has for one of its actions (keybindings.json), as
-    tmux send-keys names it: "C-g"."""
-    key = {"chat:externalEditor": "ctrl+g"}.get(name, "")
-    try:
-        data = json.loads((HOME / ".claude/keybindings.json").read_text())
-    except (OSError, ValueError):
-        data = {}
-
-    def walk(node):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                if v == name and "+" in k and " " not in k:
-                    yield k
-                else:
-                    yield from walk(v)
-        elif isinstance(node, list):
-            for v in node:
-                yield from walk(v)
-    key = next(walk(data), key)
-    *mods, last = key.lower().split("+")
-    prefix = "".join({"ctrl": "C-", "control": "C-", "alt": "M-", "meta": "M-", "option": "M-",
-                      "shift": "S-"}.get(m, "") for m in mods)
-    return prefix + (last if len(last) == 1 else last.capitalize())
-
-
-def hand_over_prompt(s):
-    """Ask the session's Claude for what's typed in its prompt, and keep it
-    for when it wakes (in its draft). False when Claude didn't hand it over
-    (a menu or a dialog open, say), so the session had better stay awake."""
-    d = claude_dir(s["id"])
-    (d / "draft").unlink(missing_ok=True)
-    write_file(d / "handover", str(time.time()))
-    tmux("send-keys", "-t", f"={tmux_name(s['id'])}:", claude_key("chat:externalEditor"))
-    end = time.time() + HANDOVER_TIMEOUT
-    while time.time() < end and (d / "handover").exists():
-        time.sleep(0.05)
-    handed = not (d / "handover").exists()
-    (d / "handover").unlink(missing_ok=True)
-    # Claude reads its prompt back from the file it gave the editor, deletes
-    # the file, then draws its prompt again where it said "Save and close
-    # editor to continue": that last screen is the one that stays.
-    try:
-        given = Path((d / "handover-file").read_text())
-    except OSError:
-        given = None
-    while handed and given and given.exists() and time.time() < end:
-        time.sleep(0.03)
-    (d / "handover-file").unlink(missing_ok=True)
-    if handed:
-        time.sleep(REPAINT)
-    return handed
-
-
-def cmd_editor(args):
-    """amarchy-editor, Claude's $VISUAL in a session: while amarchy is putting
-    the session to sleep it keeps the prompt Claude hands it (and gives it
-    back untouched); any other time it's just your editor."""
-    sid = os.environ.get("AMARCHY_SESSION", "")
-    files = [a for a in args if not a.startswith("-")]
-    request = claude_dir(sid) / "handover" if sid else None
-    if request and files and request.exists() and time.time() - request.stat().st_mtime < HANDOVER_STALE:
-        try:
-            text = Path(files[-1]).read_text(errors="replace")
-        except OSError:
-            text = ""
-        write_file(claude_dir(sid) / "draft", text if text.strip() else "")
-        write_file(claude_dir(sid) / "handover-file", files[-1])
-        request.unlink(missing_ok=True)
-        return 0
-    editor = shlex.split(your_editor())
-    try:
-        os.execvp(editor[0], [*editor, *args])
-    except OSError as e:
-        return fail(f"can't run your editor {editor[0]}: {e}")
-
-
 def conversation_records(f, tail=None):
     """The records of a conversation file, the last `tail` bytes of it only if given."""
     try:
@@ -2188,6 +2067,9 @@ def sleep_blockers(s, pane, procs, auto):
         reasons.append("it's waiting for your answer")
     if not pid:
         return reasons + ["Claude isn't running in its pane"]
+    if engine(s) == "terminal" and claude_prompt(s):
+        # What's typed in a classic terminal's prompt would go with it: it waits for you.
+        reasons.append("a message is typed in its prompt")
     if engine(s) == "chat":
         live = agent_live(sid)
         if live.get("pending") and status != "waiting":
@@ -2260,13 +2142,6 @@ def put_to_sleep(s, auto=False, force=False):
         return "; ".join(reasons)
     pid = pane_claude(pane, procs)
     loop = pane_loop(pane, procs)
-    # Claude hands its prompt over with or without the loop (its editor is
-    # amarchy's either way). The chat engine has no prompt to hand over.
-    if pid and engine(s) == "terminal" and not hand_over_prompt(s) and not force:
-        return "Claude didn't hand over its prompt (a menu or a dialog open?)"
-    if auto and sid in on_screen()[0]:
-        (claude_dir(sid) / "draft").unlink(missing_ok=True)    # it's still in Claude's prompt
-        return "you came back to it"
     try:
         set_conversation_id(sid, json.loads((HOME / f".claude/sessions/{pid}.json").read_text()).get("sessionId", ""))
     except (OSError, ValueError, TypeError):
@@ -3275,10 +3150,8 @@ def task_title(pane_title):
         title = title.replace("-", " ").replace("_", " ")
     return title[:1].upper() + title[1:]
 
-# States, most urgent first, for the list grouped by status.
-ORDER = {state: i for i, state in enumerate(("waiting", "working", "idle", "asleep"))}
-# ...where one that finished and you haven't opened yet ("Done") comes
-# before the idle ones you have.
+# States, most urgent first, for the list grouped by status: one that finished
+# and you haven't opened yet ("Done") comes before the idle ones you have.
 STATUS_GROUPS = {state: i for i, state in enumerate(("waiting", "working", "done", "idle", "asleep"))}
 
 
@@ -4194,7 +4067,7 @@ def cmd_update(args):
 # runs a command).
 
 CLIP_DIR = STATE / "clipboard"          # the web clipboard (web.clip), yours only
-PASTE_BIN = STATE / "paste"             # wl-paste and rec for a session's Claude (links to bin/amarchy-paste, -rec)
+PASTE_BIN = STATE / "paste"             # wl-paste for a session's Claude (a link to bin/amarchy-paste)
 WEB_CLIP = CLIP_DIR / "web.clip"        # what a browser or phone last handed the app (see web_clip)
 PASTE_FLAGS = {"-l": "--list-types", "--list-types": "--list-types", "-n": "--no-newline",
                "--no-newline": "--no-newline", "-p": "--primary", "--primary": "--primary"}
@@ -4289,21 +4162,20 @@ def cmd_paste(args):
 
 
 def paste_path():
-    """The PATH a session's Claude gets: amarchy's wl-paste first
-    (see "clipboard"), and its rec (see "dictation from the phone").
-    Unchanged when the links can't be made."""
+    """The PATH a session's Claude gets: amarchy's wl-paste first (see
+    "clipboard"). Unchanged when the link can't be made."""
     path = os.environ.get("PATH", "")
-    for name, target in (("wl-paste", "amarchy-paste"), ("rec", "amarchy-rec")):
-        link, target = PASTE_BIN / name, Path(SELF).parent / target
-        try:
-            if not link.is_symlink() or os.readlink(link) != str(target):
-                PASTE_BIN.mkdir(parents=True, exist_ok=True)
-                tmp = link.with_name(f".{name}.{os.getpid()}")
-                tmp.unlink(missing_ok=True)
-                tmp.symlink_to(target)
-                os.replace(tmp, link)
-        except OSError:
-            return path
+    link, target = PASTE_BIN / "wl-paste", Path(SELF).parent / "amarchy-paste"
+    try:
+        if not link.is_symlink() or os.readlink(link) != str(target):
+            PASTE_BIN.mkdir(parents=True, exist_ok=True)
+            tmp = link.with_name(f".wl-paste.{os.getpid()}")
+            tmp.unlink(missing_ok=True)
+            tmp.symlink_to(target)
+            os.replace(tmp, link)
+        (PASTE_BIN / "rec").unlink(missing_ok=True)     # a link from when Claude's voice mode had amarchy's rec
+    except OSError:
+        return path
     return os.pathsep.join([str(PASTE_BIN), *[d for d in path.split(os.pathsep) if d and d != str(PASTE_BIN)]])
 
 
@@ -5958,10 +5830,6 @@ def project_name(repo):
     return " ".join(w[:1].upper() + w[1:] for w in re.split(r"[-_]+", repo or "") if w)
 
 
-def app_where(s):
-    return f"{project_name(s['repo'])} · {s.get('branch') or s['name']}"
-
-
 def short_path(path, s):
     """A file path as the worktree sees it."""
     root = s["path"].rstrip("/") + "/"
@@ -6406,87 +6274,6 @@ def app_earlier(s, before):
     return app_items(read_records(f, start, before), s), start
 
 
-OPTION = re.compile(r"^(\s{0,8})(❯\s*)?(\d{1,2})\.\s+(\S.*)$")
-RULE = re.compile(r"^\s*[─━]{8,}\s*$")
-DASHES = re.compile(r"^\s*[╌┄-]{8,}\s*$")
-# The line under each of Claude Code's dialogs, saying how to answer it.
-DIALOG_HINT = re.compile(r"Esc to (cancel|exit|go back)|Enter to (select|confirm|continue|submit)|to navigate")
-
-
-def claude_dialog(lines):
-    """A question Claude Code shows (a permission prompt, AskUserQuestion, a
-    menu), read off its screen: {id, question, options: [{label, detail,
-    keys}], hint}, or None. Each option's keys pick it: its number, or the
-    arrows to it and Enter in a menu without numbers."""
-    width = max((len(l) for l in lines), default=0)
-    hint = next((i for i in range(len(lines) - 1, max(len(lines) - 7, -1), -1)
-                 if DIALOG_HINT.search(lines[i])), None)
-    if hint is None:
-        return None
-    found, expect = [], None
-    for j in range(hint - 1, max(hint - 60, -1), -1):
-        m = OPTION.match(lines[j])
-        if not m:
-            continue
-        n = int(m.group(3))
-        if expect is not None and n != expect:
-            break
-        found.insert(0, (j, m))
-        expect = n - 1
-        if n == 1:
-            break
-    options = []
-    if found and expect == 0:
-        top = found[0][0]
-        for k, (j, m) in enumerate(found):
-            label, detail = m.group(4).strip(), []
-            stop = found[k + 1][0] if k + 1 < len(found) else hint
-            # A label too long for the line goes on below it, cut at a space
-            # or, where the line is full to the edge, inside a word.
-            prev = lines[j]
-            for line in lines[j + 1:stop]:
-                if not line.strip() or RULE.match(line) or DASHES.match(line):
-                    prev = ""
-                    continue
-                if len(prev) >= width - 3:
-                    label += ("" if len(prev) == width else " ") + line.strip()
-                    prev = line
-                else:
-                    detail.append(line.strip())
-                    prev = ""
-            n = int(m.group(3))
-            options.append({"label": label, "detail": " ".join(detail), "selected": bool(m.group(2)),
-                            "keys": [str(n)] if n <= 9 else ["Down"] * (n - 1) + ["Enter"]})
-    else:
-        # A menu without numbers: the line with ❯ and the ones beside it, lined up with it.
-        mark = next((j for j in range(hint - 1, max(hint - 30, -1), -1)
-                     if re.match(r"^\s+❯\s+\S", lines[j])), None)
-        if mark is None:
-            return None
-        col = re.match(r"^(\s+❯\s+)", lines[mark]).end()
-        def sibling(line):
-            return len(line) > col and line[:col].strip() in ("", "❯") and line[col] != " "
-        top = mark
-        while top > 0 and sibling(lines[top - 1]):
-            top -= 1
-        bottom = mark
-        while bottom + 1 < hint and sibling(lines[bottom + 1]):
-            bottom += 1
-        for j in range(top, bottom + 1):
-            d = j - mark
-            options.append({"label": lines[j][col:].strip(), "detail": "", "selected": j == mark,
-                            "keys": ["Up"] * -d + ["Down"] * d + ["Enter"]})
-    rule = next((j for j in range(top - 1, -1, -1) if RULE.match(lines[j])), -1)
-    # (A question's tab in AskUserQuestion has a box before it, ☐ or ☒ once answered.)
-    question = [re.sub(r"^[☐☒✔]\s*", "", l.strip()) for l in lines[rule + 1:top] if l.strip() and not DASHES.match(l)]
-    if not options:
-        return None
-    question = "\n".join(question[-14:])
-    sig = json.dumps([question, [o["label"] for o in options]])
-    return {"id": hashlib.sha1(sig.encode()).hexdigest()[:12], "question": question, "options": options,
-            "hint": lines[hint].strip()}
-
-
 EXITED = "Claude Code exited. Press Enter"
 
 
@@ -6503,10 +6290,9 @@ def app_screen(s):
     while lines and not lines[-1]:
         lines.pop()
     exited = not asleep and any(EXITED in l for l in lines[-4:])
-    # On the chat engine, what Claude asks comes as data (chat_dialog), not
-    # as a picture of it to read off the screen.
-    chat = engine(s) == "chat"
-    dialog = None if exited or asleep or waking else chat_dialog(s) if chat else claude_dialog(lines)
+    # What Claude asks comes as data (chat_dialog). A classic terminal's
+    # question is only on its screen: the terminal shows it, nothing reads it.
+    dialog = None if exited or asleep or waking or engine(s) != "chat" else chat_dialog(s)
     return {"live": True, "text": "\n".join(lines), "exited": exited, "asleep": asleep, "waking": waking,
             "dialog": dialog}
 
@@ -6593,8 +6379,8 @@ def ask_words(p, root=None):
 
 
 def chat_dialog(s, live=None):
-    """The question Claude asks in a session on the chat engine, in the shape
-    claude_dialog gives (plus request and each option's answer), or None."""
+    """The question Claude asks in a session on the chat engine, as a card:
+    its text, its options (each with the keys that pick it), or None."""
     live = agent_live(s["id"]) if live is None else live
     pending = live.get("pending") if live.get("state") not in ("exited", None) else None
     if not pending:
@@ -6936,21 +6722,6 @@ def chat_pick(s, dialog, keys, text=None):
     return chat_answer(s, {"request_id": rid, **{k: v for k, v in a.items() if k in ("choice", "mode")}})
 
 
-def app_type(s, text):
-    """Send a message to the session's Claude, as if typed and sent: pasted
-    (so new lines stay in it) and Enter."""
-    pane = f"={tmux_name(s['id'])}:"
-    buffer = f"amarchy-app-{os.getpid()}-{threading.get_ident()}"
-    r = tmux("set-buffer", "-b", buffer, "--", text)
-    if r.returncode == 0:
-        r = tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", pane)
-    if r.returncode != 0:
-        return r.stderr.strip() or "tmux failed"
-    time.sleep(0.25)      # Claude takes the paste in before Enter sends it
-    r = tmux("send-keys", "-t", pane, "Enter")
-    return None if r.returncode == 0 else (r.stderr.strip() or "tmux failed")
-
-
 def valid_keys(keys):
     return isinstance(keys, list) and 0 < len(keys) <= 20 and all(isinstance(k, str) and k in APP_KEYS for k in keys)
 
@@ -6966,57 +6737,8 @@ def app_keys(s, keys):
     return None
 
 
-# ---- dictation from the phone
-#
-# Claude Code's voice mode (/voice) records with SoX's rec, whichever its PATH
-# finds, and listens for its key held down: a space again and again, as a key
-# repeats, starts it (five of them, under 120 ms apart), and none for 200 ms
-# ends it, the transcript going into its prompt. A session's Claude finds
-# amarchy's rec first (bin/amarchy-rec, linked as rec: see paste_path and
-# install.sh). While the phone holds its mic button on that session, that
-# rec is the phone's microphone, which the app's server hands it on a socket
-# (mic_socket); the server holds the space down meanwhile. A browser showing
-# Claude's terminal is its microphone the same way (DeskMic). Otherwise it's
-# the real rec.
-
-APP_MIC = APP / "mic"
-MIC_FORMAT = ["-t", "raw", "-r", "16000", "-e", "signed", "-b", "16", "-c", "1"]   # what the phone sends
-MIC_REPEAT = 0.04       # seconds between the spaces of the held key, as a key repeats
-MIC_MAX = 300           # seconds a dictation lasts at most
-MIC_QUIET = 3           # seconds without a word from the phone before it counts as let go
-MIC_CAUGHT_UP = 1.5     # seconds without a new word from Claude, writing down what was said ahead of it
-MIC_TAIL = 0.6          # seconds the key stays held after the last of the audio, rec hearing silence
-MIC_HUSH = bytes(640)   # 20 ms of silence, as the phone sends it
-MIC_LET_GO = 1.5        # seconds rec may go on hearing silence once the key is up
-MIC_METER = "▁▂▃▄▅▆▇█"  # what Claude draws after the words while it listens (how loud)
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
-
-
-def mic_socket(sid, state=None):
-    """Where a session's dictation is read from: a short name (a socket's
-    path can't be long), in amarchy's state, or your runtime directory when
-    even that is too long."""
-    state = state or STATE
-    name = hashlib.sha1(f"{state}\0{sid}".encode()).hexdigest()[:20] + ".sock"
-    path = state / APP_MIC.relative_to(STATE) / name
-    if len(str(path)) < 100:
-        return path
-    run = Path(f"/run/user/{os.getuid()}")      # the same for the server and Claude, whatever their environments
-    return (run if run.is_dir() else Path(f"/tmp/amarchy-{os.getuid()}")) / "amarchy-mic" / name
-
-
-def claude_voice():
-    """Claude Code's voice mode as its settings have it: on or not, and held
-    ("hold", the default) or tapped ("tap")."""
-    try:
-        d = json.loads((Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude") / "settings.json").read_text())
-    except (OSError, ValueError):
-        d = {}
-    d = d if isinstance(d, dict) else {}
-    v = d.get("voice") if isinstance(d.get("voice"), dict) else {}
-    return {"enabled": bool(v["enabled"] if "enabled" in v else d.get("voiceEnabled")),
-            "mode": "tap" if v.get("mode") == "tap" else "hold"}
 
 
 def undimmed(line):
@@ -7067,149 +6789,6 @@ def claude_prompt(s):
     return None
 
 
-def clear_claude_prompt(s):
-    """Empty the session's Claude's prompt (Ctrl+U, line by line). Whether it is."""
-    pane = f"={tmux_name(s['id'])}:"
-    for _ in range(12):
-        if not claude_prompt(s):
-            break
-        tmux("send-keys", "-t", pane, "C-u")
-        time.sleep(0.12)
-        if claude_prompt(s):        # a line above, of a prompt of several
-            tmux("send-keys", "-t", pane, "BSpace")
-            time.sleep(0.08)
-    return claude_prompt(s) == ""
-
-
-def desk_hide(s):
-    """While the phone dictates, the other views of the session's Claude
-    (its tmux clients: a browser's terminal, a terminal over ssh) go to a
-    screen that says so: the words come up on the phone only. What desk_show
-    needs to put it back, or None."""
-    name = tmux_name(s["id"])
-    r = tmux("list-clients", "-t", f"={name}", "-F", "#{client_name}")
-    clients = r.stdout.split() if r.returncode == 0 else []
-    if not clients:
-        return None
-    away = f"{name}-dictating"
-    size = tmux("display-message", "-p", "-t", f"={name}:", "#{window_width} #{window_height}").stdout.split()
-    # Back to Claude on its own too, should the server go before it says so.
-    back = (f'sleep {MIC_MAX + 60}; for c in $(tmux -L amarchy list-clients -t "={away}" -F "#{{client_name}}"); '
-            f'do tmux -L amarchy switch-client -c "$c" -t "={name}"; done')
-    tmux("kill-session", "-t", f"={away}")
-    tmux("new-session", "-d", "-s", away, *(["-x", size[0], "-y", size[1]] if len(size) == 2 else []),
-         "printf '\\033[?25l\\n\\n   Dictating on your phone…\\n\\n   \\033[2mWhat you say goes to the phone; "
-         "Claude is back here when you let go.\\033[0m\\n'; " + back)
-    title = tmux("display-message", "-p", "-t", f"={name}:", "#{pane_title}").stdout.strip()
-    if title:
-        tmux("select-pane", "-t", f"={away}:", "-T", title)     # the window keeps its title
-    for c in clients:
-        tmux("switch-client", "-c", c, "-t", f"={away}")
-    return away
-
-
-def desk_show(s, away):
-    """The other views back on the session's Claude (see desk_hide)."""
-    if not away:
-        return
-    r = tmux("list-clients", "-t", f"={away}", "-F", "#{client_name}")
-    for c in r.stdout.split() if r.returncode == 0 else []:
-        tmux("switch-client", "-c", c, "-t", f"={tmux_name(s['id'])}")
-    tmux("kill-session", "-t", f"={away}")
-
-
-def close_listening(sock):
-    """Close a socket that a thread waits on in accept(): shut down first, or
-    Linux leaves it listening and that thread waiting, for good."""
-    for stop in (lambda: sock.shutdown(socket.SHUT_RDWR), sock.close):
-        try:
-            stop()
-        except OSError:
-            pass
-
-
-class AppMic:
-    """One dictation from the phone: its audio as it comes, for the session's
-    rec (amarchy rec) to read on a socket, from the start: what was said
-    before Claude got its rec going too. Once the phone's audio ends, rec
-    hears silence until Claude stops it (the key is up), as from a
-    microphone: Claude writes down a last word only with some sound after
-    it, and drops it when rec just ends."""
-
-    def __init__(self, sid):
-        self.path = mic_socket(sid)
-        self.cond = threading.Condition()
-        self.chunks, self.ended, self.stopped, self.readers, self.read = [], False, False, 0, False
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.path.parent, 0o700)
-        self.path.unlink(missing_ok=True)
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.bind(str(self.path))
-        self.sock.listen(2)
-        threading.Thread(target=self.serve, daemon=True).start()
-
-    def serve(self):
-        while True:
-            try:
-                conn, _ = self.sock.accept()
-            except OSError:         # closed: the dictation is over
-                return
-            with self.cond:
-                self.readers += 1
-                start = 0 if self.readers == 1 else len(self.chunks)    # a second rec: from now on
-            threading.Thread(target=self.feed, args=(conn, start), daemon=True).start()
-
-    def feed(self, conn, i):
-        try:
-            while True:
-                with self.cond:
-                    self.cond.wait_for(lambda: i < len(self.chunks) or self.ended or self.stopped)
-                    new = self.chunks[i:]
-                    i += len(new)
-                    if not new and self.stopped:
-                        break
-                    if not new:         # all of it read: silence now, as it comes
-                        self.read = True
-                        self.cond.notify_all()
-                if new:
-                    conn.sendall(b"".join(new))
-                else:
-                    conn.sendall(MIC_HUSH)
-                    time.sleep(len(MIC_HUSH) / 32000)
-        except OSError:         # Claude stopped rec
-            pass
-        finally:
-            conn.close()        # the end of its input: rec ends, having passed on all of it
-            with self.cond:
-                self.read = True
-                self.cond.notify_all()
-
-    def add(self, data):
-        with self.cond:
-            self.chunks.append(data)
-            self.cond.notify_all()
-
-    def end(self, wait=3.0):
-        """No more audio; wait until a rec has read all of it (or none came).
-        Whether one did."""
-        with self.cond:
-            self.ended = True
-            self.cond.notify_all()
-            self.cond.wait_for(lambda: self.read, timeout=wait)
-            return self.readers > 0
-
-    def stop(self):
-        """Not even silence: a rec still reading ends."""
-        with self.cond:
-            self.ended = self.stopped = True
-            self.cond.notify_all()
-
-    def close(self):
-        self.stop()
-        close_listening(self.sock)
-        self.path.unlink(missing_ok=True)
-
-
 # ---- dictation on the host: speech to text, without Claude
 #
 # The app's mic button writes what you say into the box you're typing in (a
@@ -7255,6 +6834,8 @@ DICTATE_STRETCH_MOST = 1500 # frames a long stretch is at most: 30 s, cut at its
 DICTATE_WORDS = 5           # frames of sound worth writing down: 0.1 s
 DICTATE_BREAK = 50          # frames of silence that end a long stretch of 3 s or more too: 1 s, where
                             # you'd go on in another language (it writes one at a time down)
+MIC_MAX = 300             # seconds a dictation on the host lasts at most
+MIC_QUIET = 3             # seconds without a word from the phone before it counts as let go
 
 
 def dictate_mb():
@@ -7800,8 +7381,7 @@ def cmd_dictation(args):
     else:
         why = f" ({s['setup']['error']})" if s["setup"] else ""
         print(f"Dictation isn't set up{why}: {dictate_how()}")
-        print("Until it is, the app's mic uses the browser's own speech recognition where it has it, "
-              "else Claude Code's voice mode.")
+        print("Until it is, the app's mic uses the browser's own speech recognition where it has it.")
     return 0
 
 
@@ -7813,124 +7393,15 @@ def cmd_dictation(args):
 # `amarchy attach` on a pty of its own: a tmux client of the session's tmux,
 # so the phone and every browser show the same session at once.
 #
-# Two things a server doesn't have come from the browser instead. A pasted
-# image: the page hands the app what was pasted in it (the web clipboard, see
+# One thing a server doesn't have comes from the browser instead: a pasted
+# image. The page hands the app what was pasted in it (the web clipboard, see
 # "clipboard") before it sends Ctrl+V, and Claude's wl-paste (amarchy paste)
-# reads it there. And the microphone: Claude's voice mode records with rec
-# (amarchy rec), which, while the page shows that session's Claude with the
-# keyboard in it, is the browser's microphone (DeskMic), as dictating from
-# the phone is.
+# reads it there.
 
 
 CLIP_MAX = 25_000_000                           # bytes of one pasted image or text (as base64 in its JSON)
 CLIP_TYPES = re.compile(r"image/(png|jpeg|gif|webp)")
 TTY_PING = 25                                   # seconds between pings on a terminal's WebSocket
-MIC_EARLY = 96_000                              # bytes of audio kept from before rec is there: 3 seconds
-DESK_MIC_QUIET = 20                             # seconds a page's microphone may say nothing before it counts as gone
-
-
-class DeskMic:
-    """The microphone of a browser showing a session's Claude, for Claude's
-    voice mode: while the page has the keyboard, the session's rec is this.
-    When Claude starts recording, the page is told to turn its microphone on
-    (tell(True)), and its audio goes to rec as it comes, after what it heard
-    just before (the page opens it as soon as the key is held); when Claude
-    is done with rec, the page turns it off (tell(False))."""
-
-    def __init__(self, sid, tell):
-        self.sid, self.tell = sid, tell
-        self.path = mic_socket(sid)
-        self.lock = threading.Lock()
-        self.recs, self.sock, self.early = [], None, []
-        self.wanted = True      # the page has the keyboard in Claude
-        self.resume()
-
-    def resume(self):
-        """Be the session's rec (again)."""
-        with self.lock:
-            if self.sock:
-                return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(self.path.parent, 0o700)
-            self.path.unlink(missing_ok=True)
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                sock.bind(str(self.path))
-                sock.listen(4)
-            except OSError as e:
-                sock.close()
-                print(f"amarchy app: no microphone for {self.sid}: {e}", file=sys.stderr)
-                return
-            self.sock = sock
-        threading.Thread(target=self.serve, args=(sock,), daemon=True).start()
-
-    def suspend(self):
-        """Stop being it: the page lost the keyboard, a phone dictates, or it's gone."""
-        with self.lock:
-            sock, self.sock = self.sock, None
-            recs, self.recs, self.early = self.recs, [], []
-        if sock:
-            close_listening(sock)
-            self.path.unlink(missing_ok=True)
-        for c in recs:
-            c.close()
-        if recs:
-            self.tell(False)
-
-    def serve(self, sock):
-        while True:
-            try:
-                conn, _ = sock.accept()
-            except OSError:         # suspended
-                return
-            with self.lock:
-                if self.sock is not sock:
-                    conn.close()
-                    return
-                first, early, self.early = not self.recs, self.early, []
-                self.recs.append(conn)
-            try:
-                conn.sendall(b"".join(early))
-            except OSError:
-                pass
-            if first:
-                self.tell(True)
-            threading.Thread(target=self.watch, args=(conn,), daemon=True).start()
-
-    def watch(self, conn):
-        """Until that rec is done with it (it only reads)."""
-        try:
-            while conn.recv(4096):
-                pass
-        except OSError:
-            pass
-        with self.lock:
-            mine = conn in self.recs
-            if mine:
-                self.recs.remove(conn)
-            last = mine and not self.recs
-        conn.close()
-        if last:
-            self.tell(False)
-
-    def feed(self, data):
-        """Audio from the page: to rec, or kept until rec comes (the start of what's said)."""
-        with self.lock:
-            recs = list(self.recs)
-            if not recs:
-                self.early.append(data)
-                while sum(map(len, self.early)) > MIC_EARLY:
-                    self.early.pop(0)
-        for c in recs:
-            try:
-                c.sendall(data)
-            except OSError:
-                pass
-
-    def forget(self):
-        """What was heard while no rec came: not for the next one."""
-        with self.lock:
-            self.early = []
 
 
 def peer_uid(sock):
@@ -8033,81 +7504,6 @@ def app_add_sound(name, raw):
     return sound_key(stem), ""
 
 
-def cmd_rec(args):
-    """rec (SoX) for a session's Claude on a host: the phone's microphone while
-    it holds its button on this session (see "dictation from the phone"),
-    else the real rec. The phone's audio goes through sox, so it comes out as
-    rec was asked for, effects and all."""
-    sid, state = rec_session()
-    if re.fullmatch(r"[\w][\w.-]{0,119}", sid) and "--version" not in args:
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            conn.connect(str(mic_socket(sid, state)))
-        except OSError:
-            conn.close()
-        else:
-            return mic_record(conn, args)
-    # Not one of amarchy's (another checkout's would hand it back).
-    real = next((str(p) for d in os.environ.get("PATH", "").split(os.pathsep) if d.startswith("/")
-                 for p in [Path(d) / "rec"] if p.is_file() and os.access(p, os.X_OK)
-                 and p.resolve().name != "amarchy-rec"), None)
-    if not real:
-        print("rec (amarchy): SoX's rec isn't installed", file=sys.stderr)
-        return 127
-    os.execv(real, [real, *args])
-
-
-def rec_session():
-    """Which session's Claude runs this rec, and that session's amarchy state:
-    from Claude's own environment, the process above, since Claude Code gives
-    the programs it runs for itself (rec among them) none of its own."""
-    pid = os.getpid()
-    for _ in range(6):
-        try:
-            env = dict(v.split("=", 1) for v in Path(f"/proc/{pid}/environ").read_text(errors="replace").split("\0")
-                       if "=" in v)
-            pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
-        except (OSError, ValueError, IndexError):
-            break
-        if env.get("AMARCHY_SESSION"):
-            home = env.get("XDG_STATE_HOME")
-            return env["AMARCHY_SESSION"], Path(home) / "amarchy" if home else HOME / ".local/state/amarchy"
-        if pid <= 1:
-            break
-    return "", STATE
-
-
-def mic_record(conn, args):
-    """rec's output from the phone's audio on conn: sox reads it where rec
-    would read the microphone (rec's options first, then its output)."""
-    import signal
-    first, rest = [], list(args)
-    while rest and (rest[0] in ("-q", "-S", "--no-show-progress", "--show-progress") or re.fullmatch(r"-V\d?", rest[0])
-                    or rest[0] in ("--buffer", "--input-buffer") and len(rest) > 1):
-        n = 2 if rest[0] in ("--buffer", "--input-buffer") else 1
-        first, rest = first + rest[:n], rest[n:]
-    try:
-        sox = subprocess.Popen(["sox", *first, *MIC_FORMAT, "-", *rest], stdin=subprocess.PIPE, bufsize=0)
-    except OSError as e:
-        print(f"rec (amarchy): {e}", file=sys.stderr)
-        return 127
-
-    def stop(*_):           # Claude's done with it
-        sox.terminate()
-        os._exit(0)
-    signal.signal(signal.SIGTERM, stop)
-    try:
-        while data := conn.recv(65536):
-            sox.stdin.write(data)
-    except OSError:
-        pass
-    try:
-        sox.stdin.close()
-    except OSError:
-        pass
-    return sox.wait()
-
-
 # ---- the server
 
 APP_BUILD_MEMO = {"seen": None, "build": None}
@@ -8146,10 +7542,7 @@ class AppState:
         self.changed = threading.Condition()
         self.view, self.version, self.statuses = {}, 0, None
         self.asked = {}         # session id -> the request it last told the phones about (chat engine)
-        self.screen_asks = {}   # session id -> (when, what its terminal's screen asks): app_words
         self.seen = {}          # session id -> when the phone last said it's on screen
-        self.mics = {}          # session id -> its dictation from the phone, while there is one (AppMic)
-        self.desk_mics = {}     # session id -> the browser's microphone for its Claude (DeskMic)
         self.lock = threading.Lock()
         # Which sessions are open on a device (a phone's conversation, a
         # browser's terminals: id -> how many), and when each last was, for
@@ -8201,7 +7594,7 @@ def app_watch(st):
                     s["unseen"] = False
             view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
                     "sort": list_sort(), "look": look_stamp(look), "nerd": look["font"]["nerd"],
-                    "voice": claude_voice()["enabled"], "voice_mode": claude_voice()["mode"], "sound": sound_name(),
+                    "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
@@ -8245,21 +7638,10 @@ def secret_words(name):
     return SECRET_WORDS.get(name) or name
 
 
-def screen_ask(s):
-    """What a terminal-engine session's Claude asks on its screen, in a line, or ""."""
-    dialog = app_screen(s).get("dialog")
-    if not dialog or not dialog.get("question"):
-        return ""
-    lines = [l.strip() for l in dialog["question"].splitlines() if l.strip()]
-    # The screen's: its last lines, what it asks. The chat engine's: its first, then what.
-    return " · ".join(lines[:2] if dialog.get("request") else lines[-3:])[:300]
-
-
-def ask_line(s, screen=None):
+def ask_line(s):
     """What a session waits on you for, in words a notification and the list
     say: the secret its Claude asks for first (as its card comes first), else
-    the chat engine's request, else the question on a terminal's screen
-    (screen: that, read already), else "Needs your answer". "" when it isn't
+    the chat engine's request, else "Needs your answer". "" when it isn't
     waiting on you."""
     asks = [a for a in s.get("secret_asks") or [] if a.get("waiting")]
     if asks:
@@ -8271,13 +7653,7 @@ def ask_line(s, screen=None):
     if pending:
         more = len(pending) - 1
         return ask_words(pending[0], s.get("path")) + (f" (and {more} more)" if more > 0 else "")
-    q = screen_ask(s) if screen is None else screen
-    if not q:
-        return "Needs your answer"
-    # On a terminal: what its screen asks is the step it's on (the transcript
-    # has it, with its words), else the screen's own lines.
-    step = last_words(s)["step"]
-    return ask_words(step, s.get("path")) if step else f"Needs your answer: {q}"
+    return "Needs your answer"      # a classic terminal's question is on its screen, which nothing reads
 
 
 def app_words(st, ss):
@@ -8298,16 +7674,7 @@ def app_words(st, ss):
             act = agent_live(s["id"]).get("activity") if s.get("engine") == "chat" else None
             s["doing"] = {"tool": act.get("tool") or "", "input": step_input(act.get("input"))} \
                 if isinstance(act, dict) and act.get("tool") else words["step"]
-        screen = None
-        if s.get("status") == "waiting" and s.get("engine") != "chat":
-            at, said = st.screen_asks.get(s["id"], (0, ""))
-            if now - at > 3:
-                said = screen_ask(s)
-                st.screen_asks[s["id"]] = (now, said)
-            screen = said
-        else:
-            st.screen_asks.pop(s["id"], None)
-        s["asks"] = ask_line(s, screen)
+        s["asks"] = ask_line(s)
 
 
 def app_moments(st, ss):
@@ -8340,11 +7707,7 @@ def app_moments(st, ss):
         if time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
             continue
         if state == "waiting":
-            if not asking and s.get("engine") != "chat" and not s.get("secret_asks"):
-                time.sleep(0.3)         # the question is on screen by now
-                body = ask_line(s, screen_ask(s))
-            else:
-                body = ask_line(s)
+            body = ask_line(s)
         else:
             said = s.get("said") or last_said(s)
             body = f"Done: {said}" if said and kind != "assistant" else said or "Done"
@@ -8442,197 +7805,6 @@ def app_handler(st, users, address):
                 return None
             return s
 
-        def voice(self, s):
-            """Dictation from the phone into the session's Claude (see
-            "dictation from the phone"): a WebSocket, the phone's audio in it
-            (16 kHz, 16-bit, mono) while the button is held and "end" when it's
-            let go. Back come {"state": "listening"}, then {"state":
-            "transcribing"}, and the transcript ({"text"}, taken out of Claude's
-            prompt for the phone's box) or why there's none ({"error"})."""
-            sid = s["id"]
-            if engine(s) == "chat":
-                return self.error(409, "Claude's voice mode is in the classic terminal only: "
-                                       "pick another dictation in Settings")
-            voice = claude_voice()
-            if not voice["enabled"]:
-                return self.error(409, "Claude's voice mode is off: turn it on with /voice")
-            # "wait": not yet (Claude is starting, or asking something), so
-            # the phone asks again, what was said waiting for it.
-            screen = app_screen(s)
-            if screen["asleep"]:
-                wake(s)
-                return self.send(409, {"error": "Claude is waking up", "wait": True})
-            if screen["waking"]:
-                return self.send(409, {"error": "Claude is waking up", "wait": True})
-            if screen["exited"]:
-                return self.error(409, "Claude Code exited: start it again first")
-            if not screen["live"]:
-                return self.send(409, {"error": "Claude isn't running", "wait": True})
-            if screen["dialog"]:
-                return self.send(409, {"error": "Claude is asking you something: answer that first", "wait": True})
-            if sid in st.mics:
-                return self.error(409, "It's already listening")
-            before = claude_prompt(s)
-            if before is None:
-                return self.send(409, {"error": "Claude's prompt isn't on screen", "wait": True})
-            # Without the WebSocket, just whether it would listen (so the
-            # phone can say why it didn't).
-            if self.headers.get("Upgrade", "").lower() != "websocket":
-                return self.send(200, {"ready": True})
-            if not self.ws_check():
-                return
-            # A browser's microphone for this Claude (its wide layout) steps
-            # aside meanwhile: what Claude records now is the phone.
-            desk = st.desk_mics.get(sid)
-            if desk:
-                desk.suspend()
-            mic = st.mics[sid] = AppMic(sid)
-            pane = f"={tmux_name(sid)}:"
-            started, said, loud, outcome = time.time(), 0, False, "cut off"
-            holding, holder = threading.Event(), None
-            away, watching, sending = None, threading.Event(), threading.Lock()
-            self.ws_lock = sending
-
-            wrote = [None]      # when Claude last wrote a word down
-
-            def watch():        # the words as Claude writes them down, to the phone as they come
-                last = before
-                while watching.is_set():
-                    now = claude_prompt(s)
-                    now = now.rstrip(MIC_METER).rstrip() if now is not None else None
-                    if now is not None and now != last:
-                        last = now
-                        wrote[0] = time.time()
-                        try:
-                            self.ws_send({"interim": now})
-                        except OSError:
-                            return
-                    time.sleep(0.15)
-
-            def hold():         # the space, held: as the key repeats
-                end = time.time() + MIC_MAX
-                while holding.is_set() and time.time() < end:
-                    tmux("send-keys", "-t", pane, "Space")
-                    time.sleep(MIC_REPEAT)
-            try:
-                self.ws_handshake()
-                self.connection.settimeout(MIC_QUIET)      # a phone gone quiet has let go
-                away = desk_hide(s)
-                watching.set()
-                threading.Thread(target=watch, daemon=True).start()
-                if voice["mode"] == "tap":
-                    tmux("send-keys", "-t", pane, "Space")
-                else:
-                    holding.set()
-                    holder = threading.Thread(target=hold, daemon=True)
-                    holder.start()
-                self.ws_send({"state": "listening"})
-                started = time.time()
-                while time.time() - started < MIC_MAX:
-                    try:
-                        op, data = self.ws_recv()
-                    except (OSError, ValueError):
-                        break
-                    if op in (None, 8) or op == 1 and data == b"end":
-                        break
-                    if op in (0, 2):
-                        mic.add(data)
-                        said += len(data)
-                        loud = loud or bool(data.strip(b"\0"))
-                    elif op == 9:
-                        self.ws_send(data, op=10)
-                # Let go: Claude gets all of it before it's told the key is up.
-                # Said before Claude was up, it all came at once, and a key let
-                # go at once is no dictation to Claude: held then until Claude
-                # has caught up (no new words for a moment), or for as long as
-                # what was said lasts.
-                ahead = started + said / 32000
-                while time.time() < ahead and not (wrote[0] and time.time() - wrote[0] > MIC_CAUGHT_UP):
-                    time.sleep(0.1)
-                came = mic.end()
-                # Held a moment more once rec has all of it, rec hearing
-                # silence: Claude writes down the last words before it's told
-                # the key is up, and then stops rec itself.
-                time.sleep(MIC_TAIL)
-                holding.clear()
-                if voice["mode"] == "tap":
-                    tmux("send-keys", "-t", pane, "Space")
-                elif holder:
-                    holder.join()
-                threading.Timer(MIC_LET_GO, mic.stop).start()
-                if not came:
-                    watching.clear()
-                    # Claude never recorded (its voice mode is off after all):
-                    # the spaces went into its prompt. As it was, then.
-                    time.sleep(0.3)
-                    clear_claude_prompt(s)
-                    if before:
-                        tmux("set-buffer", "-b", f"amarchy-mic-{sid}", "--", before)
-                        tmux("paste-buffer", "-p", "-r", "-d", "-b", f"amarchy-mic-{sid}", "-t", pane)
-                    outcome = "Claude didn't record"
-                    self.ws_send({"error": "Claude didn't record: turn its voice mode on with /voice"})
-                    return
-                self.ws_send({"state": "transcribing"})
-                text, quiet = None, None
-                end = time.time() + 20
-                while time.time() < end:
-                    time.sleep(0.25)
-                    r = tmux("capture-pane", "-p", "-t", pane)
-                    busy = "processing…" in r.stdout or "listening…" in r.stdout
-                    now = claude_prompt(s)
-                    now = now.rstrip(MIC_METER).rstrip() if now is not None else None
-                    if not busy and now is not None and now != before:
-                        text = now
-                        break
-                    if busy:
-                        quiet = None
-                    elif quiet is None:
-                        quiet = time.time()
-                    elif time.time() - quiet > 2.5:     # done, and nothing came of it
-                        break
-                watching.clear()
-                if not text:
-                    # Nothing but 0 is a microphone that's dead, not a quiet room.
-                    outcome = ("no words heard" if loud else "only silence from the phone" if said
-                               else "no sound from the phone")
-                    self.ws_send({"error": "No words heard" if loud else
-                                  "The phone's microphone sent only silence: try again" if said else
-                                  "No sound came from the phone"})
-                    return
-                outcome = f"{len(text)} characters"
-                # Into the phone's box, to send from there; out of Claude's
-                # once the phone says it has it (else it stays where it is).
-                self.ws_send({"text": text})
-                got = time.time() + MIC_QUIET
-                while time.time() < got:
-                    try:
-                        op, data = self.ws_recv()
-                    except (OSError, ValueError):
-                        break
-                    if op in (None, 8):
-                        break
-                    if op == 1 and data == b"got":
-                        clear_claude_prompt(s)
-                        break
-            except OSError:
-                pass
-            finally:
-                holding.clear()
-                watching.clear()
-                desk_show(s, away)
-                mic.close()
-                # In the journal, for when dictation goes wrong.
-                print(f"amarchy app: dictation in {sid}: {said / 32000:.1f}s of audio"
-                      f"{'' if loud or not said else ', all silent'}, read by {mic.readers} rec, {outcome}",
-                      file=sys.stderr, flush=True)
-                st.mics.pop(sid, None)
-                if desk and desk.wanted:
-                    desk.resume()
-                try:
-                    self.ws_send(b"", op=8)
-                except OSError:
-                    pass
-
         def ws_check(self):
             """Whether this is a WebSocket from one of the app's own pages (a
             page elsewhere can open one to it too: its Origin says whose it is).
@@ -8667,12 +7839,10 @@ def app_handler(st, users, address):
             """A session's real terminal, Claude's or its own (which), for
             xterm.js in a browser: a WebSocket whose binary messages are what
             it shows (the pty's output) one way and the keys (its input) the
-            other; text ones are JSON: {"resize": [cols, rows]} and {"mic":
-            true|false} (whether the page has the keyboard, and so the
-            microphone) from the page, {"mic": true|false} (turn it on or
-            off) and {"exit": code} to it. On the pty, `amarchy attach`: it
-            starts what isn't running, waits for a new worktree, says so when
-            the session is gone, and is then tmux."""
+            other; text ones are JSON: {"resize": [cols, rows]} from the page,
+            and {"exit": code} to it. On the pty, `amarchy attach`: it starts
+            what isn't running, waits for a new worktree, says so when the
+            session is gone, and is then tmux."""
             if not self.ws_check():
                 return
             try:
@@ -8694,13 +7864,7 @@ def app_handler(st, users, address):
                 return self.error(500, f"couldn't attach: {e}")
             os.close(slave)
             st.looking(sid, True)
-            done, mic = threading.Event(), None
-
-            def tell(on):
-                try:
-                    self.ws_send({"mic": on})
-                except OSError:
-                    pass
+            done = threading.Event()
 
             def out():          # the terminal, as it draws, to the page
                 try:
@@ -8732,15 +7896,6 @@ def app_handler(st, users, address):
                         return
             try:
                 self.ws_handshake()
-                if which == "claude" and (args.get("mic") or [""])[0] == "1":
-                    mic = DeskMic(sid, tell)
-                    with st.lock:
-                        old, st.desk_mics[sid] = st.desk_mics.get(sid), mic
-                    if old:
-                        old.suspend()
-                    mic.wanted = (args.get("focus") or [""])[0] == "1"
-                    if not mic.wanted or sid in st.mics:
-                        mic.suspend()
                 threading.Thread(target=out, daemon=True).start()
                 threading.Thread(target=ping, daemon=True).start()
                 while not done.is_set():
@@ -8764,12 +7919,6 @@ def app_handler(st, users, address):
                         if isinstance(size, list) and len(size) == 2 and all(isinstance(n, int) for n in size):
                             fcntl.ioctl(master, termios.TIOCSWINSZ,
                                         struct.pack("HHHH", min(max(size[1], 2), 500), min(max(size[0], 2), 1000), 0, 0))
-                        if mic and isinstance(msg.get("mic"), bool):
-                            mic.wanted = msg["mic"]
-                            if mic.wanted and sid not in st.mics:
-                                mic.resume()
-                            elif not mic.wanted:
-                                mic.suspend()
                     elif op == 9:
                         self.ws_send(data, op=10)
             except OSError:
@@ -8777,11 +7926,6 @@ def app_handler(st, users, address):
             finally:
                 done.set()
                 st.looking(sid, False)
-                if mic:
-                    mic.suspend()
-                    with st.lock:
-                        if st.desk_mics.get(sid) is mic:
-                            del st.desk_mics[sid]
                 try:
                     os.close(master)
                 except OSError:
@@ -8910,40 +8054,6 @@ def app_handler(st, users, address):
                     return self.error(500, str(e))
             return self.send(200, {})
 
-        def desk_mic(self, s):
-            """The browser's microphone while Claude records from it (see
-            DeskMic): a WebSocket of its audio, 16 kHz 16-bit mono, as the
-            phone's dictation sends it."""
-            if not self.ws_check():
-                return
-            sid = s["id"]
-            if sid not in st.desk_mics:
-                return self.error(409, "Claude's terminal isn't open in this browser")
-            try:
-                self.ws_handshake()
-                # A page whose microphone takes a while to start sends nothing
-                # at first; a page gone (it says "end" otherwise) is quiet for good.
-                self.connection.settimeout(DESK_MIC_QUIET)
-                while True:
-                    op, data = self.ws_recv()
-                    if op in (None, 8) or op == 1 and data == b"end":
-                        break
-                    mic = st.desk_mics.get(sid)
-                    if op in (0, 2) and mic:
-                        mic.feed(data)
-                    elif op == 9:
-                        self.ws_send(data, op=10)
-            except (OSError, ValueError):
-                pass
-            finally:
-                mic = st.desk_mics.get(sid)
-                if mic:
-                    mic.forget()
-                try:
-                    self.ws_send(b"", op=8)
-                except OSError:
-                    pass
-
         def ws_recv(self):
             """A WebSocket frame from the phone: (opcode, payload), or (None,
             b"") when it's gone. Frames from a browser are masked."""
@@ -9026,19 +8136,15 @@ def app_handler(st, users, address):
             if path == "/api/secrets":      # the secrets' names (never a value): Settings → Secrets
                 return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
                                        "projects_known": project_names()})
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands|agent)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|tty/claude|tty/term|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
                 if m.group(2) == "agent":
                     return self.chat(s, "agent", {})
-                if m.group(2) == "voice":
-                    return self.voice(s)
                 if m.group(2).startswith("tty/"):
                     return self.tty(s, m.group(2)[4:], args)
-                if m.group(2) == "mic":
-                    return self.desk_mic(s)
                 if m.group(2) == "commands":
                     return self.send(200, {"commands": app_commands(s)})
                 if m.group(2) == "stream":
@@ -9354,6 +8460,13 @@ def app_handler(st, users, address):
                     return self.error(400, "high, normal or low")
                 r = run_amarchy("priority", level, "--id", s["id"])
                 return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
+            if what == "send" and engine(s) == "terminal":
+                # A message is the chat's: a session on Claude's classic terminal
+                # comes back to the chat once it's idle, and the chat takes it.
+                why = switch_engine(s, "chat")
+                if why:
+                    return self.error(409, why)
+                s = session(s["id"]) or s
             st.looking(s["id"])
             screen = app_screen(s)
             if screen["waking"]:
@@ -9368,49 +8481,14 @@ def app_handler(st, users, address):
                 screen = app_screen(s)
             if engine(s) == "chat":
                 return self.chat_input(s, what, data, screen)
-            if what == "send":
-                text = data.get("text")
-                if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
-                    return self.error(400, "nothing to send")
-                if screen["asleep"] or not screen["live"] and not s.get("setup"):
-                    # Asleep (or not started since a reboot): it wakes with this
-                    # as its first message, what was typed in its prompt kept.
-                    if starting(s["id"]):
-                        return self.error(409, "Claude is starting with another message: try again in a moment")
-                    threading.Thread(target=send_start, args=(s, text.replace("\r\n", "\n").replace("\r", "\n")),
-                                     daemon=True).start()
-                    return self.send(200, {"waking": True})
-                if not screen["live"]:
-                    return self.error(409, "Claude isn't running yet: try again in a moment")
-                if screen["exited"]:
-                    return self.error(409, "Claude Code exited: start it again first")
-                # An answer in your own words to a question ("Type something."):
-                # that option's keys first, then the text.
-                answer = data.get("answer") if isinstance(data.get("answer"), dict) else None
-                if screen["dialog"] and not answer:
-                    return self.error(409, "Claude is asking you something: answer that first")
-                if answer:
-                    keys = answer.get("keys")
-                    if (screen["dialog"] or {}).get("id") != answer.get("dialog"):
-                        return self.error(409, "The question changed: look again")
-                    if not valid_keys(keys):
-                        return self.error(400, "keys it doesn't send")
-                    why = app_keys(s, keys)
-                    if why:
-                        return self.error(500, why)
-                    time.sleep(0.2)
-                why = app_type(s, text.replace("\r\n", "\n").replace("\r", "\n"))
-            else:
-                keys = data.get("keys")
-                if not valid_keys(keys):
-                    return self.error(400, "keys it doesn't send")
-                if screen["asleep"]:
-                    wake(s)
-                    return self.error(409, "It was asleep: Claude is waking up, try again in a moment")
-                expect = data.get("dialog")
-                if expect is not None and (screen["dialog"] or {}).get("id") != expect:
-                    return self.error(409, "The question changed: look again")
-                why = app_keys(s, keys)
+            # Claude's classic terminal: its keys (the keys row: arrows, Enter, Esc, 1 2 3) go to its pane.
+            keys = data.get("keys")
+            if not valid_keys(keys):
+                return self.error(400, "keys it doesn't send")
+            if screen["asleep"]:
+                wake(s)
+                return self.error(409, "It was asleep: Claude is waking up, try again in a moment")
+            why = app_keys(s, keys)
             st.seen[s["id"]] = time.time()
             return self.send(200, {}) if why is None else self.error(500, why)
 
@@ -9975,10 +9053,7 @@ def cmd_app(args):
 # Enter does in its asleep terminal.
 
 SEND_TIMEOUT = 60       # minutes a message waits for Claude to be free, unless told otherwise
-SEND_TAKEN = 15         # seconds Claude has to take a message once it's typed
 SEND_START = 180        # seconds a Claude asleep or exited has to come back and take one
-SEND_SETTLE = 1.5       # seconds Claude has to look free before a message is typed
-SEND_TYPING = 15        # seconds what's typed in Claude's prompt sits still before a message goes ahead of it
 
 
 def send_queue(sid):
@@ -10007,18 +9082,32 @@ def send_turn(f):
     return None
 
 
-def claude_busy(s, screen):
-    """Whether the session's Claude is in the middle of a turn: it says so
-    under its prompt, or it said it started one (an interrupted turn never
-    says it ended) and its conversation is still moving."""
-    if any("esc to interrupt" in l for l in screen["text"].splitlines()[-6:]):
-        return True
+def starting(sid):
+    """Whether the session's Claude is starting with a message: one left for
+    it to take, lately. One that's sat there longer is gone: Claude, up by
+    now, never took it."""
     try:
-        status = (STATUS / s["id"]).read_text().strip()
+        return time.time() - (claude_dir(sid) / "send").stat().st_mtime < SEND_START
     except OSError:
-        status = ""
-    f = transcript(s)
-    return status == "working" and bool(f) and time.time() - f.stat().st_mtime < QUIET
+        return False
+
+
+def send_start(s, text):
+    """Start the session's Claude (asleep, exited or not running) with text
+    as its first message. None once it took it, else why not."""
+    sid = s["id"]
+    d = claude_dir(sid)
+    since = time.time()
+    write_file(d / "send", text)
+    if asleep_since(sid) is not None:
+        wake(s)
+    elif tmux_has(tmux_name(sid)):
+        woken(sid)
+        tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")     # it exited: Enter starts it again
+    else:
+        woken(sid)
+        host_start(s, wake=True)
+    return send_started(sid, text, since)
 
 
 def send_taken(sid, since):
@@ -10029,55 +9118,6 @@ def send_taken(sid, since):
         return f.stat().st_mtime >= since - 0.5 and f.read_text().strip() == "working"
     except OSError:
         return False
-
-
-def starting(sid):
-    """Whether the session's Claude is starting with a message: one left for
-    it to take, lately. One that's sat there longer is gone: Claude, up by
-    now, never took it."""
-    f = claude_dir(sid) / "send"
-    try:
-        if time.time() - f.stat().st_mtime < SEND_START:
-            return True
-    except OSError:
-        return False
-    if claude_prompt(session(sid) or {"id": sid}) is not None:
-        f.unlink(missing_ok=True)
-    return False
-
-
-def send_start(s, text):
-    """Start the session's Claude (asleep, exited or not running) with text
-    as its first message. None once it took it, else why not."""
-    sid = s["id"]
-    d = claude_dir(sid)
-    since = time.time()
-    # What was typed in its prompt when it went to sleep goes back there once
-    # Claude has the message.
-    # (The chat engine has no prompt to put it in: a draft from the TUI waits for the TUI.)
-    draft = take(d / "draft") if asleep_since(sid) is not None and engine(s) == "terminal" else None
-    write_file(d / "send", text)
-    if asleep_since(sid) is not None:
-        wake(s)
-    elif tmux_has(tmux_name(sid)):
-        woken(sid)
-        tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")     # it exited: Enter starts it again
-    else:
-        woken(sid)
-        host_start(s, wake=True)
-    why = send_started(sid, text, since)
-    if draft and draft.strip():
-        if why:
-            write_file(d / "draft", draft)      # for when it does start
-        else:
-            end = time.time() + 30
-            while claude_prompt(s) is None and time.time() < end:
-                time.sleep(0.3)
-            time.sleep(0.5)     # Claude's turn draws its prompt again
-            buffer = f"amarchy-send-{os.getpid()}"
-            if tmux("set-buffer", "-b", buffer, "--", draft.rstrip("\n")).returncode == 0:
-                tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", f"={tmux_name(sid)}:")
-    return why
 
 
 def send_started(sid, text, since):
@@ -10100,60 +9140,27 @@ def send_started(sid, text, since):
     return None     # it started with it, and hasn't said it's working on it (a /command)
 
 
-def send_type(s, text):
-    """Type a message into the session's Claude, free and at its prompt: what
-    was typed there first handed over (Ctrl+G) and put back after. None once
-    Claude took it, False to try again in a moment, else why not."""
-    sid = s["id"]
-    pane = f"={tmux_name(sid)}:"
-    draft = ""
-    if claude_prompt(s):
-        if not hand_over_prompt(s):
-            return False
-        draft = take(claude_dir(sid) / "draft") or ""
-        if not clear_claude_prompt(s):
-            return False
-    since = time.time()
-    why = app_type(s, text)
-    end = time.time() + SEND_TAKEN
-    taken = False
-    while not why and time.time() < end:
-        time.sleep(0.3)
-        # Its prompt empty again: taken, even without a turn (a /command).
-        if send_taken(sid, since) or (time.time() - since > 1 and claude_prompt(s) == ""):
-            taken = True
-            break
-    if draft.strip():
-        time.sleep(0.5)     # Claude's turn draws its prompt again
-        buffer = f"amarchy-send-{os.getpid()}"
-        if tmux("set-buffer", "-b", buffer, "--", draft.rstrip("\n")).returncode == 0:
-            tmux("paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", pane)
-    if why:
-        return why
-    return None if taken else "it's typed in Claude's prompt, but Claude didn't take it (a menu open there?)"
-
-
 def send_deliver(sid, text, deadline):
     """Deliver a message to the session's Claude once it's free (see above).
     None once Claude has it, else why not."""
-    wait, typed, typed_at, free_since = "", None, 0, None
+    wait = ""
     while True:
         s = session(sid)
         if not s or (CLOSING / f"{sid}.json").exists():
             return "the session was closed"
         if time.time() > deadline:
             return f"its Claude wasn't free in time ({wait})"
-        free, free_since = free_since, None     # set again below while Claude stays free
-        # Left on Claude's classic terminal and nobody has it open: a message brings the
-        # session back to the chat (once idle), and the chat's way delivers it.
-        if engine(s) == "terminal" and not classic_viewed(sid) and not s.get("setup") and asleep_since(sid) is None:
-            if switch_engine(s, "chat") is None:
-                time.sleep(0.5)     # its broker comes up: the chat's way from the next step
-                continue
         if s.get("setup"):
             wait = "it's being set up"
-        elif engine(s) == "chat" and asleep_since(sid) is None:
-            # The broker takes it (or is starting up): never the TUI's path, which types into a pane.
+        elif engine(s) == "terminal":
+            # A message is the chat's: a session on Claude's classic terminal goes back
+            # to the chat once it's idle (switch_engine), and the chat delivers it.
+            why = switch_engine(s, "chat")
+            if why is None:
+                continue
+            wait = why
+        elif asleep_since(sid) is None:
+            # The broker takes it (or is starting up): its Claude exited, Enter starts it again.
             if agent_up(sid):
                 try:
                     answer = agent_call(sid, {"op": "send", "content": text})
@@ -10165,37 +9172,14 @@ def send_deliver(sid, text, deadline):
             else:
                 pane = host_pane(s)
                 if pane and pane_claude(pane, processes()) is None and not starting(sid):
-                    return send_start(s, text)      # its Claude exited: Enter starts it again
+                    return send_start(s, text)
                 wait = "its Claude is starting up"
         elif starting(sid):
             wait = "its Claude is starting with another message"
+        elif waking_now(sid):
+            wait = "its Claude is waking up"
         else:
-            screen = app_screen(s)
-            if screen["waking"]:
-                wait = "its Claude is waking up"
-                time.sleep(0.5)
-                continue
-            if asleep_since(sid) is not None or not screen["live"] or screen["exited"]:
-                return send_start(s, text)
-            prompt = claude_prompt(s)
-            if prompt != typed:
-                typed, typed_at = prompt, time.time()
-            if prompt is None:
-                wait = "its prompt isn't on screen"
-            elif screen["dialog"]:
-                wait = "it's asking something"
-            elif claude_busy(s, screen):
-                wait = "it's working"
-            elif prompt and time.time() - typed_at < SEND_TYPING:
-                wait = "someone is typing in it"
-            elif not free or time.time() - free < SEND_SETTLE:
-                free_since = free or time.time()        # free for a moment, not just between two steps
-                wait = "it's settling"
-            else:
-                why = send_type(s, text)
-                if why is not False:
-                    return why
-                wait = "it didn't hand over what's typed in its prompt"
+            return send_start(s, text)      # asleep: it wakes with the message
         time.sleep(0.5)
 
 
@@ -11795,17 +10779,14 @@ def switch_engine(s, want, force=False):
 def engine_blockers(s):
     """Why a session's Claude shouldn't go over to the other engine now, if
     anything: what the move would lose. The things that keep a session awake
-    (sleep_blockers), and what's typed in the TUI's prompt."""
+    (sleep_blockers, which has a message typed in a classic terminal's prompt),
+    and a classic terminal whose prompt isn't on its screen."""
     pane = host_pane(s)
     if not pane:
         return ["its pane isn't running"]
     reasons = sleep_blockers(s, pane, processes(), auto=False)
-    if not reasons and engine(s) == "terminal":
-        typed = claude_prompt(s)
-        if typed is None:
-            reasons.append("its prompt isn't on screen")
-        elif typed:
-            reasons.append("a message is typed in its prompt")
+    if not reasons and engine(s) == "terminal" and claude_prompt(s) is None:
+        reasons.append("its prompt isn't on screen")
     return reasons
 
 
@@ -12005,8 +10986,8 @@ OPTIONS = {
     "terminals": (set(), set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
-    "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "paste": None, "rec": None, "agent": None, "screen-mcp": None,
+    "reap": None, "shorten": None, "attach": None, "held": None,
+    "paste": None, "agent": None, "screen-mcp": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -12041,7 +11022,7 @@ def check_args(cmd, args):
     the usage on stderr (1). Otherwise None, and the command runs."""
     spec = OPTIONS.get(cmd)
     if spec is None:
-        if cmd != "editor" and args[:1] and args[0] in HELP:
+        if args[:1] and args[0] in HELP:
             print(usage(cmd))
             return 0
         return None
@@ -12128,16 +11109,12 @@ def main(argv):
         return cmd_asleep(args[0])
     elif cmd == "woke" and len(args) in (1, 2):
         return cmd_woke(args[0], args[1] if len(args) > 1 else "")
-    elif cmd == "editor":
-        return cmd_editor(args)
     elif cmd == "attach" and args:
         return cmd_attach(args)
     elif cmd == "held" and len(args) == 1:
         return cmd_held(args[0])
     elif cmd == "paste":
         return cmd_paste(args)
-    elif cmd == "rec":
-        return cmd_rec(args)
     elif cmd == "screen-mcp" and not args:
         return screen_mcp()
     elif cmd == "agent":

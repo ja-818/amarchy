@@ -130,10 +130,7 @@ class SessionTerminal {
       if (key === "ctrl") this.ctrlBtn = b;
       return b;
     };
-    this.talkBtn = h("button", { class: "control talk", type: "button", "aria-label": "Hold to dictate to Claude" }, glyph("mic"), "Hold to talk");
-    holdToTalk(this.talkBtn, () => { this.talkBtn.classList.add("on"); talkStart(this.panes.claude); },
-               () => { this.talkBtn.classList.remove("on"); talkStop(this.panes.claude); });
-    this.classicKeys = h("div", { class: "keys term-keys classic" }, this.talkBtn, ...CLASSIC_KEYS.map(button));
+    this.classicKeys = h("div", { class: "keys term-keys classic" }, ...CLASSIC_KEYS.map(button));
     // The text bigger or smaller (kept for next time), at the end of the row.
     const size = (label, d, name) => {
       const b = h("button", { class: "control", type: "button", "aria-label": name }, label);
@@ -147,10 +144,7 @@ class SessionTerminal {
 
   pane(which) {
     if (!this.panes[which]) {
-      // The classic terminal on a computer: this page's microphone is
-      // Claude's while it has the keyboard (Hold Space, its voice mode).
-      const opts = this.phone ? { size: phoneSize, mic: which === "claude" } : { mic: which === "claude" };
-      const p = this.panes[which] = new TermPane(which, opts);
+      const p = this.panes[which] = new TermPane(which, this.phone ? { size: phoneSize } : {});
       // Ctrl from the keys row, on what's typed next.
       const send = p.send.bind(p);
       p.send = (data) => {
@@ -204,7 +198,6 @@ class SessionTerminal {
     this.el.classList.toggle("classic", classic);
     if (this.classicKeys) {
       this.classicKeys.hidden = !classic;
-      this.talkBtn.hidden = !(app.view && app.view.voice);
     }
     if (!quiet && this.opts.onShow) this.opts.onShow(this.shown);
     if (this.id && !this.closed) {

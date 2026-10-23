@@ -3,20 +3,17 @@
 // The mic button of a box (a session's, the new-session bar's): hold it while
 // you speak, or tap it to talk and tap again when you're done. The words come
 // into the box as you talk, after what's typed there, to send from there.
-// Three ways to write them down, the first one there is unless Settings picks
+// Two ways to write them down, the first one there is unless Settings picks
 // one (per device: dictationWay):
 //
 //   host:   the host writes it down ("dictation on the host" in amarchy: a
 //           speech model there that tells Spanish from English by itself).
-//           The phone's microphone as Claude's voice mode gets it (micOpen),
-//           on a WebSocket to /api/dictate.
+//           The phone's or the computer's microphone (micOpen), on a WebSocket
+//           to /api/dictate.
 //   device: the browser's own speech recognition (Web Speech: Apple's in
 //           Safari, Google's in Chrome), in one language you pick. Not in
 //           the home-screen app on an iPhone, where WebKit's misses words or
 //           never answers.
-//   claude: Claude Code's own voice mode, in a session's terminal Claude (or
-//           the new session it starts): SessionView.dictate and newChat's talk,
-//           handed in as opts.claude.
 
 const DICTATE_TAP = 350;      // ms: let go sooner and it's a tap: it listens until tapped again
 const DICTATE_STOP = 6000;    // ms the browser's recognition may take to finish once stopped
@@ -38,15 +35,13 @@ function dictationHost() {
   return !!(app.view && app.view.dictation && app.view.dictation.ready);
 }
 
-// The way this device writes dictation down: host, device, claude, or null
-// (no mic button). claude: Claude's voice mode would do (a session's).
-function dictationWay(claude) {
-  const ok = { host: dictationHost(), device: !!SpeechRec, claude: !!(claude && app.view && app.view.voice) };
+// The way this device writes dictation down: host, device, or null (no mic button).
+function dictationWay() {
+  const ok = { host: dictationHost(), device: !!SpeechRec };
   const pick = store.get("dictation");
   if (ok[pick]) return pick;
   if (ok.host) return "host";
   if (ok.device && !iPhoneApp) return "device";
-  if (ok.claude) return "claude";
   return ok.device ? "device" : null;
 }
 
@@ -64,8 +59,7 @@ function dictationReport(entry) {
 }
 
 // opts: field (the textarea), button (its mic), changed() after the words
-// change, state(text) for what's going on (null: nothing), claude (the
-// voice-mode way: { start(), stop() }, or nothing where it can't be).
+// change, state(text) for what's going on (null: nothing).
 class Dictate {
   constructor(opts) {
     this.opts = opts;
@@ -91,7 +85,7 @@ class Dictate {
         this.down = null;
         if (tapped && end === "pointerup" && this.run && this.run.held) {
           this.locked = true;
-          this.say(this.run && this.run.way === "claude" ? null : "Listening… tap the mic when you're done");
+          this.say("Listening… tap the mic when you're done");
           el.classList.add("on");
           return;
         }
@@ -101,8 +95,7 @@ class Dictate {
     el.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
-  // Claude's voice mode is the TUI's: not on the chat engine (claude.off).
-  way() { return dictationWay(!!this.opts.claude && !(this.opts.claude.off && this.opts.claude.off())); }
+  way() { return dictationWay(); }
 
   on() { return !!this.run; }
 
@@ -127,7 +120,6 @@ class Dictate {
     const r = this.run = { way, base, first: base, held: true, words: "", wrote: false, started: Date.now() };
     live.add(r);
     this.opts.button.classList.add("on");
-    if (way === "claude") return this.opts.claude.start();
     if (this.opts.changed) this.opts.changed();
     if (way === "host") this.host(r);
     else this.device(r);
@@ -139,11 +131,6 @@ class Dictate {
     r.held = false;
     this.locked = false;
     this.opts.button.classList.remove("on");
-    if (r.way === "claude") {
-      this.run = null;
-      live.delete(r);
-      return this.opts.claude.stop();
-    }
     r.letGo = Date.now();
     if (r.stop) r.stop();
   }
@@ -396,7 +383,7 @@ function dictationSettings(draw) {
       kids.push(h("p", {}, "To write down what you say on your host (Spanish, English and 23 more languages): install whisper.cpp there (on Arch: sudo pacman -S whisper-cpp), then amarchy dictation setup."));
     }
   }
-  kids.push(h("p", {}, app.desk ? "In Claude's terminal, hold Space to dictate with Claude's voice mode. The mic button is by the boxes of the phone layout (Layout, below)."
+  kids.push(h("p", {}, app.desk ? "Ctrl+Alt+Space dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key) works in every box too."
                                 : "The keyboard's own dictation (its mic key) works in every box too."));
   return kids;
 }

@@ -34,8 +34,8 @@
 .term-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .session-term.phone .term-body > .term-box { --term-pad: 4px 6px; background: transparent; }
 
-/* The phone's keys, under the terminal: Claude's menus' keys and Hold to
-   talk over the classic one, the keys a phone's keyboard hasn't always. */
+/* The phone's keys, under the terminal: Claude's menus' keys, the keys a
+   phone's keyboard hasn't always. */
 .term-keyrows { padding: 6px 8px calc(6px + var(--bottom, 0px)); border-top: 1px solid var(--border-faint); }
 .keyboard-up .term-keyrows { padding-bottom: 6px; }
 .term-keys { margin-bottom: 0; }
@@ -43,7 +43,6 @@
 .term-keys[hidden] { display: none; }
 .term-keys .control { min-width: 40px; padding: 4px 8px; }
 .term-keys .control.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
-.term-keys .control.talk[hidden] { display: none; }
 
 /* Chat | Terminal, under a session's header on the phone. */
 .session-tabs { padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }

@@ -712,8 +712,7 @@ function screenLink(b) {
 
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
-  // shows the chat (its header, its other views); claude: Claude's own voice
-  // mode for the mic ({start, stop}, see SessionView), or none.
+  // shows the chat (its header, its other views).
   constructor(opts) {
     this.opts = opts;
     this.id = opts.id;
@@ -811,13 +810,10 @@ class Chat {
                     glyph("mic"));
     this.sendBtn = h("button", { class: "cbtn send", type: "button", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
     this.stopBtn = h("button", { class: "cbtn stop", type: "button", "aria-label": "Stop Claude", onclick: () => this.stop() }, glyph("stop"));
-    // What you say, into the box (dictate.js), or through Claude's voice mode
-    // (a terminal-engine session's: a chat-engine session has none).
-    const claude = this.opts.claude;
+    // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
-                              state: (text) => this.listening(text),
-                              claude: claude ? { ...claude, off: () => this.engine === "chat" } : undefined });
+                              state: (text) => this.listening(text) });
     // The pictures and files going with the message, over the line you type on.
     this.tray = [];
     this.trayEl = h("div", { class: "tray", hidden: true });
@@ -2267,7 +2263,7 @@ class Chat {
   // The box while dictating: what's going on, in place of its placeholder.
   listening(text) {
     this.composer.classList.toggle("listening", text !== null);
-    this.micBtn.classList.toggle("on", (this.opts.voiceHeld && this.opts.voiceHeld()) || (this.talk.on() && this.talk.run.held));
+    this.micBtn.classList.toggle("on", this.talk.on() && this.talk.run.held);
     this.input.placeholder = text || this.placeholder;
   }
 

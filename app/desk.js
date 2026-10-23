@@ -13,8 +13,7 @@ const desk = {
   current: null,        // the session on screen
   chat: null,           // its chat (chat.js's Chat)
   focus: "chat",        // where the keyboard is: chat, side (the panel), term (a terminal in it)
-  focusPane: null,      // the terminal (TermPane) with the keyboard, micPane the last Claude one
-  micPane: null,
+  focusPane: null,      // the terminal (TermPane) with the keyboard
   zen: false,           // the list hidden (Ctrl+Alt+Z)
   sideTab: null,        // the side panel's tab you left open: term, changes, details, none (closed)
   sideWide: false,      // the side panel over the whole width (Ctrl+Alt+F)
@@ -132,8 +131,7 @@ function wsURL(path) {
 // ---- a real terminal: a session's Claude or its own, attached to its tmux
 
 class TermPane {
-  // which: "claude" or "term". opts.mic: this page's microphone is Claude's
-  // rec while it has the keyboard (the wide layout); opts.size: font size.
+  // which: "claude" or "term". opts.size: font size.
   constructor(which, opts) {
     this.which = which;
     this.opts = opts || {};
@@ -215,12 +213,6 @@ class TermPane {
     return (typeof s === "function" ? s() : s) || termSize();
   }
 
-  // Whether this page's microphone is its Claude's now: on a computer, while
-  // the keyboard is in Claude; on the phone, while it shows Claude's terminal.
-  wantsMic() {
-    return app.desk ? micWanted() : document.visibilityState === "visible";
-  }
-
   async open(sid) {
     if (this.sid === sid && (this.ws || this.timer)) return;
     this.disconnect();
@@ -236,10 +228,6 @@ class TermPane {
     this.fit();
     const sid = this.sid;
     const q = new URLSearchParams({ cols: this.term.cols, rows: this.term.rows });
-    if (this.which === "claude" && this.opts.mic) {
-      q.set("mic", "1");
-      q.set("focus", this.wantsMic() ? "1" : "0");
-    }
     const ws = this.ws = new WebSocket(wsURL(`/api/session/${encodeURIComponent(sid)}/tty/${this.which}?${q}`));
     ws.binaryType = "arraybuffer";
     let fresh = true;
@@ -248,7 +236,6 @@ class TermPane {
       if (typeof e.data === "string") {
         let d = {};
         try { d = JSON.parse(e.data); } catch (err) { return; }
-        if (typeof d.mic === "boolean") voiceSignal(sid, d.mic);
         if (typeof d.exit === "number") this.exited = d.exit;
         return;
       }
@@ -298,17 +285,6 @@ class TermPane {
 
   // The keys a browser would otherwise have, as a terminal sends them.
   key(e) {
-    // Space let go while Claude listens: held a moment more (as key repeats),
-    // so the last word, still on its way, is in what Claude writes down.
-    if (e.type === "keyup" && e.code === "Space" && this.which === "claude" && !voice.on) voiceTyped();
-    if (e.type === "keyup" && e.code === "Space" && voice.on && this.which === "claude") {
-      const until = Date.now() + MIC_TAIL;
-      const hold = setInterval(() => {
-        if (Date.now() > until) clearInterval(hold);
-        else this.send(enc.encode(" "));
-      }, 40);
-      return true;
-    }
     if (e.type !== "keydown") return true;
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     if (this.which === "claude") {
@@ -324,11 +300,6 @@ class TermPane {
         this.pasteFromClipboard();
         return false;
       }
-      // Space down: Claude's voice mode may be about to listen (it waits
-      // for the key to repeat, half a second on a Mac), so the microphone
-      // comes on now, and nothing said at the start is lost. Let go before
-      // it repeats, it was just a space.
-      if (this.opts.mic && plain && e.code === "Space" && app.view && app.view.voice) voiceWarm(this.sid, e.repeat);
     }
     return true;
   }
@@ -416,129 +387,6 @@ async function copyText(text) {
   }
 }
 
-// ---- the microphone, for Claude's own voice mode (/voice)
-//
-// Hold Space in Claude, as in a terminal of its own: Claude records with rec, and
-// while this page has the keyboard in Claude, the host's rec for that
-// session is this browser's microphone (DeskMic in amarchy). The page opens
-// the microphone as soon as the key is held (what's said before Claude
-// listens waits on the host) and the host says when Claude starts and stops
-// recording.
-
-const voice = { ws: null, sid: null, on: false, warmed: null, idle: null, held: false, typed: null };
-const MIC_KEEP = 600000;  // ms the microphone is kept, off, after the last dictation (on a computer)
-
-// Claude's terminal has the keyboard (in the side panel, or the phone's).
-function micWanted() {
-  const p = desk.micPane;
-  return !!p && desk.focusPane === p && !!p.sid && document.hasFocus() && document.visibilityState === "visible";
-}
-
-function voiceWarm(sid, held) {
-  if (held) voice.held = true;
-  if (voice.ws && voice.sid === sid) return;
-  voiceStart(sid);
-  voice.held = !!held;
-  clearTimeout(voice.warmed);
-  // Held, and yet Claude didn't start listening (its voice mode is off).
-  voice.warmed = setTimeout(() => { if (!voice.on) voiceStop(); }, 4000);
-}
-
-// Space let go, Claude not listening: a space typed, unless Claude takes
-// it as the key tapped (its tap mode), which it says in a moment.
-function voiceTyped() {
-  if (!voice.ws || voice.on) return;
-  clearTimeout(voice.typed);
-  const tap = !!(app.view && app.view.voice_mode === "tap");
-  if (!tap && !voice.held) voiceStop();
-  else if (tap) voice.typed = setTimeout(() => { if (!voice.on) voiceStop(); }, 1000);
-}
-
-function voiceSignal(sid, on) {
-  if (on) {
-    voice.on = true;
-    clearTimeout(voice.warmed);
-    if (!voice.ws || voice.sid !== sid) voiceStart(sid);
-  } else if (voice.sid === sid) {
-    voiceStop();
-  }
-}
-
-async function voiceStart(sid) {
-  voiceStop();
-  clearTimeout(voice.idle);
-  voice.sid = sid;
-  const ws = voice.ws = new WebSocket(wsURL(`/api/session/${encodeURIComponent(sid)}/mic`));
-  ws.binaryType = "arraybuffer";
-  const queue = [];
-  mic.take = (pcm) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
-    else if (queue.length < 250) queue.push(pcm);
-  };
-  ws.onopen = () => { for (const pcm of queue.splice(0)) ws.send(pcm); };
-  ws.onclose = () => { if (voice.ws === ws) voiceStop(); };
-  document.body.classList.add("dictating");
-  try {
-    await micOpen();
-  } catch (e) {
-    voiceStop();
-    toast(e.name === "NotAllowedError" ? "This browser may not use the microphone: allow it for Amarchy in its settings"
-                                      : `The microphone didn't start: ${e.message}`);
-  }
-}
-
-function voiceStop() {
-  const ws = voice.ws;
-  voice.ws = null;
-  voice.on = voice.held = false;
-  clearTimeout(voice.warmed);
-  clearTimeout(voice.typed);
-  document.body.classList.remove("dictating");
-  if (ws) {
-    try { if (ws.readyState === WebSocket.OPEN) ws.send("end"); } catch (e) { /* gone */ }
-    ws.close();
-  }
-  if (mic.stream) {
-    micRelease();
-    // On a computer, off for good after a while, so the browser stops
-    // showing it in use (a phone keeps it: iOS would ask again); until then
-    // the next dictation starts at once, not a second or two later.
-    clearTimeout(voice.idle);
-    if (app.desk) voice.idle = setTimeout(() => { if (!voice.ws) micClose(); }, MIC_KEEP);
-  }
-}
-
-// Claude's key held from a button (the phone's terminal), as you'd hold it
-// on a keyboard: Space as a key repeats (or once, in tap mode), the
-// microphone Claude's meanwhile. Let go, and it's held a moment more for the
-// last word; the host says when Claude is done with rec.
-function talkStart(pane) {
-  if (!pane || !pane.sid || pane.talking) return;
-  const tap = !!(app.view && app.view.voice_mode === "tap");
-  pane.talking = { tap, timer: null };
-  voiceStart(pane.sid);
-  if (tap) pane.send(enc.encode(" "));
-  else pane.talking.timer = setInterval(() => pane.send(enc.encode(" ")), 40);
-}
-
-async function talkStop(pane) {
-  const t = pane && pane.talking;
-  if (!t || t.stopping) return;
-  t.stopping = true;
-  await new Promise((ok) => setTimeout(ok, MIC_TAIL));
-  if (t.tap) pane.send(enc.encode(" "));
-  else clearInterval(t.timer);
-  pane.talking = null;
-  setTimeout(() => { if (!voice.on && !pane.talking) voiceStop(); }, 3000);     // Claude never listened
-}
-
-// Whether the page's microphone is Claude's now: it has the keyboard in Claude.
-function micFocus() {
-  if (desk.micPane) desk.micPane.control({ mic: micWanted() });
-  if (!micWanted() && voice.ws && !voice.on) voiceStop();
-  if (app.desk && document.visibilityState === "hidden" && !voice.ws && mic.stream) micClose();     // out of sight: let it go
-}
-
 // ---- the layout: your sessions on the left, the session's chat in the
 // middle, and beside it the side panel: its Terminal, Changes and Details
 
@@ -620,9 +468,7 @@ function deskStart() {
     const id = e.detail && e.detail.id;
     if (id && id !== desk.current && row(id)) go2(id);
   });
-  window.addEventListener("focus", () => { micFocus(); markSeen(); });
-  window.addEventListener("blur", micFocus);
-  document.addEventListener("visibilitychange", micFocus);
+  window.addEventListener("focus", () => markSeen());
   setInterval(markSeen, 10000);
   deskLayout();
   deskRoute();
@@ -665,17 +511,14 @@ function deskLayout() {
 function deskPanes() {
   desk.column.classList.toggle("active", desk.focus === "chat");
   desk.side.el.classList.toggle("active", desk.focus !== "chat");
-  micFocus();
 }
 
 function paneFocused(pane) {
   if (pane) {
     desk.focus = "term";
     desk.focusPane = pane;
-    if (pane.which === "claude" && pane.opts.mic) desk.micPane = pane;
   }
   if (desk.el) deskPanes();
-  else micFocus();
 }
 
 function row(id) { return app.view && app.view.sessions.find((s) => s.id === id) || null; }
@@ -937,7 +780,7 @@ class DeskTerminal {
     this.id = null;
     this.showing = "term";
     this.term = new TermPane("term");
-    this.claude = new TermPane("claude", { mic: true });
+    this.claude = new TermPane("claude");
     this.seg = h("div", { class: "seg term-switch" });
     this.el = h("div", { class: "desk-term" },
       h("div", { class: "term-bar" }, this.seg,
@@ -2009,8 +1852,7 @@ function showKeys() {
     ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
     ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],
     ["Enter / Shift+Enter", "Send / a new line, in the chat"], ["Esc", "Stop Claude, in the chat's empty box"],
-    ["⌘V / drop", "An image goes with your next message"],
-    ["Hold Space", "In Claude's classic terminal: dictate (/voice) with this computer's microphone"]];
+    ["⌘V / drop", "An image goes with your next message"]];
   sheet(sheetHead("Keys", "amarchy's, in the browser"),
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what)))));
 }
