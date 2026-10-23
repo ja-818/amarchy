@@ -528,6 +528,19 @@ and tap again. The phone asks for the microphone the first time you dictate, and
 microphone that gives only silence once held is opened afresh on the spot. The host
 logs each dictation (`journalctl --user -u amarchy-app`).
 
+**Quiet your Mac.** Music playing on your Mac gets into what you dictate, and a web
+page can't turn down another app's sound. So a small helper on the Mac does it:
+**Settings → Dictation → Quiet your Mac** gives the command to run in the Mac's
+Terminal (`curl -fsS https://<amarchy>/api/hush/mac.sh | sh`). It installs a
+LaunchAgent (`com.amarchy.hush`) that listens to amarchy over Tailscale. While a
+dictation on the host listens, from the Mac or the phone, the helper mutes the
+Mac's speakers, and it turns them back on when you let go. It leaves the sound
+alone when you're on headphones or AirPods, and when the Mac was muted already.
+If it loses amarchy mid-dictation, it turns the sound back on. Settings says
+which Macs have it. Remove it with the same command and `-s uninstall` after
+`sh`. Its log is `~/Library/Logs/amarchy-hush.log`. On an iPhone, dictating
+pauses what's playing, as a call does (press play again after).
+
 How the host did on recordings with known text, on this project's 16-vCPU server
 (October 2026): 2.5% of the words wrong in Latin American Spanish (Google's FLEURS, 15
 clips), 8.5% in English read by native Spanish speakers (the Speech Accent Archive, 13
