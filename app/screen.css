@@ -20,7 +20,7 @@
 .brief {
   --tone: var(--text-muted);
   flex: none; width: 100%; max-width: var(--chat-column, 760px); margin: 8px auto 0; box-sizing: border-box;
-  padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 12px 10px; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain;
   border-bottom: 1px solid var(--border);       /* where the brief ends and the timeline begins */
 }
 .brief[hidden], .chat.other > .brief { display: none; }
@@ -28,27 +28,36 @@
 .brief.working { --tone: var(--accent); }
 .brief.blocked { --tone: var(--danger); }
 .brief.waiting { --tone: var(--warn, #d9a441); }
-.brief-head {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px 12px; box-sizing: border-box;
-  text-align: left; font: inherit; color: var(--text); cursor: pointer;
-  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--tone); border-radius: var(--radius-card);
+/* One card: the brief's head (what it is, where it stands, the goal, a line that opens it), what waits on you, the rest. */
+.brief-card {
+  display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--border); border-left: 3px solid var(--tone); border-radius: var(--radius-card);
 }
-.brief-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brief-head {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; padding: 12px 14px; box-sizing: border-box;
+  text-align: left; font: inherit; color: var(--text); cursor: pointer; background: none; border: 0; border-radius: var(--radius-card);
+}
+.brief-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.brief-top { display: flex; align-items: center; gap: 10px; }
+.brief-label { font-size: var(--caption); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .brief-state {
-  flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--tone);
-  font-size: var(--caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--tone);
+  font-size: var(--caption); font-weight: 700;
 }
 .brief-state .dot, .turn-headline .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); flex: none; }
 .brief-goal {
-  flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-weight: 700; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .brief.open .brief-goal { -webkit-line-clamp: unset; display: block; }
-.brief-updating { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: var(--caption); color: var(--text-muted); }
-.brief-head .chev { flex: none; transform: rotate(90deg); transition: transform 0.15s ease; }
-.brief.open .brief-head .chev { transform: rotate(-90deg); }
+.brief-more { display: inline-flex; align-items: center; gap: 4px; font-size: var(--caption); font-weight: 700; color: var(--link); }
+.brief-more .chev { width: 14px; height: 14px; transform: rotate(90deg); transition: transform 0.15s ease; }
+.brief.open .brief-more .chev { transform: rotate(-90deg); }
+.brief-updating { display: inline-flex; align-items: center; gap: 6px; font-size: var(--caption); color: var(--text-muted); }
+.brief-state + .brief-updating, .brief-updating + .brief-state { margin-left: 0; }
+.brief-updating { margin-left: auto; }
 
-.brief-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 10px; }
+.brief-body { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 14px; border-top: 1px solid var(--border-faint); }
 .brief-facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .fact {
   font-size: var(--caption); padding: 3px 8px; border-radius: 999px; color: var(--text-muted);
@@ -87,21 +96,15 @@
 .brief-link-host { font-size: var(--caption); color: var(--text-muted); }
 .brief-how { margin-top: 6px; overflow-wrap: anywhere; }
 
-/* What waits on you: always there, under the brief's line. */
-.brief-waiting {
-  display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--radius-card);
-  border: 1px solid color-mix(in srgb, var(--warn, #d9a441) 45%, var(--border)); background: var(--surface);
-}
-.brief-waiting-title {
-  font-size: var(--caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--warn, #d9a441);
-}
+/* What waits on you: in the card, under its head. */
+.brief-waiting { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border-faint); }
 .bq { display: flex; flex-direction: column; gap: 8px; }
 .bq + .bq { padding-top: 10px; border-top: 1px solid var(--border-faint); }
 .bq-q { font-weight: 600; overflow-wrap: anywhere; }
 .bq.answered .bq-q::before { content: "✓ "; color: var(--success); }
 .bq-opts { display: flex; flex-wrap: wrap; gap: 8px; }
 .bq-opt {
-  flex: 1 1 auto; min-height: 44px; padding: 8px 14px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
+  flex: 1 1 0; min-width: 6em; min-height: 40px; padding: 8px 12px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
   border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); overflow-wrap: anywhere;
 }
 .bq-opt:hover { background: var(--control-hover); }
@@ -158,12 +161,14 @@
 
 /* A turn from before the brief: Claude's last words, a few lines of them. */
 .reply-plain { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.reply-plain .reply-text { width: 100%; max-height: 13.5em; overflow: hidden; }
+.reply-plain .reply-text { width: 100%; max-height: 4.8em; overflow: hidden; color: var(--text-muted); }
 .reply-plain.long:not(.open) .reply-text { -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
 .reply-plain.open .reply-text { max-height: none; }
 
 @media (max-width: 600px) {
   .brief { padding: 0 10px 8px; max-height: 50vh; }
+  /* Open, the brief is the page (the timeline comes back with Hide the details). */
+  .chat.brief-full > .brief { flex: 1; max-height: none; border-bottom: 0; }
+  .chat.brief-full > .chat-main { display: none; }
   .screen-stage { padding: 14px 12px 10px; gap: 18px; }
-  .bq-opt { flex-basis: 100%; }
 }

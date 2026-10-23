@@ -213,6 +213,8 @@ async function run(browser, base, layout) {
   await page.waitForTimeout(150);
   s = await read(page);
   check(layout, s.open, "a turn's headline opens the brief");
+  const full = await page.evaluate(() => getComputedStyle(document.querySelector(".chat-main")).display);
+  check(layout, layout === "phone" ? full === "none" : full !== "none", `open on a phone, the brief is the page; on a computer, a panel (${full})`);
   check(layout, s.changed === 2 && s.tests === "is-pass,is-fail" && s.next && s.notes, `its sections: changed, tests (${s.tests}), next, heads up`);
   check(layout, JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]) && s.how.includes("On the phone") && s.how.includes("Search"),
     `check it: the http(s) link only, and how (${JSON.stringify(s.links)})`);

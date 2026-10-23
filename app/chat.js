@@ -1241,6 +1241,7 @@ class Chat {
   drawBrief() {
     const show = this.mode === "screen" && !this.view.content && !!(this.brief || (this.facts && this.facts.branch));
     this.briefEl.hidden = !show;
+    this.el.classList.toggle("brief-full", show && this.briefOpen);      // on a phone, an open brief has the chat's whole room
     if (!show) return;
     const b = (this.brief && this.brief.data) || {};
     const live = this.engine === "chat" ? this.live : null;
@@ -1250,18 +1251,29 @@ class Chat {
     this.briefSig = sig;
     const st = b.status in BRIEF_STATES ? b.status : null;
     this.briefEl.className = `brief${this.briefOpen ? " open" : ""}${st ? ` ${st}` : ""}`;
+    // One card: what it is and where it stands, the goal, and a line saying
+    // what's in it that opens it; under them, what waits on you.
+    const changedN = texts(b.changed, 8).length;
+    const testList = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string");
+    const failing = testList.filter((x) => x.result === "fail").length;
+    const sums = [changedN ? `${changedN} change${changedN === 1 ? "" : "s"}` : null,
+      testList.length ? (failing ? `${failing} test${failing === 1 ? "" : "s"} failing` : `${testList.length} test${testList.length === 1 ? "" : "s"} passed`) : null,
+      texts(b.next, 4).length ? "what's next" : null].filter(Boolean);
     const head = h("button", { class: "brief-head", type: "button", "aria-expanded": String(this.briefOpen), onclick: () => {
       this.briefOpen = !this.briefOpen;
       store.set("briefOpen", this.briefOpen ? "1" : "0");
       this.drawBrief();
     } },
-      st ? h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]) : null,
-      h("span", { class: "brief-goal" }, b.goal ? String(b.goal) : "No brief yet: it comes when Claude finishes a turn."),
-      updating ? h("span", { class: "brief-updating" }, spinner(), "Updating") : null,
-      icon("chevron", "chev"));
-    const kids = [head];
+      h("span", { class: "brief-top" }, h("span", { class: "brief-label" }, "Brief"),
+        updating ? h("span", { class: "brief-updating" }, spinner(), "Updating") : null,
+        st ? h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]) : null),
+      h("span", { class: "brief-goal" }, b.goal ? String(b.goal) : "No brief yet: Claude writes it when it finishes a turn."),
+      h("span", { class: "brief-more" }, this.briefOpen ? "Hide the details" : sums.length ? `${sums.join(" · ")}: see all` : "See the details",
+        icon("chevron", "chev")));
+    const card = h("div", { class: "brief-card" }, head);
+    const kids = [card];
     const waiting = this.briefWaiting(b);
-    if (waiting) kids.push(waiting);
+    if (waiting) card.append(waiting);
     if (this.briefOpen) {
       const body = h("div", { class: "brief-body" });
       const facts = this.briefFacts();
@@ -1281,7 +1293,7 @@ class Chat {
       if (next.length) section("Next", h("ul", { class: "brief-list" }, ...next.map((x) => h("li", { html: inline(x) }))));
       const notes = texts(b.notes, 4);
       if (notes.length) section("Heads up", h("ul", { class: "brief-list notes" }, ...notes.map((x) => h("li", { html: inline(x) }))));
-      kids.push(body);
+      card.append(body);
     }
     this.briefEl.replaceChildren(...kids);
   }
@@ -1359,7 +1371,7 @@ class Chat {
       paint();
       if (qs.every((_, j) => st.picks[j] !== undefined)) send();
     };
-    box.append(h("div", { class: "brief-waiting-title" }, "Waiting on you"), ...rows, h("div", { class: "bq-foot" }, status, sendBtn));
+    box.append(...rows, h("div", { class: "bq-foot" }, status, sendBtn));
     paint();
     return box;
   }
