@@ -386,9 +386,8 @@ body::before {
 /* Your assistant's place at the top of the list (amarchy assistant): its card,
    bigger and with its picture but otherwise a row like the rest (no tint or
    outline: only the selected row looks selected), the other sessions of its
-   project under it, set apart from the rest by a rule. */
-.assistant-section { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; margin-bottom: 4px;
-                     border-bottom: 1px solid var(--border); }
+   project under it, set apart from the rest by the space under it. */
+.assistant-section { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; margin-bottom: 4px; }
 .row.assistant { gap: 14px; padding: 12px 12px 12px 10px; margin-bottom: 2px; }
 .avatar { display: block; width: 100%; height: 100%; border-radius: 50%; -webkit-user-drag: none; }
 .avatar.small { width: 22px; height: 22px; flex: none; }
