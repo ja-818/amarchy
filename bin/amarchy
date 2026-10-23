@@ -158,6 +158,22 @@ Plumbing:
   amarchy rec [rec options]             SoX's rec for a session's Claude (bin/amarchy-rec): the phone's or the
                                         browser's microphone while you dictate there, else the real rec
   amarchy dictation worker              keeps the dictation model loaded for the app's server (Transcriber)
+  amarchy agent <id>                    the chat engine's broker in a session's Claude pane: Claude Code on
+                                        claude -p, with a live state, a socket and a log of the conversation
+                                        (experimental, test sessions only; docs/agent-protocol.md)
+  amarchy agent engine <id> [chat|terminal]
+                                        which engine a session's Claude runs on (prints it without one);
+                                        chat only for a session named test-...; its Claude starts again
+                                        on it, the conversation kept
+  amarchy agent state|watch <id>        its live state (JSON) / everything Claude says, as it comes
+  amarchy agent send <id> <text|-> [--next|--now|--later]
+                                        a message: when Claude is free (or taken into the turn under way,
+                                        ending it, or after it, queued by Claude)
+  amarchy agent answer <id> <request> allow|always|deny [why]
+                                        answer what Claude asks (--json <response> for a question's answers)
+  amarchy agent interrupt <id> [--all]  Stop (--all: and drop what's queued)
+  amarchy agent mode|model <id> <value> switch the permission mode or the model
+  amarchy agent control <id> <json>     any other control request, e.g. '{"subtype": "get_context_usage"}'
   amarchy app serve                     the app's server (amarchy-app.service runs it)
   amarchy migrate                       bring the state from before (a desktop's) up to date, once (the app's
                                         server and install.sh run it): the look the desktop sent becomes a
@@ -201,6 +217,7 @@ import random
 import re
 import select
 import shlex
+import signal
 import shutil
 import socket
 import struct
@@ -212,6 +229,7 @@ import unicodedata
 import threading
 import time
 import urllib.parse
+import uuid
 from pathlib import Path
 
 HOME = Path.home()
@@ -1131,12 +1149,8 @@ def claude_argv(s, prefill="", prompt=None):
     was in, else the latest in its folder (sessions from before amarchy kept
     track), with prefill already typed in the prompt, or asked prompt first
     (after --, so it may start with a dash)."""
-    if transcript(s):
-        resume = ["--resume", conversation_id(s["id"])]
-    else:
-        resume = ["--continue"] if has_conversation(s["path"]) else []
     first = ["--", prompt] if prompt is not None else []
-    return ["claude", *CLAUDE_ARGS, *resume, *(["--prefill", prefill] if prefill and prompt is None else []),
+    return ["claude", *CLAUDE_ARGS, *claude_resume(s), *(["--prefill", prefill] if prefill and prompt is None else []),
             "--settings", hook_settings(s["id"]), *first]
 
 
@@ -1204,6 +1218,8 @@ def cmd_claude(sid):
         s = session(sid)
     if asleep_since(sid) is not None:
         return 0
+    if engine(s) == "chat" and agent_allowed(s):
+        return Agent(s).run()       # amarchy agent: see "the chat engine"
     # The first prompt (amarchy new --prompt) goes to Claude once: if Claude
     # starts again later, it picks the conversation up instead.
     prompt = s.pop("prompt", None)
@@ -1539,6 +1555,14 @@ def sleep_blockers(s, pane, procs, auto):
         reasons.append("it's waiting for your answer")
     if not pid:
         return reasons + ["Claude isn't running in its pane"]
+    if engine(s) == "chat":
+        live = agent_live(sid)
+        if live.get("pending") and status != "waiting":
+            reasons.append("it's waiting for your answer")
+        if live.get("tasks"):
+            reasons.append(f"a task is running in the background ({live['tasks'][0].get('description') or ''})")
+        if live.get("queue"):
+            reasons.append("a message is waiting to go in")
     shells = [p for p in descendants(pid, procs) if "/shell-snapshots/" in " ".join(cmdline(p))]
     if shells:
         command = " ".join(cmdline(shells[0]))
@@ -1604,8 +1628,8 @@ def put_to_sleep(s, auto=False, force=False):
     pid = pane_claude(pane, procs)
     loop = pane_loop(pane, procs)
     # Claude hands its prompt over with or without the loop (its editor is
-    # amarchy's either way).
-    if pid and not hand_over_prompt(s) and not force:
+    # amarchy's either way). The chat engine has no prompt to hand over.
+    if pid and engine(s) == "terminal" and not hand_over_prompt(s) and not force:
         return "Claude didn't hand over its prompt (a menu or a dialog open?)"
     if auto and sid in on_screen()[0]:
         (claude_dir(sid) / "draft").unlink(missing_ok=True)    # it's still in Claude's prompt
@@ -7674,6 +7698,14 @@ def send_deliver(sid, text, deadline):
         free, free_since = free_since, None     # set again below while Claude stays free
         if s.get("setup"):
             wait = "it's being set up"
+        elif engine(s) == "chat" and agent_up(sid) and asleep_since(sid) is None:
+            try:
+                answer = agent_call(sid, {"op": "send", "content": text})
+            except OSError as e:
+                answer = {"ok": False, "error": str(e)}
+            if answer.get("ok"):
+                return None     # the broker has it, and gives it to Claude once it's free
+            wait = answer.get("error") or "its broker didn't take it"
         elif starting(sid):
             wait = "its Claude is starting with another message"
         else:
@@ -7969,6 +8001,926 @@ def migrate_look():
     shutil.rmtree(old, ignore_errors=True)
 
 
+# ------------------------------------------------------------------ the chat engine (amarchy agent)
+#
+# Phase A1 of docs/plan-chat-app.md, experimental and for test sessions only
+# (a session named test-...). A session's engine is "terminal" (Claude Code's
+# TUI, as every session runs today) or "chat": then its Claude pane runs
+# `amarchy agent <id>`, a broker around `claude -p` with stream-json in and
+# out (the control protocol the Agent SDKs speak; docs/agent-protocol.md has
+# what it does, checked by bin/amarchy-protocol-test). The broker:
+#
+# - keeps Claude's conversation where the TUI keeps it (the same transcript,
+#   --resume both ways), with amarchy's hooks, so the list, the app's chat,
+#   sleep and send see a session as they always have;
+# - writes live.json beside it: what the transcript can't have yet (state,
+#   the questions and permissions waiting, the text being written, the tool
+#   under way, background tasks, usage limits, model and mode, the messages
+#   queued for Claude);
+# - listens on a unix socket for messages, answers, Stop and the rest
+#   (agent_call), one JSON line each way;
+# - draws the conversation as it goes in its tmux pane, and takes what's
+#   typed or pasted there (the app's composer, amarchy send) as a message, or
+#   as the answer to what Claude asks.
+#
+# Claude runs with the subscription login: ANTHROPIC_API_KEY and
+# ANTHROPIC_AUTH_TOKEN never reach it (with one, -p bills that API account).
+
+AGENT_ARGS = ("-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+              "--include-partial-messages", "--include-hook-events", "--replay-user-messages",
+              "--permission-prompt-tool", "stdio")
+API_CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+AGENT_LIVE_EVERY = 0.15     # seconds between two writes of live.json while text streams in
+AGENT_STREAM_MAX = 20_000_000   # bytes of stream.jsonl (Claude's raw output) kept, the older half dropped
+AGENT_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
+
+
+def engine(s):
+    """How a session's Claude runs: "terminal" (the TUI) or "chat" (amarchy agent)."""
+    return "chat" if s.get("engine") == "chat" else "terminal"
+
+
+def agent_allowed(s):
+    """Whether a session may run on the chat engine yet: only test sessions."""
+    return s["name"].startswith("test-")
+
+
+def agent_live_file(sid):
+    return claude_dir(sid) / "live.json"
+
+
+def agent_socket(sid):
+    """The broker's socket: beside its state, unless that path is too long for
+    a unix socket (108 bytes), then in the runtime folder."""
+    p = claude_dir(sid) / "agent.sock"
+    if len(str(p).encode()) < 100:
+        return p
+    run = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
+    return run / f"amarchy-agent-{hashlib.sha1(sid.encode()).hexdigest()[:16]}.sock"
+
+
+def agent_live(sid):
+    try:
+        return json.loads(agent_live_file(sid).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def agent_up(sid):
+    """Whether the session's broker is running (its live state says its pid, and that's it)."""
+    live = agent_live(sid)
+    pid = live.get("pid")
+    return bool(isinstance(pid, int) and live.get("state") != "exited" and Path(f"/proc/{pid}").exists()
+                and sid in cmdline(pid))
+
+
+def agent_call(sid, request, timeout=40):
+    """Ask the session's broker something: the answer (a dict, "ok" true or
+    false with "error"). Raises OSError when it isn't there."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+        c.settimeout(timeout)
+        c.connect(str(agent_socket(sid)))
+        c.sendall((json.dumps(request) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = c.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    try:
+        return json.loads(data)
+    except ValueError:
+        return {"ok": False, "error": "no answer from the broker"}
+
+
+def claude_resume(s):
+    """How a session's Claude picks its conversation back up: the one it was
+    in, else the latest in its folder (sessions from before amarchy kept
+    track), else none."""
+    if transcript(s):
+        return ["--resume", conversation_id(s["id"])]
+    return ["--continue"] if has_conversation(s["path"]) else []
+
+
+def agent_argv(s):
+    """claude -p for the session's broker: the protocol, the user's own
+    claude arguments, its conversation, amarchy's hooks; messages from other
+    sessions accepted whatever permission mode they run in (else a -p
+    Claude holds them, and drops them unseen: docs/agent-protocol.md)."""
+    settings = json.loads(hook_settings(s["id"]))
+    settings["crossSessionInbound"] = "accept"
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", json.dumps(settings)]
+
+
+def agent_env():
+    env = {k: v for k, v in os.environ.items() if k not in INHERITED_CLAUDE_ENV + API_CREDENTIALS}
+    env["PATH"] = paste_path()
+    return env
+
+
+def agent_status(sid, state):
+    """The session's status, as its hooks set it (cmd_hook), for what Claude's
+    hooks don't say under -p: that it waits for an answer, and that it's
+    working again once it has one."""
+    try:
+        prev = (STATUS / sid).read_text().strip()
+    except OSError:
+        prev = ""
+    if prev != state and session(sid):
+        (STATUS / sid).write_text(state)
+
+
+def tool_line(name, given):
+    """A tool call in a few words, for the pane: what Claude says it does, or
+    the gist of its input."""
+    given = given if isinstance(given, dict) else {}
+    what = (given.get("description") or given.get("file_path") or given.get("to") or given.get("path") or given.get("pattern")
+            or given.get("query") or given.get("url") or given.get("command") or given.get("prompt") or "")
+    what = " ".join(str(what).split())
+    return f"{name}: {what}" if what else name
+
+
+class Agent:
+    """The broker of one session: its claude -p, live state, socket and pane."""
+
+    def __init__(self, s):
+        self.s, self.sid = s, s["id"]
+        self.lock = threading.RLock()
+        self.write_lock = threading.Lock()
+        self.live_lock = threading.Lock()
+        self.dir = claude_dir(self.sid)
+        self.sock_path = agent_socket(self.sid)
+        self.live = {"pid": os.getpid(), "claude_pid": None, "state": "starting", "since": time.time(),
+                     "conversation": conversation_id(self.sid) or None, "model": None, "permission_mode": None,
+                     "pending": [], "partial": "", "thinking": False, "activity": None, "tasks": [],
+                     "queue": [], "rate_limits": {}, "turns": 0, "cost_usd": 0.0, "last_result": None,
+                     "account": None, "version": None, "socket": str(self.sock_path), "error": None}
+        self.waiting = {}           # our control requests: request_id -> [threading.Event, response]
+        self.watchers = []
+        self.busy = False           # Claude is in a turn (ours, or one it took on its own)
+        self.dirty = threading.Event()
+        self.done = threading.Event()
+        self.at_line_start = True
+        self.typed = []             # a paste arriving in the pane, line by line
+        self.pasting = False
+        self.answers = {}           # AskUserQuestion answered in the pane so far: request_id -> {question: answer}
+
+    # ---- output to the pane
+
+    def out(self, text, dim=False, newline=True):
+        with self.write_lock:
+            if not self.at_line_start and newline:
+                sys.stdout.write("\n")
+            sys.stdout.write(f"\033[2m{text}\033[0m" if dim else text)
+            if newline:
+                sys.stdout.write("\n")
+            self.at_line_start = newline or text.endswith("\n")
+            sys.stdout.flush()
+
+    # ---- live state
+
+    def changed(self, now=False):
+        self.dirty.set()
+        if now:
+            self.flush_live()
+
+    def flush_live(self):
+        with self.live_lock:
+            with self.lock:
+                self.live["updated"] = time.time()
+                data = json.dumps(self.live)
+            write_file(agent_live_file(self.sid), data)
+
+    def live_writer(self):
+        while not self.done.is_set():
+            if self.dirty.wait(0.5):
+                self.dirty.clear()
+                self.flush_live()
+                time.sleep(AGENT_LIVE_EVERY)
+
+    def set_state(self):
+        """state from what's known: waiting (something asked), working, idle."""
+        with self.lock:
+            if self.live["state"] in ("starting", "exited"):
+                return
+            state = "waiting" if self.live["pending"] else "working" if self.busy else "idle"
+            if state == self.live["state"]:
+                return
+            self.live["state"] = state
+        if state == "waiting":
+            agent_status(self.sid, "waiting")
+        elif state == "working":
+            agent_status(self.sid, "working")
+        self.changed(True)
+
+    # ---- talking to claude
+
+    def write(self, o):
+        line = json.dumps(o) + "\n"
+        with self.write_lock:
+            self.claude.stdin.write(line)
+            self.claude.stdin.flush()
+        self.log({"_sent": o})
+
+    def control(self, request, timeout=30):
+        """A control request to Claude, and its response (a dict with
+        subtype success or error)."""
+        rid = str(uuid.uuid4())
+        slot = [threading.Event(), None]
+        with self.lock:
+            self.waiting[rid] = slot
+        self.write({"type": "control_request", "request_id": rid, "request": request})
+        if not slot[0].wait(timeout):
+            with self.lock:
+                self.waiting.pop(rid, None)
+            return {"subtype": "error", "error": f"Claude didn't answer {request.get('subtype')} in {timeout}s"}
+        return slot[1]
+
+    def send(self, content, when="idle", uid=None):
+        """A message for Claude: queued here until Claude is free (when
+        "idle"), or handed to Claude now, taken into the turn under way
+        ("next") or ending it ("now")."""
+        uid = uid or str(uuid.uuid4())
+        if isinstance(content, str):
+            content = content.replace("\r\n", "\n").strip("\n")
+        message = {"uuid": uid, "content": content, "at": time.time()}
+        with self.lock:
+            if when == "idle" and (self.busy or self.live["pending"] or self.live["queue"]
+                                   or self.live["state"] == "starting"):
+                self.live["queue"].append(message)
+                self.changed(True)
+                return {"ok": True, "uuid": uid, "queued": True}
+        self.deliver(message, None if when == "idle" else when)
+        return {"ok": True, "uuid": uid, "queued": False}
+
+    def deliver(self, message, priority=None):
+        with self.lock:
+            self.busy = True
+        self.write({"type": "user", "message": {"role": "user", "content": message["content"]},
+                    "parent_tool_use_id": None, "session_id": "", "uuid": message["uuid"],
+                    **({"priority": priority} if priority else {})})
+        self.set_state()
+
+    def next_queued(self):
+        """Claude is free: the oldest queued message goes in."""
+        with self.lock:
+            if self.busy or self.live["pending"] or not self.live["queue"] or self.live["state"] == "starting":
+                return
+            message = self.live["queue"].pop(0)
+        self.deliver(message)
+        self.changed()
+
+    def answer(self, request_id, response):
+        """Settle one of Claude's requests (a permission, a question, a plan)."""
+        with self.lock:
+            pending = next((p for p in self.live["pending"] if p["request_id"] == request_id), None)
+            if not pending:
+                return {"ok": False, "error": f"nothing waits for an answer as {request_id}"}
+            self.live["pending"].remove(pending)
+        self.write({"type": "control_response", "response": {"subtype": "success", "request_id": request_id,
+                                                             "response": response}})
+        verdict = response.get("behavior", "?")
+        self.out(f"  ↳ {'allowed' if verdict == 'allow' else 'not allowed'}"
+                 f"{': ' + response['message'] if response.get('message') else ''}", dim=True)
+        self.set_state()
+        self.changed(True)
+        return {"ok": True}
+
+    # ---- what claude says
+
+    def log(self, o):
+        try:
+            f = self.dir / "stream.jsonl"
+            if f.exists() and f.stat().st_size > AGENT_STREAM_MAX:
+                data = f.read_bytes()
+                f.write_bytes(data[len(data) // 2:].split(b"\n", 1)[-1])
+            with open(f, "a") as fh:
+                fh.write(json.dumps(o) + "\n")
+        except OSError:
+            pass
+
+    def read_claude(self):
+        for line in self.claude.stdout:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                self.out(line.rstrip(), dim=True)
+                continue
+            self.log(o)
+            try:
+                self.handle(o)
+            except Exception as e:      # one odd message mustn't end the session
+                self.out(f"  (amarchy agent: couldn't handle a {o.get('type')} message: {e})", dim=True)
+            self.broadcast(o)
+
+    def read_claude_err(self):
+        for line in self.claude.stderr:
+            if line.strip():
+                self.out(f"  {line.rstrip()}", dim=True)
+
+    def handle(self, o):
+        kind, sub = o.get("type"), o.get("subtype")
+        live = self.live
+        if kind == "control_response":
+            r = o.get("response") or {}
+            with self.lock:
+                slot = self.waiting.pop(r.get("request_id"), None)
+            if slot:
+                slot[1] = r
+                slot[0].set()
+        elif kind == "control_request":
+            self.on_request(o)
+        elif kind == "control_cancel_request":
+            with self.lock:
+                live["pending"] = [p for p in live["pending"] if p["request_id"] != o.get("request_id")]
+            self.out("  ↳ Claude withdrew its question", dim=True)
+            self.set_state()
+        elif kind == "system" and sub == "init":
+            with self.lock:
+                live.update(conversation=o.get("session_id"), model=o.get("model"),
+                            permission_mode=o.get("permissionMode"), version=o.get("claude_code_version"))
+            set_conversation_id(self.sid, o.get("session_id") or "")
+            self.changed()
+        elif kind == "system" and sub == "status":
+            with self.lock:
+                if "permissionMode" in o:
+                    live["permission_mode"] = o["permissionMode"]
+                if o.get("status") == "requesting":
+                    self.busy = True
+            self.set_state()
+            self.changed()
+        elif kind == "system" and sub == "background_tasks_changed":
+            with self.lock:
+                live["tasks"] = o.get("tasks") or []
+            self.changed(True)
+        elif kind == "system" and sub == "task_notification":
+            self.out(f"  ⏺ background task {o.get('status', 'done')}: {o.get('summary') or o.get('task_id')}", dim=True)
+        elif kind == "system" and sub == "compact_boundary":
+            self.out("  · conversation compacted", dim=True)
+        elif kind == "system" and sub == "peer_message_hold":
+            self.out(f"  · a message from {o.get('from_name') or o.get('from')} was {o.get('state')}", dim=True)
+        elif kind == "command_lifecycle" and o.get("state") == "started":
+            with self.lock:
+                self.busy = True
+            self.set_state()
+        elif kind == "stream_event":
+            self.on_stream(o.get("event") or {})
+        elif kind == "assistant":
+            self.on_assistant(o)
+        elif kind == "user":
+            self.on_user(o)
+        elif kind == "rate_limit_event":
+            info = o.get("rate_limit_info") or {}
+            with self.lock:
+                live["rate_limits"] = info
+            self.changed()
+        elif kind == "result":
+            self.on_result(o)
+
+    def on_request(self, o):
+        req = o.get("request") or {}
+        if req.get("subtype") != "can_use_tool":
+            # Nothing else was declared in initialize (hooks, MCP servers,
+            # dialogs): say so, so Claude doesn't wait on it.
+            self.write({"type": "control_response", "response": {
+                "subtype": "error", "request_id": o.get("request_id"),
+                "error": f"amarchy agent doesn't handle {req.get('subtype')}"}})
+            return
+        pending = {"request_id": o["request_id"], "tool": req.get("tool_name"), "input": req.get("input") or {},
+                   "description": req.get("description") or req.get("display_name"),
+                   "suggestions": req.get("permission_suggestions") or [], "reason": req.get("decision_reason"),
+                   "tool_use_id": req.get("tool_use_id"), "at": time.time()}
+        with self.lock:
+            self.live["pending"].append(pending)
+        self.draw_request(pending)
+        self.set_state()
+        self.changed(True)
+
+    def draw_request(self, p):
+        tool, given = p["tool"], p["input"]
+        if tool == "AskUserQuestion":
+            for q in given.get("questions") or []:
+                self.out(f"\n  \033[1m? {q.get('question')}\033[0m" + ("  (several: 1,3)" if q.get("multiSelect") else ""))
+                for i, opt in enumerate(q.get("options") or [], 1):
+                    self.out(f"    {i}. {opt.get('label')}" + (f" \033[2m{opt.get('description')}\033[0m"
+                                                              if opt.get("description") else ""))
+            self.out("  Type the number of your answer (one question at a time), or your own words.", dim=True)
+        elif tool == "ExitPlanMode":
+            self.out("\n  \033[1m? Claude's plan:\033[0m")
+            for line in str(given.get("plan") or "").splitlines():
+                self.out(f"    {line}")
+            self.out("  y: approve and start · n <what to change>: keep planning", dim=True)
+        else:
+            self.out(f"\n  \033[1m? Claude wants to use {tool_line(tool, given)}\033[0m")
+            if p["reason"]:
+                self.out(f"    {p['reason']}", dim=True)
+            self.out("  y: allow · a: always allow · n [why]: don't allow", dim=True)
+
+    def on_stream(self, ev):
+        t = ev.get("type")
+        if t == "message_start":
+            with self.lock:
+                self.busy = True
+                self.live["partial"] = ""
+            self.set_state()
+        elif t == "content_block_start":
+            block = ev.get("content_block") or {}
+            with self.lock:
+                self.live["thinking"] = block.get("type") == "thinking"
+                if block.get("type") == "text":
+                    self.live["partial"] = ""
+            if block.get("type") == "text" and not self.at_line_start:
+                self.out("")
+            self.changed()
+        elif t == "content_block_delta":
+            delta = ev.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                text = delta.get("text") or ""
+                with self.lock:
+                    self.live["partial"] += text
+                self.out(text, newline=False)
+                self.changed()
+        elif t == "content_block_stop":
+            with self.lock:
+                self.live["thinking"] = False
+            self.changed()
+
+    def on_assistant(self, o):
+        if o.get("parent_tool_use_id"):
+            return      # a subagent's: its Agent call says what it's about
+        for block in o["message"].get("content") or []:
+            if block.get("type") == "text":
+                with self.lock:
+                    self.live["partial"] = ""
+                self.changed()
+            elif block.get("type") == "tool_use":
+                with self.lock:
+                    self.live["activity"] = {"tool": block.get("name"), "input": block.get("input"),
+                                             "id": block.get("id"), "since": time.time()}
+                if block.get("name") not in ("ToolSearch",):
+                    self.out(f"  ⏺ {tool_line(block.get('name'), block.get('input'))}"[:400], dim=True)
+                self.changed()
+        if not self.at_line_start:
+            self.out("", newline=True)
+
+    def on_user(self, o):
+        content = o["message"].get("content")
+        if o.get("isReplay") or isinstance(content, str):
+            # What went in to Claude: ours, or a message from another session.
+            text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") if b.get("type") == "text" else f"[{b.get('type')}]" for b in content or [])
+            m = re.fullmatch(r"\s*<local-command-std(?:out|err)>(.*)</local-command-std(?:out|err)>\s*", text, re.S)
+            if m:
+                self.out(f"  · {m.group(1).strip()}", dim=True)
+            elif text.strip():
+                self.out(f"\n\033[1m› {text.strip()}\033[0m\n")
+            return
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_result":
+                with self.lock:
+                    act = self.live["activity"]
+                    if act and act.get("id") == block.get("tool_use_id"):
+                        self.live["activity"] = None
+                if block.get("is_error") and not o.get("parent_tool_use_id"):
+                    first = json.dumps(block.get("content"))[:160] if not isinstance(block.get("content"), str) \
+                        else block["content"].splitlines()[0][:160] if block["content"] else ""
+                    self.out(f"    ✗ {first}", dim=True)
+                self.changed()
+
+    def on_result(self, o):
+        with self.lock:
+            self.busy = False
+            self.live["turns"] += 1
+            self.live["activity"] = None
+            self.live["partial"] = ""
+            self.live["cost_usd"] = round(self.live["cost_usd"] + float(o.get("total_cost_usd") or 0), 6)
+            self.live["last_result"] = {k: o.get(k) for k in ("subtype", "is_error", "duration_ms", "num_turns",
+                                                               "total_cost_usd", "stop_reason", "session_id")}
+            if o.get("session_id"):
+                self.live["conversation"] = o["session_id"]
+        set_conversation_id(self.sid, o.get("session_id") or "")
+        took = (o.get("duration_ms") or 0) / 1000
+        note = "interrupted" if o.get("subtype") == "error_during_execution" else (
+            "error: " + str(o.get("result") or o.get("subtype")) if o.get("is_error") else "done")
+        self.out(f"  · {note} · {took:.1f}s", dim=True)
+        self.set_state()
+        self.changed(True)
+        self.next_queued()
+
+    # ---- watchers on the socket
+
+    def broadcast(self, o):
+        if not self.watchers:
+            return
+        line = (json.dumps(o) + "\n").encode()
+        with self.lock:
+            watchers = list(self.watchers)
+        for w in watchers:
+            try:
+                w.sendall(line)
+            except OSError:
+                with self.lock:
+                    if w in self.watchers:
+                        self.watchers.remove(w)
+
+    # ---- the socket
+
+    def serve(self):
+        self.sock_path.unlink(missing_ok=True)
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(str(self.sock_path))
+        os.chmod(self.sock_path, 0o600)
+        self.server.listen(16)
+        while not self.done.is_set():
+            try:
+                conn, _ = self.server.accept()
+            except OSError:
+                break
+            threading.Thread(target=self.client, args=(conn,), daemon=True).start()
+
+    def client(self, conn):
+        keep = False
+        try:
+            data = b""
+            while not data.endswith(b"\n") and len(data) < 32_000_000:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+            try:
+                request = json.loads(data)
+                if not isinstance(request, dict):
+                    raise ValueError
+            except ValueError:
+                request = {}
+            if request.get("op") == "watch":
+                conn.sendall((json.dumps({"ok": True, "live": self.live}) + "\n").encode())
+                with self.lock:
+                    self.watchers.append(conn)
+                keep = True
+                return
+            try:
+                answer = self.op(request)
+            except Exception as e:
+                answer = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            conn.sendall((json.dumps(answer) + "\n").encode())
+        except OSError:
+            pass
+        finally:
+            if not keep:
+                conn.close()
+
+    def op(self, r):
+        """One request on the socket: its answer."""
+        op = r.get("op")
+        if op == "state":
+            with self.lock:
+                return {"ok": True, "live": dict(self.live)}
+        if self.live["state"] == "exited":
+            return {"ok": False, "error": "Claude isn't running"}
+        if op == "send":
+            content = r.get("content")
+            if not (isinstance(content, str) and content.strip()) and not (isinstance(content, list) and content):
+                return {"ok": False, "error": "nothing to send"}
+            when = r.get("when") or "idle"
+            if when not in ("idle", "next", "now", "later"):
+                return {"ok": False, "error": f"when is idle, next, now or later, not {when!r}"}
+            return self.send(content, "idle" if when == "idle" else when, r.get("uuid"))
+        if op == "unqueue":
+            with self.lock:
+                before = len(self.live["queue"])
+                self.live["queue"] = [m for m in self.live["queue"] if m["uuid"] != r.get("uuid")]
+                gone = before != len(self.live["queue"])
+            self.changed(True)
+            return {"ok": gone, **({} if gone else {"error": "no such message waiting"})}
+        if op == "answer":
+            response = r.get("response")
+            if not isinstance(response, dict) or response.get("behavior") not in ("allow", "deny"):
+                return {"ok": False, "error": "response is {behavior: allow|deny, ...}"}
+            with self.lock:
+                p = next((p for p in self.live["pending"] if p["request_id"] == r.get("request_id")), None)
+            if p and response["behavior"] == "allow" and "updatedInput" not in response:
+                response = {**response, "updatedInput": p["input"]}
+            if response["behavior"] == "deny" and not response.get("message"):
+                response = {**response, "message": "The user doesn't want to proceed with this tool use."}
+            return self.answer(r.get("request_id"), response)
+        if op == "interrupt":
+            res = self.control({"subtype": "interrupt", **({"cancel_queued": True} if r.get("everything") else {})})
+            if r.get("everything"):
+                with self.lock:
+                    self.live["queue"] = []
+                self.changed(True)
+            return {"ok": res.get("subtype") == "success", "response": res.get("response"), "error": res.get("error")}
+        if op == "control":
+            request = r.get("request")
+            if not isinstance(request, dict) or not request.get("subtype"):
+                return {"ok": False, "error": "request is {subtype: ..., ...}"}
+            res = self.control(request, timeout=float(r.get("timeout") or 30))
+            ok = res.get("subtype") == "success"
+            if ok and request["subtype"] == "set_permission_mode":
+                with self.lock:
+                    self.live["permission_mode"] = request.get("mode")
+                self.changed(True)
+            if ok and request["subtype"] == "set_model":
+                with self.lock:
+                    self.live["model"] = (res.get("response") or {}).get("model") or request.get("model")
+                self.changed(True)
+            return {"ok": ok, "response": res.get("response"), "error": res.get("error")}
+        if op == "stop":
+            threading.Thread(target=self.stop, daemon=True).start()
+            return {"ok": True}
+        return {"ok": False, "error": f"unknown op {op!r}"}
+
+    # ---- the pane's keyboard
+
+    def read_tty(self):
+        """What's typed in the pane: a message for Claude, or the answer to
+        what it asks. A paste (the app's composer, amarchy send) arrives
+        bracketed, so its lines stay one message."""
+        for line in sys.stdin:
+            line = line.rstrip("\n")
+            if "\033[200~" in line:
+                self.pasting = True
+                line = line.replace("\033[200~", "")
+            if "\033[201~" in line:
+                self.pasting = False
+                line = line.replace("\033[201~", "")
+            self.typed.append(line)
+            if self.pasting:
+                continue
+            text, self.typed = "\n".join(self.typed).strip("\n"), []
+            if text.strip():
+                try:
+                    self.typed_text(text)
+                except OSError:
+                    break
+
+    def typed_text(self, text):
+        with self.lock:
+            p = self.live["pending"][0] if self.live["pending"] else None
+        if not p:
+            self.send(text)
+            return
+        word, _, rest = text.strip().partition(" ")
+        word = word.lower()
+        if p["tool"] == "AskUserQuestion":
+            # One question at a time, in order; the last answer sends them all.
+            questions = p["input"].get("questions") or []
+            got = self.answers.setdefault(p["request_id"], {})
+            q = next((q for q in questions if q.get("question") not in got), None)
+            if q:
+                opts = q.get("options") or []
+                picks = [x.strip() for x in text.split(",")]
+                chosen = [opts[int(x) - 1]["label"] for x in picks if x.isdigit() and 0 < int(x) <= len(opts)]
+                got[q.get("question")] = ", ".join(chosen) if chosen and len(chosen) == len(picks) else text.strip()
+            left = [q for q in questions if q.get("question") not in got]
+            if left:
+                self.out(f"  next: {left[0].get('question')}", dim=True)
+                return
+            self.answers.pop(p["request_id"], None)
+            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": {**p["input"], "answers": got}})
+        elif word in ("y", "yes"):
+            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": p["input"]})
+        elif word in ("a", "always"):
+            rules = [x for x in p["suggestions"] if x.get("type") == "addRules"] or p["suggestions"]
+            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": p["input"], "updatedPermissions": rules})
+        elif word in ("n", "no"):
+            self.answer(p["request_id"], {"behavior": "deny", "message": rest.strip() or
+                                          "The user doesn't want to proceed with this tool use."})
+        else:
+            self.out("  y, a or n (with why, if you like)", dim=True)
+
+    # ---- the whole of it
+
+    def stop(self):
+        """End Claude as quitting it would; run() then returns."""
+        try:
+            self.claude.stdin.close()
+        except (OSError, AttributeError):
+            pass
+        try:
+            self.claude.terminate()
+            self.claude.wait(8)
+        except subprocess.TimeoutExpired:
+            self.claude.kill()
+        except AttributeError:
+            pass
+
+    def run(self):
+        s = self.s
+        self.dir.mkdir(parents=True, exist_ok=True)
+        # One broker per session: one going (its pane restarted) has a few
+        # seconds to let its Claude go.
+        lock = open(self.dir / "agent.lock", "a")
+        end = time.time() + 15
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() > end:
+                    print(f"\n  amarchy agent: another broker runs {self.sid} already\n", flush=True)
+                    return 1
+                time.sleep(0.2)
+        path = Path(s["path"])
+        os.chdir(path)
+        os.environ["PWD"] = str(path)
+        prompt = s.pop("prompt", None)
+        if prompt is not None:
+            save_session(s)
+        sent = take(self.dir / "send")
+        first = [m for m in (prompt, sent) if m is not None and m.strip()]
+        if sys.stdin.isatty():
+            sh("stty", "sane", "-echoctl")      # raw from the sleep loop's wait for a key; a paste's end unseen
+            print("\033[H\033[2J\033[3J", end="")
+        print(f"\033]0;{s['repo']} · {s['name']}\007", end="")
+        self.out(f"\n  \033[1m{s['repo']} · {s['name']}\033[0m \033[2m· Claude Code on amarchy's chat engine "
+                 f"(experimental)\033[0m\n")
+        argv = agent_argv(s)
+        try:
+            self.claude = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                           text=True, bufsize=1, env=agent_env(), cwd=path,
+                                           start_new_session=True)    # the pane's Ctrl+C is ours (Stop), not its
+        except OSError as e:
+            self.out(f"  \033[31mCouldn't start Claude Code: {e}\033[0m")
+            return 1
+        self.live["claude_pid"] = self.claude.pid
+        self.flush_live()
+        for target in (self.read_claude, self.read_claude_err, self.serve, self.live_writer):
+            threading.Thread(target=target, daemon=True).start()
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, lambda *_: threading.Thread(target=self.stop, daemon=True).start())
+        # Ctrl+C in the pane stops the turn, as Esc does in the TUI.
+        signal.signal(signal.SIGINT, lambda *_: threading.Thread(
+            target=lambda: self.busy and self.control({"subtype": "interrupt"}), daemon=True).start())
+        info = self.control({"subtype": "initialize"}, timeout=60)
+        if info.get("subtype") == "success":
+            r = info.get("response") or {}
+            write_file(self.dir / "agent.json", json.dumps({k: r.get(k) for k in (
+                "commands", "models", "agents", "account", "output_style", "claude_code_version")}))
+            with self.lock:
+                self.live.update(account=r.get("account"), version=r.get("claude_code_version"),
+                                 permission_mode=r.get("current_permission_mode"), state="idle")
+            agent_status(self.sid, "idle")
+        else:
+            with self.lock:
+                self.live.update(state="idle", error=info.get("error"))
+            self.out(f"  {info.get('error')}", dim=True)
+        self.changed(True)
+        for text in first:
+            self.send(text)
+        self.next_queued()
+        if sys.stdin.isatty():
+            sys.stdout.write("\033[?2004h")     # pastes come bracketed (read_tty)
+            sys.stdout.flush()
+            threading.Thread(target=self.read_tty, daemon=True).start()
+        code = self.claude.wait()
+        self.done.set()
+        with self.lock:
+            self.live.update(state="exited", pending=[], partial="", activity=None, exit_code=code)
+            queued = self.live["queue"]
+        if queued:
+            # Not sent yet: the next Claude of this session starts with them.
+            write_file(self.dir / "send", "\n\n".join(m["content"] for m in queued if isinstance(m["content"], str)))
+        self.flush_live()
+        try:
+            self.server.close()
+        except AttributeError:
+            pass
+        self.sock_path.unlink(missing_ok=True)
+        self.out(f"  · Claude Code exited ({code})", dim=True)
+        return 0
+
+
+def cmd_agent(args):
+    """amarchy agent <id> (the broker, in a session's Claude pane), or one of
+    its commands for a session on the chat engine (see usage)."""
+    if not args:
+        print(usage("agent"), file=sys.stderr)
+        return 1
+    commands = ("engine", "state", "send", "answer", "interrupt", "mode", "model", "watch", "control")
+    if args[0] not in commands:
+        if len(args) != 1:
+            print(usage("agent"), file=sys.stderr)
+            return 1
+        s = session(args[0])
+        if not s:
+            return fail(f"no session {args[0]!r}")
+        if not agent_allowed(s):
+            return fail(f"{s['id']}: the chat engine is for test sessions only (named test-...) for now")
+        return Agent(s).run()
+    cmd, rest = args[0], args[1:]
+    if not rest:
+        print(usage("agent"), file=sys.stderr)
+        return 1
+    s = session(rest[0])
+    if not s:
+        return fail(f"no session {rest[0]!r}")
+    sid, rest = s["id"], rest[1:]
+    if cmd == "engine":
+        if not rest:
+            print(engine(s))
+            return 0
+        want = rest[0]
+        if want not in ("chat", "terminal") or len(rest) > 1:
+            return fail("amarchy agent engine <id> [chat|terminal]")
+        if want == "chat" and not agent_allowed(s):
+            return fail(f"{sid}: the chat engine is for test sessions only (named test-...) for now")
+        if engine(s) == want:
+            print(want)
+            return 0
+        try:
+            status = (STATUS / sid).read_text().strip()
+        except OSError:
+            status = "idle"
+        if status in ("working", "waiting") and "--force" not in rest:
+            return fail(f"{sid} is {status}: switch when it's idle")
+        s["engine"] = want
+        if want == "terminal":
+            s.pop("engine")
+        save_session(s)
+        # Its Claude pane starts again on the other engine, with the same conversation.
+        pane = host_pane(s)
+        if pane and asleep_since(sid) is None and not s.get("setup"):
+            stop_claude(pane)
+            if want == "terminal" and agent_up(sid):
+                try:
+                    agent_call(sid, {"op": "stop"}, timeout=5)
+                except OSError:
+                    pass
+            host_respawn(s)
+        print(want)
+        return 0
+    if engine(s) != "chat":
+        return fail(f"{sid} runs on the terminal engine (amarchy agent engine {sid} chat, for a test session)")
+    if cmd == "state":
+        print(json.dumps(agent_live(sid), indent=1))
+        return 0
+    if not agent_up(sid):
+        return fail(f"{sid}: its broker isn't running (asleep? amarchy wake {sid})")
+    if cmd == "watch":
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+            c.connect(str(agent_socket(sid)))
+            c.sendall(b'{"op": "watch"}\n')
+            try:
+                for line in c.makefile():
+                    print(line, end="", flush=True)
+            except KeyboardInterrupt:
+                pass
+        return 0
+    if cmd == "send":
+        when = "idle"
+        for flag in ("--now", "--next", "--later"):
+            if flag in rest:
+                rest.remove(flag)
+                when = flag[2:]
+        if len(rest) != 1:
+            return fail("amarchy agent send <id> <text|-> [--next|--now|--later]")
+        text = sys.stdin.read() if rest[0] == "-" else rest[0]
+        request = {"op": "send", "content": text, "when": when}
+    elif cmd == "answer":
+        if len(rest) < 2:
+            return fail("amarchy agent answer <id> <request id> allow|always|deny [why] | --json <response>")
+        rid, verdict = rest[0], rest[1]
+        if verdict == "--json":
+            try:
+                response = json.loads(rest[2])
+            except (IndexError, ValueError):
+                return fail("--json takes the response, e.g. '{\"behavior\": \"allow\"}'")
+        elif verdict in ("allow", "always"):
+            response = {"behavior": "allow"}
+            if verdict == "always":
+                p = next((p for p in agent_live(sid).get("pending") or [] if p["request_id"] == rid), None)
+                rules = [x for x in (p or {}).get("suggestions") or [] if x.get("type") == "addRules"]
+                response["updatedPermissions"] = rules
+        elif verdict == "deny":
+            response = {"behavior": "deny", "message": " ".join(rest[2:])}
+        else:
+            return fail(f"allow, always or deny, not {verdict!r}")
+        request = {"op": "answer", "request_id": rid, "response": response}
+    elif cmd == "interrupt":
+        request = {"op": "interrupt", "everything": "--all" in rest}
+    elif cmd == "mode":
+        if len(rest) != 1 or rest[0] not in AGENT_MODES:
+            return fail(f"amarchy agent mode <id> {'|'.join(AGENT_MODES)}")
+        request = {"op": "control", "request": {"subtype": "set_permission_mode", "mode": rest[0]}}
+    elif cmd == "model":
+        if len(rest) != 1:
+            return fail("amarchy agent model <id> <model>")
+        request = {"op": "control", "request": {"subtype": "set_model", "model": rest[0]}}
+    else:   # control
+        try:
+            request = {"op": "control", "request": json.loads(rest[0])}
+        except (IndexError, ValueError):
+            return fail("amarchy agent control <id> '<control request as JSON>'")
+    try:
+        answer = agent_call(sid, request)
+    except OSError as e:
+        return fail(f"{sid}: no answer from its broker: {e}")
+    print(json.dumps(answer))
+    return 0 if answer.get("ok") else 1
+
+
 # ------------------------------------------------------------------ main
 
 # What each command takes, for `amarchy <command> --help` and for catching an
@@ -8004,7 +8956,7 @@ OPTIONS = {
     "dictation": ({"--status", "--json"}, set(), set()),
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "paste": None, "rec": None,
+    "paste": None, "rec": None, "agent": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -8136,6 +9088,8 @@ def main(argv):
         return cmd_paste(args)
     elif cmd == "rec":
         return cmd_rec(args)
+    elif cmd == "agent":
+        return cmd_agent(args)
     elif cmd == "app":
         return cmd_app(args)
     elif cmd == "send":

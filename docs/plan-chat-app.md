@@ -50,23 +50,23 @@ the docs only is marked 📄; what's still unknown is marked ❓.
 | Need | A. Agent SDK | B. stream-json (own broker) | C. TUI + hooks |
 | --- | --- | --- | --- |
 | Messages, tool calls, results as JSON | ✅ same stream as B | ✅ `assistant`, `user`/`tool_result` (with `tool_use_result`: structured output, patches), `result` with cost and usage | transcript only, after the fact |
-| Live text as it's written | 📄 `includePartialMessages` | 📄 `--include-partial-messages` (`stream_event` deltas) | no |
+| Live text as it's written | 📄 `includePartialMessages` | ✅ `--include-partial-messages`: `stream_event` deltas that add up exactly to the final text (A1) | no |
 | Permission requests | 📄 `canUseTool` | ✅ `control_request` `can_use_tool` with tool, input, a human `description`, and `permission_suggestions` ("always allow `touch made.txt`", "accept edits for the session") | scrape, or a `PermissionRequest` hook that blocks the turn until the app answers (600 s cap) |
 | AskUserQuestion | 📄 via `canUseTool` | ✅ arrives as `can_use_tool` for `AskUserQuestion` with all questions, options, descriptions, `multiSelect` (previews 📄); answered with `updatedInput.answers` | scrape only (a hook sees the questions but can't answer) |
 | Plan approval | same as B | ✅ `ExitPlanMode` arrives as `can_use_tool` with the plan's full markdown and its file; allow = approved | scrape |
-| Interrupt (Stop) | 📄 `interrupt()` | 📄 `control_request` `interrupt` (my test turn finished too fast to see it: ❓ test in phase A1) | Esc key |
-| Switch model / permission mode / effort | 📄 `setModel`, `setPermissionMode`, `applyFlagSettings` | ✅ `set_model` (and `/model`); `set_permission_mode` 📄 | `/model`, Shift+Tab keystrokes |
+| Interrupt (Stop) | 📄 `interrupt()` | ✅ `control_request` `interrupt` stops a turn at once while it writes, while a tool runs, and while a permission waits (that request is withdrawn with `control_cancel_request`); `cancel_queued` also drops what's queued (A1) | Esc key |
+| Switch model / permission mode / effort | 📄 `setModel`, `setPermissionMode`, `applyFlagSettings` | ✅ `set_model` (and `/model`); ✅ `set_permission_mode` applies to the next tool call, no restart (A1) | `/model`, Shift+Tab keystrokes |
 | Slash commands | 📄 skills and most commands | ✅ `/context`, `/compact` (emits `compact_boundary`), `/clear` (new session id) all work sent as a message; `initialize` returns every command with its description, every model, and the account | all, including terminal-only ones |
 | Terminal-only commands (`/login`, `/config` menu, `/resume` picker, `/voice`, `/bg`, `/rewind` menu) | no | no | yes |
 | Resume a TUI conversation | 📄 yes | ✅ a conversation made in the TUI resumed in stream-json and remembered its context | native |
-| …and back (TUI resumes a stream-json one) | 📄 `--resume <id>` yes (`--continue` skips them) | same | native |
-| Background tasks | 📄 | ✅ `background_tasks_changed`, `task_started` events; the process stays up while they run | pane only |
-| Subagents | 📄 `parent_tool_use_id` | 📄 same, `--forward-subagent-text` for their text | transcript sidechains |
-| SendMessage / ListAgents between sessions | 📄 | ✅ the process registers in `~/.claude/sessions` (kind `interactive`, with its agent name) and reports a `messaging_socket_path`; ❓ replies need `crossSessionInbound: accept` per the docs: test in A1 | works today |
+| …and back (TUI resumes a stream-json one) | 📄 `--resume <id>` yes (`--continue` skips them) | ✅ TUI → `-p` → TUI on one conversation id and file, context kept both ways (A1) | native |
+| Background tasks | 📄 | ✅ `background_tasks_changed`, `task_started`, `task_notification`; the process stays up while they run, and Claude takes a turn of its own when one ends | pane only |
+| Subagents | 📄 `parent_tool_use_id` | ✅ the Agent tool's messages carry `parent_tool_use_id` (A1); `--forward-subagent-text` for their text 📄 | transcript sidechains |
+| SendMessage / ListAgents between sessions | 📄 | ✅ listed by `ListAgents`, messages arrive as `<cross-session-message>` (echoed with `--replay-user-messages`) and an idle `-p` Claude takes a turn on them; replies work. But by default a message from a session in another permission class (bypass ↔ prompting) is **held**, and a `-p` host can't approve it, so it's dropped (`peer_message_hold`). The broker sets `crossSessionInbound: accept`; TUI sessions need it too for a broker's replies to reach them (A2) | works today |
 | amarchy's hooks (`--settings`) | 📄 | ✅ SessionStart, PreToolUse, Stop fire; `--include-hook-events` mirrors them into the stream. Notification doesn't fire for permissions: not needed, the request itself arrives | works today |
-| Images in a message | 📄 base64 image blocks | 📄 same shape (❓ test in A1) | clipboard shim (`amarchy-paste`) |
+| Images in a message | 📄 base64 image blocks | ✅ a base64 `image` block beside the text; Claude sees it, the transcript keeps it (A1) | clipboard shim (`amarchy-paste`) |
 | Usage limits | same | ✅ `rate_limit_event`: five-hour and weekly utilization, reset times | statusline only |
-| Login / cost | subscription login 📄 *works*, but see below | ✅ used Julian's **Claude Max** login (`apiKeySource: none`, account in `initialize`), no API key | the subscription, as today |
+| Login / cost | subscription login 📄 *works*, but see below | ✅ used Julian's **Claude Max** login (`apiKeySource: none`, account in `initialize`), no API key; with `ANTHROPIC_API_KEY` set, `-p` uses the key instead (A1), so the broker strips it | the subscription, as today |
 | New dependency | yes: a package (and the TS one bundles its own CLI copy) | none: amarchy is stdlib-only Python, this is JSON lines on a pipe | none |
 | Protocol stability | documented API | the SDK's wire protocol, not documented on its own; the open-source SDKs are the reference | Claude's screen layout: least stable |
 

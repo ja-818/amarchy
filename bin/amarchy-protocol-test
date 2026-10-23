@@ -1,0 +1,1014 @@
+#!/usr/bin/env python3
+"""amarchy-protocol-test: check that the installed Claude Code still speaks the
+protocol amarchy's chat engine is built on (`claude -p` with stream-json in
+and out, the control protocol the Agent SDKs use). See docs/agent-protocol.md.
+
+Every check runs real, small Claude Code turns on haiku, in throwaway folders,
+with your Claude subscription login: ANTHROPIC_API_KEY (and any other API
+credential) is taken out of Claude's environment, and the first check proves
+it is. Their conversations are deleted afterwards.
+
+  amarchy-protocol-test                 every check, four at a time
+  amarchy-protocol-test <name>...       only these (--list names them)
+  amarchy-protocol-test --list          the checks, one a line
+  amarchy-protocol-test --json          a JSON report on stdout instead of lines
+  amarchy-protocol-test --keep          keep the folders and conversations (to look at them)
+  amarchy-protocol-test -v              print every event as it arrives
+  amarchy-protocol-test --broker        also check `amarchy agent` itself, on a test
+                                        session of its own (made and closed again)
+
+Exits 0 when every check passed, 1 otherwise. A check that couldn't run (no
+tmux for the TUI ones) is skipped, not failed."""
+
+import base64
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import uuid
+import zlib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HOME = Path.home()
+MODEL = os.environ.get("AMARCHY_PROTOCOL_MODEL", "haiku")
+VERBOSE = False
+KEEP = False
+
+# What a running Claude Code (or amarchy) sets for its children: a Claude
+# started with them thinks it's a subagent of ours, or a session of amarchy's.
+INHERITED = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
+             "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+             "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+             "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "AMARCHY", "AMARCHY_SESSION", "AMARCHY_PATH", "AMARCHY_NAME",
+             "AMARCHY_REPO", "AMARCHY_BRANCH", "AMARCHY_ROOT")
+# What would make `claude -p` bill an API account instead of the subscription.
+API_CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def claude_env(**extra):
+    env = {k: v for k, v in os.environ.items() if k not in INHERITED + API_CREDENTIALS}
+    env.update(extra)
+    return env
+
+
+def projects_dir(path):
+    return HOME / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+class Failed(Exception):
+    pass
+
+
+class Skipped(Exception):
+    pass
+
+
+def check(cond, what):
+    if not cond:
+        raise Failed(what)
+
+
+# ------------------------------------------------------------------ a claude -p
+
+class Claude:
+    """One `claude -p --input-format stream-json --output-format stream-json`
+    process: what it says, collected as it arrives; messages and control
+    requests to it; its own control requests (can_use_tool) waiting to be
+    answered."""
+
+    def __init__(self, t, name, *args, cwd=None, settings=None, env=None, partial=True, hooks=True,
+                 model=MODEL, resume=None, stdio_permissions=True, auto_allow=False):
+        self.t, self.name, self.auto_allow = t, name, auto_allow
+        self.cwd = Path(cwd or t.folder(name))
+        argv = ["claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                *(["--include-partial-messages"] if partial else []),
+                *(["--include-hook-events"] if hooks else []),
+                *(["--permission-prompt-tool", "stdio"] if stdio_permissions else []),
+                *(["--model", model] if model else []),
+                *(["--resume", resume] if resume else []),
+                *(["--settings", json.dumps(settings)] if settings else []), *args]
+        self.argv = argv
+        self.events, self.cond = [], threading.Condition()
+        self.responses = {}
+        self.stderr = []
+        self.p = subprocess.Popen(argv, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, env=env or claude_env(), bufsize=1)
+        t.processes.append(self)
+        threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._read_err, daemon=True).start()
+
+    def _read(self):
+        for line in self.p.stdout:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if VERBOSE:
+                print(f"    [{self.t.name}/{self.name}] < {line.strip()[:240]}", file=sys.stderr, flush=True)
+            with self.cond:
+                if o.get("type") == "control_response":
+                    r = o.get("response") or {}
+                    self.responses[r.get("request_id")] = r
+                self.events.append(o)
+                self.cond.notify_all()
+            if (self.auto_allow and o.get("type") == "control_request"
+                    and o["request"].get("subtype") == "can_use_tool"):
+                self.answer(o, {"behavior": "allow", "updatedInput": o["request"]["input"]})
+        with self.cond:
+            self.events.append({"type": "_exit"})
+            self.cond.notify_all()
+
+    def _read_err(self):
+        for line in self.p.stderr:
+            self.stderr.append(line)
+
+    def write(self, o):
+        if VERBOSE:
+            print(f"    [{self.t.name}/{self.name}] > {json.dumps(o)[:240]}", file=sys.stderr, flush=True)
+        self.p.stdin.write(json.dumps(o) + "\n")
+        self.p.stdin.flush()
+
+    def send(self, content, **extra):
+        """A user message: text, or a list of content blocks."""
+        msg = {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None,
+               "session_id": "", **extra}
+        self.write(msg)
+        return msg
+
+    def control(self, subtype, timeout=30, **fields):
+        """A control request, and its response (an error raises Failed)."""
+        rid = str(uuid.uuid4())
+        self.write({"type": "control_request", "request_id": rid, "request": {"subtype": subtype, **fields}})
+        end = time.time() + timeout
+        with self.cond:
+            while rid not in self.responses:
+                if time.time() > end or self.p.poll() is not None:
+                    raise Failed(f"no answer to {subtype} in {timeout}s")
+                self.cond.wait(0.5)
+            r = self.responses[rid]
+        if r.get("subtype") == "error":
+            raise Failed(f"{subtype} refused: {r.get('error')}")
+        return r.get("response") or {}
+
+    def answer(self, request, response):
+        self.write({"type": "control_response", "response": {"subtype": "success", "request_id": request["request_id"],
+                                                             "response": response}})
+
+    def mark(self):
+        with self.cond:
+            return len(self.events)
+
+    def wait(self, pred, timeout=90, since=0, what="an event"):
+        """The first event from index since on that pred accepts."""
+        end, i = time.time() + timeout, since
+        with self.cond:
+            while True:
+                while i < len(self.events):
+                    e = self.events[i]
+                    i += 1
+                    if e.get("type") == "_exit":
+                        raise Failed(f"{self.name}: Claude exited while waiting for {what}: "
+                                     f"{''.join(self.stderr)[-400:].strip()}")
+                    if pred(e):
+                        return e
+                if time.time() > end:
+                    raise Failed(f"{self.name}: no {what} in {timeout}s")
+                self.cond.wait(0.5)
+
+    def result(self, since=0, timeout=120, allow=False, deny=False):
+        """The end of the turn (its result). allow (deny): answer every permission request on the way so."""
+        if not allow and not deny:
+            return self.wait(lambda e: e.get("type") == "result", timeout, since, "end of the turn (result)")
+        end, i = time.time() + timeout, since
+        while True:
+            e = self.wait(lambda e: e.get("type") == "result" or (e.get("type") == "control_request" and
+                          e["request"].get("subtype") == "can_use_tool"), max(1, end - time.time()), i,
+                          "end of the turn (result)")
+            if e.get("type") == "result":
+                return e
+            with self.cond:
+                i = self.events.index(e) + 1
+            self.answer(e, {"behavior": "allow", "updatedInput": e["request"]["input"]} if allow else
+                        {"behavior": "deny", "message": "Not now."})
+
+    def ask(self, content, timeout=120, **extra):
+        """Send a message and wait for its turn's result."""
+        m = self.mark()
+        self.send(content, **extra)
+        return self.result(m, timeout)
+
+    def request(self, since=0, timeout=90, tool=None):
+        """The next can_use_tool control request (for tool, if given)."""
+        return self.wait(lambda e: e.get("type") == "control_request"
+                         and e["request"].get("subtype") == "can_use_tool"
+                         and (tool is None or e["request"].get("tool_name") == tool),
+                         timeout, since, f"permission request{' for ' + tool if tool else ''}")
+
+    def all(self, pred, since=0):
+        with self.cond:
+            return [e for e in self.events[since:] if pred(e)]
+
+    def text(self, since=0):
+        """What Claude said (its text blocks), from since on."""
+        out = []
+        for e in self.all(lambda e: e.get("type") == "assistant", since):
+            for b in e["message"].get("content") or []:
+                if b.get("type") == "text":
+                    out.append(b["text"])
+        return "\n".join(out)
+
+    def init(self):
+        return self.wait(lambda e: e.get("type") == "system" and e.get("subtype") == "init", what="system/init")
+
+    def close(self, timeout=20):
+        try:
+            self.p.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.p.wait(timeout)
+        except subprocess.TimeoutExpired:
+            self.p.terminate()
+            try:
+                self.p.wait(5)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+
+
+def is_partial_text(e):
+    return (e.get("type") == "stream_event" and e["event"].get("type") == "content_block_delta"
+            and e["event"].get("delta", {}).get("type") == "text_delta")
+
+
+def tool_results(c, since=0):
+    out = []
+    for e in c.all(lambda e: e.get("type") == "user", since):
+        content = e["message"].get("content")
+        for b in content if isinstance(content, list) else []:
+            if b.get("type") == "tool_result":
+                out.append((b, e))
+    return out
+
+
+# ------------------------------------------------------------------ the checks
+
+class Test:
+    """One check: its folders, its Claudes, what it found."""
+
+    def __init__(self, name, fn):
+        self.name, self.fn, self.doc = name, fn, (fn.__doc__ or "").strip()
+        self.processes, self.folders, self.notes = [], [], []
+        self.status, self.error, self.took = None, "", 0.0
+
+    def folder(self, label):
+        d = Path(tempfile.mkdtemp(prefix=f"amarchy-protocol-{self.name}-{label}-"))
+        subprocess.run(["git", "init", "-q", str(d)], capture_output=True)
+        self.folders.append(d)
+        return d
+
+    def note(self, text):
+        """A finding worth reporting (what was observed)."""
+        self.notes.append(text)
+
+    def run(self):
+        start = time.time()
+        try:
+            self.fn(self)
+            self.status = "pass"
+        except Skipped as e:
+            self.status, self.error = "skip", str(e)
+        except Failed as e:
+            self.status, self.error = "fail", str(e)
+        except Exception as e:
+            self.status, self.error = "fail", f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}"
+        finally:
+            for c in self.processes:
+                c.close()
+            if not KEEP:
+                for d in self.folders:
+                    shutil.rmtree(projects_dir(d), ignore_errors=True)
+                    shutil.rmtree(d, ignore_errors=True)
+            self.took = time.time() - start
+        return self
+
+
+CHECKS = []
+
+
+def checked(fn):
+    CHECKS.append((fn.__name__.removeprefix("t_").replace("_", "-"), fn))
+    return fn
+
+
+@checked
+def t_login(t):
+    """Subscription login: with ANTHROPIC_API_KEY taken out, `claude -p` runs on the claude.ai account
+    (apiKeySource none); with one in its environment it would bill that key instead."""
+    c = Claude(t, "a")
+    info = c.control("initialize")
+    account = info.get("account") or {}
+    check(account.get("subscriptionType"), f"initialize names no subscription: {account}")
+    c.ask("Reply with just the word ok.")
+    init = c.init()
+    check(init.get("apiKeySource") == "none", f"apiKeySource is {init.get('apiKeySource')!r}, not 'none'")
+    t.note(f"account: {account.get('subscriptionType')} ({account.get('apiProvider')}), apiKeySource none, "
+           f"Claude Code {info.get('claude_code_version')}")
+    # The same with a (bogus) key in the environment: Claude takes the key.
+    bad = Claude(t, "key", env=claude_env(ANTHROPIC_API_KEY="sk-ant-api03-amarchy-protocol-test-not-a-key"))
+    bad.send("Reply with just the word ok.")
+    r = bad.result(timeout=60)
+    source = bad.init().get("apiKeySource")
+    check(source == "ANTHROPIC_API_KEY", f"with a key set, apiKeySource is {source!r}")
+    check(r.get("is_error"), "a bogus API key still answered: it isn't using the key?")
+    t.note("with ANTHROPIC_API_KEY set, -p uses it (apiKeySource ANTHROPIC_API_KEY): it must be stripped")
+
+
+@checked
+def t_initialize(t):
+    """initialize returns the commands (with descriptions), models, agents, account, permission mode;
+    system/init lists tools, skills, slash commands, and the messaging socket."""
+    c = Claude(t, "a")
+    info = c.control("initialize")
+    for key in ("commands", "models", "account", "current_permission_mode", "pid"):
+        check(key in info, f"initialize has no {key}")
+    check(all("name" in x and "description" in x for x in info["commands"]), "a command without description")
+    check(any(m.get("value") for m in info["models"]), "models without values")
+    c.ask("Reply with just the word ok.")
+    init = c.init()
+    for key in ("session_id", "tools", "model", "permissionMode", "slash_commands", "capabilities"):
+        check(key in init, f"system/init has no {key}")
+    t.note(f"{len(info['commands'])} commands, {len(info['models'])} models "
+           f"({', '.join(m['value'] for m in info['models'][:6])}…), capabilities: {', '.join(init['capabilities'])}")
+    t.note(f"system/init only comes with the first turn, not on initialize; messaging_socket_path: "
+           f"{'yes' if init.get('messaging_socket_path') else 'no'}")
+
+
+@checked
+def t_messages(t):
+    """Messages, tool calls and results as JSON: assistant tool_use, user tool_result with the structured
+    tool_use_result, result with cost and usage; the transcript on disk has the same turn."""
+    c = Claude(t, "a", "--permission-mode", "acceptEdits")
+    (c.cwd / "hello.txt").write_text("the secret is 42\n")
+    r = c.ask("Read hello.txt with the Read tool, then tell me the secret number. Be brief.")
+    uses = [b for e in c.all(lambda e: e.get("type") == "assistant") for b in e["message"]["content"]
+            if b.get("type") == "tool_use"]
+    check(any(u["name"] == "Read" for u in uses), "no Read tool_use")
+    res = tool_results(c)
+    check(res, "no tool_result")
+    check(any(e.get("tool_use_result") for _, e in res), "tool_result without a structured tool_use_result")
+    check("42" in c.text(), "the answer doesn't have 42")
+    for key in ("total_cost_usd", "usage", "session_id", "duration_ms", "num_turns"):
+        check(key in r, f"result has no {key}")
+    sid = r["session_id"]
+    f = projects_dir(c.cwd) / f"{sid}.jsonl"
+    check(f.exists(), "no transcript on disk")
+    check("42" in f.read_text(), "the transcript doesn't have the turn")
+    t.note(f"result: cost ${r['total_cost_usd']:.4f}, {r['num_turns']} turns; tool_use_result keys "
+           f"{sorted(next(e for _, e in res if e.get('tool_use_result'))['tool_use_result'])[:6]}")
+
+
+@checked
+def t_partial(t):
+    """Live text: --include-partial-messages streams stream_event deltas that add up to the final text."""
+    c = Claude(t, "a")
+    c.ask("Write the numbers one to twenty as English words, separated by spaces. Nothing else.")
+    deltas = c.all(is_partial_text)
+    check(len(deltas) >= 2, f"only {len(deltas)} text deltas")
+    streamed = "".join(e["event"]["delta"]["text"] for e in deltas)
+    final = c.text()
+    check(streamed.strip() == final.strip(), f"deltas {streamed[:60]!r} ≠ final {final[:60]!r}")
+    kinds = sorted({e["event"]["type"] for e in c.all(lambda e: e.get("type") == "stream_event")})
+    t.note(f"{len(deltas)} text deltas, adding up to the final text exactly; event types: {', '.join(kinds)}; "
+           f"the whole assistant message still follows each block")
+    # And without the flag: none.
+    d = Claude(t, "b", partial=False)
+    d.ask("Reply with just the word ok.")
+    check(not d.all(lambda e: e.get("type") == "stream_event"), "stream_event without the flag")
+
+
+@checked
+def t_permission(t):
+    """Permission requests: can_use_tool with tool, input, a description and permission_suggestions;
+    allow runs it, deny (with a message) gives Claude a tool error, allow with the suggestion
+    ("always allow") stops it asking again."""
+    c = Claude(t, "a", "--permission-mode", "default")
+    m = c.mark()
+    c.send("Run exactly this bash command and nothing else: touch made.txt")
+    req = c.request(m, tool="Bash")["request"]
+    check(req["input"].get("command"), "no command in the request")
+    check("permission_suggestions" in req, "no permission_suggestions")
+    t.note(f"can_use_tool Bash: keys {sorted(req)}; description {req.get('description')!r}; suggestions: "
+           f"{', '.join(x['type'] + ' ' + x.get('destination', '') for x in req.get('permission_suggestions') or [])}")
+    rule = [x for x in req.get("permission_suggestions") or [] if x.get("type") == "addRules"][:1]
+    check(rule, "no addRules suggestion")
+    c.answer(c.request(m, tool="Bash"), {"behavior": "allow", "updatedInput": req["input"], "updatedPermissions": rule})
+    c.result(m)
+    check((c.cwd / "made.txt").exists(), "allowed, yet made.txt isn't there")
+    # Always allow: the same command again doesn't ask.
+    m = c.mark()
+    c.send("Run that exact same command again: touch made.txt")
+    c.result(m)
+    asked = c.all(lambda e: e.get("type") == "control_request" and e["request"].get("subtype") == "can_use_tool", m)
+    check(not asked, "asked again after 'always allow'")
+    # Deny, with a reason Claude gets to read.
+    m = c.mark()
+    c.send("Run exactly this bash command: mkdir other-dir")
+    e = c.request(m, tool="Bash")
+    c.answer(e, {"behavior": "deny", "message": "The user said no: do not create other-dir."})
+    c.result(m)
+    check(not (c.cwd / "other-dir").exists(), "denied, yet other-dir is there")
+    denied = [b for b, _ in tool_results(c, m) if b.get("is_error")]
+    check(denied and "user said no" in json.dumps(denied[0]["content"]), "the deny message didn't reach Claude")
+    t.note("deny's message reaches Claude as the tool_result (is_error); allow + updatedPermissions = always allow")
+
+
+@checked
+def t_ask_user_question(t):
+    """AskUserQuestion arrives as can_use_tool with every question, option, description and multiSelect;
+    answered with updatedInput.answers."""
+    c = Claude(t, "a", "--permission-mode", "default")
+    m = c.mark()
+    c.send("Use the AskUserQuestion tool to ask me one question: which fruit I prefer, with the options "
+           "Apple and Banana (each with a one-line description). After I answer, reply with just the fruit's name.")
+    e = c.request(m, tool="AskUserQuestion")
+    qs = e["request"]["input"].get("questions") or []
+    check(qs and qs[0].get("options"), "no questions/options")
+    q = qs[0]
+    check(all("label" in o for o in q["options"]), "an option without label")
+    t.note(f"question keys {sorted(q)}, option keys {sorted(q['options'][0])}")
+    banana = next((o["label"] for o in q["options"] if "banana" in o["label"].lower()), q["options"][-1]["label"])
+    c.answer(e, {"behavior": "allow", "updatedInput": {**e["request"]["input"], "answers": {q["question"]: banana}}})
+    c.result(m)
+    check("banana" in c.text(m).lower(), f"Claude didn't get the answer: {c.text(m)[:120]!r}")
+
+
+@checked
+def t_plan(t):
+    """Plan approval: in plan mode ExitPlanMode arrives as can_use_tool with the plan's markdown; allow
+    approves it and the mode leaves plan."""
+    c = Claude(t, "a", "--permission-mode", "plan")
+    m = c.mark()
+    c.send("Plan how to create a file named plan.txt that contains the word hello. The plan is one short "
+           "line. Present it with ExitPlanMode right away, don't explore.")
+    e = c.request(m, tool="ExitPlanMode")
+    inp = e["request"]["input"]
+    check(inp.get("plan"), f"ExitPlanMode without the plan: {sorted(inp)}")
+    t.note(f"ExitPlanMode input keys: {sorted(inp)}")
+    c.answer(e, {"behavior": "allow", "updatedInput": inp})
+    c.result(m, timeout=180, allow=True)
+    statuses = c.all(lambda e: e.get("type") == "system" and e.get("subtype") == "status" and "permissionMode" in e, m)
+    t.note(f"after approval: status frames {[s['permissionMode'] for s in statuses]}; "
+           f"plan.txt {'made' if (c.cwd / 'plan.txt').exists() else 'not made'} in that turn")
+
+
+@checked
+def t_interrupt(t):
+    """Interrupt (Stop): control_request interrupt stops a turn while it writes and while a tool runs;
+    the next message works as usual."""
+    c = Claude(t, "a", "--permission-mode", "acceptEdits")
+    m = c.mark()
+    c.send("Write a long story, at least 1500 words, about a lighthouse keeper. Plain text.")
+    c.wait(is_partial_text, since=m, what="the story's first words")
+    r = c.control("interrupt")
+    res = c.result(m)
+    t.note(f"interrupt while writing: response {json.dumps(r)}; result subtype {res.get('subtype')!r}, "
+           f"is_error {res.get('is_error')}, stop_reason {res.get('stop_reason')!r}")
+    words = len(c.text(m).split())
+    check(words < 1200, f"the story went on ({words} words) after the interrupt")
+    # While a tool runs (a command that takes 30 s), and while a permission request waits.
+    for waiting in (False, True):
+        m = c.mark()
+        if waiting:
+            c.control("set_permission_mode", mode="default")
+        c.send("Run this exact bash command in the foreground (not in the background): "
+               "python3 -c 'import time; time.sleep(30)'")
+        e = c.wait(lambda e: (e.get("type") == "control_request" and e["request"].get("subtype") == "can_use_tool")
+                   or (e.get("type") == "assistant" and any(b.get("type") == "tool_use" for b in e["message"]["content"])),
+                   since=m, what="the command starting")
+        if not waiting:
+            time.sleep(1)
+            req = c.all(lambda e: e.get("type") == "control_request" and e["request"].get("subtype") == "can_use_tool", m)
+            for q in req:
+                c.answer(q, {"behavior": "allow", "updatedInput": q["request"]["input"]})
+            time.sleep(4)
+            check(not tool_results(c, m), "the command ended before the interrupt")
+        else:
+            c.request(m, tool="Bash")
+        t0 = time.time()
+        r = c.control("interrupt")
+        res = c.result(m, timeout=40)
+        took = time.time() - t0
+        check(took < 15, f"the turn took {took:.0f}s to stop")
+        tr = [b for b, _ in tool_results(c, m)]
+        what = "a permission request waits" if waiting else "a tool runs"
+        t.note(f"interrupt while {what}: the turn ended {took:.1f}s later ({res.get('subtype')}); the tool_result: "
+               f"{json.dumps(tr[-1]['content'])[:110] if tr else 'none'}")
+        if waiting:
+            cancels = c.all(lambda e: e.get("type") == "control_cancel_request", m)
+            t.note(f"the pending can_use_tool is withdrawn with control_cancel_request: {'yes' if cancels else 'no'}")
+    # And it goes on.
+    m = c.mark()
+    c.ask("Reply with just the word ok.")
+    check("ok" in c.text(m).lower(), "no answer after the interrupt")
+    # An interrupt while idle is harmless.
+    r = c.control("interrupt")
+    t.note(f"interrupt while idle: {json.dumps(r)}")
+
+
+def png(width, height, rgb):
+    """A plain image of one colour, as PNG bytes."""
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+@checked
+def t_images(t):
+    """Images in a message: a base64 image content block beside the text; Claude sees it, and the
+    transcript keeps it."""
+    c = Claude(t, "a")
+    data = base64.b64encode(png(64, 64, (220, 20, 20))).decode()
+    m = c.mark()
+    r = c.ask([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
+               {"type": "text", "text": "What single colour fills this image? Answer with one word."}])
+    check("red" in c.text(m).lower(), f"didn't see red: {c.text(m)[:80]!r}")
+    f = projects_dir(c.cwd) / f"{r['session_id']}.jsonl"
+    kept = f.exists() and '"type":"image"' in f.read_text().replace(" ", "")
+    t.note(f"a base64 PNG block works; the transcript {'keeps' if kept else 'drops'} the image block")
+
+
+@checked
+def t_set_model(t):
+    """Switching model: set_model takes effect on the next turn (and /model sent as a message)."""
+    c = Claude(t, "a")
+    c.ask("Reply with just the word ok.")
+    first = c.init().get("model")
+    m = c.mark()
+    c.control("set_model", model="sonnet")
+    c.ask("Reply with just the word ok.")
+    models = {e["message"].get("model") for e in c.all(lambda e: e.get("type") == "assistant", m)}
+    check(any("sonnet" in (x or "") for x in models), f"still {models} after set_model sonnet")
+    t.note(f"set_model: {first} → {', '.join(sorted(models))}")
+
+
+@checked
+def t_set_permission_mode(t):
+    """Switching permission mode: set_permission_mode (plan, acceptEdits, default) applies to the next
+    tool call without restarting."""
+    c = Claude(t, "a", "--permission-mode", "default")
+    c.ask("Reply with just the word ok.")
+    r = c.control("set_permission_mode", mode="acceptEdits")
+    m = c.mark()
+    c.ask("Create a file named accepted.txt containing the word yes, with the Write tool.")
+    asked = c.all(lambda e: e.get("type") == "control_request" and e["request"].get("tool_name") == "Write", m)
+    check(not asked, "asked to write in acceptEdits")
+    check((c.cwd / "accepted.txt").exists(), "accepted.txt wasn't written")
+    c.control("set_permission_mode", mode="default")
+    m = c.mark()
+    c.send("Create a file named asked.txt containing the word no, with the Write tool.")
+    e = c.request(m, tool="Write")
+    c.answer(e, {"behavior": "deny", "message": "Not now."})
+    c.result(m)
+    check(not (c.cwd / "asked.txt").exists(), "asked.txt written though denied")
+    statuses = c.all(lambda e: e.get("type") == "system" and "permissionMode" in e)
+    t.note(f"set_permission_mode response {json.dumps(r)}; the mode shows in system frames: "
+           f"{sorted({s['permissionMode'] for s in statuses})}")
+    c.control("set_permission_mode", mode="plan")
+    m = c.mark()
+    c.send("Create a file named planned.txt with the Write tool. If you can't, say why in one line.")
+    c.result(m, deny=True)
+    check(not (c.cwd / "planned.txt").exists(), "planned.txt written in plan mode")
+
+
+@checked
+def t_slash_commands(t):
+    """Slash commands sent as messages: /context, /compact (compact_boundary), /clear (a new session id)."""
+    c = Claude(t, "a")
+    first = c.ask("Remember the word ZEBRA. Reply with just ok.")
+    m = c.mark()
+    c.ask("/context")
+    ctx = c.all(lambda e: e.get("type") in ("user", "assistant", "system") and "context" in json.dumps(e).lower(), m)
+    check(ctx, "/context said nothing")
+    usage = c.control("get_context_usage")
+    t.note(f"get_context_usage keys: {sorted(usage)[:10]}")
+    m = c.mark()
+    c.ask("/compact", timeout=180)
+    check(c.all(lambda e: e.get("subtype") == "compact_boundary", m), "no compact_boundary")
+    m = c.mark()
+    c.ask("What word did I ask you to remember? One word.")
+    check("zebra" in c.text(m).lower(), "forgot ZEBRA across /compact")
+    c.ask("/clear")
+    after = c.ask("Reply with just the word ok.")
+    t.note(f"/clear: session id {first['session_id'][:8]} → {after['session_id'][:8]}")
+    check(after["session_id"] != first["session_id"], "/clear kept the session id")
+
+
+@checked
+def t_queue(t):
+    """Messages sent while Claude works: priority 'later' waits for the turn, 'next' is taken into it."""
+    c = Claude(t, "a", "--permission-mode", "acceptEdits", auto_allow=True)
+    m = c.mark()
+    c.send("Run this bash command in the foreground: python3 -c 'import time; time.sleep(8); print(\"slept\")'"
+           " then reply with just: done")
+    c.wait(lambda e: e.get("type") == "assistant" and any(b.get("type") == "tool_use"
+                                                          for b in e["message"]["content"]), since=m,
+           what="the command starting")
+    c.send("Also reply with the word PAPAYA.", priority="next", uuid=str(uuid.uuid4()))
+    c.result(m)
+    lifecycle = c.all(lambda e: e.get("type") == "command_lifecycle", m)
+    results = c.all(lambda e: e.get("type") == "result", m)
+    t.note(f"'next' while a tool ran: {'taken into the same turn' if 'papaya' in c.text(m).lower() and len(results) == 1 else 'its own turn'}; "
+           f"lifecycle frames: {[x.get('state') or x.get('status') for x in lifecycle][:6]}")
+    # Wait until everything queued has run.
+    end = time.time() + 60
+    while "papaya" not in c.text(m).lower() and time.time() < end:
+        time.sleep(1)
+    check("papaya" in c.text(m).lower(), "the queued message never ran")
+    # 'later': its own turn, after the one under way.
+    m = c.mark()
+    c.send("Write the numbers one to forty as English words, separated by spaces. Nothing else.")
+    c.wait(is_partial_text, since=m, what="the first words")
+    c.send("Reply with just the word KIWI.", priority="later", uuid=str(uuid.uuid4()))
+    first = c.result(m)
+    check("kiwi" not in c.text(m).lower(), "'later' was taken into the turn under way")
+    c.result(c.events.index(first) + 1)
+    check("kiwi" in c.text(m).lower(), "'later' never ran")
+    t.note("'later' while Claude wrote: a turn of its own, right after (the app's \"will send when Claude finishes\")")
+
+
+@checked
+def t_background_tasks(t):
+    """Background tasks: background_tasks_changed and task_started/task_notification; the process stays
+    up while one runs, and its end starts a turn of its own."""
+    c = Claude(t, "a", "--permission-mode", "acceptEdits", auto_allow=True)
+    m = c.mark()
+    c.send("Run `python3 -c 'import time; time.sleep(6); print(\"bg-finished\")'` with run_in_background, "
+           "then reply with just: started")
+    c.wait(lambda e: e.get("subtype") == "task_started", since=m, what="task_started")
+    c.wait(lambda e: e.get("subtype") == "background_tasks_changed" and e.get("tasks"), since=m,
+           what="background_tasks_changed")
+    c.result(m)
+    n = c.wait(lambda e: e.get("subtype") == "task_notification", since=m, timeout=60, what="task_notification")
+    c.wait(lambda e: e.get("subtype") == "background_tasks_changed" and not e.get("tasks"), since=m,
+           what="tasks emptied")
+    i = c.events.index(n)
+    c.result(i, timeout=60)
+    t.note(f"task_notification status {n.get('status')!r}; Claude takes a turn of its own on it, unasked "
+           f"(a second result); the process stays up while the task runs")
+
+
+@checked
+def t_hooks(t):
+    """amarchy's hooks (--settings): SessionStart, UserPromptSubmit, PreToolUse, Stop fire;
+    --include-hook-events mirrors them as hook_started/hook_response; Notification doesn't fire for a
+    permission request (the request itself arrives)."""
+    c0 = t.folder("a")
+    log = c0 / "hooks.log"
+
+    def h(name):
+        return [{"hooks": [{"type": "command", "command": f"cat >/dev/null; echo {name} >> {log}"}]}]
+    settings = {"hooks": {k: h(k) for k in ("SessionStart", "UserPromptSubmit", "PreToolUse", "Notification",
+                                             "Stop", "SessionEnd")}}
+    c = Claude(t, "a", "--permission-mode", "default", cwd=c0, settings=settings)
+    m = c.mark()
+    c.send("Run exactly: touch hooked.txt")
+    e = c.request(m, tool="Bash")
+    time.sleep(2)
+    c.answer(e, {"behavior": "allow", "updatedInput": e["request"]["input"]})
+    c.result(m)
+    c.close()
+    fired = log.read_text().split() if log.exists() else []
+    for name in ("SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"):
+        check(name in fired, f"{name} didn't fire")
+    mirrored = c.all(lambda e: e.get("subtype") in ("hook_started", "hook_response"))
+    check(mirrored, "no hook events in the stream")
+    t.note(f"fired: {', '.join(dict.fromkeys(fired))}; Notification "
+           f"{'fired' if 'Notification' in fired else 'did not fire'} for the permission request")
+
+
+@checked
+def t_subagents(t):
+    """Subagents: the Agent tool's own messages carry parent_tool_use_id; their result comes back as the
+    Agent's tool_result."""
+    c = Claude(t, "a", "--permission-mode", "acceptEdits", auto_allow=True)
+    c.ask("Use the Agent tool (subagent_type general-purpose, model haiku) to answer: what is 17 + 25? "
+          "Then tell me its answer in one line.", timeout=180)
+    nested = c.all(lambda e: e.get("parent_tool_use_id"))
+    check(nested, "no message with parent_tool_use_id")
+    check("42" in c.text(), "no 42 in the answer")
+    t.note(f"{len(nested)} messages with parent_tool_use_id ({sorted({e['type'] for e in nested})})")
+
+
+@checked
+def t_rate_limits(t):
+    """Usage limits: rate_limit_event with the five-hour and weekly use and reset times."""
+    c = Claude(t, "a")
+    c.ask("Reply with just the word ok.")
+    ev = c.all(lambda e: e.get("type") == "rate_limit_event")
+    check(ev, "no rate_limit_event")
+    info = ev[-1]["rate_limit_info"]
+    t.note(f"rate_limit_info keys: {sorted(info)}; windows: {sorted((info.get('unifiedWindows') or {}))}")
+
+
+# ---- conversations between the TUI and -p
+
+TMUX = ["tmux", "-L", f"amarchy-protocol-test-{os.getpid()}"]
+
+
+def trust(path, on):
+    """Pre-accept (or forget) the TUI's trust prompt for a test folder, as amarchy does for a worktree."""
+    cfg = HOME / ".claude.json"
+    try:
+        data = json.loads(cfg.read_text())
+    except (OSError, ValueError):
+        return
+    projects = data.setdefault("projects", {})
+    if on:
+        projects.setdefault(str(path), {})["hasTrustDialogAccepted"] = True
+    else:
+        projects.pop(str(path), None)
+    tmp = cfg.with_name(f".claude.json.protocol-test-{os.getpid()}")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, cfg)
+
+
+def transcript_says(f, pred, timeout=120, after=0):
+    """Whether an assistant entry of transcript f (from line after on) matches pred, waiting for one."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            for line in f.read_text().splitlines()[after:]:
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if o.get("type") == "assistant" and pred(json.dumps(o.get("message", {}).get("content", ""))):
+                    return True
+        except OSError:
+            pass
+        time.sleep(1)
+    return False
+
+
+def tui(t, cwd, name, *args):
+    """The interactive Claude Code in a private tmux, asked args' prompt."""
+    if not shutil.which("tmux"):
+        raise Skipped("no tmux for the interactive Claude Code")
+    argv = ["claude", "--model", MODEL, "--permission-mode", "acceptEdits", *args]
+    r = subprocess.run([*TMUX, "new-session", "-d", "-s", name, "-x", "160", "-y", "50", "-c", str(cwd),
+                        "env", *[f"-u{k}" for k in INHERITED + API_CREDENTIALS], *argv],
+                       capture_output=True, text=True, env=claude_env())
+    if r.returncode:
+        raise Failed(f"tmux: {r.stderr.strip()}")
+
+
+def tui_stop(name):
+    subprocess.run([*TMUX, "kill-session", "-t", name], capture_output=True)
+
+
+@checked
+def t_resume_tui(t):
+    """Resuming both ways: a conversation the TUI made, resumed in -p, remembers it; and the TUI
+    (--resume <id>) picks up what -p added."""
+    d = t.folder("a")
+    trust(d, True)
+    try:
+        tui(t, d, "first", "Remember the word PINEAPPLE. Reply with just: ok")
+        end = time.time() + 90
+        f = None
+        while time.time() < end and not f:
+            files = list(projects_dir(d).glob("*.jsonl"))
+            f = files[0] if files else None
+            time.sleep(1)
+        check(f, "the TUI made no conversation")
+        check(transcript_says(f, lambda s: "ok" in s.lower(), 90), "the TUI didn't answer")
+        tui_stop("first")
+        conversation = f.stem
+        c = Claude(t, "p", cwd=d, resume=conversation)
+        m = c.mark()
+        r = c.ask("What word did I ask you to remember? One word. Also remember the word MANGO.")
+        check("pineapple" in c.text(m).lower(), f"-p resumed without the TUI's context: {c.text(m)[:80]!r}")
+        check(r["session_id"] == conversation, f"-p resumed under a new id {r['session_id']}")
+        c.close()
+        before = len(f.read_text().splitlines())
+        tui(t, d, "back", "--resume", conversation, "Which two words did I ask you to remember? Reply with both, "
+            "in capitals.")
+        check(transcript_says(f, lambda s: "MANGO" in s and "PINEAPPLE" in s, 120, after=before),
+              "the TUI resuming didn't know MANGO")
+        t.note(f"TUI → -p → TUI on one conversation id ({conversation[:8]}), same file, context kept both ways")
+    finally:
+        tui_stop("first")
+        tui_stop("back")
+        subprocess.run([*TMUX, "kill-server"], capture_output=True)
+        trust(d, False)
+
+
+# ---- SendMessage / ListAgents between sessions
+
+def cross_session(t, receiver_settings):
+    tag = f"{t.name}-{os.getpid()}"
+    """Two -p Claudes: a (bypassPermissions, as amarchy's sessions often run) and b (default). a lists
+    agents and messages b; returns (a, b, mark of b, what b got)."""
+    a = Claude(t, "a", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions",
+               "--replay-user-messages", "--name", f"protocol-a-{tag}", settings=receiver_settings,
+               auto_allow=True)
+    b = Claude(t, "b", "--permission-mode", "default", "--replay-user-messages", "--name", f"protocol-b-{tag}",
+               settings=receiver_settings, auto_allow=True)
+    b.ask("Reply with just the word ready.")
+    a.ask("Reply with just the word ready.")
+    m = a.mark()
+    a.ask(f"Load the ListAgents tool with ToolSearch (select:ListAgents,SendMessage) if needed, then call "
+          f"ListAgents and reply with just the exact name it lists that contains protocol-b-{tag}.",
+          timeout=120)
+    listed = re.search(rf"[\w.-]*protocol-b-{re.escape(tag)}[\w.-]*", a.text(m))
+    check(listed, f"ListAgents didn't list b: {a.text(m)[:200]!r}")
+    name = listed.group(0)
+    mb = b.mark()
+    a.ask(f'Use SendMessage with to "{name}" and the message "Ping from a: reply to me with SendMessage, '
+          f'the message being just PONG." Then reply with just: sent', timeout=120)
+    return a, b, mb, name
+
+
+@checked
+def t_cross_session_held(t):
+    """SendMessage between sessions, crossSessionInbound unset: a message from a session in another
+    permission class (bypass → prompting) is held, never reaches the model (a -p host has no way to
+    approve it), and is discarded when the session ends; -p reports it as peer_message_hold."""
+    a, b, mb, _ = cross_session(t, None)
+    held = b.wait(lambda e: e.get("subtype") == "peer_message_hold", since=mb, timeout=60, what="peer_message_hold")
+    time.sleep(15)
+    got = [e for e in b.all(lambda e: e.get("type") == "user", mb) if "cross-session-message" in json.dumps(e)]
+    check(not got, "the message reached b's model though held")
+    told = a.all(lambda e: e.get("subtype") == "informational" or "delivery notice" in json.dumps(e).lower())
+    b.close()
+    dropped = b.all(lambda e: e.get("subtype") == "peer_message_hold" and e.get("state") == "dropped", mb)
+    t.note(f"held: cause {held.get('cause')!r}, lane {held.get('lane')!r}; still parked 15 s later; at b's end: "
+           f"{'dropped (' + repr(dropped[0].get('outcome')) + ')' if dropped else 'nothing said'}; the sender was "
+           f"{'told' if told else 'not told'}")
+
+
+@checked
+def t_cross_session(t):
+    """SendMessage / ListAgents between sessions with crossSessionInbound accept: the -p process is
+    listed, a message reaches it as <cross-session-message> (an idle -p Claude takes a turn on it), and
+    its SendMessage reply reaches the sender."""
+    a, b, mb, name = cross_session(t, {"crossSessionInbound": "accept"})
+    got = b.wait(lambda e: e.get("type") == "user" and "cross-session-message" in json.dumps(e), since=mb,
+                 timeout=90, what="the cross-session message (replayed with --replay-user-messages)")
+    started = b.all(lambda e: e.get("type") == "command_lifecycle", mb)
+    b.result(mb, timeout=120)
+    a.wait(lambda e: e.get("type") == "user" and "cross-session-message" in json.dumps(e)
+           and "PONG" in json.dumps(e), timeout=120, what="b's reply")
+    held = a.all(lambda e: e.get("subtype") == "peer_message_hold") + b.all(lambda e: e.get("subtype") == "peer_message_hold")
+    check(not held, f"held though both accept: {held[:1]}")
+    frm = re.search(r'from=\\?"([^"\\]+)', json.dumps(got))
+    t.note(f"b got it as a user message (shown with --replay-user-messages, isReplay {got.get('isReplay')}), "
+           f"from {frm.group(1) if frm else '?'}; an idle -p Claude takes a turn on it by itself "
+           f"(command_lifecycle {[x.get('state') for x in started]}); b's SendMessage reply reached a; "
+           f"b was listed as {name!r}")
+
+
+# ------------------------------------------------------------------ the broker (amarchy agent)
+
+def broker_check(t):
+    """amarchy agent on a test session of its own: socket, live state, messages, a permission answered
+    over the socket, interrupt, mode; the session closed again."""
+    amarchy = str(Path(__file__).with_name("amarchy"))
+    repo = os.environ.get("AMARCHY_PROTOCOL_PROJECT", "amarchy")
+    name = f"test-agent-{os.getpid()}"
+    sid = f"{repo}-{name}"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AMARCHY_") or k == "AMARCHY_WORK"}
+    run = lambda *a, **kw: subprocess.run([amarchy, *a], capture_output=True, text=True, env=env, **kw)
+    r = run("new", repo, name, "--no-jump")
+    check(r.returncode == 0, f"amarchy new: {r.stderr.strip()}")
+    try:
+        r = run("agent", "engine", sid, "chat")
+        check(r.returncode == 0, f"amarchy agent engine: {r.stderr.strip() or r.stdout.strip()}")
+        state = lambda: json.loads(run("agent", "state", sid).stdout or "{}")
+        end = time.time() + 90
+        while time.time() < end and state().get("state") != "idle":
+            time.sleep(1)
+        st = state()
+        check(st.get("state") == "idle", f"broker never idle: {st}")
+        check(st.get("account", {}).get("subscriptionType"), f"broker not on the subscription: {st.get('account')}")
+        t.note(f"broker up: claude pid {st.get('claude_pid')}, model {st.get('model')}, mode {st.get('permission_mode')}")
+        r = run("agent", "send", sid, "Reply with just the word ok.")
+        check(r.returncode == 0, f"send: {r.stderr.strip()}")
+        end = time.time() + 60
+        while time.time() < end and not (state().get("state") == "idle" and state().get("turns", 0) >= 1):
+            time.sleep(1)
+        check(state().get("turns", 0) >= 1, "no turn done")
+        run("agent", "mode", sid, "default")
+        run("agent", "send", sid, "Run exactly this bash command: touch broker.txt")
+        end = time.time() + 60
+        while time.time() < end and not state().get("pending"):
+            time.sleep(0.5)
+        st = state()
+        check(st.get("pending") and st.get("state") == "waiting", f"no pending request: {st}")
+        status = (Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy/status" / sid).read_text().strip()
+        check(status == "waiting", f"the session's status is {status!r} while asking")
+        req = st["pending"][0]
+        r = run("agent", "answer", sid, req["request_id"], "allow")
+        check(r.returncode == 0, f"answer: {r.stderr.strip()}")
+        end = time.time() + 60
+        while time.time() < end and state().get("state") != "idle":
+            time.sleep(0.5)
+        s_path = json.loads(run("list", "--compact").stdout)
+        path = next(x["path"] for x in s_path if x["id"] == sid)
+        check((Path(path) / "broker.txt").exists(), "broker.txt not made after allow over the socket")
+        run("agent", "send", sid, "Write a 1500-word story about a cat. Plain text.")
+        end = time.time() + 30
+        while time.time() < end and not state().get("partial"):
+            time.sleep(0.3)
+        check(state().get("partial"), "no partial text in the live state")
+        r = run("agent", "interrupt", sid)
+        check(r.returncode == 0, f"interrupt: {r.stderr.strip()}")
+        end = time.time() + 30
+        while time.time() < end and state().get("state") != "idle":
+            time.sleep(0.5)
+        check(state().get("state") == "idle", "not idle after interrupt")
+        t.note("socket send / answer / interrupt / mode work; live state shows pending, partial, state")
+    finally:
+        run("close", sid, "--force")
+
+
+# ------------------------------------------------------------------ main
+
+def main(argv):
+    global VERBOSE, KEEP
+    names, as_json, broker = [], False, False
+    for a in argv:
+        if a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        elif a == "--list":
+            for n, fn in CHECKS:
+                print(f"{n}\t{' '.join((fn.__doc__ or '').split())[:100]}")
+            return 0
+        elif a == "--json":
+            as_json = True
+        elif a == "--keep":
+            KEEP = True
+        elif a == "-v":
+            VERBOSE = True
+        elif a == "--broker":
+            broker = True
+        elif a.startswith("-"):
+            print(f"amarchy-protocol-test: unknown option {a}", file=sys.stderr)
+            return 2
+        else:
+            names.append(a)
+    known = dict(CHECKS)
+    if broker:
+        known["broker"] = broker_check
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        print(f"amarchy-protocol-test: no check {', '.join(unknown)} (--list)", file=sys.stderr)
+        return 2
+    if not shutil.which("claude"):
+        print("amarchy-protocol-test: no claude on PATH", file=sys.stderr)
+        return 1
+    chosen = [Test(n, known[n]) for n in (names or [n for n, _ in CHECKS] + (["broker"] if broker else []))]
+    version = subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout.strip()
+    if not as_json:
+        print(f"Claude Code {version}, model {MODEL}: {len(chosen)} checks", flush=True)
+    lock = threading.Lock()
+
+    def one(test):
+        test.run()
+        if not as_json:
+            with lock:
+                mark = {"pass": "\033[32m✓\033[0m", "fail": "\033[31m✗\033[0m", "skip": "\033[33m-\033[0m"}[test.status]
+                print(f"{mark} {test.name} \033[2m{test.took:.0f}s\033[0m", flush=True)
+                for n in test.notes:
+                    print(f"    {n}", flush=True)
+                if test.error:
+                    print(f"    \033[31m{test.error}\033[0m", flush=True)
+        return test
+    with ThreadPoolExecutor(int(os.environ.get("AMARCHY_PROTOCOL_JOBS", "4"))) as pool:
+        done = list(pool.map(one, chosen))
+    failed = [x for x in done if x.status == "fail"]
+    if as_json:
+        print(json.dumps({"claude_code": version, "model": MODEL, "ok": not failed,
+                          "checks": [{"name": x.name, "status": x.status, "error": x.error, "notes": x.notes,
+                                      "seconds": round(x.took, 1), "what": " ".join(x.doc.split())} for x in done]},
+                         indent=1))
+    else:
+        print(f"{len(done) - len(failed)}/{len(done)} passed" + (f"; failed: {', '.join(x.name for x in failed)}"
+                                                                 if failed else ""))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
