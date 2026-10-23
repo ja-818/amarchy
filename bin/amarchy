@@ -9864,8 +9864,8 @@ BRIEF_ASK = (
     "still true from the brief you wrote last, change what changed, drop what's finished or no longer matters. Write for "
     "someone glancing at a phone who may not remember this conversation: name things, use plain words, a few words per "
     "item, and copy exact values (URLs, commands, names, numbers) exactly. Never invent anything. What git says now, to "
-    "go by (the app shows these numbers itself, so don't repeat them as items): {facts}. After calling update_brief, "
-    "stop: write nothing more."
+    "go by: {facts}. The app shows these facts itself (branch, commits, files, merged, pushed, uncommitted), so don't "
+    "put them in the brief's items. Your reply was already delivered: after update_brief, end your turn with no text."
 )
 
 
