@@ -550,7 +550,12 @@ def new_project(name, github=False):
         return None, f"{dest} already exists"
     dest.mkdir(parents=True)
     sh("git", "init", "--quiet", "-b", "main", cwd=dest)
-    sh("git", "commit", "--quiet", "--allow-empty", "-m", "Initial commit", cwd=dest)
+    # A machine with no git identity (a fresh one) still gets its first commit: the chat branches off it.
+    known = sh("git", "config", "user.email", cwd=dest).returncode == 0
+    who = [] if known else ["-c", "user.name=amarchy", "-c", "user.email=amarchy@localhost"]
+    r = sh("git", *who, "commit", "--quiet", "--allow-empty", "-m", "Initial commit", cwd=dest)
+    if r.returncode != 0:
+        return name, f"created {dest}, but its first commit failed: {r.stderr.strip()[:200]}"
     if github:
         r = sh("gh", "repo", "create", name, "--private", "--source", str(dest), "--push")
         if r.returncode != 0:
@@ -1206,7 +1211,7 @@ def secret_answer(s, ask_id, value=None, scope="project", decline=False, message
         f.with_suffix(".answer").unlink(missing_ok=True)
         if answer.get("saved"):
             note = (f"[amarchy] The user saved the secret {name} you asked for. It's in your Bash commands' "
-                    f"environment now as ${name} (and in the session's terminal and run commands); use it by "
+                    f"environment now as ${name} (and in this chat's terminal and run commands); use it by "
                     f"name and never print its value.")
             detach([ENTRY, "send", sid, note, "--no-wait"])
     return None
@@ -3001,14 +3006,15 @@ def agent_context(s):
     compaction): that it runs in amarchy, which session it is, and where the rest
     is (the amarchy skill, installed with amarchy, has the details)."""
     name, bind = host_network()
-    text = (f"This Claude Code session runs inside amarchy: the user's parallel Claude Code sessions on a "
+    text = (f"This Claude Code session runs inside amarchy: the user's parallel chats with Claude Code, on a "
             f"server, {name}, that they reach from their phone and their computer's browser through the "
-            f"amarchy app (it shows your conversation, your questions as buttons, and your terminal). You are "
+            f"amarchy app (it shows each chat as a conversation, your questions and permissions as buttons, and "
+            f"the chat's terminal). You are "
             f"session {s['name']}: a git worktree of {s['repo']} at {s['path']}, on branch {s['branch']} "
             f"(made from {s['base']}). The project's main checkout is {WORK / s['repo']}; other sessions work "
             f"in worktrees of their own. This session also has a terminal of its own, where the project runs (the "
             f"user can open it in the app). The `amarchy` CLI drives all of it and acts on this "
-            f"session (AMARCHY_SESSION={s['id']} in your environment). The other sessions are Claude Code too: "
+            f"session (AMARCHY_SESSION={s['id']} in your environment). The other chats are Claude Code sessions too: "
             f"you can message them (ListAgents, SendMessage), and start one with a task of its own "
             f"(amarchy new <project> --prompt). Use the amarchy skill before running it, or when the work "
             f"involves other sessions, worktrees, that terminal or merging back into main. The user's browser "
@@ -7543,6 +7549,7 @@ class AppState:
         self.view, self.version, self.statuses = {}, 0, None
         self.asked = {}         # session id -> the request it last told the phones about (chat engine)
         self.seen = {}          # session id -> when the phone last said it's on screen
+        self.projects_stale = threading.Event()     # a project was added: the list of projects is read again now
         self.lock = threading.Lock()
         # Which sessions are open on a device (a phone's conversation, a
         # browser's terminals: id -> how many), and when each last was, for
@@ -7581,7 +7588,8 @@ def app_watch(st):
     ps, projects_at = [], 0
     while True:
         try:
-            if time.time() - projects_at > 10:
+            if st.projects_stale.is_set() or time.time() - projects_at > 10:     # a project added: now, not in ten seconds
+                st.projects_stale.clear()
                 ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
             ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
@@ -7801,7 +7809,7 @@ def app_handler(st, users, address):
         def session(self, sid):
             s = session(sid) if re.fullmatch(r"[\w][\w.-]{0,119}", sid) else None
             if not s or (CLOSING / f"{sid}.json").exists():
-                self.error(404, "no such session")
+                self.error(404, "no such chat")
                 return None
             return s
 
@@ -8101,8 +8109,9 @@ def app_handler(st, users, address):
                     repos = json.loads(r.stdout) if r.returncode == 0 else None
                 except ValueError:
                     repos = None
-                if not isinstance(repos, list):
-                    return self.error(500, gist(r.stderr) or "gh isn't installed or logged in on the host")
+                if not isinstance(repos, list):      # not a fault: GitHub just isn't connected here
+                    return self.send(200, {"repos": None, "error": "GitHub isn't connected on this server, "
+                                                                   "so its repos can't be listed"})
                 return self.send(200, {"repos": [{"name": x.get("name"), "private": bool(x.get("private")),
                                                   "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
@@ -8442,7 +8451,7 @@ def app_handler(st, users, address):
             if what == "sleep":
                 lock = sleep_lock(wait=True)
                 if not lock:
-                    return self.error(409, "Amarchy is putting sessions to sleep already: try again in a moment")
+                    return self.error(409, "Amarchy is putting chats to sleep already: try again in a moment")
                 with lock:
                     why = put_to_sleep(s)
                 return self.error(409, f"It stays awake: {why}") if why else self.send(200, {})
@@ -8668,7 +8677,7 @@ def app_handler(st, users, address):
             if data.get("all") is True:
                 lock = sleep_lock(wait=True)
                 if not lock:
-                    return self.error(409, "Amarchy is putting sessions to sleep already: try again in a moment")
+                    return self.error(409, "Amarchy is putting chats to sleep already: try again in a moment")
                 with lock:
                     slept, kept = sleep_all()
                 return self.send(200, {"slept": len(slept), "kept": len(kept)})
@@ -8700,7 +8709,7 @@ def app_handler(st, users, address):
                 items = [(kind, raw)]
             s = None
             if data.get("paste") is True:
-                s = self.session(data.get("session")) if isinstance(data.get("session"), str) else self.error(400, "which session")
+                s = self.session(data.get("session")) if isinstance(data.get("session"), str) else self.error(400, "which chat")
                 if not s:
                     return
                 if engine(s) == "chat":
@@ -8831,6 +8840,7 @@ def app_handler(st, users, address):
                 return self.error(400, "which repo")
             if r.returncode != 0:
                 return self.error(500, gist(r.stderr or r.stdout) or "couldn't add it")
+            st.projects_stale.set()
             return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
 
         def new(self, data):

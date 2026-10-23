@@ -244,7 +244,7 @@ function stepWords(name, input) {
     case "SendMessage":
       return { kind: "message", past: `Messaged ${peerName(i.to)}`, now: `Messaging ${peerName(i.to)}` };
     case "ListAgents":
-      return { kind: "other", past: "Looked at the other sessions", now: "Looking at the other sessions" };
+      return { kind: "other", past: "Looked at the other chats", now: "Looking at the other chats" };
     case "TaskOutput": case "BashOutput":
       return { kind: "run", past: "Checked on a background task", now: "Checking on a background task" };
     case "TaskStop": case "KillShell": case "KillBash":
@@ -2645,7 +2645,7 @@ const CORE_COMMANDS = [
   { name: "model", label: "Change the model", about: "Which Claude answers", menu: "model" },
   { name: "mode", label: "Change how Claude asks", about: "Before changes, never, or plan first", menu: "mode" },
   { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max" },
-  { name: "usage", label: "How much of your plan is used", about: "This session's and this week's share of your Claude plan", run: true },
+  { name: "usage", label: "How much of your plan is used", about: "This chat's and this week's share of your Claude plan", run: true },
   { name: "init", label: "Write notes about this project", about: "Claude studies the project and writes a CLAUDE.md for itself", run: true },
 ];
 

@@ -247,7 +247,7 @@ class TermPane {
       if (this.ws !== ws) return;     // let go of on purpose
       this.ws = null;
       if (this.exited === 3) {        // the session is gone (attach said why on the screen)
-        this.status("This session was closed");
+        this.status("This chat was closed");
         return;
       }
       // Back as soon as it can: the network dropped, the server restarted
@@ -429,7 +429,7 @@ function deskStart() {
                                     onkeydown: (e) => { if (e.key === "ArrowDown" && desk.organize.hidden) { e.preventDefault(); toggleOrganize(desk.organize, organizeBtn, deskList); } } },
                         glyph("organize"));
   desk.organize = organizeBox(() => organizeBtn, deskList);
-  desk.panel = h("aside", { class: "panel", "aria-label": "Your sessions" },
+  desk.panel = h("aside", { class: "panel", "aria-label": "Your chats" },
     h("div", { class: "panel-buttons" },
       desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
                      h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
@@ -658,7 +658,7 @@ function deskHead() {
     h("div", { class: "head-btns" },
       // The panel's tabs, while it's closed (open, its own head has them).
       ...(tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle)),
-      h("button", { class: "head-btn more", type: "button", title: "This session (Ctrl+Alt+M)", "aria-label": "This session",
+      h("button", { class: "head-btn more", type: "button", title: "This chat (Ctrl+Alt+M)", "aria-label": "This chat",
                     onclick: () => sessionMenu(s) }, glyph("more"))));
 }
 
@@ -1130,10 +1130,10 @@ class DeskDetails {
       kids.push(h("div", { class: "bg-row" }, icon("clock"), h("span", { class: "what" }, cut(t.description || t.summary || t.command || t.task_id || t.id || "A task", 90)),
                   t.status ? h("span", { class: "muted" }, t.status) : null));
     for (const b of bg)
-      kids.push(h("div", { class: "bg-row" }, icon("helper"), h("span", { class: "what" }, `Background session ${b.name}`),
+      kids.push(h("div", { class: "bg-row" }, icon("helper"), h("span", { class: "what" }, `Background task ${b.name}`),
                   h("span", { class: "muted" }, [b.status, b.started ? `since ${ago(b.started)}` : ""].filter(Boolean).join(" · "))));
     kids.push(h("div", { class: "section" }, "Ids"),
-      item("Session", h("code", {}, d.id)),
+      item("Chat id", h("code", {}, d.id)),
       item("Conversation", d.conversation ? h("code", {}, d.conversation) : null));
     this.el.replaceChildren(...kids.filter(Boolean));
   }
@@ -1366,7 +1366,7 @@ function chime(v) {
 function barDrop(search) {
   const open = document.querySelector(".bar-drop");
   if (open) { open.close(); return; }
-  const input = h("input", { type: "search", placeholder: "Search sessions", autocomplete: "off", spellcheck: "false" });
+  const input = h("input", { type: "search", placeholder: "Search chats", autocomplete: "off", spellcheck: "false" });
   const list = h("div", { class: "list" });
   const back = h("div", { class: "bar-shade", onclick: () => drop.close() });
   const drop = h("div", { class: "bar-drop" },
@@ -1655,11 +1655,14 @@ async function newProject() {
 }
 
 function emptyProject(name) {
-  ask("Name of the new project", name.replace(/[^\w.-]/g, "-"), (n) => {
+  ask("Name of the new project", name.replace(/[^\w.-]/g, "-"), async (n) => {
     if (!n.trim()) return;
-    picker({ title: `${n.trim()}: a GitHub repo too?`, items: [
-      { label: "Just here", act: () => addProject({ new: n.trim() }) },
-      { label: "With a private GitHub repo", act: () => addProject({ new: n.trim(), github: true }) }] });
+    // A GitHub repo too only where GitHub is connected: else it's just here, with no question.
+    const connected = await fetch("/api/github").then((r) => r.json()).then((d) => Array.isArray(d.repos)).catch(() => false);
+    if (!connected) return addProject({ new: n.trim() });
+    picker({ title: `${n.trim()}: also on GitHub?`, items: [
+      { label: "Only on this server", act: () => addProject({ new: n.trim() }) },
+      { label: "On this server, and a private GitHub repo", act: () => addProject({ new: n.trim(), github: true }) }] });
   });
 }
 
@@ -1779,15 +1782,15 @@ function deskMenu() {
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
       { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, () => toTerminal("term")) },
       { label: "The terminal", key: "Ctrl+Alt+→", act: () => toTerminal("term") }] }) },
-    { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: sessionItems(s) }) });
+    { label: "This chat", icon: "more", group: () => ({ title: s.task || where(s), items: sessionItems(s) }) });
   items.push(
-    { label: "Sessions", icon: "status", group: () => ({ title: "Sessions", items: [
+    { label: "Chats", icon: "status", group: () => ({ title: "Chats", items: [
       { label: "Next", key: "Ctrl+Alt+J", act: () => step(1) },
       { label: "Previous", key: "Ctrl+Alt+K", act: () => step(-1) },
       { label: "Search", key: "Ctrl+Alt+S", act: () => deskSearch() },
       { label: "Zen mode", detail: on(desk.zen), key: "Ctrl+Alt+Z", act: () => toggleZen() },
       { label: "Group & sort", act: () => organizePicker() },
-      { label: "Close one…", act: () => picker({ title: "Close which session?", items: ((app.view && app.view.sessions) || []).map((x) =>
+      { label: "Close one…", act: () => picker({ title: "Close which chat?", items: ((app.view && app.view.sessions) || []).map((x) =>
         ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
     { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
       { label: "Notifications, layout…", act: () => openSettings() },
@@ -1829,7 +1832,7 @@ function sessionItems(s) {
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
                                                 act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
-      { label: "Open terminal", detail: "the session's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
+      { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
     { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
@@ -1841,7 +1844,7 @@ function sessionMenu(s) {
 }
 
 function showKeys() {
-  const keys = [["Ctrl+Alt+J / K", "Next / previous session"], ["Ctrl+Alt+S", "Search sessions"],
+  const keys = [["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+S", "Search chats"],
     ["Ctrl+Alt+Z", "Zen mode: the list hidden"],
     ["Ctrl+Alt+← / →", "The chat / the terminal"],
     ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
@@ -1849,7 +1852,7 @@ function showKeys() {
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
-    ["Ctrl+Alt+X", "Close this session"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your sessions, in a list to pick from"],
+    ["Ctrl+Alt+X", "Close this chat"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your chats, in a list to pick from"],
     ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],
     ["Enter / Shift+Enter", "Send / a new line, in the chat"], ["Esc", "Stop Claude, in the chat's empty box"],
     ["⌘V / drop", "An image goes with your next message"]];

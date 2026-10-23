@@ -557,7 +557,7 @@ function welcome(added) {
     h("div", { class: "welcome-mark", "aria-hidden": "true" }, "Ⓐ"),
     h("h2", {}, "Welcome to Amarchy"),
     h("p", {}, "Tell Claude what you want, and it does the work on your projects: reads them, writes the code, runs it, and asks you whenever it needs you."),
-    h("p", { class: "muted" }, "Start with a project: one of yours on GitHub, or an empty one for something new."),
+    h("p", { class: "muted" }, "Claude works in a project: a folder of your work. Add one of your GitHub repos, or start an empty folder for something new."),
     h("div", { class: "welcome-actions" },
       h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),
       h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
@@ -825,7 +825,7 @@ function sessionActions(s, opened) {
 }
 
 function closeButton(s) {
-  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close session");
+  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close chat");
 }
 
 // Closing, asked first: it removes the worktree, and
@@ -860,7 +860,7 @@ async function confirmClose(s, known) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
-  } }, n ? "Close and discard changes" : "Close session");
+  } }, n ? "Close and discard changes" : "Close chat");
   sheet({ key: "close" }, sheetHead(`Close ${where(s)}?`, detail), yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
@@ -945,7 +945,7 @@ class SessionView {
   build() {
     this.titleEl = h("div", { class: "title" });
     const bar = h("div", { class: "bar" },
-      h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { go("#/"); } }, glyph("back")),
+      h("button", { class: "icon-btn", "aria-label": "Chats", onclick: () => { go("#/"); } }, glyph("back")),
       this.titleEl,
       h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
     // The conversation, its cards and the box you type in (chat.js).
@@ -953,7 +953,7 @@ class SessionView {
       id: this.id, row: this.row,
       onSession: (row) => { this.row = row; this.renderHeader(); },
       onGone: (why) => {
-        toast(why ? "Can't open that session." : "That session was closed.");
+        toast(why ? "Can't open that chat." : "That chat was closed.");
         go("#/");
       },
       // A notification about its card was tapped: the conversation, where the card is.
@@ -1071,7 +1071,7 @@ class SessionView {
       ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
-      h("div", { class: "section" }, "Session"),
+      h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
       ...sessionActions({ ...row, id: this.id }),
@@ -1702,8 +1702,8 @@ function sleepSettings(draw) {
         try { await api("/api/sleep", { after: value }); app.view.sleep_after = value; draw(); }
         catch (err) { toast(err.message); }
       } }, label))),
-    h("p", {}, after === "off" ? "Sessions stay awake until you put one to sleep (its menu)."
-      : `A session idle for ${after === 1 ? "a minute" : `${after} minutes`} and open nowhere sleeps: its Claude Code exits and frees its memory, the conversation stays, and what you send it wakes it. Never while it works, asks you something or runs something in the background.`),
+    h("p", {}, after === "off" ? "Chats stay awake until you put one to sleep (its menu)."
+      : `A chat idle for ${after === 1 ? "a minute" : `${after} minutes`} and open nowhere sleeps: its Claude Code exits and frees its memory, the conversation stays, and what you send it wakes it. Never while it works, asks you something or runs something in the background.`),
     h("button", { class: "control wide", onclick: async (e) => {
       e.currentTarget.disabled = true;
       try {
@@ -1711,14 +1711,14 @@ function sleepSettings(draw) {
         toast(`${r.slept} asleep${r.kept ? `, ${r.kept} kept awake (busy)` : ""}`);
       } catch (err) { toast(err.message); }
       draw();
-    } }, "Put idle sessions to sleep now")];
+    } }, "Put idle chats to sleep now")];
 }
 
 // The chat engine's check (the protocol test) failed on this Claude Code:
 // said once, in Settings, only then.
 function engineSettings() {
   const problem = app.view && app.view.engine_problem;
-  return problem ? [h("p", { class: "note" }, `Claude's chat check failed on this Claude Code: ${problem}. New sessions still use the chat.`)] : [];
+  return problem ? [h("p", { class: "note" }, `Amarchy's check of the chat with this Claude Code failed: ${problem}.`)] : [];
 }
 
 async function openSettings() {
@@ -1740,14 +1740,14 @@ async function openSettings() {
       kids.push(h("p", {}, app.desk ? "Notifications are turned off for Amarchy in this browser's settings (and System Settings → Notifications)."
                                     : "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
     } else if (state === "off") {
-      kids.push(h("p", {}, "Get a notification when a session needs you or is done."),
+      kids.push(h("p", {}, "Get a notification when a chat needs you or is done."),
         h("button", { class: "control wide accent", onclick: async (e) => {
           e.currentTarget.disabled = true;
           try { await pushOn(); toast("Notifications on."); } catch (err) { toast(err.message); }
           draw();
         } }, "Turn on notifications"));
     } else {
-      kids.push(h("p", {}, "On: you're told when a session needs you or is done, unless you're looking at it."),
+      kids.push(h("p", {}, "On: you're told when a chat needs you or is done, unless you're looking at it."),
         h("button", { class: "control wide", onclick: async () => {
           try { const r = await api("/api/push/test"); toast(r.sent ? "Sent. It should arrive in a moment." : "It couldn't be sent."); }
           catch (err) { toast(err.message); }
@@ -1763,9 +1763,9 @@ async function openSettings() {
           try { await api("/api/alerts", { alerts: value }); app.view.alerts = value; draw(); }
           catch (err) { toast(err.message); }
         } }, label))),
-      h("p", {}, alerts === "all" ? "Every session, when it needs you and when it's done."
-               : alerts === "needs-you" ? "A session that asks you something, or needs your permission. One that's done is just marked done in the list."
-               : "Nothing from the coding sessions; their list still says how they are."),
+      h("p", {}, alerts === "all" ? "Every chat, when it needs you and when it's done."
+               : alerts === "needs-you" ? "A chat that asks you something, or needs your permission. One that's done is just marked done in the list."
+               : "Nothing from the chats; their list still says how they are."),
       h("p", {}, name ? `${name}, your assistant, always tells you: under its own name and picture, with its own chime.`
                       : "Your assistant, once you have one (amarchy assistant <id>), always tells you."));
     // The chimes, your assistant and your projects (manage.js), as amarchy sound,
@@ -1775,11 +1775,11 @@ async function openSettings() {
     kids.push(h("div", { class: "section" }, "Sound"),
       h("button", { class: "control wide", onclick: () => soundSheet(false) },
         `Chime: ${label(app.view && app.view.sound)}${helper ? ` · ${helper.assistant_name || "Assistant"}'s: ${label(app.view.assistant_sound)}` : ""}`),
-      h("p", {}, app.desk ? "Rings in this browser when a session needs you or is done, unless you're looking at it."
+      h("p", {}, app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
       h("div", { class: "section" }, "Assistant"),
       helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
-             : h("p", {}, "None yet: open a session's menu (⋯, or hold it in the list) and make it your assistant."),
+             : h("p", {}, "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant."),
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));

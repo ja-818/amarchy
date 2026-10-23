@@ -75,7 +75,7 @@ function secretCard(chat, m) {
   card.append(h("div", { class: "card-head" }, keyIcon(), h("span", { class: "title" }, `Claude needs your ${what}`),
                 m.more ? h("span", { class: "count" }, `and ${m.more} more`) : null));
   card.append(h("div", { class: "card-text" }, a.why ? `${a.why.replace(/[.\s]+$/, "")}.` : "For this project's commands."),
-              h("div", { class: "card-note" }, `It's kept on your server, never shown in the chat, and the session's commands get it as $${a.name}.` +
+              h("div", { class: "card-note" }, `It's kept on your server, never shown in the chat, and this chat's commands get it as $${a.name}.` +
                 (a.again ? " It replaces the one kept now." : "")));
   if (!a.waiting) card.append(h("div", { class: "card-note warn" }, "Claude stopped waiting for it. Save it anyway and Claude is told."));
   const send = () => {
