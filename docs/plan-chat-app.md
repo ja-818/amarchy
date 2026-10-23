@@ -1,6 +1,7 @@
 # Plan: amarchy as a chat app
 
-Status: **plan, waiting for Julian's approval**. Nothing here is built yet.
+Status: **approved by Julian on 2026-10-22**, with the decisions in
+[Decisions](#decisions) (app themes postponed). Wave 1 is under way.
 
 Goal: the amarchy web app looks and works like a polished everyday app, on the
 phone and in Safari on a Mac, for someone who has never used a terminal. You
@@ -81,9 +82,9 @@ SDK, no bundled CLI). If amarchy is ever offered to other people as a
 product, revisit this with Anthropic. Usage limits for `-p` and the TUI are
 the same plan limits (no documented difference).
 
-### Recommendation: B, through a small broker per session
+### Decided: B, through a small broker per session
 
-Go with **B**. It gives everything the UI needs as clean data (the questions,
+Going with **B** (Julian decided, 2026-10-22). It gives everything the UI needs as clean data (the questions,
 permissions and plans as real requests, not pictures of them), keeps amarchy
 dependency-free, and uses Julian's subscription. A would add a package and a
 second copy of Claude Code for the same protocol; C can't answer questions
@@ -313,24 +314,19 @@ Today `app.css` uses palette tokens taken straight from Omarchy themes
 Components use only these. `app_look_vars` maps a terminal palette onto them
 (as it maps onto today's tokens), and app themes set them directly.
 
-### App themes (new, the default)
+### App themes (postponed)
 
-Clean, regular-app looks: the system font (San Francisco on Apple devices),
-rounded corners, soft shadows, generous spacing, monospace only for code.
-Each comes as a **light and dark pair** and follows the device's setting
-unless you pin one. A starting set (names and exact colours decided in
-phase B1):
+**Decided: postponed.** Julian will design the app themes with us later.
+Until then **Hackerman** stays his look and the default for new installs,
+and B1 builds only the token layer, so app themes can be added later without
+touching components.
 
-- **Paper / Graphite**: neutral, quiet, a blue accent. The default.
-- **Sage**: soft greens.
-- **Harbor**: blues.
-- **Clay**: warm neutrals with a rust accent.
-- **Plum**: violet.
-- **High contrast**: for readability.
-
-Every app theme also defines the 16 terminal colours, so the terminal panel
-and Claude's TUI (the fallback) match it. They live in `themes/` like the
-others, with `kind = "app"` and a `light` and `dark` block in `colors.toml`.
+What they're meant to become, as input for that design session: clean,
+regular-app looks (the system font, rounded corners, soft shadows, mono only
+for code), each a light and dark pair following the device, each also
+defining the 16 terminal colours so the terminal panel and Claude's TUI
+match. They'd live in `themes/` like the others, with `kind = "app"` and a
+`light` and `dark` block in `colors.toml`.
 
 ### Terminal themes (kept)
 
@@ -340,17 +336,11 @@ their monospace fonts and wallpapers. A terminal theme keeps today's look
 
 ### The picker
 
-Settings → **Appearance**:
-
-1. **Light · Dark · Match device** at the top.
-2. **App themes**: cards showing a tiny chat (a bubble, a reply, a button)
-   in that theme, not colour swatches.
-3. **Terminal themes**: the same cards in mono.
-4. Below: **Font** (System, Rounded, Serif for reading, the mono fonts),
-   **Text size**, **Wallpaper** (terminal themes, or none).
-
-Tapping a card applies it live; the choice stays per server, as today (`amarchy
-theme`), so the phone and the Mac match.
+For now the picker stays as it is (the terminal themes, fonts, wallpaper).
+When app themes arrive it gains: **Light · Dark · Match device** at the top,
+an **App themes** section above the terminal ones, and cards that show a
+tiny chat (a bubble, a reply, a button) in each theme instead of swatches.
+The choice stays per server, as today (`amarchy theme`).
 
 ---
 
@@ -406,11 +396,11 @@ Three lanes can run in parallel; arrows are hard dependencies.
 
 **Lane B: look (works on today's data, ships first)**
 
-- **B1. Design tokens and app themes.** The semantic token layer in
-  `app.css`/`desk.css`, `app_look_vars` mapping terminal palettes onto it,
-  the app themes (light/dark pairs, system font, rounded), the new
-  Appearance picker. Default for new installs: Paper/Graphite. *Ships: the
-  app can look like a normal app today, on both layouts.*
+- **B1. The token layer only** (reduced: app themes postponed). The semantic
+  tokens in `app.css`/`desk.css`, every component moved onto them, and
+  `app_look_vars` mapping the terminal palettes onto them; the look stays
+  exactly as it is (Hackerman by default). *Ships: no visible change, and
+  every later phase styles through tokens, so app themes can come later.*
 - **B2. The chat component on the phone.** `chat.js`/`chat.css` built from
   the phone's chat in `app.js`: bubbles, markdown, folded steps with
   friendly labels, diffs from Edit inputs, the TodoWrite checklist, the
@@ -467,7 +457,7 @@ Three lanes can run in parallel; arrows are hard dependencies.
 
 | Wave | Sessions at once |
 | --- | --- |
-| 1 | B1, A1, C4 (the dictation test) |
+| 1 | B1 (tokens), A1 (agent-spike), C4 (dictation): running |
 | 2 | B2, A2 |
 | 3 | B3, C1, C3 |
 | 4 | C2, C5 |
@@ -489,12 +479,16 @@ C-phases add theirs after it).
 - **Terms**: fine for amarchy as each user's own Claude Code (section 1);
   revisit if it's ever offered as a product.
 
-## Decisions for Julian
+## Decisions
 
-1. Engine: **B** (own broker on `claude -p` stream-json) as recommended, or
-   the Agent SDK?
-2. Default look for new installs: an app theme (Paper/Graphite) following
-   the device, with your current terminal theme kept for you?
-3. Terminals visible by default for new users, or behind "Show terminals"?
-4. Dictation: OK to try Web Speech first and fall back to server-side
-   speech-to-text?
+Julian's answers, 2026-10-22:
+
+1. **Engine: our own broker on `claude -p` stream-json** (option B), not
+   the Agent SDK.
+2. **App themes: postponed.** Julian designs them with us later. Hackerman
+   stays his look and the default for now; B1 is the token layer only (no
+   Paper/Graphite yet).
+3. **Terminals: hidden behind "Show terminals" for new users** (on for
+   Julian); off, the session menu keeps "Open terminal" under Advanced.
+4. **Dictation: Web Speech first, server speech-to-text as the fallback**
+   (C4); the keyboard's dictation works regardless.
