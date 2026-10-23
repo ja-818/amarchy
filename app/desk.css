@@ -110,8 +110,18 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .row.assistant .name { font-size: 22px; }
 .desk .row.assistant.cursor .name, .desk .row.assistant.cursor .line { color: var(--selected-text); }
 .desk .group-head { padding: 12px 6px 4px; font-size: var(--caption); }
+/* The outermost group (a project, say) a section title, as the Details
+   tab's are: no rule across the list, space above it instead; the group
+   inside it (a priority) stays a plain label under it. */
+.desk .group-head.ruled {
+  display: block; min-height: 0;
+  padding: 26px 6px 6px;
+  color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.desk .group-head.ruled:first-child { padding-top: 6px; }
+.desk .group-head.ruled::before, .desk .group-head.ruled::after { content: none; }
+.desk .group-head.ruled + .group-head { padding-top: 2px; }
 .desk .project-head:hover .moves { display: flex; position: absolute; right: 6px; bottom: 2px; }
-.desk .project-head.ruled:hover::after { margin-right: 48px; }
 .desk .empty { padding: 32px 12px; }
 
 /* ---- the chat, in the middle */
