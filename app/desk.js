@@ -1224,12 +1224,20 @@ function deskSettings() {
       store.set("renderer", webgl() ? "" : "webgl");
       location.reload();
     } }, webgl() ? "Drawn with WebGL (on): click for the DOM" : "Draw with WebGL (faster; reloads)"),
+    ...layoutSettings(),
+    h("button", { class: "control wide", onclick: () => showKeys() }, "Keys"),
+  ];
+}
+
+// Wide or phone layout, in this browser: in the phone layout's settings too,
+// once picked by hand (a computer's way back to the wide one).
+function layoutSettings() {
+  return [
     h("div", { class: "section" }, "Layout"),
     h("div", { class: "seg" }, ...[["", "As the window fits"], ["wide", "Wide"], ["phone", "Phone"]].map(([v, label]) =>
       h("button", { class: `control${(store.get("layout") || "").replace("desktop", "wide") === v ? " on" : ""}`, onclick: () => {
         store.set("layout", v);
         location.reload();
       } }, label))),
-    h("button", { class: "control wide", onclick: () => showKeys() }, "Keys"),
   ];
 }

@@ -13,6 +13,8 @@
 #     exits until you type in them again; amarchy sleep --after), and one that
 #     keeps amarchy up to date (amarchy update)
 #   - restarts the app (amarchy app on serves it) on what's installed now
+#   - says whether dictation in the app is set up (amarchy dictation setup:
+#     a speech model, not fetched by itself: 670 MB)
 #   - takes away what an amarchy from before left on an Omarchy desktop (its
 #     Hyprland keys, shell plugin, menu entries and theme hook), and brings
 #     its state up to date (amarchy migrate)
@@ -226,7 +228,10 @@ if ((uninstall)); then
     esac
   fi
   remove_desktop
-  say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone."
+  # The dictation model is only a download (670 MB): fetched again by
+  # amarchy dictation setup.
+  rm -rf "$state/dictation"
+  say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone (but for the dictation model)."
   exit 0
 fi
 
@@ -362,3 +367,6 @@ fi
 echo "  Sessions serve on this machine's Tailscale address if it has one, else only on localhost;"
 echo "  set NAME= and BIND= in ~/.config/amarchy/host to change it."
 echo "  Idle sessions open nowhere sleep after $("$bin_dir/amarchy" sleep --after) min (amarchy sleep --after <min>|off); send one something to wake it"
+# Dictation into the app's boxes, written down here (amarchy dictation): set
+# up, or how.
+echo "  $("$bin_dir/amarchy" dictation 2>&1 | head -1 || true)"

@@ -4,8 +4,8 @@
 // error page), your assistant's picture too. Everything else always comes
 // from the server.
 
-const SHELL = "amarchy-shell-v5";
-const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manage.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
+const SHELL = "amarchy-shell-v6";
+const FILES = ["/", "/app.css", "/desk.css", "/theme.css", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));

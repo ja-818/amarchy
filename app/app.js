@@ -913,9 +913,13 @@ class SessionView {
     this.sendBtn = h("button", { class: "send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
     this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude",
                                  onclick: () => this.press(["Escape"]) }, glyph("stop"));
-    this.micBtn = h("button", { class: "mic", "aria-label": "Hold to dictate", hidden: !(app.view && app.view.voice) },
+    this.micBtn = h("button", { class: "mic", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true },
                     glyph("mic"));
-    holdToTalk(this.micBtn, () => this.dictate(), () => this.letGo());
+    // What you say, into the box (dictate.js), or through Claude's voice mode.
+    this.talk = new Dictate({ field: this.input, button: this.micBtn,
+                              changed: () => { this.grow(); this.sendButtons(); store.set(`draft:${this.id}`, this.input.value); },
+                              state: (text) => this.listening(text),
+                              claude: { start: () => this.dictate(), stop: () => this.letGo() } });
     this.composer = h("div", { class: "prompt" }, this.input, this.imageBtn, this.micBtn, this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
@@ -956,7 +960,7 @@ class SessionView {
     this.closed = true;
     if (this.pane) this.pane.disconnect();
     clearInterval(this.seen);
-    this.letGo();
+    this.talk.cancel();
   }
 
   // Claude's own dictation (its voice mode), from the phone's microphone:
@@ -1092,7 +1096,7 @@ class SessionView {
   // The box while dictating: what's going on, in place of its placeholder.
   listening(text) {
     this.composer.classList.toggle("listening", text !== null);
-    this.micBtn.classList.toggle("on", !!this.voice && this.voice.held);
+    this.micBtn.classList.toggle("on", (!!this.voice && this.voice.held) || (this.talk.on() && this.talk.run.held));
     this.input.placeholder = text || "Message Claude";
   }
 
@@ -1251,12 +1255,12 @@ class SessionView {
   }
 
   sendButtons() {
-    this.micBtn.hidden = !(app.view && app.view.voice);
+    this.micBtn.hidden = !this.talk.available();
     const working = this.row && this.row.status === "working";
     const empty = !this.input.value.trim();
     this.stopBtn.style.display = working && empty ? "" : "none";
     this.sendBtn.style.display = working && empty ? "none" : "";
-    this.sendBtn.disabled = empty;
+    this.sendBtn.disabled = empty || this.talk.on();     // what you say is still coming into the box
   }
 
   // What's at the bottom: the question Claude asks, Claude having exited,
@@ -1402,7 +1406,7 @@ class SessionView {
 
   async send() {
     const text = this.input.value;
-    if (!text.trim()) return;
+    if (!text.trim() || this.talk.on()) return;
     this.sendBtn.disabled = true;
     try {
       const r = await api(`/api/session/${encodeURIComponent(this.id)}/send`, { text });
@@ -1880,8 +1884,14 @@ function newBar() {
                                 oninput: () => { store.set("draft:new", field.value); grow(); buttons(); } });
   field.value = store.get("draft:new") || "";
   const send = h("button", { class: "send", "aria-label": "Start session", onclick: () => start() }, glyph("send"));
-  const micBtn = h("button", { class: "mic", "aria-label": "Hold to dictate", hidden: true }, glyph("mic"));
-  holdToTalk(micBtn, () => talk(), () => letGo());
+  const micBtn = h("button", { class: "mic", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
+  // What you say, into the box (dictate.js); or, through Claude's voice mode,
+  // the session started while you speak (talk, below).
+  let saying = null;
+  const dictate = new Dictate({ field, button: micBtn,
+                                changed: () => { store.set("draft:new", field.value); grow(); buttons(); },
+                                state: (text) => { saying = text; buttons(); },
+                                claude: { start: () => talk(), stop: () => letGo() } });
   const el = h("div", { class: "prompt new" }, pick, field, micBtn, send);
   const projects = () => (app.view && app.view.projects) || [];
   const grow = () => {
@@ -1890,14 +1900,14 @@ function newBar() {
   };
   const buttons = () => {
     const none = !projects().length;
-    send.disabled = none || !field.value.trim() || !!said;
+    send.disabled = none || !field.value.trim() || !!said || dictate.on();
     pick.hidden = none;
-    micBtn.hidden = none || !(app.view && app.view.voice);
-    micBtn.classList.toggle("on", !!said && said.held);
-    el.classList.toggle("listening", !!said);
+    micBtn.hidden = none || !dictate.available();
+    micBtn.classList.toggle("on", (!!said && said.held) || (dictate.on() && dictate.run.held));
+    el.classList.toggle("listening", !!said || saying !== null);
     field.placeholder = none ? (app.view ? "No projects on the host yet" : "Connecting…")
       : said ? (!said.held ? "Starting the session…" : said.hearing ? "Listening…" : "Starting the microphone…")
-      : "What should Claude do?";
+      : saying !== null ? saying : "What should Claude do?";
   };
   const update = () => {
     const ps = projects();
@@ -2144,6 +2154,7 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newBar) app.newBar.use(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(...sleepSettings(draw));
+    kids.push(...dictationSettings(draw));
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),
@@ -2153,6 +2164,7 @@ async function openSettings() {
                  "Reachable only on your tailnet."));
     kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
+    else if (store.get("layout")) kids.push(...layoutSettings());
     keepFocus(body.parentNode || body, () => body.replaceChildren(...kids));
   };
   const back = sheet(sheetHead("Settings", app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
