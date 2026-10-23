@@ -1421,12 +1421,22 @@ function deskList() {
 // one you're in (or the one you move it to).
 function fillList(list, query, cursorId) {
   const v = app.view;
+  // The list is redrawn on every change: its scroll stays where it was, and
+  // the cursor is brought into view only when it moved (a key, a click), not
+  // when a session comes or goes under it.
+  const box = list.parentElement;
+  const top = box ? box.scrollTop : 0;
+  const cursor = cursorId || "";
   list.replaceChildren();
   if (!v) {
     list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
     return [];
   }
   const shown = matching(v.sessions, query);
+  const prev = list.dataset.cursor;
+  // Moved: to a session the list had (or from none). Not from one that's gone.
+  const moved = cursor !== (prev || "") && (!prev || shown.some((s) => s.id === prev));
+  list.dataset.cursor = cursor;
   if (!v.sessions.length) list.append(h("div", { class: "empty" }, (v.projects || []).length ? "No chats yet" : "No projects yet"));
   else if (!shown.length) list.append(h("div", { class: "empty" }, `No chat matches “${query.trim()}”`));
   const place = (el, s) => {
@@ -1441,8 +1451,9 @@ function fillList(list, query, cursorId) {
     list.append(h("div", { class: "assistant-section" },
       ...mine.map((s) => place(s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true), s))));
   grouped(list, shown, v.group || [], (s) => place(sessionRow(s, v.group || []), s));
+  if (box) box.scrollTop = top;
   const cur = list.querySelector(".row.cursor");
-  if (cur) cur.scrollIntoView({ block: "nearest" });
+  if (cur && moved) cur.scrollIntoView({ block: "nearest" });
   return shown;
 }
 

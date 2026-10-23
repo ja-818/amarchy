@@ -518,6 +518,7 @@ function renderList() {
   view.organize.classList.toggle("on", !view.menu.hidden);
   if (!view.menu.hidden) keepFocus(view.menu, () => view.menu.replaceChildren(...organizeMenu()));
   const list = view.list;
+  const top = view.scroll.scrollTop;      // a session going or coming: the list stays where it is
   keepFocus(list, () => {
     list.replaceChildren();
     const shown = v ? matching(v.sessions, app.query) : [];
@@ -542,6 +543,7 @@ function renderList() {
       grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
     }
   });
+  view.scroll.scrollTop = top;
   app.newChat.update();
 }
 
