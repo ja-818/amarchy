@@ -117,7 +117,7 @@ function restyleTerminals() {
 }
 
 function paintBars() {
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
   document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", bg));
 }
 

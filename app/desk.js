@@ -74,7 +74,7 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
 }
 
-function termFont() { return cssVar("font") || "ui-monospace, Menlo, monospace"; }
+function termFont() { return cssVar("font-code") || "ui-monospace, Menlo, monospace"; }
 
 // The terminals' font size: yours if you changed it here, else the look's.
 function termSize() {
@@ -102,15 +102,15 @@ function termColor(c, a) {
 // phone app's glass: the terminal's own is clear (what's drawn in reverse
 // still takes its color, solid).
 function termTheme() {
-  const bg = cssVar("term-background") || cssVar("bg");
+  const bg = cssVar("term-background") || cssVar("surface");
   const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
   const theme = {
-    foreground: termColor(cssVar("term-foreground") || cssVar("fg")),
+    foreground: termColor(cssVar("term-foreground") || cssVar("text")),
     background: termColor(bg, 0),
-    cursor: termColor(cssVar("term-cursor") || cssVar("fg")),
+    cursor: termColor(cssVar("term-cursor") || cssVar("text")),
     cursorAccent: termColor(bg),
-    selectionBackground: termColor(cssVar("term-selection-background") || cssVar("selection"), 0.5),
-    selectionForeground: termColor(cssVar("term-selection-foreground") || cssVar("fg")),
+    selectionBackground: termColor(cssVar("term-selection-background") || cssVar("text-selection"), 0.5),
+    selectionForeground: termColor(cssVar("term-selection-foreground") || cssVar("text")),
   };
   names.forEach((n, i) => {
     theme[n] = termColor(cssVar(`term-${i}`));

@@ -3952,8 +3952,8 @@ def push_all(payload):
 
 # The app's look: the theme, font and wallpaper picked in the app (Settings,
 # Look) or with `amarchy theme`, which every phone and browser wears (see
-# look_worn, below, which turns a theme's colors into the app's with
-# app_look_vars).
+# look_worn, below, which turns a theme's colors into the app's design tokens
+# with app_look_vars; docs/design-tokens.md has them all).
 
 APP_WALLPAPER_MAX = 8_000_000   # bytes of a wallpaper, a phone-sized copy
 APP_LOOK_TYPES = {"ttf": "font/ttf", "otf": "font/otf", "woff": "font/woff", "woff2": "font/woff2",
@@ -4006,9 +4006,11 @@ def qt_darker(c, factor):
 
 
 def app_look_vars(colors, shell, rounding):
-    """The app's CSS variables from a theme's colors.toml and shell.toml (as
-    dicts): the same choices the Omarchy shell makes for its menus, popups
-    and controls, so the app reads like them."""
+    """The app's base design tokens (app.css, docs/design-tokens.md) from a
+    theme's colors.toml and shell.toml (as dicts): a terminal palette mapped
+    onto them with the same choices the Omarchy shell makes for its menus,
+    popups and controls, so the app reads like them. The role tokens follow
+    from these in app.css."""
     def section(name):
         v = shell.get(name)
         return v if isinstance(v, dict) else {}
@@ -4047,20 +4049,23 @@ def app_look_vars(colors, shell, rounding):
     light = colors.get("mode") == "light" if colors.get("mode") in ("light", "dark") \
         else sum(bg[:3]) / 3 > 140
     out = {
-        "bg": css_rgba(bg),
-        "fg": css_rgba(fg),
-        "dim": css_rgba(qt_darker(fg, 1.4)),
-        "accent": css_rgba(accent),
-        "line": css_rgba(fg, 0.12),
-        "rule": css_rgba(fg, 0.2),
-        "sel-bg": css_rgba(color("menu", "selected-background", fg), number("menu", "selected-background-alpha", 0.08)),
-        "sel-text": css_rgba(color("menu", "selected-text", accent)),
-        "sel-border": css_rgba(color("menu", "selected-border", fg), number("menu", "selected-border-alpha", 0.25)),
-        "menu-border": css_rgba(color("menu", "border", fg), number("menu", "border-alpha", 1.0)),
-        "popup-border": gradient,
-        "popup-border-solid": css_rgba(border[0]),
+        "surface": css_rgba(bg),
+        "surface-sunken": css_rgba(base("dark_background", "#13141c")),
+        "surface-raised": css_rgba(base("lighter_background", "#24283b")),
         "scrim": css_rgba(color("menu", "scrim", bg), number("menu", "scrim-alpha", 0.5)),
-        "control-fill": css_rgba(fg, number("controls", "normal-fill-alpha", 0.04)),
+        "text": css_rgba(fg),
+        "text-muted": css_rgba(qt_darker(fg, 1.4)),
+        "text-selection": css_rgba(base("selection", "#292e42")),
+        "accent": css_rgba(accent),
+        "border-faint": css_rgba(fg, 0.12),
+        "border": css_rgba(fg, 0.2),
+        "border-menu": css_rgba(color("menu", "border", fg), number("menu", "border-alpha", 1.0)),
+        "border-popup": gradient,
+        "border-popup-solid": css_rgba(border[0]),
+        "selected-bg": css_rgba(color("menu", "selected-background", fg), number("menu", "selected-background-alpha", 0.08)),
+        "selected-text": css_rgba(color("menu", "selected-text", accent)),
+        "selected-border": css_rgba(color("menu", "selected-border", fg), number("menu", "selected-border-alpha", 0.25)),
+        "control-bg": css_rgba(fg, number("controls", "normal-fill-alpha", 0.04)),
         "control-border": css_rgba(color("controls", "normal-border", fg), number("controls", "normal-border-alpha", 0.4)),
         "control-hover": css_rgba(fg, number("controls", "hover-cursor-fill-alpha", 0.08)),
         "control-selected": css_rgba(color("controls", "selected-color", fg),
@@ -4068,11 +4073,10 @@ def app_look_vars(colors, shell, rounding):
         "control-pressed": css_rgba(fg, number("controls", "pressed-fill-alpha", 0.22)),
         "radius": f"{rounding}px",
     }
+    # Its hues, by name.
     for key, fallback in (("red", "#f7768e"), ("yellow", "#e0af68"), ("green", "#9ece6a"), ("blue", "#7aa2f7"),
-                          ("magenta", "#ad8ee6"), ("cyan", "#449dab"), ("orange", "#eb927b"),
-                          ("selection", "#292e42"), ("dark_background", "#13141c"),
-                          ("lighter_background", "#24283b")):
-        out[key.replace("_", "-")] = css_rgba(base(key, fallback))
+                          ("magenta", "#ad8ee6"), ("cyan", "#449dab"), ("orange", "#eb927b")):
+        out[key] = css_rgba(base(key, fallback))
     # The terminals' own colors (the 16 ANSI ones, the cursor, the
     # selection), for the app's real terminals: Claude's and the session's.
     for key, fallback in (("foreground", "#a9b1d6"), ("background", "#1a1b26"), ("cursor", "#c0caf5"),
@@ -4080,6 +4084,28 @@ def app_look_vars(colors, shell, rounding):
                           *((f"color{i}", c) for i, c in enumerate(TERM_COLORS))):
         out["term-" + key.replace("color", "").replace("_", "-")] = css_rgba(base(key, fallback))
     return out, "light" if light else "dark"
+
+
+# The tokens' names before docs/design-tokens.md, which a theme of your own
+# kept from then (the look a desktop sent the app) still has: worn as the
+# tokens they became.
+LOOK_TOKENS_BEFORE = {
+    "bg": "surface", "dark-background": "surface-sunken", "lighter-background": "surface-raised",
+    "fg": "text", "dim": "text-muted", "selection": "text-selection",
+    "line": "border-faint", "rule": "border", "menu-border": "border-menu",
+    "popup-border": "border-popup", "popup-border-solid": "border-popup-solid",
+    "sel-bg": "selected-bg", "sel-text": "selected-text", "sel-border": "selected-border",
+    "control-fill": "control-bg"}
+
+
+def look_tokens(variables):
+    """A theme's variables as today's tokens (see LOOK_TOKENS_BEFORE): a name
+    from before gives way to the token it became, unless that's set too."""
+    out = {k: v for k, v in variables.items() if k not in LOOK_TOKENS_BEFORE}
+    for k, v in variables.items():
+        if k in LOOK_TOKENS_BEFORE:
+            out.setdefault(LOOK_TOKENS_BEFORE[k], v)
+    return out
 
 
 # Tokyo Night's terminal colors (color0..color15), for a theme without its own.
@@ -4273,7 +4299,7 @@ def custom_themes():
         if not re.fullmatch(r"[\w-]+", d.name) or d.name in look_themes() or not isinstance(t, dict):
             continue
         variables = t.get("vars") if isinstance(t.get("vars"), dict) else {}
-        variables = {k: v for k, v in variables.items() if isinstance(k, str) and isinstance(v, str)}
+        variables = look_tokens({k: v for k, v in variables.items() if isinstance(k, str) and isinstance(v, str)})
         if not variables:
             continue
 
@@ -4477,7 +4503,7 @@ def look_info():
     look, custom = look_worn(), custom_themes()
     # Your own first, then amarchy's.
     themes = [{"key": k, "name": t["name"], "mode": t["mode"], "custom": True,
-               "colors": [t["vars"].get(c, "") for c in ("bg", "fg", "accent", "red", "yellow", "green", "blue",
+               "colors": [t["vars"].get(c, "") for c in ("surface", "text", "accent", "red", "yellow", "green", "blue",
                                                          "magenta")],
                "wallpaper": custom_url(k, t["wallpaper"]["wide"]) if t["wallpaper"] else ""}
               for k, t in custom.items()]
@@ -7977,7 +8003,8 @@ def migrate_look():
         term = desk.get("terminal") if isinstance(desk.get("terminal"), dict) else {}
         write_file(d / "theme.json", json.dumps({
             "name": f"{name} (yours)", "mode": desk.get("mode") if desk.get("mode") in ("light", "dark") else "dark",
-            "vars": variables, "terminal": {k: term[k] for k in ("size", "alpha") if isinstance(term.get(k), (int, float))},
+            "vars": look_tokens(variables),
+            "terminal": {k: term[k] for k in ("size", "alpha") if isinstance(term.get(k), (int, float))},
             "wallpaper": {"phone": phone, "wide": wide} if phone else None,
             "font": {"family": family, "nerd": bool(desk.get("nerd")), "files": fonts} if fonts else None,
             "from": "the look your Omarchy desktop sent the app"}, indent=1))

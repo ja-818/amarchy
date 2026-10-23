@@ -426,7 +426,7 @@ function markIcon(state) {
     const x = c.getContext("2d");
     x.drawImage(img, 0, 0, 64, 64);
     const css = getComputedStyle(document.documentElement);
-    x.fillStyle = (state === "waiting" ? css.getPropertyValue("--red") : css.getPropertyValue("--accent")).trim() || "#f7768e";
+    x.fillStyle = (state === "waiting" ? css.getPropertyValue("--danger") : css.getPropertyValue("--accent")).trim() || "#f7768e";
     x.beginPath();
     x.arc(48, 16, 14, 0, 2 * Math.PI);
     x.fill();
