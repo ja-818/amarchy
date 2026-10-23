@@ -104,6 +104,9 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk .session-row .task { font-size: var(--body); }
 .desk .session-row .preview { display: block; white-space: nowrap; text-overflow: ellipsis; }
 .desk .row.cursor .preview { color: var(--text); }
+/* Your assistant's section ends where its last row does: the space above the
+   next group's title sets it apart, as much as between two projects. */
+.desk .assistant-section { padding-bottom: 0; margin-bottom: 0; }
 /* Your assistant's card keeps its size beside the chat too, selected like any row. */
 .desk .row.assistant { padding: 11px 10px 11px 8px; gap: 13px; }
 .desk .row.assistant .avatar-wrap { width: 52px; height: 52px; }
