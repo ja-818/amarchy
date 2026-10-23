@@ -50,7 +50,7 @@ function secretField(placeholder, onEnter) {
 function scopeSeg(repo, start, changed) {
   let scope = start;
   const seg = h("div", { class: "seg secret-scope", role: "radiogroup", "aria-label": "For which projects" });
-  const draw = () => seg.replaceChildren(...[["project", repo ? `Only ${repo}` : "This project"], ["all", "All projects"]].map(([v, label]) =>
+  const draw = () => seg.replaceChildren(...[["project", repo ? `Only ${projectName(repo)}` : "This project"], ["all", "All projects"]].map(([v, label]) =>
     h("button", { class: `control${scope === v ? " on" : ""}`, type: "button", role: "radio", "aria-checked": String(scope === v),
                   onclick: () => { scope = v; draw(); if (changed) changed(v); } }, label)));
   draw();
@@ -168,13 +168,13 @@ async function addSecretSheet(opts) {
     try {
       await api("/api/secrets", { name: n, value: value.input.value, project });
       value.input.value = "";
-      toast(`${n} saved for ${project || "all projects"}`);
+      toast(`${n} saved for ${project ? projectName(project) : "all projects"}`);
       closeSheet();
     } catch (e) { toast(e.message); }
   };
   const value = secretField("Its value", save);
   const where = h("div", { class: "menu" });
-  const drawWhere = () => where.replaceChildren(...[[null, "All projects"], ...projects.map((p) => [p, p])].map(([p, label]) =>
+  const drawWhere = () => where.replaceChildren(...[[null, "All projects"], ...projects.map((p) => [p, projectName(p)])].map(([p, label]) =>
     h("button", { class: `menu-item${project === p ? " on" : ""}`, type: "button", onclick: () => { project = p; drawWhere(); } },
       h("span", { class: "label" }, label), project === p ? glyph("check", "val") : null)));
   drawWhere();

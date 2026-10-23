@@ -3742,7 +3742,7 @@ def assistant():
     except (OSError, ValueError):
         return None     # closed
     name = d.get("name") if isinstance(d.get("name"), str) else ""
-    return {"id": d["id"], "name": name.strip() or s.get("repo", "").capitalize() or "Assistant",
+    return {"id": d["id"], "name": name.strip() or project_name(s.get("repo", "")) or "Assistant",
             "repo": s.get("repo", "")}
 
 
@@ -5953,8 +5953,13 @@ def app_url(address):
 
 # ---- what the app shows of a session
 
+def project_name(repo):
+    """A project as a person reads it: "houston-os" is "Houston Os" (app/app.js projectName)."""
+    return " ".join(w[:1].upper() + w[1:] for w in re.split(r"[-_]+", repo or "") if w)
+
+
 def app_where(s):
-    return f"{s['repo']} · {s.get('branch') or s['name']}"
+    return f"{project_name(s['repo'])} · {s.get('branch') or s['name']}"
 
 
 def short_path(path, s):
@@ -8333,8 +8338,8 @@ def app_moments(st, ss):
                        "icon": assistant_icon()}
         else:
             # Its name, else the project it's in; under what it says, the project.
-            title = s.get("task") or f"A new chat in {s['repo']}"
-            payload = {"title": title, "body": f"{body}\n{s['repo']}" if s.get("task") else body,
+            title = s.get("task") or f"A new chat in {project_name(s['repo'])}"
+            payload = {"title": title, "body": f"{body}\n{project_name(s['repo'])}" if s.get("task") else body,
                        "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
         if state == "waiting":
             payload["ask"] = s["id"]        # tapped, it opens on the card (sw.js, Chat)

@@ -87,7 +87,7 @@ async function commandsSheet(s, opened) {
     } catch (e) { toast(e.message); }
   };
   const hasRun = cmds.some((c) => c.name === "run");
-  sheet({ key: "commands" }, sheetHead(`Run in ${s.repo}`, "Saved for the project: every session of it has them"),
+  sheet({ key: "commands" }, sheetHead(`Run in ${projectName(s.repo)}`, "Saved for the project: every session of it has them"),
     h("div", { class: "menu" }, ...cmds.map((c) => h("div", { class: "command" },
       h("button", { class: "menu-item", onclick: () => runIt(c.name) },
         h("span", { class: "label" }, h("span", { class: "text" }, c.name === "run" ? "Run the project" : c.name,
@@ -119,7 +119,7 @@ function commandForm(s, name, command, opened) {
       else toast(`Running ${n === "run" ? "the project" : n} in its terminal`);
     } catch (e) { toast(e.message); }
   };
-  sheet(sheetHead(named ? `Run command for ${s.repo}` : name ? `Change ${name}` : "Save a command",
+  sheet(sheetHead(named ? `Run command for ${projectName(s.repo)}` : name ? `Change ${name}` : "Save a command",
                   "It starts in the session's worktree; $AMARCHY_PATH and the rest are set"),
     named ? null : nameIn, cmdIn,
     h("button", { class: "control wide accent", onclick: () => save(true) }, "Save and run"),
@@ -198,7 +198,7 @@ function assistantSheet(s) {
   const helper = mainAssistant();
   const mine = s.assistant === "main";
   if (!mine) {
-    const name = field({ placeholder: s.repo.replace(/^./, (c) => c.toUpperCase()), maxlength: "40" }, () => make());
+    const name = field({ placeholder: projectName(s.repo), maxlength: "40" }, () => make());
     const make = async () => {
       try {
         await api(`/api/session/${sid(s)}/assistant`, name.value.trim() ? { name: name.value.trim() } : {});

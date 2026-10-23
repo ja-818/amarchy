@@ -1257,7 +1257,7 @@ class DeskDetails {
     const live = d.live || {};
     const kids = [
       h("div", { class: "section" }, "Where it works"),
-      item("Project", d.repo),
+      item("Project", projectName(d.repo)),
       item("Branch", h("code", {}, d.branch || d.name || "")),
       item("Made from", d.base ? h("code", {}, d.base) : null,
            d.ahead !== undefined ? h("span", { class: "muted" }, ` · ${d.ahead} commit${d.ahead === 1 ? "" : "s"} ahead, ${d.behind} behind`) : null),
@@ -1860,7 +1860,7 @@ async function runProject(name) {
     toTerminal("term");
   } catch (e) {
     if (/No run command/.test(e.message))
-      return ask(`Run command for ${s.repo}`, "", async (cmd) => {
+      return ask(`Run command for ${projectName(s.repo)}`, "", async (cmd) => {
         if (!cmd.trim()) return;
         try {
           await api(`/api/session/${encodeURIComponent(s.id)}/commands`, { name: "run", command: cmd.trim() });
@@ -1879,7 +1879,7 @@ async function pickCommand() {
     const r = await fetch(`/api/session/${encodeURIComponent(s.id)}/commands`);
     cmds = (await r.json()).commands || [];
   } catch (e) { return toast("Can't reach Amarchy"); }
-  picker({ title: `Run in ${s.repo}`, items: [
+  picker({ title: `Run in ${projectName(s.repo)}`, items: [
     ...cmds.map((c) => ({ label: c.name, detail: c.command, icon: "send", act: () => runProject(c.name) })),
     { label: "Save a new command…", icon: "plus", always: true, act: () => saveCommand(s) }] });
 }

@@ -284,11 +284,11 @@ class SessionTerminal {
     } catch (e) { return toast("Can't reach Amarchy"); }
     const s = this.row();
     if (app.desk && typeof picker === "function") {
-      return picker({ title: `Run in ${s.repo || "the project"}`, items: [
+      return picker({ title: `Run in ${projectName(s.repo) || "the project"}`, items: [
         ...cmds.map((c) => ({ label: c.name, detail: c.command, icon: "send", act: () => this.run(c.name === "run" ? undefined : c.name) })),
         { label: "Save a new command…", icon: "plus", always: true, act: () => this.saveCommand() }] });
     }
-    sheet(sheetHead(`Run in ${s.repo || "the project"}`, "In the session's terminal; again restarts it"),
+    sheet(sheetHead(`Run in ${projectName(s.repo) || "the project"}`, "In the session's terminal; again restarts it"),
       h("div", { class: "menu" }, ...cmds.map((c) => h("button", { class: "menu-item", onclick: () => { closeSheets(); this.run(c.name === "run" ? undefined : c.name); } },
         h("span", { class: "label" }, h("span", { class: "text" }, c.name, h("small", {}, c.command)))))),
       h("button", { class: "control wide", onclick: () => this.saveCommand() }, "Save a new command…"));
@@ -309,7 +309,7 @@ class SessionTerminal {
     const nameF = name ? null : field({ placeholder: "Its name (test, build…)", maxlength: "40" }, () => cmdF.focus());
     const cmdF = field({ placeholder: name === "run" ? "npm run dev, bin/dev…" : "The command" },
                        () => save(name || nameF.value.trim(), cmdF.value.trim()));
-    sheet(sheetHead(name === "run" ? `How ${s.repo || "the project"} runs` : "A new command",
+    sheet(sheetHead(name === "run" ? `How ${projectName(s.repo) || "the project"} runs` : "A new command",
                     "Saved for the project, run in the session's terminal"),
       ...(nameF ? [h("div", { class: "section" }, "Name"), nameF] : []),
       h("div", { class: "section" }, "Command"), cmdF,

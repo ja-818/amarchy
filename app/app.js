@@ -51,6 +51,12 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
+// A project as a person reads it: "houston-os" is "Houston Os". The repo's own
+// name stays what the CLI, paths, branches and the server use.
+function projectName(repo) {
+  return String(repo || "").split(/[-_]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+
 // An icon: the Nerd Font glyph, or the drawing / plain mark without one.
 function glyph(name, cls) {
   const el = h("span", { class: `glyph${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
@@ -231,7 +237,7 @@ function linkSettings() {
                    : "iOS opens links from a Home Screen app in a Safari sheet, whatever your default browser is: a web page can't ask which it is. Pick one to open them there instead.")];
 }
 
-function where(s) { return `${s.repo} · ${s.name || s.branch}`; }
+function where(s) { return `${projectName(s.repo)} · ${s.name || s.branch}`; }
 function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
 function stateOf(s) { return s.status || "idle"; }
@@ -524,9 +530,9 @@ function projectHead(repo, ruled, above, below) {
   return h("div", { class: `group-head project-head${ruled ? " ruled" : ""}`, role: "button", tabindex: "0",
                     title: "Order your projects", onclick: () => orderProjects(repo),
                     onkeydown: (e) => { if (e.key === "Enter") orderProjects(repo); } },
-    h("span", { class: "name" }, repo),
-    h("span", { class: "moves" }, arrow("up", `Move ${repo} up`, "before", above),
-      arrow("under", `Move ${repo} down`, "after", below)));
+    h("span", { class: "name" }, projectName(repo)),
+    h("span", { class: "moves" }, arrow("up", `Move ${projectName(repo)} up`, "before", above),
+      arrow("under", `Move ${projectName(repo)} down`, "after", below)));
 }
 
 // Move a project ("before" or "after" another, "up", "down", "top", "bottom")
@@ -562,13 +568,13 @@ function orderProjects(lit) {
     if (dir) arrowOn(lit, dir);
   };
   const rows = () => names.map((name, i) => h("div", { class: `menu-item${name === lit ? " on" : ""}` },
-    h("span", { class: "label" }, glyph("project", "icon"), h("span", { class: "text" }, name),
+    h("span", { class: "label" }, glyph("project", "icon"), h("span", { class: "text" }, projectName(name)),
       count[name] ? h("small", {}, String(count[name])) : null),
     h("span", { class: "moves" },
-      holdable(h("button", { class: "control move", "aria-label": `Move ${name} up (hold, or Shift+Enter: to the top)`, disabled: i === 0,
+      holdable(h("button", { class: "control move", "aria-label": `Move ${projectName(name)} up (hold, or Shift+Enter: to the top)`, disabled: i === 0,
                              "data-name": name, "data-dir": "up", onclick: () => move(name, "up") },
                  glyph("up")), () => move(name, "top")),
-      holdable(h("button", { class: "control move", "aria-label": `Move ${name} down (hold, or Shift+Enter: to the bottom)`,
+      holdable(h("button", { class: "control move", "aria-label": `Move ${projectName(name)} down (hold, or Shift+Enter: to the bottom)`,
                              disabled: i === names.length - 1, "data-name": name, "data-dir": "down",
                              onclick: () => move(name, "down") }, glyph("under")),
                () => move(name, "bottom")))));
@@ -766,7 +772,7 @@ async function confirmClose(s, known) {
       if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheets();
-      toast(`Closing ${s.repo} · ${s.name}`);
+      toast(`Closing ${projectName(s.repo)} · ${s.name}`);
       if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {
       yes.disabled = false;
@@ -832,7 +838,7 @@ function sessionRow(s, groups, near = false) {
     h("span", { class: "main" },
       taskText(task, s.task ? "" : "untitled"),
       h("div", { class: "status-line" }, h("span", { class: `status is-${tone}` }, statusLine(s)),
-        groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${s.repo}`), bg),
+        groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${projectName(s.repo)}`), bg),
       preview ? h("div", { class: `preview${st === "waiting" ? " asks" : ""}` }, preview) : null),
     h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio)), () => rowMenu(s));
 }
@@ -1086,7 +1092,7 @@ class SessionView {
     // Its state in words and its project, as the list says them (the branch: in its menu).
     this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null].filter(Boolean),
       h("div", { class: "text" }, taskText(r.task || "New chat", r.task ? "" : "untitled"),
-        h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${r.repo}`)));
+        h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
   }
 
   renderScreen() {
@@ -1661,20 +1667,20 @@ function newChat({ wide = false, started = null } = {}) {
     const ps = projects();
     if (added && ps.some((p) => p.name === added)) added = null;      // the list has it now
     if (ps.length && !added && !ps.some((p) => p.name === repo)) { repo = ps[0].name; guessed = false; }
-    name.textContent = repo || "";
+    name.textContent = projectName(repo);
     why.hidden = !guessed;
     buttons();
   };
   const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
   const pickProject = () => {
     if (app.desk) return picker({ title: "Where should Claude work on it?", placeholder: "Project", items: [
-      ...projects().map((p) => ({ label: p.name, icon: p.name === repo ? "check" : "project",
+      ...projects().map((p) => ({ label: projectName(p.name), icon: p.name === repo ? "check" : "project",
                                   detail: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : "", act: () => choose(p.name) })),
       { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", always: true, act: () => newProject() }] });
     sheet(sheetHead("Project", "Where Claude works on it"),
       h("div", { class: "menu" }, ...projects().map((p) =>
         h("button", { class: `menu-item${p.name === repo ? " on" : ""}`, onclick: () => { closeSheets(); choose(p.name); } },
-          p.name, p.name === repo ? glyph("check", "val") : null))),
+          projectName(p.name), p.name === repo ? glyph("check", "val") : null))),
       h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
   };
   // A project just added: the next chat starts there (once the list has it).
