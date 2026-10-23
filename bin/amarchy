@@ -9806,7 +9806,7 @@ def conversation_title(text):
 # folder, named by your message's record (cards_dir); the app streams them
 # (cards_all) and shows each under its turn.
 
-CARDS_MODEL = "haiku"
+CARDS_MODEL = "sonnet"      # only when the turn says no model of its own (turn_model)
 CARDS_INPUT = 40_000        # characters of a turn's work given to it (the end kept: where it lands)
 CARDS_STALE = 180           # seconds before a "pending" that never ended can be asked again
 CARDS_TONES = ("ok", "info", "warn", "error", "ask")
@@ -9939,11 +9939,27 @@ def cards_clean(cards):
     return out[:3]
 
 
-def cards_ask(text):
+def turn_model(records, rec):
+    """The model that answered a turn (its last message's), so that its cards
+    come from the same Claude: what it tells you is the part that matters."""
+    model, inside = None, False
+    for r in records:
+        if human_record(r):
+            if inside:
+                break
+            inside = r.get("uuid") == rec
+        elif inside and isinstance(r, dict) and r.get("type") == "assistant" and isinstance(r.get("message"), dict):
+            m = r["message"].get("model")
+            if isinstance(m, str) and m and not m.startswith("<"):     # "<synthetic>": Claude Code's own
+                model = m
+    return model
+
+
+def cards_ask(text, model=None):
     """The cards for a turn, from the model: (cards, None), or (None, why)."""
     try:
         r = subprocess.run(
-            ["claude", "-p", "--model", CARDS_MODEL, "--no-session-persistence", "--setting-sources", "", "--tools", "",
+            ["claude", "-p", "--model", model or CARDS_MODEL, "--no-session-persistence", "--setting-sources", "", "--tools", "",
              "--strict-mcp-config", "--output-format", "json", "--json-schema", json.dumps(CARDS_SCHEMA)],
             input=CARDS_PROMPT + text, capture_output=True, text=True, timeout=180, env=agent_env(), cwd=STATE)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -10025,7 +10041,8 @@ def cmd_cards(args):
     if want is None and size > 8_000_000:       # the last turn: the end of a long conversation is enough
         with open(f, "rb") as fh:
             start = line_start(fh, size - 8_000_000)
-    turns = card_turns(app_items(read_records(f, start, size), s))
+    records = read_records(f, start, size)
+    turns = card_turns(app_items(records, s))
     turn = next((t for t in turns if t["rec"] == want), None) if want else (turns[-1] if turns else None)
     if not turn or not turn["work"]:
         return 0
@@ -10036,9 +10053,10 @@ def cmd_cards(args):
             had.get("state") == "ready" or (had.get("state") == "pending" and time.time() - (had.get("at") or 0) < CARDS_STALE)):
         return 0
     path = cards_dir(sid) / f"{turn['rec']}.json"
-    base = {"turn": turn["rec"], "hash": digest, "model": CARDS_MODEL}
+    model = turn_model(records, turn["rec"]) or CARDS_MODEL
+    base = {"turn": turn["rec"], "hash": digest, "model": model}
     write_file(path, json.dumps({**base, "state": "pending", "at": time.time()}))
-    cards, why = cards_ask(text)
+    cards, why = cards_ask(text, model)
     if cards:
         write_file(path, json.dumps({**base, "state": "ready", "cards": cards, "at": time.time()}))
         return 0

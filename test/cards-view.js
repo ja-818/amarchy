@@ -244,11 +244,51 @@ async function run(browser, base, layout) {
   const draft = await page.evaluate(() => window.__chat.input.value);
   check(layout, draft === "Change the search page: " && posts.length === 0, `a draft button fills the box (got ${JSON.stringify(draft)})`);
   await page.evaluate(() => { window.__chat.input.value = ""; window.__chat.typed(); });
-  await page.evaluate(() => [...document.querySelectorAll(".rcard-action.primary")][0].click());
+
+  // Two cards ask (the first and the third): a tap answers the first, which
+  // says so, and goes on to the next; nothing is sent yet.
+  const deckOf = () => [...document.querySelectorAll(".deck")].at(-1);
+  await page.evaluate(() => [...[...document.querySelectorAll(".deck")].at(-1).querySelectorAll(".rcard")][0].querySelector(".rcard-action.primary").click());
+  await page.waitForTimeout(600);
+  const half = await page.evaluate(() => {
+    const d = [...document.querySelectorAll(".deck")].at(-1), cards = [...d.querySelectorAll(".rcard")];
+    return { answered: cards[0].classList.contains("answered"), label: cards[0].querySelector(".rcard-label").textContent,
+      chosen: cards[0].querySelector(".rcard-action.chosen")?.textContent, status: d.querySelector(".deck-status")?.textContent,
+      sendShown: !d.querySelector(".deck-send").hidden, dot: [...d.querySelectorAll(".deck-dot")].findIndex((x) => x.classList.contains("on")),
+      sent: d.classList.contains("sent") };
+  });
+  check(layout, half.answered && half.label === "Your answer" && half.chosen === "Ship it" && !half.sent &&
+    !posts.some((p) => p.url.endsWith("/send")), `an answer marks its card, and waits for the other (${JSON.stringify(half)})`);
+  check(layout, half.status === "1 of 2 answered" && half.sendShown && half.dot === 2, `it goes on to the card still asking (dot ${half.dot}, ${half.status})`);
+  await shot("answered");
+  // The last answer sends them together; the cards say so, and stay.
+  await page.evaluate(() => [...[...document.querySelectorAll(".deck")].at(-1).querySelectorAll(".rcard")][2].querySelectorAll(".rcard-action")[1].click());
   await page.waitForTimeout(300);
   const sent = posts.find((p) => p.url.endsWith("/send"));
-  const deckSent = await page.evaluate(() => [...document.querySelectorAll(".deck")].at(-1).classList.contains("sent"));
-  check(layout, !!sent && sent.body.includes('"text":"Ship it: merge to main and push"') && deckSent, `a card's button sends its message, once (got ${sent && sent.body})`);
+  const after = await page.evaluate(() => {
+    const d = [...document.querySelectorAll(".deck")].at(-1), cards = [...d.querySelectorAll(".rcard")];
+    return { sent: d.classList.contains("sent"), labels: cards.map((c) => c.querySelector(".rcard-label").textContent),
+      status: d.querySelector(".deck-status").textContent, count: cards.length };
+  });
+  check(layout, !!sent && sent.body === JSON.stringify({ text: "Ship it: merge to main and push\n\nNo filters" }),
+    `the answers go to Claude together, once (got ${sent && sent.body})`);
+  check(layout, after.sent && after.count === 3 && after.labels[0] === "Sent" && after.labels[2] === "Sent" && after.status === "Sent 2 answers",
+    `the cards stay, marked sent (${JSON.stringify(after)})`);
+  const sends = posts.filter((p) => p.url.endsWith("/send")).length;
+  await page.evaluate(() => [...[...document.querySelectorAll(".deck")].at(-1).querySelectorAll(".rcard-action")][1].click());
+  await page.waitForTimeout(200);
+  check(layout, posts.filter((p) => p.url.endsWith("/send")).length === sends, "a sent deck sends nothing more");
+
+  // The stream again (a reconnect) with the same conversation and one more
+  // item: the view isn't drawn again, the deck stays on its card.
+  const before = await page.evaluate(() => { window.__deck = [...document.querySelectorAll(".deck")].at(-1); return window.__chat.decks.size; });
+  await page.evaluate(({ items }) => window.__chat.conversation({ reset: true, start: 0,
+    items: [...items, { kind: "note", text: "Conversation compacted", key: "n1:0", at: "" }] }), { items: ITEMS });
+  await page.waitForTimeout(200);
+  const kept = await page.evaluate(() => ({ same: [...document.querySelectorAll(".deck")].at(-1) === window.__deck,
+    dot: [...[...document.querySelectorAll(".deck")].at(-1).querySelectorAll(".deck-dot")].findIndex((x) => x.classList.contains("on")),
+    note: [...document.querySelectorAll(".turn")].at(-1).textContent.includes("Conversation compacted") }));
+  check(layout, kept.same && kept.dot === 2 && kept.note, `a reconnect adds what's new, nothing jumps (${JSON.stringify(kept)})`);
 
   // "Sum it up" on the older turn asks for its cards, and waits for them.
   await page.evaluate(() => document.querySelector(".reply-make").click());
@@ -256,9 +296,14 @@ async function run(browser, base, layout) {
   const asked = posts.find((p) => p.url.endsWith("/cards"));
   const waiting = await page.evaluate(() => document.querySelector(".turn .reply-wait")?.textContent);
   check(layout, !!asked && asked.body.includes(OLD) && /Summing it up…$/.test(waiting || ""), `Sum it up asks for the turn's cards and waits (got ${asked && asked.body})`);
-  await page.evaluate(({ OLD }) => window.__chat.setCards({ ...window.__chat.cards, [OLD]: { state: "ready", at: 2000, cards: [{ tone: "info", title: "Said hello" }] } }), { OLD });
+  await page.evaluate(({ OLD }) => window.__chat.setCards({ ...window.__chat.cards, [OLD]: { state: "ready", at: 2000,
+    cards: [{ tone: "ask", title: "Said hello", actions: [{ label: "Hi", send: "Hi back" }] }] } }), { OLD });
   const oldCard = await page.evaluate(() => document.querySelector(".turn .rcard-title")?.textContent);
   check(layout, oldCard === "Said hello", "its cards come in when made");
+  // A card asking alone: a tap sends at once.
+  await page.evaluate(() => document.querySelector(".turn .rcard-action").click());
+  await page.waitForTimeout(300);
+  check(layout, posts.some((p) => p.url.endsWith("/send") && p.body === JSON.stringify({ text: "Hi back" })), "a card asking alone sends with one tap");
 
   // The fold opened: Claude's words, as the conversation shows them.
   await page.evaluate(() => { [...document.querySelectorAll(".turn-work")].at(-1).open = true; });
@@ -270,12 +315,17 @@ async function run(browser, base, layout) {
   await page.waitForTimeout(200);
   const chat = await page.evaluate(() => ({ mode: window.__chat.mode, conv: window.__chat.scroller.firstChild === window.__chat.conv,
     users: document.querySelectorAll(".msg.user").length, kept: store.get("chatView"), decks: document.querySelectorAll(".deck").length }));
-  check(layout, chat.mode === "chat" && chat.conv && chat.users === 2 && chat.decks === 0 && chat.kept === "chat", "the Chat switch shows the conversation, as before");
+  check(layout, chat.mode === "chat" && chat.conv && chat.users === 2 && chat.decks === 0 && chat.kept === "chat", `the Chat switch shows the conversation, as before (${JSON.stringify(chat)})`);
   await shot("chat");
   await page.locator(".view-switch .vs-btn", { hasText: "Cards" }).click();
   await page.waitForTimeout(200);
   const back = await page.evaluate(() => ({ decks: document.querySelectorAll(".deck").length, turns: document.querySelectorAll(".turn").length }));
   check(layout, back.decks === 2 && back.turns === 2, `back to the cards (decks ${back.decks}, turns ${back.turns})`);
+  await page.waitForTimeout(300);
+  const again = await page.evaluate(() => { const d = [...document.querySelectorAll(".deck")].at(-1);
+    return { dot: [...d.querySelectorAll(".deck-dot")].findIndex((x) => x.classList.contains("on")), sent: d.classList.contains("sent"),
+             label: d.querySelector(".rcard-label").textContent }; });
+  check(layout, again.dot === 2 && again.sent && again.label === "Sent", `a deck drawn again is as you left it (${JSON.stringify(again)})`);
 
   // A new turn: while Claude works, no reply yet; when it ends, the wait; then its cards.
   await page.evaluate(() => {

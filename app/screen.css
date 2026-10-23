@@ -19,7 +19,7 @@
 }
 .turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .turn-you:empty { display: none; }
-.screen-work[hidden] { display: none; }
+.screen-work[hidden] { display: flex; visibility: hidden; }     /* its line kept: nothing moves when it comes and goes */
 
 /* Claude's work: a quiet line that opens to its words and steps. */
 .turn-work { min-width: 0; }
@@ -47,7 +47,9 @@
 .reply-plain.open .reply-text { max-height: none; }
 
 /* The deck: the cards side by side, one on show, the next peeking in. */
-.deck { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.deck { display: flex; flex-direction: column; gap: 10px; min-width: 0; animation: deck-in 0.2s ease-out; }
+@keyframes deck-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .deck { animation: none; } }
 .deck-track {
   display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
   scrollbar-width: none; padding: 2px; margin: -2px; border-radius: var(--radius-card);
@@ -117,8 +119,16 @@
 .rcard-action.primary { color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
 .rcard-action.primary:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
 .rcard-action.draft::after { content: "…"; }
-.rcard-action.chosen { outline: 2px solid var(--accent); outline-offset: 2px; }
-.deck.sent .rcard-action:not(.chosen) { opacity: 0.45; pointer-events: none; }
+/* Answered: the card says so, your answer lit, the others still there to change it (until it's sent). */
+.rcard.answered { --tone: var(--success); }
+.rcard-action.chosen, .rcard-action.chosen:hover { color: var(--primary-text); background: var(--success); border-color: var(--success); }
+.rcard.answered .rcard-action.primary:not(.chosen) { color: var(--text); background: var(--control-bg); border-color: var(--control-border); }
+.rcard.answered .rcard-action:not(.chosen):not(.draft) { opacity: 0.6; }
+.deck.sent .rcard-action:not(.chosen) { opacity: 0.4; pointer-events: none; }
+.rcard-action:disabled { cursor: default; }
+.deck-foot { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 36px; }
+.deck-status { font-size: var(--caption); color: var(--text-muted); }
+.deck-status:empty { display: none; }
 
 .deck-nav { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .deck-arrow {

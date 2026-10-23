@@ -186,7 +186,7 @@ the device). Both are drawn from the same items.
   thinking: it's there, in a fold, but it isn't the reply.
 - **The reply is a few cards**, made after each turn by one extra short
   prompt: the Stop hook starts `amarchy cards <id>`, which gives a model
-  (`CARDS_MODEL`, Haiku: a few seconds) what you said and what Claude said and did, and
+  (the same model that answered the turn, `turn_model`: the cards are what Claude tells you, so they get the same Claude; `CARDS_MODEL` only when the turn names none) what you said and what Claude said and did, and
   asks for the reply a person reads (`CARDS_PROMPT`), as JSON
   (`CARDS_SCHEMA`, checked by `--json-schema`, then `cards_clean`). Each
   turn's cards are a file in the session's folder (`cards_dir`), named by the
@@ -198,6 +198,12 @@ the device). Both are drawn from the same items.
   do), a few points, numbers, a link, a command, **More** on a tap, and
   **buttons**: each sends its message to Claude as yours (once), or, for one
   you need to finish ("Change it…"), puts its start in the box.
+- **Cards that ask**: a card alone sends its answer with one tap. When
+  several cards ask, a tap marks that card *Your answer* (and the deck goes on
+  to the next one still asking); once all are answered they go to Claude as
+  one message, or earlier with **Send**. Sent cards stay, marked *Sent*. A
+  deck drawn again (the stream reconnected, the view switched) is where you
+  left it: the card on show, your answers.
 - **The turns read oldest first**, as a conversation: your message, *Claude's
   work* (a closed fold with its words and steps, as the conversation shows
   them), and the deck. The cards sit side by side, one on show: swipe them

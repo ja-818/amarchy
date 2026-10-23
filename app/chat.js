@@ -727,6 +727,7 @@ class Chat {
     this.sturns = [];           // the turns the cards view shows, in order (newTurn)
     this.sturn = null;          // the last of them
     this.idleSince = 0;         // when Claude last finished working (its cards are awaited a while)
+    this.decks = new Map();     // each turn's deck as you left it: the card on show, your answers (deckState)
     this.wasWorking = false;
     this.reset();
     this.build();
@@ -963,6 +964,13 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
+    // The stream again (it reconnected: the phone woke, the server restarted)
+    // with the conversation as it was and maybe more: only the more, so the
+    // view doesn't jump, nor its decks go back to their first card.
+    if (d.reset && !d.redraw && d.start === this.start && this.items.length && d.items.length >= this.items.length &&
+        this.items.every((it, i) => it.key && d.items[i].key === it.key)) {
+      d = { items: d.items.slice(this.items.length) };
+    }
     if (d.reset) {
       this.items = [];
       this.itemKeys = new Set();
@@ -1056,7 +1064,7 @@ class Chat {
     this.mode = mode;
     store.set("chatView", mode);
     this.drawSwitch();
-    if (mode === "chat") this.conversation({ reset: true, items: this.items.slice(), start: this.start });
+    if (mode === "chat") this.conversation({ reset: true, redraw: true, items: this.items.slice(), start: this.start });
     else this.rebuildScreen();
     if (!this.view.content) this.scroller.replaceChildren(this.body());
     this.toBottom(true);
@@ -1177,7 +1185,7 @@ class Chat {
       const left = pending ? CARDS_STALE - (now - c.at * 1000) : CARDS_WAIT - (now - this.idleSince);
       t.timer = setTimeout(() => { t.sig = null; this.drawReply(t); }, Math.max(0, left) + 100);
     }
-    if (state === "ready") t.reply.replaceChildren(this.deck(c.cards));
+    if (state === "ready") t.reply.replaceChildren(this.deck(c.cards, this.deckState(t.rec, c.at)));
     else if (state === "wait") t.reply.replaceChildren(h("div", { class: "reply-wait", role: "status" }, spinner(), h("span", {}, "Summing it up…")));
     else if (state === "text") t.reply.replaceChildren(this.replyText(t, !!c));
     else t.reply.replaceChildren();
@@ -1224,51 +1232,121 @@ class Chat {
     }
   }
 
+  // A turn's deck as you left it, kept while its cards are the same: the card
+  // on show and your answers, so a deck drawn again is where it was.
+  deckState(rec, at) {
+    let st = rec && this.decks.get(rec);
+    if (!st || st.cards !== at) {
+      st = { cards: at, at: 0, picks: {}, sent: false };
+      if (rec) this.decks.set(rec, st);
+    }
+    return st;
+  }
+
   // The reply's cards side by side, one on show at a time: swiped, or the
-  // arrows and dots under them, or ← → on the deck.
-  deck(cards) {
+  // arrows and dots under them, or ← → on the deck. A card that asks (its
+  // buttons) is answered with a tap: alone, that sends; with others asking
+  // too, it marks the card answered and goes on to the next, and the answers
+  // go together once all are in (or with Send).
+  deck(cards, st) {
     const deck = h("div", { class: `deck${cards.length > 1 ? " many" : ""}` });
     const track = h("div", { class: "deck-track", tabindex: "0", role: "group",
                              "aria-label": `Claude's reply: ${cards.length} card${cards.length === 1 ? "" : "s"}` });
-    cards.forEach((c, i) => track.append(this.replyCard(c, deck, i, cards.length)));
+    const asks = cards.map((c, i) => ((c.actions || []).some((a) => !a.draft) ? i : -1)).filter((i) => i >= 0);
+    const els = cards.map((c, i) => this.replyCard(c, i, cards.length, (k) => pick(i, k)));
+    track.append(...els);
     deck.append(track);
-    if (cards.length < 2) return deck;
-    let at = 0;
-    const els = () => Array.from(track.children);
-    const go = (i) => {
-      const all = els();
-      const el = all[Math.max(0, Math.min(all.length - 1, i))];
-      track.scrollTo({ left: el.offsetLeft - all[0].offsetLeft, behavior: "smooth" });
+    const status = h("div", { class: "deck-status", role: "status" });
+    const sendBtn = h("button", { class: "text-btn deck-send", type: "button", hidden: true, onclick: () => send() });
+
+    // What the deck shows of your answers: each card's, and what's left.
+    const paint = () => {
+      els.forEach((el, i) => {
+        const k = st.picks[i];
+        const answered = k !== undefined;
+        el.classList.toggle("answered", answered);
+        el.querySelector(".rcard-label").textContent = answered ? (st.sent ? "Sent" : "Your answer") : el.dataset.label;
+        el.querySelectorAll(".rcard-action:not(.draft)").forEach((b) => {
+          b.classList.toggle("chosen", answered && +b.dataset.k === k);
+          b.disabled = st.sent && !(answered && +b.dataset.k === k);
+        });
+      });
+      deck.classList.toggle("sent", st.sent);
+      const done = asks.filter((i) => st.picks[i] !== undefined).length;
+      status.textContent = asks.length < 2 ? "" : st.sent ? `Sent ${done} answer${done === 1 ? "" : "s"}`
+        : done ? `${done} of ${asks.length} answered` : "";
+      sendBtn.hidden = st.sent || !done || done === asks.length;
+      sendBtn.textContent = `Send ${done === 1 ? "this answer" : `these ${done}`}`;
     };
-    const dots = cards.map((_, i) => h("button", { class: "deck-dot", type: "button", "aria-label": `Card ${i + 1}`, onclick: () => go(i) }));
-    const prev = h("button", { class: "deck-arrow", type: "button", "aria-label": "Previous card", onclick: () => go(at - 1) }, icon("chevron", "back"));
-    const next = h("button", { class: "deck-arrow", type: "button", "aria-label": "Next card", onclick: () => go(at + 1) }, icon("chevron"));
-    const mark = () => {
-      const all = els();
-      const first = all[0].offsetLeft;
-      at = all.reduce((best, el, i) => Math.abs(el.offsetLeft - first - track.scrollLeft) <
-                                      Math.abs(all[best].offsetLeft - first - track.scrollLeft) ? i : best, 0);
-      if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 2) at = all.length - 1;
-      dots.forEach((d, i) => { d.classList.toggle("on", i === at); d.setAttribute("aria-current", String(i === at)); });
-      prev.disabled = at === 0;
-      next.disabled = at === all.length - 1;
+    const send = async () => {
+      const text = asks.filter((i) => st.picks[i] !== undefined)
+        .map((i) => String(cards[i].actions[st.picks[i]].send || cards[i].actions[st.picks[i]].label)).join("\n\n");
+      if (!text.trim() || st.sent) return;
+      st.sent = true;
+      paint();
+      try {
+        await this.post("send", { text });
+      } catch (e) {
+        st.sent = false;
+        paint();
+        toast(e.message);
+      }
     };
-    track.addEventListener("scroll", () => requestAnimationFrame(mark), { passive: true });
-    track.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowRight") { e.preventDefault(); go(at + 1); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); go(at - 1); }
-    });
-    deck.append(h("div", { class: "deck-nav" }, prev, h("div", { class: "deck-dots" }, ...dots), next));
-    requestAnimationFrame(mark);
+    const pick = (i, k) => {
+      const a = cards[i].actions[k];
+      if (a.draft) return this.fillDraft(String(a.send || a.label || ""));
+      if (st.sent) return;
+      st.picks[i] = k;
+      paint();
+      const left = asks.filter((j) => st.picks[j] === undefined);
+      if (!left.length) return send();
+      go(left.find((j) => j > i) ?? left[0]);
+    };
+
+    let go = () => {};
+    if (cards.length > 1) {
+      const all = () => els;
+      go = (i, now) => {
+        const el = els[Math.max(0, Math.min(els.length - 1, i))];
+        track.scrollTo({ left: el.offsetLeft - els[0].offsetLeft, behavior: now ? "auto" : "smooth" });
+      };
+      const dots = cards.map((_, i) => h("button", { class: "deck-dot", type: "button", "aria-label": `Card ${i + 1}`, onclick: () => go(i) }));
+      const prev = h("button", { class: "deck-arrow", type: "button", "aria-label": "Previous card", onclick: () => go(st.at - 1) }, icon("chevron", "back"));
+      const next = h("button", { class: "deck-arrow", type: "button", "aria-label": "Next card", onclick: () => go(st.at + 1) }, icon("chevron"));
+      const mark = () => {
+        if (!track.isConnected || !track.clientWidth) return;
+        const first = els[0].offsetLeft;
+        let at = all().reduce((best, el, i) => Math.abs(el.offsetLeft - first - track.scrollLeft) <
+                                              Math.abs(els[best].offsetLeft - first - track.scrollLeft) ? i : best, 0);
+        if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 2) at = els.length - 1;
+        st.at = at;
+        dots.forEach((d, i) => { d.classList.toggle("on", i === at); d.setAttribute("aria-current", String(i === at)); });
+        prev.disabled = at === 0;
+        next.disabled = at === els.length - 1;
+      };
+      track.addEventListener("scroll", () => requestAnimationFrame(mark), { passive: true });
+      track.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight") { e.preventDefault(); go(st.at + 1); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); go(st.at - 1); }
+      });
+      deck.append(h("div", { class: "deck-nav" }, prev, h("div", { class: "deck-dots" }, ...dots), next));
+      // Back on the card you were on (a deck drawn again), once it's laid out.
+      const back = st.at;
+      requestAnimationFrame(() => { if (back) go(back, true); mark(); });
+    }
+    if (asks.length > 1) deck.append(h("div", { class: "deck-foot" }, status, sendBtn));
+    paint();
     return deck;
   }
 
-  // One card: what it is (its label, by its tone), its title, a line or two,
-  // its numbers and points, a link or a command, more on a tap, and buttons.
-  replyCard(c, deck, i, n) {
+  // One card: what it is (its label, by its tone), its title, and as needed a
+  // line, numbers, a checklist, points, a link or a command, more on a tap,
+  // and buttons (act(k): the k-th was tapped).
+  replyCard(c, i, n, act) {
     const tone = c.tone in CARD_TONES ? c.tone : "info";
-    const card = h("article", { class: `rcard ${tone}` },
-      h("div", { class: "rcard-top" }, h("span", { class: "rcard-label" }, c.label || CARD_TONES[tone]),
+    const label = c.label || CARD_TONES[tone];
+    const card = h("article", { class: `rcard ${tone}`, "data-label": label },
+      h("div", { class: "rcard-top" }, h("span", { class: "rcard-label" }, label),
         n > 1 ? h("span", { class: "rcard-count" }, `${i + 1} / ${n}`) : null),
       h("h3", { class: "rcard-title" }, c.title || ""));
     if (c.body) card.append(h("div", { class: "msg claude rcard-body", html: md(c.body) }));
@@ -1290,36 +1368,19 @@ class Chat {
       } }, "More");
       card.append(btn, more);
     }
-    if (c.actions && c.actions.length) card.append(h("div", { class: "rcard-actions" }, ...c.actions.map((a, k) => {
-      const b = h("button", { class: `rcard-action${k === 0 ? " primary" : ""}${a.draft ? " draft" : ""}`, type: "button" }, a.label || a.send);
-      b.addEventListener("click", () => this.cardAction(deck, a, b));
-      return b;
-    })));
+    if (c.actions && c.actions.length) card.append(h("div", { class: "rcard-actions" }, ...c.actions.map((a, k) =>
+      h("button", { class: `rcard-action${k === 0 ? " primary" : ""}${a.draft ? " draft" : ""}`, type: "button", "data-k": k,
+                    onclick: () => act(k) }, a.label || a.send))));
     return card;
   }
 
-  // A card's button: its message goes to Claude as yours, once (the deck's
-  // other buttons wait with it); a draft goes into the box, for you to finish.
-  async cardAction(deck, a, btn) {
-    const text = String(a.send || a.label || "");
-    if (a.draft) {
-      this.input.value = text;
-      this.typed();
-      this.grow();
-      this.input.focus();
-      this.input.setSelectionRange(text.length, text.length);
-      return;
-    }
-    if (!text.trim() || deck.classList.contains("sent")) return;
-    deck.classList.add("sent");
-    btn.classList.add("chosen");
-    try {
-      await this.post("send", { text });
-    } catch (e) {
-      deck.classList.remove("sent");
-      btn.classList.remove("chosen");
-      toast(e.message);
-    }
+  // A button for a message you finish yourself: its start goes into the box.
+  fillDraft(text) {
+    this.input.value = text;
+    this.typed();
+    this.grow();
+    this.input.focus();
+    this.input.setSelectionRange(text.length, text.length);
   }
 
   // One item of the conversation, into where (a fragment going at the end,
