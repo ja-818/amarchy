@@ -206,30 +206,29 @@ itself; its own SendMessage reply reaches the sender (checked, both ways).
 - `"accept"`: delivered whatever the sender's mode (checked).
 - `"hold"` / `"refuse"`: held always / turned away.
 
-The broker sets `crossSessionInbound: "accept"` in its `--settings`. A TUI
-session (the terminal engine) doesn't, so **a broker's reply to a TUI session
-in another permission class is held there** (seen live: a test session's reply
-to this bypass-mode TUI session was held). Phase A2 should add `accept` to
-`hook_settings` for every session, which changes today's sessions, so it isn't
-done here.
+amarchy sets `crossSessionInbound: "accept"` for every session, the TUI's and
+the broker's (since A2: "Between sessions, for every session" below). Before,
+a TUI session didn't, so **a broker's reply to a TUI session in another
+permission class was held there** (seen live in A1).
 
 ## The broker: `amarchy agent`
 
-`bin/amarchy`, section "the chat engine". Experimental: **only sessions named
-`test-...`** can be put on it, and nothing changes for any other session.
+`bin/amarchy`, section "the chat engine". **Any session can opt in**: "Try the
+new chat" in its menu (the phone's ⋯, the wide layout's `Ctrl+Alt+M` → This
+session), or `amarchy agent engine <id> chat`; "Back to the classic terminal"
+(or `... terminal`) goes back. Sessions start on the terminal engine.
 
 ```
-amarchy new amarchy test-chat --no-jump
-amarchy agent engine amarchy-test-chat chat     # its Claude pane restarts on the broker, same conversation
-amarchy agent send amarchy-test-chat "hello"
-amarchy agent state amarchy-test-chat           # the live state
-amarchy agent watch amarchy-test-chat           # every event as it comes
-amarchy agent answer amarchy-test-chat <request id> allow|always|deny [why]
-amarchy agent interrupt amarchy-test-chat [--all]
-amarchy agent mode amarchy-test-chat plan
-amarchy agent model amarchy-test-chat haiku
-amarchy agent control amarchy-test-chat '{"subtype": "get_context_usage"}'
-amarchy agent engine amarchy-test-chat terminal # back to the TUI, same conversation
+amarchy agent engine amarchy-x chat         # its Claude starts again on the broker, same conversation
+amarchy agent send amarchy-x "hello"
+amarchy agent state amarchy-x               # the live state
+amarchy agent watch amarchy-x               # every event as it comes
+amarchy agent answer amarchy-x <request id> allow|always|deny [why]
+amarchy agent interrupt amarchy-x [--all]
+amarchy agent mode amarchy-x plan
+amarchy agent model amarchy-x haiku
+amarchy agent control amarchy-x '{"subtype": "get_context_usage"}'
+amarchy agent engine amarchy-x terminal     # back to the TUI, same conversation
 ```
 
 How it fits:
@@ -237,72 +236,139 @@ How it fits:
 - **The session's Claude pane runs it.** The pane loop's `amarchy claude <id>`
   becomes the broker for a chat-engine session, so tmux keeps it (restarting
   the app's server never stops a Claude), and sleep, wake, `amarchy send`,
-  close and reap find it where they always do. One broker per session (a
-  lock in its state folder).
+  close and reap find it where they always do.
+- **One Claude per conversation.** Whatever runs a session's conversation (the
+  TUI's Claude, or the broker and its `claude -p`) claims it first in
+  `driver` beside its state (`claim_driver`: its pid, under a lock), and a
+  second one waits up to 15 s for the first to let go, then refuses ("This
+  conversation is open in another Claude already"). So the two engines never
+  write one transcript at once.
+- **The switch** (`switch_engine`) waits for an idle moment: refused while
+  Claude works or asks something (`--force` cuts in). A running Claude stops
+  as quitting it would, and the pane starts again on the other engine once
+  the driver is free, with `--resume` on the same conversation; asleep, the
+  session just wakes on the other one. Messages queued in the broker go to
+  the TUI as its first prompt.
 - **Its Claude**: `claude -p` as above, with the user's own claude arguments
   (`AMARCHY_CLAUDE_ARGS`), the conversation resumed as the TUI's would be,
-  amarchy's hooks, `crossSessionInbound: accept`, and no API credentials. In
-  its own process group, so Ctrl+C in the pane is Stop, not the end of it.
+  amarchy's hooks (`crossSessionInbound: accept` among them, as for every
+  session: below), and no API credentials. In its own process group, so
+  Ctrl+C in the pane is Stop, not the end of it.
 - **`live.json`** (in `~/.local/state/amarchy/claude/<id>/`), rewritten as
   things change (at most every 0.15 s while text streams): `state`
   (`starting`, `idle`, `working`, `waiting`, `exited`), `pending` (the
   requests waiting: `request_id`, `tool`, `input`, `description`,
-  `suggestions`, `reason`), `partial` (the text being written), `thinking`,
+  `suggestions`, `reason`, `tool_use_id`, `answered`: AskUserQuestion's
+  questions answered so far), `partial` (the text being written), `thinking`,
   `activity` (the tool under way), `tasks` (background), `queue` (our
-  messages waiting for Claude to be free), `rate_limits`, `model`,
-  `permission_mode`, `conversation`, `turns`, `cost_usd`, `last_result`,
-  `account`, `version`, `pid`, `claude_pid`, `socket`. Beside it:
-  `agent.json` (what `initialize` said: commands, models, agents, account),
-  `stream.jsonl` (Claude's raw output and what we sent, capped at 20 MB).
+  messages waiting for Claude to be free: `uuid`, `text`, `images` (how
+  many), `at`), `attachments` (images waiting for the next message),
+  `rate_limits`, `model`, `permission_mode`, `title`, `conversation`, `turns`,
+  `cost_usd`, `last_result`, `account`, `version`, `pid`, `claude_pid`,
+  `socket`. Beside it: `agent.json` (what `initialize` said: commands, models,
+  agents, account), `stream.jsonl` (Claude's raw output and what we sent,
+  capped at 20 MB), `chosen.json` (the mode and model to come back in),
+  `attached.json` (images not sent yet), `title`.
 - **The socket** (`agent.sock` beside it, or in `$XDG_RUNTIME_DIR` when that
   path is too long): one JSON line in, one out. `op`: `state`;
   `send` (`content`: text or blocks, `when`: `idle` (queued here until Claude
   is free, today's rule), `next`, `now`, `later` (straight to Claude with that
-  priority), `uuid`); `unqueue` (`uuid`); `answer` (`request_id`, `response`:
-  `{behavior, ...}`, `updatedInput` filled in when left out); `interrupt`
-  (`everything`: drop the queue too); `control` (`request`: any control
-  request); `stop`; `watch` (the live state, then every event as it comes,
-  for as long as the connection stays open).
-- **The pane** shows the conversation as it goes: your messages (`›`),
-  Claude's text as it streams, one dim line per tool call, questions with
-  their options, how each turn ended. What's typed there goes in as a
-  message, or answers the question waiting (`y`, `a` for always, `n why`, an
-  option's number). Pastes come bracketed, so the app's composer and
-  `amarchy send` (which paste into the pane) arrive as one message each.
-- **Status**: the hooks set working and idle; the broker sets waiting while a
-  request is pending (no Notification hook fires under `-p`), and working
-  again once it's answered.
+  priority), `uuid`); `unqueue` (`uuid`); `attach` (`images`: `[{type,
+  data}]`, for the next message, whoever sends it); `answer` (`request_id`,
+  then `choice`: `allow|always|deny` with `message`, `answers`, `mode`, or
+  `question` + `answer` for one of several questions, or `response`: the
+  control response as is); `interrupt` (`everything`: drop the queue too);
+  `control` (`request`: any control request); `stop`; `watch` (the live
+  state, then every event as it comes, for as long as the connection stays
+  open). An answer to a request that's gone says `"gone": true`.
+- **Answers** (`agent_response`): `always` adds only the `addRules`
+  suggestion (the others reach further: a whole folder, a mode for the
+  session); `mode` on a plan's approval is a `setMode` permission for the
+  session (checked: Claude goes on in `acceptEdits`); `deny` with words sends
+  them as "The user doesn't want to proceed with this tool use. The user
+  said: ..." (bare, Claude took them for an error message). AskUserQuestion is
+  answered one question at a time (the pane, today's card) or all at once.
+- **The pane** shows the conversation so far as it starts (as the asleep
+  pane draws it), then as it goes: your messages (`›`), Claude's text as it
+  streams, one dim line per tool call, questions with their options, how each
+  turn ended. What's typed there goes in as a message, or answers the
+  question waiting (`y`, `a` for always (for a plan: and accept edits), `n
+  why`, an option's number). Pastes come bracketed, so a paste arrives as one
+  message.
+- **Status**: the hooks set working and idle (and the done mark); the broker
+  sets waiting while a request is pending (no Notification hook fires under
+  `-p`), working again once it's answered, and idle after a turn that ended
+  with no Stop hook: one you stopped (no done mark then, as you were there) or
+  one that failed, and when Claude exits.
+- **Title**: under `-p` Claude Code doesn't title a conversation, and the
+  list names a session after that title. The broker sets the pane's title to
+  the conversation's title (what the TUI does), and a conversation without
+  one gets one from its first message (Haiku, once), kept in `title` beside
+  its state, not given to Claude: `rename_session` would rename the session
+  in ListAgents too (seen live).
 - **Sleep**: no prompt to hand over; a session doesn't sleep while a request,
   a background task or a queued message waits. Asleep, Claude is stopped;
-  waking (or `amarchy send`) starts the broker again with `--resume`, and a
-  message queued when Claude stopped goes in first.
+  typing in its pane shows what you type, Enter wakes it with that (keys that
+  aren't text do nothing); waking (or `amarchy send`) starts the broker again
+  with `--resume`, in the mode and model you last chose (`chosen.json`: else
+  a session that sleeps after a minute idle would lose them each time), and a
+  message or images queued when Claude stopped go in first.
 - **`amarchy send`** to a chat-engine session hands the message to the
   broker, which queues it until Claude is free.
 
-Checked live on a test session: the broker started on the Max login and
-resumed the conversation the TUI had begun; messages from the socket, typed
-in the pane, pasted (two lines, one message) and from `amarchy send`; a
-permission asked (status waiting) and answered from the pane; partial text in
-`live.json`; interrupt, with the next queued message going in after it; sleep,
-then `amarchy send` waking it with the conversation's context intact; a
-SendMessage from a bypass-mode session delivered, and its reply sent; the app's
-chat (from the transcript) showing all of it, model change and interruptions
-included.
+## The app's API
 
-## Not yet (phase A2 and on)
+The app's server (`app_handler`) reads `live.json` and talks to the socket.
+The phone's chat today shows a chat-engine session as any other: its
+messages from the transcript, and its questions as the same button cards,
+built from `pending` instead of read off the screen. The new chat (`chat.js`,
+phase B2) uses the live state directly.
 
-- The app's server reading `live.json` / the socket: real cards for questions,
-  permissions and plans, streaming text, Stop, the mode and model pickers,
-  images from the composer. Today the app shows a chat-engine session from its
-  transcript, and its composer reaches the broker through the pane.
-- The switch for any session ("Try the new chat"), and the lock shared with
-  the TUI so the two never run one conversation at once (today the engine
-  switch stops one before starting the other).
-- `crossSessionInbound: accept` for terminal-engine sessions too (above).
-- The permission mode set with `mode` doesn't outlive the broker (as Shift+Tab
-  doesn't outlive the TUI): a restart is back on the session's claude
-  arguments.
-- Drafts: the chat engine has no prompt box; a draft kept from a TUI session's
-  sleep stays for the TUI.
+| Route | What |
+| --- | --- |
+| `GET /api/session/<id>/stream` | as before (`session`, `conversation`, `screen`), plus `live`: the live state (without pids and the socket) on open and on every change, chat engine only (`null` once the session goes back to the terminal engine) |
+| the `session` event, `/api/state` | each session has `engine`: `terminal` or `chat` |
+| the `screen` event's `dialog` | for a chat session, built from `pending[0]` (`chat_dialog`) in the scraped dialog's shape (`id`, `question`, `options` with `label`, `detail`, `keys`), plus `request` and each option's `answer`. A multiple-choice question is answered an option at a time (each pick toggles it, then Done) |
+| `POST .../answer` | `{request_id, choice: allow\|always\|deny, message?, answers?, mode?}` or `{request_id, question, answer}`; `{ok}` or `{error}` (409 when the request is gone) |
+| `POST .../interrupt` | Stop: `{everything?}` drops the queued messages too |
+| `POST .../model`, `.../mode` | `{model}`, `{mode}` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`); kept for the next wake |
+| `POST .../unqueue` | `{uuid}`: a queued message taken back |
+| `POST .../engine` | `{engine: chat\|terminal}`: the switch, any session; 409 while Claude works or asks |
+| `POST .../send` | as before, and for a chat session `images: [{type, data}]` and `when: idle\|next\|now`; to the broker (no typing into a pane). Asleep, it wakes with it |
+| `POST .../keys` | for a chat session: a card's option (`{keys, dialog}`) does what it says; `Escape` says no to what's asked and stops, or just stops; other keys go to the pane (Enter restarts a Claude that exited) |
+| `POST /api/clip` with `paste` | for a chat session, the image is attached to the next message (what Ctrl+V does in the TUI) |
+| `GET .../agent` | `agent.json` (commands, models, account) and the live state, for the `/` menu and the pickers |
+| `GET .../voice` | 409 for a chat session: Claude's voice mode is the TUI's (the other dictations work) |
+
+Notifications say what a chat session asks ("Needs you: Claude wants to run a
+command · ..."), from the same dialog.
+
+## Between sessions, for every session
+
+`hook_settings` sets `crossSessionInbound: "accept"` for **every** session's
+Claude, TUI or broker (it takes effect as each Claude starts again: a wake,
+a switch, a restart). Before, a message from a session in the other
+permission class (bypass vs. asking) was held for the user's approval in a
+TUI session (a prompt in its terminal), and dropped unseen in a chat-engine
+one. Now SendMessage between any two of the user's sessions is delivered
+directly, both ways. Checked live: a chat-engine session in `default` mode
+and a TUI session in bypass messaged each other and got the replies.
+
+Checked live, in the app's own server and the phone's page (a headless
+iPhone): the switch both ways (awake and asleep) with the conversation and
+title kept, and a second Claude refused on it; a permission, a deny with
+words, questions (several, one multiple-choice) and a plan approved with
+accept edits, all from today's cards; always-allow through `/answer`; Esc
+mid-turn (idle, no done mark); images sent and pasted; a queued message
+taken back; sleep, typing in the asleep pane, `amarchy send` waking it in
+the mode and model chosen before.
+
+## Not yet (phase C and on)
+
+- The new chat's own cards, streaming text, activity line, Stop, queue chip,
+  pickers (B2, C1, C2) on the live state and these routes.
+- Drafts: the chat engine has no prompt box; a draft kept from a TUI
+  session's sleep stays for the TUI, and the TUI's unsent prompt isn't
+  carried over by a switch.
 - Running `amarchy-protocol-test` on `amarchy update` and when Claude Code's
   version changes, keeping new sessions on the terminal engine when it fails.

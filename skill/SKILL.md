@@ -83,8 +83,9 @@ command's usage without running it (an option it doesn't know fails instead).
   user hasn't opened yet), `priority` (`high`,
   `normal`, `low`), `task` (what it's about: the user's name for it, else Claude Code's title cut down to "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current` (on screen), `agent`
   (the name its Claude goes by in `ListAgents` / `SendMessage`, empty until its
-  Claude runs), `background` (Claude Code background sessions running in its
-  worktree).
+  Claude runs), `engine` (`terminal`: Claude Code's own terminal app, or
+  `chat`: the app's chat engine, the same Claude on `claude -p`), `background`
+  (Claude Code background sessions running in its worktree).
 - `amarchy projects --json`: the user's projects and how many sessions each
   has, in the user's order (`amarchy projects order` prints just the names).
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all

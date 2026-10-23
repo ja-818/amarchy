@@ -167,11 +167,11 @@ Plumbing:
   amarchy dictation worker              keeps the dictation model loaded for the app's server (Transcriber)
   amarchy agent <id>                    the chat engine's broker in a session's Claude pane: Claude Code on
                                         claude -p, with a live state, a socket and a log of the conversation
-                                        (experimental, test sessions only; docs/agent-protocol.md)
-  amarchy agent engine <id> [chat|terminal]
-                                        which engine a session's Claude runs on (prints it without one);
-                                        chat only for a session named test-...; its Claude starts again
-                                        on it, the conversation kept
+                                        (docs/agent-protocol.md)
+  amarchy agent engine <id> [chat|terminal] [--force]
+                                        which engine a session's Claude runs on (prints it without one):
+                                        its Claude starts again on the other one, the conversation kept,
+                                        once it's idle (--force: even in a turn or a question)
   amarchy agent state|watch <id>        its live state (JSON) / everything Claude says, as it comes
   amarchy agent send <id> <text|-> [--next|--now|--later]
                                         a message: when Claude is free (or taken into the turn under way,
@@ -932,6 +932,11 @@ def hook_settings(sid):
         "Notification": h("waiting"),
         "Stop": h("idle"),
     }}
+    # Messages from other sessions (SendMessage) get in whatever permission
+    # mode their sender runs in. Left unset, Claude Code holds one from a
+    # session in another class (bypass vs. asking) for the user to approve,
+    # and a chat-engine session can't approve anything: docs/agent-protocol.md.
+    settings["crossSessionInbound"] = "accept"
     if CLAUDE_THEME.exists():       # the app's theme (see look_claude)
         settings["theme"] = "custom:amarchy"
     return json.dumps(settings)
@@ -1225,8 +1230,13 @@ def cmd_claude(sid):
         s = session(sid)
     if asleep_since(sid) is not None:
         return 0
-    if engine(s) == "chat" and agent_allowed(s):
+    if engine(s) == "chat":
         return Agent(s).run()       # amarchy agent: see "the chat engine"
+    other = claim_driver(sid, "terminal")
+    if other:
+        print(f"\n  \033[31mThis conversation is open in another Claude already (pid {other.get('pid')}, "
+              f"the {other.get('engine')} engine).\033[0m\n", flush=True)
+        return 1
     # The first prompt (amarchy new --prompt) goes to Claude once: if Claude
     # starts again later, it picks the conversation up instead.
     prompt = s.pop("prompt", None)
@@ -1980,6 +1990,8 @@ def cmd_woke(sid, key):
     buf = bytes.fromhex(key.replace(" ", "").strip()) if key.strip() else b""
     if not buf:
         return 3
+    if engine(session(sid) or {}) == "chat":
+        return woke_chat(sid, buf)
     draft = (d / "draft").read_text() if (d / "draft").exists() else ""
     text = draft.rstrip("\n")
 
@@ -2070,6 +2082,52 @@ def cmd_woke(sid, key):
             return wake(text + "\n")    # Shift+Enter and the like: a new line
         else:
             return wake(text)
+
+
+def woke_chat(sid, buf):
+    """cmd_woke for a session on the chat engine: its pane shows the
+    conversation as the broker wrote it, with no prompt to stand in for.
+    What's typed shows where the cursor is, and Enter brings Claude back with
+    it, sent; keys that aren't text do nothing. A pause keeps it (draft)."""
+    d = claude_dir(sid)
+    text = (d / "draft").read_text() if (d / "draft").exists() else ""
+    edited = False
+
+    def read(timeout):
+        if not select.select([0], [], [], timeout)[0]:
+            return None
+        return os.read(0, 4096) or None
+
+    while True:
+        token, buf = next_key(buf)
+        if token is None:
+            more = read(TYPING_IDLE if edited else 0.3)
+            if more:
+                buf += more
+                continue
+            if edited:
+                write_file(d / "draft", text)
+            return 3
+        kind, raw = token
+        typed = raw.decode(errors="ignore")
+        if kind == "char" and raw in (b"\r", b"\n") or kind == "csi" and raw == b"\x1b[13u":
+            if text.strip():
+                waking()
+                write_file(d / "send", text)
+                (d / "draft").unlink(missing_ok=True)
+                woken(sid)
+                return 0
+        elif kind == "paste" or kind == "char" and typed.isprintable():
+            typed = typed.replace("\r\n", "\n").replace("\r", "\n")
+            if not edited:
+                sleep_badge(TYPING_BADGE)
+                edited = True
+            os.write(1, typed.replace("\n", "\r\n").encode())
+            text += typed
+        elif kind == "char" and raw in (b"\x7f", b"\x08") and text and text[-1] != "\n":
+            cols = text_width(text[-1])
+            os.write(1, b"\b" * cols + b" " * cols + b"\b" * cols)
+            text, edited = text[:-1], True
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -2522,15 +2580,22 @@ def cmd_hook(sid, state):
     clear_waking(sid)       # it's up
     if asleep_since(sid) is not None and state != "idle":
         clear_asleep(sid)   # it's running after all (woken some other way)
+    set_status(sid, state)
+
+
+def set_status(sid, state, done=True):
+    """The session's status as the list shows it: working, waiting or idle.
+    Idle after working, it's done: its row says so until you open it (see
+    mark_seen; a phone or a browser looking at it says it did, within a
+    second), unless not done (you stopped it yourself). The app's server
+    notifies the phones (app_moments). The state it was in before."""
     prev = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else ""
     if state == prev == "idle":
-        return      # Claude coming back from sleep: idle all along, since when it was
-    (STATUS / sid).write_text(state)
-    # Done: its row says so until you open it (see mark_seen); a phone or a
-    # browser looking at it says it did, within a second. The app's server
-    # notifies the phones (app_moments).
-    if state == "idle" and prev == "working":
+        return prev     # idle all along (Claude coming back from sleep): since when it was
+    (STATUS / sid).write_text(state)    # (working again: its time says when, for send_taken)
+    if state == "idle" and prev == "working" and done:
         mark_unseen(sid)
+    return prev
 
 
 def unseen(sid):
@@ -2788,7 +2853,7 @@ def saved_title(s):
         return ""
     seen, title = cache.get(str(f), [0, ""])
     if seen == size:
-        return task_title(title)
+        return task_title(title or our_title(s["id"], f))
     try:
         with open(f, "rb") as fh:
             fh.seek(seen if seen < size else 0)
@@ -2803,6 +2868,7 @@ def saved_title(s):
     except OSError:
         return task_title(title)
     cache[str(f)] = [size, title]
+    title = title or our_title(s["id"], f)
     # Only the conversations of sessions still around.
     keep = {str(projects_dir(x["path"])) for x in sessions()}
     try:
@@ -2965,6 +3031,7 @@ def session_view():
         # Woken, and its Claude isn't up yet.
         s["waking"] = not s["sleeping"] and waking_now(s["id"])
         s["agent"] = agents.get(s["path"], "") if not s["sleeping"] else ""
+        s["engine"] = engine(s)     # how its Claude runs: terminal (the TUI) or chat (amarchy agent)
         s.pop("prompt", None)
         if s["sleeping"] and not s.get("setup"):
             s["status"] = "idle"    # only an idle session sleeps (or one left from before)
@@ -5391,8 +5458,211 @@ def app_screen(s):
     while lines and not lines[-1]:
         lines.pop()
     exited = not asleep and any(EXITED in l for l in lines[-4:])
+    # On the chat engine, what Claude asks comes as data (chat_dialog), not
+    # as a picture of it to read off the screen.
+    chat = engine(s) == "chat"
+    dialog = None if exited or asleep or waking else chat_dialog(s) if chat else claude_dialog(lines)
     return {"live": True, "text": "\n".join(lines), "exited": exited, "asleep": asleep, "waking": waking,
-            "dialog": None if exited or asleep or waking else claude_dialog(lines)}
+            "dialog": dialog}
+
+
+# ---- what a session on the chat engine asks, as today's cards
+#
+# The broker has Claude's requests as data (live.json's pending): a
+# permission, AskUserQuestion's questions, a plan to approve. The phone's
+# card (app.js's ask) shows a dialog read off the TUI's screen, each option
+# picked by its keys; chat_dialog gives it one in that shape, its options
+# numbered (their keys, ["1"]...), each saying what it does (answer). The
+# app's routes then do that instead of sending the keys (chat_pick). A
+# multiple-choice question is answered one option at a time: each pick
+# toggles it (CHAT_PICKS), "Done" sends them. The new chat (chat.js) reads
+# live.json's pending itself and answers through /answer.
+
+CHAT_PICKS = {}         # (session id, request id, question) -> the options picked so far, for multiSelect
+
+
+def chat_tool_ask(p):
+    """What a permission request asks, in words: its first line, the rest."""
+    tool, given = p.get("tool") or "a tool", p.get("input") or {}
+    path = given.get("file_path") or given.get("notebook_path") or given.get("path")
+    head = {"Bash": "Claude wants to run a command", "WebFetch": "Claude wants to read a web page",
+            "WebSearch": "Claude wants to search the web"}.get(tool)
+    if not head and tool in ("Edit", "MultiEdit", "Write", "NotebookEdit"):
+        head = f"Claude wants to {'create' if tool == 'Write' else 'edit'} {Path(str(path)).name if path else 'a file'}"
+    head = head or f"Claude wants to use {tool}"
+    rest = [p.get("description") if p.get("description") not in (None, tool) else None,
+            given.get("command") or given.get("url") or given.get("query") or (str(path) if path else None),
+            p.get("reason")]
+    return head, [str(x) for x in rest if x]
+
+
+def chat_dialog(s, live=None):
+    """The question Claude asks in a session on the chat engine, in the shape
+    claude_dialog gives (plus request and each option's answer), or None."""
+    live = agent_live(s["id"]) if live is None else live
+    pending = live.get("pending") if live.get("state") not in ("exited", None) else None
+    if not pending:
+        return None
+    p = pending[0]
+    rid, given = p.get("request_id"), p.get("input") or {}
+    for key in [k for k in CHAT_PICKS if k[0] == s["id"] and k[1] not in {x.get("request_id") for x in pending}]:
+        del CHAT_PICKS[key]
+    options, hint = [], ""
+    if p.get("tool") == "AskUserQuestion":
+        questions = [q for q in given.get("questions") or [] if isinstance(q, dict)]
+        answered = p.get("answered") or {}
+        left = [q for q in questions if q.get("question") not in answered]
+        if not left:
+            return None
+        q = left[0]
+        text = q.get("question") or ""
+        lines = [text]
+        if len(questions) > 1:
+            lines.append(f"Question {len(questions) - len(left) + 1} of {len(questions)}")
+        picks = CHAT_PICKS.get((s["id"], rid, text), []) if q.get("multiSelect") else []
+        for o in q.get("options") or []:
+            label = str(o.get("label") or "")
+            if q.get("multiSelect"):
+                options.append({"label": f"{'☑' if label in picks else '☐'} {label}", "detail": o.get("description") or "",
+                                "answer": {"question": text, "toggle": label}})
+            else:
+                options.append({"label": label, "detail": o.get("description") or "",
+                                "answer": {"question": text, "answer": label}})
+        if q.get("multiSelect"):
+            options.append({"label": "Done" if picks else "Done (pick at least one)", "detail": ", ".join(picks),
+                            "answer": {"question": text, "done": True}})
+            hint = "Pick all that apply, then Done"
+        options.append({"label": "Type something.", "detail": "", "answer": {"question": text, "own": True}})
+    elif p.get("tool") == "ExitPlanMode":
+        lines = ["Claude's plan: approve it?", str(given.get("plan") or "").strip()]
+        options = [{"label": "Yes, and start", "detail": "", "answer": {"choice": "allow"}},
+                   {"label": "Yes, and accept edits without asking", "detail": "",
+                    "answer": {"choice": "allow", "mode": "acceptEdits"}},
+                   {"label": "Type something.", "detail": "No, keep planning: say what to change",
+                    "answer": {"choice": "deny", "own": True}},
+                   {"label": "No, keep planning", "detail": "", "answer": {"choice": "deny"}}]
+    else:
+        head, rest = chat_tool_ask(p)
+        lines = [head, *rest]
+        options = [{"label": "Yes", "detail": "", "answer": {"choice": "allow"}}]
+        rules = [r for x in p.get("suggestions") or [] if x.get("type") == "addRules" for r in x.get("rules") or []]
+        if rules:
+            said = ", ".join(f"{r.get('toolName')}({r['ruleContent']})" if r.get("ruleContent") else str(r.get("toolName"))
+                             for r in rules)
+            options.append({"label": "Yes, and don't ask again", "detail": f"for {said} in this project",
+                            "answer": {"choice": "always"}})
+        options += [{"label": "No", "detail": "", "answer": {"choice": "deny"}},
+                    {"label": "Type something.", "detail": "No, and tell Claude what to do instead",
+                     "answer": {"choice": "deny", "own": True}}]
+    for i, o in enumerate(options):
+        o["keys"] = [str(i + 1)] if i < 9 else ["Down"] * i + ["Enter"]
+        o["selected"] = i == 0
+    question = "\n".join(lines)
+    sig = json.dumps([rid, question, [o["label"] for o in options]])
+    return {"id": hashlib.sha1(sig.encode()).hexdigest()[:12], "question": question, "options": options,
+            "hint": hint, "request": rid}
+
+
+def chat_images(images):
+    """The images of a message for the chat engine ([{type, data (base64)}]
+    from the app) as Claude's image blocks, or why not (a str)."""
+    if images is None:
+        return []
+    if not isinstance(images, list) or len(images) > 20:
+        return "images: a list of {type, data}, 20 at most"
+    blocks = []
+    for im in images:
+        kind, data = (im.get("type"), im.get("data")) if isinstance(im, dict) else (None, None)
+        if not isinstance(kind, str) or not CLIP_TYPES.fullmatch(kind):
+            return "only images (PNG, JPEG, GIF or WebP)"
+        try:
+            if not isinstance(data, str) or not base64.b64decode(data, validate=True):
+                raise ValueError
+        except ValueError:
+            return "an image that isn't base64"
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}})
+    return blocks
+
+
+def chat_attach_later(sid, blocks):
+    """Images for the next message of a session whose broker isn't running:
+    it takes them as it starts (Agent.load_attached)."""
+    f = claude_dir(sid) / "attached.json"
+    try:
+        had = json.loads(f.read_text())
+    except (OSError, ValueError):
+        had = []
+    write_file(f, json.dumps((had if isinstance(had, list) else []) + blocks))
+
+
+def chat_attach(s, images):
+    """Images pasted into a session on the chat engine (its terminal's
+    Ctrl+V, the phone's image button): they go with its next message, as a
+    pasted image does in the TUI. None once attached, else (code, why)."""
+    blocks = chat_images(images)
+    if isinstance(blocks, str):
+        return 400, blocks
+    end = time.time() + 20
+    while not agent_up(s["id"]) and claude_driver(s["id"]) and time.time() < end:
+        time.sleep(0.3)         # its broker is starting: it listens in a moment
+    if not agent_up(s["id"]):
+        chat_attach_later(s["id"], blocks)
+        return None
+    try:
+        r = agent_call(s["id"], {"op": "attach", "images": images})
+    except OSError as e:
+        return 409, f"Claude's broker didn't answer: {e}"
+    return None if r.get("ok") else (400, r.get("error") or "it wasn't attached")
+
+
+def chat_live(live):
+    """live.json as the app gets it (the stream's live event)."""
+    return {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket")} if live else None
+
+
+def chat_answer(s, request):
+    """An answer to the session's broker ({request_id, ...}: Agent.op
+    "answer"): None once it has it, else (code, why)."""
+    if not agent_up(s["id"]):
+        return 409, "Claude isn't running: wake it first"
+    try:
+        r = agent_call(s["id"], {"op": "answer", **request})
+    except OSError as e:
+        return 500, f"Claude's broker didn't answer: {e}"
+    if not r.get("ok"):
+        return (409 if r.get("gone") else 400), r.get("error") or "it wasn't taken"
+    return None
+
+
+def chat_pick(s, dialog, keys, text=None):
+    """Do what the option of a chat_dialog with these keys does (with text,
+    the one to answer in your own words): None once done, else (code, why)."""
+    o = next((o for o in dialog["options"] if o["keys"] == keys), None)
+    if not o:
+        return 400, "no such answer"
+    a, rid = o["answer"], dialog["request"]
+    if a.get("own"):
+        if not isinstance(text, str) or not text.strip():
+            return 400, "your answer"
+        if "question" in a:
+            return chat_answer(s, {"request_id": rid, "question": a["question"], "answer": text.strip()})
+        return chat_answer(s, {"request_id": rid, "choice": "deny", "message": text.strip()})
+    if "toggle" in a:
+        key = (s["id"], rid, a["question"])
+        picks = CHAT_PICKS.setdefault(key, [])
+        picks.remove(a["toggle"]) if a["toggle"] in picks else picks.append(a["toggle"])
+        return None
+    if a.get("done"):
+        picks = CHAT_PICKS.get((s["id"], rid, a["question"])) or []
+        if not picks:
+            return 409, "Pick at least one first"
+        why = chat_answer(s, {"request_id": rid, "question": a["question"], "answer": ", ".join(picks)})
+        if not why:
+            CHAT_PICKS.pop((s["id"], rid, a["question"]), None)
+        return why
+    if "question" in a:
+        return chat_answer(s, {"request_id": rid, "question": a["question"], "answer": a["answer"]})
+    return chat_answer(s, {"request_id": rid, **{k: v for k, v in a.items() if k in ("choice", "mode")}})
 
 
 def app_type(s, text):
@@ -6682,7 +6952,9 @@ def app_moments(st, ss):
             time.sleep(0.3)         # the question is on screen by now
             dialog = app_screen(s).get("dialog")
             if dialog and dialog["question"]:
-                body += ": " + " · ".join(dialog["question"].splitlines()[-3:])[:300]
+                lines = dialog["question"].splitlines()
+                # The screen's: its last lines, what it asks. The chat engine's: its first, then what.
+                body += ": " + " · ".join(lines[:2] if dialog.get("request") else lines[-3:])[:300]
         if kind == "assistant":
             # Under its name and picture, what it said (a brief's first words).
             said = s.get("said") or last_said(s) if state == "idle" else ""
@@ -6781,6 +7053,9 @@ def app_handler(st, users, address):
             "transcribing"}, and the transcript ({"text"}, taken out of Claude's
             prompt for the phone's box) or why there's none ({"error"})."""
             sid = s["id"]
+            if engine(s) == "chat":
+                return self.error(409, "Claude's voice mode is in the classic terminal only: "
+                                       "pick another dictation in Settings")
             voice = claude_voice()
             if not voice["enabled"]:
                 return self.error(409, "Claude's voice mode is off: turn it on with /voice")
@@ -7306,11 +7581,13 @@ def app_handler(st, users, address):
                                                   "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|voice|tty/claude|tty/term|mic|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
+                if m.group(2) == "agent":
+                    return self.chat(s, "agent", {})
                 if m.group(2) == "voice":
                     return self.voice(s)
                 if m.group(2).startswith("tty/"):
@@ -7444,9 +7721,31 @@ def app_handler(st, users, address):
                 host_start(s)       # after a reboot, before anyone attached: asleep, until you send it something
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
+            # On the chat engine, its live state too (live.json, chat_live) as
+            # it changes: what Claude is writing, doing and asking.
+            live, live_sig, tick = None, None, 0
             st.looking(s["id"], True)
             try:
                 while True:
+                    chat = engine(st.row(s["id"]) or s) == "chat"
+                    if chat:
+                        try:
+                            sig = agent_live_file(s["id"]).stat().st_mtime_ns
+                        except OSError:
+                            sig = None
+                        if sig != live_sig:
+                            live_sig, was = sig, live
+                            live = chat_live(agent_live(s["id"]))
+                            if live != was:
+                                self.event("live", live)
+                                tick = 0        # what it asks: on the screen's dialog now
+                    elif live is not None or live_sig is not None:
+                        live, live_sig = None, None
+                        self.event("live", None)    # back on the terminal engine
+                    if time.time() - tick < 0.5:
+                        time.sleep(0.12)
+                        continue
+                    tick = time.time()
                     now = st.row(s["id"])
                     if now is None and (not session(s["id"]) or (CLOSING / f"{s['id']}.json").exists()):
                         self.event("gone", {})
@@ -7467,7 +7766,7 @@ def app_handler(st, users, address):
                         self.wfile.write(b": still here\n\n")
                         self.wfile.flush()
                         beat = time.time()
-                    time.sleep(0.5)
+                    time.sleep(0.12 if chat else 0.5)
             except OSError:
                 pass
             finally:
@@ -7476,7 +7775,8 @@ def app_handler(st, users, address):
         def do_POST(self):
             if not self.allowed(write=True):
                 return
-            big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper")
+            big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper") \
+                or bool(re.fullmatch(r"/api/session/[^/]+/send", self.path))      # images, on the chat engine
             data = self.body(CLIP_MAX if big else 200_000)
             if self.path == "/api/clip":
                 return self.clip(data)
@@ -7525,6 +7825,11 @@ def app_handler(st, users, address):
                 return self.error(400, why) if why else self.send(200, {})
             if self.path == "/api/sleep":     # when idle sessions sleep (amarchy sleep --after), or all of them now
                 return self.sleep(data)
+            # The chat engine's own (docs/agent-protocol.md, "The app's API").
+            m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine)", self.path)
+            if m:
+                s = self.session(m.group(1))
+                return self.chat(s, m.group(2), data) if s else None
             m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|wake|sleep)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
@@ -7578,6 +7883,8 @@ def app_handler(st, users, address):
                     return self.error(409, "Claude is still waking up: try again in a moment")
                 time.sleep(0.5)     # its first screen drawn
                 screen = app_screen(s)
+            if engine(s) == "chat":
+                return self.chat_input(s, what, data, screen)
             if what == "send":
                 text = data.get("text")
                 if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
@@ -7624,6 +7931,162 @@ def app_handler(st, users, address):
             st.seen[s["id"]] = time.time()
             return self.send(200, {}) if why is None else self.error(500, why)
 
+        # ---- the chat engine (phase A2 of docs/plan-chat-app.md)
+
+        def chat(self, s, what, data):
+            """A session on the chat engine: answer what Claude asks
+            ({request_id, choice: allow|always|deny, message, answers, mode},
+            or {request_id, question, answer} for one of several questions),
+            Stop ({everything}: and what's queued), the model ({model}), the
+            permission mode ({mode}), a queued message back ({uuid}); GET
+            agent: what Claude said it has (commands, models...) and its live
+            state. engine ({engine: chat|terminal}) switches any session."""
+            sid = s["id"]
+            if what == "engine":
+                why = switch_engine(s, data.get("engine"))
+                return self.error(409, why) if why else self.send(200, {"ok": True, "engine": data.get("engine")})
+            if engine(s) != "chat":
+                return self.error(409, "It's on Claude's classic terminal")
+            if what == "agent":
+                try:
+                    told = json.loads((claude_dir(sid) / "agent.json").read_text())
+                except (OSError, ValueError):
+                    told = {}
+                return self.send(200, {"agent": told, "live": chat_live(agent_live(sid))})
+            st.seen[sid] = time.time()
+            st.looking(sid)
+            if what in ("model", "mode") and not agent_up(sid):
+                # Asleep: it wakes in it.
+                value = data.get(what)
+                if what == "mode" and value not in AGENT_MODES or what == "model" and not (
+                        isinstance(value, str) and re.fullmatch(r"[\w.:\[\]-]{1,100}", value)):
+                    return self.error(400, f"which {what}")
+                agent_remember(sid, **{what: value})
+                return self.send(200, {"ok": True, "later": True})
+            if not agent_up(sid):
+                return self.error(409, "Claude isn't running: it's asleep, or starting")
+            if what == "answer":
+                rid = data.get("request_id")
+                if not isinstance(rid, str):
+                    return self.error(400, "which request (request_id)")
+                request = {"request_id": rid}
+                if "question" in data:
+                    request.update(question=data.get("question"), answer=data.get("answer"))
+                else:
+                    request.update({k: data[k] for k in ("choice", "message", "answers", "mode") if k in data})
+                why = chat_answer(s, request)
+                return self.error(*why) if why else self.send(200, {"ok": True})
+            if what == "interrupt":
+                request = {"op": "interrupt", "everything": data.get("everything") is True}
+            elif what == "unqueue":
+                if not isinstance(data.get("uuid"), str):
+                    return self.error(400, "which message (uuid)")
+                request = {"op": "unqueue", "uuid": data["uuid"]}
+            elif what == "model":
+                model = data.get("model")
+                if not isinstance(model, str) or not re.fullmatch(r"[\w.:\[\]-]{1,100}", model):
+                    return self.error(400, "which model")
+                request = {"op": "control", "request": {"subtype": "set_model", "model": model}}
+            else:   # mode
+                if data.get("mode") not in AGENT_MODES:
+                    return self.error(400, f"mode is one of {', '.join(AGENT_MODES)}")
+                request = {"op": "control", "request": {"subtype": "set_permission_mode", "mode": data["mode"]}}
+            try:
+                r = agent_call(sid, request)
+            except OSError as e:
+                return self.error(500, f"Claude's broker didn't answer: {e}")
+            if not r.get("ok"):
+                return self.error(409, r.get("error") or "Claude didn't take it")
+            return self.send(200, {"ok": True, **({"response": r["response"]} if r.get("response") else {})})
+
+        def chat_input(self, s, what, data, screen):
+            """/send and /keys for a session on the chat engine. send: {text,
+            images: [{type, data (base64)}], when: idle (the default: once
+            Claude is free) | next (into the turn under way) | now (ending
+            it)}, to its broker; asleep, it wakes with it. keys: today's card
+            (chat_dialog) picks an answer by its keys; Esc says no to what
+            Claude asks and stops it, as in the TUI; other keys go to its pane
+            (Enter starts a Claude that exited)."""
+            sid = s["id"]
+            dialog = screen["dialog"]
+            if what == "keys":
+                keys = data.get("keys")
+                if not valid_keys(keys):
+                    return self.error(400, "keys it doesn't send")
+                if data.get("dialog") is not None:
+                    if (dialog or {}).get("id") != data["dialog"]:
+                        return self.error(409, "The question changed: look again")
+                    why = chat_pick(s, dialog, keys)
+                elif keys == ["Escape"] and screen["live"] and not (screen["asleep"] or screen["exited"]):
+                    if dialog:
+                        why = chat_answer(s, {"request_id": dialog["request"], "response": {
+                            "behavior": "deny", "message": "The user doesn't want to proceed with this tool use.",
+                            "interrupt": True}})
+                    else:
+                        try:
+                            r = agent_call(sid, {"op": "interrupt"})
+                            why = None if r.get("ok") else (409, r.get("error") or "Claude didn't stop")
+                        except OSError:
+                            why = (409, "Claude isn't running")
+                elif screen["asleep"]:
+                    wake(s)
+                    return self.error(409, "It was asleep: Claude is waking up, try again in a moment")
+                else:
+                    why = app_keys(s, keys)
+                    why = (500, why) if why else None
+                st.seen[sid] = time.time()
+                return self.error(*why) if why else self.send(200, {})
+            text, when = data.get("text", ""), data.get("when") or "idle"
+            if not isinstance(text, str) or len(text) > 60_000:
+                return self.error(400, "nothing to send")
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            images = chat_images(data.get("images"))
+            if isinstance(images, str):
+                return self.error(400, images)
+            if not text.strip() and not images:
+                return self.error(400, "nothing to send")
+            if when not in ("idle", "next", "now"):
+                return self.error(400, "when is idle, next or now")
+            answer = data.get("answer") if isinstance(data.get("answer"), dict) else None
+            if answer:      # in your own words, to what Claude asks (today's card)
+                if (dialog or {}).get("id") != answer.get("dialog"):
+                    return self.error(409, "The question changed: look again")
+                why = chat_pick(s, dialog, answer.get("keys"), text)
+                return self.error(*why) if why else self.send(200, {})
+            if s.get("setup"):
+                return self.error(409, "It's still being set up: try again in a moment")
+            if screen["asleep"] or not screen["live"] or screen["exited"]:
+                # It wakes with this as its first message, the images
+                # attached to it.
+                if starting(sid):
+                    return self.error(409, "Claude is starting with another message: try again in a moment")
+                if images:
+                    chat_attach_later(sid, images)
+                if not text.strip():
+                    if screen["asleep"]:
+                        wake(s)
+                    elif screen["exited"]:
+                        woken(sid)
+                        tmux("send-keys", "-t", f"={tmux_name(sid)}:", "Enter")
+                    else:
+                        woken(sid)
+                        host_start(s, wake=True)
+                    return self.send(200, {"waking": True})
+                threading.Thread(target=send_start, args=(s, text), daemon=True).start()
+                return self.send(200, {"waking": True})
+            end = time.time() + 30          # starting: its broker listens in a moment
+            while not agent_up(sid) and time.time() < end:
+                time.sleep(0.3)
+            content = [*images, *([{"type": "text", "text": text}] if text.strip() else [])] if images else text
+            try:
+                r = agent_call(sid, {"op": "send", "content": content, "when": when})
+            except OSError as e:
+                return self.error(409, f"Claude isn't running yet: try again in a moment ({e})")
+            if not r.get("ok"):
+                return self.error(409, r.get("error") or "Claude didn't take it")
+            st.seen[sid] = time.time()
+            return self.send(200, {"ok": True, "uuid": r.get("uuid"), "queued": r.get("queued")})
+
         def sleep(self, data):
             """{"after": minutes|"off"}: how long a session idle and open
             nowhere waits before it sleeps. {"all": true}: every idle one
@@ -7666,6 +8129,16 @@ def app_handler(st, users, address):
                 s = self.session(data.get("session")) if isinstance(data.get("session"), str) else self.error(400, "which session")
                 if not s:
                     return
+                if engine(s) == "chat":
+                    try:
+                        web_clip_save(items)
+                    except OSError as e:
+                        return self.error(500, f"couldn't keep it: {e}")
+                    if kind is None:
+                        return self.send(200, {})       # text: the clipboard only
+                    why = chat_attach(s, [{"type": kind, "data": data.get("data")}])
+                    st.seen[s["id"]] = time.time()
+                    return self.error(*why) if why else self.send(200, {})
                 screen = app_screen(s)
                 if not screen["live"] or screen["exited"]:
                     return self.error(409, "Claude isn't running: start it first")
@@ -8482,9 +8955,10 @@ def migrate_look():
 
 # ------------------------------------------------------------------ the chat engine (amarchy agent)
 #
-# Phase A1 of docs/plan-chat-app.md, experimental and for test sessions only
-# (a session named test-...). A session's engine is "terminal" (Claude Code's
-# TUI, as every session runs today) or "chat": then its Claude pane runs
+# Phases A1 and A2 of docs/plan-chat-app.md. Any session can opt in ("Try
+# the new chat" in its menu, or amarchy agent engine <id> chat) and go back.
+# A session's engine is "terminal" (Claude Code's TUI, as every session runs
+# by default) or "chat": then its Claude pane runs
 # `amarchy agent <id>`, a broker around `claude -p` with stream-json in and
 # out (the control protocol the Agent SDKs speak; docs/agent-protocol.md has
 # what it does, checked by bin/amarchy-protocol-test). The broker:
@@ -8519,9 +8993,42 @@ def engine(s):
     return "chat" if s.get("engine") == "chat" else "terminal"
 
 
-def agent_allowed(s):
-    """Whether a session may run on the chat engine yet: only test sessions."""
-    return s["name"].startswith("test-")
+def claude_driver(sid):
+    """What runs the session's conversation now, if anything: {pid, engine,
+    claude_pid} of the TUI's Claude (amarchy claude, become claude) or of
+    the broker and its claude -p. Each says the session in its arguments."""
+    try:
+        d = json.loads((claude_dir(sid) / "driver").read_text())
+    except (OSError, ValueError):
+        return None
+    for pid in (d.get("pid"), d.get("claude_pid")) if isinstance(d, dict) else ():
+        if not isinstance(pid, int) or pid == os.getpid():
+            continue
+        args = cmdline(pid)
+        if f"hook {sid} " in " ".join(args) or any(a == sid and args[i - 1] in ("claude", "agent")
+                                                   for i, a in enumerate(args) if i):
+            return d
+    return None
+
+
+def claim_driver(sid, kind, wait=15):
+    """Make this process the one that runs the session's conversation: one
+    Claude at a time on it, the TUI's or the chat engine's, or both would
+    write it. One that's going away (its pane restarted, the engine switched)
+    has wait seconds to go. None once it's ours, else what still runs it."""
+    d = claude_dir(sid)
+    d.mkdir(parents=True, exist_ok=True)
+    end = time.time() + wait
+    while True:
+        with open(d / "driver.lock", "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            other = claude_driver(sid)
+            if not other:
+                write_file(d / "driver", json.dumps({"pid": os.getpid(), "engine": kind, "since": time.time()}))
+                return None
+        if time.time() > end:
+            return other
+        time.sleep(0.2)
 
 
 def agent_live_file(sid):
@@ -8583,12 +9090,8 @@ def claude_resume(s):
 
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
-    claude arguments, its conversation, amarchy's hooks; messages from other
-    sessions accepted whatever permission mode they run in (else a -p
-    Claude holds them, and drops them unseen: docs/agent-protocol.md)."""
-    settings = json.loads(hook_settings(s["id"]))
-    settings["crossSessionInbound"] = "accept"
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", json.dumps(settings)]
+    claude arguments, its conversation, amarchy's hooks."""
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", hook_settings(s["id"])]
 
 
 def agent_env():
@@ -8597,16 +9100,13 @@ def agent_env():
     return env
 
 
-def agent_status(sid, state):
+def agent_status(sid, state, done=True):
     """The session's status, as its hooks set it (cmd_hook), for what Claude's
-    hooks don't say under -p: that it waits for an answer, and that it's
-    working again once it has one."""
-    try:
-        prev = (STATUS / sid).read_text().strip()
-    except OSError:
-        prev = ""
-    if prev != state and session(sid):
-        (STATUS / sid).write_text(state)
+    hooks don't say under -p: that it waits for an answer, that it's working
+    again once it has one, and that it's idle after a turn that ended with no
+    Stop hook (you stopped it, or it failed)."""
+    if session(sid) and not (CLOSING / f"{sid}.json").exists():
+        set_status(sid, state, done)
 
 
 def tool_line(name, given):
@@ -8617,6 +9117,95 @@ def tool_line(name, given):
             or given.get("query") or given.get("url") or given.get("command") or given.get("prompt") or "")
     what = " ".join(str(what).split())
     return f"{name}: {what}" if what else name
+
+
+TITLE_PROMPT = """Give this coding session a title: what it's about, in 3 to 7 words, as a short sentence in sentence case, like "Fix login redirect loop after OAuth" or "Add dark mode toggle to settings". In the language of the request. Reply with the title only: no quotes, no period.
+
+The session starts with this request:
+{text}"""
+
+
+def conversation_title(text):
+    """A title for a conversation, from its first message (Haiku), or None."""
+    try:
+        r = subprocess.run(
+            ["claude", "-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", "", "--tools", "",
+             "--strict-mcp-config", TITLE_PROMPT.format(text=text[:3000])],
+            capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL, env=agent_env(), cwd=STATE)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
+    title = lines[0].strip("\"'`*#. ") if r.returncode == 0 and len(lines) == 1 else ""
+    return title if 0 < len(title) <= 80 else None
+
+
+def our_title(sid, f):
+    """The title the chat engine gave the session's conversation in the
+    transcript f (Agent.name_conversation), or ""."""
+    try:
+        t = json.loads((claude_dir(sid) / "title").read_text())
+    except (OSError, ValueError):
+        return ""
+    ok = isinstance(t, dict) and t.get("conversation") == f.stem and isinstance(t.get("title"), str)
+    return t["title"] if ok else ""
+
+
+def agent_remember(sid, **chosen):
+    """The permission mode and model you chose (or that a plan approved left)
+    outlive the session's Claude on the chat engine: it sleeps when idle, and
+    wakes in them (Agent.restore). Not the TUI's: it starts in your claude
+    arguments'."""
+    f = claude_dir(sid) / "chosen.json"
+    try:
+        had = json.loads(f.read_text())
+    except (OSError, ValueError):
+        had = {}
+    had = had if isinstance(had, dict) else {}
+    now = {**had, **{k: v for k, v in chosen.items() if isinstance(v, str) and v}}
+    if now != had:
+        write_file(f, json.dumps(now))
+
+
+def message_text(content):
+    """A message's text, its images left out."""
+    if isinstance(content, str):
+        return content
+    return "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+
+
+def message_images(content):
+    return sum(1 for b in content if isinstance(b, dict) and b.get("type") == "image") if isinstance(content, list) else 0
+
+
+def agent_response(p, choice, message=None, answers=None, mode=None):
+    """The answer to one of Claude's requests (live["pending"]), from what
+    was chosen: allow, always (allow, and the rule Claude suggests so it
+    doesn't ask again: only that one, the other suggestions reach further),
+    or deny (with why, or what to change in a plan). answers: AskUserQuestion's,
+    {question: answer}. mode: the permission mode to go on in, as a plan is
+    approved ("acceptEdits"). A str when it doesn't add up."""
+    if choice == "deny":
+        why = message.strip() if isinstance(message, str) and message.strip() else ""
+        no = "The user doesn't want to proceed with this tool use."
+        return {"behavior": "deny", "message": f"{no} The user said:\n{why}" if why else no}
+    if choice not in ("allow", "always"):
+        return f"allow, always or deny, not {choice!r}"
+    given = p.get("input") or {}
+    response = {"behavior": "allow", "updatedInput": given}
+    if p.get("tool") == "AskUserQuestion":
+        answers = {**(p.get("answered") or {}), **(answers if isinstance(answers, dict) else {})}
+        asked = [q.get("question") for q in given.get("questions") or [] if isinstance(q, dict)]
+        if not all(isinstance(answers.get(q), str) and answers[q].strip() for q in asked):
+            return "an answer to each question"
+        response["updatedInput"] = {**given, "answers": {q: answers[q] for q in asked}}
+    rules = [x for x in p.get("suggestions") or [] if x.get("type") == "addRules"] if choice == "always" else []
+    if mode is not None:
+        if mode not in AGENT_MODES:
+            return f"mode is one of {', '.join(AGENT_MODES)}"
+        rules.append({"type": "setMode", "mode": mode, "destination": "session"})
+    if rules:
+        response["updatedPermissions"] = rules
+    return response
 
 
 class Agent:
@@ -8632,8 +9221,13 @@ class Agent:
         self.live = {"pid": os.getpid(), "claude_pid": None, "state": "starting", "since": time.time(),
                      "conversation": conversation_id(self.sid) or None, "model": None, "permission_mode": None,
                      "pending": [], "partial": "", "thinking": False, "activity": None, "tasks": [],
-                     "queue": [], "rate_limits": {}, "turns": 0, "cost_usd": 0.0, "last_result": None,
-                     "account": None, "version": None, "socket": str(self.sock_path), "error": None}
+                     "queue": [], "attachments": 0, "rate_limits": {}, "turns": 0, "cost_usd": 0.0,
+                     "last_result": None, "account": None, "version": None, "socket": str(self.sock_path),
+                     "title": None, "error": None}
+        self.version = self.written = 0     # of live, as changed and as written to live.json
+        self.queue = []             # our messages waiting for Claude to be free (live["queue"] says what they are)
+        self.attached = self.load_attached()    # images for the next message (attach)
+        self.live["attachments"] = len(self.attached)
         self.waiting = {}           # our control requests: request_id -> [threading.Event, response]
         self.watchers = []
         self.busy = False           # Claude is in a turn (ours, or one it took on its own)
@@ -8642,7 +9236,7 @@ class Agent:
         self.at_line_start = True
         self.typed = []             # a paste arriving in the pane, line by line
         self.pasting = False
-        self.answers = {}           # AskUserQuestion answered in the pane so far: request_id -> {question: answer}
+        self.titled = False         # asked for a title for the conversation already
 
     # ---- output to the pane
 
@@ -8664,11 +9258,17 @@ class Agent:
             self.flush_live()
 
     def flush_live(self):
+        # Taken in this order only (never live_lock, then lock: a caller may
+        # hold lock), and an older state never written over a newer one.
+        with self.lock:
+            self.live["updated"] = time.time()
+            data = json.dumps(self.live)
+            self.version += 1
+            version = self.version
         with self.live_lock:
-            with self.lock:
-                self.live["updated"] = time.time()
-                data = json.dumps(self.live)
-            write_file(agent_live_file(self.sid), data)
+            if version > self.written:
+                write_file(agent_live_file(self.sid), data)
+                self.written = version
 
     def live_writer(self):
         while not self.done.is_set():
@@ -8722,15 +9322,66 @@ class Agent:
         uid = uid or str(uuid.uuid4())
         if isinstance(content, str):
             content = content.replace("\r\n", "\n").strip("\n")
-        message = {"uuid": uid, "content": content, "at": time.time()}
         with self.lock:
-            if when == "idle" and (self.busy or self.live["pending"] or self.live["queue"]
+            # The images attached since the last message go with this one,
+            # as a pasted image goes with what's sent next in the TUI.
+            if self.attached:
+                content = [*self.attached, *([{"type": "text", "text": content}] if isinstance(content, str)
+                                             else content)]
+                self.attached = []
+                self.save_attached()
+            message = {"uuid": uid, "content": content, "at": time.time()}
+            if when == "idle" and (self.busy or self.live["pending"] or self.queue
                                    or self.live["state"] == "starting"):
-                self.live["queue"].append(message)
-                self.changed(True)
+                self.queue.append(message)
+                self.queue_changed()
                 return {"ok": True, "uuid": uid, "queued": True}
         self.deliver(message, None if when == "idle" else when)
         return {"ok": True, "uuid": uid, "queued": False}
+
+    def queue_changed(self):
+        """live["queue"] from the queue: each message's text and how many images."""
+        with self.lock:
+            self.live["queue"] = [{"uuid": m["uuid"], "text": message_text(m["content"]),
+                                   "images": message_images(m["content"]), "at": m["at"]} for m in self.queue]
+        self.changed(True)
+
+    def load_attached(self):
+        try:
+            images = json.loads((self.dir / "attached.json").read_text())
+        except (OSError, ValueError):
+            return []
+        return [b for b in images if isinstance(b, dict) and b.get("type") == "image"] if isinstance(images, list) else []
+
+    def save_attached(self):
+        """The images attached and not sent yet, kept for the next Claude of
+        the session if this one stops (asleep) before they go."""
+        f = self.dir / "attached.json"
+        if self.attached:
+            write_file(f, json.dumps(self.attached))
+        else:
+            f.unlink(missing_ok=True)
+        self.live["attachments"] = len(self.attached)
+        self.changed(True)
+
+    def attach(self, images):
+        """Images for the next message, whoever sends it (the app, the pane,
+        amarchy send)."""
+        blocks = []
+        for im in images if isinstance(images, list) else []:
+            kind, data = (im.get("type"), im.get("data")) if isinstance(im, dict) else (None, None)
+            if not (isinstance(kind, str) and CLIP_TYPES.fullmatch(kind) and isinstance(data, str) and data):
+                return {"ok": False, "error": "images are {type: image/png|jpeg|gif|webp, data: base64}"}
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}})
+        if not blocks:
+            return {"ok": False, "error": "no image"}
+        with self.lock:
+            self.attached += blocks
+            self.save_attached()
+            n = len(self.attached)
+        self.out(f"  · {n} image{'s' if n > 1 else ''} attached: {'they go' if n > 1 else 'it goes'} "
+                 f"with the next message", dim=True)
+        return {"ok": True, "attachments": n}
 
     def deliver(self, message, priority=None):
         with self.lock:
@@ -8743,18 +9394,18 @@ class Agent:
     def next_queued(self):
         """Claude is free: the oldest queued message goes in."""
         with self.lock:
-            if self.busy or self.live["pending"] or not self.live["queue"] or self.live["state"] == "starting":
+            if self.busy or self.live["pending"] or not self.queue or self.live["state"] == "starting":
                 return
-            message = self.live["queue"].pop(0)
+            message = self.queue.pop(0)
+        self.queue_changed()
         self.deliver(message)
-        self.changed()
 
     def answer(self, request_id, response):
         """Settle one of Claude's requests (a permission, a question, a plan)."""
         with self.lock:
             pending = next((p for p in self.live["pending"] if p["request_id"] == request_id), None)
             if not pending:
-                return {"ok": False, "error": f"nothing waits for an answer as {request_id}"}
+                return {"ok": False, "error": "Claude doesn't wait for that answer anymore", "gone": True}
             self.live["pending"].remove(pending)
         self.write({"type": "control_response", "response": {"subtype": "success", "request_id": request_id,
                                                              "response": response}})
@@ -8764,6 +9415,42 @@ class Agent:
         self.set_state()
         self.changed(True)
         return {"ok": True}
+
+    def answer_question(self, request_id, question, answer):
+        """One of AskUserQuestion's questions answered; the last one sends
+        them all."""
+        with self.lock:
+            p = next((p for p in self.live["pending"] if p["request_id"] == request_id), None)
+            if not p or p["tool"] != "AskUserQuestion":
+                return {"ok": False, "error": "Claude doesn't wait for that answer anymore", "gone": True}
+            asked = [q.get("question") for q in p["input"].get("questions") or [] if isinstance(q, dict)]
+            if question not in asked:
+                return {"ok": False, "error": "Claude didn't ask that"}
+            if not isinstance(answer, str) or not answer.strip():
+                return {"ok": False, "error": "no answer"}
+            p["answered"][question] = answer.strip()
+            left = [q for q in asked if q not in p["answered"]]
+        if left:
+            self.out(f"  next: {left[0]}", dim=True)
+            self.changed(True)
+            return {"ok": True, "left": len(left)}
+        return self.answer(request_id, agent_response(p, "allow"))
+
+    def remember(self, **chosen):
+        agent_remember(self.sid, **chosen)
+
+    def restore(self):
+        try:
+            chosen = json.loads((self.dir / "chosen.json").read_text())
+        except (OSError, ValueError):
+            return
+        if chosen.get("mode") in AGENT_MODES and chosen["mode"] != self.live["permission_mode"]:
+            if self.control({"subtype": "set_permission_mode", "mode": chosen["mode"]}).get("subtype") == "success":
+                self.live["permission_mode"] = chosen["mode"]
+        if isinstance(chosen.get("model"), str):
+            res = self.control({"subtype": "set_model", "model": chosen["model"]})
+            if res.get("subtype") == "success":
+                self.live["model"] = (res.get("response") or {}).get("model") or chosen["model"]
 
     # ---- what claude says
 
@@ -8821,6 +9508,8 @@ class Agent:
             set_conversation_id(self.sid, o.get("session_id") or "")
             self.changed()
         elif kind == "system" and sub == "status":
+            if o.get("permissionMode"):
+                self.remember(mode=o["permissionMode"])
             with self.lock:
                 if "permissionMode" in o:
                     live["permission_mode"] = o["permissionMode"]
@@ -8834,6 +9523,8 @@ class Agent:
             self.changed(True)
         elif kind == "system" and sub == "task_notification":
             self.out(f"  ⏺ background task {o.get('status', 'done')}: {o.get('summary') or o.get('task_id')}", dim=True)
+        elif kind == "system" and sub == "session_title_changed":
+            self.set_title(o.get("title"))
         elif kind == "system" and sub == "compact_boundary":
             self.out("  · conversation compacted", dim=True)
         elif kind == "system" and sub == "peer_message_hold":
@@ -8868,7 +9559,8 @@ class Agent:
         pending = {"request_id": o["request_id"], "tool": req.get("tool_name"), "input": req.get("input") or {},
                    "description": req.get("description") or req.get("display_name"),
                    "suggestions": req.get("permission_suggestions") or [], "reason": req.get("decision_reason"),
-                   "tool_use_id": req.get("tool_use_id"), "at": time.time()}
+                   "tool_use_id": req.get("tool_use_id"), "at": time.time(),
+                   "answered": {}}     # AskUserQuestion's questions answered so far, one by one
         with self.lock:
             self.live["pending"].append(pending)
         self.draw_request(pending)
@@ -8888,7 +9580,8 @@ class Agent:
             self.out("\n  \033[1m? Claude's plan:\033[0m")
             for line in str(given.get("plan") or "").splitlines():
                 self.out(f"    {line}")
-            self.out("  y: approve and start · n <what to change>: keep planning", dim=True)
+            self.out("  y: approve and start · a: approve, and accept edits without asking · "
+                     "n <what to change>: keep planning", dim=True)
         else:
             self.out(f"\n  \033[1m? Claude wants to use {tool_line(tool, given)}\033[0m")
             if p["reason"]:
@@ -8979,12 +9672,80 @@ class Agent:
                 self.live["conversation"] = o["session_id"]
         set_conversation_id(self.sid, o.get("session_id") or "")
         took = (o.get("duration_ms") or 0) / 1000
-        note = "interrupted" if o.get("subtype") == "error_during_execution" else (
+        stopped = o.get("subtype") == "error_during_execution"
+        note = "interrupted" if stopped else (
             "error: " + str(o.get("result") or o.get("subtype")) if o.get("is_error") else "done")
         self.out(f"  · {note} · {took:.1f}s", dim=True)
         self.set_state()
         self.changed(True)
+        # The Stop hook says idle (and done) after a turn that ended on its
+        # own; one you stopped, or one that failed, ends without it.
+        with self.lock:
+            idle = not self.busy and not self.live["pending"] and not self.queue
+        if idle:
+            agent_status(self.sid, "idle", done=not stopped)
         self.next_queued()
+        if not self.titled:
+            self.titled = True
+            threading.Thread(target=self.name_conversation, daemon=True).start()
+
+    def name_conversation(self):
+        """Claude Code's TUI titles a conversation (the list's name for the
+        session comes from it); under -p it doesn't. A conversation without
+        one gets one, from its first message, the way the TUI's would read."""
+        s = session(self.sid) or self.s
+        f = transcript(s)
+        if not f:
+            self.titled = False     # no conversation yet: after the next turn
+            return
+        first, title = None, None
+        try:
+            with open(f, "rb") as fh:
+                for line in fh:
+                    if b'"ai-title"' in line or b'"custom-title"' in line:
+                        try:
+                            d = json.loads(line)
+                            title = d.get("customTitle") or d.get("aiTitle") or title
+                        except ValueError:
+                            pass
+                    elif first is None and b'"type":"user"' in line:
+                        try:
+                            r = json.loads(line)
+                        except ValueError:
+                            continue
+                        content = (r.get("message") or {}).get("content")
+                        if r.get("isMeta") or r.get("isSidechain") or not isinstance(content, (str, list)):
+                            continue
+                        item = user_item(message_text(content))
+                        first = item["text"] if item and item["kind"] == "user" else None
+        except OSError:
+            return
+        title = title or our_title(self.sid, f)
+        if title:
+            self.set_title(title)
+            return
+        if not first:
+            self.titled = False     # nothing said yet: after the next turn
+            return
+        title = conversation_title(first)
+        if title:
+            # Kept by amarchy (saved_title reads it), not given to Claude:
+            # rename_session would rename the session for ListAgents too.
+            write_file(self.dir / "title", json.dumps({"conversation": f.stem, "title": title}))
+            self.set_title(title)
+
+    def set_title(self, title):
+        """The conversation's title, as the TUI shows it: the pane's title,
+        which the list reads (host_titles)."""
+        title = " ".join(str(title or "").split())[:200]
+        if not title:
+            return
+        with self.lock:
+            self.live["title"] = title
+        with self.write_lock:
+            sys.stdout.write(f"\033]0;{title}\007")
+            sys.stdout.flush()
+        self.changed()
 
     # ---- watchers on the socket
 
@@ -9065,20 +9826,33 @@ class Agent:
             if when not in ("idle", "next", "now", "later"):
                 return {"ok": False, "error": f"when is idle, next, now or later, not {when!r}"}
             return self.send(content, "idle" if when == "idle" else when, r.get("uuid"))
+        if op == "attach":
+            return self.attach(r.get("images"))
         if op == "unqueue":
             with self.lock:
-                before = len(self.live["queue"])
-                self.live["queue"] = [m for m in self.live["queue"] if m["uuid"] != r.get("uuid")]
-                gone = before != len(self.live["queue"])
-            self.changed(True)
+                before = len(self.queue)
+                self.queue = [m for m in self.queue if m["uuid"] != r.get("uuid")]
+                gone = before != len(self.queue)
+            self.queue_changed()
             return {"ok": gone, **({} if gone else {"error": "no such message waiting"})}
         if op == "answer":
-            response = r.get("response")
-            if not isinstance(response, dict) or response.get("behavior") not in ("allow", "deny"):
-                return {"ok": False, "error": "response is {behavior: allow|deny, ...}"}
+            # {request_id, choice: allow|always|deny, message, answers, mode},
+            # {request_id, question, answer} (one of several questions), or
+            # {request_id, response} (the control response's, as is).
             with self.lock:
                 p = next((p for p in self.live["pending"] if p["request_id"] == r.get("request_id")), None)
-            if p and response["behavior"] == "allow" and "updatedInput" not in response:
+            if not p:
+                return {"ok": False, "error": "Claude doesn't wait for that answer anymore", "gone": True}
+            if "question" in r:
+                return self.answer_question(p["request_id"], r.get("question"), r.get("answer"))
+            response = r.get("response")
+            if response is None:
+                response = agent_response(p, r.get("choice"), r.get("message"), r.get("answers"), r.get("mode"))
+                if isinstance(response, str):
+                    return {"ok": False, "error": response}
+            if not isinstance(response, dict) or response.get("behavior") not in ("allow", "deny"):
+                return {"ok": False, "error": "response is {behavior: allow|deny, ...}"}
+            if response["behavior"] == "allow" and "updatedInput" not in response:
                 response = {**response, "updatedInput": p["input"]}
             if response["behavior"] == "deny" and not response.get("message"):
                 response = {**response, "message": "The user doesn't want to proceed with this tool use."}
@@ -9087,8 +9861,8 @@ class Agent:
             res = self.control({"subtype": "interrupt", **({"cancel_queued": True} if r.get("everything") else {})})
             if r.get("everything"):
                 with self.lock:
-                    self.live["queue"] = []
-                self.changed(True)
+                    self.queue = []
+                self.queue_changed()
             return {"ok": res.get("subtype") == "success", "response": res.get("response"), "error": res.get("error")}
         if op == "control":
             request = r.get("request")
@@ -9099,10 +9873,12 @@ class Agent:
             if ok and request["subtype"] == "set_permission_mode":
                 with self.lock:
                     self.live["permission_mode"] = request.get("mode")
+                self.remember(mode=request.get("mode"))
                 self.changed(True)
             if ok and request["subtype"] == "set_model":
                 with self.lock:
                     self.live["model"] = (res.get("response") or {}).get("model") or request.get("model")
+                self.remember(model=request.get("model"))
                 self.changed(True)
             return {"ok": ok, "response": res.get("response"), "error": res.get("error")}
         if op == "stop":
@@ -9144,28 +9920,20 @@ class Agent:
         word = word.lower()
         if p["tool"] == "AskUserQuestion":
             # One question at a time, in order; the last answer sends them all.
-            questions = p["input"].get("questions") or []
-            got = self.answers.setdefault(p["request_id"], {})
-            q = next((q for q in questions if q.get("question") not in got), None)
+            questions = [q for q in p["input"].get("questions") or [] if isinstance(q, dict)]
+            q = next((q for q in questions if q.get("question") not in p["answered"]), None)
             if q:
                 opts = q.get("options") or []
                 picks = [x.strip() for x in text.split(",")]
                 chosen = [opts[int(x) - 1]["label"] for x in picks if x.isdigit() and 0 < int(x) <= len(opts)]
-                got[q.get("question")] = ", ".join(chosen) if chosen and len(chosen) == len(picks) else text.strip()
-            left = [q for q in questions if q.get("question") not in got]
-            if left:
-                self.out(f"  next: {left[0].get('question')}", dim=True)
-                return
-            self.answers.pop(p["request_id"], None)
-            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": {**p["input"], "answers": got}})
-        elif word in ("y", "yes"):
-            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": p["input"]})
-        elif word in ("a", "always"):
-            rules = [x for x in p["suggestions"] if x.get("type") == "addRules"] or p["suggestions"]
-            self.answer(p["request_id"], {"behavior": "allow", "updatedInput": p["input"], "updatedPermissions": rules})
-        elif word in ("n", "no"):
-            self.answer(p["request_id"], {"behavior": "deny", "message": rest.strip() or
-                                          "The user doesn't want to proceed with this tool use."})
+                self.answer_question(p["request_id"], q.get("question"),
+                                     ", ".join(chosen) if chosen and len(chosen) == len(picks) else text.strip())
+        elif word in ("y", "yes", "a", "always", "n", "no"):
+            choice = {"y": "allow", "a": "always", "n": "deny"}[word[0]]
+            plan = p["tool"] == "ExitPlanMode"
+            self.answer(p["request_id"], agent_response(
+                p, "allow" if plan and choice == "always" else choice, rest,
+                mode="acceptEdits" if plan and choice == "always" else None))
         else:
             self.out("  y, a or n (with why, if you like)", dim=True)
 
@@ -9188,19 +9956,13 @@ class Agent:
     def run(self):
         s = self.s
         self.dir.mkdir(parents=True, exist_ok=True)
-        # One broker per session: one going (its pane restarted) has a few
-        # seconds to let its Claude go.
-        lock = open(self.dir / "agent.lock", "a")
-        end = time.time() + 15
-        while True:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.time() > end:
-                    print(f"\n  amarchy agent: another broker runs {self.sid} already\n", flush=True)
-                    return 1
-                time.sleep(0.2)
+        # One Claude per conversation: one going (its pane restarted, the
+        # engine switched) has a few seconds to let it go.
+        other = claim_driver(self.sid, "chat")
+        if other:
+            print(f"\n  \033[31mThis conversation is open in another Claude already (pid {other.get('pid')}, "
+                  f"the {other.get('engine')} engine).\033[0m\n", flush=True)
+            return 1
         path = Path(s["path"])
         os.chdir(path)
         os.environ["PWD"] = str(path)
@@ -9212,9 +9974,17 @@ class Agent:
         if sys.stdin.isatty():
             sh("stty", "sane", "-echoctl")      # raw from the sleep loop's wait for a key; a paste's end unseen
             print("\033[H\033[2J\033[3J", end="")
-        print(f"\033]0;{s['repo']} · {s['name']}\007", end="")
+        print(f"\033]0;amarchy:{s['id']}\007", end="")      # the list then reads the conversation's title
+        if transcript(s) and sys.stdout.isatty():
+            # The conversation so far, as the pane showed it before (asleep,
+            # or in the TUI): Claude under -p doesn't print it again.
+            try:
+                width = os.get_terminal_size().columns
+            except OSError:
+                width = 100
+            self.out("\n".join(conversation_lines(s, width)))
         self.out(f"\n  \033[1m{s['repo']} · {s['name']}\033[0m \033[2m· Claude Code on amarchy's chat engine "
-                 f"(experimental)\033[0m\n")
+                 f"(the new chat)\033[0m\n")
         argv = agent_argv(s)
         try:
             self.claude = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -9224,7 +9994,11 @@ class Agent:
             self.out(f"  \033[31mCouldn't start Claude Code: {e}\033[0m")
             return 1
         self.live["claude_pid"] = self.claude.pid
+        write_file(self.dir / "driver", json.dumps({"pid": os.getpid(), "claude_pid": self.claude.pid,
+                                                    "engine": "chat", "since": time.time()}))
         self.flush_live()
+        self.titled = True
+        threading.Thread(target=self.name_conversation, daemon=True).start()     # one it has already
         for target in (self.read_claude, self.read_claude_err, self.serve, self.live_writer):
             threading.Thread(target=target, daemon=True).start()
         for sig in (signal.SIGTERM, signal.SIGHUP):
@@ -9240,6 +10014,7 @@ class Agent:
             with self.lock:
                 self.live.update(account=r.get("account"), version=r.get("claude_code_version"),
                                  permission_mode=r.get("current_permission_mode"), state="idle")
+            self.restore()
             agent_status(self.sid, "idle")
         else:
             with self.lock:
@@ -9257,11 +10032,20 @@ class Agent:
         self.done.set()
         with self.lock:
             self.live.update(state="exited", pending=[], partial="", activity=None, exit_code=code)
-            queued = self.live["queue"]
-        if queued:
-            # Not sent yet: the next Claude of this session starts with them.
-            write_file(self.dir / "send", "\n\n".join(m["content"] for m in queued if isinstance(m["content"], str)))
+            queued, self.queue = self.queue, []
+            # Not sent yet: the next Claude of this session starts with them,
+            # their images attached again for it.
+            self.attached = [b for m in queued if isinstance(m["content"], list)
+                             for b in m["content"] if b.get("type") == "image"] + self.attached
+            self.save_attached()
+            self.live["queue"] = []
+        text = "\n\n".join(t for t in (message_text(m["content"]).strip() for m in queued) if t)
+        if text:
+            write_file(self.dir / "send", text)
         self.flush_live()
+        # It won't say it's idle, if it stopped in a turn or a question.
+        if asleep_since(self.sid) is None:
+            agent_status(self.sid, "idle", done=False)
         try:
             self.server.close()
         except AttributeError:
@@ -9269,6 +10053,45 @@ class Agent:
         self.sock_path.unlink(missing_ok=True)
         self.out(f"  · Claude Code exited ({code})", dim=True)
         return 0
+
+
+def switch_engine(s, want, force=False):
+    """Put a session's Claude on the other engine ("chat" or "terminal"),
+    with the same conversation: once it's idle (a turn under way, or a
+    question, would be cut), unless forced. Running, it stops (as quitting
+    it would), and its pane starts again on the other one once it's gone (the
+    two never run one conversation at once: claim_driver); asleep or not
+    started, it wakes on it. None once done, else why not."""
+    sid = s["id"]
+    if want not in ("chat", "terminal"):
+        return "the engine is chat or terminal"
+    if engine(s) == want:
+        return None
+    try:
+        status = (STATUS / sid).read_text().strip()
+    except OSError:
+        status = "idle"
+    if status in ("working", "waiting") and not force:
+        return ("Claude is working: switch once it's done" if status == "working"
+                else "Claude is asking you something: answer it first")
+    s = session(sid) or s
+    s["engine"] = want
+    if want == "terminal":
+        s.pop("engine")
+    save_session(s)
+    pane = host_pane(s)
+    if pane and asleep_since(sid) is None and not s.get("setup"):
+        if want == "terminal" and agent_up(sid):
+            try:
+                agent_call(sid, {"op": "stop"}, timeout=5)      # its queue kept for the TUI (send)
+            except OSError:
+                pass
+        stop_claude(pane)
+        end = time.time() + 10
+        while claude_driver(sid) and time.time() < end:
+            time.sleep(0.1)
+        host_respawn(s)
+    return None
 
 
 def cmd_agent(args):
@@ -9285,8 +10108,6 @@ def cmd_agent(args):
         s = session(args[0])
         if not s:
             return fail(f"no session {args[0]!r}")
-        if not agent_allowed(s):
-            return fail(f"{s['id']}: the chat engine is for test sessions only (named test-...) for now")
         return Agent(s).run()
     cmd, rest = args[0], args[1:]
     if not rest:
@@ -9297,41 +10118,20 @@ def cmd_agent(args):
         return fail(f"no session {rest[0]!r}")
     sid, rest = s["id"], rest[1:]
     if cmd == "engine":
+        force = "--force" in rest
+        rest = [a for a in rest if a != "--force"]
         if not rest:
             print(engine(s))
             return 0
-        want = rest[0]
-        if want not in ("chat", "terminal") or len(rest) > 1:
-            return fail("amarchy agent engine <id> [chat|terminal]")
-        if want == "chat" and not agent_allowed(s):
-            return fail(f"{sid}: the chat engine is for test sessions only (named test-...) for now")
-        if engine(s) == want:
-            print(want)
-            return 0
-        try:
-            status = (STATUS / sid).read_text().strip()
-        except OSError:
-            status = "idle"
-        if status in ("working", "waiting") and "--force" not in rest:
-            return fail(f"{sid} is {status}: switch when it's idle")
-        s["engine"] = want
-        if want == "terminal":
-            s.pop("engine")
-        save_session(s)
-        # Its Claude pane starts again on the other engine, with the same conversation.
-        pane = host_pane(s)
-        if pane and asleep_since(sid) is None and not s.get("setup"):
-            stop_claude(pane)
-            if want == "terminal" and agent_up(sid):
-                try:
-                    agent_call(sid, {"op": "stop"}, timeout=5)
-                except OSError:
-                    pass
-            host_respawn(s)
-        print(want)
+        if len(rest) > 1 or rest[0] not in ("chat", "terminal"):
+            return fail("amarchy agent engine <id> [chat|terminal] [--force]")
+        why = switch_engine(s, rest[0], force)
+        if why:
+            return fail(f"{sid}: {why}")
+        print(rest[0])
         return 0
     if engine(s) != "chat":
-        return fail(f"{sid} runs on the terminal engine (amarchy agent engine {sid} chat, for a test session)")
+        return fail(f"{sid} runs on the terminal engine (amarchy agent engine {sid} chat switches it)")
     if cmd == "state":
         print(json.dumps(agent_live(sid), indent=1))
         return 0
@@ -9366,17 +10166,12 @@ def cmd_agent(args):
                 response = json.loads(rest[2])
             except (IndexError, ValueError):
                 return fail("--json takes the response, e.g. '{\"behavior\": \"allow\"}'")
-        elif verdict in ("allow", "always"):
-            response = {"behavior": "allow"}
-            if verdict == "always":
-                p = next((p for p in agent_live(sid).get("pending") or [] if p["request_id"] == rid), None)
-                rules = [x for x in (p or {}).get("suggestions") or [] if x.get("type") == "addRules"]
-                response["updatedPermissions"] = rules
-        elif verdict == "deny":
-            response = {"behavior": "deny", "message": " ".join(rest[2:])}
+        elif verdict in ("allow", "always", "deny"):
+            request = {"op": "answer", "request_id": rid, "choice": verdict, "message": " ".join(rest[2:])}
         else:
             return fail(f"allow, always or deny, not {verdict!r}")
-        request = {"op": "answer", "request_id": rid, "response": response}
+        if verdict == "--json":
+            request = {"op": "answer", "request_id": rid, "response": response}
     elif cmd == "interrupt":
         request = {"op": "interrupt", "everything": "--all" in rest}
     elif cmd == "mode":

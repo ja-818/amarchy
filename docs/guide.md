@@ -502,6 +502,18 @@ chime (not for the one you're looking at on the phone); your assistant's
 always (see [Your assistant](#your-assistant)). Since it reads the sessions on the host, it
 doesn't matter which Anthropic account each one's Claude Code uses.
 
+**Try the new chat** in a session's ••• menu (and in the wide layout's
+`Ctrl+Alt+M` → This session) puts its Claude on amarchy's chat engine, the
+same conversation going on: Claude Code runs as `claude -p` behind a small
+broker instead of its terminal app, so what it asks (a permission, its
+questions, a plan to approve) reaches the app as data rather than read off
+its screen, answers go straight to it, Stop stops it, images go with your
+next message, and messages queue until Claude is free. Everything else works
+as before: the list, sleep, notifications, `amarchy send`. Claude's voice
+mode is the terminal app's, so dictation there uses the other ways. **Back to
+the classic terminal** switches back; either way waits until Claude is idle.
+Details in [the chat engine's protocol](agent-protocol.md).
+
 It needs [Tailscale](https://tailscale.com) on the host and on the phone, with
 HTTPS certificates turned on for your tailnet (in the Tailscale admin console:
 DNS → HTTPS Certificates). On the host:

@@ -259,6 +259,23 @@ async function sleepSession(s) {
   } catch (e) { toast(e.message); }
 }
 
+// The session's Claude on the other engine, the same conversation: the new
+// chat (Claude Code as a chat, its questions as data) or Claude's classic
+// terminal (the TUI). Once it's idle.
+async function switchEngine(s, want) {
+  try {
+    await api(`/api/session/${encodeURIComponent(s.id)}/engine`, { engine: want });
+    toast(want === "chat" ? "On the new chat now: same conversation" : "Back on Claude's classic terminal");
+  } catch (e) { toast(e.message); }
+}
+
+function engineButton(s) {
+  if (s.setup) return null;
+  const chat = s.engine === "chat";
+  return h("button", { class: "control wide", onclick: () => { closeSheets(); switchEngine(s, chat ? "terminal" : "chat"); } },
+    chat ? "Back to the classic terminal" : "Try the new chat");
+}
+
 // Wake or sleep, as the session is now.
 function sleepButton(s) {
   const st = sleepOf(s);
@@ -919,7 +936,8 @@ class SessionView {
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => { this.grow(); this.sendButtons(); store.set(`draft:${this.id}`, this.input.value); },
                               state: (text) => this.listening(text),
-                              claude: { start: () => this.dictate(), stop: () => this.letGo() } });
+                              claude: { start: () => this.dictate(), stop: () => this.letGo(),
+                                        off: () => !!this.row && this.row.engine === "chat" } });
     this.composer = h("div", { class: "prompt" }, this.input, this.imageBtn, this.micBtn, this.stopBtn, this.sendBtn);
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
@@ -1434,6 +1452,7 @@ class SessionView {
         shown("screen", "Claude's screen, as text")),
       h("div", { class: "section" }, "Session"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); pickImageInto({ id: this.id }); } }, "Paste an image into Claude…"),
+      engineButton({ ...row, id: this.id }),
       ...sessionActions({ ...row, id: this.id }),
       closeButton({ ...row, id: this.id }));
   }

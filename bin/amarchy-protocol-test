@@ -942,7 +942,25 @@ def broker_check(t):
         while time.time() < end and state().get("state") != "idle":
             time.sleep(0.5)
         check(state().get("state") == "idle", "not idle after interrupt")
+        # No Stop hook after an interrupt: the broker says idle itself.
+        end = time.time() + 10
+        while time.time() < end and status_file.read_text().strip() != "idle":
+            time.sleep(0.3)
+        check(status_file.read_text().strip() == "idle",
+              f"the session's status is {status_file.read_text().strip()!r} after an interrupt")
         t.note("socket send / answer / interrupt / mode work; live state shows pending, partial, state")
+        # Back to the TUI: it takes the conversation over once the broker let go of it.
+        conversation = state().get("conversation")
+        r = run("agent", "engine", sid, "terminal")
+        check(r.returncode == 0, f"amarchy agent engine terminal: {r.stderr.strip() or r.stdout.strip()}")
+        driver = status_file.parent.parent / "claude" / sid / "driver"
+        end = time.time() + 60
+        while time.time() < end and json.loads(driver.read_text() or "{}").get("engine") != "terminal":
+            time.sleep(0.5)
+        check(json.loads(driver.read_text()).get("engine") == "terminal", "the TUI didn't take the conversation over")
+        convo = (status_file.parent.parent / "claude" / sid / "conversation").read_text().strip()
+        check(convo == conversation, f"the TUI is in another conversation ({convo}, not {conversation})")
+        t.note("switched back to the terminal engine, same conversation")
     finally:
         # What it made (broker.txt) goes, so the session closes without --force.
         for x in json.loads(run("list", "--compact").stdout or "[]"):

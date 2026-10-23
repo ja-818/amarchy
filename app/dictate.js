@@ -95,7 +95,8 @@ class Dictate {
     el.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
-  way() { return dictationWay(!!this.opts.claude); }
+  // Claude's voice mode is the TUI's: not on the chat engine (claude.off).
+  way() { return dictationWay(!!this.opts.claude && !(this.opts.claude.off && this.opts.claude.off())); }
 
   on() { return !!this.run; }
 

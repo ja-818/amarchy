@@ -1163,6 +1163,9 @@ function deskMenu() {
       { label: "The terminal", key: "Ctrl+Alt+Return", act: () => toPane("term") }] }) },
     { label: "This session", icon: "more", group: () => ({ title: s.task || where(s), items: [
       { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
+      ...(s.setup ? [] : [s.engine === "chat" ? { label: "Back to the classic terminal", detail: "Claude Code's own, same conversation",
+                                                act: () => switchEngine(s, "terminal") }
+                                              : { label: "Try the new chat", detail: "same conversation", act: () => switchEngine(s, "chat") }]),
       ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                                 : { label: "Put to sleep", act: () => sleepSession(s) }]),
       { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
