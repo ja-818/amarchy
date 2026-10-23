@@ -44,7 +44,3 @@
 .term-keys .control { min-width: 40px; padding: 4px 8px; }
 .term-keys .control.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 
-/* Chat | Terminal, under a session's header on the phone. */
-.session-tabs { padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }
-.session-tabs[hidden] { display: none; }
-.session-tabs .control { min-height: 44px; font-size: var(--caption); font-weight: 700; }

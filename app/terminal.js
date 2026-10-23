@@ -327,6 +327,6 @@ function terminalSettings(draw) {
   return [h("div", { class: "section" }, "Terminals"),
     h("div", { class: "seg" }, ...[[true, "Show"], [false, "Hide"]].map(([value, label]) =>
       h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => set(value) }, label))),
-    h("p", {}, on ? "The project's terminal and Claude's classic terminal open in each chat: the Terminal tab on the phone, the panel beside the chat on a computer."
+    h("p", {}, on ? "The project's terminal and Claude's classic terminal open in each chat: from the chat's menu (⋯) on the phone, the panel beside the chat on a computer."
                   : "Just the chat. A chat's terminals are still in its menu, under Advanced, for when you need one.")];
 }

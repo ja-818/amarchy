@@ -345,6 +345,36 @@ async function run(browser, base, layout) {
   const done = await page.evaluate(() => [...document.querySelectorAll(".turn")].at(-1).querySelector(".rcard-title")?.textContent);
   check(layout, done === "Filters added", "then its cards");
 
+  // On the phone the switch isn't over the chat (opts.noSwitch): it's in
+  // Settings (Replies) and the chat's menu. A choice there takes every chat open.
+  const phone = await page.evaluate(() => {
+    const c2 = new Chat({ id: "fake-cards-2", row: { id: "fake-cards-2", engine: "chat", status: "idle" }, noSwitch: true });
+    window.__chat2 = c2;
+    return { switches: c2.el.querySelectorAll(".view-switch").length };
+  });
+  check(layout, phone.switches === 0, "a phone's chat has no Cards | Chat switch over it");
+  await page.evaluate(() => openSettings());
+  await page.waitForSelector(".sheet-back.settings .seg");
+  const settings = await page.evaluate(() => {
+    const sh = document.querySelector(".sheet-back.settings");
+    const sec = [...sh.querySelectorAll(".section")].find((x) => x.textContent === "Replies");
+    const seg = sec && sec.nextElementSibling;
+    return { found: !!sec, buttons: seg ? [...seg.querySelectorAll("button")].map((b) => b.textContent) : [],
+             on: seg ? seg.querySelector(".on")?.textContent : null };
+  });
+  check(layout, settings.found && settings.buttons.join() === "Cards,Chat", `Settings has Replies: Cards | Chat (${JSON.stringify(settings)})`);
+  await page.evaluate(() => { const sh = document.querySelector(".sheet-back.settings");
+    const sec = [...sh.querySelectorAll(".section")].find((x) => x.textContent === "Replies");
+    [...sec.nextElementSibling.querySelectorAll("button")].find((b) => b.textContent === "Chat").click(); });
+  await page.waitForTimeout(200);
+  const chosen = await page.evaluate(() => ({ a: window.__chat.mode, b: window.__chat2.mode, kept: store.get("chatView"),
+    on: [...document.querySelector(".sheet-back.settings").querySelectorAll(".section")].find((x) => x.textContent === "Replies").nextElementSibling.querySelector(".on")?.textContent }));
+  check(layout, chosen.a === "chat" && chosen.b === "chat" && chosen.kept === "chat" && chosen.on === "Chat",
+    `choosing Chat in Settings switches every chat open (${JSON.stringify(chosen)})`);
+  await page.evaluate(() => { setChatView("screen"); closeSheets(); window.__chat2.close(); });
+  const back2 = await page.evaluate(() => window.__chat.mode);
+  check(layout, back2 === "screen", "and Cards switches them back");
+
   check(layout, errors.length === 0, `no page errors (${errors.join("; ") || "none"})`);
   await ctx.close();
 }

@@ -179,8 +179,11 @@ terminals; after this, the wide layout is chat-first too.
 ### The cards: the default view
 
 The chat's main view is **the cards**; the conversation is the other view,
-one tap away (the **Cards | Chat** switch over the chat; the choice is kept on
-the device). Both are drawn from the same items.
+one tap away: on a computer the **Cards | Chat** switch over the chat; on the
+phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*, so the
+chat keeps the whole screen. The choice is kept on the device and every chat
+open takes it. Both views are drawn from the same items. (The phone's terminals
+open from the chat's menu too; its back arrow returns from one to the chat.)
 
 - **Claude answers as it always does.** Its text is treated like its
   thinking: it's there, in a fold, but it isn't the reply.

@@ -707,6 +707,22 @@ function cardLink(l) {
     h("span", { class: "rcard-link-host" }, url.host + (url.pathname.length > 1 ? url.pathname : "")));
 }
 
+// How the chats show on this device: "screen" (the cards) or "chat" (the
+// conversation). Settings and a chat's menu set it; every chat open takes it.
+function chatView() { return store.get("chatView") === "chat" ? "chat" : "screen"; }
+function setChatView(mode) {
+  store.set("chatView", mode);
+  window.dispatchEvent(new CustomEvent("amarchy-chatview", { detail: mode }));
+}
+
+// The choice, as a row of two (Settings, a chat's menu); then(): after a tap.
+function chatViewSeg(then) {
+  const now = chatView();
+  return h("div", { class: "seg" }, ...[["screen", "Cards"], ["chat", "Chat"]].map(([mode, label]) =>
+    h("button", { class: `control${now === mode ? " on" : ""}`, type: "button", "aria-pressed": String(now === mode),
+                  onclick: () => { setChatView(mode); if (then) then(); } }, label)));
+}
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views).
@@ -720,7 +736,7 @@ class Chat {
     this.view = { content: null, above: [], composer: true };
     // How the chat shows: the cards (the default) or the conversation. Both
     // are drawn from the same items, kept here in order (see keepItems).
-    this.mode = store.get("chatView") === "chat" ? "chat" : "screen";
+    this.mode = chatView();
     this.items = [];
     this.itemKeys = new Set();
     this.cards = {};            // each turn's cards, by its message's record (the stream's "cards")
@@ -773,7 +789,12 @@ class Chat {
     this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
     this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
     this.drawSwitch();
-    this.el = h("div", { class: "chat" }, this.switchEl, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    // (On the phone it's in Settings and the chat's menu instead: opts.noSwitch.)
+    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl,
+                h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    // Chosen in Settings (setChatView): every chat open takes it.
+    this.onViewChosen = (e) => this.showMode(e.detail);
+    window.addEventListener("amarchy-chatview", this.onViewChosen);
     this.listenDrops();
     this.renderDock();
   }
@@ -889,6 +910,7 @@ class Chat {
     if (this.es) this.es.close();
     this.es = null;
     window.removeEventListener("amarchy-ask", this.onAskEvent);
+    window.removeEventListener("amarchy-chatview", this.onViewChosen);
     clearInterval(this.workingTimer);
     this.workingEl = null;
     this.closed = true;

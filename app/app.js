@@ -433,7 +433,6 @@ function openList() {
 function refresh() {
   if (app.desk) deskList();
   else if (!app.session) renderList();
-  else app.session.renderTabs();       // Show terminals may have changed
   keptListScroll();
 }
 
@@ -945,12 +944,13 @@ class SessionView {
   build() {
     this.titleEl = h("div", { class: "title" });
     const bar = h("div", { class: "bar" },
-      h("button", { class: "icon-btn", "aria-label": "Chats", onclick: () => { go("#/"); } }, glyph("back")),
+      // Back: from a terminal to the chat, from the chat to the list.
+      h("button", { class: "icon-btn", "aria-label": "Back", onclick: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); } }, glyph("back")),
       this.titleEl,
       h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({
-      id: this.id, row: this.row,
+      id: this.id, row: this.row, noSwitch: true,      // Cards | Chat: in Settings and the menu (⋯)
       onSession: (row) => { this.row = row; this.renderHeader(); },
       onGone: (why) => {
         toast(why ? "Can't open that chat." : "That chat was closed.");
@@ -959,9 +959,8 @@ class SessionView {
       // A notification about its card was tapped: the conversation, where the card is.
       onAsk: () => { if (this.mode !== "chat") this.setMode("chat"); },
     });
-    // Chat | Terminal (with Show terminals on, or while the terminal shows).
-    this.tabs = h("div", { class: "seg session-tabs", role: "tablist", "aria-label": "Show" });
-    this.el = h("div", { class: "view" }, bar, this.tabs, this.chat.el);
+    // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
+    this.el = h("div", { class: "view" }, bar, this.chat.el);
     root.replaceChildren(this.el);
     this.renderHeader();
   }
@@ -979,15 +978,6 @@ class SessionView {
 
   // What restyleTerminals() wears the look again on.
   get pane() { return this._terminal || null; }
-
-  renderTabs() {
-    const on = this.mode === "terminal" || terminalsShown();
-    this.tabs.hidden = !on;
-    if (!on) return;
-    const tab = (mode, label) => h("button", { class: `control${this.mode === mode ? " on" : ""}`, type: "button", role: "tab",
-                                              "aria-selected": String(this.mode === mode), onclick: () => this.setMode(mode) }, label);
-    this.tabs.replaceChildren(tab("chat", "Chat"), tab("terminal", "Terminal"));
-  }
 
   open() { this.chat.open(); }
 
@@ -1014,7 +1004,6 @@ class SessionView {
 
   // The strip above Claude: its state, what it's about, project · name.
   renderHeader() {
-    this.renderTabs();
     if (!this.row) {
       this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
       return;
@@ -1051,7 +1040,6 @@ class SessionView {
       if (which === "classic") t.classic();
       else t.open(this.id).then(() => { if (which) t.show(which); });
     }
-    this.renderTabs();
   }
 
   menu() {
@@ -1067,10 +1055,12 @@ class SessionView {
     // terminal only when Show terminals is on: it's for what the chat can't do).
     const classicOk = !!(app.view && app.view.show_terminals);
     const terminals = h("div", { class: "menu" },
+      ...(this.mode === "terminal" ? [item(false, "Back to the chat", () => this.setMode("chat"))] : []),
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
       ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
+      h("div", { class: "section" }, "Show replies as"), chatViewSeg(() => { closeSheets(); if (this.mode === "terminal") this.setMode("chat"); }),
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
@@ -1783,6 +1773,9 @@ async function openSettings() {
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
+    kids.push(h("div", { class: "section" }, "Replies"), chatViewSeg(() => draw()),
+      h("p", {}, chatView() === "screen" ? "Cards: each reply summed up in a few cards you swipe, Claude's own words a tap away."
+                                         : "Chat: Claude's replies as it writes them, the whole conversation."));
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
     kids.push(...engineSettings());
