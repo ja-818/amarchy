@@ -892,7 +892,11 @@ def broker_check(t):
     run = lambda *a, **kw: subprocess.run([amarchy, *a], capture_output=True, text=True, env=env, **kw)
     r = run("new", repo, name, "--no-jump")
     check(r.returncode == 0, f"amarchy new: {r.stderr.strip()}")
+    status_file = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy/status" / sid
     try:
+        end = time.time() + 120        # its worktree made and its first Claude up
+        while time.time() < end and not (status_file.exists() and status_file.read_text().strip() == "idle"):
+            time.sleep(1)
         r = run("agent", "engine", sid, "chat")
         check(r.returncode == 0, f"amarchy agent engine: {r.stderr.strip() or r.stdout.strip()}")
         state = lambda: json.loads(run("agent", "state", sid).stdout or "{}")
@@ -916,7 +920,7 @@ def broker_check(t):
             time.sleep(0.5)
         st = state()
         check(st.get("pending") and st.get("state") == "waiting", f"no pending request: {st}")
-        status = (Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy/status" / sid).read_text().strip()
+        status = status_file.read_text().strip()
         check(status == "waiting", f"the session's status is {status!r} while asking")
         req = st["pending"][0]
         r = run("agent", "answer", sid, req["request_id"], "allow")
@@ -940,7 +944,13 @@ def broker_check(t):
         check(state().get("state") == "idle", "not idle after interrupt")
         t.note("socket send / answer / interrupt / mode work; live state shows pending, partial, state")
     finally:
-        run("close", sid, "--force")
+        # What it made (broker.txt) goes, so the session closes without --force.
+        for x in json.loads(run("list", "--compact").stdout or "[]"):
+            if x["id"] == sid:
+                (Path(x["path"]) / "broker.txt").unlink(missing_ok=True)
+        r = run("close", sid)
+        if r.returncode:
+            t.note(f"couldn't close {sid}: {r.stderr.strip()}")
 
 
 # ------------------------------------------------------------------ main
