@@ -1138,6 +1138,8 @@ async function micOpen(retry) {
     return;
   }
   micClose();       // what's left of one that ended (a phone call took it, say)
+  // Recording, as a call does: on an iPhone the music playing pauses.
+  if (navigator.audioSession) navigator.audioSession.type = "play-and-record";
   const stream = await within(navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
     60000, "the phone didn't answer about the microphone");
@@ -1265,6 +1267,7 @@ function micReset() {
   micClose();
   if (mic.ctx) mic.ctx.close().catch(() => {});
   mic.ctx = mic.ready = null;
+  if (navigator.audioSession) navigator.audioSession.type = "auto";
 }
 
 // ---- the keys in a menu

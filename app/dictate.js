@@ -385,5 +385,27 @@ function dictationSettings(draw) {
   }
   kids.push(h("p", {}, app.desk ? "Ctrl+Alt+Space dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key) works in every box too."
                                 : "The keyboard's own dictation (its mic key) works in every box too."));
+  if (d.ready) kids.push(...hushSettings());
+  return kids;
+}
+
+// Settings → Dictation → Quiet your Mac: its helper (mac/hush-install.sh)
+// mutes the Mac's speakers while you dictate on the host, on any device.
+function hushSettings() {
+  const on = (app.view && app.view.hushers) || [];
+  const command = `curl -fsS ${location.origin}/api/hush/mac.sh | sh`;
+  const copy = (text, said) => async () => {
+    try { await navigator.clipboard.writeText(text); toast(said); }
+    catch (e) { toast("Couldn't copy it: hold the command to copy it"); }
+  };
+  const kids = [h("div", { class: "section" }, "Quiet your Mac")];
+  if (on.length) {
+    kids.push(h("p", {}, `On: ${on.join(", ")} mutes its speakers while you dictate, here or on your phone, and turns them back on after. Not when you're on headphones.`),
+      h("button", { class: "control wide", onclick: copy(`${command} -s uninstall`, "Copied: run it in the Mac's Terminal") }, "Copy the command that removes it"));
+  } else {
+    kids.push(h("p", {}, "Music playing on your Mac gets into what you dictate. A helper on the Mac mutes its speakers while you dictate (here or on your phone), and turns them back on after; not when you're on headphones. Run this in the Mac's Terminal:"),
+      h("code", { class: "share-url" }, command),
+      h("button", { class: "control wide", onclick: copy(command, "Copied: paste it in the Mac's Terminal") }, "Copy the command"));
+  }
   return kids;
 }
