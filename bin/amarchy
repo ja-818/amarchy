@@ -10157,6 +10157,47 @@ BRIEF_DEF = {
                        "items": {"type": "object", "required": ["point"], "additionalProperties": False,
                                  "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
                                                 "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
+            "artifacts": {"type": "array", "maxItems": 10, "description": "The things this turn made for the person to use, "
+                          "each complete, so they never go looking for them: a message to send (message: on WhatsApp, by "
+                          "email, on Slack...), a link to open (link), a command to run (command), an event (event), to-dos "
+                          "and loops (todos), a person (contact), a place (place), another chat you started or messaged "
+                          "(session, by its id), data (table), a file you wrote for them to open (file), a document or note "
+                          "(text), code (code). The thing itself, in full: \"I drafted it\" or \"it's in my other message\" "
+                          "is never enough. Not the record (steps, edited files): the app shows that.",
+                          "items": {"type": "object", "required": ["type"], "additionalProperties": False, "properties": {
+                              "type": {"type": "string", "enum": ["message", "link", "command", "event", "todos", "contact",
+                                                                  "place", "session", "table", "file", "text", "code"]},
+                              "title": {"type": "string", "description": "A short name for it (\"WhatsApp to the C21 group\")."},
+                              "channel": {"type": "string", "enum": ["whatsapp", "email", "slack", "sms", "other"],
+                                          "description": "message: where it goes."},
+                              "to": {"type": "string", "description": "message: who it's for (a person, a group, an address)."},
+                              "subject": {"type": "string", "description": "message (email): its subject."},
+                              "body": {"type": "string", "description": "message: the whole text, ready to send. text: the "
+                                                                        "document, in markdown."},
+                              "name": {"type": "string", "description": "contact, place: the name. session: the chat's id."},
+                              "role": {"type": "string", "description": "contact: who they are to the person."},
+                              "phone": {"type": "string", "description": "message, contact, place: a phone number, with its "
+                                                                         "country code."},
+                              "email": {"type": "string", "description": "message (email), contact: the address."},
+                              "url": {"type": "string", "description": "link, place: the address to open."},
+                              "command": {"type": "string", "description": "command: exactly what to run."},
+                              "code": {"type": "string"}, "language": {"type": "string"},
+                              "path": {"type": "string", "description": "file: where it is."},
+                              "when": {"type": "string", "description": "event: when it starts, ISO 8601 with the time zone "
+                                                                        "when known (2026-10-29T15:40:00-05:00)."},
+                              "end": {"type": "string", "description": "event: when it ends, the same way."},
+                              "where": {"type": "string", "description": "event: the place or address. place: its address. "
+                                                                         "command: the folder to run it in."},
+                              "hours": {"type": "string", "description": "place: when it's open."},
+                              "items": {"type": "array", "maxItems": 20, "description": "todos: each to-do.",
+                                        "items": {"type": "object", "required": ["text"], "additionalProperties": False,
+                                                  "properties": {"text": {"type": "string"}, "due": {"type": "string"},
+                                                                 "who": {"type": "string"}, "done": {"type": "boolean"}}}},
+                              "columns": {"type": "array", "items": {"type": "string"}},
+                              "rows": {"type": "array", "maxItems": 50, "items": {"type": "array", "items": {"type": "string"}}},
+                              "note": {"type": "string", "description": "One line on it (\"The link expires in 10 minutes\", "
+                                                                        "\"Send it from the WhatsApp Business number\")."},
+                          }}},
             "plan": {"type": "array", "maxItems": 12, "description": "The steps toward the goal, when there's a plan: done, "
                                                                     "doing (under way) or next.",
                      "items": {"type": "object", "required": ["step", "state"], "additionalProperties": False,
@@ -10196,7 +10237,9 @@ BRIEF_ASK = (
     "to check it, and caveats. If they asked you to explain or answer something, the explanation itself goes in "
     "explanation, in full: a point never says you explained or found something without saying what. A question's "
     "turn is kind answer: the short answer, verdicts when it judges or compares, the explanation in '## ' topics, and "
-    "summary points only for takeaways not already said. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
+    "summary points only for takeaways not already said. Anything you made for them to use (a message to send, a link, "
+    "a command, an event, to-dos, a contact, a place, a chat you started, a table, a file, a document) goes in "
+    "artifacts, complete, so nothing they need is left in your messages. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
     "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
     "phone who may not remember this conversation: name things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "

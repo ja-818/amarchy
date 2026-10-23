@@ -81,8 +81,10 @@ case), your conversation is in the app's chat, and:
   "use Run in Terminal").
 - They read a reply card per turn rather than your messages. When a turn ends,
   amarchy asks you to write it with `update_brief`: the outcome, your answer as
-  complete short points, the plan, what needs them. The app adds what you did
-  from the record. Do it once, then stop. Otherwise write as you normally would.
+  complete short points, the plan, what needs them, and in `artifacts` anything
+  you made for them to use (a draft to send, a link, a command, an event...),
+  in full. The app adds what you did from the record. Do it once, then stop.
+  Otherwise write as you normally would.
 - What they send while you work waits for your turn, unless they send it now.
 - Your questions and permission requests reach them as cards with buttons. Ask
   in plain words, with short option labels: that reads best on a phone.

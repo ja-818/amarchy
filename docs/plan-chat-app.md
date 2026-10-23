@@ -196,6 +196,16 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   explain, teach, compare or answer something, the *Explanation* itself
   comes after the summary, in full (`explanation`, markdown): a summary point
   says the thing, never only that Claude explained it.
+- **For you**: what the turn made for you to use (`artifacts`), right after
+  the summary, each a row with its quick action at hand while folded and
+  every action that fits it open, so nothing you need stays in Claude's
+  messages (or in an earlier conversation): a *message* draft (Copy, Open in
+  WhatsApp / mail / Messages, filled in), a *link* (Open), a *command* or
+  *code* (Copy), an *event* (Add to Google Calendar, Map), *to-dos* with
+  their due dates, a *contact* (Call, WhatsApp, Email), a *place* (Map,
+  Call, Website), another *chat* (Open, in the app), a *table* (Copy as
+  tab-separated), a *file* (its path), a *text* document. Links open only on
+  the web, mail, a call, a text message or a chat of yours.
 - **An answer** (a turn where you asked a question: kind *answer*) gets its
   own card: the *short answer* in larger type; *verdicts* when it judges or
   compares, a row per option with its badge (Good, Careful, Avoid, Depends)

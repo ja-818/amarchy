@@ -696,6 +696,25 @@ function screenCard(chat, d, step) {
 // top. Its states, in words.
 const BRIEF_STATES = { done: "Done", working: "Working", blocked: "Blocked", waiting: "Waiting on you" };
 const VERDICT_WORDS = { good: "Good", caution: "Careful", bad: "Avoid", neutral: "Depends" };
+const ARTIFACT_KINDS = ["message", "link", "command", "event", "todos", "contact", "place", "session", "table", "file", "text", "code"];
+const CHANNEL_WORDS = { whatsapp: "WhatsApp", email: "Email", slack: "Slack", sms: "Text message", other: "Message" };
+
+// An address a reply's artifact may open: the web, mail, a call or a text
+// message, WhatsApp, or a chat of yours in the app. Nothing else.
+function artifactHref(href) {
+  const v = String(href || "").trim();
+  if (/^#\/s\/[\w.-]+$/.test(v)) return v;
+  try {
+    const u = new URL(v);
+    return ["https:", "http:", "mailto:", "tel:", "sms:"].includes(u.protocol) ? u.href : null;
+  } catch { return null; }
+}
+
+// An event's start or end as a Date, when it's a date and time written out.
+function artifactDate(v) {
+  const d = typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? new Date(v) : null;
+  return d && !isNaN(d) ? d : null;
+}
 
 // A link in the brief: an http or https address, opened in a new tab (nothing else).
 function briefLink(url, label) {
@@ -729,6 +748,7 @@ function briefShape(b) {
     title: str(b.title) || str(b.headline), status: b.status, kind: str(b.kind), goal: str(b.goal), answer, plan,
     explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
     short: str(b.short),
+    artifacts: objs(b.artifacts).filter((x) => ARTIFACT_KINDS.includes(x.type)).slice(0, 10),
     verdicts: objs(b.verdicts).filter((x) => str(x.option)).slice(0, 8)
       .map((x) => ({ option: str(x.option), reason: str(x.reason), rating: ["good", "caution", "bad", "neutral"].includes(x.rating) ? x.rating : "neutral" })),
     waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
@@ -1424,12 +1444,15 @@ class Chat {
             v.reason ? h("span", { class: "verdict-reason", html: inline(v.reason) }) : null)))));
       if (b.answer.length) card.append(h("div", { class: "reply-summary" }, h("div", { class: "reply-k" }, "Takeaways"),
         h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x)))));
+      if (b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
       if (b.explanation) card.append(this.explainTopics(b.explanation, key, toggle));
     } else {
       const top = h("div", { class: "reply-summary" });
       if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
       else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
       if (top.childElementCount) card.append(top);
+      // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
+      if (b && b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
       // What it explained, when you asked: the explanation itself, in full.
       if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
         h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
@@ -1498,6 +1521,135 @@ class Chat {
       card.append(extra);
     }
     return card;
+  }
+
+  // What a reply made for you to use, under "For you": each artifact a row
+  // (its kind, its name, what it is) with its quick action (Copy, Open) at
+  // hand while folded; open, all of it and every action that fits it.
+  artifactsView(list, key, toggle) {
+    const box = h("div", { class: "reply-artifacts" }, h("div", { class: "reply-k" }, "For you"));
+    box.append(h("ul", { class: "artifacts" }, ...list.map((a, i) => {
+      const k = `${key}|art${i}`;
+      const on = this.isOpen(k, false);
+      const v = this.artifactParts(a);
+      const li = h("li", { class: `art art-${a.type}${on ? " open" : ""}` });
+      const head = h("div", { class: "art-head" },
+        h("button", { class: "art-toggle", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+          h("span", { class: "art-ic" }, icon(v.icon)),
+          h("span", { class: "art-text" }, h("span", { class: "art-title" }, v.title), v.sub ? h("span", { class: "art-sub" }, v.sub) : null),
+          icon("chevron", "chev")),
+        v.quick || null);
+      li.append(head);
+      if (on) li.append(h("div", { class: "art-body" }, ...v.body.filter(Boolean),
+        v.actions.filter(Boolean).length ? h("div", { class: "art-actions" }, ...v.actions.filter(Boolean)) : null,
+        a.note ? h("div", { class: "art-note", html: inline(String(a.note)) }) : null));
+      return li;
+    })));
+    return box;
+  }
+
+  // An artifact's parts: its icon, title, the line under it, its quick
+  // action, what it shows open and the actions there.
+  artifactParts(a) {
+    const str = (x) => (typeof x === "string" ? x.trim() : "");
+    const copy = (text, label = "Copy") => {
+      const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
+        e.stopPropagation();
+        copyText(text).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = label; }, 1500); });
+      } }, label);
+      return b;
+    };
+    const open = (href, label, primary) => {
+      const safe = artifactHref(href);
+      return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
+        onclick: (e) => e.stopPropagation() }, label) : null;
+    };
+    const digits = (p) => str(p).replace(/[^\d]/g, "");
+    const pre = (text) => h("div", { class: "art-pre" }, text);
+    const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
+    switch (a.type) {
+      case "message": {
+        const ch = CHANNEL_WORDS[a.channel] ? a.channel : "other";
+        const body = str(a.body), to = str(a.to);
+        const wa = ch === "whatsapp" ? `https://wa.me/${digits(a.phone)}?text=${encodeURIComponent(body)}` : null;
+        const mailTo = str(a.email) || (/@/.test(to) ? to : "");
+        const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(a.subject))}&body=${encodeURIComponent(body)}` : null;
+        const sms = ch === "sms" && digits(a.phone) ? `sms:+${digits(a.phone)}?&body=${encodeURIComponent(body)}` : null;
+        return { icon: "message", title: str(a.title) || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
+          quick: body ? copy(body) : null,
+          body: [a.subject ? field("Subject", str(a.subject)) : null, pre(body)],
+          actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
+            body ? copy(body, "Copy the message") : null] };
+      }
+      case "link": {
+        const href = artifactHref(a.url);
+        let host = "";
+        try { host = new URL(a.url).host; } catch { /* not a URL */ }
+        return { icon: "web", title: str(a.title) || host || "Link", sub: host, quick: href ? open(href, "Open", true) : null,
+          body: [pre(str(a.url))], actions: [href ? copy(href, "Copy the link") : null] };
+      }
+      case "command":
+        return { icon: "run", title: str(a.title) || "Command to run", sub: str(a.where) ? `in ${str(a.where)}` : cut(str(a.command), 60),
+          quick: copy(str(a.command)), body: [h("div", { class: "art-code" }, str(a.command))], actions: [] };
+      case "code":
+        return { icon: "file", title: str(a.title) || `Code${a.language ? ` (${str(a.language)})` : ""}`, sub: `${str(a.code).split("\n").length} lines`,
+          quick: copy(str(a.code)), body: [h("div", { class: "art-code" }, str(a.code))], actions: [] };
+      case "event": {
+        const start = artifactDate(a.when), end = artifactDate(a.end) || (start ? new Date(start.getTime() + 3600000) : null);
+        const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(a.when);
+        const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+        const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(str(a.title) || "Event")}` +
+          `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(a.where))}&details=${encodeURIComponent(str(a.note))}` : null;
+        const map = str(a.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(a.where))}` : null;
+        return { icon: "clock", title: str(a.title) || "Event", sub: [when, str(a.where)].filter(Boolean).join(" · "), quick: null,
+          body: [when ? field("When", when, end && a.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
+            str(a.where) ? field("Where", str(a.where)) : null],
+          actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
+      }
+      case "todos": {
+        const items = (Array.isArray(a.items) ? a.items : []).filter((x) => x && str(x.text));
+        const left = items.filter((x) => !x.done).length;
+        return { icon: "list", title: str(a.title) || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
+          body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
+            h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
+            str(x.due) || str(x.who) ? h("span", { class: "meta" }, [str(x.due), str(x.who)].filter(Boolean).join(" · ")) : null)))],
+          actions: [] };
+      }
+      case "contact": {
+        const ph = digits(a.phone);
+        return { icon: "helper", title: str(a.name) || str(a.title) || "Contact", sub: str(a.role), quick: null,
+          body: [ph ? field("Phone", `+${ph}`) : null, str(a.email) ? field("Email", str(a.email)) : null],
+          actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(a.email) && open(`mailto:${str(a.email)}`, "Email"),
+            ph ? copy(`+${ph}`, "Copy the number") : null] };
+      }
+      case "place": {
+        const where = str(a.where);
+        const map = where || str(a.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(a.name), where].filter(Boolean).join(", "))}` : null;
+        const ph = digits(a.phone);
+        return { icon: "web", title: str(a.name) || str(a.title) || "Place", sub: [str(a.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
+          body: [where ? field("Address", where) : null, str(a.hours) ? field("Hours", str(a.hours)) : null, ph ? field("Phone", `+${ph}`) : null],
+          actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(a.url) && open(str(a.url), "Website")] };
+      }
+      case "session": {
+        const id = str(a.name);
+        return { icon: "message", title: str(a.title) || id || "A chat", sub: id && str(a.title) ? id : "Another chat", quick: id ? open(`#/s/${id}`, "Open") : null,
+          body: [str(a.body) ? h("div", { class: "msg claude", html: md(str(a.body)) }) : null], actions: [] };
+      }
+      case "table": {
+        const cols = (Array.isArray(a.columns) ? a.columns : []).map(String);
+        const rows = (Array.isArray(a.rows) ? a.rows : []).filter(Array.isArray);
+        return { icon: "list", title: str(a.title) || "Table", sub: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+          quick: copy([cols, ...rows].map((r) => r.join("\t")).join("\n")),
+          body: [h("div", { class: "art-table" }, h("table", {}, cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c)))) : null,
+            h("tbody", {}, ...rows.map((r) => h("tr", {}, ...r.map((c) => h("td", {}, String(c))))))))], actions: [] };
+      }
+      case "file":
+        return { icon: "file", title: str(a.title) || baseName(str(a.path)) || "File", sub: str(a.path), quick: copy(str(a.path), "Copy path"),
+          body: [str(a.body) ? pre(str(a.body)) : null], actions: [] };
+      default:
+        return { icon: "file", title: str(a.title) || "Note", sub: cut(firstLine(str(a.body)), 70), quick: str(a.body) ? copy(str(a.body)) : null,
+          body: [h("div", { class: "msg claude", html: md(str(a.body)) })], actions: [] };
+    }
   }
 
   // An answer's explanation, folded by topic: what comes before its first

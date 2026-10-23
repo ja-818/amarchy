@@ -115,6 +115,17 @@ const BRIEF = {
   tests: [{ name: "Search tests", result: "pass", detail: "42 passed" }, { name: "Lint", result: "fail" }],
   check: [{ label: "Open the page", url: "http://amarchy:5173/search" }, { label: "Bad", url: "javascript:window.__pwned=2" }],
   notes: ["Lint fails on an old file"],
+  artifacts: [
+    { type: "message", channel: "whatsapp", to: "C21 group", phone: "+57 300 123 4567", title: "WhatsApp to the C21 group",
+      body: "Hola equipo, les comparto el resumen:\n1. Piloto PQR\n2. Datos por Excel" },
+    { type: "link", title: "Sign in to Gmail", url: "https://accounts.google.com/x?y=1", note: "Expires in 10 minutes" },
+    { type: "link", title: "Bad", url: "javascript:window.__pwned=3" },
+    { type: "command", title: "Log in the ringer", command: "ringer login --account houston", where: "~/Work/jaken" },
+    { type: "event", title: "ECOS panel", when: "2026-10-29T15:40:00-05:00", end: "2026-10-29T17:00:00-05:00", where: "Teatro Panorama, Bogotá" },
+    { type: "todos", title: "Loops", items: [{ text: "Send the C21 summary", due: "today" }, { text: "Twilio top-up", done: true }] },
+    { type: "contact", name: "Gaby Mendez", role: "Quantística", phone: "+57 310 555 0101", email: "gaby@example.com" },
+    { type: "session", name: "houston-os-c21-crm", title: "C21 Kanban CRM" },
+  ],
 };
 const FACTS = { branch: "search-page", base: "origin/main", commits: 3, recent: ["Search page"], files: 4, added: 120, removed: 8, uncommitted: 2, merged: false };
 const OLD = "11111111-aaaa-4aaa-8aaa-000000000001";
@@ -229,6 +240,39 @@ async function run(browser, base, layout) {
   check(layout, JSON.stringify(s.blocks) === JSON.stringify(["Summary", "Needs you"]) && s.questions === 2 &&
     JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]),
     `the summary right under the title, then what needs you (${JSON.stringify(s.blocks)})`);
+  // For you: what the reply made to use, right after the summary, each a row with its quick action.
+  await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; });
+  const arts = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { order: [...r.children].map((x) => x.className.split(" ")[0]).slice(1, 4),
+      rows: [...r.querySelectorAll(".art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}|${x.querySelector(".art-head > .art-btn")?.textContent || ""}`),
+      linkHref: r.querySelector(".art-link .art-head > a")?.getAttribute("href"),
+      sessionHref: r.querySelector(".art-session .art-head > a")?.getAttribute("href"),
+      unsafe: [...r.querySelectorAll(".art a")].some((a) => /^javascript/i.test(a.getAttribute("href") || "")) };
+  });
+  check(layout, JSON.stringify(arts.order) === JSON.stringify(["reply-summary", "reply-artifacts", "reply-needs"]), `For you comes after the summary, before Needs you (${JSON.stringify(arts.order)})`);
+  check(layout, JSON.stringify(arts.rows) === JSON.stringify(["art-message|WhatsApp to the C21 group|Copy", "art-link|Sign in to Gmail|Open", "art-link|Bad|",
+    "art-command|Log in the ringer|Copy", "art-event|ECOS panel|", "art-todos|Loops|", "art-contact|Gaby Mendez|", "art-session|C21 Kanban CRM|Open"]),
+    `each artifact a row, its quick action at hand (${JSON.stringify(arts.rows)})`);
+  check(layout, arts.linkHref === "https://accounts.google.com/x?y=1" && arts.sessionHref === "#/s/houston-os-c21-crm" && !arts.unsafe,
+    "links open, a chat opens in the app, a javascript: link isn't made");
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".art-message .art-head > .art-btn").click());
+  await page.waitForTimeout(100);
+  const copied = await page.evaluate(() => ({ text: window.__copied, label: [...document.querySelectorAll(".reply")].at(-1).querySelector(".art-message .art-head > .art-btn").textContent }));
+  check(layout, copied.text === "Hola equipo, les comparto el resumen:\n1. Piloto PQR\n2. Datos por Excel" && copied.label === "Copied", "Copy copies the whole draft, folded");
+  await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1); r.querySelector(".art-message .art-toggle").click(); });
+  await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1); r.querySelector(".art-event .art-toggle").click(); });
+  const opened = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { pre: r.querySelector(".art-message .art-pre")?.textContent, wa: r.querySelector(".art-message .art-actions a")?.getAttribute("href"),
+      gcal: [...r.querySelectorAll(".art-event .art-actions a")].map((a) => a.getAttribute("href")) };
+  });
+  check(layout, opened.pre.startsWith("Hola equipo") && opened.wa === "https://wa.me/573001234567?text=Hola%20equipo%2C%20les%20comparto%20el%20resumen%3A%0A1.%20Piloto%20PQR%0A2.%20Datos%20por%20Excel",
+    `the draft open: all of it, and Open in WhatsApp filled in (${opened.wa})`);
+  check(layout, /dates=20261029T204000Z\/20261029T220000Z/.test(opened.gcal[0] || "") && /maps\/search/.test(opened.gcal[1] || ""), `an event: Add to Google Calendar at the right time, a map (${opened.gcal[0]})`);
+  await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = 0; [...document.querySelectorAll(".reply")].at(-1).scrollIntoView(); });
+  await shot("artifacts");
+  await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1); r.querySelector(".art-message .art-toggle").click(); r.querySelector(".art-event .art-toggle").click(); });
   check(layout, JSON.stringify(s.sections) === JSON.stringify(["More"]) && s.more === "1 test failing · Plan · Changes · Checks · Activity · Notes · Original message",
     `the rest waits under More, which says what's there and flags a failing test (${s.more})`);
   await openSec(page, "more");
