@@ -358,6 +358,42 @@ async function run(browser, base, layout) {
   check(layout, explain.label === "Explanation" && explain.bold === "3 commits" && explain.items === 2 && explain.order === "reply-summary,reply-explain",
     `an explanation shows in full, after the summary (${JSON.stringify(explain)})`);
   await shot("done");
+
+  // A question's turn: the answer card. The short answer, the verdicts, the
+  // takeaways, the explanation folded by topic.
+  await page.evaluate(({ TOOL }) => {
+    window.__chat.conversation({ items: [{ kind: "user", text: "Are peptides good or bad?", turn: true, key: "55555555-eeee-4eee-8eee-000000000005:0", at: "" },
+      { kind: "claude", text: "It depends on the kind.", key: "q1:0", at: "" },
+      { kind: "tool", id: "q2", name: TOOL, key: "q2:0", at: "", brief: { title: "Peptides: it depends on the kind", status: "done", kind: "answer",
+        short: "Prescribed ones are **fine**; online injectables are risky.",
+        verdicts: [{ option: "Prescription", rating: "good", reason: "Tested, dosed by a doctor" },
+          { option: "Online injectables", rating: "bad", reason: "Unregulated, often impure" },
+          { option: "Collagen powders", rating: "caution", reason: "Small benefit" }],
+        explanation: "Peptides are short chains of amino acids.\n\n## Side effects\nNausea with GLP-1 drugs.\n\n## Contamination\nOnline products are often impure.",
+        answer: [{ point: "Ask a doctor before any injectable" }] } }] });
+  }, { TOOL });
+  const ans = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { order: [...r.children].map((x) => x.className.split(" ")[0]),
+      short: r.querySelector(".reply-short")?.textContent, bold: r.querySelector(".reply-short strong")?.textContent,
+      verdicts: [...r.querySelectorAll(".verdict")].map((v) => `${v.className.replace("verdict ", "")}|${v.querySelector(".verdict-badge").textContent}|${v.querySelector(".verdict-option").textContent}`),
+      keys: [...r.querySelectorAll(".reply-k")].map((x) => x.textContent),
+      intro: r.querySelector(".reply-explain > .explain-body")?.textContent.trim(),
+      topics: [...r.querySelectorAll(".topic")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}`) };
+  });
+  check(layout, JSON.stringify(ans.order) === JSON.stringify(["reply-head", "reply-short", "verdicts", "reply-summary", "reply-explain", "rsec"]),
+    `the answer card, in order: short answer, verdicts, takeaways, explanation, More (${JSON.stringify(ans.order)})`);
+  check(layout, ans.short === "Prescribed ones are fine; online injectables are risky." && ans.bold === "fine", "the short answer, its markdown drawn");
+  check(layout, JSON.stringify(ans.verdicts) === JSON.stringify(["is-good|Good|Prescription", "is-bad|Avoid|Online injectables", "is-caution|Careful|Collagen powders"]),
+    `the verdicts, a row each with its badge (${JSON.stringify(ans.verdicts)})`);
+  check(layout, JSON.stringify(ans.keys) === JSON.stringify(["Takeaways", "Explanation"]) && ans.intro === "Peptides are short chains of amino acids." &&
+    JSON.stringify(ans.topics) === JSON.stringify(["Side effects|false", "Contamination|false"]), `takeaways; the explanation's intro, its topics folded (${JSON.stringify(ans.topics)})`);
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".topic-head").click());
+  const topic = await page.evaluate(() => { const x = [...document.querySelectorAll(".reply")].at(-1).querySelector(".topic");
+    return { open: x.classList.contains("open"), body: x.querySelector(".topic-body")?.textContent.trim() }; });
+  check(layout, topic.open && topic.body === "Nausea with GLP-1 drugs.", `a topic opens on a tap (${JSON.stringify(topic)})`);
+  await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
+  await shot("answer");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
   check(layout, JSON.stringify(all) === JSON.stringify(["Less", "Changes", "Activity", "Original message"]), `More brings them up (${JSON.stringify(all)})`);
@@ -365,10 +401,10 @@ async function run(browser, base, layout) {
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));
   const chat = await page.evaluate(() => ({ replies: document.querySelectorAll(".reply").length, users: document.querySelectorAll(".msg.user").length }));
-  check(layout, chat.replies === 0 && chat.users === 4, `the Chat view: the conversation (${JSON.stringify(chat)})`);
+  check(layout, chat.replies === 0 && chat.users === 5, `the Chat view: the conversation (${JSON.stringify(chat)})`);
   await page.evaluate(() => window.__chat.showMode("screen"));
   s = await read(page);
-  check(layout, s.replies === 4 && s.titles[3] === "Shipped to main", "back to the brief view");
+  check(layout, s.replies === 5 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind", "back to the brief view");
 
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());

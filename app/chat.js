@@ -695,6 +695,7 @@ function screenCard(chat, d, step) {
 // The brief (bin/amarchy's update_brief): the chat's living summary, at its
 // top. Its states, in words.
 const BRIEF_STATES = { done: "Done", working: "Working", blocked: "Blocked", waiting: "Waiting on you" };
+const VERDICT_WORDS = { good: "Good", caution: "Careful", bad: "Avoid", neutral: "Depends" };
 
 // A link in the brief: an http or https address, opened in a new tab (nothing else).
 function briefLink(url, label) {
@@ -727,6 +728,9 @@ function briefShape(b) {
   return {
     title: str(b.title) || str(b.headline), status: b.status, kind: str(b.kind), goal: str(b.goal), answer, plan,
     explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
+    short: str(b.short),
+    verdicts: objs(b.verdicts).filter((x) => str(x.option)).slice(0, 8)
+      .map((x) => ({ option: str(x.option), reason: str(x.reason), rating: ["good", "caution", "bad", "neutral"].includes(x.rating) ? x.rating : "neutral" })),
     waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
     tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
     check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
@@ -1407,14 +1411,29 @@ class Chat {
       ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
       icon("chevron", "chev")));
     if (!open) return card;
-    // First what came of it: the summary, always there (the chat's goal is in its header).
-    const top = h("div", { class: "reply-summary" });
-    if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
-    else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
-    if (top.childElementCount) card.append(top);
-    // What it explained, when you asked: the explanation itself, in full.
-    if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
-      h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
+    // First what came of it, always there (the chat's goal is in its header). A
+    // question's turn is an answer card: the short answer, the verdicts, the
+    // takeaways not said already, the explanation folded by topic. Any other:
+    // the summary, then the explanation if there is one.
+    const answer = !!b && (b.kind === "answer" || !!b.short || b.verdicts.length > 0);
+    if (answer) {
+      if (b.short) card.append(h("div", { class: "reply-short", html: inline(b.short) }));
+      if (b.verdicts.length) card.append(h("ul", { class: "verdicts" }, ...b.verdicts.map((v) =>
+        h("li", { class: `verdict is-${v.rating}` }, h("span", { class: "verdict-badge" }, VERDICT_WORDS[v.rating]),
+          h("div", { class: "verdict-text" }, h("span", { class: "verdict-option", html: inline(v.option) }),
+            v.reason ? h("span", { class: "verdict-reason", html: inline(v.reason) }) : null)))));
+      if (b.answer.length) card.append(h("div", { class: "reply-summary" }, h("div", { class: "reply-k" }, "Takeaways"),
+        h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x)))));
+      if (b.explanation) card.append(this.explainTopics(b.explanation, key, toggle));
+    } else {
+      const top = h("div", { class: "reply-summary" });
+      if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
+      else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
+      if (top.childElementCount) card.append(top);
+      // What it explained, when you asked: the explanation itself, in full.
+      if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
+        h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
+    }
     // Then what it needs from you, with that context: the newest reply's questions.
     if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
 
@@ -1479,6 +1498,33 @@ class Chat {
       card.append(extra);
     }
     return card;
+  }
+
+  // An answer's explanation, folded by topic: what comes before its first
+  // "## " heading shows as it is; each heading is a row that opens its part.
+  // Without headings, all of it, as it is.
+  explainTopics(text, key, toggle) {
+    const parts = [];
+    let cur = { head: "", lines: [] };
+    for (const line of String(text).split("\n")) {
+      const m = line.match(/^#{2,3}\s+(.+?)\s*#*\s*$/);
+      if (m) { parts.push(cur); cur = { head: m[1], lines: [] }; } else cur.lines.push(line);
+    }
+    parts.push(cur);
+    const intro = parts[0].lines.join("\n").trim();
+    const topics = parts.slice(1).filter((p) => p.head);
+    const box = h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"));
+    if (intro) box.append(h("div", { class: "msg claude explain-body", html: md(intro) }));
+    if (topics.length) box.append(h("div", { class: "topics" }, ...topics.map((p, i) => {
+      const k = `${key}|topic${i}`;
+      const on = this.isOpen(k, false);
+      const row = h("div", { class: `topic${on ? " open" : ""}` },
+        h("button", { class: "topic-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+          h("span", { class: "topic-title", html: inline(p.head) }), icon("chevron", "chev")));
+      if (on) row.append(h("div", { class: "msg claude explain-body topic-body", html: md(p.lines.join("\n").trim()) }));
+      return row;
+    })));
+    return box;
   }
 
   answerPoint(x) {

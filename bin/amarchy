@@ -10128,14 +10128,26 @@ BRIEF_DEF = {
                        "description": "done (the turn's job is finished), working (more steps under way or planned), blocked "
                                       "(you can't go on), waiting (you need the person)."},
             "kind": {"type": "string", "enum": ["answer", "change", "investigation", "plan", "task", "problem"],
-                     "description": "What this turn was: an answer to a question, a change made, an investigation or report, a "
-                                    "plan, a task carried out (an email sent, a clean-up), or a problem."},
+                     "description": "What this turn was: an answer to a question (they asked you to explain, judge, compare "
+                                    "or tell them something: the app shows it as an answer card), a change made, an "
+                                    "investigation or report, a plan, a task carried out (an email sent, a clean-up), or a "
+                                    "problem."},
+            "short": {"type": "string", "description": "For an answer: the short answer, in one or two plain sentences, as "
+                                                       "you'd say it to a friend (\"Depends on the kind: prescribed ones are "
+                                                       "fine, online injectables are risky.\")."},
+            "verdicts": {"type": "array", "maxItems": 8, "description": "For an answer that judges or compares (good or bad, "
+                         "which one, is it safe): one row per option, with its rating and a one-line reason.",
+                         "items": {"type": "object", "required": ["option", "rating", "reason"], "additionalProperties": False,
+                                   "properties": {"option": {"type": "string", "description": "A few words: what's rated."},
+                                                  "rating": {"type": "string", "enum": ["good", "caution", "bad", "neutral"]},
+                                                  "reason": {"type": "string", "description": "Why, in one short line."}}}},
             "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in one short sentence. "
                                                       "Keep it unless it changed."},
             "explanation": {"type": "string", "description": "When they asked you to explain, teach, compare or answer "
-                            "something: the explanation itself, complete, in markdown (short paragraphs, lists, a table or "
-                            "code where it helps), as you'd want to read it. Not a description of it. Leave it out for a turn "
-                            "that only did work."},
+                            "something: the explanation itself, complete, in markdown, as you'd want to read it, split into "
+                            "topics under '## ' headings (each folds on its own: \"## What peptides are\", \"## Side "
+                            "effects\"), with short paragraphs, lists, a table or code where they help. Not a description of "
+                            "it. Leave it out for a turn that only did work."},
             "answer": {"type": "array", "maxItems": 12, "description": "The summary: everything from this turn the person "
                        "needs, as short points: what you found, decided, did and concluded, with the exact names, numbers, URLs "
                        "and results. Complete, so they never need your messages (it's what they read first, under the title), "
@@ -10182,7 +10194,9 @@ BRIEF_ASK = (
     "(answer) as complete points (every finding, decision, name, number, URL and result that matters: it's what they read "
     "first, so leave nothing important out, just keep each point short), the plan if there is one, what needs them, how "
     "to check it, and caveats. If they asked you to explain or answer something, the explanation itself goes in "
-    "explanation, in full: a point never says you explained or found something without saying what. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
+    "explanation, in full: a point never says you explained or found something without saying what. A question's "
+    "turn is kind answer: the short answer, verdicts when it judges or compares, the explanation in '## ' topics, and "
+    "summary points only for takeaways not already said. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
     "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
     "phone who may not remember this conversation: name things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "

@@ -195,7 +195,13 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   buttons), after the context that explains them. When you asked Claude to
   explain, teach, compare or answer something, the *Explanation* itself
   comes after the summary, in full (`explanation`, markdown): a summary point
-  says the thing, never only that Claude explained it. The chat's *goal* (from
+  says the thing, never only that Claude explained it.
+- **An answer** (a turn where you asked a question: kind *answer*) gets its
+  own card: the *short answer* in larger type; *verdicts* when it judges or
+  compares, a row per option with its badge (Good, Careful, Avoid, Depends)
+  and a one-line reason; *Takeaways* only for what those don't say; and the
+  *Explanation* folded by topic (each `## ` heading a row that opens its
+  part, any intro above them open). The chat's *goal* (from
   its newest reply that says one) isn't on the cards: it's under the chat's
   name in the header, on the phone and on a computer.
 - **Look into it**: the rest is what happened, under one *More* row that says
