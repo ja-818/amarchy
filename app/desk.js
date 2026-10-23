@@ -900,7 +900,7 @@ function renderSide() {
 
 function makeTerminal() {
   if (typeof SessionTerminal === "function")
-    return new SessionTerminal({ id: null, phone: false, onShow: () => deskHead() });
+    return new SessionTerminal({ id: null, phone: false, onShow: () => deskHead(), onBack: () => toChat() });
   return new DeskTerminal();
 }
 
