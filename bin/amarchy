@@ -5198,6 +5198,88 @@ def tool_summary(name, args, s):
     return ""
 
 
+APP_INPUT_KEYS = {        # what of a tool's input the chat shows (app/chat.js), by tool
+    "Read": ("file_path", "offset", "limit"), "Edit": ("file_path", "old_string", "new_string", "replace_all"),
+    "MultiEdit": ("file_path", "edits"), "Write": ("file_path", "content"), "NotebookEdit": ("notebook_path",),
+    "Bash": ("command", "description", "run_in_background"), "Grep": ("pattern", "path", "glob", "type"),
+    "Glob": ("pattern", "path"), "WebSearch": ("query",), "WebFetch": ("url",),
+    "Agent": ("description", "subagent_type"), "Task": ("description", "subagent_type"), "Skill": ("skill",),
+    "SendMessage": ("to", "summary"), "TodoWrite": ("todos",), "ExitPlanMode": ("plan",),
+    "TaskCreate": ("subject", "activeForm"), "TaskUpdate": ("taskId", "status", "subject", "activeForm"),
+    "AskUserQuestion": ("questions",), "Monitor": ("description",), "ScheduleWakeup": ("reason",),
+}
+APP_INPUT_TEXT = 20000      # characters of any one string of it (an edit's old and new text, a plan)
+
+
+def tool_input_view(name, args, s):
+    """What the chat needs of a tool call's input to draw it in words (an
+    edit's diff, the checklist, a plan): a few keys, long text cut short,
+    paths as the worktree sees them."""
+    if not isinstance(args, dict):
+        return {}
+    keys = APP_INPUT_KEYS.get(name)
+    if keys is None:
+        keys = ("description", "file_path", "path", "url", "query", "command", "pattern")
+
+    def cut(v, depth=0):
+        if isinstance(v, str):
+            return v if len(v) <= APP_INPUT_TEXT else v[:APP_INPUT_TEXT] + "\n…"
+        if isinstance(v, list):
+            return [cut(x, depth + 1) for x in v[:60]] if depth < 4 else []
+        if isinstance(v, dict):
+            return {k: cut(x, depth + 1) for k, x in list(v.items())[:30]} if depth < 4 else {}
+        return v if isinstance(v, (int, float, bool)) or v is None else str(v)
+
+    out = {k: cut(args[k]) for k in keys if k in args}
+    if isinstance(out.get("content"), str) and len(out["content"]) > 6000:
+        out["content"] = out["content"][:6000] + "\n…"     # its result has the diff: this is for before it
+    for k in ("file_path", "notebook_path", "path"):
+        if isinstance(out.get(k), str):
+            out[k] = short_path(out[k], s)
+    return out
+
+
+APP_PATCH_LINES = 600       # lines of a result's diff the chat gets, all its files together
+
+
+def result_view(r, s):
+    """What a tool's result says beyond its text, from the record's
+    toolUseResult: the diff it made (an edit's, a write's, a command's that
+    changed files) and the answers to a question."""
+    t = r.get("toolUseResult")
+    if not isinstance(t, dict):
+        return {}
+    out, files = {}, []
+    if isinstance(t.get("structuredPatch"), list) and t.get("filePath"):
+        files.append({"path": t["filePath"], "hunks": t["structuredPatch"], "created": t.get("type") == "create"})
+    diff = t.get("bashEditDiff")
+    if isinstance(diff, dict) and isinstance(diff.get("files"), list):
+        files += [{"path": f.get("filePath"), "hunks": f.get("hunks")} for f in diff["files"] if isinstance(f, dict)]
+    left, shown = APP_PATCH_LINES, []
+    for f in files:
+        if not isinstance(f["path"], str) or not isinstance(f["hunks"], list):
+            continue
+        hunks, adds, dels = [], 0, 0
+        for hk in f["hunks"]:
+            if not isinstance(hk, dict) or not isinstance(hk.get("lines"), list):
+                continue
+            lines = [l for l in hk["lines"] if isinstance(l, str)]
+            adds += sum(1 for l in lines if l.startswith("+"))
+            dels += sum(1 for l in lines if l.startswith("-"))
+            if left > 0:
+                hunks.append({"old": hk.get("oldStart"), "new": hk.get("newStart"),
+                              "lines": [l[:2000] for l in lines[:left]]})
+                left -= len(hunks[-1]["lines"])
+        if hunks:       # (a file written new has none: its input says what's in it)
+            shown.append({"path": short_path(f["path"], s), "hunks": hunks, "add": adds, "del": dels,
+                          "created": bool(f.get("created")), "cut": left <= 0})
+    if shown:
+        out["diff"] = shown
+    if isinstance(t.get("answers"), dict):
+        out["answers"] = {str(k)[:2000]: str(v)[:2000] for k, v in t["answers"].items()}
+    return out
+
+
 def result_text(content):
     if isinstance(content, str):
         return content
@@ -5249,6 +5331,8 @@ def app_items(records, s):
         blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content or []
         found = []
         if kind == "user":
+            results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+            extra = result_view(r, s) if len(results) == 1 else {}
             for b in blocks:
                 if not isinstance(b, dict):
                     continue
@@ -5259,7 +5343,7 @@ def app_items(records, s):
                 elif b.get("type") == "tool_result":
                     text = result_text(b.get("content"))
                     found.append({"kind": "result", "tool": b.get("tool_use_id", ""), "error": bool(b.get("is_error")),
-                                  "text": text[:4000] + ("\n…" if len(text) > 4000 else "")})
+                                  "text": text[:4000] + ("\n…" if len(text) > 4000 else ""), **extra})
         elif kind == "assistant":
             for b in blocks:
                 if not isinstance(b, dict):
@@ -5268,7 +5352,8 @@ def app_items(records, s):
                     found.append({"kind": "claude", "text": b["text"].strip()})
                 elif b.get("type") == "tool_use":
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
-                                  "summary": tool_summary(b.get("name"), b.get("input"), s)[:600]})
+                                  "summary": tool_summary(b.get("name"), b.get("input"), s)[:600],
+                                  "input": tool_input_view(b.get("name"), b.get("input"), s)})
         elif kind == "system":
             sub = r.get("subtype")
             if sub == "away_summary" and r.get("content"):

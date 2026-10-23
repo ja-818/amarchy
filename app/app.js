@@ -74,7 +74,7 @@ const spin = { frame: 0 };
 setInterval(() => {
   if (document.visibilityState !== "visible") return;
   spin.frame = (spin.frame + 1) % SPINNER.length;
-  document.querySelectorAll(".state.working").forEach((el) => { el.textContent = SPINNER[spin.frame]; });
+  document.querySelectorAll(".state.working, .spinner").forEach((el) => { el.textContent = SPINNER[spin.frame]; });
 }, 90);
 
 // What a session is about, the keyword before ": " in bold.
@@ -298,92 +298,6 @@ function fitViewport() {
 if (window.visualViewport) {
   visualViewport.addEventListener("resize", fitViewport);
   visualViewport.addEventListener("scroll", fitViewport);
-}
-
-// ---- markdown, for what Claude says (escaped first: nothing in it becomes HTML of its own)
-
-function inline(raw) {
-  const held = [];
-  const hold = (html) => { held.push(html); return `\u0000${held.length - 1}\u0000`; };
-  let s = raw.replace(/`([^`\n]+)`/g, (_, c) => hold(`<code>${esc(c)}</code>`));
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
-                (_, t, u) => hold(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`));
-  s = s.replace(/https?:\/\/[^\s<>()\u0000]+[^\s<>().,;:!?'"\u0000]/g,
-                (u) => hold(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`));
-  s = esc(s);
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?![\w*])/g, "$1<em>$2</em>");
-  s = s.replace(/(^|[^\w])_([^_\s][^_\n]*?)_(?!\w)/g, "$1<em>$2</em>");
-  s = s.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[+i]);
-}
-
-const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
-const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
-
-function md(text) {
-  const lines = String(text).replace(/\r/g, "").split("\n");
-  let out = "", i = 0;
-  const starts = (l) => /^\s*```/.test(l) || /^#{1,6}\s/.test(l) || /^\s*>/.test(l) || LIST_ITEM.test(l);
-  while (i < lines.length) {
-    const l = lines[i];
-    if (!l.trim()) { i++; continue; }
-    let m;
-    if ((m = l.match(/^\s*```\s*([\w+-]*)/))) {
-      const code = [];
-      for (i++; i < lines.length && !/^\s*```\s*$/.test(lines[i]); i++) code.push(lines[i]);
-      i++;
-      out += `<pre><code>${esc(code.join("\n"))}</code></pre>`;
-    } else if ((m = l.match(/^(#{1,6})\s+(.*)$/))) {
-      const n = Math.min(m[1].length + 1, 4);
-      out += `<h${n}>${inline(m[2])}</h${n}>`;
-      i++;
-    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) {
-      out += "<hr>";
-      i++;
-    } else if (/^\s*>/.test(l)) {
-      const q = [];
-      for (; i < lines.length && /^\s*>/.test(lines[i]); i++) q.push(lines[i].replace(/^\s*>\s?/, ""));
-      out += `<blockquote>${md(q.join("\n"))}</blockquote>`;
-    } else if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1])) {
-      const cells = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => inline(c.trim()));
-      const head = cells(l);
-      i += 2;
-      let body = "";
-      for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++)
-        body += `<tr>${cells(lines[i]).map((c) => `<td>${c}</td>`).join("")}</tr>`;
-      out += `<div class="table-wrap"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr></thead>` +
-             `<tbody>${body}</tbody></table></div>`;
-    } else if ((m = l.match(LIST_ITEM))) {
-      const indent = m[1].length, ordered = /\d/.test(m[2]);
-      const items = [];
-      while (i < lines.length) {
-        const li = lines[i].match(LIST_ITEM);
-        if (li && li[1].length <= indent) {
-          if (/\d/.test(li[2]) !== ordered) break;
-          items.push([li[3]]);
-          i++;
-        } else if (lines[i].trim() && (/^\s/.test(lines[i]) || (li && li[1].length > indent))) {
-          items[items.length - 1].push(lines[i].replace(new RegExp(`^\\s{0,${indent + 4}}`), ""));
-          i++;
-        } else if (!lines[i].trim() && i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) {
-          items[items.length - 1].push("");
-          i++;
-        } else break;
-      }
-      const tag = ordered ? "ol" : "ul";
-      const first = ordered ? parseInt(m[2], 10) : 1;
-      out += `<${tag}${ordered && first !== 1 ? ` start="${first}"` : ""}>` + items.map((it) => {
-        const body = md(it.join("\n"));
-        return `<li>${body.replace(/^<p>([\s\S]*?)<\/p>/, "$1")}</li>`;
-      }).join("") + `</${tag}>`;
-    } else {
-      const p = [];
-      for (; i < lines.length && lines[i].trim() && !(p.length && starts(lines[i])); i++) p.push(lines[i].trim());
-      out += `<p>${p.map(inline).join("<br>")}</p>`;
-    }
-  }
-  return out;
 }
 
 // ---- the list
@@ -890,10 +804,6 @@ class SessionView {
     this.row = app.view && app.view.sessions.find((s) => s.id === id) || null;
     this.screen = null;
     this.mode = "chat";
-    this.tools = new Map();
-    this.keys = new Set();
-    this.start = 0;
-    this.dialogId = null;
     this.build();
     this.open();
     this.seen = setInterval(() => this.markSeen(), 10000);
@@ -911,74 +821,36 @@ class SessionView {
       h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { go("#/"); } }, glyph("back")),
       this.titleEl,
       h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
-    this.conv = h("div", { class: "conv" });
-    this.screenEl = h("pre", { class: "screen" });
-    this.scroller = h("div", { class: "scroll" }, this.conv);
-    this.dock = h("div", { class: "dock" });
-    this.input = h("textarea", { rows: 1, placeholder: "Message Claude", enterkeyhint: "enter",
-                                 oninput: () => { this.grow(); store.set(`draft:${this.id}`, this.input.value); this.sendButtons(); } });
-    this.input.value = store.get(`draft:${this.id}`) || "";
-    // An image pasted into the box goes to Claude's prompt (manage.js).
-    this.input.addEventListener("paste", (e) => {
-      const item = e.clipboardData && Array.from(e.clipboardData.items).find((i) => i.kind === "file" && /^image\//.test(i.type));
-      if (!item) return;
-      e.preventDefault();
-      pasteImageInto({ id: this.id }, item.getAsFile());
+    // The conversation, its cards and the box you type in (chat.js).
+    this.chat = new Chat({
+      id: this.id, row: this.row,
+      onSession: (row) => { this.row = row; this.renderHeader(); },
+      onScreen: (screen) => { this.screen = screen; if (this.mode === "screen") this.renderScreen(); },
+      onGone: (why) => {
+        toast(why ? "Can't open that session." : "That session was closed.");
+        go("#/");
+      },
+      // Claude's voice mode, for a terminal-engine session's mic.
+      claude: { start: () => this.dictate(), stop: () => this.letGo() },
+      voiceHeld: () => !!this.voice && this.voice.held,
     });
-    this.imageBtn = h("button", { class: "attach", "aria-label": "Paste an image into Claude",
-                                  onclick: () => pickImageInto({ id: this.id }) }, glyph("image"));
-    this.sendBtn = h("button", { class: "send", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
-    this.stopBtn = h("button", { class: "stop", "aria-label": "Stop Claude",
-                                 onclick: () => this.press(["Escape"]) }, glyph("stop"));
-    this.micBtn = h("button", { class: "mic", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true },
-                    glyph("mic"));
-    // What you say, into the box (dictate.js), or through Claude's voice mode.
-    this.talk = new Dictate({ field: this.input, button: this.micBtn,
-                              changed: () => { this.grow(); this.sendButtons(); store.set(`draft:${this.id}`, this.input.value); },
-                              state: (text) => this.listening(text),
-                              claude: { start: () => this.dictate(), stop: () => this.letGo(),
-                                        off: () => !!this.row && this.row.engine === "chat" } });
-    this.composer = h("div", { class: "prompt" }, this.input, this.imageBtn, this.micBtn, this.stopBtn, this.sendBtn);
+    this.screenEl = h("pre", { class: "screen" });
     this.keysRow = h("div", { class: "keys" },
       ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
           ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
         h("button", { class: "control", onclick: () => this.press([key]) }, label)));
-    this.el = h("div", { class: "view" }, bar, this.scroller, this.dock);
+    this.el = h("div", { class: "view" }, bar, this.chat.el);
     root.replaceChildren(this.el);
     this.renderHeader();
-    this.renderDock();
-    this.grow();
   }
 
-  open() {
-    const es = new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
-    this.es = es;
-    es.addEventListener("session", (e) => { this.row = JSON.parse(e.data); this.renderHeader(); this.renderDock(); });
-    es.addEventListener("conversation", (e) => this.conversation(JSON.parse(e.data)));
-    es.addEventListener("screen", (e) => {
-      this.screen = JSON.parse(e.data);
-      if (this.mode === "screen") this.renderScreen();
-      this.renderDock();
-    });
-    es.addEventListener("gone", () => {
-      toast("That session was closed.");
-      go("#/");
-    });
-    es.addEventListener("error", () => {
-      if (es.readyState === EventSource.CLOSED) {
-        toast("Can't open that session.");
-        go("#/");
-      }
-    });
-  }
+  open() { this.chat.open(); }
 
   close() {
-    if (this.es) this.es.close();
-    this.es = null;
+    this.chat.close();
     this.closed = true;
     if (this.pane) this.pane.disconnect();
     clearInterval(this.seen);
-    this.talk.cancel();
   }
 
   // Claude's own dictation (its voice mode), from the phone's microphone:
@@ -991,20 +863,20 @@ class SessionView {
     if (this.voice) return;
     // What was in the box before: the words go after it, as they come.
     const v = this.voice = { held: !handed, ws: null, queue: handed ? handed.queue : [], heard: false,
-                             base: this.input.value.replace(/\s+$/, "") };
+                             base: this.chat.input.value.replace(/\s+$/, "") };
     const write = (words) => {
-      this.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
-      this.grow();
-      this.sendButtons();
+      this.chat.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
+      this.chat.grow();
+      this.chat.sendButtons();
     };
     const done = () => {
       if (this.voice === v) this.voice = null;
-      this.listening(null);
+      this.chat.listening(null);
     };
     if (!handed) {
       // Listening once the microphone hears: what's said before is lost.
-      this.listening("Starting the microphone…");
-      mic.hears = () => { if (v.held) this.listening("Listening…"); };
+      this.chat.listening("Starting the microphone…");
+      mic.hears = () => { if (v.held) this.chat.listening("Listening…"); };
       try {
         await micOpen();
       } catch (e) {
@@ -1043,12 +915,12 @@ class SessionView {
       let d = {};
       try { d = JSON.parse(e.data); } catch (err) { return; }
       v.heard = true;
-      if (d.state === "transcribing") this.listening("Claude is writing it down…");
+      if (d.state === "transcribing") this.chat.listening("Claude is writing it down…");
       if (typeof d.interim === "string") write(d.interim);
       if (typeof d.text === "string") {
         ws.send("got");     // it can go from Claude's prompt now
         write(d.text);
-        store.set(`draft:${this.id}`, this.input.value);
+        store.set(`draft:${this.id}`, this.chat.input.value);
       }
       if (d.error) {
         write("");
@@ -1087,7 +959,7 @@ class SessionView {
         return "Can't reach Amarchy";
       }
       if (!d.wait || Date.now() > until) return d.error || "Dictation didn't connect";
-      if (!v.held) this.listening("Waiting for Claude to start…");
+      if (!v.held) this.chat.listening("Waiting for Claude to start…");
       await new Promise((ok) => setTimeout(ok, 700));
     }
   }
@@ -1099,30 +971,22 @@ class SessionView {
     const v = this.voice;
     if (!v || !v.held) return;
     v.held = false;
-    this.micBtn.classList.remove("on");
+    this.chat.micBtn.classList.remove("on");
     await new Promise((ok) => setTimeout(ok, MIC_TAIL));
     micRelease();
     if (v.ws && v.ws.readyState === WebSocket.OPEN) this.end(v);
-    else this.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
+    else this.chat.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
   }
 
   end(v) {
     v.ws.send("end");
-    this.listening("Claude is writing it down…");
-  }
-
-  // The box while dictating: what's going on, in place of its placeholder.
-  listening(text) {
-    this.composer.classList.toggle("listening", text !== null);
-    this.micBtn.classList.toggle("on", (!!this.voice && this.voice.held) || (this.talk.on() && this.talk.run.held));
-    this.input.placeholder = text || "Message Claude";
+    this.chat.listening("Claude is writing it down…");
   }
 
   // Back from the background: everything from scratch.
   reopen() {
-    this.close();
+    this.chat.reopen();
     this.closed = false;
-    this.open();
     if (this.mode === "terminal") this.pane.open(this.id);
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
@@ -1144,7 +1008,7 @@ class SessionView {
     if (r.assistant === "main") {
       const name = r.assistant_name || "Assistant";
       const task = r.task && r.task.toLowerCase() !== name.toLowerCase() ? `${r.task} · ` : "";
-      this.input.placeholder = `Message ${name}`;
+      this.chat.setPlaceholder(`Message ${name}`);
       this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(r), stateIcon(r)),
         h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
           h("div", { class: "meta" }, `${task}${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
@@ -1155,94 +1019,14 @@ class SessionView {
         h("div", { class: "meta" }, `${where(r)} · ${STATUS[stateOf(r)]}${sleepOf(r) ? ` · ${SLEEP[sleepOf(r)]}` : ""}`)));
   }
 
-  atBottom() {
-    const s = this.scroller;
-    return s.scrollTop + s.clientHeight >= s.scrollHeight - 120;
-  }
-
-  toBottom() { this.scroller.scrollTop = this.scroller.scrollHeight; }
-
-  conversation(d) {
-    if (this.mode !== "chat") {
-      (this.pending = this.pending || []).push(d);
-      return;
-    }
-    const stick = d.reset || this.atBottom();
-    if (d.reset) {
-      this.conv.replaceChildren();
-      this.tools.clear();
-      this.keys.clear();
-      this.start = d.start;
-      this.earlierBtn = h("button", { class: "link earlier", onclick: () => this.earlier() }, "earlier");
-      if (this.start > 0) this.conv.append(this.earlierBtn);
-      if (!d.items.length) this.conv.append(h("div", { class: "msg note" }, "Nothing here yet."));
-    }
-    for (const item of d.items) {
-      const el = this.item(item);
-      if (el) this.conv.append(el);
-    }
-    if (stick) requestAnimationFrame(() => this.toBottom());
-  }
-
-  async earlier() {
-    this.earlierBtn.disabled = true;
-    try {
-      const res = await fetch(`/api/session/${encodeURIComponent(this.id)}/earlier?before=${this.start}`);
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "couldn't load it");
-      const frag = document.createDocumentFragment();
-      for (const item of d.items) {
-        const el = this.item(item);
-        if (el) frag.append(el);
-      }
-      const before = this.scroller.scrollHeight;
-      this.earlierBtn.after(frag);
-      this.scroller.scrollTop += this.scroller.scrollHeight - before;
-      this.start = d.start;
-      if (this.start <= 0) this.earlierBtn.remove();
-    } catch (e) {
-      toast(e.message);
-    }
-    this.earlierBtn.disabled = false;
-  }
-
-  item(it) {
-    if (it.key && this.keys.has(it.key)) return null;
-    if (it.key) this.keys.add(it.key);
-    if (it.kind === "user") return h("div", { class: "msg user" }, it.text);
-    if (it.kind === "command") return h("div", { class: "msg command" }, it.text);
-    if (it.kind === "note") return h("div", { class: "msg note" }, it.text);
-    if (it.kind === "claude") return h("div", { class: "msg claude", html: md(it.text) });
-    if (it.kind === "tool") {
-      // As Claude Code prints one: ● Name(what), its output under ⎿.
-      const result = h("pre", {}, "…");
-      const el = h("div", { class: "tool" },
-        h("button", { onclick: () => el.classList.toggle("open") },
-          h("span", { class: "tdot" }, "●"),
-          h("span", { class: "tline" }, h("span", { class: "tname" }, it.name),
-            it.summary ? h("span", { class: "tsum" }, `(${it.summary})`) : null)),
-        h("div", { class: "tbody" }, h("div", { class: "out" }, result)));
-      el.result = result;
-      this.tools.set(it.id, el);
-      return el;
-    }
-    if (it.kind === "result") {
-      const el = this.tools.get(it.tool);
-      if (el) {
-        el.classList.add(it.error ? "failed" : "done");
-        el.result.textContent = it.text || "(no output)";
-      }
-      return null;
-    }
-    return null;
-  }
-
   renderScreen() {
-    const stick = this.atBottom();
+    const stick = this.chat.atBottom();
     this.screenEl.textContent = this.screen ? this.screen.text : "";
-    if (stick) this.toBottom();
+    if (stick) this.chat.toBottom(true);
   }
 
+  // The conversation, Claude's real terminal, or its screen as text; under
+  // the last two, the keys the phone's keyboard hasn't.
   setMode(mode) {
     this.mode = mode;
     this.el.classList.toggle("terminal", mode === "terminal");
@@ -1251,84 +1035,15 @@ class SessionView {
       // Claude's real terminal (desk.js), as in the wide layout: what you type
       // goes to it, the keys below for what the phone's keyboard hasn't.
       if (!this.pane) this.pane = new TermPane("claude", { size: phoneSize, mic: true });
-      this.scroller.replaceChildren(this.pane.box);
+      this.chat.setView({ content: this.pane.box, above: [this.toolsRow(), this.keysRow], composer: false });
       this.pane.open(this.id).then(() => this.pane.fit());
     } else if (mode === "screen") {
-      this.scroller.replaceChildren(this.screenEl);
+      this.chat.setView({ content: this.screenEl, above: [this.toolsRow(), this.keysRow], composer: true });
       this.renderScreen();
-      this.toBottom();
+      this.chat.toBottom(true);
     } else {
-      this.scroller.replaceChildren(this.conv);
-      for (const d of this.pending || []) this.conversation(d);
-      this.pending = [];
-      this.toBottom();
+      this.chat.setView();
     }
-    this.dialogId = null;
-    this.renderDock();
-  }
-
-  grow() {
-    this.input.style.height = "auto";
-    this.input.style.height = `${Math.min(this.input.scrollHeight + 2, window.innerHeight * 0.4)}px`;
-  }
-
-  sendButtons() {
-    this.micBtn.hidden = !this.talk.available();
-    const working = this.row && this.row.status === "working";
-    const empty = !this.input.value.trim();
-    this.stopBtn.style.display = working && empty ? "" : "none";
-    this.sendBtn.style.display = working && empty ? "none" : "";
-    this.sendBtn.disabled = empty || this.talk.on();     // what you say is still coming into the box
-  }
-
-  // What's at the bottom: the question Claude asks, Claude having exited,
-  // or where you type.
-  renderDock() {
-    const sc = this.screen;
-    const dialog = sc && sc.dialog;
-    let key = "composer";
-    const sleep = sleepOf(this.row);
-    if (sc && sc.exited) key = "exited";
-    else if (this.row && this.row.setup) key = "setup";
-    else if (dialog) key = `dialog:${dialog.id}`;
-    key += `:${this.mode}:${sleep}`;
-    if (this.mode === "terminal") key = "terminal";
-    if (key === this.dialogId) { this.sendButtons(); return; }
-    this.dialogId = key;
-    const kids = [];
-    if (this.mode !== "chat") kids.push(this.toolsRow(), this.keysRow);
-    if (this.mode === "terminal") {
-      // Its prompt is in the terminal itself.
-    } else if (sc && sc.exited) {
-      kids.push(h("div", { class: "ask" },
-        h("div", { class: "q" }, h("div", { class: "head" }, "Claude Code exited"), "Start it again to go on with this session."),
-        h("button", { class: "opt first", onclick: () => this.press(["Enter"]) },
-          h("span", { class: "n" }), h("span", { class: "what" }, h("b", {}, "Start Claude again")))));
-    } else if (this.row && this.row.setup) {
-      kids.push(h("div", { class: "note" }, "Setting up the worktree…"));
-    } else if (dialog && this.mode === "chat") {
-      kids.push(this.ask(dialog));
-    } else {
-      // Asleep, what you send wakes it (with that as Claude's first message).
-      if (sleep === "asleep") kids.push(h("div", { class: "sleep-note" }, glyph("asleep", "sleep"),
-        h("span", {}, "Asleep, its memory freed. Send something to wake it."),
-        h("button", { class: "link", onclick: () => wakeSession(this.row) }, "Wake")));
-      else if (sleep === "waking") kids.push(h("div", { class: "sleep-note" }, glyph("asleep", "sleep waking"),
-        h("span", {}, "Waking Claude…")));
-      kids.push(this.composer);
-    }
-    // The keys, if they were here, stay: on Claude's question (its cursor's
-    // choice), and back in the box you type in once it's answered.
-    const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
-    this.dock.replaceChildren(...kids);
-    if (had) {
-      const ask = this.dock.querySelector(".ask");
-      if (ask) (menuStart(ask) || ask).focus({ preventScroll: true });
-      else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
-    }
-    this.sendButtons();
-    this.grow();
-    if (this.mode === "chat" && this.atBottom()) requestAnimationFrame(() => this.toBottom());
   }
 
   // Over Claude's terminal or its screen: the text bigger or smaller (kept
@@ -1352,91 +1067,12 @@ class SessionView {
     return this.toolsEl;
   }
 
-  // Claude's question as its own menu draws it: the choices numbered (when
-  // they are), its cursor on one; tap one to pick it. Or as in Claude's own:
-  // ↑/↓ and ↵, a choice's number, Esc to say no.
-  ask(d) {
-    const box = h("div", { class: "ask", role: "menu", tabindex: "-1" });
-    menuKeys(box, { close: () => this.press(["Escape"]) });
-    box.addEventListener("keydown", (e) => {
-      if (!/^[1-9]$/.test(e.key) || e.ctrlKey || e.altKey || e.metaKey || e.target.matches("textarea")) return;
-      const opt = box.querySelectorAll(".opt")[Number(e.key) - 1];
-      if (!opt || opt.disabled) return;
-      e.preventDefault();
-      opt.click();
-    });
-    const q = d.question.split("\n");
-    box.append(h("div", { class: "q" }, h("div", { class: "head" }, q[0] || "Claude asks"), q.slice(1).join("\n")));
-    const numbered = d.options.length && d.options[0].keys[0] === "1";
-    const cursor = Math.max(0, d.options.findIndex((o) => o.selected));
-    d.options.forEach((o, i) => {
-      const n = h("span", { class: "n" }, numbered ? `${i + 1}.` : "");
-      if (/^Type something/i.test(o.label)) {
-        const field = h("textarea", { class: "field", placeholder: "Your answer" });
-        const write = h("div", { class: "write", style: "display:none" }, field,
-          h("button", { class: "control accent", onclick: () => this.answer(d, o, field.value) }, "Send answer"));
-        box.append(h("button", { class: "opt", onclick: () => { write.style.display = ""; field.focus(); } },
-          n, h("span", { class: "what" }, h("b", {}, "Answer in your own words…"))), write);
-        return;
-      }
-      box.append(h("button", { class: `opt${i === cursor ? " first on" : ""}`,
-                               onclick: (e) => this.pick(d, o, e.currentTarget) },
-        n, h("span", { class: "what" }, h("b", {}, o.label), o.detail ? h("small", {}, o.detail) : null)));
-    });
-    box.append(h("div", { class: "row-btns" },
-      h("button", { class: "link", onclick: () => this.press(["Escape"]) }, "esc"),
-      h("button", { class: "link", onclick: () => this.setMode("screen") }, "screen"),
-      h("span", { class: "hint" }, d.hint)));
-    return box;
-  }
-
-  async pick(d, o, btn) {
-    this.dock.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-    btn.classList.add("selected");
-    try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/keys`, { keys: o.keys, dialog: d.id });
-    } catch (e) {
-      toast(e.message);
-      this.dialogId = null;
-      this.renderDock();
-    }
-  }
-
-  async answer(d, o, text) {
-    if (!text.trim()) return;
-    this.dock.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-    try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/send`, { text, answer: { dialog: d.id, keys: o.keys } });
-    } catch (e) {
-      toast(e.message);
-      this.dialogId = null;
-      this.renderDock();
-    }
-  }
-
   async press(keys) {
     try {
       await api(`/api/session/${encodeURIComponent(this.id)}/keys`, { keys });
     } catch (e) {
       toast(e.message);
     }
-  }
-
-  async send() {
-    const text = this.input.value;
-    if (!text.trim() || this.talk.on()) return;
-    this.sendBtn.disabled = true;
-    try {
-      const r = await api(`/api/session/${encodeURIComponent(this.id)}/send`, { text });
-      if (r.waking) toast("Waking Claude with it…");
-      this.input.value = "";
-      store.set(`draft:${this.id}`, "");
-      this.grow();
-      requestAnimationFrame(() => this.toBottom());
-    } catch (e) {
-      toast(e.message);
-    }
-    this.sendButtons();
   }
 
   menu() {

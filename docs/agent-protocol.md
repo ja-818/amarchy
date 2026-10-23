@@ -365,8 +365,10 @@ the mode and model chosen before.
 
 ## Not yet (phase C and on)
 
-- The new chat's own cards, streaming text, activity line, Stop, queue chip,
-  pickers (B2, C1, C2) on the live state and these routes.
+- The model and mode pickers, the `/` menu and images from the composer
+  (C2). The new chat (`app/chat.js`, B2) already draws the cards, the
+  streaming text, the activity line, Stop and the queue chip from the live
+  state and these routes.
 - Drafts: the chat engine has no prompt box; a draft kept from a TUI
   session's sleep stays for the TUI, and the TUI's unsent prompt isn't
   carried over by a switch.

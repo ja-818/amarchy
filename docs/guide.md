@@ -481,8 +481,19 @@ into the box sends one from the phone's photos to Claude's prompt, as
 project** (one of your GitHub repos, any git URL, or an empty one, with a
 private GitHub repo if you like) and orders them; the project picker under
 the list has **New project…** too. In a
-session, its conversation, a box to send it messages, and Claude's questions
-and permission prompts as buttons. The mic button by the box dictates
+session, its conversation as a chat: what you said in bubbles, what Claude
+says as formatted text (code blocks with a **Copy** button), and its steps
+folded into one line in words ("Read app.js, edited 2 files and ran 3
+commands"): tap it for each step, and a step for what's behind it (the
+command and its output, an edit's changes in red and green). Claude's
+checklist shows as one, ticked off as it goes. At the bottom, Claude's
+question, a permission ("Claude wants to run a command", with **Allow**,
+**Always allow …** and **Don't allow…**, where you can say why) or a plan to
+approve come up as a card with buttons, and stay in the conversation once
+answered; anything else Claude asks shows with its choices as they are. While
+Claude works, a line under the conversation says what it's doing, and the
+box's Send turns into **Stop**. On a computer, Enter sends (Shift+Enter for a
+new line). The mic button by the box dictates
 (see [Dictation](#dictation)): hold it while you speak, or tap it and tap
 again when you're done, and the words come into the box as you talk, to edit
 and send. The phone asks whether Amarchy may use the microphone the first

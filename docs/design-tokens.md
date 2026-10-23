@@ -66,6 +66,11 @@ its background's lightness.
 | `--code-bg` / `--code-border` | `--control-bg`, `--border-faint` | A code block |
 | `--diff-add` / `--diff-del` | green, red | Added and removed lines (for B2) |
 | `--diff-add-bg` / `--diff-del-bg` | green, red at 15% | Their background, as Claude Code's |
+| `--diff-add-text` / `--diff-del-text` | `--text`, `--text-muted` | Their text: a removed line dimmed (and struck through), so it reads as gone even where red is green (Hackerman) |
+| `--bubble-user-border` | `--bubble-user-edge` at 40% | Your bubble's outline in the chat |
+| `--step-icon` | `--text-muted` | The icon of one of Claude's steps |
+| `--ask-bg` / `--ask-border` | `--surface`, `--accent` | A card in the chat's dock: Claude's question, a permission, a plan |
+| `--primary-bg` / `--primary-text` | `--accent`, `--on-accent` | The button that does what a card is for (Allow, Approve), and Send |
 | `--radius-control` | `--radius` | Buttons, fields, the search |
 | `--radius-card` | `--radius` | Popups (sheets, menus, toasts, the picker) and tiles (the bar you type in, Claude's question) |
 | `--radius-item` | `--radius` | Rows, menu items, options, code blocks, theme cards |
@@ -80,7 +85,8 @@ its background's lightness.
 
 `--caption` `--body` `--title` `--display` `--icon-large` (font sizes; the
 wide layout sets its own in `.desk-root`), `--gap`, and the safe areas `--top`
-`--bottom`. The scripts set `--vvh`, `--vv-top`, `--screen-size`, `--column`,
+`--bottom`; `--chat-column`, the chat's readable column (760px unless a
+layout sets it). The scripts set `--vvh`, `--vv-top`, `--screen-size`, `--column`,
 `--header`, and the theme cards' `--card-bg` `--card-fg` `--dot` `--thumb`.
 
 ## The terminals
