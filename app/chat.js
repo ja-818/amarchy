@@ -209,6 +209,7 @@ const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet"]);
 function stepWords(name, input) {
   const i = input || {};
   const file = baseName(i.file_path || i.notebook_path || i.path);
+  if (name === SCREEN_TOOL_NAME) return { kind: "other", past: "Drew the screen", now: "Drawing the screen" };
   const mcp = mcpParts(name);
   if (mcp) return { kind: "other", past: `Used ${mcp.server}: ${mcp.what}`, now: `Using ${mcp.server}: ${mcp.what}` };
   // Claude's plan file (plan mode keeps it in ~/.claude/plans).
@@ -691,6 +692,24 @@ function screenCard(chat, d, step) {
 
 // ---- the chat
 
+// The screen (bin/amarchy's SCREEN_DEF, the show_screen tool): its tool's name
+// in the transcript, the tones and the states its blocks take.
+const SCREEN_TOOL_NAME = "mcp__amarchy__show_screen";
+const SCREEN_TONES = ["info", "ok", "warn", "error"];
+const SCREEN_STATES = ["done", "doing", "todo"];
+
+// The chat's markdown styles (.chat .msg.claude) hold for the screen's text too.
+
+// A link block: an http or https address, opened in a new tab (nothing else).
+function screenLink(b) {
+  let url;
+  try { url = new URL(String(b.url || "")); } catch { return null; }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  return h("a", { class: "sb-link", href: url.href, target: "_blank", rel: "noopener" },
+    h("span", { class: "sb-link-label" }, String(b.label || url.host)),
+    h("span", { class: "sb-link-host" }, b.detail ? String(b.detail) : url.host));
+}
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views); claude: Claude's own voice
@@ -703,6 +722,12 @@ class Chat {
     this.live = null;
     this.placeholder = "Message Claude";
     this.view = { content: null, above: [], composer: true };
+    // How the chat shows: the screen (the default) or the conversation. Both
+    // are drawn from the same items, kept here in order (see keepItems).
+    this.mode = store.get("chatView") === "chat" ? "chat" : "screen";
+    this.items = [];
+    this.itemKeys = new Set();
+    this.shownScreen = null;    // the key of the screen on show (a new one goes to its top)
     this.reset();
     this.build();
   }
@@ -725,20 +750,29 @@ class Chat {
     this.conv = h("div", { class: "conv chat-conv" });
     this.tail = h("div", { class: "chat-tail" });
     this.conv.append(this.tail);
-    // A code block's Copy, a fold opened.
-    this.conv.addEventListener("click", (e) => {
-      const copy = e.target.closest(".copy");
-      if (!copy) return;
-      const code = copy.closest(".code").querySelector("code").textContent;
-      copyText(code).then(() => { copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy"; }, 1500); });
-    });
-    this.scroller = h("div", { class: "scroll chat-scroll" }, this.conv);
+    // A code block's Copy, a fold opened (in the conversation, and on the screen).
+    const copy = (e) => {
+      const btn = e.target.closest(".copy");
+      if (!btn) return;
+      const code = btn.closest(".code").querySelector("code").textContent;
+      copyText(code).then(() => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); });
+    };
+    this.conv.addEventListener("click", copy);
+    this.stage = h("div", { class: "screen-stage" });
+    this.stage.addEventListener("click", copy);
+    this.stageWork = h("div", { class: "working screen-work", role: "status", hidden: true }, spinner(), h("span", { class: "now" }));
+    this.scroller = h("div", { class: "scroll chat-scroll" }, this.body());
     this.latest = h("button", { class: "to-latest", type: "button", hidden: true, "aria-label": "Go to the latest",
                                 onclick: () => this.toBottom(true) }, icon("down"));
     this.scroller.addEventListener("scroll", () => { if (this.atBottom()) this.latest.hidden = true; }, { passive: true });
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
-    this.el = h("div", { class: "chat" }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    // The switch between the two views, over the chat (hidden over the terminal and the other views).
+    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Screen");
+    this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
+    this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
+    this.drawSwitch();
+    this.el = h("div", { class: "chat" }, this.switchEl, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     this.listenDrops();
     this.renderDock();
   }
@@ -910,7 +944,7 @@ class Chat {
 
   setView({ content = null, above = [], composer = true } = {}) {
     this.view = { content, above, composer };
-    this.scroller.replaceChildren(content || this.conv);
+    this.scroller.replaceChildren(content || this.body());
     this.el.classList.toggle("other", !!content);
     this.cardKey = null;
     this.renderDock();
@@ -931,6 +965,13 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
+    if (d.reset) {
+      this.items = [];
+      this.itemKeys = new Set();
+      this.start = d.start;
+    }
+    this.keepItems(d.items);
+    if (this.mode === "screen") return this.paintScreen();
     // The page after an update: its scroll, as it was (app.js keptChatScroll).
     const back = d.reset ? keptChatScroll(this.id) : null;
     const stick = back === null && (d.reset || this.atBottom());
@@ -976,6 +1017,8 @@ class Chat {
       const res = await fetch(`/api/session/${encodeURIComponent(this.id)}/earlier?before=${this.start}`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "couldn't load it");
+      this.keepItems(d.items, true);
+      if (this.mode === "screen") { this.start = d.start; return this.paintScreen(); }
       // Its own folds: what came before doesn't join the ones after it.
       const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard };
       this.fold = null;
@@ -995,6 +1038,176 @@ class Chat {
       toast(e.message);
     }
     this.earlierBtn.disabled = false;
+  }
+
+  // ---- the two views: the screen (the default), or the conversation
+
+  body() { return this.mode === "screen" ? this.stage : this.conv; }
+
+  // The items the conversation has, in order, whichever view shows them.
+  keepItems(items, front) {
+    const fresh = items.filter((it) => !it.key || !this.itemKeys.has(it.key));
+    for (const it of fresh) if (it.key) this.itemKeys.add(it.key);
+    if (front) this.items.unshift(...fresh);
+    else this.items.push(...fresh);
+  }
+
+  // The view: the screen or the conversation (the switch over the chat).
+  showMode(mode) {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    store.set("chatView", mode);
+    this.drawSwitch();
+    if (mode === "chat") this.conversation({ reset: true, items: this.items.slice(), start: this.start });
+    else this.paintScreen();
+    if (!this.view.content) this.scroller.replaceChildren(this.body());
+  }
+
+  drawSwitch() {
+    for (const [btn, on] of [[this.screenBtn, this.mode === "screen"], [this.chatBtn, this.mode === "chat"]]) {
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  // The turns of the conversation: each from one of your messages to the next,
+  // with what Claude said in it, the screen it drew (the last), and its steps.
+  turns() {
+    const turns = [];
+    let cur = null;
+    for (const it of this.items) {
+      if (it.kind === "user") {
+        if (typeof it.image === "number") continue;          // a picture: the words of its message start the turn
+        const said = this.userView(it.text);
+        if (said.note || said.summary) continue;             // what Claude Code put in your name, not you
+        cur = { key: it.key, user: String(it.text || "").trim(), said: [], tools: [], screen: null };
+        turns.push(cur);
+        continue;
+      }
+      if (!cur) turns.push(cur = { key: it.key, user: "", said: [], tools: [], screen: null });
+      if (it.kind === "claude") cur.said.push(it.text);
+      else if (it.kind === "tool" && it.screen) cur.screen = it;
+      else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) cur.tools.push(it);
+    }
+    return turns;
+  }
+
+  // The screen: the newest turn's, big, with what Claude wrote under it in a
+  // fold; the turns before it below, each a tap away.
+  paintScreen() {
+    const shown = this.turns().filter((t) => t.screen || t.said.length);
+    const now = shown[shown.length - 1];
+    const body = h("div", { class: "screen-body" });
+    if (now) body.append(this.screenCard(now, true));
+    else body.append(h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
+                       h("div", {}, "Write it below, or hold the mic and say it.")));
+    const before = shown.slice(0, -1).reverse();
+    this.earlierBtn = this.start > 0 ? h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages") : null;
+    if (before.length || this.earlierBtn) {
+      body.append(h("section", { class: "screen-past" },
+        before.length ? h("h3", {}, "Earlier") : null,
+        ...before.map((t) => h("details", { class: "screen-old" },
+          h("summary", {}, cut((t.screen && t.screen.screen && t.screen.screen.title) || t.said[0] || t.user || "Earlier", 90)),
+          this.screenCard(t, false))),
+        this.earlierBtn));
+    }
+    this.stage.replaceChildren(body, this.stageWork);
+    if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
+    const key = now ? now.key : null;
+    if (key !== this.shownScreen) {
+      // A new screen opens at its top: again after the first layout, which can move the position on a fresh page.
+      this.shownScreen = key;
+      this.scroller.scrollTop = 0;
+      requestAnimationFrame(() => { this.scroller.scrollTop = 0; });
+    }
+  }
+
+  screenCard(turn, now) {
+    const card = h("article", { class: `screen-card${now ? " current" : ""}` });
+    if (turn.user) card.append(h("div", { class: "screen-ask" }, cut(turn.user, 240)));
+    if (turn.screen) {
+      const shot = turn.screen.screen || {};
+      if (shot.title) card.append(h("h2", { class: "sb-title" }, String(shot.title)));
+      for (const b of Array.isArray(shot.blocks) ? shot.blocks : []) {
+        const el = this.screenBlock(b);
+        if (el) card.append(el);
+      }
+      if (turn.said.length || turn.tools.length) card.append(this.screenWrote(turn));
+    } else {
+      // No screen (Claude wrote its answer as text): the text is the screen.
+      card.append(h("div", { class: "msg claude screen-text", html: md(turn.said.join("\n\n")) }));
+    }
+    return card;
+  }
+
+  // What Claude wrote and did under a screen, a tap away.
+  screenWrote(turn) {
+    const n = turn.tools.length;
+    return h("details", { class: "screen-wrote" },
+      h("summary", {}, `What Claude wrote${n ? ` · ${n} step${n === 1 ? "" : "s"}` : ""}`),
+      ...turn.said.map((t) => h("div", { class: "msg claude screen-text", html: md(t) })),
+      n ? h("ul", { class: "screen-steps" }, ...turn.tools.map((t) => h("li", {}, stepWords(t.name, t.input || {}).past))) : null);
+  }
+
+  // One block of a screen, in the vocabulary of SCREEN_DEF (bin/amarchy). Text is
+  // escaped (md escapes first); a block it doesn't know is left out.
+  screenBlock(b) {
+    if (!b || typeof b !== "object") return null;
+    const text = (v) => (v === undefined || v === null ? "" : String(v));
+    const tone = (t) => (SCREEN_TONES.includes(t) ? t : "info");
+    const items = (v) => (Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined) : []);
+    switch (b.type) {
+      case "title": return h("h2", { class: "sb-title" }, text(b.text));
+      case "text": return h("div", { class: "msg claude screen-text", html: md(text(b.text)) });
+      case "note": return h("div", { class: `sb-note ${tone(b.tone)}` }, text(b.text));
+      case "stats": return h("div", { class: "sb-stats" }, ...items(b.items).map((s) => h("div", { class: `sb-stat ${tone(s.tone)}` },
+        h("div", { class: "sb-stat-value" }, text(s.value)), h("div", { class: "sb-stat-label" }, text(s.label)),
+        s.detail ? h("div", { class: "sb-stat-detail" }, text(s.detail)) : null)));
+      case "steps": return h("ol", { class: "sb-steps" }, ...items(b.items).map((s) =>
+        h("li", { class: `sb-step s-${SCREEN_STATES.includes(s.state) ? s.state : "todo"}` }, text(s.label))));
+      case "list": return h("ul", { class: "sb-list" }, ...items(b.items).map((x) => h("li", {}, text(x))));
+      case "table": {
+        const cols = items(b.columns).map(text);
+        const rows = items(b.rows).filter(Array.isArray);
+        return h("div", { class: "sb-table" }, h("table", {},
+          cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c)))) : null,
+          h("tbody", {}, ...rows.map((r) => h("tr", {}, ...r.map((c) => h("td", {}, text(c))))))));
+      }
+      case "code": return h("div", { class: "sb-code", html: codeBlock(text(b.code), text(b.language)) });
+      case "link": return screenLink(b);
+      case "choices": return this.screenChoices(b);
+      default: return null;
+    }
+  }
+
+  // Choices: each a button, whose text goes to Claude as your next message.
+  screenChoices(b) {
+    const box = h("div", { class: "sb-choices" });
+    if (b.prompt) box.append(h("div", { class: "sb-prompt" }, String(b.prompt)));
+    const options = (Array.isArray(b.options) ? b.options : []).filter((o) => o && typeof o === "object");
+    box.append(h("div", { class: "sb-options" }, ...options.map((o) => {
+      const send = String(o.send || o.label || "");
+      const btn = h("button", { class: "sb-option", type: "button" },
+        h("span", { class: "sb-option-label" }, String(o.label || send)),
+        o.detail ? h("span", { class: "sb-option-detail" }, String(o.detail)) : null);
+      btn.addEventListener("click", () => this.chooseScreen(box, send, btn));
+      return btn;
+    })));
+    return box;
+  }
+
+  // A tap on a choice sends its text, once: the others wait with it.
+  async chooseScreen(box, text, btn) {
+    if (!text.trim() || box.classList.contains("sent")) return;
+    box.classList.add("sent");
+    btn.classList.add("chosen");
+    try {
+      await this.post("send", { text });
+    } catch (e) {
+      box.classList.remove("sent");
+      btn.classList.remove("chosen");
+      toast(e.message);
+    }
   }
 
   // One item of the conversation, into where (a fragment going at the end,
@@ -1292,6 +1505,13 @@ class Chat {
 
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
+    if (this.mode === "screen") {
+      // The screen shows what Claude is doing, in a line under it; its words are in the chat view.
+      const now = this.activity(live);
+      this.stageWork.hidden = !now;
+      if (now) this.stageWork.querySelector(".now").textContent = now.text;
+      return;
+    }
     const stick = this.atBottom();
     this.streamTo(live && this.working() ? live.partial || "" : "");
     // What it's doing, in words, unless that's the step spinning just above,

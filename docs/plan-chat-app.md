@@ -175,6 +175,32 @@ terminals; after this, the wide layout is chat-first too.
   changed), *Details* (model, mode, context and plan usage, background
   tasks). Zen mode hides the sidebar, as today. Keyboard shortcuts stay.
 
+### The screen: the default view
+
+The chat's main view is **the screen**, and the conversation is the other
+view, one tap away (the **Screen | Chat** switch over the chat; the choice is
+kept on the device). Both are drawn from the same items.
+
+- Claude ends each reply by drawing it with **`show_screen`**, a tool amarchy
+  serves (`amarchy screen-mcp`, an MCP server on stdio, in the broker's
+  argv with `--allowedTools`, so it never asks). Its input is a title and a
+  list of blocks (title, text, note, stats, steps, list, table, code, link,
+  choices): the vocabulary is `SCREEN_DEF` in `bin/amarchy`, drawn by
+  `screenBlock` in `app/chat.js`. Its prompt, `SCREEN_PROMPT`, asks for a short
+  text and the screen.
+- The screen shows the **newest turn's** screen, big, with a fold *What Claude
+  wrote* (its text and its steps); the turns before it sit below, each a fold.
+  A turn without a screen shows its text as the screen, so nothing is lost.
+- **Choices** send their text as your next message (once: the others wait).
+  Links open in a new tab, but only http and https links are made. Text is
+  escaped; a block the vocabulary doesn't have is left out.
+- Phone first: one column, stats two to a row, choices stacked. On a wide
+  screen, a readable column of about 760 px, stats in a row, larger type.
+- Questions, permissions and plans are still the cards above the composer.
+- Not yet: the screen doesn't stream while Claude draws it (it appears when the
+  call is complete); a turn that ends without a screen isn't re-asked by a Stop
+  hook (its text shows as the screen instead).
+
 ### The conversation
 
 - **You**: right-aligned bubbles, with images as thumbnails.

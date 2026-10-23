@@ -6146,6 +6146,10 @@ def app_items(records, s):
                     continue
                 if b.get("type") == "text" and (b.get("text") or "").strip():
                     found.append({"kind": "claude", "text": b["text"].strip()})
+                elif b.get("type") == "tool_use" and b.get("name") == SCREEN_TOOL:
+                    # The screen as Claude drew it: the app draws its blocks (chat.js screenBlocks).
+                    found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""), "summary": "Drew the screen",
+                                  "screen": b.get("input") if isinstance(b.get("input"), dict) else {}})
                 elif b.get("type") == "tool_use":
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
                                   "summary": tool_summary(b.get("name"), b.get("input"), s)[:600],
@@ -10500,6 +10504,43 @@ AGENT_LIVE_EVERY = 0.15     # seconds between two writes of live.json while text
 AGENT_STREAM_MAX = 20_000_000   # bytes of stream.jsonl (Claude's raw output) kept, the older half dropped
 AGENT_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
+# The screen: the chat engine's Claude ends each reply by drawing it with
+# show_screen, a tool amarchy serves (`amarchy screen-mcp`, an MCP server on
+# stdio). The app draws the tool's input (app_items gives it as "screen"); the
+# text Claude writes stays in the transcript, one tap away under the screen.
+SCREEN_SERVER = "amarchy"
+SCREEN_TOOL = f"mcp__{SCREEN_SERVER}__show_screen"
+SCREEN_DEF = {
+    "name": "show_screen",
+    "description": "Draws the screen the user reads in amarchy, in place of your chat text. Call it once, at the end "
+                   "of each reply. The blocks, in order: title {text}; text {text} (markdown, a paragraph or two); "
+                   "note {tone: info|ok|warn|error, text}; stats {items: [{label, value, detail?, tone?}]}; "
+                   "steps {items: [{label, state: done|doing|todo}]}; list {items: [string]}; "
+                   "table {columns: [string], rows: [[string]]}; code {language?, code}; link {label, url, detail?} "
+                   "(an http or https URL the user can open); choices {prompt?, options: [{label, detail?, send?}]} "
+                   "(a tap sends send, or the label, to you as the user's next message).",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "The screen's heading, shown big at its top."},
+            "blocks": {"type": "array", "description": "The screen's blocks, in order.",
+                       "items": {"type": "object", "required": ["type"], "additionalProperties": True,
+                                 "properties": {"type": {"type": "string", "enum": [
+                                     "title", "text", "note", "stats", "steps", "list", "table", "code", "link", "choices"]}}}},
+        },
+        "required": ["blocks"],
+    },
+}
+SCREEN_PROMPT = (
+    "Your replies in amarchy are shown as a screen the user reads, not as a chat. End each reply with one call to "
+    "show_screen: the result, what changed, the URL to test, the numbers, and the next choices as buttons. Keep your "
+    "own text to a line or two before it: the user can open all of your text under the screen when they want it. "
+    "Make the screen short and easy to scan on a phone: a title, then a few blocks. A tap on a choices button sends "
+    "its text to you as the user's next message, so write each send text as the message you want back. Use link for "
+    "any URL the user should open, stats for numbers, steps for progress, table for rows, and code only for a short "
+    "snippet. A question that needs an answer comes as choices (AskUserQuestion still works where its own dialog is needed)."
+)
+
 
 ENGINES = ("chat", "terminal")
 ENGINE_CHECK_FILE = STATE / "engine-check.json"  # the protocol test's last result, for the Claude Code it ran on (see protocol_problem)
@@ -10645,8 +10686,11 @@ def claude_resume(s):
 
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
-    claude arguments, its conversation, amarchy's hooks."""
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", hook_settings(s["id"])]
+    claude arguments, its conversation, amarchy's hooks, and the screen
+    (its tool, allowed without asking, and the prompt that asks for it)."""
+    mcp = {"mcpServers": {SCREEN_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "screen-mcp"]}}}
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--mcp-config", json.dumps(mcp),
+            "--allowedTools", SCREEN_TOOL, "--append-system-prompt", SCREEN_PROMPT, "--settings", hook_settings(s["id"])]
 
 
 def agent_env(s=None):
@@ -11787,6 +11831,39 @@ def follow_engines():
         switch_engine(s, "chat")
 
 
+def screen_mcp():
+    """amarchy screen-mcp: the MCP server (stdio, JSON lines) that gives a
+    chat-engine Claude its show_screen tool. The tool only answers: the app
+    draws the screen from what Claude sent (app_items)."""
+    def send(reply):
+        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.flush()
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(msg, dict) or "id" not in msg:       # a notification: nothing to answer
+            continue
+        method, params = msg.get("method"), msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        if method == "initialize":
+            result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
+                      "serverInfo": {"name": SCREEN_SERVER, "version": "1"}}
+        elif method == "tools/list":
+            result = {"tools": [SCREEN_DEF]}
+        elif method == "tools/call":
+            ok = params.get("name") == SCREEN_DEF["name"]
+            text = "Shown on the user's screen." if ok else f"No tool named {params.get('name')}."
+            result = {"content": [{"type": "text", "text": text}], "isError": not ok}
+        elif method == "ping":
+            result = {}
+        else:
+            send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": f"Unknown method: {method}"}})
+            continue
+        send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
+    return 0
+
+
 def cmd_agent(args):
     """amarchy agent <id> (the broker, in a session's Claude pane), or one of
     its commands for a session on the chat engine (see usage)."""
@@ -11929,7 +12006,7 @@ OPTIONS = {
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "editor": None, "attach": None, "held": None,
-    "paste": None, "rec": None, "agent": None,
+    "paste": None, "rec": None, "agent": None, "screen-mcp": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -12061,6 +12138,8 @@ def main(argv):
         return cmd_paste(args)
     elif cmd == "rec":
         return cmd_rec(args)
+    elif cmd == "screen-mcp" and not args:
+        return screen_mcp()
     elif cmd == "agent":
         return cmd_agent(args)
     elif cmd == "app":
