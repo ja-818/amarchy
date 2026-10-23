@@ -2,12 +2,11 @@
 
 # Ⓐ amarchy
 
-**Run a dozen Claude Codes at once, right in your Omarchy desktop.**
+**Run a dozen Claude Codes at once, each in a chat of its own.**
 
-Each session gets its own git worktree, its own workspace and a terminal next to it.
-The Ⓐ in your bar lights up when one of them needs you.
-
-<img src="docs/demo.gif" alt="One prompt in amarchy starts an agent per open GitHub issue, each in its own worktree" width="100%">
+Talk to Claude in a chat, on your phone or in a computer's browser. Each chat works on its
+own copy of a project, so several can work at once without getting in each other's way.
+When one of them asks you something or finishes, you know.
 
 [Install](#install) · [Keys](#the-keys-that-matter) · [Full guide](docs/guide.md)
 
@@ -17,42 +16,70 @@ The Ⓐ in your bar lights up when one of them needs you.
 
 ## What you get
 
-- **One key, new agent.** `Super+Alt+N`, pick a project, and you're done. You get a fresh worktree and branch, with Claude in the middle and a terminal beside it.
-- **Agents that start agents.** Ask one Claude to start a session per GitHub issue, and they all appear in the list, each on its own branch.
-- **Knows who needs you.** The Ⓐ in the bar lights up, and a chime plays, when a session asks a question or finishes. Click it to jump there.
-- **Sessions you can find.** They're listed by what they're about (**Login:** redirect loop), with search, priorities, and grouping by project, priority or status.
-- **Light on memory.** Idle sessions sleep and free their memory. Start typing and they wake up mid-conversation.
-- **Keeps going with the lid shut.** Put your sessions on a server. They keep working while your laptop sleeps.
-- **On your phone.** A home-screen web app to read, answer and start sessions, with push notifications.
-- **Talk instead of typing.** Hold the mic and speak Spanish, English or 23 more languages: a speech model on your own server writes it down, free, and the audio never leaves it.
-- **In a browser.** The same app on a computer's wide screen is amarchy as your desktop has it, with Claude's and the session's real terminals: no Omarchy needed there.
-
-It's all plain Omarchy: ordinary Hyprland windows, `Super+arrows`, the Omarchy menu, your theme.
-Running another multiplexer inside a tiling window manager felt like one too many, so amarchy lives in the desktop instead.
+- **A chat for each piece of work.** Pick a project, type what you want, and Claude starts on it.
+  Each chat has its own copy of the project, so ten chats can change ten things at once.
+- **Questions and permissions as buttons.** When Claude needs a yes, a choice or a plan
+  approved, it shows a card. You tap a button and it carries on.
+- **Knows who needs you.** A chat that is waiting for you says so in the list, and a chime
+  plays (or your phone notifies you). Tap the notification and you land on the card.
+- **Talk instead of typing.** The mic by the box writes what you say into it. A speech model
+  on your own machine does the writing, so the audio stays there.
+- **Keys and passwords stay out of the chat.** When a project needs one, Claude asks in an
+  app card, and the value is kept on your machine, never in the conversation.
+- **Light on memory.** A chat you're not using goes to sleep and frees its memory. Send it
+  something and it wakes up where it was.
+- **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
+  working while your laptop or phone sleeps.
+- **On your phone and in your browser.** An app you add to your home screen, and the same
+  app on a computer. Both work over your private Tailscale network, not the internet.
 
 ## Install
 
-You need **Omarchy 4** and **[Claude Code](https://docs.claude.com/en/docs/claude-code)**, logged in.
+You need a Linux machine that stays on (a server, or a PC at home), with
+**[Claude Code](https://docs.claude.com/en/docs/claude-code)** installed and logged in, plus
+`git`, `tmux` (3.5 or newer) and `python3`. To use it from your phone or a browser you also
+need [Tailscale](https://tailscale.com) on that machine and on your devices, with HTTPS
+certificates turned on for your tailnet.
 
 ```sh
 git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy && ~/.local/share/amarchy/install.sh
+amarchy app on
 ```
 
-Then press **`Super+Alt+N`**. amarchy offers every git repo in `~/Work`, or clones one of yours from GitHub.
+`amarchy app on` prints the address of the app. On your phone, open it in Safari, tap
+**Share → Add to Home Screen**, and open amarchy from there. Then add a project: amarchy
+offers every git repo in `~/Work`, or clones one of your GitHub repos.
 
-You can run `install.sh` again at any time to update. `install.sh --uninstall` removes amarchy.
+Run `install.sh` again at any time to update. `install.sh --uninstall` removes amarchy and
+leaves your projects and chats alone.
+
+## The app
+
+- **The list**: your chats, each with its name, what it's doing ("Needs your answer",
+  "Working", "Done", "Ready") and its project. Put them in groups by project, priority or
+  status if you like.
+- **The chat**: what you said, what Claude says, the steps it took (folded into one line you
+  can open), and the cards for its questions and permissions. Under it, the box you type in,
+  with the model and how Claude asks for permission.
+- **Chat | Terminal**: the project's own terminal, where you run it (`npm run dev`, say). On a
+  computer it's a panel beside the chat.
+- **Settings**: sleep, sounds, notifications, the look, dictation, secrets and the terminals.
 
 ## The keys that matter
 
+On a computer's browser:
+
 | Key | |
 | --- | --- |
-| `Super+Alt+N` | New session |
-| `Super+Alt+A` | Back to amarchy |
-| `Ctrl+Alt+J` / `K` | Next / previous session |
-| `Ctrl+Alt+S` | Search sessions |
-| `Ctrl+Alt+Z` | Zen mode: just Claude |
+| `Ctrl+Alt+N` | New chat |
+| `Ctrl+Alt+J` / `K` | Next / previous chat |
+| `Ctrl+Alt+S` | Search chats |
+| `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
+| `Ctrl+Alt+←` / `→` | The chat / the terminal |
 | `Ctrl+Alt+R` | Run the project in the terminal |
-| `Ctrl+Alt+X` | Close the session and remove its worktree |
+| `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority |
+| `Ctrl+Alt+Z` | Zen mode: the chat alone |
+| `Ctrl+Alt+X` | Close the chat |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
 Every action is also a command: `amarchy help`.
@@ -60,9 +87,10 @@ Every action is also a command: `amarchy help`.
 ## More
 
 The **[full guide](docs/guide.md)** covers all of it: [how it works](docs/guide.md#how-it-works),
-[sleep](docs/guide.md#sleep), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
-[remote sessions](docs/guide.md#remote-sessions), [the phone app](docs/guide.md#your-phone),
+[the chat](docs/guide.md#the-chat), [your phone](docs/guide.md#your-phone),
 [the browser](docs/guide.md#in-a-browser-on-your-computer),
+[dictation](docs/guide.md#dictation), [secrets](docs/guide.md#secrets),
+[sleep](docs/guide.md#sleep), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
 [configuration](docs/guide.md#configure) and [the CLI](docs/guide.md#cli).
 
 [MIT](LICENSE)

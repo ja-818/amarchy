@@ -145,7 +145,6 @@ const CHAT_ICONS = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
-  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
 };
 
@@ -243,7 +242,7 @@ function stepWords(name, input) {
     case "SendMessage":
       return { kind: "message", past: `Messaged ${peerName(i.to)}`, now: `Messaging ${peerName(i.to)}` };
     case "ListAgents":
-      return { kind: "other", past: "Looked at the other sessions", now: "Looking at the other sessions" };
+      return { kind: "other", past: "Looked at the other chats", now: "Looking at the other chats" };
     case "TaskOutput": case "BashOutput":
       return { kind: "run", past: "Checked on a background task", now: "Checking on a background task" };
     case "TaskStop": case "KillShell": case "KillBash":
@@ -710,8 +709,7 @@ function cardLink(l) {
 
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
-  // shows the chat (its header, its other views); claude: Claude's own voice
-  // mode for the mic ({start, stop}, see SessionView), or none.
+  // shows the chat (its header, its other views).
   constructor(opts) {
     this.opts = opts;
     this.id = opts.id;
@@ -813,13 +811,10 @@ class Chat {
                     glyph("mic"));
     this.sendBtn = h("button", { class: "cbtn send", type: "button", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
     this.stopBtn = h("button", { class: "cbtn stop", type: "button", "aria-label": "Stop Claude", onclick: () => this.stop() }, glyph("stop"));
-    // What you say, into the box (dictate.js), or through Claude's voice mode
-    // (a terminal-engine session's: a chat-engine session has none).
-    const claude = this.opts.claude;
+    // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
-                              state: (text) => this.listening(text),
-                              claude: claude ? { ...claude, off: () => this.engine === "chat" } : undefined });
+                              state: (text) => this.listening(text) });
     // The pictures and files going with the message, over the line you type on.
     this.tray = [];
     this.trayEl = h("div", { class: "tray", hidden: true });
@@ -2387,7 +2382,7 @@ class Chat {
   // The box while dictating: what's going on, in place of its placeholder.
   listening(text) {
     this.composer.classList.toggle("listening", text !== null);
-    this.micBtn.classList.toggle("on", (this.opts.voiceHeld && this.opts.voiceHeld()) || (this.talk.on() && this.talk.run.held));
+    this.micBtn.classList.toggle("on", this.talk.on() && this.talk.run.held);
     this.input.placeholder = text || this.placeholder;
   }
 
@@ -2520,7 +2515,7 @@ class Chat {
     }
     const s = this.settings();
     const mode = s.mode ? modeWords(s.mode).label : "";
-    this.modelPill.replaceChildren(icon("spark"), h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
+    this.modelPill.replaceChildren(h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
     this.modelPill.title = "Which Claude answers";
     this.modePill.replaceChildren(icon("shield"), h("span", { class: "k" }, mode || "How Claude asks"), icon("chevron", "chev"));
     this.modePill.title = s.mode ? modeWords(s.mode).about || "" : "How Claude asks before it changes things";
@@ -2769,7 +2764,7 @@ const CORE_COMMANDS = [
   { name: "model", label: "Change the model", about: "Which Claude answers", menu: "model" },
   { name: "mode", label: "Change how Claude asks", about: "Before changes, never, or plan first", menu: "mode" },
   { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max" },
-  { name: "usage", label: "How much of your plan is used", about: "This session's and this week's share of your Claude plan", run: true },
+  { name: "usage", label: "How much of your plan is used", about: "This chat's and this week's share of your Claude plan", run: true },
   { name: "init", label: "Write notes about this project", about: "Claude studies the project and writes a CLAUDE.md for itself", run: true },
 ];
 

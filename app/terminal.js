@@ -86,6 +86,10 @@ const TERM_KEYS = [
 // Claude's classic terminal also takes these: its menus are picked with them.
 const CLASSIC_KEYS = [["⇧Tab", "\x1b[Z"], ["⏎", "\r"], ["1", "1"], ["2", "2"], ["3", "3"]];
 const ARROWS = { up: "A", down: "B", right: "C", left: "D" };
+// What a key button says to a screen reader (its label is a symbol).
+const SPOKEN = { "⇧Tab": "Shift+Tab", "⏎": "Enter", "↑": "Up arrow", "↓": "Down arrow", "←": "Left arrow", "→": "Right arrow",
+                 "^C": "Control+C", "^D": "Control+D", "|": "Pipe", "~": "Tilde", "/": "Slash", "-": "Dash", "Ctrl": "Control",
+                 "A−": "Smaller text", "A+": "Bigger text" };
 
 class SessionTerminal {
   constructor(opts) {
@@ -122,18 +126,14 @@ class SessionTerminal {
   buildKeys() {
     this.ctrlBtn = null;
     const button = ([label, key]) => {
-      const b = h("button", { class: "control", type: "button", "aria-label": label === "^C" ? "Ctrl+C" : label === "^D" ? "Ctrl+D" : label },
-                  label);
+      const b = h("button", { class: "control", type: "button", "aria-label": SPOKEN[label] || label }, label);
       // A tap mustn't take the keyboard away from the terminal.
       b.addEventListener("pointerdown", (e) => e.preventDefault());
       b.addEventListener("click", () => this.key(key));
       if (key === "ctrl") this.ctrlBtn = b;
       return b;
     };
-    this.talkBtn = h("button", { class: "control talk", type: "button", "aria-label": "Hold to dictate to Claude" }, glyph("mic"), "Hold to talk");
-    holdToTalk(this.talkBtn, () => { this.talkBtn.classList.add("on"); talkStart(this.panes.claude); },
-               () => { this.talkBtn.classList.remove("on"); talkStop(this.panes.claude); });
-    this.classicKeys = h("div", { class: "keys term-keys classic" }, this.talkBtn, ...CLASSIC_KEYS.map(button));
+    this.classicKeys = h("div", { class: "keys term-keys classic" }, ...CLASSIC_KEYS.map(button));
     // The text bigger or smaller (kept for next time), at the end of the row.
     const size = (label, d, name) => {
       const b = h("button", { class: "control", type: "button", "aria-label": name }, label);
@@ -147,10 +147,7 @@ class SessionTerminal {
 
   pane(which) {
     if (!this.panes[which]) {
-      // The classic terminal on a computer: this page's microphone is
-      // Claude's while it has the keyboard (Hold Space, its voice mode).
-      const opts = this.phone ? { size: phoneSize, mic: which === "claude" } : { mic: which === "claude" };
-      const p = this.panes[which] = new TermPane(which, opts);
+      const p = this.panes[which] = new TermPane(which, this.phone ? { size: phoneSize } : {});
       // Ctrl from the keys row, on what's typed next.
       const send = p.send.bind(p);
       p.send = (data) => {
@@ -204,7 +201,6 @@ class SessionTerminal {
     this.el.classList.toggle("classic", classic);
     if (this.classicKeys) {
       this.classicKeys.hidden = !classic;
-      this.talkBtn.hidden = !(app.view && app.view.voice);
     }
     if (!quiet && this.opts.onShow) this.opts.onShow(this.shown);
     if (this.id && !this.closed) {
@@ -242,7 +238,7 @@ class SessionTerminal {
 
   setCtrl(on) {
     this.ctrl = on;
-    if (this.ctrlBtn) this.ctrlBtn.classList.toggle("on", on);
+    if (this.ctrlBtn) { this.ctrlBtn.classList.toggle("on", on); this.ctrlBtn.setAttribute("aria-pressed", String(on)); }
   }
 
   key(key) {
@@ -288,7 +284,7 @@ class SessionTerminal {
         ...cmds.map((c) => ({ label: c.name, detail: c.command, icon: "send", act: () => this.run(c.name === "run" ? undefined : c.name) })),
         { label: "Save a new command…", icon: "plus", always: true, act: () => this.saveCommand() }] });
     }
-    sheet(sheetHead(`Run in ${projectName(s.repo) || "the project"}`, "In the session's terminal; again restarts it"),
+    sheet(sheetHead(`Run in ${projectName(s.repo) || "the project"}`, "In this chat's terminal; again restarts it"),
       h("div", { class: "menu" }, ...cmds.map((c) => h("button", { class: "menu-item", onclick: () => { closeSheets(); this.run(c.name === "run" ? undefined : c.name); } },
         h("span", { class: "label" }, h("span", { class: "text" }, c.name, h("small", {}, c.command)))))),
       h("button", { class: "control wide", onclick: () => this.saveCommand() }, "Save a new command…"));
@@ -310,7 +306,7 @@ class SessionTerminal {
     const cmdF = field({ placeholder: name === "run" ? "npm run dev, bin/dev…" : "The command" },
                        () => save(name || nameF.value.trim(), cmdF.value.trim()));
     sheet(sheetHead(name === "run" ? `How ${projectName(s.repo) || "the project"} runs` : "A new command",
-                    "Saved for the project, run in the session's terminal"),
+                    "Saved for the project, run in the chat's terminal"),
       ...(nameF ? [h("div", { class: "section" }, "Name"), nameF] : []),
       h("div", { class: "section" }, "Command"), cmdF,
       h("button", { class: "control wide accent", onclick: () => save(name || nameF.value.trim(), cmdF.value.trim()) }, "Save and run"));
@@ -331,6 +327,6 @@ function terminalSettings(draw) {
   return [h("div", { class: "section" }, "Terminals"),
     h("div", { class: "seg" }, ...[[true, "Show"], [false, "Hide"]].map(([value, label]) =>
       h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => set(value) }, label))),
-    h("p", {}, on ? "The project's terminal and Claude's classic terminal open in each session: the Terminal tab on the phone, the panel beside the chat on a computer."
-                  : "Just the chat. A session's terminals are still in its menu, under Advanced, for when you need one.")];
+    h("p", {}, on ? "The project's terminal and Claude's classic terminal open in each chat: the Terminal tab on the phone, the panel beside the chat on a computer."
+                  : "Just the chat. A chat's terminals are still in its menu, under Advanced, for when you need one.")];
 }

@@ -518,6 +518,7 @@ function renderList() {
   view.organize.classList.toggle("on", !view.menu.hidden);
   if (!view.menu.hidden) keepFocus(view.menu, () => view.menu.replaceChildren(...organizeMenu()));
   const list = view.list;
+  const top = view.scroll.scrollTop;      // a session going or coming: the list stays where it is
   keepFocus(list, () => {
     list.replaceChildren();
     const shown = v ? matching(v.sessions, app.query) : [];
@@ -542,6 +543,7 @@ function renderList() {
       grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
     }
   });
+  view.scroll.scrollTop = top;
   app.newChat.update();
 }
 
@@ -555,7 +557,7 @@ function welcome(added) {
     h("div", { class: "welcome-mark", "aria-hidden": "true" }, "Ⓐ"),
     h("h2", {}, "Welcome to Amarchy"),
     h("p", {}, "Tell Claude what you want, and it does the work on your projects: reads them, writes the code, runs it, and asks you whenever it needs you."),
-    h("p", { class: "muted" }, "Start with a project: one of yours on GitHub, or an empty one for something new."),
+    h("p", { class: "muted" }, "Claude works in a project: a folder of your work. Add one of your GitHub repos, or start an empty folder for something new."),
     h("div", { class: "welcome-actions" },
       h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),
       h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
@@ -823,7 +825,7 @@ function sessionActions(s, opened) {
 }
 
 function closeButton(s) {
-  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close session");
+  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close chat");
 }
 
 // Closing, asked first: it removes the worktree, and
@@ -858,7 +860,7 @@ async function confirmClose(s, known) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
-  } }, n ? "Close and discard changes" : "Close session");
+  } }, n ? "Close and discard changes" : "Close chat");
   sheet({ key: "close" }, sheetHead(`Close ${where(s)}?`, detail), yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
@@ -933,45 +935,30 @@ class SessionView {
   constructor(id) {
     this.id = id;
     this.row = app.view && app.view.sessions.find((s) => s.id === id) || null;
-    this.screen = null;
     this.mode = "chat";
     this.build();
     this.open();
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
-    if (app.handed && app.handed.id === id) {     // said on the new-session bar, for this one
-      const handed = app.handed;
-      app.handed = null;
-      this.dictate(handed);
-    }
   }
 
   build() {
     this.titleEl = h("div", { class: "title" });
     const bar = h("div", { class: "bar" },
-      h("button", { class: "icon-btn", "aria-label": "Sessions", onclick: () => { go("#/"); } }, glyph("back")),
+      h("button", { class: "icon-btn", "aria-label": "Chats", onclick: () => { go("#/"); } }, glyph("back")),
       this.titleEl,
       h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({
       id: this.id, row: this.row,
       onSession: (row) => { this.row = row; this.renderHeader(); },
-      onScreen: (screen) => { this.screen = screen; if (this.mode === "screen") this.renderScreen(); },
       onGone: (why) => {
-        toast(why ? "Can't open that session." : "That session was closed.");
+        toast(why ? "Can't open that chat." : "That chat was closed.");
         go("#/");
       },
-      // Claude's voice mode, for a terminal-engine session's mic.
-      claude: { start: () => this.dictate(), stop: () => this.letGo() },
       // A notification about its card was tapped: the conversation, where the card is.
       onAsk: () => { if (this.mode !== "chat") this.setMode("chat"); },
-      voiceHeld: () => !!this.voice && this.voice.held,
     });
-    this.screenEl = h("pre", { class: "screen" });
-    this.keysRow = h("div", { class: "keys" },
-      ...[["↑", "Up"], ["↓", "Down"], ["⏎", "Enter"], ["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"],
-          ["1", "1"], ["2", "2"], ["3", "3"]].map(([label, key]) =>
-        h("button", { class: "control", onclick: () => this.press([key]) }, label)));
     // Chat | Terminal (with Show terminals on, or while the terminal shows).
     this.tabs = h("div", { class: "seg session-tabs", role: "tablist", "aria-label": "Show" });
     this.el = h("div", { class: "view" }, bar, this.tabs, this.chat.el);
@@ -1009,136 +996,6 @@ class SessionView {
     this.closed = true;
     if (this._terminal) this._terminal.close();
     clearInterval(this.seen);
-  }
-
-  // Claude's own dictation (its voice mode), from the phone's microphone:
-  // while the button is held, what the phone hears goes to the session's
-  // Claude as if its voice key were held down; let go, and what Claude
-  // made of it comes into the box, to send from there. What's said before
-  // Claude can listen (it's starting, in a session just made) waits for it.
-  // handed: said already, on the new-session bar ({queue}: its audio).
-  async dictate(handed) {
-    if (this.voice) return;
-    // What was in the box before: the words go after it, as they come.
-    const v = this.voice = { held: !handed, ws: null, queue: handed ? handed.queue : [], heard: false,
-                             base: this.chat.input.value.replace(/\s+$/, "") };
-    const write = (words) => {
-      this.chat.input.value = v.base && words ? `${v.base} ${words}` : v.base || words;
-      this.chat.grow();
-      this.chat.sendButtons();
-    };
-    const done = () => {
-      if (this.voice === v) this.voice = null;
-      this.chat.listening(null);
-    };
-    if (!handed) {
-      // Listening once the microphone hears: what's said before is lost.
-      this.chat.listening("Starting the microphone…");
-      mic.hears = () => { if (v.held) this.chat.listening("Listening…"); };
-      try {
-        await micOpen();
-      } catch (e) {
-        done();
-        toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
-                                          : `The microphone didn't start: ${e.message}`);
-        return;
-      }
-      if (!v.held) {      // let go already (the first time, while the phone asked about the microphone)
-        done();
-        micRelease();
-        return;
-      }
-      mic.take = (pcm) => {
-        if (v.ws && v.ws.readyState === WebSocket.OPEN) v.ws.send(pcm);
-        else if (v.queue.length < 15000) v.queue.push(pcm);      // 5 minutes, as long as one can be
-      };
-    }
-    const url = `/api/session/${encodeURIComponent(this.id)}/voice`;
-    const why = await this.voiceReady(v, url);
-    if (why !== null) {
-      if (v.held) micRelease();
-      v.held = false;
-      done();
-      if (why) toast(why);
-      return;
-    }
-    const ws = v.ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`);
-    ws.binaryType = "arraybuffer";
-    ws.onopen = () => {
-      for (const pcm of v.queue) ws.send(pcm);
-      v.queue = [];
-      if (!v.held) this.end(v);
-    };
-    ws.onmessage = (e) => {
-      let d = {};
-      try { d = JSON.parse(e.data); } catch (err) { return; }
-      v.heard = true;
-      if (d.state === "transcribing") this.chat.listening("Claude is writing it down…");
-      if (typeof d.interim === "string") write(d.interim);
-      if (typeof d.text === "string") {
-        ws.send("got");     // it can go from Claude's prompt now
-        write(d.text);
-        store.set(`draft:${this.id}`, this.chat.input.value);
-      }
-      if (d.error) {
-        write("");
-        toast(d.error);
-      }
-    };
-    ws.onclose = async () => {
-      if (v.held) micRelease();       // gone while the button was still held
-      v.held = false;
-      done();
-      if (!v.heard) {     // it didn't take it: ask why
-        try {
-          const r = await fetch(url);
-          const d = await r.json();
-          toast(d.error || "Dictation didn't connect");
-        } catch (e) {
-          toast("Can't reach Amarchy");
-        }
-      }
-    };
-  }
-
-  // Whether Claude can take a dictation now: null when it can, else why not
-  // ("" when there's nothing to say: the session was left). While it can't
-  // yet (it's starting, or asking something), it's asked again, for a while.
-  async voiceReady(v, url) {
-    const until = Date.now() + 120000;
-    for (;;) {
-      if (this.closed || this.voice !== v) return "";
-      let d = {};
-      try {
-        const r = await fetch(url);
-        d = await r.json();
-        if (r.ok) return null;
-      } catch (e) {
-        return "Can't reach Amarchy";
-      }
-      if (!d.wait || Date.now() > until) return d.error || "Dictation didn't connect";
-      if (!v.held) this.chat.listening("Waiting for Claude to start…");
-      await new Promise((ok) => setTimeout(ok, 700));
-    }
-  }
-
-  // Let go: the rest of what it heard, then "end" (once it's connected).
-  // Let go: the microphone keeps on a moment (the last word is still being
-  // said as the finger lifts), then the rest of it and "end".
-  async letGo() {
-    const v = this.voice;
-    if (!v || !v.held) return;
-    v.held = false;
-    this.chat.micBtn.classList.remove("on");
-    await new Promise((ok) => setTimeout(ok, MIC_TAIL));
-    micRelease();
-    if (v.ws && v.ws.readyState === WebSocket.OPEN) this.end(v);
-    else this.chat.listening(v.ws ? "Claude is writing it down…" : "Waiting for Claude…");
-  }
-
-  end(v) {
-    v.ws.send("end");
-    this.chat.listening("Claude is writing it down…");
   }
 
   // Back from the background: everything from scratch.
@@ -1179,15 +1036,8 @@ class SessionView {
         h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
   }
 
-  renderScreen() {
-    const stick = this.chat.atBottom();
-    this.screenEl.textContent = this.screen ? this.screen.text : "";
-    if (stick) this.chat.toBottom(true);
-  }
-
-  // The conversation, the session's terminals (the project's, or Claude's
-  // classic one: terminal.js, its keys under it), or Claude's screen as
-  // text (with keys for its menus).
+  // The conversation, or the session's terminals (the project's, or Claude's
+  // classic one: terminal.js, its keys under it).
   setMode(mode, which) {
     this.mode = mode;
     this.el.classList.toggle("terminal", mode === "terminal");
@@ -1200,22 +1050,8 @@ class SessionView {
       t.el.hidden = false;
       if (which === "classic") t.classic();
       else t.open(this.id).then(() => { if (which) t.show(which); });
-    } else if (mode === "screen") {
-      this.chat.setView({ content: this.screenEl, above: [this.keysRow], composer: true });
-      this.renderScreen();
-      this.chat.toBottom(true);
-    } else {
-      this.chat.setView();
     }
     this.renderTabs();
-  }
-
-  async press(keys) {
-    try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/keys`, { keys });
-    } catch (e) {
-      toast(e.message);
-    }
   }
 
   menu() {
@@ -1232,11 +1068,10 @@ class SessionView {
     const classicOk = !!(app.view && app.view.show_terminals);
     const terminals = h("div", { class: "menu" },
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
-      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []),
-      item(this.mode === "screen", "Claude's screen, as text", () => this.setMode("screen")));
+      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
-      h("div", { class: "section" }, "Session"),
+      h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
       ...sessionActions({ ...row, id: this.id }),
@@ -1245,7 +1080,7 @@ class SessionView {
   }
 }
 
-// The text size of Claude's terminal and screen on the phone (A−/A+ there).
+// The text size of the terminals on the phone (A−/A+ there).
 function phoneSize() {
   const n = parseFloat(store.get("phone-size") || "");
   return n >= 7 && n <= 24 ? n : 12;
@@ -1416,17 +1251,6 @@ function micReset() {
   micClose();
   if (mic.ctx) mic.ctx.close().catch(() => {});
   mic.ctx = mic.ready = null;
-}
-
-// Held down: start(); let go (or the finger slides off): stop().
-function holdToTalk(el, start, stop) {
-  el.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    try { el.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
-    start();
-  });
-  for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(end, () => stop());
-  el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
 // ---- the keys in a menu
@@ -1740,13 +1564,12 @@ function newChat({ wide = false, started = null } = {}) {
   };
   const buttons = () => {
     const none = !projects().length;
-    send.disabled = none || !field.value.trim() || !!said || dictate.on();
+    send.disabled = none || !field.value.trim() || dictate.on();
     under.hidden = none;
     micBtn.hidden = none || !dictate.available();
-    micBtn.classList.toggle("on", (!!said && said.held) || (dictate.on() && dictate.run.held));
-    box.classList.toggle("listening", !!said || saying !== null);
+    micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
+    box.classList.toggle("listening", saying !== null);
     field.placeholder = none ? (app.view ? "Add a project first" : "Connecting…")
-      : said ? (!said.held ? "Starting the chat…" : said.hearing ? "Listening…" : "Starting the microphone…")
       : saying !== null ? saying : wide ? "Say it in your own words: what you want, and anything Claude should know" : "What do you want to do?";
   };
   const update = () => {
@@ -1788,7 +1611,7 @@ function newChat({ wide = false, started = null } = {}) {
     update();
   };
   const start = async () => {
-    if (!field.value.trim() || !repo || said) return;
+    if (!field.value.trim() || !repo) return;
     send.disabled = true;
     el.classList.add("busy");
     try {
@@ -1802,62 +1625,6 @@ function newChat({ wide = false, started = null } = {}) {
     }
     el.classList.remove("busy");
     buttons();
-  };
-  // Or hold the mic and say it: the session starts while you speak (once
-  // it's clearly held, not just tapped), and when you let go it opens, what
-  // you said going to its Claude's dictation as soon as Claude is up. The
-  // words come into its box, after what was typed here, to send from there.
-  let said = null;
-  const talk = async () => {
-    if (said || !repo) return;
-    const s = said = { held: true, hearing: false, queue: [], id: null, failed: null, making: null };
-    mic.hears = () => { s.hearing = true; buttons(); };
-    buttons();
-    try {
-      await micOpen();
-    } catch (e) {
-      said = null;
-      buttons();
-      toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in the phone's Settings"
-                                        : `The microphone didn't start: ${e.message}`);
-      return;
-    }
-    if (!s.held) {      // let go already (the first time, while the phone asked about the microphone)
-      micRelease();
-      return;
-    }
-    mic.take = (pcm) => { if (s.queue.length < 15000) s.queue.push(pcm); };      // 5 minutes, as long as one can be
-    s.timer = setTimeout(() => {
-      s.making = api("/api/new", { repo }).then((d) => { s.id = d.id; }, (e) => { s.failed = e.message; });
-    }, 400);
-  };
-  const letGo = async () => {
-    const s = said;
-    if (!s || !s.held) return;
-    s.held = false;
-    clearTimeout(s.timer);
-    buttons();
-    await new Promise((ok) => setTimeout(ok, MIC_TAIL));     // the end of the last word
-    micRelease();
-    if (!s.making) {        // only tapped (or let go while the phone asked about the microphone)
-      said = null;
-      buttons();
-      if (s.queue.length) toast("Hold the mic while you speak");
-      return;
-    }
-    buttons();
-    await s.making;
-    said = null;
-    buttons();
-    if (s.failed) return toast(s.failed);
-    store.set(`draft:${s.id}`, field.value.trim());
-    field.value = "";
-    store.set("draft:new", "");
-    store.set("last-project", repo);
-    picked = guessed = false;
-    grow();
-    app.handed = { id: s.id, queue: s.queue };
-    go(`#/s/${encodeURIComponent(s.id)}`);
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
   return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field };
@@ -1935,8 +1702,8 @@ function sleepSettings(draw) {
         try { await api("/api/sleep", { after: value }); app.view.sleep_after = value; draw(); }
         catch (err) { toast(err.message); }
       } }, label))),
-    h("p", {}, after === "off" ? "Sessions stay awake until you put one to sleep (its menu)."
-      : `A session idle for ${after === 1 ? "a minute" : `${after} minutes`} and open nowhere sleeps: its Claude Code exits and frees its memory, the conversation stays, and what you send it wakes it. Never while it works, asks you something or runs something in the background.`),
+    h("p", {}, after === "off" ? "Chats stay awake until you put one to sleep (its menu)."
+      : `A chat idle for ${after === 1 ? "a minute" : `${after} minutes`} and open nowhere sleeps: its Claude Code exits and frees its memory, the conversation stays, and what you send it wakes it. Never while it works, asks you something or runs something in the background.`),
     h("button", { class: "control wide", onclick: async (e) => {
       e.currentTarget.disabled = true;
       try {
@@ -1944,14 +1711,14 @@ function sleepSettings(draw) {
         toast(`${r.slept} asleep${r.kept ? `, ${r.kept} kept awake (busy)` : ""}`);
       } catch (err) { toast(err.message); }
       draw();
-    } }, "Put idle sessions to sleep now")];
+    } }, "Put idle chats to sleep now")];
 }
 
 // The chat engine's check (the protocol test) failed on this Claude Code:
 // said once, in Settings, only then.
 function engineSettings() {
   const problem = app.view && app.view.engine_problem;
-  return problem ? [h("p", { class: "note" }, `Claude's chat check failed on this Claude Code: ${problem}. New sessions still use the chat.`)] : [];
+  return problem ? [h("p", { class: "note" }, `Amarchy's check of the chat with this Claude Code failed: ${problem}.`)] : [];
 }
 
 async function openSettings() {
@@ -1973,14 +1740,14 @@ async function openSettings() {
       kids.push(h("p", {}, app.desk ? "Notifications are turned off for Amarchy in this browser's settings (and System Settings → Notifications)."
                                     : "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
     } else if (state === "off") {
-      kids.push(h("p", {}, "Get a notification when a session needs you or is done."),
+      kids.push(h("p", {}, "Get a notification when a chat needs you or is done."),
         h("button", { class: "control wide accent", onclick: async (e) => {
           e.currentTarget.disabled = true;
           try { await pushOn(); toast("Notifications on."); } catch (err) { toast(err.message); }
           draw();
         } }, "Turn on notifications"));
     } else {
-      kids.push(h("p", {}, "On: you're told when a session needs you or is done, unless you're looking at it."),
+      kids.push(h("p", {}, "On: you're told when a chat needs you or is done, unless you're looking at it."),
         h("button", { class: "control wide", onclick: async () => {
           try { const r = await api("/api/push/test"); toast(r.sent ? "Sent. It should arrive in a moment." : "It couldn't be sent."); }
           catch (err) { toast(err.message); }
@@ -1996,9 +1763,9 @@ async function openSettings() {
           try { await api("/api/alerts", { alerts: value }); app.view.alerts = value; draw(); }
           catch (err) { toast(err.message); }
         } }, label))),
-      h("p", {}, alerts === "all" ? "Every session, when it needs you and when it's done."
-               : alerts === "needs-you" ? "A session that asks you something, or needs your permission. One that's done is just marked done in the list."
-               : "Nothing from the coding sessions; their list still says how they are."),
+      h("p", {}, alerts === "all" ? "Every chat, when it needs you and when it's done."
+               : alerts === "needs-you" ? "A chat that asks you something, or needs your permission. One that's done is just marked done in the list."
+               : "Nothing from the chats; their list still says how they are."),
       h("p", {}, name ? `${name}, your assistant, always tells you: under its own name and picture, with its own chime.`
                       : "Your assistant, once you have one (amarchy assistant <id>), always tells you."));
     // The chimes, your assistant and your projects (manage.js), as amarchy sound,
@@ -2008,11 +1775,11 @@ async function openSettings() {
     kids.push(h("div", { class: "section" }, "Sound"),
       h("button", { class: "control wide", onclick: () => soundSheet(false) },
         `Chime: ${label(app.view && app.view.sound)}${helper ? ` · ${helper.assistant_name || "Assistant"}'s: ${label(app.view.assistant_sound)}` : ""}`),
-      h("p", {}, app.desk ? "Rings in this browser when a session needs you or is done, unless you're looking at it."
+      h("p", {}, app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
       h("div", { class: "section" }, "Assistant"),
       helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
-             : h("p", {}, "None yet: open a session's menu (⋯, or hold it in the list) and make it your assistant."),
+             : h("p", {}, "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant."),
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));

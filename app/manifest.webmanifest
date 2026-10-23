@@ -1,7 +1,7 @@
 {
   "name": "Amarchy",
   "short_name": "Amarchy",
-  "description": "Your amarchy sessions",
+  "description": "Your amarchy chats",
   "id": "/",
   "start_url": "/",
   "scope": "/",

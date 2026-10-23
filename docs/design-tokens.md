@@ -33,7 +33,7 @@ from it.
 | `--surface-raised` | A lighter shade of it | `lighter_background` |
 | `--scrim` | The shade behind a sheet or menu card | `background` at 50% |
 | `--text` | Text | `foreground` (`menu.text`) |
-| `--text-muted` | Secondary text: meta lines, hints, placeholders | `foreground` dimmed as Qt's `darker(140)` |
+| `--text-muted` | Secondary text: meta lines, hints, placeholders | `foreground` dimmed as Qt's `darker(140)`, eased off until it has 5:1 on the surface (WCAG AA, with a margin) |
 | `--text-selection` | Behind text you select | `selection` |
 | `--accent` | The theme's accent: titles, what's in use, focus | `accent` |
 | `--border-faint` | Hairlines: under a bar, around code | `foreground` at 12% |

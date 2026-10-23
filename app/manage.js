@@ -87,7 +87,7 @@ async function commandsSheet(s, opened) {
     } catch (e) { toast(e.message); }
   };
   const hasRun = cmds.some((c) => c.name === "run");
-  sheet({ key: "commands" }, sheetHead(`Run in ${projectName(s.repo)}`, "Saved for the project: every session of it has them"),
+  sheet({ key: "commands" }, sheetHead(`Run in ${projectName(s.repo)}`, "Saved for the project: every chat of it has them"),
     h("div", { class: "menu" }, ...cmds.map((c) => h("div", { class: "command" },
       h("button", { class: "menu-item", onclick: () => runIt(c.name) },
         h("span", { class: "label" }, h("span", { class: "text" }, c.name === "run" ? "Run the project" : c.name,
@@ -120,7 +120,7 @@ function commandForm(s, name, command, opened) {
     } catch (e) { toast(e.message); }
   };
   sheet(sheetHead(named ? `Run command for ${projectName(s.repo)}` : name ? `Change ${name}` : "Save a command",
-                  "It starts in the session's worktree; $AMARCHY_PATH and the rest are set"),
+                  "It starts in this chat's folder; $AMARCHY_PATH and the rest are set"),
     named ? null : nameIn, cmdIn,
     h("button", { class: "control wide accent", onclick: () => save(true) }, "Save and run"),
     h("button", { class: "control wide", onclick: () => save(false) }, "Save"),
@@ -180,10 +180,10 @@ async function soundSheet(forAssistant) {
       now === name ? glyph("check", "val") : null);
     keepFocus(body.parentNode || body, () => body.replaceChildren(
       h("div", { class: "seg" },
-        h("button", { class: `control${forAssistant ? "" : " on"}`, onclick: () => { forAssistant = false; draw(); } }, "Sessions"),
+        h("button", { class: `control${forAssistant ? "" : " on"}`, onclick: () => { forAssistant = false; draw(); } }, "Chats"),
         h("button", { class: `control${forAssistant ? " on" : ""}`, onclick: () => { forAssistant = true; draw(); } }, who)),
-      h("p", {}, forAssistant ? `${who} rings with its own, whatever the sessions do.`
-                              : "When a session needs you or is done (as Settings → Tell me says)."),
+      h("p", {}, forAssistant ? `${who} rings with its own, whatever the chats do.`
+                              : "When a chat needs you or is done (as Settings → Tell me says)."),
       h("div", { class: "menu" }, ...d.sounds.map((x) => row(x.name, x.label, x.mine ? "yours" : "")), row("off", "Off", "silent")),
       h("button", { class: "control wide", onclick: add }, "Add your own…")));
   };
@@ -208,7 +208,7 @@ function assistantSheet(s) {
     };
     sheet(sheetHead("Make it your assistant?", where(s)),
       h("p", {}, "Your assistant keeps your day rather than writing code: at the top of the list with its picture, "
-                 + "the other sessions of its project under it, and it always tells you when it needs you or is done."
+                 + "the other chats of its project under it, and it always tells you when it needs you or is done."
                  + (helper ? ` It takes the place of ${helper.assistant_name || "the one you have"}.` : "")),
       h("div", { class: "section" }, "Its name"), name,
       h("button", { class: "control wide accent", onclick: make }, "Make it my assistant"));
@@ -235,7 +235,7 @@ function assistantSheet(s) {
     h("div", { class: "section" }, "Chime"),
     h("button", { class: "control wide", onclick: () => soundSheet(true) }, "Its chime…"),
     h("button", { class: "control wide danger", onclick: async () => {
-      try { await api(`/api/session/${sid(s)}/assistant`, { off: true }); closeSheets(); toast("No assistant: it's a session like the others again"); }
+      try { await api(`/api/session/${sid(s)}/assistant`, { off: true }); closeSheets(); toast("No assistant: it's a chat like the others again"); }
       catch (e) { toast(e.message); }
     } }, "Not my assistant any more"));
 }
@@ -331,8 +331,8 @@ function newProjectSheet(added, how) {
   let repos = null;
   const list = h("div", { class: "menu" });
   const repo = field({ placeholder: "owner/repo or a git URL" }, () => add({ repo: repo.value.trim() }));
-  const empty = field({ placeholder: "Its name", maxlength: "100" }, () => add({ new: empty.value.trim() }));
-  const github = h("button", { class: "control wide", "aria-pressed": "false", onclick: () => {
+  const empty = field({ placeholder: "For example: my website", maxlength: "100" }, () => add({ new: empty.value.trim() }));
+  const github = h("button", { class: "control wide", "aria-pressed": "false", hidden: true, onclick: () => {
     const on = github.getAttribute("aria-pressed") !== "true";
     github.setAttribute("aria-pressed", String(on));
     github.classList.toggle("on", on);
@@ -361,15 +361,16 @@ function newProjectSheet(added, how) {
     h("button", { class: "control wide accent", onclick: () => add({ repo: repo.value.trim() }) }, "Add it"),
     h("div", { class: "section" }, "Your GitHub repos"), list];
   const fromNothing = [h("div", { class: "section" }, how === "empty" ? "What's it called?" : "Or an empty one"), empty, github,
-    h("button", { class: `control wide${how === "empty" ? " accent" : ""}`, onclick: () => add({ new: empty.value.trim() }) }, "Start it")];
+    h("button", { class: `control wide${how === "empty" ? " accent" : ""}`, onclick: () => add({ new: empty.value.trim() }) }, "Create the project")];
   sheet(sheetHead(how === "empty" ? "An empty project" : how === "github" ? "A project from GitHub" : "New project",
-                  how === "empty" ? "A new folder on your server" : "Copied to your server"),
+                  how === "empty" ? "A new, empty folder for Claude to work in" : "Copied to your server"),
     ...(how === "empty" ? fromNothing : how === "github" ? fromGithub : [...fromGithub, ...fromNothing]));
   if (how === "empty") setTimeout(() => empty.focus(), 50);
   drawRepos();
   fetch("/api/github").then(async (r) => {
     const d = await r.json();
-    repos = r.ok ? d.repos || [] : d.error || "Your GitHub repos aren't reachable from the host (gh)";
+    repos = Array.isArray(d.repos) ? d.repos : d.error || "Your GitHub repos aren't reachable from this server";
+    github.hidden = !Array.isArray(repos);      // a private repo too: only where GitHub is connected
   }).catch(() => { repos = "Can't reach Amarchy"; }).then(() => { if (list.isConnected) drawRepos(); });
 }
 

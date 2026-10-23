@@ -4,9 +4,8 @@
 # (a server, say). Safe to run again.
 #
 #   - links bin/amarchy into ~/.local/bin
-#   - a wl-paste that reads what you paste in the app, and a rec that is the
-#     phone's or the browser's microphone while you dictate (bin/amarchy-paste,
-#     bin/amarchy-rec), for the sessions' Claude
+#   - a wl-paste that reads what you paste in the app (bin/amarchy-paste), for
+#     the sessions' Claude
 #   - installs the amarchy skill for Claude Code (skill/), so the Claude in a
 #     session knows it's in amarchy and how to use the CLI
 #   - a systemd user timer that puts idle sessions to sleep (their Claude Code
@@ -217,9 +216,8 @@ if ((uninstall)); then
     "$bin_dir/amarchy" app off >/dev/null 2>&1 || true
   fi
   rm -f "$bin_dir/amarchy" "$state/host"
-  # The wl-paste and rec of the sessions, only if they're ours.
+  # The wl-paste of the sessions, only if it's ours.
   [[ $(readlink "$bin_dir/wl-paste" 2>/dev/null) == */bin/amarchy-paste ]] && rm -f "$bin_dir/wl-paste"
-  [[ $(readlink "$bin_dir/rec" 2>/dev/null) == */bin/amarchy-rec ]] && rm -f "$bin_dir/rec"
   for unit in amarchy-sleep amarchy-update; do
     systemctl --user disable --now "$unit.timer" >/dev/null 2>&1 || true
     rm -f "$units/$unit.timer" "$units/$unit.service"
@@ -288,13 +286,9 @@ if [[ -L $bin_dir/wl-paste ]] || [[ ! -e $bin_dir/wl-paste ]]; then
     ln -s "$repo/bin/amarchy-paste" "$bin_dir/wl-paste"
   fi
 fi
-# rec for the sessions here, Claude's voice mode: the phone's or the browser's
-# microphone while you dictate there, else the real rec, which it then runs
-# (see "dictation from the phone" in bin/amarchy). Ahead of it on the PATH, so
-# a Claude that's already running finds it too; never over a rec of your own.
-if [[ -L $bin_dir/rec ]] || [[ ! -e $bin_dir/rec ]]; then
-  ln -sfn "$repo/bin/amarchy-rec" "$bin_dir/rec"
-fi
+# The rec that amarchy used to put here for Claude's voice mode is gone (dictation
+# is the host's now): take its link away, but never a rec of your own.
+[[ $(readlink "$bin_dir/rec" 2>/dev/null) == */bin/amarchy-rec ]] && rm -f "$bin_dir/rec"
 
 # The amarchy skill: Claude Code finds it in every session (their SessionStart
 # hook points it there). A link, so it follows this checkout.
