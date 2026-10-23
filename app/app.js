@@ -865,8 +865,12 @@ async function confirmClose(s, known) {
 
 // Your assistant's picture: yours (amarchy assistant --picture), by its hash,
 // else amarchy's own (app/assistant.svg).
+// The 192 one is what the lists show (about 70 KB, not the 512's 420 KB, and
+// every row's picture is drawn again each time the list changes); the big one
+// only where it's shown big.
 function avatar(s, cls) {
-  const src = /^[0-9a-f]{12}$/.test(s.picture || "") ? `/picture/${s.picture}-512.png` : "/assistant.svg";
+  const size = cls === "big" ? 512 : 192;
+  const src = /^[0-9a-f]{12}$/.test(s.picture || "") ? `/picture/${s.picture}-${size}.png` : "/assistant.svg";
   return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
 }
 
