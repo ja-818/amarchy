@@ -353,7 +353,6 @@ phase B2) uses the live state directly.
 | `POST .../keys` | for a chat session: a card's option (`{keys, dialog}`) does what it says; `Escape` says no to what's asked and stops, or just stops; other keys go to the pane (Enter restarts a Claude that exited) |
 | `POST /api/clip` with `paste` | for a chat session, the image is attached to the next message (what Ctrl+V does in the TUI) |
 | `GET .../agent` | `agent.json` (commands, models, account) and the live state, for the `/` menu and the pickers |
-| `GET .../voice` | 409 for a chat session: Claude's voice mode is the TUI's (the other dictations work) |
 
 Notifications say what a chat session asks, from `pending` (`ask_words`):
 "Asks: Which theme should be the default? (and 2 more questions)", "Wants to

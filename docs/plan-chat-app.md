@@ -1,7 +1,8 @@
 # Plan: amarchy as a chat app
 
-Status: **approved by Julian on 2026-10-22**, with the decisions in
-[Decisions](#decisions) (app themes postponed). Wave 1 is under way.
+Status: **finished**. Phases A1 to D1 shipped (D1 shipped in the final-pass session).
+Approved by Julian on 2026-10-22, with the decisions in [Decisions](#decisions)
+(app themes postponed).
 
 Goal: the amarchy web app looks and works like a polished everyday app, on the
 phone and in Safari on a Mac, for someone who has never used a terminal. You
@@ -480,7 +481,7 @@ Three lanes can run in parallel; arrows are hard dependencies.
 - **A3. Chat engine by default.** New sessions on `chat`; existing ones
   switch when idle or on waking; the setting to keep the TUI. (after A2, C1,
   C2, C4)
-- **D1. Clean-up and docs.** Scraping kept only for the terminal engine,
+- **D1. Clean-up and docs.** *Done (shipped in the final-pass session).* Scraping kept only for the terminal engine,
   dead paths removed, `docs/guide.md` and `docs/parity.md` updated, an
   onboarding screen for a first-time user, accessibility pass (VoiceOver
   labels, focus, contrast in every theme).
