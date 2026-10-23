@@ -94,27 +94,38 @@ function taskText(task, cls) {
 
 // The look picked (theme.css: the theme, its font, the wallpaper), again
 // whenever it changes, on every device; the status bar in its background.
+// One stylesheet link, whose href moves to the new look: the browser wears
+// the old look until the new theme.css has loaded (no unstyled flash), and a
+// quick run of picks can't leave an older sheet in the page to win.
 function wearLook(look) {
-  const stamp = look ? `${look.look || ""}${look.font || ""}` : "";
   const link = document.getElementById("look");
-  if (link && !link.dataset.stamp) link.dataset.stamp = stamp;     // the page came with this one
-  else if (link && stamp && link.dataset.stamp !== stamp) {
+  const stamp = look ? `${look.look || ""}${look.font || ""}` : "";
+  if (!link || !stamp) return paintBars();
+  if (!link.dataset.stamp) link.dataset.stamp = stamp;     // the page came with this one
+  else if (link.dataset.stamp !== stamp) {
     const v = `${(look.look || "").slice(0, 12)}${(look.font || "").slice(0, 12)}`;
-    const next = h("link", { rel: "stylesheet", href: `theme.css?v=${v}`, id: "look" });
-    next.dataset.stamp = stamp;
-    next.addEventListener("load", async () => {
-      link.remove();
-      paintBars();
-      // A new font: loaded before the terminals measure it again (or a moment's wait).
-      const family = getComputedStyle(document.documentElement).getPropertyValue("--font").trim();
-      if (family && document.fonts) await Promise.race([
-        Promise.all([document.fonts.load(`16px ${family}`), document.fonts.load(`bold 16px ${family}`)]).catch(() => {}),
-        new Promise((ok) => setTimeout(ok, 3000))]);
-      restyleTerminals();
-    });
-    link.after(next);
+    link.dataset.stamp = stamp;
+    if (!link.dataset.loads) {
+      link.dataset.loads = "1";
+      link.addEventListener("load", lookLoaded);
+      // A look that didn't come (the network blipped): asked for again, a moment on.
+      link.addEventListener("error", () => setTimeout(() => link.setAttribute("href", link.dataset.want), 2000));
+    }
+    link.dataset.want = `theme.css?v=${v}`;
+    link.setAttribute("href", link.dataset.want);
   }
   paintBars();
+}
+
+// The new look's sheet is in: the status bar, and the terminals (which
+// measure the font, so it's loaded before they do, or a moment's wait).
+async function lookLoaded() {
+  paintBars();
+  const family = getComputedStyle(document.documentElement).getPropertyValue("--font").trim();
+  if (family && document.fonts) await Promise.race([
+    Promise.all([document.fonts.load(`16px ${family}`), document.fonts.load(`bold 16px ${family}`)]).catch(() => {}),
+    new Promise((ok) => setTimeout(ok, 3000))]);
+  restyleTerminals();
 }
 
 // The real terminals wear it too (desk.js's, the phone's).
@@ -2045,24 +2056,35 @@ async function openLook() {
     if (!info.fetch || !info.fetch.running) return;
     polling = setTimeout(async () => {
       if (!back.isConnected) return;
+      const asked = picks;
       try {
         const res = await fetch("/api/look");
         if (!res.ok) throw new Error();
-        const was = info.look && info.look.look;
-        info = await res.json();
-        if (info.look && info.look.look !== was) wearIt();
+        const fresh = await res.json();
+        // Read before a pick of yours was answered: that's the older look.
+        if (asked === picks) {
+          const was = info.look && info.look.look;
+          info = fresh;
+          if (info.look && info.look.look !== was) wearIt();
+        }
       } catch (err) { /* the next one, then */ }
       if (back.isConnected) draw();
     }, 1500);
   };
-  const pick = async (change, el) => {
+  // The picks go to the host one after another, so the last one tapped is
+  // the one kept (and worn), however quickly they're tapped.
+  let picks = 0, picking = Promise.resolve();
+  const pick = (change, el) => {
     if (el) el.classList.add("busy");
-    try {
-      info = await api("/api/look", change);
-      wearIt();
-    } catch (err) { toast(err.message); }
-    if (el) el.classList.remove("busy");
-    draw();
+    picking = picking.then(async () => {
+      try {
+        info = await api("/api/look", change);
+        picks++;
+        wearIt();
+      } catch (err) { toast(err.message); }
+      if (el) el.classList.remove("busy");
+      draw();
+    }).catch((err) => console.error(err));     // one that failed doesn't hold up the next
   };
   // Worn here at once; every other device takes it from the list in a moment.
   const wearIt = () => {

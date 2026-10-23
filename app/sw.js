@@ -52,13 +52,17 @@ self.addEventListener("fetch", (e) => {
   const path = url.pathname === "/index.html" ? "/" : url.pathname;
   const picture = path.startsWith("/picture/");     // your assistant's picture
   if (!FILES.includes(path) && !picture) return;
+  // The look (theme.css?v=<its stamp>) is kept as the URL it was asked for:
+  // one at a time, the last look you picked.
+  const look = path === "/theme.css";
+  const key = look ? path + url.search : path;
   e.respondWith((async () => {
     try {
       const res = await fetch(e.request);
       if (ofBuild(res)) {
         const copy = res.clone();
         caches.open(picture ? PICTURES : SHELL).then(async (c) => {
-          await c.put(path, copy);
+          await c.put(key, copy);
           // A new picture: the one before it isn't needed any more.
           if (picture) {
             const sig = path.slice(9, 21);
@@ -67,10 +71,21 @@ self.addEventListener("fetch", (e) => {
               if (p.startsWith("/picture/") && p.slice(9, 21) !== sig) await c.delete(req);
             }
           }
+          // A new look: the one kept before it isn't needed any more.
+          if (look) for (const req of await c.keys()) {
+            const u = new URL(req.url);
+            if (u.pathname === path && u.search !== url.search) await c.delete(req);
+          }
         });
       }
       return res;
     } catch (err) {
+      // Offline: the look as it was kept (the last one picked, if this one never was).
+      if (look) {
+        const c = await caches.open(SHELL);
+        const kept = (await c.keys()).find((req) => new URL(req.url).pathname === path);
+        return (await c.match(key)) || (kept && (await c.match(kept))) || Response.error();
+      }
       return (await caches.match(path)) || Response.error();
     }
   })());
