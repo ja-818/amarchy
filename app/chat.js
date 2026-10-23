@@ -1161,7 +1161,7 @@ class Chat {
       t.brief = it.brief;
       this.brief = { key: it.key, data: it.brief };
     }
-    if (it.kind === "claude") t.said = it.text;
+    if (it.kind === "claude" && !it.aside) t.said = it.text;
     else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) t.steps++;
     if (it.kind !== "result") this.drawWork(t);
   }
@@ -1378,6 +1378,7 @@ class Chat {
   add(it, where, earlier) {
     if (it.key && this.keys.has(it.key)) return;
     if (it.key) this.keys.add(it.key);
+    if (it.kind === "claude" && it.aside) return;      // said again after the brief (bin/amarchy app_items)
     this.where = where;
     if (it.kind === "result") return this.result(it);
     if (it.kind === "tool") return this.tool(it, where, earlier);

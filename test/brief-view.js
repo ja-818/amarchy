@@ -125,6 +125,7 @@ const ITEMS = [
   { kind: "result", tool: "t1", error: false, text: "ok", key: "c4:0", at: "" },
   { kind: "claude", text: "Done. The page runs at http://amarchy:5173/search.", key: "c5:0", at: "" },
   { kind: "tool", id: "t2", name: TOOL, summary: "Updated the brief", brief: BRIEF, key: "c6:0", at: "" },
+  { kind: "claude", text: "The brief is updated.", aside: true, key: "c6b:0", at: "" },
 ];
 
 const failures = [];
@@ -202,6 +203,8 @@ async function run(browser, base, layout) {
     `the timeline, oldest first, each turn with its headline (${s.headline})`);
   check(layout, s.oldText === "Hi there. What should we build today?", "a turn from before the brief shows Claude's words");
   check(layout, /1 step/.test(s.work || ""), `the brief's own call isn't a step in Claude's work (${s.work})`);
+  const aside = await page.evaluate(() => document.body.textContent.includes("The brief is updated."));
+  check(layout, !aside, "what Claude says again after the brief isn't shown");
   check(layout, s.overflow <= 1, `no sideways scroll (${s.overflow}px)`);
   await shot("closed");
 

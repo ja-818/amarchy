@@ -6033,8 +6033,10 @@ def user_item(text):
 def app_items(records, s):
     """A conversation's records as the app shows them: what you said, what
     Claude said, its tool calls (each result follows as "result", for the
-    call it answers) and notes. Thinking and Claude Code's bookkeeping are left out."""
-    out = []
+    call it answers) and notes. Thinking and Claude Code's bookkeeping are left out.
+    What Claude says after its brief (update_brief) until your next message is
+    marked aside: it repeats what it said, and the app leaves it out."""
+    out, briefed = [], False
     for r in records:
         if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta"):
             continue
@@ -6045,6 +6047,8 @@ def app_items(records, s):
         found = []
         if kind == "user":
             results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+            if not results:
+                briefed = False
             extra = result_view(r, s) if len(results) == 1 else {}
             for b in blocks:
                 if not isinstance(b, dict):
@@ -6066,8 +6070,9 @@ def app_items(records, s):
                 if not isinstance(b, dict):
                     continue
                 if b.get("type") == "text" and (b.get("text") or "").strip():
-                    found.append({"kind": "claude", "text": b["text"].strip()})
+                    found.append({"kind": "claude", "text": b["text"].strip(), **({"aside": True} if briefed else {})})
                 elif b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
+                    briefed = True
                     # The brief as Claude wrote it: the app draws it (chat.js drawBrief).
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""), "summary": "Updated the brief",
                                   "brief": b.get("input") if isinstance(b.get("input"), dict) else {}})
