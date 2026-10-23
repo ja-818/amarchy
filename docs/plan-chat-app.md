@@ -198,11 +198,15 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   and a bar, commits, merges, pushes, and git now on the newest), *Checks*
   (tests with their results, ways to try it; opens itself when one fails),
   *Activity* ("6 steps · 3 actions · 4 min"), *Notes*.
-- **Audit**: *Activity* is a timeline: each step that acts (an edit, a
-  command, a helper, a message) a line, the looking around between them one
-  line ("Read 2 files, searched 1 time", a tap lists them), what Claude said
-  and what came in by itself (a background task that ended) where they
-  happened. *Original message* is the turn as the conversation shows it.
+- **Audit**: *Activity* is a timeline, folded the way the conversation folds
+  Claude's steps: each run of steps between two things it said is one row in
+  the chat's words ("Read 2 files, edited search.js, ran 2 commands and
+  searched once"), with its +/−, what didn't work and how long; a tap lists
+  its steps (their kind, the command in a pill, an edit's +/−, the first line
+  of an error). What Claude said sits between as quiet quotes, background
+  events where they happened. A row whose steps are running spins and says
+  what it's doing; the line Claude is writing shows live at the end. *Original
+  message* is the turn as the conversation shows it.
 - **Only what helps**: every part but the title is optional, so a simple
   answer is a title and a point or two. Claude also says which of the
   record's sections don't help this turn (`skip`: changes, checks, activity,

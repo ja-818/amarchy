@@ -132,6 +132,9 @@ const ITEMS = [
   { kind: "tool", id: "r1", name: "Read", input: { file_path: "/x/app.js" }, key: "c3:0", at: "" },
   { kind: "tool", id: "r2", name: "Read", input: { file_path: "/x/list.js" }, key: "c4:0", at: "" },
   { kind: "tool", id: "g1", name: "Grep", input: { pattern: "search" }, key: "c5:0", at: "" },
+  { kind: "result", tool: "r1", error: false, text: "", key: "c5a:0", at: "" },
+  { kind: "result", tool: "r2", error: false, text: "", key: "c5b:0", at: "" },
+  { kind: "result", tool: "g1", error: false, text: "", key: "c5c:0", at: "" },
   { kind: "tool", id: "e1", name: "Edit", input: { file_path: "/x/search.js", old_string: "a\nb", new_string: "a\nc\nd" }, key: "c6:0", at: "" },
   { kind: "result", tool: "e1", error: false, text: "ok", key: "c7:0", at: "" },
   { kind: "tool", id: "b1", name: "Bash", input: { command: "node test/search.js", description: "Run the search tests" }, key: "c8:0", at: "" },
@@ -186,7 +189,7 @@ const read = (page) => page.evaluate(() => {
     facts: card ? [...card.querySelectorAll(".fact")].map((f) => f.textContent) : [],
     tests: card ? [...card.querySelectorAll(".brief-list.tests li")].map((li) => li.className).join(",") : "",
     links: card ? [...card.querySelectorAll(".brief-link")].map((x) => x.getAttribute("href")) : [],
-    activity: card ? [...card.querySelectorAll(".activity > li")].map((li) => `${li.className}|${li.querySelector(".act-text").firstChild?.textContent || li.querySelector(".act-text").textContent}`) : [],
+    activity: card ? [...card.querySelectorAll(".activity > li")].map((li) => `${li.className}|${(li.querySelector(".act-title, .act-quote") || {}).textContent}`) : [],
     words: sec("words")?.querySelector(".turn-work-body")?.textContent || "",
     badge: card?.querySelector(".reply-badge")?.textContent || null,
     pwned: window.__pwned,
@@ -224,7 +227,7 @@ async function run(browser, base, layout) {
   check(layout, JSON.stringify(s.openSecs) === JSON.stringify(["Needs you", "Answer", "Checks"]) && s.questions === 2 &&
     JSON.stringify(s.answer) === JSON.stringify(["The page filters as you type", "Empty query shows all 120 items"]), `Needs you, Answer and Checks (a test fails) open, the rest folded (${JSON.stringify(s.openSecs)})`);
   check(layout, s.sums.plan === "1 of 3 done · next: Ship to main" && s.sums.changes === "1 file +2 −1 · 1 commit" &&
-    /^6 steps · 3 actions · 4 min$/.test(s.sums.activity) &&
+    /^6 steps · 4 min$/.test(s.sums.activity) &&
     s.sums.notes === "1 · Lint fails on an old file" && s.sums.words === "2 messages · 6 steps",
     `each folded section says what it holds (${JSON.stringify(s.sums)})`);
   check(layout, s.overflow <= 1, `no sideways scroll (${s.overflow}px)`);
@@ -240,9 +243,18 @@ async function run(browser, base, layout) {
   check(layout, JSON.stringify(s.facts) === JSON.stringify(["search-page", "3 commits", "4 files +120 −8", "2 uncommitted", "not in main yet"]), "git now, on the newest");
   check(layout, s.tests === "is-pass,is-fail" && JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]), "checks: tests, the http(s) link only");
   check(layout, JSON.stringify(s.activity) === JSON.stringify([
-    "act-said|“On it.”", "act-group|Read 2 files, searched 1 time", "act-step|Edited search.js", "act-step|Run the search tests", "act-step|Commit",
-    "act-event|Done in the background: Background build finished", "act-said|“Done. The page runs at http://amarchy:5173/search.”"]),
-    `activity: in order, the looking around grouped (${JSON.stringify(s.activity)})`);
+    "act act-said|On it.", "act act-fold|Read 2 files, edited search.js, ran 2 commands and searched once",
+    "act act-event|Done in the background: Background build finished", "act act-said|Done. The page runs at http://amarchy:5173/search."]),
+    `activity: in order, each run of steps one row in the chat's words (${JSON.stringify(s.activity)})`);
+  const fold = await page.evaluate(() => { const li = [...document.querySelectorAll(".reply")].at(-1).querySelector(".act-fold");
+    const chips = [...li.querySelectorAll(".act-chips .chip")].map((c) => c.textContent);
+    li.querySelector(".act-row").click();
+    const steps = [...li.querySelectorAll(".act-step")].map((x) => x.querySelector(".act-step-what").textContent + (x.querySelector(".act-cmd") ? ` [${x.querySelector(".act-cmd").textContent}]` : ""));
+    return { chips, open: li.classList.contains("open"), steps }; });
+  check(layout, JSON.stringify(fold.chips) === JSON.stringify(["6 steps", "+2−1"]) && fold.open &&
+    JSON.stringify(fold.steps) === JSON.stringify(["Read app.js", "Read list.js", "Searched the code for “search”", "Edited search.js+2−1",
+      "Run the search tests [node test/search.js]", "Commit [git add -A && git commit -q -m \"Add search page\"]"]),
+    `the row opens to its steps: commands, an edit's +/− (${JSON.stringify(fold)})`);
   check(layout, s.words.includes("On it.") && !s.words.includes("The brief is updated."), "Original message: the turn as the conversation shows it, without what it said again");
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("sections");
@@ -303,12 +315,12 @@ async function run(browser, base, layout) {
   const liveNow = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-now")?.textContent);
   check(layout, s.replies === 4 && /working/.test(s.cls) && s.titles[3].startsWith("Working…") && /Merging/.test(liveNow || "") &&
     s.openSecs.includes("Activity"), `while it works: a live card, its activity open (${s.titles[3]})`);
-  const nowRow = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1);
-    return { now: r.querySelector(".act-now .act-text")?.textContent, last: r.querySelector(".activity > li:last-child")?.className }; });
-  check(layout, nowRow.now === "Merging…" && nowRow.last === "act-now", `the live activity ends with what it's doing now (${JSON.stringify(nowRow)})`);
+  const nowRow = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1), f = r.querySelector(".act-fold.going");
+    return { going: f && f.querySelector(".act-title").textContent, spin: !!(f && f.querySelector(".act-node .spinner")), nowHidden: r.querySelector(".act-now").hidden }; });
+  check(layout, nowRow.going === "Merge and push…" && nowRow.spin && nowRow.nowHidden, `while a step runs, its row says so, spinning (${JSON.stringify(nowRow)})`);
   await page.evaluate(() => { const c = window.__chat; c.live = { ...c.live, partial: "Merged.\nNow I'm pushing the branch to origin" }; c.renderTail(); });
-  const writing = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".act-now .act-text")?.textContent);
-  check(layout, writing === "Writing: “Now I'm pushing the branch to origin”", `or the line it's writing (${writing})`);
+  const writing = await page.evaluate(() => { const n = [...document.querySelectorAll(".reply")].at(-1).querySelector(".act-now"); return !n.hidden && n.querySelector(".act-title").textContent; });
+  check(layout, writing === "Writing: “Now I'm pushing the branch to origin”", `the line Claude is writing, live, at the end (${writing})`);
   await shot("live");
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;

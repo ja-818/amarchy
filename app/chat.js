@@ -793,52 +793,37 @@ function testsOf(items, results) {
   return out.slice(-6);
 }
 
-// What a turn did, in order: each step that acts (an edit, a command, a
-// helper, a message) a line; the looking around between them (reading,
-// searching, the web) one line saying how much; what Claude said, and what
-// came in by itself (a background task that ended), as they happened.
+// What a turn did, in order, folded as the conversation folds it: each run of
+// steps between two things Claude said is one entry (in the chat's words:
+// "Edited search.js and ran 2 commands"), opening to its steps; what Claude
+// said, and what came in by itself (a background task that ended), between.
 function activityOf(items, results, userView) {
   const entries = [];
-  let group = null, steps = 0, acts = 0;
+  let fold = null, steps = 0, failed = 0;
   for (const it of items) {
     if (it.kind === "tool") {
       if (HIDDEN_TOOLS.has(it.name)) continue;
       steps++;
-      const w = stepWords(it.name, it.input || {});
-      const res = results.get(it.id);
-      if (["read", "search", "web"].includes(w.kind)) {
-        if (!group) entries.push(group = { type: "group", steps: [] });
-        group.steps.push({ w, it });
-        continue;
-      }
-      group = null;
-      acts++;
-      const cmd = it.name === "Bash" && (it.input || {}).description ? cut(String((it.input || {}).command || "").split("\n")[0], 70) : "";
-      entries.push({ type: "step", w, error: !!(res && res.error), cmd });
+      const result = results.get(it.id) || null;
+      if (result && result.error && !DENIED.test(String(result.text || ""))) failed++;
+      if (!fold) entries.push(fold = { type: "fold", steps: [] });
+      fold.steps.push({ id: it.id, name: it.name, input: it.input || {}, at: it.at, result, words: stepWords(it.name, it.input || {}) });
     } else if (it.kind === "claude" && !it.aside) {
-      group = null;
-      entries.push({ type: "said", text: cut(firstLine(it.text), 110) });
+      fold = null;
+      entries.push({ type: "said", text: cut(firstLine(it.text), 140) });
     } else if (it.kind === "user" && !it.turn) {
       const v = userView(it.text);
-      group = null;
+      fold = null;
       entries.push({ type: "event", text: typeof v.note === "string" ? v.note : v.summary || cut(String(it.text || ""), 100) });
     } else if (it.kind === "note") {
-      group = null;
+      fold = null;
       entries.push({ type: "event", text: it.text === "Interrupted" ? "You stopped Claude" : cut(it.text, 100) });
     }
   }
-  for (const e of entries) {
-    if (e.type !== "group") continue;
-    const n = (k) => e.steps.filter((x) => x.w.kind === k).length;
-    const parts = [n("read") ? `read ${n("read")} file${n("read") === 1 ? "" : "s"}` : null,
-      n("search") ? `searched ${n("search")} time${n("search") === 1 ? "" : "s"}` : null,
-      n("web") ? `${n("web")} web look${n("web") === 1 ? "" : "s"}` : null].filter(Boolean);
-    e.label = parts.join(", ").replace(/^./, (c) => c.toUpperCase());
-  }
   const times = items.map((i) => Date.parse(i.at)).filter((x) => !isNaN(x));
   const mins = times.length > 1 ? Math.round((Math.max(...times) - Math.min(...times)) / 60000) : 0;
-  const summary = [`${steps} step${steps === 1 ? "" : "s"}`, acts ? `${acts} action${acts === 1 ? "" : "s"}` : null,
-    mins ? `${mins} min` : null].filter(Boolean).join(" · ");
+  const summary = [`${steps} step${steps === 1 ? "" : "s"}`, failed ? `${failed} didn't work` : null, mins ? `${mins} min` : null]
+    .filter(Boolean).join(" · ");
   return { entries, steps, summary };
 }
 
@@ -1357,6 +1342,7 @@ class Chat {
     const partial = live && live.partial ? String(live.partial).trim().split("\n").filter(Boolean).pop() || "" : "";
     const now = this.activity(live);
     t.liveAct.textContent = partial ? `Writing: “${partial.length > 110 ? `…${partial.slice(-110)}` : partial}”` : now ? now.text : "Working…";
+    if (t.liveRow) t.liveRow.hidden = !partial && !!t.liveRunning && !(live && live.thinking);
   }
 
   // The newest reply again (git's facts came in).
@@ -1487,29 +1473,68 @@ class Chat {
     return box;
   }
 
-  // live: the turn under way, whose activity ends with what it's doing now
-  // (renderTail keeps that line up to date, t.liveAct).
+  // The activity as a timeline. A fold is a row: how it went (a spinner while
+  // its steps run), the chat's sentence for them, their +/−, what didn't
+  // work, how long; a tap lists its steps (kind, words, the command, the
+  // diff's +/−, the first line of an error). live: the turn under way, whose
+  // timeline ends with what it's doing now (drawNow keeps that line up to date).
   activityView(entries, live) {
-    const list = h("ol", { class: "activity" }, ...entries.map((e) => {
-      if (e.type === "said") return h("li", { class: "act-said" }, h("span", { class: "act-ic" }, icon("message")), h("span", { class: "act-text" }, `“${e.text}”`));
-      if (e.type === "event") return h("li", { class: "act-event" }, h("span", { class: "act-ic" }, icon("clock")), h("span", { class: "act-text" }, e.text));
-      if (e.type === "group") {
-        const list = h("ul", { class: "act-group-steps", hidden: true }, ...e.steps.map((x) => h("li", {}, x.w.past)));
-        return h("li", { class: "act-group" }, h("span", { class: "act-ic" }, icon("search")),
-          h("span", { class: "act-text" }, h("button", { class: "act-group-btn", type: "button", onclick: (ev) => {
-            list.hidden = !list.hidden;
-            ev.currentTarget.setAttribute("aria-expanded", String(!list.hidden));
-          }, "aria-expanded": "false" }, e.label), list));
-      }
-      return h("li", { class: `act-step${e.error ? " failed" : ""}` }, h("span", { class: "act-ic" }, icon(e.error ? "failed" : CHAT_ICONS[e.w.kind] ? e.w.kind : "other")),
-        h("span", { class: "act-text" }, e.w.past, e.cmd ? h("code", { class: "act-cmd" }, e.cmd) : null));
-    }));
+    const list = h("ol", { class: "activity" });
+    let running = false;
+    entries.forEach((e, n) => {
+      if (e.type === "said") return list.append(h("li", { class: "act act-said" }, h("span", { class: "act-node" }, icon("message")),
+        h("div", { class: "act-main" }, h("span", { class: "act-quote" }, e.text))));
+      if (e.type === "event") return list.append(h("li", { class: "act act-event" }, h("span", { class: "act-node" }, icon("clock")),
+        h("div", { class: "act-main" }, h("span", { class: "act-title" }, e.text))));
+      const steps = e.steps;
+      const done = steps.filter((x) => x.result);
+      const refused = steps.filter((x) => x.result && x.result.error && DENIED.test(String(x.result.text || ""))).length;
+      const failed = steps.filter((x) => x.result && x.result.error).length - refused;
+      const going = !!live && n === entries.length - 1 && steps.some((x) => !x.result);
+      running = running || going;
+      const times = steps.flatMap((x) => [x.at, x.result && x.result.at]).filter(Boolean).map((t) => Date.parse(t)).filter((t) => !isNaN(t));
+      const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
+      const diffs = steps.flatMap((x) => (x.words.kind === "edit" || x.words.kind === "create" ? stepDiff(x.name, x.input, x.result) || [] : []));
+      const title = going && !done.length ? `${steps[0].words.now}…` : steps.length === 1 ? steps[0].words.past : stepsSummary(done.length ? done : steps);
+      const open = h("ol", { class: "act-steps", hidden: true }, ...steps.map((x) => this.activityStep(x)));
+      const one = steps.length === 1 && !steps[0].input.command && !diffs.length && !(steps[0].result && steps[0].result.error);
+      const row = h(one ? "div" : "button", { class: "act-row", ...(one ? {} : { type: "button", "aria-expanded": "false", onclick: () => {
+          open.hidden = !open.hidden;
+          row.setAttribute("aria-expanded", String(!open.hidden));
+          li.classList.toggle("open", !open.hidden);
+        } }) },
+        h("span", { class: "act-title" }, title),
+        h("span", { class: "act-chips" }, ...[steps.length > 1 ? h("span", { class: "chip" }, `${steps.length} steps`) : null, diffChip(diffs),
+          failed ? h("span", { class: "chip bad" }, `${failed} didn't work`) : null,
+          refused ? h("span", { class: "chip" }, `you said no to ${refused}`) : null,
+          took >= 5000 ? h("span", { class: "chip took" }, duration(took)) : null].filter(Boolean)),
+        one ? null : icon("chevron", "chev"));
+      const li = h("li", { class: `act act-fold${failed ? " failed" : ""}${going ? " going" : ""}` },
+        h("span", { class: "act-node" }, going ? spinner() : icon(failed ? "failed" : CHAT_ICONS[steps[0].words.kind] && steps.every((x) => x.words.kind === steps[0].words.kind) ? steps[0].words.kind : "check")),
+        h("div", { class: "act-main" }, row, open));
+      list.append(li);
+    });
     if (live) {
-      live.liveAct = h("span", { class: "act-text" });
-      list.append(h("li", { class: "act-now" }, h("span", { class: "act-ic" }, spinner()), live.liveAct));
+      live.liveAct = h("span", { class: "act-title" });
+      live.liveRow = h("li", { class: "act act-now" }, h("span", { class: "act-node" }, spinner()), h("div", { class: "act-main" }, live.liveAct));
+      live.liveRunning = running;
+      list.append(live.liveRow);
       this.drawNow(live);
     }
     return list;
+  }
+
+  // One step of a fold, opened: its kind, what it did, the command it ran,
+  // the +/− of its edit, the first line of what went wrong.
+  activityStep(x) {
+    const err = x.result && x.result.error;
+    const diff = x.words.kind === "edit" || x.words.kind === "create" ? diffChip(stepDiff(x.name, x.input, x.result) || []) : null;
+    const cmd = x.input.command ? String(x.input.command).split("\n")[0] : "";
+    return h("li", { class: `act-step${err ? " failed" : ""}${x.result ? "" : " going"}` },
+      h("span", { class: "act-step-ic" }, icon(err ? "failed" : CHAT_ICONS[x.words.kind] ? x.words.kind : "other")),
+      h("div", { class: "act-step-main" }, h("span", { class: "act-step-what" }, x.words.past, diff),
+        cmd && x.input.description ? h("code", { class: "act-cmd" }, cmd) : null,
+        err ? h("span", { class: "act-err" }, cut(String(x.result.text || "").split("\n").find((l) => l.trim()) || "It didn't work", 140)) : null));
   }
 
   // What git says, as it is (bin/amarchy brief_facts): a row of chips.
