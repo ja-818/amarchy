@@ -6101,6 +6101,52 @@ def read_records(f, start, end):
     return out
 
 
+def human_record(r):
+    """Whether a transcript record is a message of yours (what starts a turn:
+    app_items marks it "turn")."""
+    if not isinstance(r, dict) or r.get("type") != "user" or r.get("isMeta") or r.get("isSidechain"):
+        return False
+    content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+    if isinstance(content, list):
+        blocks = [b for b in content if isinstance(b, dict)]
+        if any(b.get("type") == "tool_result" for b in blocks):
+            return False
+        if any(b.get("type") == "image" for b in blocks):
+            return True
+        content = message_text(content)
+    if not isinstance(content, str):
+        return False
+    item = user_item(content)
+    return bool(item) and item["kind"] == "user" and human_message(item["text"])
+
+
+def turn_start(fh, pos, back=1, limit=16_000_000):
+    """The start of the line of the message of yours (a turn's start) before
+    pos, or back of them back: where the app's first page of a conversation
+    starts, so its turns are whole (a long turn's own message isn't cut off,
+    and its cards have it to go under). The file's start if there are fewer;
+    pos if none is within limit bytes."""
+    if pos <= 0:
+        return 0
+    lo = max(0, pos - limit)
+    fh.seek(lo)
+    data = fh.read(pos - lo)
+    found, end = [], len(data)
+    while end > 0 and len(found) < back:
+        cut = data.rfind(b"\n", 0, end - 1) + 1     # the start of the line that ends at end
+        line = data[cut:end]
+        if b'"type":"user"' in line:
+            try:
+                if human_record(json.loads(line)):
+                    found.append(lo + cut)
+            except ValueError:
+                pass
+        end = cut
+    if len(found) == back or lo == 0 and found:
+        return found[-1] if len(found) == back else 0
+    return 0 if lo == 0 else pos
+
+
 class AppConversation:
     """Follows the conversation a session is in (it changes with /clear): the
     latest of it first, then what's added."""
@@ -6118,7 +6164,12 @@ class AppConversation:
                 return [], True
             with open(f, "rb") as fh:
                 end = fh.seek(0, 2)
-                self.start = line_start(fh, end - APP_CHUNK)
+                # Whole turns: from the start of the one the chunk begins in, and
+                # at least the turn before the last (its cards show while the next goes).
+                last = turn_start(fh, end)
+                self.start = turn_start(fh, line_start(fh, end - APP_CHUNK))
+                if self.start >= last > 0:
+                    self.start = turn_start(fh, last)
             self.offset = self.start
             return self.read(), True
         return (self.read(), False) if f else ([], False)
