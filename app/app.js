@@ -1774,7 +1774,7 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(h("div", { class: "section" }, "Replies"), chatViewSeg(() => draw()),
-      h("p", {}, chatView() === "screen" ? "Cards: each reply summed up in a few cards you swipe, Claude's own words a tap away."
+      h("p", {}, chatView() === "screen" ? "Brief: each chat's goal, where it stands, what changed and what waits on you, kept up to date by Claude; its own words a tap away."
                                          : "Chat: Claude's replies as it writes them, the whole conversation."));
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));

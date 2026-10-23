@@ -176,48 +176,40 @@ terminals; after this, the wide layout is chat-first too.
   changed), *Details* (model, mode, context and plan usage, background
   tasks). Zen mode hides the sidebar, as today. Keyboard shortcuts stay.
 
-### The cards: the default view
+### The brief: the default view
 
-The chat's main view is **the cards**; the conversation is the other view,
-one tap away: on a computer the **Cards | Chat** switch over the chat; on the
-phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*, so the
-chat keeps the whole screen. The choice is kept on the device and every chat
-open takes it. Both views are drawn from the same items. (The phone's terminals
-open from the chat's menu too; its back arrow returns from one to the chat.)
+The chat's main view is **the brief**; the conversation is the other view,
+one tap away: on a computer the **Brief | Chat** switch over the chat; on the
+phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*. The
+choice is kept on the device and every chat open takes it. (The phone's
+terminals open from the chat's menu; its back arrow returns to the chat.)
 
-- **Claude answers as it always does.** Its text is treated like its
-  thinking: it's there, in a fold, but it isn't the reply.
-- **The reply is a few cards**, made after each turn by one extra short
-  prompt: the Stop hook starts `amarchy cards <id>`, which gives a model
-  (the same model that answered the turn, `turn_model`: the cards are what Claude tells you, so they get the same Claude; `CARDS_MODEL` only when the turn names none) what you said and what Claude said and did, and
-  asks for the reply a person reads (`CARDS_PROMPT`), as JSON
-  (`CARDS_SCHEMA`, checked by `--json-schema`, then `cards_clean`). Each
-  turn's cards are a file in the session's folder (`cards_dir`), named by the
-  record of your message; the session's stream sends them (`cards`).
-- **Less is more**: one card is the usual (three at most), and a title can be
-  the whole card. People glance; whoever wants the details opens Claude's
-  work. A card has a label and a tone (done, to know, heads up, problem,
-  needs you), a title, and only if needed: a **checklist** (done and still to
-  do), a few points, numbers, a link, a command, **More** on a tap, and
-  **buttons**: each sends its message to Claude as yours (once), or, for one
-  you need to finish ("Change it…"), puts its start in the box.
-- **Cards that ask**: a card alone sends its answer with one tap. When
-  several cards ask, a tap marks that card *Your answer* (and the deck goes on
-  to the next one still asking); once all are answered they go to Claude as
-  one message, or earlier with **Send**. Sent cards stay, marked *Sent*. A
-  deck drawn again (the stream reconnected, the view switched) is where you
-  left it: the card on show, your answers.
-- **The turns read oldest first**, as a conversation: your message, *Claude's
-  work* (a closed fold with its words and steps, as the conversation shows
-  them), and the deck. The cards sit side by side, one on show: swipe them
-  on a phone; arrows, dots and ← → on a computer.
-- While Claude works, the working line; when it's done, *Summing it up…*
-  until the cards come (a few seconds). A turn without cards (from before
-  them, or they failed) shows Claude's last words, a few lines of them, and
-  **Sum it up in cards** (or *Try again*).
-- Questions, permissions and plans are still the cards above the composer.
-- Phone first: one column, a card at a time with the next peeking in,
-  buttons stacked. On a wide screen, a readable column of about 760 px.
+- **One living document per chat**, at its top: where it stands (done,
+  working, blocked, waiting on you) and the goal on one line that opens to
+  the rest: *What changed*, *Tests* (with their results), *Check it* (links,
+  what to tap), *Next*, *Heads up*, and git's facts as chips (branch,
+  commits, files and lines changed, uncommitted, not pushed, merged or not).
+  Open on a wide screen, a line on the phone (the choice is kept).
+- **Waiting on you** is always there under it: each question with its
+  options as buttons. One question: a tap sends. Several: a tap marks it
+  answered, they go together once all are (or with *Send*). An option you
+  finish yourself puts its start in the box.
+- **Written by Claude itself**, not guessed by another model: when a turn
+  ends, amarchy's Stop hook asks the same Claude, in the same conversation
+  (all it knows, its cache), to update the brief (`BRIEF_ASK`, with git's
+  facts: `brief_facts`). It calls `update_brief`, a tool amarchy serves
+  (`amarchy brief-mcp`, in both engines' arguments, allowed without asking).
+  The session stays *working* until it has, so you're told it's done once
+  the brief is there. The hook asks once a stop, and only when Claude did
+  something the brief doesn't have yet (`brief_needed`); a Claude started
+  before the tool isn't asked (`claude_has_brief`).
+- The app draws the brief from the transcript (`app_items` gives the call as
+  `brief`); git's facts come live from the server (`facts` on the stream).
+  The ask and the call stay out of what you read.
+- **The timeline**, under it, oldest first: your message, the brief's
+  *headline* for that turn (a tap opens the brief), and *Claude's work* in a
+  closed fold (its words and steps). A turn from before the brief shows
+  Claude's last words.
 
 ### The conversation
 

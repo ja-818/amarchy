@@ -201,13 +201,15 @@ function peerName(to) {
 }
 
 // Tools that are Claude's bookkeeping: not shown.
-const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet"]);
+const BRIEF_TOOL_NAME = "mcp__amarchy__update_brief";      // bin/amarchy BRIEF_TOOL: the brief view draws it
+const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet", BRIEF_TOOL_NAME]);
 
 // A step in words: {kind (its icon, and what it counts as), past, now (while
 // it's under way), path (a file it's about)}.
 function stepWords(name, input) {
   const i = input || {};
   const file = baseName(i.file_path || i.notebook_path || i.path);
+  if (name === BRIEF_TOOL_NAME) return { kind: "other", past: "Updated the brief", now: "Updating the brief" };
   const mcp = mcpParts(name);
   if (mcp) return { kind: "other", past: `Used ${mcp.server}: ${mcp.what}`, now: `Using ${mcp.server}: ${mcp.what}` };
   // Claude's plan file (plan mode keeps it in ~/.claude/plans).
@@ -690,24 +692,26 @@ function screenCard(chat, d, step) {
 
 // ---- the chat
 
-// The cards (bin/amarchy's cmd_cards): the reply for you under each turn, a few
-// cards you swipe through, Claude's own words a tap away. The word over a card
-// that has no label of its own, by its tone.
-const CARD_TONES = { ok: "Done", info: "To know", warn: "Heads up", error: "Problem", ask: "Needs you" };
-const CARDS_WAIT = 20000;       // ms after a turn ends that its cards are awaited, before its words show instead
-const CARDS_STALE = 180000;     // ms a "pending" that never ended is waited on (bin/amarchy CARDS_STALE)
+// The brief (bin/amarchy's update_brief): the chat's living summary, at its
+// top. Its states, in words.
+const BRIEF_STATES = { done: "Done", working: "Working", blocked: "Blocked", waiting: "Waiting on you" };
 
-// A card's link: an http or https address, opened in a new tab (nothing else).
-function cardLink(l) {
-  let url;
-  try { url = new URL(String(l.url || "")); } catch { return null; }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-  return h("a", { class: "rcard-link", href: url.href, target: "_blank", rel: "noopener" },
-    h("span", { class: "rcard-link-label" }, String(l.label || url.host)),
-    h("span", { class: "rcard-link-host" }, url.host + (url.pathname.length > 1 ? url.pathname : "")));
+// A link in the brief: an http or https address, opened in a new tab (nothing else).
+function briefLink(url, label) {
+  let u;
+  try { u = new URL(String(url || "")); } catch { return null; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  return h("a", { class: "brief-link", href: u.href, target: "_blank", rel: "noopener" },
+    h("span", { class: "brief-link-label" }, String(label || u.host)),
+    h("span", { class: "brief-link-host" }, u.host + (u.pathname.length > 1 ? u.pathname : "")));
 }
 
-// How the chats show on this device: "screen" (the cards) or "chat" (the
+// A list of strings from what a model wrote (nothing else in it).
+function texts(v, n = 8) {
+  return (Array.isArray(v) ? v : []).filter((x) => typeof x === "string" && x.trim()).slice(0, n);
+}
+
+// How the chats show on this device: "screen" (the brief) or "chat" (the
 // conversation). Settings and a chat's menu set it; every chat open takes it.
 function chatView() { return store.get("chatView") === "chat" ? "chat" : "screen"; }
 function setChatView(mode) {
@@ -718,7 +722,7 @@ function setChatView(mode) {
 // The choice, as a row of two (Settings, a chat's menu); then(): after a tap.
 function chatViewSeg(then) {
   const now = chatView();
-  return h("div", { class: "seg" }, ...[["screen", "Cards"], ["chat", "Chat"]].map(([mode, label]) =>
+  return h("div", { class: "seg" }, ...[["screen", "Brief"], ["chat", "Chat"]].map(([mode, label]) =>
     h("button", { class: `control${now === mode ? " on" : ""}`, type: "button", "aria-pressed": String(now === mode),
                   onclick: () => { setChatView(mode); if (then) then(); } }, label)));
 }
@@ -734,17 +738,17 @@ class Chat {
     this.live = null;
     this.placeholder = "Message Claude";
     this.view = { content: null, above: [], composer: true };
-    // How the chat shows: the cards (the default) or the conversation. Both
+    // How the chat shows: the brief (the default) or the conversation. Both
     // are drawn from the same items, kept here in order (see keepItems).
     this.mode = chatView();
     this.items = [];
     this.itemKeys = new Set();
-    this.cards = {};            // each turn's cards, by its message's record (the stream's "cards")
-    this.sturns = [];           // the turns the cards view shows, in order (newTurn)
+    this.sturns = [];           // the turns the brief view shows, in order (newTurn)
     this.sturn = null;          // the last of them
-    this.idleSince = 0;         // when Claude last finished working (its cards are awaited a while)
-    this.decks = new Map();     // each turn's deck as you left it: the card on show, your answers (deckState)
-    this.wasWorking = false;
+    this.brief = null;          // the latest brief: {key, data} (update_brief's input)
+    this.facts = null;          // what git says (the stream's "facts": bin/amarchy brief_facts)
+    this.answers = new Map();   // your answers to a brief's questions, by its key: {picks, sent}
+    this.briefOpen = store.get("briefOpen") ? store.get("briefOpen") === "1" : matchMedia("(min-width: 900px)").matches;
     this.reset();
     this.build();
   }
@@ -785,12 +789,13 @@ class Chat {
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     // The switch between the two views, over the chat (hidden over the terminal and the other views).
-    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Cards");
+    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Brief");
     this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
     this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
     this.drawSwitch();
     // (On the phone it's in Settings and the chat's menu instead: opts.noSwitch.)
-    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl,
+    this.briefEl = h("section", { class: "brief", hidden: true, "aria-label": "The brief" });
+    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl, this.briefEl,
                 h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     // Chosen in Settings (setChatView): every chat open takes it.
     this.onViewChosen = (e) => this.showMode(e.detail);
@@ -889,7 +894,7 @@ class Chat {
       this.renderTail();
     });
     es.addEventListener("conversation", (e) => this.conversation(JSON.parse(e.data)));
-    es.addEventListener("cards", (e) => this.setCards(JSON.parse(e.data)));
+    es.addEventListener("facts", (e) => { this.facts = JSON.parse(e.data); this.drawBrief(); });
     es.addEventListener("screen", (e) => {
       this.screen = JSON.parse(e.data);
       if (this.opts.onScreen) this.opts.onScreen(this.screen);
@@ -967,6 +972,7 @@ class Chat {
     this.view = { content, above, composer };
     this.scroller.replaceChildren(content || this.body());
     this.el.classList.toggle("other", !!content);
+    this.drawBrief();
     this.cardKey = null;
     this.renderDock();
     if (!content) this.toBottom(true);
@@ -988,7 +994,7 @@ class Chat {
   conversation(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
-    // view doesn't jump, nor its decks go back to their first card.
+    // view doesn't jump, nor the brief's answers you started go.
     if (d.reset && !d.redraw && d.start === this.start && this.items.length && d.items.length >= this.items.length &&
         this.items.every((it, i) => it.key && d.items[i].key === it.key)) {
       d = { items: d.items.slice(this.items.length) };
@@ -1068,7 +1074,7 @@ class Chat {
     this.earlierBtn.disabled = false;
   }
 
-  // ---- the two views: the cards (the default), or the conversation
+  // ---- the two views: the brief (the default), or the conversation
 
   body() { return this.mode === "screen" ? this.stage : this.conv; }
 
@@ -1080,7 +1086,7 @@ class Chat {
     else this.items.push(...fresh);
   }
 
-  // The view: the cards or the conversation (the switch over the chat).
+  // The view: the brief or the conversation (the switch over the chat).
   showMode(mode) {
     if (mode === this.mode) return;
     this.mode = mode;
@@ -1089,6 +1095,7 @@ class Chat {
     if (mode === "chat") this.conversation({ reset: true, redraw: true, items: this.items.slice(), start: this.start });
     else this.rebuildScreen();
     if (!this.view.content) this.scroller.replaceChildren(this.body());
+    this.drawBrief();
     this.toBottom(true);
   }
 
@@ -1099,24 +1106,25 @@ class Chat {
     }
   }
 
-  // ---- the cards view: each turn (a message of yours, and all Claude did for
-  // it) is your message, Claude's work in a fold (its words and steps, as the
-  // conversation shows them, like its thinking), and the reply: its cards.
+  // ---- the brief view's timeline: each turn (a message of yours, and all Claude
+  // did for it) is your message, the brief's headline for it, and Claude's work
+  // in a fold (its words and steps, as the conversation shows them).
   // Oldest first, as a conversation reads.
 
   rebuildScreen(keepPlace) {
     const fromEnd = this.scroller.scrollHeight - this.scroller.scrollTop;
     this.reset();
-    for (const t of this.sturns) clearTimeout(t.timer);
     this.conv.replaceChildren(this.tail);       // drawn again when it's shown (and add() mustn't find its bubbles)
     this.sturns = [];
     this.sturn = null;
     this.emptyScreen = null;
     this.earlierBtn = this.start > 0 ? h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages") : null;
     this.stage.replaceChildren(...[this.earlierBtn, this.stageWork].filter(Boolean));
+    this.brief = null;
     for (const it of this.items) this.screenAdd(it);
     this.drawEmpty();
     for (const t of this.sturns) this.drawReply(t);
+    this.drawBrief();
     if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
     if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
   }
@@ -1128,9 +1136,11 @@ class Chat {
       return;
     }
     const stick = this.atBottom();
+    const had = this.brief;
     for (const it of d.items) this.screenAdd(it);
     this.drawEmpty();
     if (this.sturn) this.drawReply(this.sturn);
+    if (this.brief !== had) this.drawBrief();
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
   }
@@ -1147,13 +1157,17 @@ class Chat {
     }
     const t = this.sturn || this.newTurn(null);
     this.add(it, t.body);
+    if (it.kind === "tool" && it.brief) {
+      t.brief = it.brief;
+      this.brief = { key: it.key, data: it.brief };
+    }
     if (it.kind === "claude") t.said = it.text;
     else if (it.kind === "tool" && !HIDDEN_TOOLS.has(it.name)) t.steps++;
     if (it.kind !== "result") this.drawWork(t);
   }
 
   newTurn(rec) {
-    const t = { rec, said: "", steps: 0, sig: null, timer: null };
+    const t = { rec, said: "", steps: 0, sig: null, brief: null };
     t.you = h("div", { class: "turn-you" });
     t.summary = h("summary", {});
     t.body = h("div", { class: "turn-work-body" });
@@ -1186,123 +1200,146 @@ class Chat {
                                   n ? h("span", { class: "turn-work-n" }, `${n} step${n === 1 ? "" : "s"}`) : null].filter(Boolean));
   }
 
-  // A turn's reply: its cards; while they're made, a line saying so; with none
-  // (a turn from before them, or they failed), Claude's last words and a
-  // button to make them. Drawn again only when what it shows changes (a deck
-  // you swiped stays where you left it).
+  // Under a turn: its headline, from the brief Claude wrote at its end (a tap
+  // opens the brief); while Claude works, nothing (the working line says
+  // what); a turn from before the brief, Claude's last words.
   drawReply(t) {
-    const c = t.rec ? this.cards[t.rec] : null;
-    const now = Date.now();
-    const pending = !!c && c.state === "pending" && now - (c.at || 0) * 1000 < CARDS_STALE;
-    const awaited = !c && !!t.rec && t === this.sturn && now - this.idleSince < CARDS_WAIT;
-    const state = t === this.sturn && this.working() ? "live"
-      : c && c.state === "ready" && c.cards && c.cards.length ? "ready"
-      : pending || awaited ? "wait"
-      : t.said ? "text" : "none";
-    const sig = `${state}|${c ? `${c.state}|${c.at}` : ""}|${state === "text" ? t.said.length : ""}`;
+    const state = t === this.sturn && this.working() ? "live" : t.brief ? "brief" : t.said ? "text" : "none";
+    const sig = `${state}|${state === "brief" ? JSON.stringify([t.brief.headline, t.brief.status]) : state === "text" ? t.said.length : ""}`;
     if (sig === t.sig) return;
     t.sig = sig;
-    clearTimeout(t.timer);
-    if (state === "wait") {
-      const left = pending ? CARDS_STALE - (now - c.at * 1000) : CARDS_WAIT - (now - this.idleSince);
-      t.timer = setTimeout(() => { t.sig = null; this.drawReply(t); }, Math.max(0, left) + 100);
-    }
-    if (state === "ready") t.reply.replaceChildren(this.deck(c.cards, this.deckState(t.rec, c.at)));
-    else if (state === "wait") t.reply.replaceChildren(h("div", { class: "reply-wait", role: "status" }, spinner(), h("span", {}, "Summing it up…")));
-    else if (state === "text") t.reply.replaceChildren(this.replyText(t, !!c));
-    else t.reply.replaceChildren();
+    if (state === "brief") {
+      const st = t.brief.status in BRIEF_STATES ? t.brief.status : "working";
+      t.reply.replaceChildren(h("button", { class: `turn-headline ${st}`, type: "button", title: "Open the brief",
+        onclick: () => this.openBrief() }, h("span", { class: "dot" }), h("span", {}, String(t.brief.headline || BRIEF_STATES[st]))));
+    } else if (state === "text") {
+      const text = h("div", { class: "msg claude reply-text", html: md(t.said) });
+      const box = h("div", { class: "reply-plain" }, text);
+      const all = h("button", { class: "text-btn reply-all", type: "button", hidden: true,
+                                onclick: () => { box.classList.add("open"); all.remove(); } }, "Show all");
+      box.append(all);
+      requestAnimationFrame(() => {
+        all.hidden = text.scrollHeight <= text.clientHeight + 4;
+        box.classList.toggle("long", !all.hidden);
+      });
+      t.reply.replaceChildren(box);
+    } else t.reply.replaceChildren();
   }
 
-  // Claude's last words, as the reply of a turn without cards (a few lines,
-  // the rest a tap away), and the button that makes them.
-  replyText(t, failed) {
-    const text = h("div", { class: "msg claude reply-text", html: md(t.said) });
-    const box = h("div", { class: "reply-plain" }, text);
-    const all = h("button", { class: "text-btn reply-all", type: "button", hidden: true,
-                              onclick: () => { box.classList.add("open"); all.remove(); } }, "Show all");
-    box.append(all);
-    requestAnimationFrame(() => {
-      all.hidden = text.scrollHeight <= text.clientHeight + 4;
-      box.classList.toggle("long", !all.hidden);
+  openBrief() {
+    this.briefOpen = true;
+    store.set("briefOpen", "1");
+    this.drawBrief();
+    this.briefEl.scrollTop = 0;
+  }
+
+  // ---- the brief: the chat's living summary, over the timeline. Its line
+  // (where it stands, the goal) opens the rest; what waits on you is always
+  // there, its questions answered with a tap (several: each marked, sent
+  // together); git's facts as they are.
+
+  drawBrief() {
+    const show = this.mode === "screen" && !this.view.content && !!(this.brief || (this.facts && this.facts.branch));
+    this.briefEl.hidden = !show;
+    if (!show) return;
+    const b = (this.brief && this.brief.data) || {};
+    const live = this.engine === "chat" ? this.live : null;
+    const updating = !!(live && live.activity && live.activity.tool === BRIEF_TOOL_NAME && this.working());
+    const sig = JSON.stringify([this.brief && this.brief.key, this.facts, this.briefOpen, updating]);
+    if (sig === this.briefSig) return;
+    this.briefSig = sig;
+    const st = b.status in BRIEF_STATES ? b.status : null;
+    this.briefEl.className = `brief${this.briefOpen ? " open" : ""}${st ? ` ${st}` : ""}`;
+    const head = h("button", { class: "brief-head", type: "button", "aria-expanded": String(this.briefOpen), onclick: () => {
+      this.briefOpen = !this.briefOpen;
+      store.set("briefOpen", this.briefOpen ? "1" : "0");
+      this.drawBrief();
+    } },
+      st ? h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]) : null,
+      h("span", { class: "brief-goal" }, b.goal ? String(b.goal) : "No brief yet: it comes when Claude finishes a turn."),
+      updating ? h("span", { class: "brief-updating" }, spinner(), "Updating") : null,
+      icon("chevron", "chev"));
+    const kids = [head];
+    const waiting = this.briefWaiting(b);
+    if (waiting) kids.push(waiting);
+    if (this.briefOpen) {
+      const body = h("div", { class: "brief-body" });
+      const facts = this.briefFacts();
+      if (facts) body.append(facts);
+      const section = (title, ...rows) => body.append(h("div", { class: "brief-section" }, h("h4", {}, title), ...rows));
+      const changed = texts(b.changed, 8);
+      if (changed.length) section("What changed", h("ul", { class: "brief-list ticks" }, ...changed.map((x) => h("li", { html: inline(x) }))));
+      const tests = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string").slice(0, 6);
+      if (tests.length) section("Tests", h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
+        h("li", { class: `is-${["pass", "fail", "skipped"].includes(x.result) ? x.result : "skipped"}` },
+          h("span", { class: "mark", html: x.result === "pass" ? TICK : "" }, x.result === "fail" ? "✕" : x.result === "skipped" ? "–" : ""),
+          h("span", { html: inline(x.name) }), x.detail ? h("span", { class: "detail" }, ` · ${x.detail}`) : null))));
+      const checks = (Array.isArray(b.check) ? b.check : []).filter((x) => x && typeof x.label === "string").slice(0, 4);
+      if (checks.length) section("Check it", ...checks.map((x) => briefLink(x.url, x.label) ||
+        h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null)));
+      const next = texts(b.next, 4);
+      if (next.length) section("Next", h("ul", { class: "brief-list" }, ...next.map((x) => h("li", { html: inline(x) }))));
+      const notes = texts(b.notes, 4);
+      if (notes.length) section("Heads up", h("ul", { class: "brief-list notes" }, ...notes.map((x) => h("li", { html: inline(x) }))));
+      kids.push(body);
+    }
+    this.briefEl.replaceChildren(...kids);
+  }
+
+  // What git says, as it is (bin/amarchy brief_facts): a row of chips.
+  briefFacts() {
+    const f = this.facts;
+    if (!f || !f.branch) return null;
+    const chip = (text, cls) => h("span", { class: `fact${cls ? ` ${cls}` : ""}` }, text);
+    const n = (k, one, many) => `${f[k]} ${f[k] === 1 ? one : many}`;
+    const chips = [chip(f.branch, "branch")];
+    if (f.commits) chips.push(chip(n("commits", "commit", "commits")));
+    if (f.files) chips.push(chip(`${n("files", "file", "files")} +${f.added || 0} −${f.removed || 0}`));
+    if (f.uncommitted) chips.push(chip(`${f.uncommitted} uncommitted`, "warn"));
+    if (f.unpushed) chips.push(chip(`${f.unpushed} not pushed`, "warn"));
+    if (f.commits && f.merged === true) chips.push(chip(`merged into ${String(f.base || "main").replace(/^origin\//, "")}`, "ok"));
+    else if (f.commits && f.merged === false) chips.push(chip(`not in ${String(f.base || "main").replace(/^origin\//, "")} yet`));
+    return h("div", { class: "brief-facts" }, ...chips);
+  }
+
+  // What waits on you: each question and its options. One question: a tap
+  // sends. Several: a tap marks it answered, and they go together once all
+  // are (or with Send). A draft option puts its start in the box.
+  briefWaiting(b) {
+    const qs = (Array.isArray(b.waiting) ? b.waiting : [])
+      .filter((q) => q && typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3);
+    if (!qs.length) return null;
+    const key = (this.brief && this.brief.key) || "";
+    let st = this.answers.get(key);
+    if (!st) this.answers.set(key, st = { picks: {}, sent: false });
+    const box = h("div", { class: "brief-waiting" });
+    const rows = qs.map((q, i) => {
+      const opts = q.options.filter((o) => o && typeof o.label === "string").slice(0, 4);
+      return h("div", { class: "bq" }, h("div", { class: "bq-q", html: inline(q.question) }),
+        h("div", { class: "bq-opts" }, ...opts.map((o, k) =>
+          h("button", { class: `bq-opt${k === 0 ? " primary" : ""}${o.draft ? " draft" : ""}`, type: "button", "data-k": k,
+                        onclick: () => pick(i, k) }, o.label))));
     });
-    if (t.rec) {
-      const make = h("button", { class: "text-btn reply-make", type: "button", onclick: () => this.makeCards(t, make) },
-                     failed ? "Couldn't sum it up · Try again" : "Sum it up in cards");
-      box.append(make);
-    }
-    return box;
-  }
-
-  // The session's cards, as the stream sends them ({rec: {state, cards, at}}).
-  setCards(cards) {
-    this.cards = cards && typeof cards === "object" ? cards : {};
-    if (this.mode !== "screen") return;
-    const stick = this.atBottom();
-    for (const t of this.sturns) this.drawReply(t);
-    if (stick) this.toBottom();
-  }
-
-  async makeCards(t, btn) {
-    btn.disabled = true;
-    try {
-      await this.post("cards", { turn: t.rec });
-      this.cards[t.rec] = { state: "pending", at: Date.now() / 1000 };
-      this.drawReply(t);
-    } catch (e) {
-      btn.disabled = false;
-      toast(e.message);
-    }
-  }
-
-  // A turn's deck as you left it, kept while its cards are the same: the card
-  // on show and your answers, so a deck drawn again is where it was.
-  deckState(rec, at) {
-    let st = rec && this.decks.get(rec);
-    if (!st || st.cards !== at) {
-      st = { cards: at, at: 0, picks: {}, sent: false };
-      if (rec) this.decks.set(rec, st);
-    }
-    return st;
-  }
-
-  // The reply's cards side by side, one on show at a time: swiped, or the
-  // arrows and dots under them, or ← → on the deck. A card that asks (its
-  // buttons) is answered with a tap: alone, that sends; with others asking
-  // too, it marks the card answered and goes on to the next, and the answers
-  // go together once all are in (or with Send).
-  deck(cards, st) {
-    const deck = h("div", { class: `deck${cards.length > 1 ? " many" : ""}` });
-    const track = h("div", { class: "deck-track", tabindex: "0", role: "group",
-                             "aria-label": `Claude's reply: ${cards.length} card${cards.length === 1 ? "" : "s"}` });
-    const asks = cards.map((c, i) => ((c.actions || []).some((a) => !a.draft) ? i : -1)).filter((i) => i >= 0);
-    const els = cards.map((c, i) => this.replyCard(c, i, cards.length, (k) => pick(i, k)));
-    track.append(...els);
-    deck.append(track);
-    const status = h("div", { class: "deck-status", role: "status" });
-    const sendBtn = h("button", { class: "text-btn deck-send", type: "button", hidden: true, onclick: () => send() });
-
-    // What the deck shows of your answers: each card's, and what's left.
+    const status = h("span", { class: "bq-status", role: "status" });
+    const sendBtn = h("button", { class: "text-btn bq-send", type: "button", onclick: () => send() });
     const paint = () => {
-      els.forEach((el, i) => {
+      rows.forEach((row, i) => {
         const k = st.picks[i];
-        const answered = k !== undefined;
-        el.classList.toggle("answered", answered);
-        el.querySelector(".rcard-label").textContent = answered ? (st.sent ? "Sent" : "Your answer") : el.dataset.label;
-        el.querySelectorAll(".rcard-action:not(.draft)").forEach((b) => {
-          b.classList.toggle("chosen", answered && +b.dataset.k === k);
-          b.disabled = st.sent && !(answered && +b.dataset.k === k);
+        row.classList.toggle("answered", k !== undefined);
+        row.querySelectorAll(".bq-opt:not(.draft)").forEach((btn) => {
+          btn.classList.toggle("chosen", +btn.dataset.k === k);
+          btn.disabled = st.sent && +btn.dataset.k !== k;
         });
       });
-      deck.classList.toggle("sent", st.sent);
-      const done = asks.filter((i) => st.picks[i] !== undefined).length;
-      status.textContent = asks.length < 2 ? "" : st.sent ? `Sent ${done} answer${done === 1 ? "" : "s"}`
-        : done ? `${done} of ${asks.length} answered` : "";
-      sendBtn.hidden = st.sent || !done || done === asks.length;
+      box.classList.toggle("sent", st.sent);
+      const done = qs.filter((_, i) => st.picks[i] !== undefined).length;
+      status.textContent = st.sent ? "Sent" : qs.length > 1 && done ? `${done} of ${qs.length} answered` : "";
+      sendBtn.hidden = st.sent || !done || done === qs.length;
       sendBtn.textContent = `Send ${done === 1 ? "this answer" : `these ${done}`}`;
     };
     const send = async () => {
-      const text = asks.filter((i) => st.picks[i] !== undefined)
-        .map((i) => String(cards[i].actions[st.picks[i]].send || cards[i].actions[st.picks[i]].label)).join("\n\n");
+      const text = qs.map((q, i) => (st.picks[i] === undefined ? null : q.options[st.picks[i]]))
+        .filter(Boolean).map((o) => String(o.send || o.label)).join("\n\n");
       if (!text.trim() || st.sent) return;
       st.sent = true;
       paint();
@@ -1315,88 +1352,19 @@ class Chat {
       }
     };
     const pick = (i, k) => {
-      const a = cards[i].actions[k];
-      if (a.draft) return this.fillDraft(String(a.send || a.label || ""));
+      const o = qs[i].options[k];
+      if (o.draft) return this.fillDraft(String(o.send || o.label || ""));
       if (st.sent) return;
       st.picks[i] = k;
       paint();
-      const left = asks.filter((j) => st.picks[j] === undefined);
-      if (!left.length) return send();
-      go(left.find((j) => j > i) ?? left[0]);
+      if (qs.every((_, j) => st.picks[j] !== undefined)) send();
     };
-
-    let go = () => {};
-    if (cards.length > 1) {
-      const all = () => els;
-      go = (i, now) => {
-        const el = els[Math.max(0, Math.min(els.length - 1, i))];
-        track.scrollTo({ left: el.offsetLeft - els[0].offsetLeft, behavior: now ? "auto" : "smooth" });
-      };
-      const dots = cards.map((_, i) => h("button", { class: "deck-dot", type: "button", "aria-label": `Card ${i + 1}`, onclick: () => go(i) }));
-      const prev = h("button", { class: "deck-arrow", type: "button", "aria-label": "Previous card", onclick: () => go(st.at - 1) }, icon("chevron", "back"));
-      const next = h("button", { class: "deck-arrow", type: "button", "aria-label": "Next card", onclick: () => go(st.at + 1) }, icon("chevron"));
-      const mark = () => {
-        if (!track.isConnected || !track.clientWidth) return;
-        const first = els[0].offsetLeft;
-        let at = all().reduce((best, el, i) => Math.abs(el.offsetLeft - first - track.scrollLeft) <
-                                              Math.abs(els[best].offsetLeft - first - track.scrollLeft) ? i : best, 0);
-        if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 2) at = els.length - 1;
-        st.at = at;
-        dots.forEach((d, i) => { d.classList.toggle("on", i === at); d.setAttribute("aria-current", String(i === at)); });
-        prev.disabled = at === 0;
-        next.disabled = at === els.length - 1;
-      };
-      track.addEventListener("scroll", () => requestAnimationFrame(mark), { passive: true });
-      track.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowRight") { e.preventDefault(); go(st.at + 1); }
-        else if (e.key === "ArrowLeft") { e.preventDefault(); go(st.at - 1); }
-      });
-      deck.append(h("div", { class: "deck-nav" }, prev, h("div", { class: "deck-dots" }, ...dots), next));
-      // Back on the card you were on (a deck drawn again), once it's laid out.
-      const back = st.at;
-      requestAnimationFrame(() => { if (back) go(back, true); mark(); });
-    }
-    if (asks.length > 1) deck.append(h("div", { class: "deck-foot" }, status, sendBtn));
+    box.append(h("div", { class: "brief-waiting-title" }, "Waiting on you"), ...rows, h("div", { class: "bq-foot" }, status, sendBtn));
     paint();
-    return deck;
+    return box;
   }
 
-  // One card: what it is (its label, by its tone), its title, and as needed a
-  // line, numbers, a checklist, points, a link or a command, more on a tap,
-  // and buttons (act(k): the k-th was tapped).
-  replyCard(c, i, n, act) {
-    const tone = c.tone in CARD_TONES ? c.tone : "info";
-    const label = c.label || CARD_TONES[tone];
-    const card = h("article", { class: `rcard ${tone}`, "data-label": label },
-      h("div", { class: "rcard-top" }, h("span", { class: "rcard-label" }, label),
-        n > 1 ? h("span", { class: "rcard-count" }, `${i + 1} / ${n}`) : null),
-      h("h3", { class: "rcard-title" }, c.title || ""));
-    if (c.body) card.append(h("div", { class: "msg claude rcard-body", html: md(c.body) }));
-    if (c.stats && c.stats.length) card.append(h("div", { class: "rcard-stats" }, ...c.stats.map((x) =>
-      h("div", { class: "rcard-stat" }, h("div", { class: "v" }, x.value || ""), h("div", { class: "k" }, x.label || "")))));
-    if (c.checklist && c.checklist.length) card.append(h("ul", { class: "rcard-checks" }, ...c.checklist.map((x) =>
-      h("li", { class: x.done ? "is-done" : "is-todo" }, h("span", { class: "box", "aria-label": x.done ? "Done" : "To do", html: x.done ? TICK : "" }),
-        h("span", { html: inline(String(x.text || "")) })))));
-    if (c.points && c.points.length) card.append(h("ul", { class: "rcard-points" }, ...c.points.map((x) => h("li", { html: inline(String(x)) }))));
-    const link = c.link ? cardLink(c.link) : null;
-    if (link) card.append(link);
-    if (c.code) card.append(h("div", { class: "rcard-code", html: codeBlock(c.code, "") }));
-    if (c.more) {
-      const more = h("div", { class: "msg claude rcard-more", hidden: true, html: md(c.more) });
-      const btn = h("button", { class: "text-btn rcard-more-btn", type: "button", "aria-expanded": "false", onclick: () => {
-        more.hidden = !more.hidden;
-        btn.setAttribute("aria-expanded", String(!more.hidden));
-        btn.textContent = more.hidden ? "More" : "Less";
-      } }, "More");
-      card.append(btn, more);
-    }
-    if (c.actions && c.actions.length) card.append(h("div", { class: "rcard-actions" }, ...c.actions.map((a, k) =>
-      h("button", { class: `rcard-action${k === 0 ? " primary" : ""}${a.draft ? " draft" : ""}`, type: "button", "data-k": k,
-                    onclick: () => act(k) }, a.label || a.send))));
-    return card;
-  }
-
-  // A button for a message you finish yourself: its start goes into the box.
+  // An option for a message you finish yourself: its start goes into the box.
   fillDraft(text) {
     this.input.value = text;
     this.typed();
@@ -1701,15 +1669,13 @@ class Chat {
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
     if (this.mode === "screen") {
-      // The cards view: what Claude is doing, in a line under the last turn; its words are in the turn's fold.
+      // The brief view: what Claude is doing, in a line under the last turn; its words are in the turn's fold.
       const stick = this.atBottom();
-      const working = this.working();
-      if (this.wasWorking && !working) this.idleSince = Date.now();
-      this.wasWorking = working;
       const now = this.activity(live);
       this.stageWork.hidden = !now;
       if (now) this.stageWork.querySelector(".now").textContent = now.text;
       if (this.sturn) this.drawReply(this.sturn);
+      this.drawBrief();
       if (stick) this.toBottom();
       return;
     }
@@ -1743,7 +1709,7 @@ class Chat {
       if (this.stream && !this.stream.done) return null;                        // its words are coming in
       const since = live.working_since ? live.working_since * 1000 : null;
       const a = live.activity;
-      if (a && a.tool && !HIDDEN_TOOLS.has(a.tool)) {
+      if (a && a.tool && (!HIDDEN_TOOLS.has(a.tool) || a.tool === BRIEF_TOOL_NAME)) {
         let text = stepWords(a.tool, a.input || {}).now;
         // A helper's own step: "A helper is on it: … · reading app.js".
         if (a.step && a.step.tool && !HIDDEN_TOOLS.has(a.step.tool)) {

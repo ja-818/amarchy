@@ -1779,7 +1779,7 @@ def claude_argv(s, prefill="", prompt=None):
     (after --, so it may start with a dash)."""
     first = ["--", prompt] if prompt is not None else []
     return ["claude", *CLAUDE_ARGS, *claude_resume(s), *(["--prefill", prefill] if prefill and prompt is None else []),
-            "--settings", hook_settings(s["id"]), *first]
+            *brief_mcp_args(), "--settings", hook_settings(s["id"]), *first]
 
 
 def pane_loop(pane, procs):
@@ -3095,8 +3095,6 @@ def cmd_hook(sid, state):
     # it isn't the session's own Claude: it says nothing about the session.
     if hook_claude().get("kind") == "bg":
         return
-    if state == "idle" and event.get("hook_event_name") == "Stop":
-        detach([ENTRY, "cards", sid])       # the reply for you, from the turn that just ended (cmd_cards)
     set_conversation_id(sid, event.get("session_id", ""))
     clear_waking(sid)       # it's up
     if asleep_since(sid) is not None and state != "idle":
@@ -3108,6 +3106,16 @@ def cmd_hook(sid, state):
         live = agent_live(sid)
         if live.get("pending") and live.get("state") not in ("exited", None):
             return
+    # A turn ended with work the brief doesn't have: Claude updates it first
+    # (the session stays working meanwhile, so it's done, and you're told,
+    # once the brief is there). Asked once a stop (stop_hook_active: the
+    # second goes through).
+    if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
+            and claude_has_brief() and brief_needed(event.get("transcript_path")):
+        facts = brief_facts(s)
+        print(json.dumps({"decision": "block", "reason": BRIEF_ASK.format(
+            facts=json.dumps(facts, ensure_ascii=False) if facts else "(not a git repository)")}))
+        return
     set_status(sid, state)
 
 
@@ -6044,7 +6052,7 @@ def app_items(records, s):
                 if b.get("type") == "text":
                     item = user_item(b.get("text") or "")
                     if item and item["kind"] == "user" and human_message(item["text"]):
-                        item["turn"] = True     # yours: it starts a turn (the cards' and the app's)
+                        item["turn"] = True     # yours: it starts a turn (the brief view groups by them)
                     found.append(item)
                 elif b.get("type") == "image":       # shown at /api/session/<id>/image/<rec>/<n>
                     found.append({"kind": "user", "text": "[image]", "rec": rid, "turn": True,
@@ -6059,6 +6067,10 @@ def app_items(records, s):
                     continue
                 if b.get("type") == "text" and (b.get("text") or "").strip():
                     found.append({"kind": "claude", "text": b["text"].strip()})
+                elif b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
+                    # The brief as Claude wrote it: the app draws it (chat.js drawBrief).
+                    found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""), "summary": "Updated the brief",
+                                  "brief": b.get("input") if isinstance(b.get("input"), dict) else {}})
                 elif b.get("type") == "tool_use":
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
                                   "summary": tool_summary(b.get("name"), b.get("input"), s)[:600],
@@ -6124,7 +6136,7 @@ def turn_start(fh, pos, back=1, limit=16_000_000):
     """The start of the line of the message of yours (a turn's start) before
     pos, or back of them back: where the app's first page of a conversation
     starts, so its turns are whole (a long turn's own message isn't cut off,
-    and its cards have it to go under). The file's start if there are fewer;
+    and its headline has it to go under). The file's start if there are fewer;
     pos if none is within limit bytes."""
     if pos <= 0:
         return 0
@@ -6165,7 +6177,7 @@ class AppConversation:
             with open(f, "rb") as fh:
                 end = fh.seek(0, 2)
                 # Whole turns: from the start of the one the chunk begins in, and
-                # at least the turn before the last (its cards show while the next goes).
+                # at least the turn before the last (its headline shows while the next goes).
                 last = turn_start(fh, end)
                 self.start = turn_start(fh, line_start(fh, end - APP_CHUNK))
                 if self.start >= last > 0:
@@ -8374,7 +8386,7 @@ def app_handler(st, users, address):
                 host_start(s)       # after a reboot, before anyone attached: asleep, until you send it something
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
-            cards_seen = object()       # the cards' folder as last sent (cards_sig): nothing yet
+            facts, facts_at, facts_status = None, 0, None     # git's facts for the brief (brief_facts), as last sent
             # On the chat engine, its live state too (live.json, chat_live) as
             # it changes: what Claude is writing, doing and asking.
             live, live_sig, tick = None, None, 0
@@ -8415,10 +8427,14 @@ def app_handler(st, users, address):
                         self.event("conversation", {"reset": True, "items": items, "start": conv.start})
                     elif items:
                         self.event("conversation", {"items": items})
-                    sig = cards_sig(s["id"])
-                    if sig != cards_seen:
-                        cards_seen = sig
-                        self.event("cards", cards_all(s["id"]))
+                    # Again when the session's state changes (a turn ended: commits, files), and every minute.
+                    status = (now or {}).get("status")
+                    if status != facts_status or time.time() - facts_at > 60:
+                        facts_status, facts_at = status, time.time()
+                        seen_facts = brief_facts(session(s["id"]) or s)
+                        if seen_facts != facts:
+                            facts = seen_facts
+                            self.event("facts", facts)
                     seen = app_screen(s)
                     if seen != screen:
                         screen = seen
@@ -8514,16 +8530,6 @@ def app_handler(st, users, address):
                 if why == "gone":
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
-            m = re.fullmatch(r"/api/session/([^/]+)/cards", self.path)
-            if m:       # the cards for a turn, made (again): {turn: its message's record}
-                s = self.session(m.group(1))
-                if not s:
-                    return
-                rec = str(data.get("turn") or "")
-                if not re.fullmatch(r"[0-9A-Za-z-]{8,64}", rec):
-                    return self.error(400, "Which turn?")
-                detach([ENTRY, "cards", s["id"], rec, "--force"])
-                return self.send(200, {})
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine|classic)", self.path)
             if m:
@@ -9745,7 +9751,7 @@ def claude_resume(s):
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
     claude arguments, its conversation, amarchy's hooks."""
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), "--settings", hook_settings(s["id"])]
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *brief_mcp_args(), "--settings", hook_settings(s["id"])]
 
 
 def agent_env(s=None):
@@ -9795,67 +9801,193 @@ def conversation_title(text):
     return title if 0 < len(title) <= 80 else None
 
 
-# ---- the cards: the reply for you
+# ---- the brief: what the person reads instead of the conversation
 #
-# The app's main view (the cards, app/chat.js) gives each turn's reply as a few
-# cards you swipe through, not as Claude's text. Claude answers as it always
-# does; when its turn ends (the Stop hook), `amarchy cards` asks a model for
-# the reply a person would read (CARDS_PROMPT, as CARDS_SCHEMA's JSON), from
-# what you said and what Claude said and did. Claude's own words stay a tap
-# away, as its thinking would. Each turn's cards are a file in the session's
-# folder, named by your message's record (cards_dir); the app streams them
-# (cards_all) and shows each under its turn.
+# The app's main view (the brief, app/chat.js) gives each chat one living
+# document: its goal, where it stands, what changed, the tests, how to check
+# it, what waits on you, what's next. Claude answers as it always does; when
+# a turn ends, amarchy's Stop hook asks the same Claude, in the same
+# conversation (so with all it knows, and its cache), to update the brief
+# (BRIEF_ASK, with what git says: brief_facts), and it does with update_brief,
+# a tool amarchy serves (`amarchy brief-mcp`). The app draws the tool's input
+# from the transcript (app_items: "brief"); the hook's ask and the call stay
+# out of the conversation you read.
 
-CARDS_MODEL = "sonnet"      # only when the turn says no model of its own (turn_model)
-CARDS_INPUT = 40_000        # characters of a turn's work given to it (the end kept: where it lands)
-CARDS_STALE = 180           # seconds before a "pending" that never ended can be asked again
-CARDS_TONES = ("ok", "info", "warn", "error", "ask")
-CARDS_PROMPT = """A person's coding agent (Claude) just finished a turn of work. Write what they see instead of Claude's text: a card, or a few, on a phone. People don't read. They glance. Whoever wants the details opens Claude's own text, so leave the details out.
-
-Less is more, but it must make sense on its own:
-- They haven't read Claude's text and may not remember the conversation. Name what you mean: no "part 2", "the fix", "option B", "it" without saying what. A question says what it's about ("Next: cards while Claude works, or for old chats?").
-- One card is the usual. Add a second (at most a third) only for something they must act on separately: a decision, something to test, a problem.
-- Never add a card only to ask for feedback or say what's next: a button on the main card does that.
-- A title can be the whole card. Say the outcome in it, in at most 7 words ("Search page works", "Tests fail: 3 broken", "Shipped to main").
-- No subtitles. Leave body empty unless one short sentence says something the title and lists can't.
-- Prefer a list to a sentence. checklist: what got done (done: true) and what's left (done: false), each item 2 to 6 words. points: a few words each, for facts that aren't tasks. At most 5 items in all; often none.
-- stats: only when a number is the point (tests, files, time). At most 3.
-- link: a URL Claude gave them to open (http or https), with a 1 to 3 word label. code: only a command they must run.
-- more: leave empty unless there's one thing they may want to look into; then at most 3 short lines.
-- label: 1 or 2 words over the title ("Done", "Needs you", "Problem", "Test it"); tone: ok (done, works), info, warn (partial), error (failed, blocked), ask (Claude waits for them).
-- actions: only when there's an obvious next step or Claude asked something; then the options, 1 to 3 words each. send is the full message as they'd type it ("Ship it" sends "Ship it: merge to main and push"). When they'd need to add their own words, draft: true and send is its start ("Change it: "). At most 3.
-- If Claude asked them something or waits for them, that is the first card (tone ask), the options as actions.
-- Copy exact values exactly (URLs, ports, commands, names, numbers). Never invent anything. Write in the language the person wrote in.
-
-The turn:
-
-"""
-CARDS_SCHEMA = {
-    "type": "object", "required": ["cards"], "additionalProperties": False,
-    "properties": {"cards": {"type": "array", "minItems": 1, "maxItems": 3, "items": {
-        "type": "object", "required": ["title", "tone"], "additionalProperties": False,
+BRIEF_SERVER = "amarchy"
+BRIEF_TOOL = f"mcp__{BRIEF_SERVER}__update_brief"
+BRIEF_DEF = {
+    "name": "update_brief",
+    "description": "Updates this chat's brief: the live summary the person reads in amarchy instead of your messages. "
+                   "amarchy asks for it when a turn ends; call it then, once.",
+    "inputSchema": {
+        "type": "object", "additionalProperties": False, "required": ["goal", "status", "headline"],
         "properties": {
-            "tone": {"type": "string", "enum": list(CARDS_TONES)},
-            "label": {"type": "string"},
-            "title": {"type": "string"},
-            "body": {"type": "string"},
-            "checklist": {"type": "array", "maxItems": 5, "items": {
-                "type": "object", "required": ["text", "done"], "additionalProperties": False,
-                "properties": {"text": {"type": "string"}, "done": {"type": "boolean"}}}},
-            "points": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
-            "stats": {"type": "array", "maxItems": 3, "items": {
-                "type": "object", "required": ["label", "value"], "additionalProperties": False,
-                "properties": {"label": {"type": "string"}, "value": {"type": "string"}}}},
-            "link": {"type": "object", "required": ["url"], "additionalProperties": False,
-                     "properties": {"label": {"type": "string"}, "url": {"type": "string"}}},
-            "code": {"type": "string"},
-            "more": {"type": "string"},
-            "actions": {"type": "array", "maxItems": 3, "items": {
-                "type": "object", "required": ["label", "send"], "additionalProperties": False,
-                "properties": {"label": {"type": "string"}, "send": {"type": "string"}, "draft": {"type": "boolean"}}}},
-        }}}},
+            "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in their terms, in "
+                                                      "one short sentence. Keep it unless the goal changed."},
+            "status": {"type": "string", "enum": ["done", "working", "blocked", "waiting"],
+                       "description": "Where the goal stands after this turn: done (reached), working (more steps under way or "
+                                      "planned), blocked (can't go on), waiting (needs the person)."},
+            "headline": {"type": "string", "description": "This turn in at most 10 words: what happened, or what you need. "
+                                                          "Shown under their message."},
+            "changed": {"type": "array", "maxItems": 6, "items": {"type": "string"},
+                        "description": "What has changed toward the goal so far (the whole chat, not only this turn), in plain "
+                                       "words, a few words each."},
+            "tests": {"type": "array", "maxItems": 5, "description": "Tests and checks you ran that tell where things stand now, "
+                                                                    "with their real results.",
+                      "items": {"type": "object", "required": ["name", "result"], "additionalProperties": False,
+                                "properties": {"name": {"type": "string"},
+                                               "result": {"type": "string", "enum": ["pass", "fail", "skipped"]},
+                                               "detail": {"type": "string"}}}},
+            "check": {"type": "array", "maxItems": 3, "description": "How the person can see or try the result themselves: a URL "
+                                                                    "to open, or what to tap.",
+                      "items": {"type": "object", "required": ["label"], "additionalProperties": False,
+                                "properties": {"label": {"type": "string"}, "url": {"type": "string"}, "how": {"type": "string"}}}},
+            "waiting": {"type": "array", "maxItems": 3,
+                        "description": "Decisions only the person can make, each a question with its options as buttons: label "
+                                       "(1 to 4 words) and send (the full message as they'd type it); draft: true when they "
+                                       "must add their own words (send is its start).",
+                        "items": {"type": "object", "required": ["question", "options"], "additionalProperties": False,
+                                  "properties": {"question": {"type": "string"}, "options": {
+                                      "type": "array", "maxItems": 4, "items": {
+                                          "type": "object", "required": ["label", "send"], "additionalProperties": False,
+                                          "properties": {"label": {"type": "string"}, "send": {"type": "string"},
+                                                         "draft": {"type": "boolean"}}}}}}},
+            "next": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "What comes next, a few words each."},
+            "notes": {"type": "array", "maxItems": 3, "items": {"type": "string"},
+                      "description": "Heads-ups worth knowing: risks, caveats, what isn't done."},
+        },
+    },
 }
-HIDDEN_STEPS = ("ToolSearch", "TodoRead", "TaskList", "TaskGet")    # as the app hides them (chat.js HIDDEN_TOOLS)
+BRIEF_ASK = (
+    "amarchy: now update this chat's brief by calling update_brief once (ToolSearch can load it). The person reads the "
+    "brief instead of your messages: they rarely read those. It is one living document for the whole chat: keep what's "
+    "still true from the brief you wrote last, change what changed, drop what's finished or no longer matters. Write for "
+    "someone glancing at a phone who may not remember this conversation: name things, use plain words, a few words per "
+    "item, and copy exact values (URLs, commands, names, numbers) exactly. Never invent anything. What git says now, to "
+    "go by (the app shows these numbers itself, so don't repeat them as items): {facts}. After calling update_brief, "
+    "stop: write nothing more."
+)
+
+
+def brief_mcp_args():
+    """The brief's tool for a session's Claude (both engines): amarchy's MCP
+    server, allowed without asking."""
+    mcp = {"mcpServers": {BRIEF_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "brief-mcp"]}}}
+    return ["--mcp-config", json.dumps(mcp), "--allowedTools", BRIEF_TOOL]
+
+
+def brief_mcp():
+    """amarchy brief-mcp: the MCP server (stdio, JSON lines) that gives a
+    session's Claude update_brief. The tool only answers: the app draws the
+    brief from what Claude sent, in the transcript (app_items)."""
+    def send(reply):
+        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.flush()
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(msg, dict) or "id" not in msg:       # a notification: nothing to answer
+            continue
+        method, params = msg.get("method"), msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        if method == "initialize":
+            result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
+                      "serverInfo": {"name": BRIEF_SERVER, "version": "1"}}
+        elif method == "tools/list":
+            result = {"tools": [BRIEF_DEF]}
+        elif method == "tools/call":
+            ok = params.get("name") == BRIEF_DEF["name"]
+            result = {"content": [{"type": "text", "text": "Brief updated. Stop here." if ok else f"No tool {params.get('name')}."}],
+                      "isError": not ok}
+        elif method == "ping":
+            result = {}
+        else:
+            send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": f"Unknown method: {method}"}})
+            continue
+        send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
+    return 0
+
+
+def brief_facts(s):
+    """What git says about a session's work, for its brief: exact, written by
+    no one. {branch, base, commits (since it left its base), recent (their
+    subjects), files, added, removed (against the base, uncommitted work in),
+    uncommitted, unpushed, merged (into the base)}; {} outside a repository."""
+    path = s.get("path")
+    if not path or not Path(path).is_dir():
+        return {}
+
+    def git(*a):
+        r = sh("git", *a, cwd=path)
+        return r.stdout.strip() if r.returncode == 0 else None
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    if not branch:
+        return {}
+    base, mb = git_base(s)
+    out = {"branch": branch, "base": base}
+    if mb:
+        commits = (git("log", "--format=%s", f"{mb}..HEAD") or "").splitlines()
+        out["commits"], out["recent"] = len(commits), commits[:3]
+        stat = git("diff", "--shortstat", mb) or ""
+        for key, word in (("files", "file"), ("added", "insertion"), ("removed", "deletion")):
+            m = re.search(rf"(\d+) {word}", stat)
+            out[key] = int(m.group(1)) if m else 0
+        if commits:
+            out["merged"] = sh("git", "merge-base", "--is-ancestor", "HEAD", base, cwd=path).returncode == 0
+    out["uncommitted"] = len((git("status", "--porcelain") or "").splitlines())
+    unpushed = git("rev-list", "--count", "@{upstream}..HEAD")
+    if unpushed and unpushed.isdigit():
+        out["unpushed"] = int(unpushed)
+    return out
+
+
+def claude_has_brief():
+    """Whether the Claude a hook runs for has update_brief (it started with
+    amarchy's brief-mcp: one from before doesn't, until it's started again)."""
+    pid = os.getppid()
+    for _ in range(6):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            if stat[stat.find("(") + 1:stat.rfind(")")] == "claude":
+                return b"brief-mcp" in Path(f"/proc/{pid}/cmdline").read_bytes()
+            pid = int(stat[stat.rfind(")") + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
+
+
+def brief_needed(path, tail=4_000_000):
+    """Whether a conversation's Claude has done something since it last wrote
+    the brief (or since your last message, if it hasn't): its turn ended
+    with words or steps the brief doesn't have yet."""
+    try:
+        with open(path, "rb") as fh:
+            end = fh.seek(0, 2)
+            fh.seek(max(0, end - tail))
+            lines = fh.read().splitlines()
+    except (OSError, TypeError):
+        return False
+    for line in reversed(lines):
+        if b'"type":"assistant"' not in line and b'"type":"user"' not in line:
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if human_record(r):
+            return False        # your message, and nothing from Claude after it
+        if r.get("type") != "assistant" or r.get("isSidechain"):
+            continue
+        for b in (r.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
+                return False    # the brief is the last thing it did
+            if (b.get("type") == "text" and (b.get("text") or "").strip()) or \
+                    (b.get("type") == "tool_use" and b.get("name") != "ToolSearch"):
+                return True
+    return False
 
 
 def human_message(text):
@@ -9866,202 +9998,6 @@ def human_message(text):
     if re.match(r"<(task-notification|cross-session-message|system-reminder|local-command|command-|bash-)", t):
         return False
     return not t.startswith("This session is being continued from a previous conversation")
-
-
-def card_turns(items):
-    """A conversation's items (app_items) as turns: each from one of your
-    messages (its record, rec) to the next, as the app groups them. What came
-    before your first message has nothing to reply to."""
-    turns, cur = [], None
-    for it in items:
-        rec = it.get("rec") or str(it.get("key", "")).split(":")[0]
-        kind = it.get("kind")
-        if kind == "user" and it.get("turn"):
-            if cur is None or cur["rec"] != rec:
-                cur = {"rec": rec, "said": [], "work": []}
-                turns.append(cur)
-            cur["said"].append("[a picture]" if it.get("image") is not None else it.get("text") or "")
-        elif cur is None:
-            continue
-        elif kind == "claude":
-            cur["work"].append(("Claude", it.get("text") or ""))
-        elif kind == "tool" and it.get("name") not in HIDDEN_STEPS:
-            cur["work"].append(("did", it.get("summary") or it.get("name") or ""))
-        elif kind == "result" and it.get("error"):
-            cur["work"].append(("failed", (it.get("text") or "")[:400]))
-        elif kind in ("note", "user", "command"):
-            cur["work"].append(("note", (it.get("text") or "")[:600]))
-    return turns
-
-
-def cards_input(turn):
-    """What the model is given of a turn: what you said, and what Claude said
-    and did in order (the start cut when it's long: the end is where it lands)."""
-    said = "\n\n".join(t for t in turn["said"] if t).strip()[:6000]
-    work = "\n\n".join(f"[Claude]\n{text}" if kind == "Claude" else f"[{kind}] {text}" for kind, text in turn["work"])
-    if len(work) > CARDS_INPUT:
-        work = "…\n" + work[-CARDS_INPUT:]
-    return (f"WHAT THE PERSON SAID:\n{said or '(nothing: Claude went on by itself)'}\n\n"
-            f"WHAT CLAUDE SAID AND DID, IN ORDER:\n{work or '(nothing)'}")
-
-
-def cards_clean(cards):
-    """The cards a model gave, as the app may draw them: known fields, short
-    strings, http(s) links only, at most 4 cards."""
-    def text(v, n):
-        return " ".join(str(v).split())[:n] if isinstance(v, (str, int, float)) else ""
-
-    def block(v, n):
-        return str(v).strip()[:n] if isinstance(v, str) else ""
-    out = []
-    for c in cards if isinstance(cards, list) else []:
-        if not isinstance(c, dict) or not text(c.get("title"), 140):
-            continue
-        card = {"tone": c.get("tone") if c.get("tone") in CARDS_TONES else "info",
-                "label": text(c.get("label"), 40), "title": text(c.get("title"), 140), "body": block(c.get("body"), 500),
-                "points": [text(p, 160) for p in (c.get("points") or [])[:5] if text(p, 160)] if isinstance(c.get("points"), list) else [],
-                "checklist": [{"text": text(x.get("text"), 120), "done": x.get("done") is True}
-                              for x in (c.get("checklist") or [])[:6] if isinstance(x, dict) and text(x.get("text"), 120)]
-                             if isinstance(c.get("checklist"), list) else [],
-                "stats": [{"label": text(x.get("label"), 40), "value": text(x.get("value"), 40)}
-                          for x in (c.get("stats") or [])[:4] if isinstance(x, dict) and text(x.get("value"), 40)]
-                         if isinstance(c.get("stats"), list) else [],
-                "code": block(c.get("code"), 1500), "more": block(c.get("more"), 2000),
-                "actions": [{"label": text(a.get("label"), 48), "send": block(a.get("send"), 2000) or text(a.get("label"), 48),
-                             "draft": a.get("draft") is True}
-                            for a in (c.get("actions") or [])[:3] if isinstance(a, dict) and text(a.get("label"), 48)]
-                           if isinstance(c.get("actions"), list) else []}
-        link = c.get("link") if isinstance(c.get("link"), dict) else {}
-        url = text(link.get("url"), 2000)
-        if re.match(r"https?://\S+$", url):
-            card["link"] = {"label": text(link.get("label"), 80), "url": url}
-        out.append(card)
-    return out[:3]
-
-
-def turn_model(records, rec):
-    """The model that answered a turn (its last message's), so that its cards
-    come from the same Claude: what it tells you is the part that matters."""
-    model, inside = None, False
-    for r in records:
-        if human_record(r):
-            if inside:
-                break
-            inside = r.get("uuid") == rec
-        elif inside and isinstance(r, dict) and r.get("type") == "assistant" and isinstance(r.get("message"), dict):
-            m = r["message"].get("model")
-            if isinstance(m, str) and m and not m.startswith("<"):     # "<synthetic>": Claude Code's own
-                model = m
-    return model
-
-
-def cards_ask(text, model=None):
-    """The cards for a turn, from the model: (cards, None), or (None, why)."""
-    try:
-        r = subprocess.run(
-            ["claude", "-p", "--model", model or CARDS_MODEL, "--no-session-persistence", "--setting-sources", "", "--tools", "",
-             "--strict-mcp-config", "--output-format", "json", "--json-schema", json.dumps(CARDS_SCHEMA)],
-            input=CARDS_PROMPT + text, capture_output=True, text=True, timeout=180, env=agent_env(), cwd=STATE)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"the model didn't answer ({type(e).__name__})"
-    try:
-        d = json.loads(r.stdout)
-    except ValueError:
-        return None, (r.stderr or r.stdout or "no answer").strip()[-300:]
-    out = d.get("structured_output") if isinstance(d, dict) else None
-    if not isinstance(out, dict) and isinstance(d, dict) and isinstance(d.get("result"), str):
-        try:
-            out = json.loads(d["result"])
-        except ValueError:
-            out = None
-    cards = cards_clean(out.get("cards")) if isinstance(out, dict) else []
-    if not cards:
-        return None, (d.get("result") if isinstance(d, dict) and d.get("is_error") else "") or "no cards in its answer"
-    return cards, None
-
-
-def cards_dir(sid):
-    return claude_dir(sid) / "cards"
-
-
-def cards_read(sid, rec):
-    try:
-        d = json.loads((cards_dir(sid) / f"{rec}.json").read_text())
-    except (OSError, ValueError):
-        return None
-    return d if isinstance(d, dict) else None
-
-
-def cards_all(sid, most=60):
-    """The session's cards for the app: {rec: {state, cards, at, error}},
-    the newest most."""
-    d = cards_dir(sid)
-    try:
-        files = sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime)[-most:]
-    except OSError:
-        return {}
-    out = {}
-    for f in files:
-        c = cards_read(sid, f.stem)
-        if c:
-            out[f.stem] = {k: c.get(k) for k in ("state", "cards", "at", "error") if k in c}
-    return out
-
-
-def cards_sig(sid):
-    """What changes when any of the session's cards does (each is written
-    whole, by a rename: the folder's time moves)."""
-    try:
-        return cards_dir(sid).stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-def cmd_cards(args):
-    """amarchy cards <id> [<rec>] [--force]: the cards for a turn of the
-    session (its last, or the one your message <rec> started), from the
-    model, into the session's folder (the Stop hook starts it, and the app's
-    "Sum it up"). A turn whose cards are made already, from the same work,
-    isn't asked again unless --force."""
-    force = "--force" in args
-    args = [a for a in args if a != "--force"]
-    if not 1 <= len(args) <= 2:
-        return fail("usage: amarchy cards <id> [<rec>] [--force]")
-    sid, want = args[0], args[1] if len(args) == 2 else None
-    s = session(sid)
-    if not s:
-        return fail(f"no session {sid}")
-    if want is None:
-        time.sleep(1)       # from the Stop hook: the turn's last record a moment to land
-    f = transcript(s)
-    if not f:
-        return 0
-    size = f.stat().st_size
-    start = 0
-    if want is None and size > 8_000_000:       # the last turn: the end of a long conversation is enough
-        with open(f, "rb") as fh:
-            start = line_start(fh, size - 8_000_000)
-    records = read_records(f, start, size)
-    turns = card_turns(app_items(records, s))
-    turn = next((t for t in turns if t["rec"] == want), None) if want else (turns[-1] if turns else None)
-    if not turn or not turn["work"]:
-        return 0
-    text = cards_input(turn)
-    digest = hashlib.sha1(text.encode()).hexdigest()[:16]
-    had = cards_read(sid, turn["rec"]) or {}
-    if not force and had.get("hash") == digest and (
-            had.get("state") == "ready" or (had.get("state") == "pending" and time.time() - (had.get("at") or 0) < CARDS_STALE)):
-        return 0
-    path = cards_dir(sid) / f"{turn['rec']}.json"
-    model = turn_model(records, turn["rec"]) or CARDS_MODEL
-    base = {"turn": turn["rec"], "hash": digest, "model": model}
-    write_file(path, json.dumps({**base, "state": "pending", "at": time.time()}))
-    cards, why = cards_ask(text, model)
-    if cards:
-        write_file(path, json.dumps({**base, "state": "ready", "cards": cards, "at": time.time()}))
-        return 0
-    write_file(path, json.dumps({**base, "state": "failed", "error": why, "at": time.time()}))
-    return fail(f"no cards: {why}")
 
 
 def our_title(sid, f):
@@ -11294,7 +11230,7 @@ OPTIONS = {
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "attach": None, "held": None,
-    "paste": None, "agent": None, "cards": ({"--force"}, set(), set()),
+    "paste": None, "agent": None, "brief-mcp": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -11422,8 +11358,8 @@ def main(argv):
         return cmd_held(args[0])
     elif cmd == "paste":
         return cmd_paste(args)
-    elif cmd == "cards":
-        return cmd_cards(args)
+    elif cmd == "brief-mcp" and not args:
+        return brief_mcp()
     elif cmd == "agent":
         return cmd_agent(args)
     elif cmd == "app":

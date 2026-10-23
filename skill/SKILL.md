@@ -79,8 +79,9 @@ case), your conversation is in the app's chat, and:
   menu. There is no prompt box in a terminal for them to type into, so never
   tell them to type a command or a reply into one. Say what to tap ("tap Allow",
   "use Run in Terminal").
-- After each turn, amarchy sums up your reply in a few cards they swipe through;
-  your own text sits a tap away, in a fold. Write as you normally would.
+- They read each chat's brief rather than your messages. When a turn ends,
+  amarchy asks you to update it with `update_brief`: do it once, in plain
+  words a glance can take in, then stop. Otherwise write as you normally would.
 - What they send while you work waits for your turn, unless they send it now.
 - Your questions and permission requests reach them as cards with buttons. Ask
   in plain words, with short option labels: that reads best on a phone.
