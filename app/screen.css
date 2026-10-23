@@ -15,49 +15,42 @@
 .vs-btn.on { color: var(--text); background: var(--control-pressed); border-color: var(--accent); }
 .vs-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ---- the brief */
+/* ---- the brief, as a message under each turn */
 
-.brief {
-  --tone: var(--text-muted);
-  flex: none; width: 100%; max-width: var(--chat-column, 760px); margin: 8px auto 0; box-sizing: border-box;
-  padding: 0 12px 10px; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain;
-  border-bottom: 1px solid var(--border);       /* where the brief ends and the timeline begins */
-}
-.brief[hidden], .chat.other > .brief { display: none; }
-.brief.done { --tone: var(--success); }
-.brief.working { --tone: var(--accent); }
-.brief.blocked { --tone: var(--danger); }
-.brief.waiting { --tone: var(--warn, #d9a441); }
-/* One card: the brief's head (what it is, where it stands, the goal, a line that opens it), what waits on you, the rest. */
 .brief-card {
-  display: flex; flex-direction: column; background: var(--surface);
+  --tone: var(--text-muted);
+  display: flex; flex-direction: column; min-width: 0; background: var(--surface);
   border: 1px solid var(--border); border-left: 3px solid var(--tone); border-radius: var(--radius-card);
 }
-.brief-head {
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; padding: 12px 14px; box-sizing: border-box;
-  text-align: left; font: inherit; color: var(--text); cursor: pointer; background: none; border: 0; border-radius: var(--radius-card);
-}
-.brief-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.brief-top { display: flex; align-items: center; gap: 10px; }
+.brief-card.done, .turn-headline.done { --tone: var(--success); }
+.brief-card.working, .turn-headline.working { --tone: var(--accent); }
+.brief-card.blocked, .turn-headline.blocked { --tone: var(--danger); }
+.brief-card.waiting, .turn-headline.waiting { --tone: var(--warn, #d9a441); }
+.brief-top { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; }
 .brief-label { font-size: var(--caption); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.brief-state {
-  margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--tone);
-  font-size: var(--caption); font-weight: 700;
-}
+.brief-state { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--tone); font-size: var(--caption); font-weight: 700; }
 .brief-state .dot, .turn-headline .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); flex: none; }
-.brief-goal {
-  font-weight: 700; line-height: 1.35; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-}
-.brief.open .brief-goal { -webkit-line-clamp: unset; display: block; }
-.brief-more { display: inline-flex; align-items: center; gap: 4px; font-size: var(--caption); font-weight: 700; color: var(--link); }
-.brief-more .chev { width: 14px; height: 14px; transform: rotate(90deg); transition: transform 0.15s ease; }
-.brief.open .brief-more .chev { transform: rotate(-90deg); }
-.brief-updating { display: inline-flex; align-items: center; gap: 6px; font-size: var(--caption); color: var(--text-muted); }
-.brief-state + .brief-updating, .brief-updating + .brief-state { margin-left: 0; }
-.brief-updating { margin-left: auto; }
+.brief-fold { min-height: 0; padding: 0 0 0 4px; font-size: var(--caption); }
+.brief-headline { padding: 6px 14px 0; font-size: 1.08rem; font-weight: 700; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.brief-goal { padding: 6px 14px 12px; font-size: var(--caption); color: var(--text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+.brief-goal .k { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.brief-headline:last-child { padding-bottom: 12px; }
 
-.brief-body { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 14px; border-top: 1px solid var(--border-faint); }
+/* The details: a row that says what they hold, and opens them below it. */
+.brief-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 10px 14px; box-sizing: border-box;
+  font: inherit; text-align: left; cursor: pointer; color: var(--link); background: none;
+  border: 0; border-top: 1px solid var(--border-faint);
+}
+.brief-card:not(.open) .brief-toggle { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+.brief-toggle:hover { background: var(--control-hover); }
+.brief-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.brief-toggle-label { font-weight: 700; flex: none; }
+.brief-toggle-sum { flex: 1; min-width: 0; font-size: var(--caption); color: var(--text-muted); overflow-wrap: anywhere; }
+.brief-toggle .chev { margin-left: auto; flex: none; width: 16px; height: 16px; transform: rotate(90deg); transition: transform 0.15s ease; }
+.brief-card.open .brief-toggle .chev { transform: rotate(-90deg); }
+
+.brief-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 14px 14px; }
 .brief-facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .fact {
   font-size: var(--caption); padding: 3px 8px; border-radius: 999px; color: var(--text-muted);
@@ -96,7 +89,7 @@
 .brief-link-host { font-size: var(--caption); color: var(--text-muted); }
 .brief-how { margin-top: 6px; overflow-wrap: anywhere; }
 
-/* What waits on you: in the card, under its head. */
+/* What waits on you: in the newest brief, over its details. */
 .brief-waiting { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border-faint); }
 .bq { display: flex; flex-direction: column; gap: 8px; }
 .bq + .bq { padding-top: 10px; border-top: 1px solid var(--border-faint); }
@@ -130,18 +123,18 @@
 .turn-you:empty { display: none; }
 .screen-work[hidden] { display: flex; visibility: hidden; }     /* its line kept: nothing moves when it comes and goes */
 
-/* The brief's headline for a turn: a tap opens the brief. */
+/* An older turn's brief, as its headline: a tap opens it in place. */
 .turn-headline {
   --tone: var(--text-muted);
-  align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 2px;
-  font: inherit; font-weight: 600; color: var(--text); text-align: left; cursor: pointer; background: none; border: 0;
-  overflow-wrap: anywhere;
+  align-self: stretch; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px; box-sizing: border-box;
+  font: inherit; font-weight: 600; color: var(--text); text-align: left; cursor: pointer;
+  background: none; border: 1px solid var(--border-faint); border-radius: var(--radius-item);
 }
-.turn-headline.done { --tone: var(--success); }
-.turn-headline.working { --tone: var(--accent); }
-.turn-headline.blocked { --tone: var(--danger); }
-.turn-headline.waiting { --tone: var(--warn, #d9a441); }
-.turn-headline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-control); }
+.turn-headline:hover { background: var(--control-hover); }
+.turn-headline .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.turn-headline-more { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: var(--caption); color: var(--link); }
+.turn-headline-more .chev { width: 14px; height: 14px; }
+.turn-headline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Claude's work: a quiet line that opens to its words and steps. */
 .turn-work { min-width: 0; }
@@ -166,9 +159,5 @@
 .reply-plain.open .reply-text { max-height: none; }
 
 @media (max-width: 600px) {
-  .brief { padding: 0 10px 8px; max-height: 50vh; }
-  /* Open, the brief is the page (the timeline comes back with Hide the details). */
-  .chat.brief-full > .brief { flex: 1; max-height: none; border-bottom: 0; }
-  .chat.brief-full > .chat-main { display: none; }
   .screen-stage { padding: 14px 12px 10px; gap: 18px; }
 }

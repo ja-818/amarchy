@@ -141,7 +141,6 @@ async function mount(page) {
     box.style.cssText = "height:100vh;height:100dvh;display:flex;flex-direction:column;background:var(--surface)";
     document.body.append(box);
     store.set("chatView", null);
-    store.set("briefOpen", null);
     window.__chat = new Chat({ id: "fake-brief",
       row: { id: "fake-brief", engine: "chat", status: "idle", sleeping: false, awake: true, repo: "r", name: "n", path: "/tmp" },
       onSession() {}, onScreen() {}, onGone() {} });
@@ -153,25 +152,26 @@ async function mount(page) {
 }
 
 const read = (page) => page.evaluate(() => {
-  const c = window.__chat, b = c.briefEl, turns = [...document.querySelectorAll(".turn")];
-  const sec = (t) => [...b.querySelectorAll(".brief-section")].find((s) => s.querySelector("h4").textContent === t);
+  const c = window.__chat, card = document.querySelector(".brief-card.latest"), turns = [...document.querySelectorAll(".turn")];
+  const sec = (t) => card && [...card.querySelectorAll(".brief-section")].find((x) => x.querySelector("h4").textContent === t);
   return {
-    mode: c.mode, hidden: b.hidden, open: b.classList.contains("open"), cls: b.className,
-    state: b.querySelector(".brief-state")?.textContent, goal: b.querySelector(".brief-goal")?.textContent,
-    updating: !!b.querySelector(".brief-updating"),
-    questions: b.querySelectorAll(".bq").length,
+    mode: c.mode, pinned: document.querySelectorAll(".chat > .brief").length,
+    inLast: !!(card && turns.at(-1).contains(card)), open: !!(card && card.classList.contains("open")),
+    state: card?.querySelector(".brief-state")?.textContent, headline: card?.querySelector(".brief-headline")?.textContent,
+    goal: card?.querySelector(".brief-goal")?.textContent, toggle: card?.querySelector(".brief-toggle")?.textContent,
+    questions: card ? card.querySelectorAll(".bq").length : 0,
     changed: sec("What changed")?.querySelectorAll("li").length || 0,
     tests: sec("Tests") ? [...sec("Tests").querySelectorAll("li")].map((li) => li.className).join(",") : "",
-    links: [...b.querySelectorAll(".brief-link")].map((a) => a.getAttribute("href")),
-    how: [...b.querySelectorAll(".brief-how")].map((x) => x.textContent).join(" | "),
+    links: card ? [...card.querySelectorAll(".brief-link")].map((x) => x.getAttribute("href")) : [],
+    how: card ? [...card.querySelectorAll(".brief-how")].map((x) => x.textContent).join(" | ") : "",
     next: !!sec("Next"), notes: !!sec("Heads up"),
-    facts: [...b.querySelectorAll(".fact")].map((f) => f.textContent),
+    facts: card ? [...card.querySelectorAll(".fact")].map((f) => f.textContent) : [],
+    cards: document.querySelectorAll(".brief-card").length, lines: [...document.querySelectorAll(".turn-headline .text")].map((x) => x.textContent),
     turns: turns.length, firstSaid: turns[0]?.querySelector(".turn-you")?.textContent.trim(),
-    headline: turns.at(-1)?.querySelector(".turn-headline")?.textContent,
     oldText: turns[0]?.querySelector(".reply-text")?.textContent.trim(),
     work: turns.at(-1)?.querySelector(".turn-work > summary")?.textContent,
     pwned: window.__pwned,
-    overflow: Math.max(c.stage.scrollWidth - c.stage.clientWidth, b.scrollWidth - b.clientWidth),
+    overflow: c.stage.scrollWidth - c.stage.clientWidth,
   };
 });
 
@@ -194,59 +194,58 @@ async function run(browser, base, layout) {
   const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) });
 
   let s = await read(page);
-  check(layout, s.mode === "screen" && !s.hidden, "the brief view is the default, the brief over the timeline");
-  check(layout, s.state === "Waiting on you" && s.goal.startsWith("Ship the <img"), `its line: where it stands and the goal, as text (${s.state} · ${s.goal})`);
+  check(layout, s.mode === "screen" && s.pinned === 0 && s.inLast, "the brief is a message: in the last turn, nothing pinned over the chat");
+  check(layout, s.state === "Waiting on you" && s.headline === "Search page works: 2 choices for you" && s.goal.startsWith("Goal Ship the <img"),
+    `the card: where it stands, this turn's headline, the goal, as text (${s.state} · ${s.headline})`);
   check(layout, s.pwned === undefined, "nothing in the brief runs as markup");
-  check(layout, s.open === (layout === "wide"), `open on a wide screen, closed on a phone (open: ${s.open})`);
-  check(layout, s.questions === 2, "what waits on you is there, open or closed");
-  check(layout, s.turns === 2 && s.firstSaid === "Hello" && s.headline === "Search page works: 2 choices for you",
-    `the timeline, oldest first, each turn with its headline (${s.headline})`);
-  check(layout, s.oldText === "Hi there. What should we build today?", "a turn from before the brief shows Claude's words");
+  check(layout, !s.open && s.questions === 2, "its details closed, what waits on you there");
+  check(layout, s.toggle === "Show details2 changes · 1 test failing · next steps", `the details' row says what they hold (${s.toggle})`);
+  check(layout, s.turns === 2 && s.firstSaid === "Hello" && s.oldText === "Hi there. What should we build today?", "the timeline, oldest first; a turn from before the brief shows Claude's words");
   check(layout, /1 step/.test(s.work || ""), `the brief's own call isn't a step in Claude's work (${s.work})`);
   const aside = await page.evaluate(() => document.body.textContent.includes("The brief is updated."));
   check(layout, !aside, "what Claude says again after the brief isn't shown");
   check(layout, s.overflow <= 1, `no sideways scroll (${s.overflow}px)`);
   await shot("closed");
 
-  // The headline opens the brief: its sections, git's facts, links.
-  await page.evaluate(() => [...document.querySelectorAll(".turn-headline")].at(-1).click());
-  await page.waitForTimeout(150);
+  // The details' row opens them: sections, git's facts, links; again, closes.
+  await page.evaluate(() => document.querySelector(".brief-card.latest .brief-toggle").click());
   s = await read(page);
-  check(layout, s.open, "a turn's headline opens the brief");
-  const full = await page.evaluate(() => getComputedStyle(document.querySelector(".chat-main")).display);
-  check(layout, layout === "phone" ? full === "none" : full !== "none", `open on a phone, the brief is the page; on a computer, a panel (${full})`);
+  check(layout, s.open && s.toggle === "Hide details", `the row opens the details (${s.toggle})`);
   check(layout, s.changed === 2 && s.tests === "is-pass,is-fail" && s.next && s.notes, `its sections: changed, tests (${s.tests}), next, heads up`);
   check(layout, JSON.stringify(s.links) === JSON.stringify(["http://amarchy:5173/search"]) && s.how.includes("On the phone") && s.how.includes("Search"),
     `check it: the http(s) link only, and how (${JSON.stringify(s.links)})`);
   check(layout, JSON.stringify(s.facts) === JSON.stringify(["search-page", "3 commits", "4 files +120 −8", "2 uncommitted", "not in main yet"]),
     `git's facts, as they are (${JSON.stringify(s.facts)})`);
+  await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("open");
+  await page.evaluate(() => document.querySelector(".brief-card.latest .brief-toggle").click());
+  s = await read(page);
+  check(layout, !s.open, "and closes them");
 
   // Answers: the first marks its question; the last sends both, once.
-  await page.evaluate(() => window.__chat.briefEl.querySelectorAll(".bq")[0].querySelector(".bq-opt").click());
-  const half = await page.evaluate(() => { const b = window.__chat.briefEl; return { answered: b.querySelectorAll(".bq.answered").length,
+  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[0].querySelector(".bq-opt").click());
+  const half = await page.evaluate(() => { const b = document.querySelector(".brief-card.latest"); return { answered: b.querySelectorAll(".bq.answered").length,
     status: b.querySelector(".bq-status").textContent, send: !b.querySelector(".bq-send").hidden }; });
   check(layout, half.answered === 1 && half.status === "1 of 2 answered" && half.send && !posts.some((p) => p.url.endsWith("/send")),
     `an answer marks its question and waits for the other (${JSON.stringify(half)})`);
-  await page.evaluate(() => window.__chat.briefEl.querySelectorAll(".bq")[1].querySelectorAll(".bq-opt")[2].click());
+  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[1].querySelectorAll(".bq-opt")[2].click());
   const draft = await page.evaluate(() => window.__chat.input.value);
   check(layout, draft === "Filters: " && !posts.some((p) => p.url.endsWith("/send")), `a draft option fills the box (${JSON.stringify(draft)})`);
   await page.evaluate(() => { window.__chat.input.value = ""; window.__chat.typed(); });
-  await page.evaluate(() => window.__chat.briefEl.querySelectorAll(".bq")[1].querySelectorAll(".bq-opt")[1].click());
+  await page.evaluate(() => document.querySelectorAll(".brief-card.latest .bq")[1].querySelectorAll(".bq-opt")[1].click());
   await page.waitForTimeout(300);
   const sent = posts.filter((p) => p.url.endsWith("/send"));
   check(layout, sent.length === 1 && sent[0].body === JSON.stringify({ text: "Ship it: merge to main and push\n\nNo filters" }),
     `the answers go to Claude together, once (${sent.map((p) => p.body)})`);
-  await shot("answered");
 
   // A reconnect with the same conversation: nothing drawn again, the answers kept.
-  await page.evaluate(({ items }) => { window.__head = window.__chat.briefEl.querySelector(".brief-head");
+  await page.evaluate(({ items }) => { window.__card = document.querySelector(".brief-card.latest");
     window.__chat.conversation({ reset: true, start: 0, items: [...items, { kind: "note", text: "Conversation compacted", key: "n1:0", at: "" }] }); }, { items: ITEMS });
-  const kept = await page.evaluate(() => ({ same: window.__chat.briefEl.querySelector(".brief-head") === window.__head,
-    status: window.__chat.briefEl.querySelector(".bq-status").textContent }));
+  const kept = await page.evaluate(() => ({ same: document.querySelector(".brief-card.latest") === window.__card,
+    status: document.querySelector(".brief-card.latest .bq-status").textContent }));
   check(layout, kept.same && kept.status === "Sent", `a reconnect moves nothing, the answers stay sent (${JSON.stringify(kept)})`);
 
-  // A new turn: while Claude works, no headline; writing the brief, "Updating"; then the new brief.
+  // A new turn: while Claude works, no reply yet (the working line says it's writing the brief); then its brief, the one before as a line.
   await page.evaluate(() => {
     const c = window.__chat;
     c.row = { ...c.row, status: "working" };
@@ -255,9 +254,9 @@ async function run(browser, base, layout) {
       { kind: "claude", text: "Shipping.", key: "c7:0", at: "" }] });
     c.renderTail();
   });
-  const live = await page.evaluate(() => ({ headline: [...document.querySelectorAll(".turn")].at(-1).querySelector(".turn-headline"),
-    updating: !!window.__chat.briefEl.querySelector(".brief-updating"), line: document.querySelector(".screen-work .now")?.textContent }));
-  check(layout, !live.headline && live.updating && /Updating the brief/.test(live.line || ""), `while it writes the brief: "Updating" (${live.line})`);
+  const live = await page.evaluate(() => ({ reply: [...document.querySelectorAll(".turn")].at(-1).querySelector(".turn-reply").childElementCount,
+    line: document.querySelector(".screen-work .now")?.textContent }));
+  check(layout, live.reply === 0 && /Updating the brief/.test(live.line || ""), `while it writes the brief: the working line says so (${live.line})`);
   await page.evaluate(({ TOOL }) => {
     const c = window.__chat;
     c.conversation({ items: [{ kind: "tool", id: "t9", name: TOOL, summary: "Updated the brief", key: "c8:0", at: "",
@@ -265,16 +264,28 @@ async function run(browser, base, layout) {
     c.row = { ...c.row, status: "idle" }; c.live = { state: "idle", pending: [] }; c.renderTail();
   }, { TOOL });
   s = await read(page);
-  check(layout, s.state === "Done" && s.headline === "Shipped to main" && s.questions === 0 && !s.updating, `then the new brief (${s.state} · ${s.headline})`);
+  check(layout, s.state === "Done" && s.headline === "Shipped to main" && s.questions === 0 && s.cards === 1 &&
+    JSON.stringify(s.lines) === JSON.stringify(["Search page works: 2 choices for you"]),
+    `then its brief in full, the one before as its line (${JSON.stringify(s.lines)})`);
   await shot("done");
+  // The line opens that brief in place (its questions gone: overtaken); Fold makes it a line again.
+  await page.evaluate(() => document.querySelector(".turn-headline").click());
+  const older = await page.evaluate(() => { const cards = document.querySelectorAll(".brief-card");
+    const o = [...cards].find((x) => !x.classList.contains("latest"));
+    return { cards: cards.length, headline: o?.querySelector(".brief-headline")?.textContent, questions: o ? o.querySelectorAll(".bq").length : -1 }; });
+  check(layout, older.cards === 2 && older.headline === "Search page works: 2 choices for you" && older.questions === 0,
+    `an older brief opens in place, without its old questions (${JSON.stringify(older)})`);
+  await page.evaluate(() => document.querySelector(".brief-card:not(.latest) .brief-fold").click());
+  const folded = await page.evaluate(() => document.querySelectorAll(".brief-card").length);
+  check(layout, folded === 1, "Fold makes it a line again");
 
-  // The conversation view hides the brief; back again.
+  // The conversation view has no brief; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));
-  const chat = await page.evaluate(() => ({ hidden: window.__chat.briefEl.hidden, users: document.querySelectorAll(".msg.user").length }));
-  check(layout, chat.hidden && chat.users === 3, `the Chat view: the conversation, no brief (${JSON.stringify(chat)})`);
+  const chat = await page.evaluate(() => ({ cards: document.querySelectorAll(".brief-card").length, users: document.querySelectorAll(".msg.user").length }));
+  check(layout, chat.cards === 0 && chat.users === 3, `the Chat view: the conversation, no brief (${JSON.stringify(chat)})`);
   await page.evaluate(() => window.__chat.showMode("screen"));
   s = await read(page);
-  check(layout, !s.hidden && s.state === "Done" && s.turns === 3, "back to the brief");
+  check(layout, s.state === "Done" && s.turns === 3 && s.inLast, "back to the brief");
 
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());
@@ -282,7 +293,7 @@ async function run(browser, base, layout) {
   const settings = await page.evaluate(() => {
     const sh = document.querySelector(".sheet-back.settings");
     const sec = [...sh.querySelectorAll(".section")].find((x) => x.textContent === "Replies");
-    return sec ? [...sec.nextElementSibling.querySelectorAll("button")].map((b) => b.textContent).join() : "";
+    return sec ? [...sec.nextElementSibling.querySelectorAll("button")].map((x) => x.textContent).join() : "";
   });
   check(layout, settings === "Brief,Chat", `Settings: Replies, Brief | Chat (${settings})`);
   await page.evaluate(() => closeSheets());

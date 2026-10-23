@@ -184,13 +184,18 @@ phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*. The
 choice is kept on the device and every chat open takes it. (The phone's
 terminals open from the chat's menu; its back arrow returns to the chat.)
 
-- **One living document per chat**, at its top: where it stands (done,
-  working, blocked, waiting on you) and the goal on one line that opens to
-  the rest: *What changed*, *Tests* (with their results), *Check it* (links,
-  what to tap), *Next*, *Heads up*, and git's facts as chips (branch,
-  commits, files and lines changed, uncommitted, not pushed, merged or not).
-  Open on a wide screen, a line on the phone (the choice is kept).
-- **Waiting on you** is always there under it: each question with its
+- **One living document per chat, as Claude's reply**: at the end of each
+  turn, under your message, a card: *Brief*, where it stands (done, working,
+  blocked, waiting on you), this turn's headline and the chat's goal. A row
+  under it, *Show details*, says what they hold ("6 changes · 3 tests passed
+  · next steps") and opens them below it: *What changed*, *Tests* (with
+  their results), *Check it* (links, what to tap), *Next*, *Heads up*, and
+  git's facts as chips (branch, commits, files and lines changed,
+  uncommitted, not pushed, merged or not). The newest brief is in full; the
+  ones before it are their headline, opened in place with a tap (*Fold*
+  makes them a line again). It scrolls with the conversation: nothing is
+  pinned.
+- **What waits on you** is in the newest brief, over its details: each question with its
   options as buttons. One question: a tap sends. Several: a tap marks it
   answered, they go together once all are (or with *Send*). An option you
   finish yourself puts its start in the box.
@@ -206,10 +211,9 @@ terminals open from the chat's menu; its back arrow returns to the chat.)
 - The app draws the brief from the transcript (`app_items` gives the call as
   `brief`); git's facts come live from the server (`facts` on the stream).
   The ask and the call stay out of what you read.
-- **The timeline**, under it, oldest first: your message, the brief's
-  *headline* for that turn (a tap opens the brief), and *Claude's work* in a
-  closed fold (its words and steps). A turn from before the brief shows
-  Claude's last words.
+- **The timeline**, oldest first: your message, *Claude's work* in a closed
+  fold (its words and steps), and its brief. A turn from before the brief
+  shows Claude's last words, three lines of them.
 
 ### The conversation
 

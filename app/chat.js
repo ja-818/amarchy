@@ -748,7 +748,8 @@ class Chat {
     this.brief = null;          // the latest brief: {key, data} (update_brief's input)
     this.facts = null;          // what git says (the stream's "facts": bin/amarchy brief_facts)
     this.answers = new Map();   // your answers to a brief's questions, by its key: {picks, sent}
-    this.briefOpen = store.get("briefOpen") ? store.get("briefOpen") === "1" : matchMedia("(min-width: 900px)").matches;
+    this.briefsOpen = new Set();    // briefs (their keys) whose details are open
+    this.briefsShown = new Set();   // older turns' briefs opened from their line
     this.reset();
     this.build();
   }
@@ -794,8 +795,7 @@ class Chat {
     this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
     this.drawSwitch();
     // (On the phone it's in Settings and the chat's menu instead: opts.noSwitch.)
-    this.briefEl = h("section", { class: "brief", hidden: true, "aria-label": "The brief" });
-    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl, this.briefEl,
+    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl,
                 h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     // Chosen in Settings (setChatView): every chat open takes it.
     this.onViewChosen = (e) => this.showMode(e.detail);
@@ -972,7 +972,6 @@ class Chat {
     this.view = { content, above, composer };
     this.scroller.replaceChildren(content || this.body());
     this.el.classList.toggle("other", !!content);
-    this.drawBrief();
     this.cardKey = null;
     this.renderDock();
     if (!content) this.toBottom(true);
@@ -1095,7 +1094,6 @@ class Chat {
     if (mode === "chat") this.conversation({ reset: true, redraw: true, items: this.items.slice(), start: this.start });
     else this.rebuildScreen();
     if (!this.view.content) this.scroller.replaceChildren(this.body());
-    this.drawBrief();
     this.toBottom(true);
   }
 
@@ -1124,7 +1122,6 @@ class Chat {
     for (const it of this.items) this.screenAdd(it);
     this.drawEmpty();
     for (const t of this.sturns) this.drawReply(t);
-    this.drawBrief();
     if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
     if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
   }
@@ -1140,7 +1137,7 @@ class Chat {
     for (const it of d.items) this.screenAdd(it);
     this.drawEmpty();
     if (this.sturn) this.drawReply(this.sturn);
-    if (this.brief !== had) this.drawBrief();
+    if (this.brief !== had) for (const t of this.sturns) if (t.brief) this.drawReply(t);     // the newest brief in full, the ones before as a line
     if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
   }
@@ -1159,6 +1156,7 @@ class Chat {
     this.add(it, t.body);
     if (it.kind === "tool" && it.brief) {
       t.brief = it.brief;
+      t.briefKey = it.key;
       this.brief = { key: it.key, data: it.brief };
     }
     if (it.kind === "claude" && !it.aside) t.said = it.text;
@@ -1200,18 +1198,26 @@ class Chat {
                                   n ? h("span", { class: "turn-work-n" }, `${n} step${n === 1 ? "" : "s"}`) : null].filter(Boolean));
   }
 
-  // Under a turn: its headline, from the brief Claude wrote at its end (a tap
-  // opens the brief); while Claude works, nothing (the working line says
-  // what); a turn from before the brief, Claude's last words.
+  // Claude's reply to a turn, as the brief view shows it: the brief it wrote at
+  // the turn's end, as a message. The newest in full; the ones before it as
+  // their headline, opened in place with a tap. While Claude works, nothing
+  // (the working line says what); a turn from before the brief, Claude's last
+  // words.
   drawReply(t) {
-    const state = t === this.sturn && this.working() ? "live" : t.brief ? "brief" : t.said ? "text" : "none";
-    const sig = `${state}|${state === "brief" ? JSON.stringify([t.brief.headline, t.brief.status]) : state === "text" ? t.said.length : ""}`;
+    const latest = !!t.brief && !!this.brief && t.briefKey === this.brief.key;
+    const full = !!t.brief && (latest || this.briefsShown.has(t.briefKey));
+    const state = t.brief ? (full ? "card" : "line") : t === this.sturn && this.working() ? "live" : t.said ? "text" : "none";
+    const sig = `${state}|${t.briefKey || ""}|${state === "card" ? JSON.stringify([latest, latest ? this.facts : null, this.briefsOpen.has(t.briefKey)])
+      : state === "text" ? t.said.length : ""}`;
     if (sig === t.sig) return;
     t.sig = sig;
-    if (state === "brief") {
+    if (state === "card") t.reply.replaceChildren(this.briefCard(t, latest));
+    else if (state === "line") {
       const st = t.brief.status in BRIEF_STATES ? t.brief.status : "working";
-      t.reply.replaceChildren(h("button", { class: `turn-headline ${st}`, type: "button", title: "Open the brief",
-        onclick: () => this.openBrief() }, h("span", { class: "dot" }), h("span", {}, String(t.brief.headline || BRIEF_STATES[st]))));
+      t.reply.replaceChildren(h("button", { class: `turn-headline ${st}`, type: "button", "aria-label": "Show this brief",
+        onclick: () => { this.briefsShown.add(t.briefKey); this.drawReply(t); } },
+        h("span", { class: "dot" }), h("span", { class: "text" }, String(t.brief.headline || BRIEF_STATES[st])),
+        h("span", { class: "turn-headline-more" }, "Brief", icon("chevron", "chev"))));
     } else if (state === "text") {
       const text = h("div", { class: "msg claude reply-text", html: md(t.said) });
       const box = h("div", { class: "reply-plain" }, text);
@@ -1226,76 +1232,69 @@ class Chat {
     } else t.reply.replaceChildren();
   }
 
-  openBrief() {
-    this.briefOpen = true;
-    store.set("briefOpen", "1");
-    this.drawBrief();
-    this.briefEl.scrollTop = 0;
+  // The newest brief again (git's facts came in).
+  drawBrief() {
+    const t = this.mode === "screen" && this.brief && this.sturns.find((x) => x.briefKey === this.brief.key);
+    if (t) this.drawReply(t);
   }
 
-  // ---- the brief: the chat's living summary, over the timeline. Its line
-  // (where it stands, the goal) opens the rest; what waits on you is always
-  // there, its questions answered with a tap (several: each marked, sent
-  // together); git's facts as they are.
-
-  drawBrief() {
-    const show = this.mode === "screen" && !this.view.content && !!(this.brief || (this.facts && this.facts.branch));
-    this.briefEl.hidden = !show;
-    this.el.classList.toggle("brief-full", show && this.briefOpen);      // on a phone, an open brief has the chat's whole room
-    if (!show) return;
-    const b = (this.brief && this.brief.data) || {};
-    const live = this.engine === "chat" ? this.live : null;
-    const updating = !!(live && live.activity && live.activity.tool === BRIEF_TOOL_NAME && this.working());
-    const sig = JSON.stringify([this.brief && this.brief.key, this.facts, this.briefOpen, updating]);
-    if (sig === this.briefSig) return;
-    this.briefSig = sig;
-    const st = b.status in BRIEF_STATES ? b.status : null;
-    this.briefEl.className = `brief${this.briefOpen ? " open" : ""}${st ? ` ${st}` : ""}`;
-    // One card: what it is and where it stands, the goal, and a line saying
-    // what's in it that opens it; under them, what waits on you.
-    const changedN = texts(b.changed, 8).length;
-    const testList = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string");
-    const failing = testList.filter((x) => x.result === "fail").length;
-    const sums = [changedN ? `${changedN} change${changedN === 1 ? "" : "s"}` : null,
-      testList.length ? (failing ? `${failing} test${failing === 1 ? "" : "s"} failing` : `${testList.length} test${testList.length === 1 ? "" : "s"} passed`) : null,
-      texts(b.next, 4).length ? "what's next" : null].filter(Boolean);
-    const head = h("button", { class: "brief-head", type: "button", "aria-expanded": String(this.briefOpen), onclick: () => {
-      this.briefOpen = !this.briefOpen;
-      store.set("briefOpen", this.briefOpen ? "1" : "0");
-      this.drawBrief();
-    } },
-      h("span", { class: "brief-top" }, h("span", { class: "brief-label" }, "Brief"),
-        updating ? h("span", { class: "brief-updating" }, spinner(), "Updating") : null,
-        st ? h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]) : null),
-      h("span", { class: "brief-goal" }, b.goal ? String(b.goal) : "No brief yet: Claude writes it when it finishes a turn."),
-      h("span", { class: "brief-more" }, this.briefOpen ? "Hide the details" : sums.length ? `${sums.join(" · ")}: see all` : "See the details",
-        icon("chevron", "chev")));
-    const card = h("div", { class: "brief-card" }, head);
-    const kids = [card];
-    const waiting = this.briefWaiting(b);
+  // ---- the brief, as a message: what it is and where it stands, this turn's
+  // headline, the chat's goal, what waits on you (the newest brief's only:
+  // the ones before were answered, or overtaken), and the details behind a
+  // row that says what they hold (what changed, tests, how to check it,
+  // what's next, heads-ups; git's facts on the newest).
+  briefCard(t, latest) {
+    const b = t.brief, key = t.briefKey;
+    const st = b.status in BRIEF_STATES ? b.status : "working";
+    const open = this.briefsOpen.has(key);
+    const card = h("article", { class: `brief-card ${st}${open ? " open" : ""}${latest ? " latest" : ""}` });
+    const top = h("div", { class: "brief-top" }, h("span", { class: "brief-label" }, "Brief"),
+      h("span", { class: "brief-state" }, h("span", { class: "dot" }), BRIEF_STATES[st]));
+    if (!latest) top.append(h("button", { class: "text-btn brief-fold", type: "button", "aria-label": "Show as a line",
+      onclick: () => { this.briefsShown.delete(key); this.drawReply(t); } }, "Fold"));
+    card.append(top, h("div", { class: "brief-headline" }, String(b.headline || BRIEF_STATES[st])));
+    if (b.goal) card.append(h("div", { class: "brief-goal" }, h("span", { class: "k" }, "Goal"), " ", String(b.goal)));
+    const waiting = latest ? this.briefWaiting(b, key) : null;
     if (waiting) card.append(waiting);
-    if (this.briefOpen) {
-      const body = h("div", { class: "brief-body" });
-      const facts = this.briefFacts();
-      if (facts) body.append(facts);
-      const section = (title, ...rows) => body.append(h("div", { class: "brief-section" }, h("h4", {}, title), ...rows));
-      const changed = texts(b.changed, 8);
-      if (changed.length) section("What changed", h("ul", { class: "brief-list ticks" }, ...changed.map((x) => h("li", { html: inline(x) }))));
-      const tests = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string").slice(0, 6);
-      if (tests.length) section("Tests", h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
-        h("li", { class: `is-${["pass", "fail", "skipped"].includes(x.result) ? x.result : "skipped"}` },
-          h("span", { class: "mark", html: x.result === "pass" ? TICK : "" }, x.result === "fail" ? "✕" : x.result === "skipped" ? "–" : ""),
-          h("span", { html: inline(x.name) }), x.detail ? h("span", { class: "detail" }, ` · ${x.detail}`) : null))));
-      const checks = (Array.isArray(b.check) ? b.check : []).filter((x) => x && typeof x.label === "string").slice(0, 4);
-      if (checks.length) section("Check it", ...checks.map((x) => briefLink(x.url, x.label) ||
-        h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null)));
-      const next = texts(b.next, 4);
-      if (next.length) section("Next", h("ul", { class: "brief-list" }, ...next.map((x) => h("li", { html: inline(x) }))));
-      const notes = texts(b.notes, 4);
-      if (notes.length) section("Heads up", h("ul", { class: "brief-list notes" }, ...notes.map((x) => h("li", { html: inline(x) }))));
-      card.append(body);
+    const changedN = texts(b.changed, 8).length;
+    const tests = (Array.isArray(b.tests) ? b.tests : []).filter((x) => x && typeof x.name === "string").slice(0, 6);
+    const failing = tests.filter((x) => x.result === "fail").length;
+    const sums = [changedN ? `${changedN} change${changedN === 1 ? "" : "s"}` : null,
+      tests.length ? (failing ? `${failing} test${failing === 1 ? "" : "s"} failing` : `${tests.length} test${tests.length === 1 ? "" : "s"} passed`) : null,
+      texts(b.next, 4).length ? "next steps" : null].filter(Boolean);
+    const details = this.briefDetails(b, tests, latest);
+    if (details) {
+      card.append(h("button", { class: "brief-toggle", type: "button", "aria-expanded": String(open), onclick: () => {
+        if (open) this.briefsOpen.delete(key); else this.briefsOpen.add(key);
+        this.drawReply(t);
+      } },
+        h("span", { class: "brief-toggle-label" }, open ? "Hide details" : "Show details"),
+        !open && sums.length ? h("span", { class: "brief-toggle-sum" }, sums.join(" · ")) : null,
+        icon("chevron", "chev")));
+      if (open) card.append(details);
     }
-    this.briefEl.replaceChildren(...kids);
+    return card;
+  }
+
+  briefDetails(b, tests, latest) {
+    const body = h("div", { class: "brief-body" });
+    const facts = latest ? this.briefFacts() : null;
+    if (facts) body.append(facts);
+    const section = (title, ...rows) => body.append(h("div", { class: "brief-section" }, h("h4", {}, title), ...rows));
+    const changed = texts(b.changed, 8);
+    if (changed.length) section("What changed", h("ul", { class: "brief-list ticks" }, ...changed.map((x) => h("li", { html: inline(x) }))));
+    if (tests.length) section("Tests", h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
+      h("li", { class: `is-${["pass", "fail", "skipped"].includes(x.result) ? x.result : "skipped"}` },
+        h("span", { class: "mark", html: x.result === "pass" ? TICK : "" }, x.result === "fail" ? "✕" : x.result === "skipped" ? "–" : ""),
+        h("span", { html: inline(x.name) }), x.detail ? h("span", { class: "detail" }, ` · ${x.detail}`) : null))));
+    const checks = (Array.isArray(b.check) ? b.check : []).filter((x) => x && typeof x.label === "string").slice(0, 4);
+    if (checks.length) section("Check it", ...checks.map((x) => briefLink(x.url, x.label) ||
+      h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null)));
+    const next = texts(b.next, 4);
+    if (next.length) section("Next", h("ul", { class: "brief-list" }, ...next.map((x) => h("li", { html: inline(x) }))));
+    const notes = texts(b.notes, 4);
+    if (notes.length) section("Heads up", h("ul", { class: "brief-list notes" }, ...notes.map((x) => h("li", { html: inline(x) }))));
+    return body.childElementCount ? body : null;
   }
 
   // What git says, as it is (bin/amarchy brief_facts): a row of chips.
@@ -1317,11 +1316,10 @@ class Chat {
   // What waits on you: each question and its options. One question: a tap
   // sends. Several: a tap marks it answered, and they go together once all
   // are (or with Send). A draft option puts its start in the box.
-  briefWaiting(b) {
+  briefWaiting(b, key) {
     const qs = (Array.isArray(b.waiting) ? b.waiting : [])
       .filter((q) => q && typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3);
     if (!qs.length) return null;
-    const key = (this.brief && this.brief.key) || "";
     let st = this.answers.get(key);
     if (!st) this.answers.set(key, st = { picks: {}, sent: false });
     const box = h("div", { class: "brief-waiting" });
@@ -1688,7 +1686,6 @@ class Chat {
       this.stageWork.hidden = !now;
       if (now) this.stageWork.querySelector(".now").textContent = now.text;
       if (this.sturn) this.drawReply(this.sturn);
-      this.drawBrief();
       if (stick) this.toBottom();
       return;
     }
