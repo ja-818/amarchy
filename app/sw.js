@@ -57,6 +57,13 @@ self.addEventListener("fetch", (e) => {
   const look = path === "/theme.css";
   const key = look ? path + url.search : path;
   e.respondWith((async () => {
+    // A picture's address is its hash: the one kept is the one, so it's
+    // served from the kept copy (not the network), as each list row's picture
+    // is asked for again every time the list is drawn.
+    if (picture) {
+      const kept = await (await caches.open(PICTURES)).match(path);
+      if (kept) return kept;
+    }
     try {
       const res = await fetch(e.request);
       if (ofBuild(res)) {
