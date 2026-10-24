@@ -749,6 +749,7 @@ function briefShape(b) {
     explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
     short: str(b.short),
     artifacts: objs(b.artifacts).filter((x) => ARTIFACT_KINDS.includes(x.type)).slice(0, 10),
+    sources: objs(b.sources).map((x) => ({ url: str(x.url), label: str(x.label) })).filter((x) => artifactHref(x.url) && !x.url.startsWith("#")).slice(0, 20),
     tables: objs(b.tables).filter((x) => Array.isArray(x.columns) && Array.isArray(x.rows) && x.rows.length).slice(0, 3).map((x) => ({
       title: str(x.title), note: str(x.note), columns: x.columns.slice(0, 8).map((c) => String(c ?? "")),
       rows: x.rows.filter(Array.isArray).slice(0, 20).map((r) => r.slice(0, 8).map((c) => String(c ?? ""))),
@@ -1464,6 +1465,22 @@ class Chat {
       if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
         h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
     }
+    // Where it came from: every source, a row that opens to their links.
+    if (b && b.sources.length) {
+      const k = `${key}|sources`;
+      const on = this.isOpen(k, false);
+      const row = h("div", { class: `reply-sources${on ? " open" : ""}` },
+        h("button", { class: "sources-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+          h("span", { class: "reply-k" }, "Sources"), h("span", { class: "sources-sum" }, `${b.sources.length} · ${b.sources.map((x) => {
+            try { return new URL(x.url).host.replace(/^www\./, ""); } catch { return ""; } }).filter((x, i, all) => x && all.indexOf(x) === i).slice(0, 3).join(", ")}`),
+          icon("chevron", "chev")));
+      if (on) row.append(h("ul", { class: "sources-list" }, ...b.sources.map((x) => {
+        let host = "";
+        try { host = new URL(x.url).host.replace(/^www\./, ""); } catch { /* no host */ }
+        return h("li", {}, h("a", { href: artifactHref(x.url), target: "_blank", rel: "noopener" }, x.label || host || x.url), host && x.label ? h("span", { class: "src-host" }, host) : null);
+      })));
+      card.append(row);
+    }
     // Then what it needs from you, with that context: the newest reply's questions.
     if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
 
@@ -1700,16 +1717,18 @@ class Chat {
     return box;
   }
 
+  // A summary point. With its why (detail), a row that opens it under the
+  // point: the reason, the numbers, the context behind it.
   answerPoint(x) {
-    const li = h("li", {}, h("span", { html: inline(x.point) }));
-    if (x.detail) {
-      const more = h("div", { class: "answer-detail", hidden: true, html: inline(x.detail) });
-      li.classList.add("has-detail");
-      li.append(h("button", { class: "text-btn answer-more", type: "button", onclick: (e) => {
-        more.hidden = !more.hidden;
-        e.currentTarget.textContent = more.hidden ? "Details" : "Hide";
-      } }, "Details"), more);
-    }
+    if (!x.detail) return h("li", {}, h("span", { class: "pt-text", html: inline(x.point) }));
+    const why = h("div", { class: "answer-detail", hidden: true, html: inline(x.detail) });
+    const li = h("li", { class: "has-detail" });
+    const btn = h("button", { class: "answer-toggle", type: "button", "aria-expanded": "false", onclick: () => {
+      why.hidden = !why.hidden;
+      btn.setAttribute("aria-expanded", String(!why.hidden));
+      li.classList.toggle("open", !why.hidden);
+    } }, h("span", { class: "pt-text", html: inline(x.point) }), icon("chevron", "chev"));
+    li.append(btn, why);
     return li;
   }
 

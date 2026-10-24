@@ -209,8 +209,38 @@
 .answer-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .answer-list > li { position: relative; padding-left: 18px; line-height: 1.45; overflow-wrap: anywhere; }
 .answer-list > li::before { content: ""; position: absolute; left: 3px; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
-.answer-more { min-height: 0; padding: 0 0 0 6px; font-size: var(--caption); }
-.answer-detail { margin-top: 4px; font-size: var(--caption); color: var(--text-muted); }
+/* A point with its why: the point is a row that opens it. */
+.answer-list > li.has-detail { padding-left: 18px; }
+.answer-toggle {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 0; margin: 0; font: inherit; text-align: left;
+  color: inherit; background: none; border: 0; cursor: pointer; line-height: 1.45;
+}
+.answer-toggle .pt-text { flex: 1; min-width: 0; text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 60%, transparent); text-underline-offset: 4px; }
+.answer-toggle .chev { flex: none; width: 14px; height: 14px; margin-top: 3px; opacity: 0.55; transform: rotate(90deg); transition: transform 0.15s ease; }
+li.open > .answer-toggle .chev { transform: rotate(-90deg); }
+li.open > .answer-toggle .pt-text { text-decoration: none; }
+.answer-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.answer-detail {
+  margin: 6px 0 2px; padding: 8px 10px; font-size: var(--caption); line-height: 1.5; color: var(--text);
+  border-left: 2px solid var(--tone); background: var(--control-bg); border-radius: 0 var(--radius-item) var(--radius-item) 0;
+}
+
+/* Sources: a row that opens to every link. */
+.reply-sources { border-top: 1px solid var(--border-faint); }
+.sources-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 14px; box-sizing: border-box;
+  font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer;
+}
+.sources-head:hover { background: var(--control-hover); }
+.sources-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sources-sum { flex: 1; min-width: 0; font-size: var(--caption); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sources-head .chev { flex: none; width: 14px; height: 14px; opacity: 0.55; transform: rotate(90deg); transition: transform 0.15s ease; }
+.reply-sources.open .sources-head .chev { transform: rotate(-90deg); }
+.sources-list { margin: 0; padding: 0 14px 12px; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.sources-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: var(--caption); overflow-wrap: anywhere; }
+.sources-list a { color: var(--link); text-decoration: none; font-weight: 600; }
+.sources-list a:hover { text-decoration: underline; }
+.src-host { color: var(--text-muted); font-size: 11px; }
 .answer-list code, .brief-list code, .plan-steps code { font-size: 0.92em; padding: 1px 4px; border-radius: 4px; background: var(--code-bg); }
 
 /* Plan: steps, done / doing / next. */

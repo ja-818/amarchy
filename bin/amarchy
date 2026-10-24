@@ -3172,12 +3172,16 @@ def cmd_hook(sid, state):
     # (the session stays working meanwhile, so it's done, and you're told,
     # once the brief is there). Asked once a stop (stop_hook_active: the
     # second goes through).
-    if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
-            and claude_has_brief() and brief_needed(event.get("transcript_path")):
-        facts = brief_facts(s)
-        print(json.dumps({"decision": "block", "reason": BRIEF_ASK.format(
-            facts=json.dumps(facts, ensure_ascii=False) if facts else "(not a git repository)")}))
-        return
+    if state == "idle" and event.get("hook_event_name") == "Stop":
+        has = claude_brief_version()
+        if has is not None and not event.get("stop_hook_active") and brief_needed(event.get("transcript_path")):
+            facts = brief_facts(s)
+            print(json.dumps({"decision": "block", "reason": BRIEF_ASK.format(
+                facts=json.dumps(facts, ensure_ascii=False) if facts else "(not a git repository)")}))
+            return
+        if has != BRIEF_VERSION:
+            detach([ENTRY, "claude-reload", sid])     # its reply written, an older (or no) update_brief: a new Claude
+
     set_status(sid, state)
 
 
@@ -10156,7 +10160,15 @@ BRIEF_DEF = {
                        "shows those).",
                        "items": {"type": "object", "required": ["point"], "additionalProperties": False,
                                  "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
-                                                "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
+                                                "detail": {"type": "string", "description": "Why it's so: the reason, the "
+                                                           "numbers or the context behind the point, in a sentence or "
+                                                           "three, shown when they open it. Give one for every point "
+                                                           "that has a reason."}}}},
+            "sources": {"type": "array", "maxItems": 20, "description": "Every source you used or cite (a web page, a doc, "
+                        "an email), so they can check it.",
+                        "items": {"type": "object", "required": ["url"], "additionalProperties": False,
+                                  "properties": {"label": {"type": "string", "description": "What it is, a few words."},
+                                                 "url": {"type": "string"}}}},
             "tables": {"type": "array", "maxItems": 3, "description": "Comparisons and side-by-side data, shown open in the "
                        "reply (\"Model | Chip | RAM | Price\"): when a table says it better than points, always use one. "
                        "Cells short, with exact values; markdown in cells is fine.",
@@ -10173,7 +10185,8 @@ BRIEF_DEF = {
                           "and loops (todos), a person (contact), a place (place), another chat you started or messaged "
                           "(session, by its id), data (table), a file you wrote for them to open (file), a document or note "
                           "(text), code (code). The thing itself, in full: \"I drafted it\" or \"it's in my other message\" "
-                          "is never enough. Not the record (steps, edited files): the app shows that.",
+                          "is never enough. Lists the person tracks (still open, waiting on, loops, follow-ups) always "
+                          "go in, as todos. Not the record (steps, edited files): the app shows that.",
                           "items": {"type": "object", "required": ["type"], "additionalProperties": False, "properties": {
                               "type": {"type": "string", "enum": ["message", "link", "command", "event", "todos", "contact",
                                                                   "place", "session", "table", "file", "text", "code"]},
@@ -10250,7 +10263,9 @@ BRIEF_ASK = (
     "summary points only for takeaways not already said. A comparison or side-by-side data goes in tables (shown open), "
     "not flattened into points. Anything you made for them to use (a message to send, a link, "
     "a command, an event, to-dos, a contact, a place, a chat you started, a table, a file, a document) goes in "
-    "artifacts, complete, so nothing they need is left in your messages. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
+    "artifacts, complete, so nothing they need is left in your messages; so do lists they track (still open, waiting "
+    "on, loops), as todos. Give each summary point its why (detail). Every source you cite goes in sources. Only what "
+    "helps: every part is optional but the title, so a simple answer is a title and a point or two, "
     "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
     "phone who may not remember this conversation: name things, plain words. "
     "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "
@@ -10259,10 +10274,20 @@ BRIEF_ASK = (
 )
 
 
+# Which update_brief a Claude has: a hash of what the tool says it takes (the
+# ask changes need no new Claude: the hook sends it each turn). A
+# Claude started with another (before amarchy changed the tool) is started
+# again at an idle moment (claude_reload), so a chat that's always open (an
+# assistant) gets the new one too.
+BRIEF_VERSION = hashlib.sha1(json.dumps(BRIEF_DEF, sort_keys=True).encode()).hexdigest()[:10]
+BRIEF_RELOAD_EVERY = 600    # seconds between two tries to start a session's Claude again for it
+
+
 def brief_mcp_args():
     """The brief's tool for a session's Claude (both engines): amarchy's MCP
-    server, allowed without asking."""
-    mcp = {"mcpServers": {BRIEF_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "brief-mcp"]}}}
+    server (its version in its arguments: claude_brief_version), allowed
+    without asking."""
+    mcp = {"mcpServers": {BRIEF_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "brief-mcp", BRIEF_VERSION]}}}
     return ["--mcp-config", json.dumps(mcp), "--allowedTools", BRIEF_TOOL]
 
 
@@ -10333,19 +10358,65 @@ def brief_facts(s):
     return out
 
 
-def claude_has_brief():
-    """Whether the Claude a hook runs for has update_brief (it started with
-    amarchy's brief-mcp: one from before doesn't, until it's started again)."""
+def claude_brief_version():
+    """Which update_brief the Claude a hook runs for has: None for none (it
+    started before amarchy served it), "" for the first one (no version),
+    else its version (BRIEF_VERSION when it's the current one)."""
     pid = os.getppid()
     for _ in range(6):
         try:
             stat = Path(f"/proc/{pid}/stat").read_text()
             if stat[stat.find("(") + 1:stat.rfind(")")] == "claude":
-                return b"brief-mcp" in Path(f"/proc/{pid}/cmdline").read_bytes()
+                args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                for i, a in enumerate(args):
+                    if b'"brief-mcp"' in a or a == b"brief-mcp":
+                        m = re.search(rb'"brief-mcp",\s*"([0-9a-f]+)"', a)
+                        return m.group(1).decode() if m else ""
+                return None
             pid = int(stat[stat.rfind(")") + 2:].split()[1])
         except (OSError, ValueError, IndexError):
-            return False
-    return False
+            return None
+    return None
+
+
+def claude_reload(sid):
+    """amarchy claude-reload <id>: start a session's Claude again, with the
+    same conversation, so it gets the update_brief amarchy serves now (the
+    Stop hook starts this when the one it has is older). Only once it's idle
+    and nothing would be lost (a turn, a question, a background task), and at
+    most every BRIEF_RELOAD_EVERY seconds."""
+    mark = claude_dir(sid) / "brief-reload"
+    try:
+        if time.time() - mark.stat().st_mtime < BRIEF_RELOAD_EVERY:
+            return 0
+    except OSError:
+        pass
+    write_file(mark, f"{time.time()}\n")
+    end = time.time() + 120
+    while time.time() < end:
+        time.sleep(3)
+        s = session(sid)
+        if not s or asleep_since(sid) is not None:
+            return 0        # asleep, it wakes with the new one anyway
+        try:
+            status = (STATUS / sid).read_text().strip()
+        except OSError:
+            status = "idle"
+        live = agent_live(sid) if engine(s) == "chat" else {}
+        if status != "idle" or live.get("pending") or live.get("queue") or (live.get("state") not in (None, "idle")):
+            continue
+        if engine_blockers(s):
+            continue
+        pane = host_pane(s)
+        if not pane:
+            return 0
+        stop_claude(pane)
+        until = time.time() + 10
+        while claude_driver(sid) and time.time() < until:
+            time.sleep(0.1)
+        host_respawn(session(sid) or s)
+        return 0
+    return 0
 
 
 def brief_needed(path, tail=4_000_000):
@@ -11634,7 +11705,7 @@ OPTIONS = {
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "attach": None, "held": None,
-    "paste": None, "agent": None, "brief-mcp": None,
+    "paste": None, "agent": None, "brief-mcp": None, "claude-reload": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -11762,8 +11833,10 @@ def main(argv):
         return cmd_held(args[0])
     elif cmd == "paste":
         return cmd_paste(args)
-    elif cmd == "brief-mcp" and not args:
+    elif cmd == "brief-mcp" and len(args) <= 1:
         return brief_mcp()
+    elif cmd == "claude-reload" and len(args) == 1:
+        return claude_reload(args[0])
     elif cmd == "agent":
         return cmd_agent(args)
     elif cmd == "app":

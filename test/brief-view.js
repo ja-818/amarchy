@@ -115,6 +115,8 @@ const BRIEF = {
   tests: [{ name: "Search tests", result: "pass", detail: "42 passed" }, { name: "Lint", result: "fail" }],
   check: [{ label: "Open the page", url: "http://amarchy:5173/search" }, { label: "Bad", url: "javascript:window.__pwned=2" }],
   notes: ["Lint fails on an old file"],
+  sources: [{ label: "Search UX guide", url: "https://www.nngroup.com/articles/search/" }, { url: "https://developer.mozilla.org/en-US/docs/Web/API" },
+            { label: "Bad", url: "javascript:alert(1)" }],
   artifacts: [
     { type: "message", channel: "whatsapp", to: "C21 group", phone: "+57 300 123 4567", title: "WhatsApp to the C21 group",
       body: "Hola equipo, les comparto el resumen:\n1. Piloto PQR\n2. Datos por Excel" },
@@ -193,7 +195,7 @@ const read = (page) => page.evaluate(() => {
     sections: card ? [...card.querySelectorAll(".rsec-label")].map((x) => x.textContent) : [],
     openSecs: card ? [...card.querySelectorAll(".rsec.open .rsec-label")].map((x) => x.textContent) : [],
     sums: { plan: sum("plan"), changes: sum("changes"), checks: sum("checks"), activity: sum("activity"), notes: sum("notes"), words: sum("words") },
-    answer: card ? [...card.querySelectorAll(".reply-summary .answer-list > li > span:first-child")].map((x) => x.textContent) : [],
+    answer: card ? [...card.querySelectorAll(".reply-summary .answer-list .pt-text")].map((x) => x.textContent) : [],
     blocks: card ? [...card.querySelectorAll(":scope > .reply-summary > .reply-k, :scope > .reply-needs > .reply-k")].map((x) => x.textContent) : [],
     more: card?.querySelector(".rsec-more .rsec-sum")?.textContent,
     questions: card ? card.querySelectorAll(".reply-needs .bq").length : 0,
@@ -244,13 +246,14 @@ async function run(browser, base, layout) {
   await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; });
   const arts = await page.evaluate(() => {
     const r = [...document.querySelectorAll(".reply")].at(-1);
-    return { order: [...r.children].map((x) => x.className.split(" ")[0]).slice(1, 4),
+    return { order: [...r.children].map((x) => x.className.split(" ")[0]).slice(1, 5),
       rows: [...r.querySelectorAll(".art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}|${x.querySelector(".art-head > .art-btn")?.textContent || ""}`),
       linkHref: r.querySelector(".art-link .art-head > a")?.getAttribute("href"),
       sessionHref: r.querySelector(".art-session .art-head > a")?.getAttribute("href"),
       unsafe: [...r.querySelectorAll(".art a")].some((a) => /^javascript/i.test(a.getAttribute("href") || "")) };
   });
-  check(layout, JSON.stringify(arts.order) === JSON.stringify(["reply-summary", "reply-artifacts", "reply-needs"]), `For you comes after the summary, before Needs you (${JSON.stringify(arts.order)})`);
+  check(layout, JSON.stringify(arts.order) === JSON.stringify(["reply-summary", "reply-artifacts", "reply-sources", "reply-needs"]),
+    `For you after the summary, then Sources, then Needs you (${JSON.stringify(arts.order)})`);
   check(layout, JSON.stringify(arts.rows) === JSON.stringify(["art-message|WhatsApp to the C21 group|Copy", "art-link|Sign in to Gmail|Open", "art-link|Bad|",
     "art-command|Log in the ringer|Copy", "art-event|ECOS panel|", "art-todos|Loops|", "art-contact|Gaby Mendez|", "art-session|C21 Kanban CRM|Open"]),
     `each artifact a row, its quick action at hand (${JSON.stringify(arts.rows)})`);
@@ -318,10 +321,21 @@ async function run(browser, base, layout) {
   check(layout, s.sums.checks === "1 failing of 2 · 2 ways to try it", `folded, Checks says what it holds (${s.sums.checks})`);
   await openSec(page, "words");
 
-  // An answer's detail, on a tap.
-  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-more").click());
-  const detail = await page.evaluate(() => { const d = [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-detail"); return !d.hidden && d.textContent; });
-  check(layout, detail === "Debounced at 200 ms", "a point's detail opens on a tap");
+  // A point's why, on a tap: the point is a row that opens it.
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-toggle").click());
+  const detail = await page.evaluate(() => { const li = [...document.querySelectorAll(".reply")].at(-1).querySelector(".answer-list li.has-detail");
+    return { open: li.classList.contains("open"), why: !li.querySelector(".answer-detail").hidden && li.querySelector(".answer-detail").textContent,
+             plain: [...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".answer-list li:not(.has-detail) .answer-toggle").length }; });
+  check(layout, detail.open && detail.why === "Debounced at 200 ms" && detail.plain === 0, `a point with its why opens on a tap; one without stays a plain point (${JSON.stringify(detail)})`);
+  // Sources: a row, folded, that opens to every link (only http(s)).
+  const src = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1), row = r.querySelector(".reply-sources");
+    const sum = row.querySelector(".sources-sum").textContent; row.querySelector(".sources-head").click();
+    const links = [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".sources-list a")].map((a) => `${a.textContent}|${a.getAttribute("href")}`);
+    return { sum, links, order: [...r.children].map((x) => x.className.split(" ")[0]).includes("reply-sources") }; });
+  check(layout, src.sum === "2 · nngroup.com, developer.mozilla.org" &&
+    JSON.stringify(src.links) === JSON.stringify(["Search UX guide|https://www.nngroup.com/articles/search/", "developer.mozilla.org|https://developer.mozilla.org/en-US/docs/Web/API"]),
+    `sources: a folded row, every http(s) link in it (${JSON.stringify(src)})`);
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".sources-head").click());
 
   // Answers: the first marks its question; the last sends both, once.
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".bq")[0].querySelector(".bq-opt").click());

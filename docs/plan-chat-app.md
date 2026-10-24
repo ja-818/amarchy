@@ -190,16 +190,19 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   where it stands (done, working, blocked, waiting on you). The newest reply
   is open; the ones before are their title, opened with a tap. A folded reply
   that needs you says so.
-- **Read**: right under the title, always there, the turn's *Summary* (what Claude found, decided, did, concluded, as complete
-  short points, *Details* on one with a tap); then *Needs you* (questions as
-  buttons), after the context that explains them. When you asked Claude to
-  explain, teach, compare or answer something, the *Explanation* itself
-  comes after the summary, in full (`explanation`, markdown): a summary point
-  says the thing, never only that Claude explained it.
+- **Read**: right under the title, always there, the turn's *Summary*: its
+  points, each with its why (`detail`: the reason, the numbers, the context)
+  when it has one, the point a row that opens it; then *Needs you*
+  (questions as buttons), after the context that explains them. The chat's
+  *goal* (from its newest reply that says one) is under the chat's name in
+  the header, not on the cards. *Sources*, a folded row, has every link
+  Claude used or cites.
 - **Tables**: a comparison or side-by-side data (`tables`) shows open in the
   reply, after the summary (or an answer's verdicts): a real table on a wide
   screen, a little card per row on the phone (its cells under their column's
   name), the row Claude recommends marked *Pick*.
+- **Lists you track** (still open, waiting on, loops, follow-ups) are always
+  in For you, as to-dos.
 - **For you**: what the turn made for you to use (`artifacts`), right after
   the summary, each a row with its quick action at hand while folded and
   every action that fits it open, so nothing you need stays in Claude's
@@ -249,6 +252,14 @@ stays *working* until the reply is written, so you're told it's done once it
 is. The hook asks once a stop, only when Claude did something since its last
 reply (`brief_needed`), and never a Claude started before the tool
 (`claude_has_brief`). What Claude says after the call is left out (`aside`).
+
+**New tools reach every chat.** update_brief has a version (a hash of what
+it takes, `BRIEF_VERSION`, in its server's arguments). When a turn's reply is
+written by a Claude with an older one (or none), the Stop hook starts
+`amarchy claude-reload`: once the chat is idle and nothing would be lost, its
+Claude is started again with the same conversation, now with the current
+tool (at most every ten minutes). A chat that's always open, like an
+assistant, gets every change too.
 
 While Claude works, the turn's card is live: *Working…* and what it's doing
 in its title, its activity shown (not under More) and filling in, ending with a live line: the
