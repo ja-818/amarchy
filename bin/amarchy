@@ -10157,6 +10157,16 @@ BRIEF_DEF = {
                        "items": {"type": "object", "required": ["point"], "additionalProperties": False,
                                  "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
                                                 "detail": {"type": "string", "description": "More on it, shown on a tap."}}}},
+            "tables": {"type": "array", "maxItems": 3, "description": "Comparisons and side-by-side data, shown open in the "
+                       "reply (\"Model | Chip | RAM | Price\"): when a table says it better than points, always use one. "
+                       "Cells short, with exact values; markdown in cells is fine.",
+                       "items": {"type": "object", "required": ["columns", "rows"], "additionalProperties": False,
+                                 "properties": {"title": {"type": "string", "description": "What it compares, a few words."},
+                                                "columns": {"type": "array", "maxItems": 8, "items": {"type": "string"}},
+                                                "rows": {"type": "array", "maxItems": 20, "items": {"type": "array", "items": {"type": "string"}}},
+                                                "pick": {"type": "integer", "description": "The row you recommend, counting from 0, "
+                                                                                           "when there's one: it's marked."},
+                                                "note": {"type": "string", "description": "One line under it (\"Prices from Oct 2026\")."}}}},
             "artifacts": {"type": "array", "maxItems": 10, "description": "The things this turn made for the person to use, "
                           "each complete, so they never go looking for them: a message to send (message: on WhatsApp, by "
                           "email, on Slack...), a link to open (link), a command to run (command), an event (event), to-dos "
@@ -10237,7 +10247,8 @@ BRIEF_ASK = (
     "to check it, and caveats. If they asked you to explain or answer something, the explanation itself goes in "
     "explanation, in full: a point never says you explained or found something without saying what. A question's "
     "turn is kind answer: the short answer, verdicts when it judges or compares, the explanation in '## ' topics, and "
-    "summary points only for takeaways not already said. Anything you made for them to use (a message to send, a link, "
+    "summary points only for takeaways not already said. A comparison or side-by-side data goes in tables (shown open), "
+    "not flattened into points. Anything you made for them to use (a message to send, a link, "
     "a command, an event, to-dos, a contact, a place, a chat you started, a table, a file, a document) goes in "
     "artifacts, complete, so nothing they need is left in your messages. Only what helps: every part is optional but the title, so a simple answer is a title and a point or two, "
     "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "

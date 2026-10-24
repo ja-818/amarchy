@@ -749,6 +749,10 @@ function briefShape(b) {
     explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
     short: str(b.short),
     artifacts: objs(b.artifacts).filter((x) => ARTIFACT_KINDS.includes(x.type)).slice(0, 10),
+    tables: objs(b.tables).filter((x) => Array.isArray(x.columns) && Array.isArray(x.rows) && x.rows.length).slice(0, 3).map((x) => ({
+      title: str(x.title), note: str(x.note), columns: x.columns.slice(0, 8).map((c) => String(c ?? "")),
+      rows: x.rows.filter(Array.isArray).slice(0, 20).map((r) => r.slice(0, 8).map((c) => String(c ?? ""))),
+      pick: Number.isInteger(x.pick) ? x.pick : -1 })),
     verdicts: objs(b.verdicts).filter((x) => str(x.option)).slice(0, 8)
       .map((x) => ({ option: str(x.option), reason: str(x.reason), rating: ["good", "caution", "bad", "neutral"].includes(x.rating) ? x.rating : "neutral" })),
     waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
@@ -1442,6 +1446,7 @@ class Chat {
         h("li", { class: `verdict is-${v.rating}` }, h("span", { class: "verdict-badge" }, VERDICT_WORDS[v.rating]),
           h("div", { class: "verdict-text" }, h("span", { class: "verdict-option", html: inline(v.option) }),
             v.reason ? h("span", { class: "verdict-reason", html: inline(v.reason) }) : null)))));
+      for (const tb of b.tables) card.append(this.tableView(tb));
       if (b.answer.length) card.append(h("div", { class: "reply-summary" }, h("div", { class: "reply-k" }, "Takeaways"),
         h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x)))));
       if (b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
@@ -1451,6 +1456,8 @@ class Chat {
       if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
       else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
       if (top.childElementCount) card.append(top);
+      // Its comparisons and side-by-side data, open.
+      for (const tb of b ? b.tables : []) card.append(this.tableView(tb));
       // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
       if (b && b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
       // What it explained, when you asked: the explanation itself, in full.
@@ -1521,6 +1528,20 @@ class Chat {
       card.append(extra);
     }
     return card;
+  }
+
+  // A table in a reply, open: a real table on a wide screen; on a phone each
+  // row a little card, its cells under their column's name (screen.css, from
+  // data-label). The row Claude recommends is marked.
+  tableView(tb) {
+    const cols = tb.columns;
+    const head = cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", { html: inline(c) })))) : null;
+    const body = h("tbody", {}, ...tb.rows.map((r, i) => h("tr", { class: i === tb.pick ? "pick" : "" },
+      ...r.map((c, j) => h("td", { "data-label": j && cols[j] ? cols[j].replace(/[*_`]/g, "") : null, class: j ? "" : "lead" },
+        j === 0 && i === tb.pick ? h("span", { class: "pick-badge" }, "Pick") : null, h("span", { html: inline(c) }))))));
+    return h("div", { class: "reply-table" }, h("div", { class: "reply-k" }, tb.title || "Comparison"),
+      h("div", { class: "rtable-wrap" }, h("table", { class: "rtable" }, head, body)),
+      tb.note ? h("div", { class: "rtable-note", html: inline(tb.note) }) : null);
   }
 
   // What a reply made for you to use, under "For you": each artifact a row

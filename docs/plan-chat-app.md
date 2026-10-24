@@ -196,6 +196,10 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
   explain, teach, compare or answer something, the *Explanation* itself
   comes after the summary, in full (`explanation`, markdown): a summary point
   says the thing, never only that Claude explained it.
+- **Tables**: a comparison or side-by-side data (`tables`) shows open in the
+  reply, after the summary (or an answer's verdicts): a real table on a wide
+  screen, a little card per row on the phone (its cells under their column's
+  name), the row Claude recommends marked *Pick*.
 - **For you**: what the turn made for you to use (`artifacts`), right after
   the summary, each a row with its quick action at hand while folded and
   every action that fits it open, so nothing you need stays in Claude's

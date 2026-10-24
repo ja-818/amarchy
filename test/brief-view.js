@@ -414,6 +414,9 @@ async function run(browser, base, layout) {
           { option: "Online injectables", rating: "bad", reason: "Unregulated, often impure" },
           { option: "Collagen powders", rating: "caution", reason: "Small benefit" }],
         explanation: "Peptides are short chains of amino acids.\n\n## Side effects\nNausea with GLP-1 drugs.\n\n## Contamination\nOnline products are often impure.",
+        tables: [{ title: "Beelink models", columns: ["Model", "Chip", "RAM", "Verdict"], pick: 0, note: "Prices move often",
+          rows: [["SER8", "Ryzen 7 8845HS", "**upgradeable** to 64 GB", "Best fit"], ["SER9 Pro", "Ryzen 7 H255", "24 GB soldered", "Too little RAM"],
+                 ["GTR9 Pro", "Ryzen AI Max+ 395", "128 GB", "Overkill"]] }],
         answer: [{ point: "Ask a doctor before any injectable" }] } }] });
   }, { TOOL });
   const ans = await page.evaluate(() => {
@@ -425,12 +428,23 @@ async function run(browser, base, layout) {
       intro: r.querySelector(".reply-explain > .explain-body")?.textContent.trim(),
       topics: [...r.querySelectorAll(".topic")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}`) };
   });
-  check(layout, JSON.stringify(ans.order) === JSON.stringify(["reply-head", "reply-short", "verdicts", "reply-summary", "reply-explain", "rsec"]),
+  const tbl = await page.evaluate(() => {
+    const t = [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-table");
+    return { title: t?.querySelector(".reply-k")?.textContent, cols: [...t.querySelectorAll("th")].map((x) => x.textContent),
+      rows: t.querySelectorAll("tbody tr").length, pick: t.querySelector("tr.pick td.lead")?.textContent, bold: t.querySelector("td strong")?.textContent,
+      label: t.querySelector("tbody td[data-label]")?.getAttribute("data-label"), head: getComputedStyle(t.querySelector("thead")).display,
+      note: t.querySelector(".rtable-note")?.textContent };
+  });
+  check(layout, tbl.title === "Beelink models" && JSON.stringify(tbl.cols) === JSON.stringify(["Model", "Chip", "RAM", "Verdict"]) && tbl.rows === 3 &&
+    tbl.pick === "PickSER8" && tbl.bold === "upgradeable" && tbl.label === "Chip" && tbl.note === "Prices move often",
+    `a comparison table, open, its pick marked (${JSON.stringify(tbl)})`);
+  check(layout, layout === "phone" ? tbl.head === "none" : tbl.head === "table-header-group", `a real table wide, a card per row on a phone (${tbl.head})`);
+  check(layout, JSON.stringify(ans.order) === JSON.stringify(["reply-head", "reply-short", "verdicts", "reply-table", "reply-summary", "reply-explain", "rsec"]),
     `the answer card, in order: short answer, verdicts, takeaways, explanation, More (${JSON.stringify(ans.order)})`);
   check(layout, ans.short === "Prescribed ones are fine; online injectables are risky." && ans.bold === "fine", "the short answer, its markdown drawn");
   check(layout, JSON.stringify(ans.verdicts) === JSON.stringify(["is-good|Good|Prescription", "is-bad|Avoid|Online injectables", "is-caution|Careful|Collagen powders"]),
     `the verdicts, a row each with its badge (${JSON.stringify(ans.verdicts)})`);
-  check(layout, JSON.stringify(ans.keys) === JSON.stringify(["Takeaways", "Explanation"]) && ans.intro === "Peptides are short chains of amino acids." &&
+  check(layout, JSON.stringify(ans.keys) === JSON.stringify(["Beelink models", "Takeaways", "Explanation"]) && ans.intro === "Peptides are short chains of amino acids." &&
     JSON.stringify(ans.topics) === JSON.stringify(["Side effects|false", "Contamination|false"]), `takeaways; the explanation's intro, its topics folded (${JSON.stringify(ans.topics)})`);
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".topic-head").click());
   const topic = await page.evaluate(() => { const x = [...document.querySelectorAll(".reply")].at(-1).querySelector(".topic");
