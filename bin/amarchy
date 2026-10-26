@@ -11518,7 +11518,10 @@ class Agent:
             self.changed()
         elif kind == "system" and sub == "background_tasks_changed":
             with self.lock:
-                live["tasks"] = o.get("tasks") or []
+                # When each began (Claude Code doesn't say): when we first saw it.
+                began = {t.get("task_id"): t.get("started") for t in live.get("tasks") or []}
+                live["tasks"] = [{**t, "started": began.get(t.get("task_id")) or time.time()}
+                                 for t in o.get("tasks") or [] if isinstance(t, dict)]
             self.changed(True)
         elif kind == "system" and sub == "task_notification":
             self.out(f"  ⏺ background task {o.get('status', 'done')}: {o.get('summary') or o.get('task_id')}", dim=True)

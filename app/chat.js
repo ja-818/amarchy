@@ -1105,6 +1105,7 @@ class Chat {
     menuKeys(this.menuEl, { close: () => this.closeMenu(true) });
     this.box = h("div", { class: "composer-wrap" }, this.menuEl, this.pills, this.composer);
     this.queueEl = h("div", { class: "queue" });
+    this.bgEl = h("div", { class: "bg-strip", hidden: true });
     this.drawPills();
     this.drawTray();
     this.takeShare();
@@ -1174,6 +1175,7 @@ class Chat {
   }
 
   close() {
+    clearInterval(this.bgTimer);
     if (this.es) this.es.close();
     this.es = null;
     window.removeEventListener("amarchy-ask", this.onAskEvent);
@@ -2551,10 +2553,11 @@ class Chat {
     const sleep = sleepOf(this.row);
     const key = [now ? now.key || now.note : "composer", sleep, this.view.composer, this.view.above.length, content].join("|");
     this.renderQueue();
+    this.renderBackground();
     this.drawPills();
     if (key === this.cardKey) { this.sendButtons(); return; }
     this.cardKey = key;
-    const kids = [...this.view.above];
+    const kids = [content ? this.bgEl : null, ...this.view.above].filter(Boolean);
     if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -2615,6 +2618,45 @@ class Chat {
     if (n) kids.push(h("div", { class: "queued images" }, icon("image"),
       h("div", { class: "text" }, h("div", { class: "what" }, n === 1 ? "An image goes with your next message" : `${n} images go with your next message`))));
     this.queueEl.replaceChildren(...kids);
+  }
+
+  // What Claude left running in the background (live.tasks): its helpers
+  // (subagents) and commands, as one line over the box that opens to name
+  // each and say for how long. Shown whatever Claude itself is doing, as
+  // they go on after its turn ends.
+  renderBackground() {
+    const live = this.engine === "chat" ? this.live : null;
+    const tasks = live && Array.isArray(live.tasks) ? live.tasks : [];
+    clearInterval(this.bgTimer);
+    this.bgEl.hidden = !tasks.length;
+    if (!tasks.length) return this.bgEl.replaceChildren();
+    const plural = (x, one, many) => `${x} ${x === 1 ? one : many}`;
+    const since = (at) => duration(Math.max(0, Date.now() - at * 1000));
+    const helpers = tasks.filter((t) => t.task_type !== "local_bash").length, runs = tasks.length - helpers;
+    const what = [helpers ? plural(helpers, "helper", "helpers") : "", runs ? plural(runs, "command", "commands") : ""].filter(Boolean).join(" and ");
+    const first = Math.min(...tasks.map((t) => t.started || Infinity));
+    const open = this.bgOpen === true;
+    const took = h("span", { class: "bg-took" });
+    const tooks = [];
+    const rows = tasks.map((t) => {
+      const el = h("span", { class: "bg-took" });
+      tooks.push([el, t.started]);
+      return h("li", { class: "bg-task" }, h("span", { class: "bg-dot" }), icon(t.task_type === "local_bash" ? "run" : "helper"),
+        h("span", { class: "bg-name" }, cut(t.description || t.summary || t.command || t.subagent_type || "A task", 120)), el);
+    });
+    const tick = () => {
+      took.textContent = first !== Infinity ? since(first) : "";
+      for (const [el, at] of tooks) el.textContent = at ? since(at) : "";
+    };
+    this.bgEl.replaceChildren(
+      h("button", { class: "bg-head", type: "button", "aria-expanded": String(open),
+                    onclick: () => { this.bgOpen = !open; this.renderBackground(); } },
+        h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
+        h("span", { class: "bg-what" }, `${what} in the background`), took,
+        icon("chevron", "bg-chev")),
+      open ? h("ul", { class: "bg-list" }, ...rows) : null);
+    tick();
+    this.bgTimer = setInterval(tick, 1000);
   }
 
   // A queued message taken back from Claude's broker: its content (text,

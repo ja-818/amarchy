@@ -417,6 +417,29 @@ async function run(browser, base, layout) {
     `an explanation shows in full, after the summary (${JSON.stringify(explain)})`);
   await shot("done");
 
+  // Helpers Claude left running in the background: one line over the box (idle or not), opening to name each.
+  await page.evaluate(() => {
+    const c = window.__chat, now = Date.now() / 1000;
+    c.live = { state: "idle", pending: [], tasks: [
+      { task_id: "a1", task_type: "local_agent", description: "A: pipelines apart from agents", started: now - 720 },
+      { task_id: "a2", task_type: "local_agent", description: "B: Houston brand look", started: now - 300 },
+      { task_id: "a3", task_type: "local_agent", description: "C: WhatsApp token", started: now - 60 },
+      { task_id: "b1", task_type: "local_bash", description: "npm run dev", started: now - 30 }] };
+    c.renderDock();
+  });
+  const bg = await page.evaluate(() => { const el = document.querySelector(".chat-dock .bg-strip");
+    return { shown: !!el && !el.hidden && el.offsetHeight > 0, what: `${el?.querySelector(".bg-what")?.textContent} · ${el?.querySelector(".bg-head > .bg-took")?.textContent}`, dots: el?.querySelectorAll(".bg-pulse i").length,
+             first: el?.nextElementSibling ? true : false }; });
+  check(layout, bg.shown && bg.what === "3 helpers and 1 command in the background · 12 min" && bg.dots === 4,
+    `background helpers: a line over the box (${JSON.stringify(bg)})`);
+  await page.click(".bg-head");
+  const bgRows = await page.evaluate(() => [...document.querySelectorAll(".bg-task")].map((x) => `${x.querySelector(".bg-name").textContent}|${x.querySelector(".bg-took").textContent}`));
+  check(layout, bgRows.length === 4 && bgRows[0] === "A: pipelines apart from agents|12 min" && bgRows[3] === "npm run dev|30 s",
+    `opened, it names each and for how long (${JSON.stringify(bgRows)})`);
+  await shot("background");
+  await page.evaluate(() => { const c = window.__chat; c.live = { ...c.live, tasks: [] }; c.renderDock(); });
+  check(layout, await page.evaluate(() => document.querySelector(".bg-strip").hidden), "and gone once they finish");
+
   // A question's turn: the answer card. The short answer, the verdicts, the
   // takeaways, the explanation folded by topic.
   await page.evaluate(({ TOOL }) => {
