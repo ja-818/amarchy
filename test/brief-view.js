@@ -492,6 +492,11 @@ async function run(browser, base, layout) {
     "## Details",
     "The room is booked from 4:30.",
     "",
+    "## Reminder",
+    "```event title=\"Decide\" when=\"2026-10-30T10:00:00-05:00\"",
+    "Pick one.",
+    "```",
+    "",
     "## Sources",
     "- [Calendar](https://calendar.google.com/)",
     "",
@@ -508,14 +513,16 @@ async function run(browser, base, layout) {
     const r = [...document.querySelectorAll(".reply")].at(-1);
     return { title: r.querySelector(".reply-title")?.textContent, bold: r.querySelector(".reply-body strong")?.textContent,
       table: r.querySelector(".reply-body table.rtable") ? [...r.querySelectorAll(".reply-body tbody td[data-label]")].map((x) => x.dataset.label).slice(0, 2) : null,
-      arts: [...r.querySelectorAll(".reply-body .art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}`),
+      arts: [...r.querySelectorAll(".reply-artifacts .art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}`),
+      forYouFirst: [...r.children].map((x) => x.className.split(" ")[0]).indexOf("reply-artifacts") < [...r.children].map((x) => x.className.split(" ")[0]).indexOf("topics"),
       secs: [...r.querySelectorAll(".reply-sec")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}`),
       choices: [...r.querySelectorAll(".reply-choices .bq-opt")].map((x) => x.textContent),
       more: r.querySelector(".rsec-more .rsec-sum")?.textContent };
   });
   check(layout, fmt.title === "The demo moved to Friday: here's the message for Felipe." && fmt.bold === "Friday 5pm", `the reply's first line is the title, its text the body (${fmt.title})`);
   check(layout, JSON.stringify(fmt.table) === JSON.stringify(["Day", "Works for"]), `its table, cards per row on a phone (${JSON.stringify(fmt.table)})`);
-  check(layout, JSON.stringify(fmt.arts) === JSON.stringify(["art-message|WhatsApp draft", "art-todos|Still open"]), `its blocks as things to use (${JSON.stringify(fmt.arts)})`);
+  check(layout, JSON.stringify(fmt.arts) === JSON.stringify(["art-message|WhatsApp draft", "art-todos|Still open", "art-event|Decide"]) && fmt.forYouFirst,
+    `its blocks as things to use, under For you, before the sections (${JSON.stringify(fmt.arts)})`);
   check(layout, JSON.stringify(fmt.secs) === JSON.stringify(["Details|true", "Sources|false"]), `its sections: open, Sources folded (${JSON.stringify(fmt.secs)})`);
   check(layout, JSON.stringify(fmt.choices) === JSON.stringify(["Send it", "Not yet"]) && /Transcript/.test(fmt.more || ""), `choices as buttons; the transcript under More (${fmt.more})`);
   await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; [...document.querySelectorAll(".reply")].at(-1).querySelector(".art-message .art-head > .art-btn").click(); });

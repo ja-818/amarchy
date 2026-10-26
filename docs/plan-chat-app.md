@@ -245,7 +245,7 @@ markdown with `## ` sections (each folds; *Sources* folded), tables for
 comparisons, and fenced blocks named for what they hold (`whatsapp`, `email`,
 `slack`, `sms`, `command`, `link`, `event`, `todos`, `contact`, `place`,
 `session`, `file`, `choices`), which the card gives buttons (`parseReply`,
-`replyBody` in app/chat.js). One rendition, so nothing is lost or said twice,
+`replyBody` in app/chat.js; the things to use are always lifted into *For you*, right after the opening text, and choices to the end, wherever Claude wrote them, so a folded section never hides them). One rendition, so nothing is lost or said twice,
 the card is there as soon as the turn ends, and no extra step is spent on it.
 What Claude *did* comes from the record, never from the model: the activity,
 the files changed and their +/−, commits and pushes, test runs (`changesOf`,

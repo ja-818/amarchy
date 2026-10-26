@@ -907,6 +907,7 @@ function parseReply(text) {
   }
   const sections = [{ head: null, blocks: [] }];
   const choices = [];       // wherever they are (even under Sources): asked after the reply's body
+  const things = [];        // the things to use, wherever they are: all under For you, never folded away
   let cur = sections[0], buf = [];
   const flush = () => {
     if (buf.join("\n").trim()) cur.blocks.push({ type: "md", text: buf.join("\n").trim() });
@@ -922,14 +923,15 @@ function parseReply(text) {
       const body = [];
       for (i++; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
       if (kind === "choices") { flush(); choices.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
-      else if (REPLY_BLOCKS.includes(kind)) { flush(); cur.blocks.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
+      else if (REPLY_BLOCKS.includes(kind)) { flush(); things.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
       else buf.push(line, ...body, "```");
       continue;
     }
     buf.push(line);
   }
   flush();
-  return { title, sections, choices };
+  // A section left empty by what moved out of it (only its block) goes.
+  return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things };
 }
 
 // Tables in a reply's text, as the card's: cards per row on a phone.
@@ -1679,6 +1681,8 @@ class Chat {
     const out = [];
     const root = reply.sections[0];
     if (root.blocks.length) out.push(h("div", { class: "reply-body" }, ...blocks(root.blocks, "r")));
+    // What it made for you to use, wherever it wrote it: at hand, never folded away.
+    const forYou = reply.things.length ? this.artifactsView(reply.things, `${key}|things`, toggle) : null;
     reply.sections.slice(1).forEach((sec, i) => {
       const k = `${key}|sec${i}`;
       const sources = /^sources?$/i.test(sec.head.replace(/[*_:]/g, "").trim());
@@ -1691,8 +1695,8 @@ class Chat {
     });
     const asks = reply.choices.filter((c) => c.options.length);
     const choices = asks.length ? h("div", { class: "reply-body" }, ...blocks(asks, "q")) : null;
-    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0)), choices].filter(Boolean);
-    return [...out, choices].filter(Boolean);
+    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, forYou, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0)), choices].filter(Boolean);
+    return [...out, forYou, choices].filter(Boolean);
   }
 
   // What a reply made for you to use, under "For you": each artifact a row
