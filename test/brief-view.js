@@ -516,7 +516,10 @@ async function run(browser, base, layout) {
       arts: [...r.querySelectorAll(".reply-artifacts .art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}`),
       forYouFirst: [...r.children].map((x) => x.className.split(" ")[0]).indexOf("reply-artifacts") < [...r.children].map((x) => x.className.split(" ")[0]).indexOf("topics"),
       secs: [...r.querySelectorAll(".reply-sec")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}`),
-      choices: [...r.querySelectorAll(".reply-choices .bq-opt")].map((x) => x.textContent),
+      choices: [...r.querySelectorAll(".reply-needs .bq-opt")].map((x) => x.textContent),
+      needsLabel: r.querySelector(".reply-needs .reply-k")?.textContent, needsCount: r.querySelectorAll(".reply-needs").length,
+      needsBeforeSecs: [...r.children].map((x) => x.className.split(" ")[0]).indexOf("reply-needs") < [...r.children].map((x) => x.className.split(" ")[0]).indexOf("topics"),
+      edge: r.classList.contains("st-waiting"),
       more: r.querySelector(".rsec-more .rsec-sum")?.textContent };
   });
   check(layout, fmt.title === "The demo moved to Friday: here's the message for Felipe." && fmt.bold === "Friday 5pm", `the reply's first line is the title, its text the body (${fmt.title})`);
@@ -524,12 +527,17 @@ async function run(browser, base, layout) {
   check(layout, JSON.stringify(fmt.arts) === JSON.stringify(["art-message|WhatsApp draft", "art-todos|Still open", "art-event|Decide"]) && fmt.forYouFirst,
     `its blocks as things to use, under For you, before the sections (${JSON.stringify(fmt.arts)})`);
   check(layout, JSON.stringify(fmt.secs) === JSON.stringify(["Details|true", "Sources|false"]), `its sections: open, Sources folded (${JSON.stringify(fmt.secs)})`);
-  check(layout, JSON.stringify(fmt.choices) === JSON.stringify(["Send it", "Not yet"]) && /Transcript/.test(fmt.more || ""), `choices as buttons; the transcript under More (${fmt.more})`);
+  check(layout, JSON.stringify(fmt.choices) === JSON.stringify(["Send it", "Not yet"]) && fmt.needsLabel === "Needs you" && fmt.needsCount === 1 && fmt.needsBeforeSecs && fmt.edge,
+    `its choices: the Needs you form, once, above the sections, the card edged as waiting (${JSON.stringify([fmt.needsLabel, fmt.needsCount, fmt.needsBeforeSecs, fmt.edge])})`);
+  check(layout, /Transcript/.test(fmt.more || ""), `the transcript under More (${fmt.more})`);
+  const badge = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1); r.querySelector(".reply-head").click();
+    const b = [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-badge")?.textContent; [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-head").click(); return b; });
+  check(layout, badge === "Needs you", "folded, it says it needs you");
   await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; [...document.querySelectorAll(".reply")].at(-1).querySelector(".art-message .art-head > .art-btn").click(); });
   await page.waitForTimeout(100);
   check(layout, (await page.evaluate(() => window.__copied)) === "Hola Felipe, la demo pasa al viernes a las 5pm.", "its draft copies whole");
   const before = posts.filter((p) => p.url.endsWith("/send")).length;
-  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-choices .bq-opt").click());
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-needs .bq-opt").click());
   await page.waitForTimeout(300);
   const lastSend = posts.filter((p) => p.url.endsWith("/send")).slice(before)[0];
   check(layout, !!lastSend && lastSend.body === JSON.stringify({ text: "Send Felipe the WhatsApp now" }), `a choice sends its message (${lastSend && lastSend.body})`);

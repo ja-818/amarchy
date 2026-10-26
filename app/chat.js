@@ -1515,12 +1515,15 @@ class Chat {
 
   replyCard(t, key, last, live) {
     const b = briefShape(t.brief);
-    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status : "plain";
-    const ask = !!b && last && t.briefKey === (this.brief && this.brief.key) ? b.waiting : [];
+    const reply = !b && !live && t.said ? parseReply(t.said) : null;     // the reply as Claude wrote it, in amarchy's format
+    // What it needs from you: the newest reply's questions (a brief's, or the
+    // choices a reply in the format ends with), as the Needs you form.
+    const ask = !last ? [] : b ? (t.briefKey === (this.brief && this.brief.key) ? b.waiting : [])
+      : reply ? reply.choices.filter((c) => c.options.length) : [];
+    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status : reply ? (ask.length ? "waiting" : "done") : "plain";
     const open = this.isOpen(key, last);
     const card = h("article", { class: `reply st-${st}${open ? " open" : ""}${live ? " live" : ""}` });      // st-: not the chat's own .working
     const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
-    const reply = !b && !live && t.said ? parseReply(t.said) : null;     // the reply as Claude wrote it, in amarchy's format
     const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : (reply && reply.title) || firstLine(t.said) || "Claude's reply";
     t.liveNow = live ? h("span", { class: "reply-now" }) : null;
     card.append(h("button", { class: "reply-head", type: "button", "aria-expanded": String(open), onclick: () => toggle(key, open) },
@@ -1549,7 +1552,7 @@ class Chat {
       const top = h("div", { class: "reply-summary" });
       if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
       if (top.childElementCount) card.append(top);
-      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 2500));
+      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 2500, ask));
       // Its comparisons and side-by-side data, open.
       for (const tb of b ? b.tables : []) card.append(this.tableView(tb));
       // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
@@ -1575,7 +1578,7 @@ class Chat {
       card.append(row);
     }
     // Then what it needs from you, with that context: the newest reply's questions.
-    if (ask.length) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));
+    if (ask.length && b) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));      // (a reply in the format has its own, above its sections)
 
     // The rest is what happened (plan, changes, checks, activity, notes, the
     // original message): under More, each its own section. While Claude works,
@@ -1659,7 +1662,7 @@ class Chat {
   // open on the newest reply, all of them when it's short; Sources folded);
   // its blocks in place: text (tables as cards on a phone), the things to use
   // as rows with their buttons, choices as buttons on the newest reply.
-  replyBody(reply, key, toggle, last, long) {
+  replyBody(reply, key, toggle, last, long, ask = []) {
     const blocks = (list, at) => {
       const out = [];
       let things = [];
@@ -1669,11 +1672,7 @@ class Chat {
       };
       list.forEach((bl, n) => {
         if (bl.type === "md") { flush(); out.push(tableize(h("div", { class: "msg claude reply-md", html: md(bl.text) }))); }
-        else if (bl.type === "choices") {
-          flush();
-          out.push(last && bl.options.length ? h("div", { class: "reply-choices" }, this.briefWaiting({ waiting: [bl] }, `${key}|${at}c${n}`))
-            : h("div", { class: "msg claude reply-md" }, h("strong", {}, bl.question), h("ul", {}, ...bl.options.map((o) => h("li", {}, o.label)))));
-        } else things.push(bl);
+        else things.push(bl);
       });
       flush();
       return out;
@@ -1693,10 +1692,11 @@ class Chat {
       if (on) row.append(h("div", { class: "reply-sec-body" }, ...blocks(sec.blocks, `s${i}-`)));
       out.push(row);
     });
-    const asks = reply.choices.filter((c) => c.options.length);
-    const choices = asks.length ? h("div", { class: "reply-body" }, ...blocks(asks, "q")) : null;
-    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, forYou, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0)), choices].filter(Boolean);
-    return [...out, forYou, choices].filter(Boolean);
+    // Needs you: its questions, after the text and the things that give them
+    // context, above the sections (all of them together: one answer each).
+    const needs = ask.length ? h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, `${key}|needs`)) : null;
+    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, forYou, needs, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0))].filter(Boolean);
+    return [...out, forYou, needs].filter(Boolean);
   }
 
   // What a reply made for you to use, under "For you": each artifact a row

@@ -64,7 +64,6 @@
 .reply-sec-body { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 12px; min-width: 0; }
 .reply-sec.sources .topic-title { color: var(--text-muted); font-weight: 600; }
 .reply-artifacts.inline { padding: 0; border-top: 0; }
-.reply-choices .brief-waiting { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn, #d9a441) 45%, var(--border)); border-radius: var(--radius-item); }
 
 /* A table in a reply, open: a real table wide; a card per row on a phone. */
 .reply-table { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; min-width: 0; }
