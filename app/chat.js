@@ -934,6 +934,18 @@ function parseReply(text) {
   return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things };
 }
 
+// What a folded section holds, in a few words: its table ("Table · 8 rows"),
+// its list ("5 points"), else its first sentence.
+function sectionHint(sec) {
+  const text = sec.blocks.filter((b) => b.type === "md").map((b) => b.text).join("\n");
+  const rows = text.split("\n").filter((l) => /^\s*\|/.test(l) && !/^\s*\|?\s*:?-{2,}/.test(l)).length;
+  if (rows > 1) return `Table · ${rows - 1} row${rows - 1 === 1 ? "" : "s"}`;
+  const items = text.split("\n").filter((l) => /^\s*([-*+]|\d+[.)])\s+/.test(l)).length;
+  if (items > 1) return `${items} points`;
+  const line = text.split("\n").map((l) => l.replace(/[#>*_`|]/g, "").trim()).find(Boolean) || "";
+  return cut(line.split(/(?<=[.!?])\s/)[0], 90);
+}
+
 // Tables in a reply's text, as the card's: cards per row on a phone.
 function tableize(el) {
   el.querySelectorAll("table").forEach((tb) => {
@@ -1552,7 +1564,7 @@ class Chat {
       const top = h("div", { class: "reply-summary" });
       if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
       if (top.childElementCount) card.append(top);
-      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 2500, ask));
+      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 1200, ask));
       // Its comparisons and side-by-side data, open.
       for (const tb of b ? b.tables : []) card.append(this.tableView(tb));
       // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
@@ -1679,16 +1691,29 @@ class Chat {
     };
     const out = [];
     const root = reply.sections[0];
-    if (root.blocks.length) out.push(h("div", { class: "reply-body" }, ...blocks(root.blocks, "r")));
+    if (root.blocks.length) {
+      // Its opening, a few lines of it when it runs long (all of it a tap away).
+      const body = h("div", { class: "reply-body" }, ...blocks(root.blocks, "r"));
+      const words = root.blocks.filter((x) => x.type === "md").reduce((n, x) => n + x.text.length, 0);
+      if (words > 700) {
+        const k = `${key}|all`;
+        const all = this.isOpen(k, false);
+        body.classList.toggle("clipped", !all);
+        out.push(h("div", { class: "reply-opening" }, body,
+          h("button", { class: "text-btn reply-all", type: "button", onclick: () => toggle(k, all) }, all ? "Show less" : "Show all")));
+      } else out.push(body);
+    }
     // What it made for you to use, wherever it wrote it: at hand, never folded away.
     const forYou = reply.things.length ? this.artifactsView(reply.things, `${key}|things`, toggle) : null;
     reply.sections.slice(1).forEach((sec, i) => {
       const k = `${key}|sec${i}`;
       const sources = /^sources?$/i.test(sec.head.replace(/[*_:]/g, "").trim());
-      const on = this.isOpen(k, last && !sources && (!long || i < 2));
+      // A long reply's sections start folded (a short one's open), each saying what's in it.
+      const on = this.isOpen(k, last && !sources && !long);
       const row = h("div", { class: `topic reply-sec${on ? " open" : ""}${sources ? " sources" : ""}` },
         h("button", { class: "topic-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
-          h("span", { class: "topic-title", html: inline(sec.head) }), icon("chevron", "chev")));
+          h("span", { class: "topic-text" }, h("span", { class: "topic-title", html: inline(sec.head) }),
+            on ? null : h("span", { class: "topic-hint" }, sectionHint(sec))), icon("chevron", "chev")));
       if (on) row.append(h("div", { class: "reply-sec-body" }, ...blocks(sec.blocks, `s${i}-`)));
       out.push(row);
     });

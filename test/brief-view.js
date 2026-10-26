@@ -543,6 +543,39 @@ async function run(browser, base, layout) {
   check(layout, !!lastSend && lastSend.body === JSON.stringify({ text: "Send Felipe the WhatsApp now" }), `a choice sends its message (${lastSend && lastSend.body})`);
   await page.evaluate(() => { const sc = window.__chat.scroller; [...document.querySelectorAll(".reply")].at(-1).scrollIntoView(); });
   await shot("format");
+
+  // A long reply: its sections start folded, each saying what's in it; a long
+  // opening shows a few lines, the rest a tap away.
+  const rows = Array.from({ length: 8 }, (_, i) => `| ${i + 1} | Slide ${i + 1} | ${"what this slide says in some detail ".repeat(3)}|`);
+  const LONG = [
+    "The deck and the email are drafted; nothing was sent.",
+    "",
+    ...Array.from({ length: 8 }, (_, i) => `Paragraph ${i + 1} of the opening, long enough to need clipping on a phone screen when it all adds up.`),
+    "",
+    "## What each slide says", "| # | Slide | Content |", "|---|---|---|", ...rows,
+    "", "## Notes", "- one", "- two", "- three", "- four", "- five",
+    "", "## The email", "```email to=\"ana@example.com\" subject=\"Deck\"", "Hola Ana, adjunto la presentación.", "```",
+    "", "```choices question=\"Send it?\"", "- Send it | Send the email to Ana", "- Not yet", "```",
+  ].join("\n");
+  await page.evaluate(({ LONG }) => {
+    window.__chat.conversation({ items: [{ kind: "user", text: "Make the deck", turn: true, key: "77777777-aaaa-4aaa-8aaa-000000000007:0", at: "" },
+      { kind: "claude", text: LONG, key: "g1:0", at: "" }] });
+  }, { LONG });
+  const lng = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { secs: [...r.querySelectorAll(".reply-sec")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}|${x.querySelector(".topic-hint")?.textContent || ""}`),
+      arts: [...r.querySelectorAll(".reply-artifacts .art-title")].map((x) => x.textContent), needs: r.querySelectorAll(".reply-needs .bq-opt").length,
+      clipped: r.querySelector(".reply-body.clipped") !== null, more: r.querySelector(".reply-opening .reply-all")?.textContent };
+  });
+  check(layout, JSON.stringify(lng.secs) === JSON.stringify(["What each slide says|false|Table · 8 rows", "Notes|false|5 points"]),
+    `a long reply's sections start folded, each saying what's in it (${JSON.stringify(lng.secs)})`);
+  check(layout, JSON.stringify(lng.arts) === JSON.stringify(["Email draft"]) && lng.needs === 2, "its draft under For you, its question under Needs you, at first sight");
+  check(layout, lng.clipped && lng.more === "Show all", `a long opening shows a few lines, Show all for the rest (${JSON.stringify([lng.clipped, lng.more])})`);
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-opening .reply-all").click());
+  const shown = await page.evaluate(() => { const r = [...document.querySelectorAll(".reply")].at(-1); return [r.querySelector(".reply-body.clipped") === null, r.querySelector(".reply-opening .reply-all").textContent]; });
+  check(layout, shown[0] && shown[1] === "Show less", `Show all opens the rest (${JSON.stringify(shown)})`);
+  await page.evaluate(() => { [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-opening .reply-all").click(); [...document.querySelectorAll(".reply")].at(-1).scrollIntoView(); });
+  await shot("long");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
   check(layout, JSON.stringify(all) === JSON.stringify(["Less", "Changes", "Activity", "Transcript"]), `More brings them up (on the newest, a reply in the format: its transcript) (${JSON.stringify(all)})`);
@@ -550,11 +583,11 @@ async function run(browser, base, layout) {
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));
   const chat = await page.evaluate(() => ({ replies: document.querySelectorAll(".reply").length, users: document.querySelectorAll(".msg.user").length }));
-  check(layout, chat.replies === 0 && chat.users === 6, `the Chat view: the conversation (${JSON.stringify(chat)})`);
+  check(layout, chat.replies === 0 && chat.users === 7, `the Chat view: the conversation (${JSON.stringify(chat)})`);
   await page.evaluate(() => window.__chat.showMode("screen"));
   s = await read(page);
-  check(layout, s.replies === 6 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind" &&
-    s.titles[5] === "The demo moved to Friday: here's the message for Felipe.", "back to the brief view");
+  check(layout, s.replies === 7 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind" &&
+    s.titles[5] === "The demo moved to Friday: here's the message for Felipe." && s.titles[6] === "The deck and the email are drafted; nothing was sent.", "back to the brief view");
 
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());
