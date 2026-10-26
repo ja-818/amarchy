@@ -856,6 +856,96 @@ function activityOf(items, results, userView) {
   return { entries, steps, summary };
 }
 
+// ---- a reply in amarchy's format (bin/amarchy REPLY_FORMAT): its first line
+// the outcome (the card's title), then markdown with "## " sections, and fenced
+// blocks named for what they hold, which the card gives buttons.
+
+const REPLY_BLOCKS = ["whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "contact", "place", "session", "file", "choices"];
+
+function replyAttrs(s) {
+  const o = {};
+  for (const m of String(s || "").matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) o[m[1].toLowerCase()] = m[2];
+  return o;
+}
+
+// A fenced block, as the card's things to use (the artifacts' shapes) or choices.
+function replyBlock(kind, a, body) {
+  const lines = body.split("\n");
+  switch (kind) {
+    case "whatsapp": case "email": case "slack": case "sms":
+      return { type: "message", channel: kind, to: a.to || "", phone: a.phone || "", email: a.email || (kind === "email" && /@/.test(a.to || "") ? a.to : ""),
+               subject: a.subject || "", body, title: a.title || "", note: a.note || "" };
+    case "command": return { type: "command", command: body, where: a.cwd || a.where || "", title: a.title || "", note: a.note || "" };
+    case "link": return { type: "link", url: (lines.find((l) => l.trim()) || a.url || "").trim(), title: a.label || a.title || "", note: a.note || "" };
+    case "event": return { type: "event", title: a.title || "", when: a.when || "", end: a.end || "", where: a.where || "", note: body || a.note || "" };
+    case "todos": return { type: "todos", title: a.title || "", items: lines.map((l) => l.match(/^\s*[-*]\s*(?:\[( |x|X)\]\s*)?(.+?)\s*$/)).filter(Boolean).map((m) => {
+      const due = m[2].match(/\s*\(([^)]{1,40})\)\s*$/);
+      return { text: due ? m[2].slice(0, due.index) : m[2], due: due ? due[1] : "", done: /x/i.test(m[1] || "") };
+    }) };
+    case "contact": return { type: "contact", name: a.name || "", role: a.role || "", phone: a.phone || "", email: a.email || "", note: body || a.note || "" };
+    case "place": return { type: "place", name: a.name || "", where: a.where || a.address || "", hours: a.hours || "", phone: a.phone || "", url: a.url || "", note: body || a.note || "" };
+    case "session": return { type: "session", name: a.id || a.name || "", title: a.title || "", body };
+    case "file": return { type: "file", path: a.path || "", title: a.title || "", body };
+    default: return { type: "choices", question: a.question || "", options: lines.map((l) => l.match(/^\s*[-*]\s*(.+?)\s*$/)).filter(Boolean).map((m) => {
+      const [label, send] = m[1].split(/\s+\|\s+/);
+      return { label: label.trim(), send: (send || label).trim() };
+    }).slice(0, 4) };
+  }
+}
+
+// A reply's parts: its title (the first line, unless the reply starts with a
+// block), and its sections (the first, before any "## " heading, has none),
+// each a list of blocks: markdown, a thing to use, choices.
+function parseReply(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  let title = "";
+  if (i < lines.length && !/^```|^\s*\|/.test(lines[i])) {
+    title = lines[i].replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
+    i++;
+  }
+  const sections = [{ head: null, blocks: [] }];
+  const choices = [];       // wherever they are (even under Sources): asked after the reply's body
+  let cur = sections[0], buf = [];
+  const flush = () => {
+    if (buf.join("\n").trim()) cur.blocks.push({ type: "md", text: buf.join("\n").trim() });
+    buf = [];
+  };
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    const head = line.match(/^##\s+(.+?)\s*#*\s*$/);
+    if (head) { flush(); cur = { head: head[1], blocks: [] }; sections.push(cur); continue; }
+    const fence = line.match(/^```\s*([A-Za-z]+)?(.*)$/);
+    if (fence) {
+      const kind = (fence[1] || "").toLowerCase();
+      const body = [];
+      for (i++; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
+      if (kind === "choices") { flush(); choices.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
+      else if (REPLY_BLOCKS.includes(kind)) { flush(); cur.blocks.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
+      else buf.push(line, ...body, "```");
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return { title, sections, choices };
+}
+
+// Tables in a reply's text, as the card's: cards per row on a phone.
+function tableize(el) {
+  el.querySelectorAll("table").forEach((tb) => {
+    tb.classList.add("rtable");
+    if (tb.parentElement && tb.parentElement.classList.contains("table-wrap")) tb.parentElement.classList.add("rtable-wrap");
+    const heads = [...tb.querySelectorAll("thead th")].map((th) => th.textContent.replace(/[*_`]/g, "").trim());
+    tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, j) => {
+      if (j === 0) td.classList.add("lead");
+      else if (heads[j]) td.dataset.label = heads[j];
+    }));
+  });
+  return el;
+}
+
 // How the chats show on this device: "screen" (the brief) or "chat" (the
 // conversation). Settings and a chat's menu set it; every chat open takes it.
 function chatView() { return store.get("chatView") === "chat" ? "chat" : "screen"; }
@@ -1428,7 +1518,8 @@ class Chat {
     const open = this.isOpen(key, last);
     const card = h("article", { class: `reply st-${st}${open ? " open" : ""}${live ? " live" : ""}` });      // st-: not the chat's own .working
     const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
-    const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : firstLine(t.said) || "Claude's reply";
+    const reply = !b && !live && t.said ? parseReply(t.said) : null;     // the reply as Claude wrote it, in amarchy's format
+    const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : (reply && reply.title) || firstLine(t.said) || "Claude's reply";
     t.liveNow = live ? h("span", { class: "reply-now" }) : null;
     card.append(h("button", { class: "reply-head", type: "button", "aria-expanded": String(open), onclick: () => toggle(key, open) },
       live ? spinner() : null,
@@ -1455,8 +1546,8 @@ class Chat {
     } else {
       const top = h("div", { class: "reply-summary" });
       if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
-      else if (!b && !live && t.said) top.append(h("div", { class: "reply-k" }, "Summary"), h("div", { class: "msg claude reply-said", html: md(t.said) }));
       if (top.childElementCount) card.append(top);
+      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 2500));
       // Its comparisons and side-by-side data, open.
       for (const tb of b ? b.tables : []) card.append(this.tableView(tb));
       // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
@@ -1536,7 +1627,7 @@ class Chat {
       () => h("ul", { class: "brief-list notes" }, ...b.notes.map((x) => h("li", { html: inline(x) }))));
     // The original message: the turn as the conversation shows it.
     const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
-    if (t.body.childElementCount) section("words", "Original message", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
+    if (t.body.childElementCount) section("words", reply ? "Transcript" : "Original message", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
     if (held.length || (more && extra.childNodes.length)) {
       card.append(h("div", { class: "rsec rsec-more" }, h("button", { class: "rsec-head", type: "button", "aria-expanded": String(more),
         onclick: () => toggle(`${key}|more`, more) },
@@ -1561,11 +1652,54 @@ class Chat {
       tb.note ? h("div", { class: "rtable-note", html: inline(tb.note) }) : null);
   }
 
+  // A reply in amarchy's format, laid out (parseReply): what comes before its
+  // first "## " heading open; each section a row that folds (the first ones
+  // open on the newest reply, all of them when it's short; Sources folded);
+  // its blocks in place: text (tables as cards on a phone), the things to use
+  // as rows with their buttons, choices as buttons on the newest reply.
+  replyBody(reply, key, toggle, last, long) {
+    const blocks = (list, at) => {
+      const out = [];
+      let things = [];
+      const flush = () => {
+        if (things.length) out.push(this.artifactsView(things, `${key}|${at}${out.length}`, toggle, ""));
+        things = [];
+      };
+      list.forEach((bl, n) => {
+        if (bl.type === "md") { flush(); out.push(tableize(h("div", { class: "msg claude reply-md", html: md(bl.text) }))); }
+        else if (bl.type === "choices") {
+          flush();
+          out.push(last && bl.options.length ? h("div", { class: "reply-choices" }, this.briefWaiting({ waiting: [bl] }, `${key}|${at}c${n}`))
+            : h("div", { class: "msg claude reply-md" }, h("strong", {}, bl.question), h("ul", {}, ...bl.options.map((o) => h("li", {}, o.label)))));
+        } else things.push(bl);
+      });
+      flush();
+      return out;
+    };
+    const out = [];
+    const root = reply.sections[0];
+    if (root.blocks.length) out.push(h("div", { class: "reply-body" }, ...blocks(root.blocks, "r")));
+    reply.sections.slice(1).forEach((sec, i) => {
+      const k = `${key}|sec${i}`;
+      const sources = /^sources?$/i.test(sec.head.replace(/[*_:]/g, "").trim());
+      const on = this.isOpen(k, last && !sources && (!long || i < 2));
+      const row = h("div", { class: `topic reply-sec${on ? " open" : ""}${sources ? " sources" : ""}` },
+        h("button", { class: "topic-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+          h("span", { class: "topic-title", html: inline(sec.head) }), icon("chevron", "chev")));
+      if (on) row.append(h("div", { class: "reply-sec-body" }, ...blocks(sec.blocks, `s${i}-`)));
+      out.push(row);
+    });
+    const asks = reply.choices.filter((c) => c.options.length);
+    const choices = asks.length ? h("div", { class: "reply-body" }, ...blocks(asks, "q")) : null;
+    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0)), choices].filter(Boolean);
+    return [...out, choices].filter(Boolean);
+  }
+
   // What a reply made for you to use, under "For you": each artifact a row
   // (its kind, its name, what it is) with its quick action (Copy, Open) at
   // hand while folded; open, all of it and every action that fits it.
-  artifactsView(list, key, toggle) {
-    const box = h("div", { class: "reply-artifacts" }, h("div", { class: "reply-k" }, "For you"));
+  artifactsView(list, key, toggle, label = "For you") {
+    const box = h("div", { class: `reply-artifacts${label ? "" : " inline"}` }, label ? h("div", { class: "reply-k" }, label) : null);
     box.append(h("ul", { class: "artifacts" }, ...list.map((a, i) => {
       const k = `${key}|art${i}`;
       const on = this.isOpen(k, false);

@@ -235,7 +235,7 @@ async function run(browser, base, layout) {
   check(layout, s.mode === "screen" && s.replies === 3, `each turn is a reply card (${s.replies})`);
   check(layout, JSON.stringify(s.open) === "[false,false,true]", `the newest open, the ones before as their title (${JSON.stringify(s.open)})`);
   check(layout, s.titles[0] === "Hi there. What should we build today?" && s.titles[1] === "A plan for the search page" && s.titles[2].startsWith("Search page works: 2 choices for <img"),
-    `titles: Original message, an old-style brief, the new (${JSON.stringify(s.titles)})`);
+    `titles: Claude's message, an old-style brief, the new (${JSON.stringify(s.titles)})`);
   const goal = await page.evaluate(() => window.__chat.goal);
   check(layout, s.pwned === undefined && /waiting/.test(s.cls) && s.goal === undefined && goal === "Ship the search page",
     `where it stands; the goal isn't on the card, it's the chat's (${goal}); nothing runs as markup`);
@@ -359,8 +359,8 @@ async function run(browser, base, layout) {
   // An older reply opens on a tap: a turn from before the brief, Original message as its answer.
   await page.evaluate(() => document.querySelector(".reply .reply-head").click());
   const old = await page.evaluate(() => { const r = document.querySelector(".reply");
-    return { open: r.classList.contains("open"), answer: r.querySelector(".reply-summary .reply-said")?.textContent.trim() }; });
-  check(layout, old.open && old.answer === "Hi there. What should we build today?", `an older reply opens on a tap, Claude's words its summary (${JSON.stringify(old)})`);
+    return { open: r.classList.contains("open"), title: r.querySelector(".reply-title").textContent, body: r.querySelector(".reply-body")?.textContent.trim() || "" }; });
+  check(layout, old.open && old.title === "Hi there. What should we build today?" && old.body === "", `an older reply opens on a tap: Claude's message, laid out (${JSON.stringify(old)})`);
   await page.evaluate(() => document.querySelector(".reply .reply-head").click());
 
   // A reconnect with the same conversation: nothing drawn again.
@@ -466,17 +466,80 @@ async function run(browser, base, layout) {
   check(layout, topic.open && topic.body === "Nausea with GLP-1 drugs.", `a topic opens on a tap (${JSON.stringify(topic)})`);
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("answer");
+
+  // A reply in amarchy's format (no update_brief): Claude's own message is the
+  // card. Its first line the title; its text; its table as cards on a phone;
+  // its blocks as things to use, choices as buttons; its sections folding.
+  const REPLY = [
+    "The demo moved to Friday: here's the message for Felipe.",
+    "",
+    "Felipe asked for a later slot, so **Friday 5pm** works for everyone.",
+    "",
+    "| Option | Day | Works for |",
+    "|---|---|---|",
+    "| A | Friday 5pm | everyone |",
+    "| B | Monday 9am | not Felipe |",
+    "",
+    "```whatsapp to=\"Felipe\" phone=\"+57 300 111 2233\"",
+    "Hola Felipe, la demo pasa al viernes a las 5pm.",
+    "```",
+    "",
+    "```todos title=\"Still open\"",
+    "- [ ] Send Felipe the message (today)",
+    "- [x] Book the room",
+    "```",
+    "",
+    "## Details",
+    "The room is booked from 4:30.",
+    "",
+    "## Sources",
+    "- [Calendar](https://calendar.google.com/)",
+    "",
+    "```choices question=\"Send it now?\"",
+    "- Send it | Send Felipe the WhatsApp now",
+    "- Not yet",
+    "```",
+  ].join("\n");
+  await page.evaluate(({ REPLY }) => {
+    window.__chat.conversation({ items: [{ kind: "user", text: "Move the demo", turn: true, key: "66666666-ffff-4fff-8fff-000000000006:0", at: "" },
+      { kind: "claude", text: REPLY, key: "f1:0", at: "" }] });
+  }, { REPLY });
+  const fmt = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { title: r.querySelector(".reply-title")?.textContent, bold: r.querySelector(".reply-body strong")?.textContent,
+      table: r.querySelector(".reply-body table.rtable") ? [...r.querySelectorAll(".reply-body tbody td[data-label]")].map((x) => x.dataset.label).slice(0, 2) : null,
+      arts: [...r.querySelectorAll(".reply-body .art")].map((x) => `${x.className.split(" ")[1]}|${x.querySelector(".art-title").textContent}`),
+      secs: [...r.querySelectorAll(".reply-sec")].map((x) => `${x.querySelector(".topic-title").textContent}|${x.classList.contains("open")}`),
+      choices: [...r.querySelectorAll(".reply-choices .bq-opt")].map((x) => x.textContent),
+      more: r.querySelector(".rsec-more .rsec-sum")?.textContent };
+  });
+  check(layout, fmt.title === "The demo moved to Friday: here's the message for Felipe." && fmt.bold === "Friday 5pm", `the reply's first line is the title, its text the body (${fmt.title})`);
+  check(layout, JSON.stringify(fmt.table) === JSON.stringify(["Day", "Works for"]), `its table, cards per row on a phone (${JSON.stringify(fmt.table)})`);
+  check(layout, JSON.stringify(fmt.arts) === JSON.stringify(["art-message|WhatsApp draft", "art-todos|Still open"]), `its blocks as things to use (${JSON.stringify(fmt.arts)})`);
+  check(layout, JSON.stringify(fmt.secs) === JSON.stringify(["Details|true", "Sources|false"]), `its sections: open, Sources folded (${JSON.stringify(fmt.secs)})`);
+  check(layout, JSON.stringify(fmt.choices) === JSON.stringify(["Send it", "Not yet"]) && /Transcript/.test(fmt.more || ""), `choices as buttons; the transcript under More (${fmt.more})`);
+  await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; [...document.querySelectorAll(".reply")].at(-1).querySelector(".art-message .art-head > .art-btn").click(); });
+  await page.waitForTimeout(100);
+  check(layout, (await page.evaluate(() => window.__copied)) === "Hola Felipe, la demo pasa al viernes a las 5pm.", "its draft copies whole");
+  const before = posts.filter((p) => p.url.endsWith("/send")).length;
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-choices .bq-opt").click());
+  await page.waitForTimeout(300);
+  const lastSend = posts.filter((p) => p.url.endsWith("/send")).slice(before)[0];
+  check(layout, !!lastSend && lastSend.body === JSON.stringify({ text: "Send Felipe the WhatsApp now" }), `a choice sends its message (${lastSend && lastSend.body})`);
+  await page.evaluate(() => { const sc = window.__chat.scroller; [...document.querySelectorAll(".reply")].at(-1).scrollIntoView(); });
+  await shot("format");
   await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".rsec-more .rsec-head").click());
   const all = await page.evaluate(() => [...[...document.querySelectorAll(".reply")].at(-1).querySelectorAll(".rsec-label")].map((x) => x.textContent));
-  check(layout, JSON.stringify(all) === JSON.stringify(["Less", "Changes", "Activity", "Original message"]), `More brings them up (${JSON.stringify(all)})`);
+  check(layout, JSON.stringify(all) === JSON.stringify(["Less", "Changes", "Activity", "Transcript"]), `More brings them up (on the newest, a reply in the format: its transcript) (${JSON.stringify(all)})`);
 
   // The conversation view has no replies; back again.
   await page.evaluate(() => window.__chat.showMode("chat"));
   const chat = await page.evaluate(() => ({ replies: document.querySelectorAll(".reply").length, users: document.querySelectorAll(".msg.user").length }));
-  check(layout, chat.replies === 0 && chat.users === 5, `the Chat view: the conversation (${JSON.stringify(chat)})`);
+  check(layout, chat.replies === 0 && chat.users === 6, `the Chat view: the conversation (${JSON.stringify(chat)})`);
   await page.evaluate(() => window.__chat.showMode("screen"));
   s = await read(page);
-  check(layout, s.replies === 5 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind", "back to the brief view");
+  check(layout, s.replies === 6 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind" &&
+    s.titles[5] === "The demo moved to Friday: here's the message for Felipe.", "back to the brief view");
 
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());

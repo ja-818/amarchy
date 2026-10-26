@@ -1848,7 +1848,7 @@ def claude_argv(s, prefill="", prompt=None):
     model = chosen_model(s["id"]) if prompt is not None else None
     return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []), *claude_resume(s),
             *(["--prefill", prefill] if prefill and prompt is None else []),
-            *brief_mcp_args(), "--settings", hook_settings(s["id"]), *first]
+            *brief_mcp_args(), *reply_format_args(), "--settings", hook_settings(s["id"]), *first]
 
 
 def pane_loop(pane, procs):
@@ -3184,15 +3184,12 @@ def cmd_hook(sid, state):
     # (the session stays working meanwhile, so it's done, and you're told,
     # once the brief is there). Asked once a stop (stop_hook_active: the
     # second goes through).
-    if state == "idle" and event.get("hook_event_name") == "Stop":
-        has = claude_brief_version()
-        if has is not None and not event.get("stop_hook_active") and brief_needed(event.get("transcript_path")):
-            facts = brief_facts(s)
-            print(json.dumps({"decision": "block", "reason": BRIEF_ASK.format(
-                facts=json.dumps(facts, ensure_ascii=False) if facts else "(not a git repository)")}))
-            return
-        if has != BRIEF_VERSION:
-            detach([ENTRY, "claude-reload", sid])     # its reply written, an older (or no) update_brief: a new Claude
+    # A turn ended on a Claude started with an older reply format (or none):
+    # it's started again once idle (claude_reload), the same conversation, with
+    # the format amarchy gives now. (A tool's description would be kept in the
+    # conversation; the format is given at start, so a new Claude has it.)
+    if state == "idle" and event.get("hook_event_name") == "Stop" and claude_format_version() != FORMAT_VERSION:
+        detach([ENTRY, "claude-reload", sid])
 
     set_status(sid, state)
 
@@ -10574,7 +10571,8 @@ def claude_resume(s):
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
     claude arguments, its conversation, amarchy's hooks."""
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *brief_mcp_args(), "--settings", hook_settings(s["id"])]
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *brief_mcp_args(), *reply_format_args(),
+            "--settings", hook_settings(s["id"])]
 
 
 def agent_env(s=None):
@@ -10795,6 +10793,82 @@ BRIEF_ASK = (
 )
 
 
+# ---- the reply format: Claude writes each reply as the card it becomes
+#
+# Given at every start (--append-system-prompt, both engines): a reply leads
+# with its outcome, then markdown sections, tables for comparisons, and fenced
+# blocks named for what they hold (a draft, a command, an event...) that the
+# app gives buttons (chat.js parseReply). No second rendition of the reply, so
+# nothing is lost or said twice, and no extra step at the end of a turn.
+REPLY_FORMAT = """amarchy shows the person each of your replies as a card built from your markdown, on their phone or computer. They read that, so write every reply (not your working notes in between, only your final message of a turn) like this:
+
+- First line: the outcome in one plain sentence, as you'd say it to them. It becomes the card's title. No greeting, no "Here's...", no heading mark.
+- Then the rest, as you normally would, in markdown: short paragraphs and lists, "## " headings for sections (each folds in the card), a table for any comparison or side-by-side data, code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point: the card is all they read.
+- Anything they will use goes in a fenced block named for it, so the card gives it buttons (Copy, Open in WhatsApp, Add to calendar...). Attributes go on the opening line as key="value":
+  ```whatsapp to="Felipe" phone="+57 300 111 2233"
+  the whole message, ready to send
+  ```
+  ```email to="ana@example.com" subject="Contract"
+  the whole email
+  ```
+  (also ```slack to="#channel"``` and ```sms phone="+1 555 0100"```)
+  ```command cwd="~/Work/houston"
+  exactly what to run
+  ```
+  ```link label="Sign in to Gmail" note="Expires in 10 minutes"
+  https://...
+  ```
+  ```event title="ECOS panel" when="2026-10-29T15:40:00-05:00" end="2026-10-29T17:00:00-05:00" where="Teatro Panorama, Bogotá"
+  any notes
+  ```
+  ```todos title="Still open"
+  - [ ] Send the C21 summary (today)
+  - [x] Twilio top-up
+  ```
+  ```contact name="Gaby Mendez" role="Quantística" phone="+57 310 555 0101" email="gaby@example.com"
+  ```
+  ```place name="Spinning Center Rosales" where="Cl. 72 #5-83, Bogotá" hours="Mon-Fri 6am-9pm"
+  ```
+  ```session id="houston-os-c21-crm"
+  what that chat is doing
+  ```
+- Lists they track (still open, waiting on, loops) go in a todos block.
+- When you need them to decide, end with a choices block; each option is "- Label | the full message it sends" (or just "- Label"):
+  ```choices question="Ship it to main?"
+  - Ship it | Ship it: merge to main and push
+  - Not yet
+  ```
+- Sources you used go last, under "## Sources", as links.
+- Never put what they need only in an earlier message: each reply stands on its own."""
+FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
+
+
+def reply_format_args():
+    """The reply format, for a session's Claude (both engines)."""
+    return ["--append-system-prompt", REPLY_FORMAT]
+
+
+def claude_format_version():
+    """Which reply format the Claude a hook runs for was started with: None
+    for none, else the hash of its --append-system-prompt (FORMAT_VERSION
+    when it's the current one)."""
+    pid = os.getppid()
+    for _ in range(6):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            if stat[stat.find("(") + 1:stat.rfind(")")] == "claude":
+                args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                for i, a in enumerate(args[:-1]):
+                    if a == b"--append-system-prompt":
+                        text = args[i + 1].decode(errors="replace")
+                        return hashlib.sha1(text.encode()).hexdigest()[:10] if text.startswith("amarchy shows") else None
+                return None
+            pid = int(stat[stat.rfind(")") + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+    return None
+
+
 # Which update_brief a Claude has: a hash of what the tool says it takes (the
 # ask changes need no new Claude: the hook sends it each turn). A
 # Claude started with another (before amarchy changed the tool) is started
@@ -10902,10 +10976,11 @@ def claude_brief_version():
 
 def claude_reload(sid):
     """amarchy claude-reload <id>: start a session's Claude again, with the
-    same conversation, so it gets the update_brief amarchy serves now (the
-    Stop hook starts this when the one it has is older). Only once it's idle
-    and nothing would be lost (a turn, a question, a background task), and at
-    most every BRIEF_RELOAD_EVERY seconds."""
+    same conversation, so it gets what amarchy gives a Claude now (the reply
+    format; the Stop hook starts this when the one it has is older). Only once
+    it's idle and nothing would be lost (a turn, a question, a background
+    task), waiting for that up to BRIEF_RELOAD_EVERY seconds, and at most once
+    in that time."""
     mark = claude_dir(sid) / "brief-reload"
     try:
         if time.time() - mark.stat().st_mtime < BRIEF_RELOAD_EVERY:
@@ -10913,9 +10988,9 @@ def claude_reload(sid):
     except OSError:
         pass
     write_file(mark, f"{time.time()}\n")
-    end = time.time() + 120
+    end = time.time() + BRIEF_RELOAD_EVERY      # a quiet moment can take a while: its conversation settles after a turn
     while time.time() < end:
-        time.sleep(3)
+        time.sleep(5)
         s = session(sid)
         if not s or asleep_since(sid) is not None:
             return 0        # asleep, it wakes with the new one anyway

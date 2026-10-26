@@ -238,20 +238,23 @@ Each turn is your message and **Claude's reply as one card**, read in layers:
 - Every part but the title is optional, so a simple answer is a title and a
   point or two.
 
-**Who writes what.** What needs judgment Claude writes itself, in the same
-conversation: when a turn ends, amarchy's Stop hook asks it for this turn's
-reply (`BRIEF_ASK`, with git's facts: `brief_facts`), and it calls
-`update_brief` (a tool amarchy serves, `amarchy brief-mcp`, in both
-engines' arguments, allowed without asking) with the title, status, kind,
-the chat's goal, the answer (complete: the app folds it, so nothing important
-is left out), the plan, the questions, tests, ways to check it and notes.
+**Who writes what.** Claude's reply *is* the card: amarchy gives every
+Claude a reply format when it starts (`REPLY_FORMAT`, `--append-system-prompt`,
+both engines): the outcome in its first line (the card's title), then
+markdown with `## ` sections (each folds; *Sources* folded), tables for
+comparisons, and fenced blocks named for what they hold (`whatsapp`, `email`,
+`slack`, `sms`, `command`, `link`, `event`, `todos`, `contact`, `place`,
+`session`, `file`, `choices`), which the card gives buttons (`parseReply`,
+`replyBody` in app/chat.js). One rendition, so nothing is lost or said twice,
+the card is there as soon as the turn ends, and no extra step is spent on it.
 What Claude *did* comes from the record, never from the model: the activity,
 the files changed and their +/−, commits and pushes, test runs (`changesOf`,
-`testsOf`, `activityOf` in app/chat.js, from the turn's items). The session
-stays *working* until the reply is written, so you're told it's done once it
-is. The hook asks once a stop, only when Claude did something since its last
-reply (`brief_needed`), and never a Claude started before the tool
-(`claude_has_brief`). What Claude says after the call is left out (`aside`).
+`testsOf`, `activityOf`). Replies written before, with `update_brief` (asked
+by the Stop hook then; its tool is still served), keep their card. A Claude
+started with an older format (or none) is started again at an idle moment,
+the same conversation (`claude-reload`, `FORMAT_VERSION`): the format is
+given at start, so the new Claude has it (a tool's description, by
+contrast, is kept in the conversation once loaded).
 
 **New tools reach every chat.** update_brief has a version (a hash of what
 it takes, `BRIEF_VERSION`, in its server's arguments). When a turn's reply is
