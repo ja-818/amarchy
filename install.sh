@@ -220,9 +220,17 @@ if ((uninstall)); then
   [[ $(readlink "$bin_dir/wl-paste" 2>/dev/null) == */bin/amarchy-paste ]] && rm -f "$bin_dir/wl-paste"
   for unit in amarchy-sleep amarchy-update; do
     systemctl --user disable --now "$unit.timer" >/dev/null 2>&1 || true
-    rm -f "$units/$unit.timer" "$units/$unit.service"
+    rm -f "$units/$unit.timer" "$units/$unit.service" "$units/$unit.timer.d/zz-amarchy-paused.conf"
+    rmdir "$units/$unit.timer.d" 2>/dev/null || true
   done
   systemctl --user daemon-reload >/dev/null 2>&1 || true
+  # Automations you paused in the app stay paused (that was your choice): said,
+  # with how to resume each one without amarchy.
+  for paused in "$units"/*.timer.d/zz-amarchy-paused.conf; do
+    [[ -f $paused ]] || continue
+    timer=$(basename "$(dirname "$paused")" .d)
+    say "$timer stays paused: rm $paused && systemctl --user daemon-reload && systemctl --user start $timer"
+  done
   # Only our own link (to this checkout or the one installed): a skill of the
   # same name the user wrote stays.
   if [[ -L $skill_link ]]; then
@@ -323,6 +331,8 @@ cat >"$units/amarchy-sleep.timer" <<UNIT
 # Installed by amarchy ($repo/install.sh); removed by its --uninstall.
 [Unit]
 Description=Put idle amarchy sessions to sleep, every 30 seconds
+X-Amarchy-Name=Sleep
+X-Amarchy-About=Every 30 seconds, puts to sleep the chats that have been idle a while and are open on no phone or browser: their Claude Code exits and lets go of its memory, and comes back when you type in the chat or send it something. Paused, idle chats stay awake and keep using memory.
 
 [Timer]
 OnActiveSec=30s
@@ -349,6 +359,8 @@ cat >"$units/amarchy-update.timer" <<UNIT
 # Installed by amarchy ($repo/install.sh); removed by its --uninstall.
 [Unit]
 Description=Update amarchy to the latest on GitHub, every 5 minutes
+X-Amarchy-Name=Updates
+X-Amarchy-About=Every 5 minutes, brings amarchy up to the latest on GitHub (its main), when the checkout it runs from is on main with nothing uncommitted, and installs it; the app reloads by itself. Paused, amarchy stays as it is until you run amarchy update.
 
 [Timer]
 OnBootSec=2min

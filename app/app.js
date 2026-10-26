@@ -16,10 +16,10 @@ const NERD = {
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
   stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
   organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
-  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}", image: "\u{F02E9}",
+  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}", image: "\u{F02E9}", clock: "\u{F0150}", next: "\u{F0142}",
 };
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
-                project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅" };
+                project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅", clock: "◷", next: "›" };
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -32,6 +32,8 @@ const ICONS = {
   image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+  next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
 };
 
 // ---- small helpers
@@ -458,7 +460,7 @@ function listView() {
   const meta = h("div", { class: "meta" });
   const head = h("div", { class: "hero" },
     h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
-    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));
+    automationsButton(), h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));      // automations.js
   // Above the list, as in the wide layout beside Claude: the search, and how
   // the list is grouped and sorted.
   const search = h("input", { type: "search", placeholder: "Search chats", enterkeyhint: "search",
@@ -1112,37 +1114,51 @@ const MIC_DEAD = 1200;    // ms held before the microphone is looked at: dead, i
 const MIC_SILENT = 40;    // pieces (20 ms) of nothing but 0 in a row that only a dead microphone gives
 
 // retry: the microphone opened afresh while held (see micWatch), not a new hold.
+//
+// Called in the touch itself, and nothing is awaited before both asks are
+// made: the microphone first (the phone asks whether Amarchy may use it,
+// there and then), and the audio. On an iPhone a touch only lets the audio
+// start once the finger lifts (pointerdown isn't a gesture for it; pointerup
+// is), so the audio isn't waited for before the microphone is asked for:
+// micNudge, from the lift, starts it then.
 async function micOpen(retry) {
   const gen = ++mic.gen;
   clearTimeout(mic.idle);
   if (!retry) mic.fresh = false;
-  // An AudioContext is made and resumed in the touch itself (iOS starts it
-  // only then): nothing awaited before.
   if (mic.ctx && mic.ctx.state !== "running" && mic.ctx.state !== "suspended") micReset();
+  const kept = mic.stream && mic.stream.getAudioTracks().some((t) => t.readyState === "live" && !t.muted);
+  let asked = null;
+  if (!kept) {
+    micClose();       // what's left of one that ended (a phone call took it, say)
+    asked = navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  }
   if (!mic.ctx) {
     mic.ctx = new AudioContext();
     mic.ready = mic.ctx.audioWorklet ? mic.ctx.audioWorklet.addModule("voice.js") : Promise.resolve();
   }
-  const resumed = mic.ctx.resume();
+  const ctx = mic.ctx;
+  ctx.resume().catch(() => {});
+  let stream = null;
   try {
-    await within(Promise.all([mic.ready, resumed]), MIC_START, "the phone's audio didn't start");
+    if (asked) stream = await within(asked, 60000, "the phone didn't answer about the microphone");
+    // Asked just now, the answer took a while: the lift that would have
+    // started the audio came before it, so it's asked again.
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    await within(Promise.all([mic.ready, micRunning(ctx)]), MIC_START, "the phone's audio didn't start");
   } catch (e) {
-    micReset();       // the next hold makes it all anew
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (gen === mic.gen) micReset();       // the next hold makes it all anew
     throw e;
   }
-  if (gen !== mic.gen) return;
-  if (mic.stream && mic.stream.getAudioTracks().some((t) => t.readyState === "live" && !t.muted)) {
+  if (gen !== mic.gen || mic.ctx !== ctx) {      // another hold took over meanwhile
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  if (!stream) {
     if (mic.node && mic.node.port) mic.node.port.postMessage("reset");
     mic.stream.getTracks().forEach((t) => { t.enabled = true; });
     micWatch();
-    return;
-  }
-  micClose();       // what's left of one that ended (a phone call took it, say)
-  const stream = await within(navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
-    60000, "the phone didn't answer about the microphone");
-  if (gen !== mic.gen || !mic.ctx) {      // another hold took over meanwhile
-    stream.getTracks().forEach((t) => t.stop());
     return;
   }
   mic.stream = stream;
@@ -1160,6 +1176,25 @@ async function micOpen(retry) {
   mute.gain.value = 0;
   mic.source.connect(mic.node).connect(mute).connect(mic.ctx.destination);
   micWatch();
+}
+
+// Once the audio runs, whichever ask started it (a resume() iOS turned down
+// can stay pending for good, so its promise isn't what's waited for).
+function micRunning(ctx) {
+  if (ctx.state === "running") return Promise.resolve();
+  return new Promise((ok) => {
+    const seen = () => {
+      if (ctx.state !== "running") return;
+      ctx.removeEventListener("statechange", seen);
+      ok();
+    };
+    ctx.addEventListener("statechange", seen);
+  });
+}
+
+// The finger lifted off the mic: a gesture the phone starts the audio in.
+function micNudge() {
+  if (mic.ctx && mic.ctx.state !== "running" && mic.ctx.state !== "closed") mic.ctx.resume().catch(() => {});
 }
 
 // A promise, or why not if it takes longer than ms.
@@ -1972,7 +2007,7 @@ async function openSettings() {
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
     kids.push(...engineSettings());
-    kids.push(...terminalSettings(draw), ...secretsSettings());     // terminal.js, secrets.js
+    kids.push(...terminalSettings(draw), ...secretsSettings(), ...automationsSettings());     // terminal.js, secrets.js, automations.js
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),

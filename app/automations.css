@@ -1,0 +1,94 @@
+/* Automations (automations.js): the clock that opens them, their list, one
+   of them with its log. Design tokens only (docs/design-tokens.md). */
+
+/* The clock, with a dot while one's last run failed. */
+.auto-btn { position: relative; }
+.auto-btn .glyph svg { width: 22px; height: 22px; }
+.desk .auto-btn .glyph svg { width: 18px; height: 18px; }
+.auto-btn .auto-dot {
+  position: absolute; top: 8px; right: 8px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
+  display: none;
+}
+.desk .auto-btn .auto-dot { top: 5px; right: 5px; }
+.auto-btn.alert .auto-dot { display: block; }
+
+/* Its state as a dot: fine, failed, running, paused, never run. */
+.auto-mark {
+  flex: none; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--success);
+}
+.auto-mark.failed { background: var(--danger); }
+.auto-mark.running { background: var(--accent); animation: auto-pulse 1.2s ease-in-out infinite; }
+.auto-mark.paused, .auto-mark.stopped { background: none; border: 2px solid var(--text-muted); }
+.auto-mark.never { background: none; border: 2px solid var(--success); }
+@keyframes auto-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .auto-mark.running { animation: none; } }
+
+.auto-alert { color: var(--danger); }
+
+/* The list: a job a row. */
+.auto-list { display: flex; flex-direction: column; gap: 4px; }
+.auto-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-item);
+  text-align: left; color: var(--text);
+}
+.auto-row .auto-mark { margin-top: 5px; }
+.auto-row:active, .auto-row:focus-visible { background: var(--selected-bg); border-color: var(--selected-border); }
+@media (hover: hover) { .auto-row:hover { background: var(--selected-bg); } }
+.auto-row .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.auto-row .text b { font-size: var(--body); }
+.auto-row .about {
+  color: var(--text); font-size: var(--caption); line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.auto-row small { color: var(--text-muted); font-size: var(--caption); }
+.auto-row small.bad { color: var(--danger); }
+.auto-row small.kids { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-row.paused b, .auto-row.stopped b { color: var(--text-muted); }
+.auto-row .go { flex: none; align-self: center; color: var(--text-muted); }
+.auto-row .go svg { width: 16px; height: 16px; }
+
+/* One of them. */
+.auto-state { display: flex; align-items: center; gap: 8px; font-weight: 700; margin: 2px 0 8px; }
+.auto-state.failed { color: var(--danger); }
+.auto-about { margin: 0 0 10px; line-height: 1.45; }
+.auto-facts { margin: 0 0 12px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+.auto-fact { display: contents; }
+.auto-fact dt { color: var(--text-muted); font-size: var(--caption); padding-top: 2px; }
+.auto-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.auto-fact code { font-size: var(--caption); }
+.auto-runs { display: inline-flex; gap: 3px; vertical-align: middle; }
+.auto-run { width: 8px; height: 14px; border-radius: 2px; background: var(--success); }
+.auto-run.failed { background: var(--danger); }
+.auto-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.auto-actions .control { flex: 1; }
+.auto-actions:empty { display: none; }
+
+.auto-kids { display: flex; flex-direction: column; gap: 2px; }
+.auto-kid { display: flex; gap: 10px; padding: 6px 10px; border: 1px solid var(--border-faint); border-radius: var(--radius-item); font-size: var(--caption); }
+.auto-kid .t { flex: none; min-width: 7.5em; color: var(--text-muted); }
+.auto-kid .m { min-width: 0; overflow-wrap: anywhere; }
+
+.auto-log-head { display: flex; align-items: center; justify-content: space-between; }
+.auto-log {
+  max-height: 46vh; overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-item);
+  background: var(--surface-sunken);
+  font-family: var(--font-code); font-size: var(--caption); line-height: 1.45;
+  -webkit-overflow-scrolling: touch;
+}
+.auto-log-day { color: var(--accent); margin: 6px 0 2px; }
+.auto-log-day:first-child { margin-top: 0; }
+.auto-log-line { display: flex; gap: 8px; }
+.auto-log-line .t { flex: none; color: var(--text-muted); }
+.auto-log-line .m { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.auto-log-line.sys .m { color: var(--text-muted); }
+.auto-log-line.error .m { color: var(--danger); }

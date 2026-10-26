@@ -524,9 +524,11 @@ on each phone or browser picks another:
 
 The keyboard's own dictation (its mic key) works in every box too. On a computer,
 `Ctrl+Alt+Space` (or `Ctrl+Alt+Enter`) dictates into the chat's box: hold it, or tap it
-and tap again. The phone asks for the microphone the first time you dictate, and a
-microphone that gives only silence once held is opened afresh on the spot. The host
-logs each dictation (`journalctl --user -u amarchy-app`).
+and tap again. The phone asks for the microphone the first time you dictate, in that
+very tap (an iPhone starts the audio only once your finger lifts, so the microphone is
+asked for first, and the audio started on the lift), and a microphone that gives only
+silence once held is opened afresh on the spot. `amarchy dictation log` lists each
+dictation, and each one whose microphone didn't start, with why.
 
 How the host did on recordings with known text, on this project's 16-vCPU server
 (October 2026): 2.5% of the words wrong in Latin American Spanish (Google's FLEURS, 15
@@ -582,6 +584,56 @@ amarchy secret ask NAME [--why "..."] [--all] [--again]   # from a chat's Claude
 amarchy secret list [--json]                              # names, and for which project
 amarchy secret set NAME [--project <name>|--all]          # its value from stdin
 amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
+```
+
+## Automations
+
+**Automations** (the clock beside the gear in the phone's list; on a computer the
+clock in the list's bar, or **Automations** in the Amarchy menu; and Settings) lists
+what runs for you by itself on the host: every systemd user timer, your projects'
+scheduled jobs and amarchy's own (**Sleep**, **Updates**). Grouped by whose it is (the
+project its unit file or its program is in, amarchy's own last), each one says what it
+does, when it runs ("Every 15 minutes, 7:00–21:45", "Weekdays at 18:00"), when it runs
+next and how the last run went. The clock wears a red dot while one's last run failed.
+Tap one for:
+
+- what it does, when, next, its last run (when, ok or why it failed, how long it took)
+  and its last ten runs as marks;
+- **Run now**: its job, at once, whatever its schedule;
+- **Pause…** (it asks first) and **Resume**. Paused, it doesn't run, not even after a
+  restart, until you resume it. Nothing is changed or removed: the timer is stopped,
+  and a drop-in of amarchy's own (`~/.config/systemd/user/<timer>.d/zz-amarchy-paused.conf`)
+  keeps it from starting again, even when a project's install enables it. Uninstalling
+  amarchy leaves what you paused paused, and says how to resume each one;
+- the timers it armed for itself, under it (a meeting's push and ring under the job
+  that reads the calendar), rather than in the list;
+- its recent log (the journal's lines for it, systemd's own in grey, errors in red).
+
+It's generic: amarchy knows nothing of a project's jobs. A unit explains itself with
+lines systemd ignores (any `X-` key), in its timer or its service:
+
+```ini
+[Unit]
+Description=Jaken: heartbeat every 15 minutes, 07:00-21:45
+X-Amarchy-Name=Heartbeat
+X-Amarchy-About=Quick checks every 15 minutes during the day, silent unless something's up.
+# Also, if you like:
+# X-Amarchy-When=Every 15 minutes, in the day     (else said from OnCalendar=)
+# X-Amarchy-Owner=Jaken                           (else the project the unit is in)
+# X-Amarchy-Children=meet-*.timer                 (the timers it makes, with systemd-run: shown under it)
+```
+
+Without them, `Description=` is its name (less the project's "Jaken: " before it). A
+timer made with `systemd-run` shows its `--description`. The system's own timers
+(`/usr/lib/systemd/user`, as systemd-tmpfiles-clean) aren't listed unless they have
+such lines.
+
+```sh
+amarchy automations [--json]          # each one, as the app lists them
+amarchy automations log <timer>       # its last lines in the journal
+amarchy automations run <timer>       # run its job now
+amarchy automations pause <timer>     # until it's resumed, even across restarts
+amarchy automations resume <timer>    # back on its schedule
 ```
 
 ## Your assistant
@@ -833,6 +885,11 @@ amarchy dictation setup               fetch the speech model (Parakeet TDT 0.6B 
 amarchy dictation remove              delete the model again
 amarchy dictation log [--json]        the last dictations and how each went
 amarchy dictation transcribe <file>   write down a recording, as a dictation would be
+
+Automations:
+amarchy automations [--json]          what runs by itself (systemd user timers): what, when, next, last
+amarchy automations log <timer>       its last lines in the journal
+amarchy automations run|pause|resume <timer>   run it now; stop it until resumed; back on its schedule
 
 Secrets:
 amarchy secret ask <NAME> [--why <text>] [--all] [--again] [--timeout <seconds>]

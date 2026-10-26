@@ -83,6 +83,7 @@ class Dictate {
         if (this.down === null || this.down === undefined) return;
         const tapped = e.timeStamp - this.down < DICTATE_TAP;
         this.down = null;
+        if (end === "pointerup" && this.run && this.run.way === "host") micNudge();      // the lift starts the phone's audio
         if (tapped && end === "pointerup" && this.run && this.run.held) {
           this.locked = true;
           this.say("Listening… tap the mic when you're done");
@@ -183,6 +184,7 @@ class Dictate {
       await micOpen();
     } catch (e) {
       this.done(r);
+      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: ${e.name === "NotAllowedError" ? "not allowed" : e.message}` });
       toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in Settings"
                                         : `The microphone didn't start: ${e.message}`);
       return;
@@ -247,6 +249,7 @@ class Dictate {
           const res = await fetch("/api/dictate", { headers: { Accept: "application/json" } });
           const d = await res.json();
           toast(d.ready ? "Dictation didn't connect" : `Dictation isn't set up on the host: ${d.how}`);
+          if (d.ready) dictationReport({ engine: "host", error: "the dictation's connection closed before any answer" });
         } catch (err) {
           toast("Can't reach Amarchy");
         }

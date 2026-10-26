@@ -160,6 +160,17 @@ commands have each one as an environment variable, $NAME):
   amarchy secret forget <NAME> [--project <name>|--all]
                                         drop one (also: secret rm)
 
+Automations (what runs for you by itself: every systemd user timer on this machine, your projects' jobs and
+amarchy's own; a unit can explain itself with X-Amarchy-Name=, X-Amarchy-About=, X-Amarchy-When=,
+X-Amarchy-Owner= and X-Amarchy-Children=<glob> lines, which systemd ignores; docs/guide.md, "Automations"):
+  amarchy automations [--json]          each one: what it does, when it runs, its next run and how the last
+                                        went, the one-off timers a job makes under it
+  amarchy automations log <timer>       its last lines in the journal
+  amarchy automations run <timer>       run its job now (its service), whatever its schedule
+  amarchy automations pause <timer>     stop it until it's resumed, even across restarts (a drop-in of
+                                        amarchy's own; no unit is changed or removed)
+  amarchy automations resume <timer>    back on its schedule
+
 Terminals:
   amarchy terminals [on|off]            Show terminals: whether the app shows the sessions' terminals (the
                                         Terminal tab, the panel beside the chat). Off on a new install,
@@ -247,6 +258,7 @@ State: ~/.local/state/amarchy/.
 import base64
 import calendar
 import fcntl
+import fnmatch
 import hashlib
 import hmac
 import json
@@ -4535,6 +4547,499 @@ def cmd_held(sid):
     return 0 if session(sid) and not (CLOSING / f"{sid}.json").exists() else 1
 
 
+# ------------------------------------------------------------------ automations
+#
+# What runs for you by itself: every systemd user timer on this machine (the
+# jobs your projects set up, amarchy's own), each with what it does in plain
+# words, when it runs, how its last runs went and its log, and Run now, Pause
+# and Resume (amarchy automations, the app's Automations).
+#
+# It's generic: nothing here knows a project's jobs. A unit says what it is
+# with its Description= (the name), and, if it likes, keys systemd itself
+# ignores (any X- key), in the timer or its service:
+#
+#   X-Amarchy-Name=Heartbeat                  the name, short (else Description=)
+#   X-Amarchy-About=What it does and why.     the plain explanation
+#   X-Amarchy-When=Every 15 minutes, 7–22     the schedule in words (else made from OnCalendar=)
+#   X-Amarchy-Owner=Jaken                     whose it is (else the project its file is in)
+#   X-Amarchy-Children=meet-*.timer           the timers it makes (systemd-run): shown under it
+#
+# Pausing never removes a unit or a link to one (systemctl disable would take a
+# linked unit's file away with it): the timer is stopped, and a drop-in of its
+# own (AUTOMATION_PAUSE) keeps it from starting again, at login and when
+# anything enables it, until Resume takes the drop-in away and starts it.
+
+USER_UNITS = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "systemd/user"
+AUTOMATION_PAUSE = "zz-amarchy-paused.conf"
+VENDOR_UNITS = ("/usr/", "/lib/", "/etc/")      # where the system's units are, not yours
+AUTOMATION_RUNS = 10        # the runs each one shows, latest first
+AUTOMATION_LOG = 60         # lines of its log
+AUTOMATION_UNIT = r"[A-Za-z0-9:_.@\\-]+\.timer"
+_automations_cache = {"at": 0, "list": None}
+AUTOMATIONS_FRESH = 15      # s a list is good for (the app's dot asks every few minutes)
+
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEKDAY_NAMES = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+
+
+def systemctl_user(*args):
+    return sh("systemctl", "--user", *args)
+
+
+def unit_props(units, props):
+    """systemctl show for several units at once: {Id: {prop: value}}, times
+    as unix seconds (0: never)."""
+    if not units:
+        return {}
+    r = systemctl_user("show", "--timestamp=unix", "-p", ",".join(["Id"] + props), "--", *units)
+    out = {}
+    for block in r.stdout.split("\n\n"):
+        d = {}
+        for line in block.splitlines():
+            k, _, v = line.partition("=")
+            if k == "TimersCalendar" or k == "TimersMonotonic":
+                d.setdefault(k, []).append(v)
+            else:
+                d[k] = v
+        if d.get("Id"):
+            out[d["Id"]] = d
+    return out
+
+
+def unix_time(v):
+    """A systemctl show --timestamp=unix value ("@1792977464") in seconds, or None."""
+    m = re.fullmatch(r"@(\d+(?:\.\d+)?)", (v or "").strip())
+    return float(m.group(1)) if m and float(m.group(1)) > 0 else None
+
+
+def unit_keys(*files):
+    """The X-Amarchy-* keys in a unit's files (its own, then its drop-ins,
+    later ones winning): {"name": ..., "about": ...}."""
+    keys = {}
+    for f in files:
+        try:
+            text = Path(f).read_text(errors="replace")
+        except OSError:
+            continue
+        text = re.sub(r"\\\n[ \t]*", " ", text)        # a line continued on the next
+        for line in text.splitlines():
+            m = re.match(r"\s*X-Amarchy-([A-Za-z]+)\s*=\s*(.*?)\s*$", line)
+            if m:
+                keys[m.group(1).lower()] = m.group(2)
+    return keys
+
+
+def timespan_s(text):
+    """A systemd timespan ("1min 30s", "5min", "2h") in seconds, or None."""
+    units = {"us": 1e-6, "ms": 1e-3, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "hr": 3600,
+             "d": 86400, "w": 604800}
+    total, found = 0, False
+    for n, u in re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", text or ""):
+        if u not in units and u != "":
+            return None
+        total += float(n) * units.get(u or "s", 1)
+        found = True
+    return total if found else None
+
+
+def span_words(s):
+    """Seconds, as said: 30 seconds, 5 minutes, 2 hours, 1 day."""
+    for size, one in ((86400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
+        if s >= size and s % size == 0 or size == 1:
+            n = round(s / size)
+            return f"{n} {one}" if n == 1 else f"{n} {one}s"
+    return f"{s:g} seconds"
+
+
+def every_words(s):
+    return f"Every {span_words(s)}" if span_words(s).split()[0] != "1" else f"Every {span_words(s).split()[1]}"
+
+
+def calendar_part(text, top):
+    """One field of an OnCalendar= time ("*", "7", "07..21", "00/15",
+    "1,3"): the values it takes in 0..top-1, and its step if it's one."""
+    values, step = set(), None
+    for piece in text.split(","):
+        m = re.fullmatch(r"(\*|\d+)(?:\.\.(\d+))?(?:/(\d+))?", piece)
+        if not m:
+            return None, None
+        a = 0 if m.group(1) == "*" else int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else (top - 1 if m.group(1) == "*" or m.group(3) else a)
+        step = int(m.group(3)) if m.group(3) else step
+        values.update(range(a, b + 1, int(m.group(3) or 1)))
+    return sorted(v for v in values if v < top), step
+
+
+def weekday_words(text):
+    """An OnCalendar= weekday part ("Mon..Fri", "Fri", "Sat,Sun") in words."""
+    days = set()
+    for piece in text.split(","):
+        m = re.fullmatch(r"([A-Za-z]{3})[a-z]*(?:\.\.([A-Za-z]{3})[a-z]*)?", piece)
+        if not m or m.group(1).title() not in WEEKDAYS or (m.group(2) and m.group(2).title() not in WEEKDAYS):
+            return text
+        a = WEEKDAYS.index(m.group(1).title())
+        b = WEEKDAYS.index(m.group(2).title()) if m.group(2) else a
+        days.update(range(a, b + 1))
+    days = sorted(days)
+    if days == list(range(5)):
+        return "Weekdays"
+    if days == [5, 6]:
+        return "Weekends"
+    if len(days) == 7:
+        return "Every day"
+    if len(days) == 1:
+        return WEEKDAY_NAMES[days[0]]
+    return ", ".join(WEEKDAYS[d] for d in days)
+
+
+def calendar_words(expr):
+    """An OnCalendar= expression as systemd normalizes it ("Mon..Fri
+    *-*-* 18:00:00", "*-*-* 07..21:00/15:00") in words ("Weekdays at
+    18:00", "Every 15 minutes, 7:00–21:45"), or the expression itself."""
+    parts = expr.split()
+    if parts and not re.match(r"[\d*]", parts[-1].split(":")[0][:1] or "x"):
+        parts = parts[:-1]          # a timezone (UTC): the times given are its
+    dow = parts.pop(0) if parts and re.match(r"[A-Za-z]", parts[0]) else None
+    if len(parts) != 2 or parts[1].count(":") != 2:
+        return expr
+    date, clock = parts
+    if not re.fullmatch(r"\*-\*-\*", date):
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            return "Once"
+        return expr
+    hours, hstep = calendar_part(clock.split(":")[0], 24)
+    mins, mstep = calendar_part(clock.split(":")[1], 60)
+    if hours is None or mins is None or not hours or not mins:
+        return expr
+    days = weekday_words(dow) if dow else "Every day"
+    if mstep and len(mins) > 1:
+        often = f"every {mstep} minutes"
+        if len(hours) == 24:
+            text = often
+        elif hours == list(range(hours[0], hours[-1] + 1)):
+            text = f"{often}, {hours[0]}:{mins[0]:02d}–{hours[-1]}:{mins[-1]:02d}"
+        else:
+            return expr
+    elif len(hours) == 24 and len(mins) == 1:
+        text = "every hour" + (f", at :{mins[0]:02d}" if mins[0] else "")
+    elif hstep and len(hours) > 1 and len(mins) == 1:
+        text = f"every {hstep} hours" + (f", at :{mins[0]:02d}" if mins[0] else "")
+    elif len(hours) * len(mins) <= 4:
+        times = [f"{h}:{m:02d}" for h in hours for m in mins]
+        text = "at " + (" and ".join(times) if len(times) <= 2 else ", ".join(times[:-1]) + " and " + times[-1])
+        return f"{days} {text}"
+    else:
+        return expr
+    return f"{text[0].upper()}{text[1:]}" if days == "Every day" else f"{days}, {text}"
+
+
+def schedule_words(calendars, monotonic):
+    """When a timer runs, in words, from systemctl show's TimersCalendar and
+    TimersMonotonic."""
+    said = []
+    for c in calendars or []:
+        m = re.search(r"OnCalendar=([^;]+?)\s*;", c)
+        if m:
+            said.append(calendar_words(m.group(1).strip()))
+    mono = {}
+    for c in monotonic or []:
+        m = re.search(r"\{\s*(\w+)=([^;]+?)\s*;", c)
+        if m:
+            mono[m.group(1)] = timespan_s(m.group(2))
+    every = mono.get("OnUnitActiveUSec") or mono.get("OnUnitInactiveUSec")
+    if every:
+        said.append(every_words(every))
+    elif not said:
+        for k, after in (("OnBootUSec", "after the computer starts"), ("OnStartupUSec", "after you log in"),
+                         ("OnActiveUSec", "after it's started")):
+            if mono.get(k):
+                said.append(f"Once, {span_words(mono[k])} {after}")
+                break
+    return "; ".join(dict.fromkeys(said)) or "When something starts it"
+
+
+def automation_runs(service):
+    """Its last runs, from the journal, latest first: [{"at", "ok", "result"}]."""
+    r = sh("journalctl", "--user", f"USER_UNIT={service}", "JOB_TYPE=start", "-n", str(AUTOMATION_RUNS * 3),
+           "-o", "json", "--output-fields=JOB_RESULT,__REALTIME_TIMESTAMP", "--no-pager", "-q")
+    runs = []
+    for line in reversed(r.stdout.splitlines()):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        res = e.get("JOB_RESULT")
+        if not res or res == "skipped":      # "Starting…", or a condition said no
+            continue
+        runs.append({"at": int(e.get("__REALTIME_TIMESTAMP", 0)) / 1e6, "ok": res == "done", "result": res})
+        if len(runs) >= AUTOMATION_RUNS:
+            break
+    return runs
+
+
+def result_words(result, status):
+    return {"exit-code": f"exited with {status}" if status else "failed", "timeout": "took too long",
+            "signal": "was killed", "core-dump": "crashed", "watchdog": "stopped answering",
+            "start-limit-hit": "failed too often in a row", "resources": "couldn't start",
+            "failed": "failed", "dependency": "something it needs failed"}.get(result, result or "failed")
+
+
+def automation_owner(keys, service_file, exec_path, tid, text):
+    """Whose a job is: X-Amarchy-Owner, amarchy's own, else the project its
+    file (or its program) is in, else this computer's."""
+    if keys.get("owner"):
+        return keys["owner"]
+    if tid.startswith("amarchy-") and "Installed by amarchy" in text:
+        return "Amarchy"
+    for p in (service_file, exec_path):
+        if not p or not os.path.isabs(p):
+            continue
+        try:
+            rel = Path(os.path.realpath(p)).relative_to(WORK)
+        except ValueError:
+            continue
+        if rel.parts and not rel.parts[0].startswith("."):
+            return project_name(rel.parts[0])
+        if len(rel.parts) > 2 and rel.parts[0] == ".worktrees":
+            return project_name(rel.parts[1])
+    return "This computer"
+
+
+def automation_list(fresh=False):
+    """Every timer of yours, as the app shows it: grouped (children under the
+    one that makes them), latest first within nothing (the app orders them)."""
+    if not fresh and _automations_cache["list"] is not None and time.time() - _automations_cache["at"] < AUTOMATIONS_FRESH:
+        return _automations_cache["list"]
+    ids, nexts = set(), {}
+    r = systemctl_user("list-timers", "--all", "--output=json", "--no-pager")      # next, monotonic ones' too
+    try:
+        for u in json.loads(r.stdout or "[]"):
+            ids.add(u["unit"])
+            if isinstance(u.get("next"), (int, float)) and u["next"] > 0:
+                nexts[u["unit"]] = u["next"] / 1e6
+    except (ValueError, KeyError, TypeError):
+        pass
+    r = systemctl_user("list-unit-files", "--type=timer", "--output=json", "--no-pager")
+    try:
+        ids.update(u["unit_file"] for u in json.loads(r.stdout or "[]")
+                   if "@." not in u["unit_file"] and u.get("state") not in ("masked", "transient"))
+    except (ValueError, KeyError, TypeError):
+        pass
+    ids = sorted(i for i in ids if i.endswith(".timer") and "@." not in i)
+    timers = unit_props(ids, ["Description", "Unit", "LastTriggerUSec", "NextElapseUSecRealtime", "TimersCalendar",
+                              "TimersMonotonic", "ActiveState", "LoadState", "UnitFileState", "FragmentPath",
+                              "DropInPaths", "Transient"])
+    services = unit_props(sorted({t.get("Unit") for t in timers.values() if t.get("Unit")}),
+                          ["Description", "ActiveState", "SubState", "Result", "ExecMainStatus", "FragmentPath",
+                           "DropInPaths", "InactiveExitTimestamp", "InactiveEnterTimestamp", "ExecStart", "LoadState"])
+    runs = {}
+    threads = [threading.Thread(target=lambda s=s: runs.__setitem__(s, automation_runs(s)), daemon=True)
+               for s in services]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    out = []
+    for tid, t in timers.items():
+        if t.get("LoadState") != "loaded":
+            continue
+        tfiles = [f for f in [t.get("FragmentPath"), *(t.get("DropInPaths") or "").split()] if f]
+        if t.get("FragmentPath", "").startswith(VENDOR_UNITS) and not unit_keys(*tfiles):
+            continue        # the system's own housekeeping (systemd-tmpfiles-clean), not a job of yours
+        sid = t.get("Unit") or tid[:-len(".timer")] + ".service"
+        s = services.get(sid, {})
+        sfiles = [f for f in [s.get("FragmentPath"), *(s.get("DropInPaths") or "").split()] if f]
+        keys = {**unit_keys(*sfiles), **unit_keys(*tfiles)}       # the timer's own win
+        text = ""
+        try:
+            text = Path(t.get("FragmentPath") or "").read_text(errors="replace") if t.get("FragmentPath") else ""
+        except OSError:
+            pass
+        exec_path = (re.search(r"path=([^ ;]+)", s.get("ExecStart") or "") or [None, None])[1]
+        transient = t.get("Transient") == "yes"
+        name = keys.get("name") or t.get("Description") or s.get("Description") or tid
+        if name.startswith("[systemd-run]"):        # made without a description: what it runs, then
+            name = s.get("Description") or name
+            argv = re.search(r"argv\[\]=([^;]+)", s.get("ExecStart") or "")
+            words = argv.group(1).split() if argv else []
+            said = " ".join(w for w in words[1:] if not w.startswith("-"))
+            name = f"{Path(words[0]).name}{': ' if said else ''}{said[:60]}{'…' if len(said) > 60 else ''}" if words else tid
+        owner = automation_owner(keys, s.get("FragmentPath"), exec_path, tid, text)
+        if not keys.get("name") and name.lower().startswith(owner.lower() + ":"):
+            name = name[len(owner) + 1:].strip()
+            name = name[:1].upper() + name[1:]
+        paused = any(Path(p).name == AUTOMATION_PAUSE for p in (t.get("DropInPaths") or "").split()) \
+            or (USER_UNITS / f"{tid}.d" / AUTOMATION_PAUSE).exists()
+        running = s.get("ActiveState") in ("activating", "active", "reloading") and s.get("SubState") not in ("exited",)
+        state = "running" if running else "paused" if paused else "waiting" if t.get("ActiveState") == "active" else "stopped"
+        hist = runs.get(sid) or []
+        started, ended = unix_time(s.get("InactiveExitTimestamp")), unix_time(s.get("InactiveEnterTimestamp"))
+        last = {"at": None, "ok": None, "why": None, "took_s": None}
+        if hist:
+            last.update(at=hist[0]["at"], ok=hist[0]["ok"])
+        if started and (not hist or started >= hist[0]["at"] - 5):
+            last["at"] = started
+            if ended and ended >= started:
+                last["ok"] = s.get("Result") == "success"
+                last["took_s"] = round(ended - started, 1)
+        if last["ok"] is False:
+            last["why"] = result_words(s.get("Result") if s.get("Result") != "success" else (hist[0]["result"] if hist else None),
+                                       s.get("ExecMainStatus") if s.get("ExecMainStatus") not in ("0", "") else None)
+        out.append({
+            "id": tid, "service": sid, "name": name, "about": keys.get("about") or "",
+            "description": t.get("Description") if t.get("Description") != name else s.get("Description") or "",
+            "owner": owner, "when": keys.get("when") or schedule_words(t.get("TimersCalendar"), t.get("TimersMonotonic")),
+            "next": None if paused or state == "stopped" else nexts.get(tid) or unix_time(t.get("NextElapseUSecRealtime")),
+            "last_trigger": unix_time(t.get("LastTriggerUSec")), "last": last,
+            "runs": [{"at": x["at"], "ok": x["ok"]} for x in hist], "state": state, "transient": transient,
+            "children_glob": keys.get("children", "").split(), "children": [],
+            "can_pause": not transient, "parent": None,
+        })
+    # The ones a job makes go under it; one-offs nobody claims stay on their own.
+    by_id = {a["id"]: a for a in out}
+    for a in out:
+        for g in a["children_glob"]:
+            for c in out:
+                if c is not a and c["parent"] is None and fnmatch_glob(c["id"], g):
+                    c["parent"] = a["id"]
+                    a["children"].append(c["id"])
+    for a in out:
+        a.pop("children_glob")
+        a["children"].sort(key=lambda c: by_id[c]["next"] or 1e18)
+    _automations_cache.update(at=time.time(), list=out)
+    return out
+
+
+def fnmatch_glob(name, pattern):
+    return fnmatch.fnmatchcase(name, pattern) or fnmatch.fnmatchcase(name, pattern + ".timer")
+
+
+def automation_find(name):
+    """A timer by its name, with or without .timer, or None."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    tid = name if name.endswith(".timer") else f"{name}.timer"
+    if not re.fullmatch(AUTOMATION_UNIT, tid):
+        return None
+    return next((a for a in automation_list(fresh=True) if a["id"] == tid), None)
+
+
+def automation_log(a, lines=AUTOMATION_LOG):
+    """Its last lines in the journal, the program's and systemd's about it:
+    [{"at", "text", "error", "from"}], oldest first."""
+    r = sh("journalctl", "--user", "-u", a["service"], "-n", str(lines), "-o", "json", "--no-pager", "-q",
+           "--output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER,__REALTIME_TIMESTAMP")
+    out = []
+    for line in r.stdout.splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        msg = e.get("MESSAGE")
+        if isinstance(msg, list):        # not text: bytes
+            msg = bytes(x for x in msg if isinstance(x, int) and 0 <= x < 256).decode(errors="replace")
+        if not isinstance(msg, str):
+            continue
+        try:
+            prio = int(e.get("PRIORITY", 6))
+        except ValueError:
+            prio = 6
+        out.append({"at": int(e.get("__REALTIME_TIMESTAMP", 0)) / 1e6, "text": msg[:2000], "error": prio <= 3,
+                    "from": e.get("SYSLOG_IDENTIFIER") or ""})
+    return out
+
+
+def automation_act(a, action):
+    """Run now, pause or resume one: None, or why not."""
+    _automations_cache["list"] = None
+    if action == "run":
+        if a["state"] == "running":
+            return f"{a['name']} is running already"
+        r = systemctl_user("start", "--no-block", "--", a["service"])
+        return None if r.returncode == 0 else (r.stderr.strip() or f"{a['service']} didn't start")
+    if action not in ("pause", "resume"):
+        return "run, pause or resume"
+    if a["transient"]:
+        return "a one-off: it runs once, at its time, and can't be paused"
+    drop = USER_UNITS / f"{a['id']}.d" / AUTOMATION_PAUSE
+    if action == "pause":
+        write_file(drop, "# Paused in amarchy (Automations): this timer doesn't start, not even at login, until it's\n"
+                         "# resumed there (amarchy automations resume), or this file is deleted (then:\n"
+                         f"# systemctl --user daemon-reload && systemctl --user start {a['id']}).\n"
+                         "[Unit]\n"
+                         f"ConditionPathExists=!{drop}\n")
+        systemctl_user("daemon-reload")
+        r = systemctl_user("stop", "--", a["id"])
+        return None if r.returncode == 0 else (r.stderr.strip() or "it didn't stop")
+    try:
+        drop.unlink()
+    except FileNotFoundError:
+        pass
+    try:
+        drop.parent.rmdir()          # only if nothing else is in it
+    except OSError:
+        pass
+    systemctl_user("daemon-reload")
+    r = systemctl_user("start", "--", a["id"])
+    return None if r.returncode == 0 else (r.stderr.strip() or "it didn't start")
+
+
+def ago_words(t, now=None):
+    """A time as `amarchy automations` says it: 12:45, or Mon 07:30 further away."""
+    if not t:
+        return "-"
+    lt = time.localtime(t)
+    return time.strftime("%H:%M" if time.strftime("%F", lt) == time.strftime("%F") else "%a %d %b %H:%M", lt)
+
+
+def cmd_automations(args):
+    what = args[0] if args and not args[0].startswith("-") else "list"
+    rest = [a for a in args[1:] if not a.startswith("-")] if args and not args[0].startswith("-") else []
+    if what == "list":
+        items = automation_list(fresh=True)
+        if "--json" in args:
+            print(json.dumps(items, indent=1))
+            return 0
+        if not items:
+            print("No automations: no systemd user timers on this machine.")
+            return 0
+        by_id = {a["id"]: a for a in items}
+        for owner in sorted({a["owner"] for a in items}, key=lambda o: (o == "Amarchy", o == "This computer", o)):
+            print(owner)
+            for a in sorted((a for a in items if a["owner"] == owner and not a["parent"]), key=lambda a: a["name"].lower()):
+                last = a["last"]
+                said = "never" if not last["at"] else f"{ago_words(last['at'])} " + (
+                    "ok" if last["ok"] else "running" if last["ok"] is None else f"FAILED ({last['why']})")
+                print(f"  {a['name']}  [{a['id']}]{'  PAUSED' if a['state'] == 'paused' else ''}")
+                if a["about"]:
+                    print(f"    {a['about']}")
+                print(f"    {a['when']} · next {ago_words(a['next'])} · last {said}")
+                for c in a["children"]:
+                    c = by_id[c]
+                    print(f"      {ago_words(c['next'])}  {c['name']}")
+        return 0
+    if what in ("log", "run", "pause", "resume"):
+        if len(rest) != 1:
+            print(usage("automations"), file=sys.stderr)
+            return 1
+        a = automation_find(rest[0])
+        if not a:
+            return fail(f"no automation {rest[0]} (amarchy automations lists them)")
+        if what == "log":
+            for line in automation_log(a):
+                print(f"{time.strftime('%F %T', time.localtime(line['at']))} {line['from']}: {line['text']}")
+            return 0
+        why = automation_act(a, what)
+        if why:
+            return fail(why)
+        print({"run": f"{a['name']} started", "pause": f"{a['name']} paused: it won't run until you resume it",
+               "resume": f"{a['name']} resumed"}[what])
+        return 0
+    print(usage("automations"), file=sys.stderr)
+    return 1
+
+
 # ------------------------------------------------------------------ the app
 #
 # `amarchy app`: your sessions on your phone, a web app (app/) you add to the
@@ -8334,12 +8839,13 @@ def app_handler(st, users, address):
 
         def dictate_logged(self, data):
             """How a dictation the browser wrote down itself (its own speech
-            recognition) went, for amarchy dictation log."""
+            recognition) went, or why one for the host never reached it (the
+            microphone didn't start), for amarchy dictation log."""
             def num(k, most):
                 v = data.get(k)
                 return round(min(float(v), most), 1) if isinstance(v, (int, float)) and v >= 0 else None
             lang = str(data.get("lang") or "")[:20]
-            dictate_log({"engine": "device", "device": device_name(self.headers.get("User-Agent"), bool(data.get("standalone"))),
+            dictate_log({"engine": "host" if data.get("engine") == "host" else "device", "device": device_name(self.headers.get("User-Agent"), bool(data.get("standalone"))),
                          "lang": lang, "said_s": num("said_s", 3600), "wait_ms": num("wait_ms", 600000),
                          "text": str(data.get("text") or "")[:5000],
                          **({"error": str(data["error"])[:300]} if data.get("error") else {})})
@@ -8442,6 +8948,13 @@ def app_handler(st, users, address):
                 return
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
+            if path == "/api/automations":      # what runs by itself (see "automations")
+                return self.send(200, {"automations": automation_list(), "at": time.time()})
+            if path == "/api/automations/log":
+                a = automation_find((args.get("id") or [""])[0])
+                if not a:
+                    return self.error(404, "no such automation")
+                return self.send(200, {"log": automation_log(a)})
             # The wide layout's side panel (desk.js, B3): what a session changed, and its details.
             # The composer's (phase C2): its / menu, models and mode; an image
             # in what you said.
@@ -8703,6 +9216,14 @@ def app_handler(st, users, address):
                 return self.assistant(None, data)
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
+            if self.path == "/api/automations":     # {id, action: run|pause|resume}
+                a = automation_find(data.get("id") if isinstance(data.get("id"), str) else "")
+                if not a:
+                    return self.error(404, "no such automation")
+                why = automation_act(a, data.get("action"))
+                if why:
+                    return self.error(409, why)
+                return self.send(200, {"automation": automation_find(a["id"])})
             if self.path == "/api/dictate/setup":
                 return self.dictate_fetch()
             if self.path == "/api/new":
@@ -11699,6 +12220,7 @@ OPTIONS = {
     "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),
     "dictation": ({"--status", "--json"}, set(), set()),
+    "automations": ({"--json"}, set(), set()),
     "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
@@ -11857,6 +12379,8 @@ def main(argv):
         return cmd_dictation(args)
     elif cmd == "secret":
         return cmd_secret(args)
+    elif cmd == "automations":
+        return cmd_automations(args)
     elif cmd == "terminals":
         return cmd_terminals(args)
     elif cmd == "protocol-check":

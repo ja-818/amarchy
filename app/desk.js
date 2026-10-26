@@ -438,7 +438,7 @@ function deskStart() {
     desk.toolbar = h("div", { class: "toolbar" },
       h("label", { class: "searchbox" }, glyph("search"), desk.search,
         h("span", { class: "hint" }, "Ctrl+Alt+S")),
-      organizeBtn, desk.organize),
+      organizeBtn, automationsButton("control organize"), desk.organize),      // automations.js
     h("div", { class: "scroll" }, desk.listEl));
   desk.head = h("header", { class: "desk-head" });
   desk.chatSlot = h("div", { class: "desk-chat" });
@@ -1795,6 +1795,7 @@ function deskMenu() {
       { label: "Group & sort", act: () => organizePicker() },
       { label: "Close one…", act: () => picker({ title: "Close which chat?", items: ((app.view && app.view.sessions) || []).map((x) =>
         ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
+    { label: "Automations", icon: "clock", detail: "what runs by itself", act: () => automationsSheet() },
     { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
       { label: "Notifications, layout…", act: () => openSettings() },
       { label: "Theme, font, wallpaper…", key: "Ctrl+Alt+T", act: () => openLook() },

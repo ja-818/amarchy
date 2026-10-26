@@ -143,6 +143,12 @@ command's usage without running it (an option it doesn't know fails instead).
   below).
 - `amarchy dictation`: whether the host can write the user's dictation down
   (the mic in the composer). If they say dictation doesn't work, check it first.
+- `amarchy automations` / `amarchy automations log <timer>`: what runs by itself
+  on the host (every systemd user timer: what it does, when, next, how the last
+  run went) and a job's log; the user sees the same in the app's Automations.
+  When you set up a timer for the user, give it `X-Amarchy-Name=` and
+  `X-Amarchy-About=` lines (plain words: what it does and why) so it reads well
+  there; `X-Amarchy-Children=<glob>` puts the timers it makes under it.
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the
@@ -196,6 +202,8 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   running from that worktree (dev servers started in the background too),
   removes the worktree, and refuses if it has uncommitted changes. Never add
   `--force` without explicit approval: it discards them.
+- `amarchy automations run|pause|resume <timer>`: run a job now, or pause it
+  (until resumed, even across restarts) and resume it.
 - `amarchy alerts`, `amarchy sound`, `amarchy theme`, `amarchy assistant`:
   what the user hears and sees in the app. Change them only when asked.
 
