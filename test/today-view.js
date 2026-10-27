@@ -221,6 +221,17 @@ async function phone(browser, port) {
   check(where, await until(p, () => !!document.querySelector(".home-tabs .tab.on[data-tab=today]") && !!document.querySelector(".today:not([hidden]) .today-part")), "opens on Today");
   check(where, /4/.test(await text(p, ".home-tabs .tab[data-tab=today]")), "its tab counts your move (2 asks, 2 loops)");
   check(where, !!(await p.$(".list-view .dock .start-chat")), "the new chat stays under it");
+  // It scrolls, and stays where you scrolled it while the list changes under it.
+  const kept = await p.evaluate(async () => {
+    const sc = document.querySelector(".list-view .scroll");
+    sc.scrollTop = 300;
+    const was = sc.scrollTop;
+    renderList(); app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, said: "new words" })) }; renderList();
+    await new Promise((r) => setTimeout(r, 50));
+    return { was, now: sc.scrollTop };
+  });
+  check(where, kept.was > 0 && kept.now === kept.was, `it scrolls, and keeps its place as the list changes (${JSON.stringify(kept)})`);
+  await p.evaluate(() => { document.querySelector(".list-view .scroll").scrollTop = 0; });
   await common(p, where);
   await p.evaluate(() => document.querySelector(".home-tabs .tab[data-tab=chats]").click());
   check(where, await until(p, () => !document.querySelector(".list-view .list").hidden && document.querySelector(".today").hidden), "Chats: the list");
@@ -235,12 +246,22 @@ async function wide(browser, port) {
   await p.goto("/");
   await ready(p);
   check(where, await until(p, () => desk.today && !!document.querySelector(".desk-empty:not([hidden]) .today")), "launched: Today in the middle");
-  check(where, /Today/.test(await text(p, ".desk-root .today-row")), "its row above the list");
+  await p.setViewportSize({ width: 1280, height: 520 });
+  const sc = await p.evaluate(() => {
+    const el = document.querySelector(".today-scroll");
+    el.scrollTop = 200;
+    return { top: el.scrollTop, fits: el.clientHeight < window.innerHeight };
+  });
+  check(where, sc.top > 0 && sc.fits, `the middle scrolls (${JSON.stringify(sc)})`);
+  await p.evaluate(() => { document.querySelector(".today-scroll").scrollTop = 0; });
+  await p.setViewportSize({ width: 1280, height: 800 });
+  check(where, /Today/.test(await text(p, ".panel-buttons .today-btn")) && await p.evaluate(() => document.querySelector(".today-btn").classList.contains("on")), "its button over the list, on");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".panel-buttons .control")].map((b) => b.className.split(" ")[1]).join(",")) === "new-chat,today-btn,brand", "the bar: New chat, Today, the cog");
   await common(p, where);
   await p.evaluate(() => go2("proj-work"));
   check(where, await until(p, () => desk.current === "proj-work"), "a chat opened");
-  await p.evaluate(() => document.querySelector(".today-row").click());
-  check(where, await until(p, () => desk.today && !desk.current), "the Today row: Today again");
+  await p.evaluate(() => document.querySelector(".today-btn").click());
+  check(where, await until(p, () => desk.today && !desk.current), "the Today button: Today again");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

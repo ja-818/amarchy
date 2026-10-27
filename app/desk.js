@@ -431,10 +431,14 @@ function deskStart() {
   desk.organize = organizeBox(() => organizeBtn, deskList);
   desk.panel = h("aside", { class: "panel", "aria-label": "Your chats" },
     h("div", { class: "panel-buttons" },
-      desk.brand = h("button", { class: "control brand", title: "Amarchy menu (Ctrl+Alt+M)", onclick: () => deskMenu() },
-                     h("span", { class: "a" }, "Ⓐ"), "Amarchy Menu"),
       // The new chat ("What do you want to do?") in the middle: newSession().
-      h("button", { class: "control new-chat", title: "New chat (Ctrl+Alt+N)", onclick: () => newSession() }, glyph("plus"), "New chat")),
+      h("button", { class: "control new-chat", title: "New chat (Ctrl+Alt+N)", onclick: () => newSession() }, glyph("plus"), "New chat"),
+      // Today (today.js) in the middle, with how many things are your move.
+      desk.todayBtn = h("button", { class: "control today-btn", title: "Today: what to do now (Ctrl+Alt+H)", onclick: () => go("#/today") }, "Today"),
+      // Settings; a right click (or Ctrl+Alt+M), the Amarchy menu.
+      desk.brand = h("button", { class: "control brand", title: "Settings (right click or Ctrl+Alt+M: the Amarchy menu)", "aria-label": "Settings",
+                                 onclick: () => openSettings(), oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } },
+                     h("span", { class: "a" }, glyph("gear")))),
     desk.toolbar = h("div", { class: "toolbar" },
       h("label", { class: "searchbox" }, glyph("search"), desk.search,
         h("span", { class: "hint" }, "Ctrl+Alt+S")),
@@ -591,7 +595,7 @@ function drawEmpty(changed) {
     if (desk.emptyKind !== "today") {
       desk.todayEl = todayBox();
       desk.empty.replaceChildren(h("div", { class: "today-scroll" }, desk.todayEl), h("div", { class: "today-dock" }, desk.newChat.el));
-    } else keepFocus(desk.todayEl, () => desk.todayEl.replaceChildren(...todayNodes()));
+    } else todayFill(desk.todayEl);
     desk.newChat.update();
     if (changed || desk.emptyKind !== "today") requestAnimationFrame(() => {
       if (!desk.current && !document.querySelector(".picker-back, .sheet-back")) desk.newChat.focus();
@@ -1263,7 +1267,12 @@ function deskList() {
   chime(v);
   const waiting = !v ? 0 : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
   document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
-  for (const b of [desk.brand, desk.ball]) b.classList.toggle("lit", waiting > 0);
+  desk.ball.classList.toggle("lit", waiting > 0);
+  // Today's button: on while it's in the middle, with what's your move.
+  const n = todayCount(v);
+  desk.todayBtn.classList.toggle("on", !!desk.today && !desk.current);
+  desk.todayBtn.classList.toggle("lit", n > 0);
+  desk.todayBtn.replaceChildren("Today", n ? h("span", { class: "tab-count" }, String(n)) : "");
   // Show terminals turned on or off: the panel and the header follow.
   const shows = showTerminals();
   if (shows !== desk.shows) { desk.shows = shows; deskLayout(); } else deskHead();
@@ -1304,14 +1313,6 @@ function fillList(list, query, cursorId) {
     el.addEventListener("contextmenu", (e) => { e.preventDefault(); rowMenu(s); });
     return el;
   };
-  // Today first (today.js): what to do now, in the middle.
-  if (v.sessions.length && !query) {
-    const n = todayCount(v), on = !cursorId && desk.today;
-    list.append(h("button", { class: `row today-row${on ? " cursor" : ""}`, type: "button", onclick: () => go("#/today") },
-      glyph("clock", "state"), h("span", { class: "main" }, h("div", { class: "task" }, h("b", {}, "Today")),
-        h("div", { class: "status-line" }, n ? `${n} for you to do` : "Nothing waits on you")),
-      n ? h("span", { class: "tab-count" }, String(n)) : null));
-  }
   // Your assistant first, in a place of its own above the groups, as on the phone.
   const mine = shown.filter((s) => s.assistant);
   if (mine.length)
@@ -1453,7 +1454,7 @@ const DESK_KEYS = {
   KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
   KeyL: () => classicTerminal(),
   KeyR: () => runProject(), KeyC: () => pickCommand(),
-  KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(),
+  KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => go("#/today"),
   ArrowUp: () => desk.current && setPriority(row(desk.current), "up"),
   ArrowDown: () => desk.current && setPriority(row(desk.current), "down"),
   KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(), KeyA: () => barDrop(),
@@ -1798,6 +1799,7 @@ function deskMenu() {
   const items = [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
     { label: "New project", icon: "plus", key: "Ctrl+Alt+P", act: () => newProject() },
+    { label: "Today", icon: "clock", detail: "what to do now", key: "Ctrl+Alt+H", act: () => go("#/today") },
   ];
   if (s) items.push(
     { label: "View", icon: "status", group: () => ({ title: "View", items: viewItems() }) },
@@ -1875,7 +1877,7 @@ function showKeys() {
     ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
     ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
-    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"],
+    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+H", "Today: what to do now"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this chat"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your chats, in a list to pick from"],
     ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],

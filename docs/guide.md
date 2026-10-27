@@ -253,11 +253,12 @@ is a see-through pane over your wallpaper, in your theme and font. A Mac, or any
 computer with Tailscale and a browser, can use the host's chats without anything
 else installed.
 
-- **The list** shows each chat as the phone does. Over it, the amarchy menu and
-  **New chat**: **What do you want to do?** in the middle, a big box with the
+- **The list** shows each chat as the phone does. Over it, **New chat**, **Today**
+  (with how many things are your move; `Ctrl+Alt+H`) and the cog, Settings (a right
+  click on it, or `Ctrl+Alt+M`, opens the Amarchy menu). **New chat** is **What do you want to do?** in the middle, a big box with the
   project and the model under it (the model stays the default of every new chat,
-  as on the phone) and the mic. Above your chats, **Today** puts [Today](#today) in
-  the middle, with **What do you want to do?** under it: it's what the app opens on
+  as on the phone) and the mic. **Today** puts [Today](#today) in the middle, with
+  **What do you want to do?** under it: it's what the app opens on
   (a reload stays on its chat, a link to a chat opens that chat); `Esc` in its empty
   box goes back to the chat you were in. A right click on a chat opens its menu.
 - **Over the chat**: the chat's name (click: rename) and state, and, while the side
@@ -334,6 +335,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
 | `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
+| `Ctrl+Alt+H` | Today: what to do now. |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the chat. |
 | `Ctrl+Alt+T` | The look: theme, font and wallpaper (see [Theme](#theme)). |
@@ -597,7 +599,7 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 ## Today
 
 **Today** is the app's home (the phone's first tab, with **Chats** beside it; on a
-computer the row above your chats, and the middle when no chat is open). It says
+computer its button over your chats, and the middle when no chat is open). It says
 what to do now without reading any chat, in three parts:
 
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes

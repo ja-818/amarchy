@@ -75,9 +75,12 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 }
 .zen .panel { display: none; }
 .panel-buttons { display: flex; gap: 8px; flex: none; }
-/* The menu as wide as its name, New session the rest. */
+/* New chat the width left; Today and Settings (the cog) on the right. */
 .panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
-.panel-buttons .brand { flex: none; }
+.panel-buttons .brand { flex: none; width: 38px; padding: 0; }
+.panel-buttons .brand .glyph svg { width: 18px; height: 18px; }
+.panel-buttons .today-btn { flex: none; font-weight: 700; }
+.panel-buttons .today-btn.on { border-color: var(--accent); color: var(--accent); }
 /* Outline, like the rest of the buttons here: not filled. */
 .panel-buttons .new-chat { flex: 1; min-width: 0; justify-content: center; }
 .panel-buttons .a { font-size: var(--title); line-height: 1; }

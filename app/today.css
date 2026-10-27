@@ -83,12 +83,12 @@
                        border-radius: var(--radius-control); background: var(--control-bg); }
 
 /* A computer's: Today in the middle, the new chat under it. */
-.desk-empty.today-pane { padding: 0; justify-content: stretch; align-items: stretch; }
-.today-pane .today-scroll { flex: 1; overflow-y: auto; }
+/* The middle holds still and Today scrolls in it (min-height: 0, or the
+   column grows with it instead and nothing scrolls). */
+.desk-empty.today-pane { padding: 0; justify-content: stretch; align-items: stretch; min-height: 0; overflow: hidden; }
+.today-pane .today-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .today-pane .today { max-width: 760px; width: 100%; margin: 0 auto; padding: 24px 24px 32px; }
 .today-pane .today-dock { flex: none; max-width: 760px; width: 100%; margin: 0 auto; padding: 0 24px 18px; }
 @media (hover: hover) {
   .today-line-main:hover .task, .today-chat:hover .task { color: var(--accent); }
 }
-/* The list's own row for it, above the chats. */
-.today-row .tab-count { margin-left: auto; }

@@ -531,7 +531,7 @@ function renderList() {
   }
   view.today.hidden = !onToday;
   view.list.hidden = onToday;
-  if (onToday) keepFocus(view.today, () => view.today.replaceChildren(...todayNodes()));
+  if (onToday) todayFill(view.today);      // only when what it shows changed: its scroll stays (today.js)
   view.toolbar.hidden = !v || !v.sessions.length || onToday;
   view.dock.hidden = first;
   view.clear.hidden = !app.query;

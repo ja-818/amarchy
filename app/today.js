@@ -23,6 +23,7 @@ const todayUI = {
   open: new Map(),      // a fold you opened or closed: its key -> open
   answers: new Map(),   // a chat's questions answered here: id -> {key, picks, sent}
   told: new Map(),      // a loop or chat acted on here, until the view says so too: key -> what
+  version: 0,           // bumped by what's tapped here: drawn again (todayFill)
 };
 
 // ---- the facts
@@ -234,7 +235,7 @@ function todayChat(s, kind) {
       h("button", { class: `control${kind === "done" ? " accent" : ""}`, type: "button", onclick: () => confirmClose(s) }, "Close"))
     : null;
   const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
-  const word = kind === "done" ? "Done" : kind === "stale" ? `Quiet ${quiet} days` : kind === "working" ? statusLine(s) : since;
+  const word = kind === "done" ? "Done" : kind === "stale" ? `Quiet ${quiet} days` : kind === "working" ? statusWords(s) : since;
   return h("div", { class: `today-line ${kind}` },
     h("button", { class: "today-line-main", type: "button", onclick: () => todayOpen(s) },
       stateIcon(s),
@@ -284,17 +285,38 @@ function todayCount(v) {
   return p.asks.length + p.blocked.length + p.dueNow.length;
 }
 
-// Drawn again where it shows (the view changed, or something was tapped here).
+// What Today shows of the view: drawn again only when it changes (each
+// second the list may change for something Today doesn't show, and a page
+// drawn again under your finger stops its scroll), or every minute (its
+// times: "since yesterday", "Quiet 3 days").
+function todayKey(v) {
+  if (!v) return `off|${app.failed}`;
+  return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs,
+    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today,
+                                   (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority])]);
+}
+
+// Today into its box, if what it shows changed, keeping where it's scrolled to.
+function todayFill(box, force) {
+  const key = todayKey(app.view);
+  if (!force && box.dataset.key === key) return;
+  box.dataset.key = key;
+  const scroller = box.closest(".scroll, .today-scroll");
+  const top = scroller ? scroller.scrollTop : 0;
+  keepFocus(box, () => box.replaceChildren(...todayNodes()));
+  if (scroller) scroller.scrollTop = top;
+}
+
+// Drawn again where it shows: something was tapped here.
 function todayRedraw() {
-  for (const box of document.querySelectorAll(".today")) {
-    keepFocus(box, () => box.replaceChildren(...todayNodes()));
-  }
+  todayUI.version++;
+  for (const box of document.querySelectorAll(".today")) todayFill(box);
 }
 
 // A box Today fills, kept drawn by the list's changes (app.js refresh).
 function todayBox() {
   const box = h("div", { class: "today" });
-  box.replaceChildren(...todayNodes());
+  todayFill(box);
   return box;
 }
 
