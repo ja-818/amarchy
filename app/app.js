@@ -2289,16 +2289,37 @@ function route() {
   }
 }
 
+// Opening the app is for something new: on the phone, back after a while
+// away (AWAY), the list and its "What do you want to do?" rather than the
+// chat you left; on a computer, launched (not reloaded), the new chat in
+// the middle (start). A tapped notification still goes to its chat, and a
+// chat with something unsent (reloadWait) stays.
+const AWAY = 10 * 60 * 1000;        // ms in the background before the phone comes back to the new chat
+const away = { since: 0, told: 0 };   // hidden since; a notification's go, last (start's message)
+
 document.addEventListener("visibilitychange", () => {
   if (app.desk) return;       // a computer's: its terminals stay as they are
   if (document.visibilityState === "hidden") {
+    away.since = Date.now();
     closeList();
     if (app.session) app.session.close();
   } else {
     openList();
-    if (app.session) app.session.reopen();
+    if (app.session && backFromAway()) go("#/");
+    else if (app.session) app.session.reopen();
   }
 });
+
+function backFromAway() {
+  return away.since && Date.now() - away.since >= AWAY && away.told < away.since && !reloadWait();
+}
+
+// Launched, not reloaded: a reload (or the page after an update, kept)
+// stays where it was.
+function launched() {
+  const nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+  return !kept && !(nav && nav.type === "reload");
+}
 
 // On a computer's wide screen, the wide layout (desk.js): the list, Claude's
 // terminal and the session's beside it; on a phone, the list and the
@@ -2316,7 +2337,10 @@ async function start() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (e) => {
-      if (e.data && e.data.go) go(new URL(e.data.go, location.href).hash || "#/");
+      if (e.data && e.data.go) {
+        away.told = Date.now();
+        go(new URL(e.data.go, location.href).hash || "#/");
+      }
       // A notification about a card: the session's chat shows it (chat.js).
       if (e.data && e.data.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: e.data.ask } }));
     });
@@ -2349,6 +2373,11 @@ async function start() {
   // address never shows it, so it's kept), and the build it is.
   takeKept();
   if (kept && standalone && kept.hash) routed.hash = kept.hash;
+  // A computer's, launched with no chat asked for: the new chat, not the last one.
+  if (app.desk && launched() && !asked && !/^#\/s\//.test(here())) {
+    routed.hash = "#/new";
+    if (!standalone) history.replaceState(null, "", location.pathname + location.search + "#/new");
+  }
   app.build = (document.querySelector('meta[name="app-build"]') || {}).content || null;
   if (app.desk) deskStart();
   else route();

@@ -212,6 +212,10 @@ finished, and its priority on the right. Your assistant's card stays on top (see
   composer's to change). With no project yet, the app opens on a welcome: what it
   does in a sentence, and **Add a project from GitHub** or **Start an empty
   project**.
+- **Opening the app is for something new**: back after 10 minutes or more away,
+  it's on the list and its **What do you want to do?**, not the chat you left
+  (back sooner, the same chat; a notification you tap still opens its chat, and a
+  chat with an answer half given stays).
 - **Share to Amarchy**: a screenshot or photo, from the phone's share sheet to a
   chat. Open Amarchy and **Send it to a chat** is waiting, on every screen of
   yours: **Send** by a chat sends it as it is; a chat tapped opens with it in the
@@ -251,7 +255,9 @@ else installed.
 - **The list** shows each chat as the phone does. Over it, the amarchy menu and
   **New chat**: **What do you want to do?** in the middle, a big box with the
   project and the model under it (the model stays the default of every new chat,
-  as on the phone) and the mic. A right click on a chat opens its menu.
+  as on the phone) and the mic. It's what the app opens on (a reload stays on its
+  chat, a link to a chat opens that chat); `Esc` in its empty box goes back to the
+  chat you were in. A right click on a chat opens its menu.
 - **Over the chat**: the chat's name (click: rename) and state, and, while the side
   panel is closed, its tabs as buttons; `⋯` is the chat's menu.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you drag
