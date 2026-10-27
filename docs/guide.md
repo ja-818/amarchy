@@ -258,13 +258,14 @@ else installed.
   `Ctrl+Alt+H`); the app opens on the one you used last, Tasks at first. **Tasks**
   is the whole window with no list: [Today](#today) with every chat a ticket (its
   project, its state, its goal and what it last said, its question's buttons).
-  Click one and it opens in place, the chat itself live in it: answer, approve,
-  write, **Close chat**, **Open in Chats**, and **Fold** (or `Esc`, or click it
-  again) to put it away. One is open at a time, and the page holds still while it
-  is. Send it something (a message, an answer, an approval) and it folds while it
-  works on it, and the next thing that's your move comes into view, lit, `Enter` to
-  open it. **New chat** (`Ctrl+Alt+N`) puts its box at the top, and the chat it starts
-  opens as a ticket. **Chats** is the rest of this section.
+  Click one (or `Enter`) and the chat takes the whole window, its box ready:
+  answer, approve, write, **Close chat**, **Open in Chats**. **← Back** (or `Esc`)
+  is the board again, where you were; so is sending it something (a message, an
+  answer, an approval): it works on that, and the next thing that's your move is
+  lit, `Enter` to open it. On the board, `j` / `k` go from ticket to ticket, `1`-`4`
+  pick an answer, `x` closes (with Undo) and `n` starts a new chat, its box at the
+  top (as **New chat** and `Ctrl+Alt+N` do); the chat it starts opens at once.
+  **Chats** is the rest of this section.
 - **The list** shows each chat as the phone does. Over it, **New chat**, **Tasks**
   (with how many things are your move) and the cog, Settings (a right click on it,
   or `Ctrl+Alt+M`, opens the Amarchy menu). **New chat** is **What do you want to do?** in the middle, a big box with the
@@ -610,23 +611,29 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 
 ## Today
 
-**Today** is the app's home (the phone's first tab, with **Chats** beside it; on a
-computer its button over your chats, and the middle when no chat is open). It says
-what to do now without reading any chat, each chat with its project as a colored
-label (higher priority first, then your projects' order), in three parts:
+**Today** is the app's home: the phone's first tab (with **Chats** beside it, and
+the **+** for a new chat), and on a computer **Tasks**. It's one queue of what to do,
+without reading any chat, each chat with its project as a colored label (higher
+priority first, then your projects' order), and one count in the header:
 
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
-  to the chat; **Other…** opens it to say more), a permission or a secret to give
-  (**Answer** opens the chat at its card), a chat that's blocked, and your
-  commitments due by tomorrow, late ones in red. The red number on the tab, the
-  app's icon and the browser tab counts what waits on you.
+  to the chat; **Other…** opens it to say more), a permission's **Allow** and
+  **Deny**, a secret to give (**Answer** opens the chat at its card), a chat that's
+  blocked, the people to chase today (**Chase**: your assistant drafts the message),
+  and your commitments due by tomorrow, late ones in red. The number on the tab
+  counts them; the app's icon counts the chats asking you.
 - **Finish**: a chat exists to reach its goal and be closed. A chat whose goal is
-  reached says **Done** with **Close** (asked first; it refuses work not shipped, as
-  any close); one quiet for two days or more offers **Nudge** (it asks the chat
-  where it stands, and to finish or say what it needs) and **Close**.
-- **Their move**: the people you wait on (**Chase** once their chase date comes:
-  your assistant drafts the message), the chats at work, the rest of your week,
-  further out, and the other chats.
+  reached says **Done** with **Close**; one stalled two days or more offers **Ask
+  status** (it asks the chat where it stands, and to finish or say what it needs)
+  and **Close**. With two or more done, **Close all done**. A close with nothing to
+  lose happens at once, with **Undo**; one that would lose work not committed (or
+  that amarchy runs from) asks first.
+- **Waiting**: the chats at work, the people you wait on, the rest of your week,
+  further out, and the other chats, folded but for what's at work.
+
+Your assistant is a line on top. What you answer, allow or close goes after a few
+seconds with **Undo** at the bottom of the screen, so a slip costs nothing. A chat you
+open from Today on the phone comes back to Today once you send it something.
 
 Each chat knows its goal and where it stands because every reply ends with a goal
 block (amarchy's reply format asks for it): the goal in a sentence, and working,

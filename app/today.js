@@ -1,39 +1,74 @@
 // ---- Today: what to do now, without reading a chat
 //
-// The app's home (the phone's first tab, the middle of a computer's when no
-// chat is open). Every open thing is in one of three states, and Today reads
-// them in that order:
+// The app's home (the phone's first tab; on a computer, Tasks: tasks.js).
+// One queue, in the order things cost you:
 //
-// - Your move: what a chat asks you (its question with its buttons, a
-//   permission, a secret), a chat that's blocked, and your commitments due
-//   by tomorrow. The badge counts the chats' (bin/amarchy needs_you).
-// - Finish: a chat that reached its goal (Close), one left idle for days
-//   (Close or Nudge). A chat exists to reach its goal and be closed.
-// - Their move: the people you wait on (Chase once it's time), the chats at
-//   work, and the rest of your week.
+// - Your move: what a chat asks you (its question's buttons, a permission's
+//   Allow and Deny, a secret), a chat that's blocked, the people to chase
+//   today, and your commitments due by tomorrow.
+// - Finish: a chat that reached its goal (Close), one stalled for days (Ask
+//   status, Close). A chat exists to reach its goal and be closed: closing
+//   one with nothing to lose is a tap, with Undo.
+// - Waiting: the people you wait on, the chats at work, the rest of your
+//   week, the other chats. Folded, but for what's at work.
 //
-// A chat says where it stands in the goal block each reply ends with (its
-// today: goal, state, asks; bin/amarchy chat_reply). Your commitments are
-// your loops file's (amarchy today --loops), which Today only reads: Done
-// and Chase go to your assistant, which keeps it (loop_tell).
+// What you do here goes with an Undo a few seconds long (todayUndo), so a
+// thumb's slip costs nothing. A chat says where it stands in the goal block
+// each reply ends with (its today: goal, state, asks; bin/amarchy
+// chat_reply). Your commitments are your loops file's (amarchy today
+// --loops), which Today only reads: Done and Chase go to your assistant,
+// which keeps it (loop_tell).
 
-const TODAY_STALE = 2 * 86400;      // s idle before a chat is offered Close or Nudge (bin/amarchy STALE_DAYS)
+const TODAY_STALE = 2 * 86400;      // s idle before a chat is stalled: Close or Ask status (bin/amarchy STALE_DAYS)
 const TODAY_NUDGE = "Where does this stand? Finish what's left for this chat's goal, or tell me what you need from me to close it.";
+const TODAY_UNDO = 3500;            // ms an answer waits for Undo before it goes
+const TODAY_UNDO_CLOSE = 5000;      // ms a close waits for Undo
+const TODAY_SHOW = 5;               // Finish's rows before "+N more"
 const todayUI = {
   open: new Map(),      // a fold you opened or closed: its key -> open
-  answers: new Map(),   // a chat's questions answered here: id -> {key, picks, sent}
+  answers: new Map(),   // a chat's questions being answered here: id -> {key, picks}
   told: new Map(),      // a loop or chat acted on here, until the view says so too: key -> what
-  version: 0,           // bumped by what's tapped here: drawn again (todayFill)
-  sent: new Map(),      // a chat you just answered: id -> when (it isn't your move while that reaches it)
+  sent: new Map(),      // a chat you answered: id -> {key: what it asked then, at}
+  closing: new Set(),   // chats closing (their Undo still up): off the page
+  more: new Set(),      // lists with "+N more" opened
+  expand: new Set(),    // loops whose whole text you opened
+  version: 0,           // bumped by what's done here: drawn again (todayFill)
 };
 
-const TODAY_SENT = 20000;     // ms an answered chat waits off Your move for its conversation to say so
+// What a chat asks you now, as a key: it changes when it asks something new.
+function todayAskKey(s) {
+  return JSON.stringify([s.status, s.permission && s.permission.request_id, (s.today || {}).asks || [], (s.secret_asks || []).length]);
+}
 
-// You just answered it (here, or in its ticket): not your move any more,
-// unless it asks again (a permission, after it read your answer).
+// You answered it (here, or in its chat): off your move until it asks
+// something else (its conversation says so in a second or two; a sleeping
+// one takes longer to wake), or two minutes went by.
 function todayAnswered(id) {
-  todayUI.sent.set(id, Date.now());
+  const s = rowOf(id);
+  todayUI.sent.set(id, { key: s ? todayAskKey(s) : "", at: Date.now() });
   todayUI.version++;
+}
+
+function todayIsAnswered(s) {
+  const t = todayUI.sent.get(s.id);
+  if (!t) return false;
+  if (Date.now() - t.at > 120000 || todayAskKey(s) !== t.key) { todayUI.sent.delete(s.id); return false; }
+  return true;
+}
+
+function rowOf(id) { return app.view && app.view.sessions.find((s) => s.id === id) || null; }
+
+// A toast with Undo: act() runs when it's gone, unless Undo was pressed
+// (undone() then). At the bottom on the phone, out of the thumb's way.
+function todayUndo(text, act, undone, ms = TODAY_UNDO) {
+  document.querySelectorAll(".toast:not(.stay), .undo-toast").forEach((t) => { if (t.flush) t.flush(); else t.remove(); });
+  let timer = null;
+  const el = h("div", { class: "toast stay undo-toast", role: "status" }, h("span", {}, text),
+    h("button", { class: "text-btn", type: "button", onclick: () => { clearTimeout(timer); el.remove(); if (undone) undone(); } }, "Undo"));
+  // Another one now: this one goes at once, not lost.
+  el.flush = () => { clearTimeout(timer); el.remove(); act(); };
+  document.body.append(el);
+  timer = setTimeout(() => { el.remove(); act(); }, ms);
 }
 
 // ---- the facts
@@ -65,15 +100,6 @@ function todayAgo(iso) {
   return n >= 0 ? "today" : n === -1 ? "yesterday" : `${-n} days ago`;
 }
 
-// Where a chat stands, in one word: from its goal block, else its state now.
-function todayState(s) {
-  const t = s.today || {};
-  if (s.status === "waiting" || (s.secret_asks || []).length) return "waiting";
-  if (s.status === "working") return "working";
-  if ((t.asks || []).length) return "waiting";
-  return t.state || "idle";
-}
-
 // Each project its own color, the same everywhere (one of the theme's hues,
 // by its name), so you tell them apart at a glance.
 const TODAY_HUES = 7;
@@ -85,7 +111,7 @@ function todayHue(repo) {
 
 function projectChip(s) {
   const name = s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo);
-  return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}` }, name);
+  return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
 // In order: higher priority first, then your projects' order, then the newest.
@@ -93,35 +119,137 @@ function todaySort(v, ss) {
   const rank = new Map(((v.projects || []).map((p) => p.name)).map((name, i) => [name, i]));
   const prio = { high: 0, normal: 1, low: 2 };
   return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
-    || (a.assistant ? -1 : 0) - (b.assistant ? -1 : 0)
     || (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99)
     || ((b.today || {}).at || 0) - ((a.today || {}).at || 0));
 }
 
 // The chats and loops, sorted into Today's parts.
 function todayParts(v) {
-  const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup));
+  const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
   const loops = (v.today && v.today.loops) || [];
   const isMain = (s) => s.assistant === "main";
   const now = Date.now() / 1000;
-  const answered = (s) => Date.now() - (todayUI.sent.get(s.id) || 0) < TODAY_SENT && s.status !== "waiting";
-  const asks = ss.filter((s) => !answered(s) && (s.status === "waiting" || (s.secret_asks || []).length
+  const asks = ss.filter((s) => !todayIsAnswered(s) && (s.status === "waiting" || (s.secret_asks || []).length
     || (s.status !== "working" && ((s.today || {}).asks || []).length)));
   const blocked = ss.filter((s) => !asks.includes(s) && s.status !== "working" && (s.today || {}).state === "blocked");
   const due = loops.filter((l) => l.kind === "due" && l.due).sort((a, b) => a.due.localeCompare(b.due));
   const dueNow = due.filter((l) => todayDay(l.due) <= 1);
   const week = due.filter((l) => todayDay(l.due) > 1 && todayDay(l.due) <= 7);
   const later = due.filter((l) => todayDay(l.due) > 7);
-  const waiting = loops.filter((l) => l.kind === "waiting")
-    .sort((a, b) => (a.chase || "9").localeCompare(b.chase || "9"));
-  const chaseNow = waiting.filter((l) => l.chase && todayDay(l.chase) <= 0);
+  const waitingAll = loops.filter((l) => l.kind === "waiting").sort((a, b) => (a.chase || "9").localeCompare(b.chase || "9"));
+  const chaseNow = waitingAll.filter((l) => l.chase && todayDay(l.chase) <= 0);
+  const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
+  const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s));
   const done = rest.filter((s) => s.status !== "working" && (s.today || {}).state === "done");
-  const stale = rest.filter((s) => !done.includes(s) && s.status !== "working" && (s.today || {}).at && now - s.today.at > TODAY_STALE);
+  const quietFor = (s) => now - ((s.today || {}).at || 0);
+  const stale = rest.filter((s) => !done.includes(s) && s.status !== "working" && (s.today || {}).at && quietFor(s) > TODAY_STALE)
+    .sort((a, b) => quietFor(b) - quietFor(a));
   const working = rest.filter((s) => s.status === "working");
   const idle = rest.filter((s) => !done.includes(s) && !stale.includes(s) && !working.includes(s));
-  const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
-  return { asks, blocked, dueNow, week, later, waiting, chaseNow, done, stale, working, idle, someday };
+  return { asks, blocked, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle };
+}
+
+// What's your move: the count on Today's tab, the switch, the page's top.
+function todayCount(v) {
+  if (!v) return 0;
+  const p = todayParts(v);
+  return p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
+}
+
+// The one count line: what's your move, what's to close.
+function todaySummary(v) {
+  const p = todayParts(v);
+  const yours = p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
+  return [yours ? `${yours} for you to do` : "Nothing waits on you", p.done.length ? `${p.done.length} to close` : ""].filter(Boolean).join(" · ");
+}
+
+// ---- doing
+
+function todayOpen(s) {
+  if (boardOn()) return boardOpen(s.id);      // Tasks: the whole window (tasks.js)
+  if (app.desk && typeof go2 === "function") return go2(s.id);
+  app.fromToday = s.id;      // sent there, the phone comes back here (app.js SessionView)
+  go(`#/s/${encodeURIComponent(s.id)}`);
+}
+
+// Close it: at once, with Undo, when nothing would be lost; else asked, as
+// any close is (app.js confirmClose says what would go).
+async function todayClose(s) {
+  let c;
+  try {
+    const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
+    c = await res.json();
+    if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
+  } catch (e) {
+    return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
+  }
+  if (c.changes || c.amarchy) return confirmClose(s, c);
+  todayCloseNow([s]);
+}
+
+// These close, after their Undo (off the page meanwhile).
+function todayCloseNow(ss) {
+  ss.forEach((s) => todayUI.closing.add(s.id));
+  todayRedraw();
+  const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); todayRedraw(); };
+  const what = ss.length === 1 ? `Closed ${ss[0].task || "the chat"}` : `Closed ${ss.length} chats`;
+  todayUndo(what, async () => {
+    const failed = [];
+    for (const s of ss) {
+      try {
+        await api(`/api/session/${encodeURIComponent(s.id)}/close`, { discard: false });
+      } catch (e) {
+        failed.push(`${s.task || s.name}: ${e.message}`);
+        todayUI.closing.delete(s.id);
+      }
+    }
+    if (failed.length) { toast(`Didn't close ${failed.join("; ")}`); todayRedraw(); }
+    // Gone from the list by then: forgotten here too.
+    setTimeout(() => ss.forEach((s) => { if (!rowOf(s.id)) todayUI.closing.delete(s.id); }), 8000);
+  }, back, TODAY_UNDO_CLOSE);
+}
+
+// Close every done chat: the ones with nothing to lose at once (one Undo),
+// the first of the rest asked.
+async function todayCloseDone(ss) {
+  const quick = [], ask = [];
+  for (const s of ss) {
+    try {
+      const c = await (await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`)).json();
+      (c.changes || c.amarchy ? ask : quick).push([s, c]);
+    } catch (e) {
+      return toast("Can't reach Amarchy");
+    }
+  }
+  if (quick.length) todayCloseNow(quick.map(([s]) => s));
+  if (ask.length) confirmClose(ask[0][0], ask[0][1]);
+}
+
+// Ask a stalled chat where it stands.
+async function todayNudge(s) {
+  todayUI.told.set(s.id, "nudging");
+  todayRedraw();
+  try {
+    await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: TODAY_NUDGE });
+    todayUI.told.set(s.id, "nudge");
+  } catch (e) {
+    todayUI.told.delete(s.id);
+    toast(e.message);
+  }
+  todayRedraw();
+}
+
+// A permission answered from here: Allow or Deny, with Undo.
+function todayPermit(s, choice) {
+  const p = s.permission;
+  if (!p) return todayOpen(s);
+  todayAnswered(s.id);
+  todayRedraw();
+  todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
+    api(`/api/session/${encodeURIComponent(s.id)}/answer`, { request_id: p.request_id, choice })
+      .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
+  }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }
 
 // ---- drawing
@@ -130,92 +258,91 @@ function todayFold(key, title, count, kids, open = false) {
   if (!kids.length) return null;
   const isOpen = todayUI.open.has(key) ? todayUI.open.get(key) : open;
   const d = h("details", { class: "today-fold", ...(isOpen ? { open: true } : {}) },
-    h("summary", {}, h("span", { class: "today-fold-title" }, title), count !== null ? h("span", { class: "today-count" }, String(count)) : null),
+    h("summary", { "aria-label": `${title}, ${count}` }, h("span", { class: "today-fold-title" }, title),
+      count !== null ? h("span", { class: "today-count" }, String(count)) : null),
     h("div", { class: "today-rows" }, ...kids));
   d.addEventListener("toggle", () => todayUI.open.set(key, d.open));
   return d;
 }
 
-function todaySection(kind, title, sub, ...kids) {
+// The first few, then "+N more" for the rest.
+function todayFirst(key, kids, n = TODAY_SHOW) {
+  if (kids.length <= n || todayUI.more.has(key)) return kids;
+  return [...kids.slice(0, n), h("button", { class: "text-btn today-more", type: "button",
+    onclick: () => { todayUI.more.add(key); todayRedraw(); } }, `+${kids.length - n} more`)];
+}
+
+function todaySection(kind, title, extra, ...kids) {
   kids = kids.flat().filter(Boolean);
   if (!kids.length) return null;
-  return h("section", { class: `today-part today-${kind}` },
-    h("h2", { class: "today-head" }, title, sub ? h("span", { class: "today-sub" }, sub) : null), ...kids);
+  return h("section", { class: `today-part today-${kind}` }, h("h2", { class: "today-head" }, h("span", {}, title), extra || null), ...kids);
 }
 
-function todayOpen(s) {
-  if (boardOn()) return boardToggle(s.id);       // Tasks: it opens in its ticket (tasks.js)
-  if (app.desk && typeof go2 === "function") go2(s.id);
-  else go(`#/s/${encodeURIComponent(s.id)}`);
-}
-
-// A chat's name as the list has it, a tap opening it.
-function todayChatName(s) {
-  return h("button", { class: "today-chat", type: "button", onclick: () => todayOpen(s) },
-    s.assistant === "main" ? avatar(s, "small") : stateIcon(s),
-    h("span", { class: "today-chat-text" }, s.assistant === "main" ? null : projectChip(s),
-      taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat")),
-    glyph("next", "go"));
+// A chat's head: its mark (? when it asks you, the bell for a permission,
+// else its state), its project and its name on one line, a tap opening it.
+function todayChatName(s, asking) {
+  const main = s.assistant === "main";
+  const mark = main ? avatar(s, "small")
+    : asking ? h("span", { class: `today-mark${s.status === "waiting" ? " bell" : ""}`, "aria-label": "Asks you" }, s.status === "waiting" ? glyph("waiting") : "?")
+    : stateIcon(s);
+  return h("button", { class: "today-chat today-go", type: "button", onclick: () => todayOpen(s) },
+    mark, main ? null : projectChip(s), taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat"), glyph("next", "go"));
 }
 
 // What a chat asks you, answered here: its last reply's questions with their
-// buttons (as the chat's Needs you form: all of them picked, they go as one
-// message), else a permission or a secret, which open the chat at its card.
+// buttons (all of them picked, they go as one message, after Undo's
+// moment), a permission's Allow and Deny, else Answer (a secret, a plan,
+// Claude's own question: in the chat, at its card).
 function todayAsk(s) {
   const t = s.today || {};
   const qs = s.status !== "waiting" ? (t.asks || []).filter((q) => (q.options || []).length).slice(0, 3) : [];
-  const card = h("article", { class: "today-card ask" }, todayChatName(s));
+  const card = h("article", { class: "today-card ask" }, todayChatName(s, true));
   if (!qs.length) {
     const what = (s.secret_asks || []).length ? "Asks you for a secret" : s.asks || "Needs your answer";
-    card.append(h("p", { class: "today-q" }, what),
-      h("div", { class: "today-btns" }, h("button", { class: "control accent", type: "button", onclick: () => todayOpen(s) }, "Answer")));
+    card.append(h("p", { class: "today-q" }, what), h("div", { class: "today-btns" },
+      s.permission ? h("button", { class: "control today-opt", type: "button", onclick: () => todayPermit(s, "allow") }, "Allow") : null,
+      s.permission ? h("button", { class: "control today-opt", type: "button", onclick: () => todayPermit(s, "deny") }, "Deny") : null,
+      h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, s.permission ? "Open" : "Answer")));
     return card;
   }
   const key = JSON.stringify(qs);
   let st = todayUI.answers.get(s.id);
-  if (!st || st.key !== key) todayUI.answers.set(s.id, st = { key, picks: {}, sent: false });
-  const send = async () => {
+  if (!st || st.key !== key) todayUI.answers.set(s.id, st = { key, picks: {} });
+  const send = () => {
     const text = qs.map((q, i) => (st.picks[i] === undefined ? null : q.options[st.picks[i]]))
       .filter(Boolean).map((o) => String(o.send || o.label)).join("\n\n");
-    if (!text.trim() || st.sent) return;
-    st.sent = true;
+    if (!text.trim()) return;
+    todayAnswered(s.id);
     todayRedraw();
-    try {
-      await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text });
-      todayAnswered(s.id);
-      todayRedraw();
-      toast(`Sent to ${s.task || "the chat"}`);
-    } catch (e) {
-      st.sent = false;
-      todayRedraw();
-      toast(e.message);
-    }
+    todayUndo(`Sent to ${s.task || "the chat"}`, () => {
+      todayUI.answers.delete(s.id);
+      api(`/api/session/${encodeURIComponent(s.id)}/send`, { text })
+        .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
+    }, () => { todayUI.sent.delete(s.id); st.picks = {}; todayRedraw(); });
   };
   qs.forEach((q, i) => {
     card.append(h("p", { class: "today-q", html: inline(q.question || "What should it do?") }),
       h("div", { class: "today-btns" }, ...q.options.map((o, k) => h("button", {
-        class: `control${st.picks[i] === k ? " chosen" : ""}${k === 0 ? " accent" : ""}`, type: "button",
-        disabled: st.sent && st.picks[i] !== k,
+        class: `control today-opt${st.picks[i] === k ? " chosen" : ""}`, type: "button",
         onclick: () => {
           // One you finish in your own words: in the chat, where you write them.
           if (o.draft || /[:…]\s*$/.test(o.send || "")) return todayOpen(s);
-          if (st.sent) return;
           st.picks[i] = k;
           if (qs.every((_, j) => st.picks[j] !== undefined)) send();
           else todayRedraw();
         } }, o.label)), h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, "Other…")));
   });
-  if (st.sent) card.append(h("p", { class: "today-note" }, "Sent"));
   return card;
 }
 
 function todayBlocked(s) {
   return h("article", { class: "today-card blocked" }, todayChatName(s),
     h("p", { class: "today-q" }, h("b", {}, "Blocked"), (s.today || {}).goal ? ` · ${s.today.goal}` : ""),
-    h("div", { class: "today-btns" }, h("button", { class: "control accent", type: "button", onclick: () => todayOpen(s) }, "See why")));
+    h("div", { class: "today-btns" }, h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, "See why")));
 }
 
-// One of your loops: what, when, and Done (or Chase) for your assistant.
+// One of your loops: who (a label), what (a tap shows all of it), when, and
+// Done or Chase for your assistant.
 function todayLoop(l, v) {
   const sent = (v.today.sent || {})[l.key] || (todayUI.told.has(l.key) ? { action: todayUI.told.get(l.key) } : null);
   const late = l.kind === "due" ? todayDay(l.due) < 0 : l.chase && todayDay(l.chase) <= 0;
@@ -223,8 +350,7 @@ function todayLoop(l, v) {
   const meta = l.kind === "waiting"
     ? [l.since ? `asked ${todayAgo(l.since)}` : "", l.chase ? `chase ${todayWhen(l.chase).replace(/^since /, "")}` : ""].filter(Boolean).join(" · ")
     : todayWhen(l.due);
-  const act = async (action, btn) => {
-    btn.disabled = true;
+  const act = async (action) => {
     todayUI.told.set(l.key, action);
     todayRedraw();
     try {
@@ -240,127 +366,110 @@ function todayLoop(l, v) {
   const btns = sent
     ? h("span", { class: "today-sent" }, sent.action === "chase" ? `${name} drafts it` : `Sent to ${name}`)
     : h("span", { class: "today-btns inline" },
-      l.kind === "waiting" && can ? h("button", { class: `control${late ? " accent" : ""}`, type: "button", onclick: (e) => act("chase", e.currentTarget) }, "Chase") : null,
-      can ? h("button", { class: "control", type: "button", title: `Tell ${name} it's done`, onclick: (e) => act("done", e.currentTarget) }, glyph("check"), "Done") : null);
+      l.kind === "waiting" && can ? h("button", { class: "control", type: "button", onclick: () => act("chase") }, "Chase") : null,
+      can ? h("button", { class: "control", type: "button", title: `Tell ${name} it's done`, onclick: () => act("done") }, glyph("check"), "Done") : null);
+  const open = todayUI.expand.has(l.key);
   return h("div", { class: `today-loop${late ? " late" : ""}${sent ? " sent" : ""}` },
-    h("div", { class: "today-loop-text" },
-      l.who ? h("b", {}, `${l.who} · `) : null, h("span", { class: "what" }, l.what),
+    h("button", { class: `today-loop-text${open ? " open" : ""}`, type: "button", "aria-expanded": String(open),
+                  onclick: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); } },
+      h("span", { class: "what" }, l.who ? h("span", { class: "who" }, l.who) : null, l.what),
       meta ? h("small", { class: late ? "late" : "" }, meta) : null),
     btns);
 }
 
-// A chat in a line: its name, its goal, how long since anything happened,
-// and for one that's done or idle for days, Close (and Nudge).
+// A chat in a line: its project and name, its state and goal (and in Tasks
+// what it last said), and for one that's done or stalled, Close (and Ask
+// status).
 function todayChat(s, kind) {
   const t = s.today || {};
   const since = t.at ? autoPast(t.at) : "";
   const told = todayUI.told.get(s.id);
-  const nudge = async (btn) => {
-    btn.disabled = true;
-    todayUI.told.set(s.id, "nudge");
-    try {
-      await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: TODAY_NUDGE });
-      toast(`Nudged ${s.task || "the chat"}`);
-    } catch (e) {
-      todayUI.told.delete(s.id);
-      toast(e.message);
-    }
-    todayRedraw();
-  };
   const btns = kind === "done" || kind === "stale"
     ? h("span", { class: "today-btns inline" },
-      kind === "stale" ? (told === "nudge" ? h("span", { class: "today-sent" }, "Nudged")
-        : h("button", { class: "control", type: "button", onclick: (e) => nudge(e.currentTarget) }, "Nudge")) : null,
-      h("button", { class: `control${kind === "done" ? " accent" : ""}`, type: "button", onclick: () => confirmClose(s) }, "Close"))
+      kind === "stale" ? (told ? h("span", { class: "today-sent" }, told === "nudging" ? "Asking…" : "Asked")
+        : h("button", { class: "control", type: "button", onclick: () => todayNudge(s) }, "Ask status")) : null,
+      h("button", { class: "control", type: "button", onclick: () => todayClose(s) }, "Close"))
     : null;
   const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
-  const word = kind === "done" ? "Done" : kind === "stale" ? `Quiet ${quiet} days` : kind === "working" ? statusWords(s) : since;
+  const word = kind === "done" ? "Done" : kind === "stale" ? `Stalled ${quiet} days` : kind === "working" || kind === "assistant" ? statusWords(s) : since;
+  const main = s.assistant === "main";
   return h("div", { class: `today-line ${kind}` },
-    h("button", { class: "today-line-main", type: "button", onclick: () => todayOpen(s) },
-      stateIcon(s),
-      h("span", { class: "text" }, h("span", { class: "today-line-top" }, projectChip(s), taskText(kind === "assistant" ? s.assistant_name || s.task : s.task || "New chat")),
-        h("small", {}, [word, t.goal].filter(Boolean).join(" · ")),
+    h("button", { class: "today-line-main today-go", type: "button", onclick: () => todayOpen(s) },
+      main ? avatar(s, "small") : stateIcon(s),
+      h("span", { class: "text" }, h("span", { class: "today-line-top" }, main ? null : projectChip(s), taskText(main ? s.assistant_name || s.task : s.task || "New chat")),
+        h("small", {}, [word, main ? "" : t.goal].filter(Boolean).join(" · ")),
         // Tasks: what it last said, so a ticket says where it is before you open it.
-        boardOn() && s.said ? h("span", { class: "today-said" }, s.said) : null)),
+        boardOn() && !main && s.said && kind !== "done" ? h("span", { class: "today-said" }, s.said) : null)),
     btns);
 }
 
-// Today, as nodes, for whoever shows it (the phone's list, desk.js's middle).
-// board: drawn for Tasks (tasks.js), each chat a ticket that opens in place.
-function todayNodes(board = false) {
+// Today, as nodes. top: with its count line (Tasks, a computer's middle; the
+// phone has it in its header). board: each chat a ticket (tasks.js).
+function todayNodes({ board = false, top = true } = {}) {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
   const p = todayParts(v);
   const tk = (draw, ...more) => (s) => (board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more));
   const hasLoops = !!(v.today && v.today.source);
-  const name = (v.today && v.today.assistant || {}).name || "your assistant";
-  const yours = p.asks.length + p.blocked.length + p.dueNow.length;
-  const date = new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
-  const nodes = [h("div", { class: "today-top" }, h("div", { class: "today-date" }, date),
-    h("div", { class: "today-summary" }, yours ? `${yours} for you to do` : "Nothing waits on you",
-      p.done.length ? ` · ${p.done.length} to close` : ""))];
-  // Tasks: your assistant first, a ticket too (it never asks to be closed).
-  const mine = board ? (v.sessions || []).find((s) => s.assistant === "main" && !p.asks.includes(s)) : null;
-  if (mine) nodes.push(boardTicket(mine, todayChat(mine, "assistant")));
+  const yours = p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
+  const close = p.done.length;
+  const nodes = [];
+  if (top) nodes.push(h("div", { class: "today-summary" }, todaySummary(v)));
+  if (p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, a line on top
   nodes.push(todaySection("yours", "Your move", null,
     p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)),
-    p.dueNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, "Due"), ...p.dueNow.map((l) => todayLoop(l, v))) : null));
-  if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing waits on you right now."));
-  nodes.push(todaySection("finish", "Finish", "a chat exists to reach its goal and be closed",
-    p.done.map(tk(todayChat, "done")),
-    todayFold("stale", "Quiet for days", p.stale.length, p.stale.map(tk(todayChat, "stale")), p.stale.length <= 3)));
-  nodes.push(todaySection("theirs", "Their move", null,
-    todayFold("chase", "Waiting on others", p.waiting.length, p.waiting.map((l) => todayLoop(l, v)), p.chaseNow.length > 0),
+    p.chaseNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, `Chase today · ${p.chaseNow.length}`), ...p.chaseNow.map((l) => todayLoop(l, v))) : null,
+    p.dueNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, `Due · ${p.dueNow.length}`), ...p.dueNow.map((l) => todayLoop(l, v))) : null));
+  if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"),
+    close ? ` Nothing waits on you. ${close} to close, below.` : p.stale.length ? ` Nothing waits on you. ${p.stale.length} stalled, below.` : " Nothing waits on you."));
+  const all = close >= 2 ? h("button", { class: "text-btn today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
+  nodes.push(todaySection("finish", "Finish", all,
+    todayFirst("finish", [...p.done.map(tk(todayChat, "done")), ...p.stale.map(tk(todayChat, "stale"))])));
+  nodes.push(todaySection("theirs", "Waiting", null,
     todayFold("working", "At work", p.working.length, p.working.map(tk(todayChat, "working")), true),
+    todayFold("chase", "On others", p.waiting.length, p.waiting.map((l) => todayLoop(l, v))),
     todayFold("week", "Later this week", p.week.length, p.week.map((l) => todayLoop(l, v))),
     todayFold("later", "Further out", p.later.length, p.later.map((l) => todayLoop(l, v))),
-    todayFold("idle", "Other chats", p.idle.length, p.idle.map(tk(todayChat, "idle")), board)));
+    todayFold("idle", "Other chats", p.idle.length, p.idle.map(tk(todayChat, "idle")))));
   if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
   if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your commitments can show here too: set your loops file in ",
     h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
   else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark loops done from here."));
-  else nodes.push(h("p", { class: "today-note" }, `Done and Chase go to ${name}, who keeps your loops.`));
   return nodes.filter(Boolean);
-}
-
-// How many things are your move: the badge's number for the Today tab (the
-// chats') plus what's due by tomorrow.
-function todayCount(v) {
-  if (!v) return 0;
-  const p = todayParts(v);
-  return p.asks.length + p.blocked.length + p.dueNow.length;
 }
 
 // What Today shows of the view: drawn again only when it changes (each
 // second the list may change for something Today doesn't show, and a page
 // drawn again under your finger stops its scroll), or every minute (its
-// times: "since yesterday", "Quiet 3 days").
+// times: "since yesterday", "Stalled 3 days").
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
+  const said = boardOn();
   return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs,
-    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today,
-                                   (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority])]);
+    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today, s.permission,
+                                   (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
 }
 
+function boardOn() { return !!app.desk && typeof desk !== "undefined" && desk.mode === "tasks"; }
+
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
-// Tasks' (board) holds still while a ticket is open (its chat is live in it;
-// drawn again, it would lose its place): it catches up when it's closed.
 function todayFill(box, force) {
-  const board = box.classList.contains("board-today");
-  if (board && !force && boardHolds()) return;
   const key = todayKey(app.view);
   if (!force && box.dataset.key === key) return;
   box.dataset.key = key;
+  const board = box.classList.contains("board-today");
   const scroller = box.closest(".scroll, .today-scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
-  keepFocus(box, () => box.replaceChildren(...todayNodes(board)));
+  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, top: !box.classList.contains("phone-today") })));
   if (scroller) scroller.scrollTop = top;
 }
 
-// Drawn again where it shows: something was tapped here.
+// Drawn again where it shows: something was done here.
 function todayRedraw() {
   todayUI.version++;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
+  if (!app.desk && !app.session && app.listEl) renderList();      // the header's count
+  if (app.desk && typeof modeButtons === "function") modeButtons();
 }
 
 // A box Today fills, kept drawn by the list's changes (app.js refresh).
@@ -386,6 +495,6 @@ function todaySettings() {
     save.disabled = false;
   } }, "Save");
   return [h("div", { class: "section" }, "Today"),
-    h("p", {}, "Your home page: what needs you, what's due, who you're waiting on, and the chats to finish. Your commitments come from a loops file, one per line (- [ ] 2026-10-30 · what, - [ ] waiting · who · what · chase 10-30). Today only reads it: Done and Chase go to your assistant."),
+    h("p", {}, "Your home page: what needs you, what's due, who to chase, and the chats to finish. Your commitments come from a loops file, one per line (- [ ] 2026-10-30 · what, - [ ] waiting · who · what · chase 10-30). Today only reads it: Done and Chase go to your assistant, which keeps it."),
     h("div", { class: "today-setting" }, field, save)];
 }

@@ -681,7 +681,7 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "unseen", "assistant", "assistant_name", "said", "picture", "today")
+               "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission")
 
 
 def own_session_id():
@@ -8840,7 +8840,7 @@ def app_words(st, ss):
     now = time.time()
     for s in ss:
         if s.get("setup"):
-            s["said"], s["doing"], s["asks"], s["today"] = "", None, "", chat_reply({})
+            s["said"], s["doing"], s["asks"], s["today"], s["permission"] = "", None, "", chat_reply({}), None
             continue
         s["today"] = chat_reply(s)      # its goal, its state, what its last reply asks you (Today)
         words = last_words(s)
@@ -8852,6 +8852,11 @@ def app_words(st, ss):
             s["doing"] = {"tool": act.get("tool") or "", "input": step_input(act.get("input"))} \
                 if isinstance(act, dict) and act.get("tool") else words["step"]
         s["asks"] = ask_line(s)
+        # A permission it waits on (not a question or a plan: those have their
+        # own cards), for Today's Allow and Deny.
+        first = (app_asking(s) or [None])[0] if s.get("status") == "waiting" and not s.get("secret_asks") else None
+        s["permission"] = {"request_id": first["request_id"], "tool": first.get("tool") or ""} \
+            if isinstance(first, dict) and first.get("request_id") and first.get("tool") not in ("AskUserQuestion", "ExitPlanMode") else None
 
 
 def app_moments(st, ss):

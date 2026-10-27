@@ -2780,7 +2780,7 @@ class Chat {
         h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
         h("span", { class: "bg-what" }, `${what} in the background`), took,
         icon("chevron", "bg-chev")),
-      open ? h("ul", { class: "bg-list" }, ...rows) : null);
+      ...(open ? [h("ul", { class: "bg-list" }, ...rows)] : []));      // (replaceChildren would write a null as "null")
     tick();
     this.bgTimer = setInterval(tick, 1000);
   }

@@ -487,7 +487,7 @@ function listView() {
   const tab = (key, label) => h("button", { class: "tab", type: "button", role: "tab", "data-tab": key,
                                              onclick: () => { app.tab = key; renderList(); view.scroll.scrollTop = 0; } }, label);
   const tabs = h("div", { class: "home-tabs", role: "tablist" }, tab("today", "Today"), tab("chats", "Chats"));
-  const today = h("div", { class: "today" });
+  const today = h("div", { class: "today phone-today" });      // its count line is the header's
   const list = h("div", { class: "list" });
   menuKeys(list);       // ↑/↓ from session to session, ↵ opens one
   list.addEventListener("keydown", (e) => {     // ↑ from the first: back to the search
@@ -521,14 +521,16 @@ function renderList() {
   const v = app.view;
   const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);      // a new user: the welcome
   view.meta.replaceChildren();
-  if (v && v.sessions.length) {
+  // Today, unless there's nothing yet (the welcome) or you're searching.
+  const onToday = app.tab === "today" && !!v && !!v.sessions.length && !app.query;
+  // Under the name, one count: Today's (what's your move, what's to close), or the chats'.
+  if (onToday) view.meta.append(h("span", { class: todayCount(v) ? "waiting" : "" }, todaySummary(v)));
+  else if (v && v.sessions.length) {
     const waiting = typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
     view.meta.append(`${v.sessions.length} chat${v.sessions.length === 1 ? "" : "s"}`);
     if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
   }
   view.offline.hidden = app.online || !v;
-  // Today, unless there's nothing yet (the welcome) or you're searching.
-  const onToday = app.tab === "today" && !!v && !!v.sessions.length && !app.query;
   view.tabs.hidden = !v || !v.sessions.length;
   for (const b of view.tabs.children) {
     const on = (b.dataset.tab === "today") === onToday;
@@ -894,14 +896,14 @@ async function confirmClose(s, known) {
       if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheets();
-      toast(`Closing ${projectName(s.repo)} · ${s.name}`);
+      toast(`Closing ${s.task || `${projectName(s.repo)} · ${s.name}`}`);
       if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
   } }, n ? "Close and discard changes" : "Close chat");
-  sheet({ key: "close" }, sheetHead(`Close ${where(s)}?`, detail), yes,
+  sheet({ key: "close" }, sheetHead(`Close ${s.task || where(s)}?`, `${detail} · ${where(s)}`), yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
@@ -1000,6 +1002,15 @@ class SessionView {
       },
       // A notification about its card was tapped: the conversation, where the card is.
       onAsk: () => { if (this.mode !== "chat") this.setMode("chat"); },
+      // Opened from Today and sent something: back to Today, the next thing in sight.
+      onSent: () => {
+        if (app.fromToday !== this.id) return;
+        app.fromToday = null;
+        todayAnswered(this.id);
+        app.tab = "today";
+        go("#/");
+        toast("Sent: it's working on it");
+      },
     });
     // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
     this.el = h("div", { class: "view" }, bar, this.chat.el);
@@ -2317,6 +2328,7 @@ function route() {
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
   const id = m ? decodeURIComponent(m[1]) : null;
+  if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
     app.session.close();
     app.session = null;

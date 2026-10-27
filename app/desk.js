@@ -1263,7 +1263,7 @@ function deskList() {
     if (next) return go2(next);
     return show(null);
   }
-  if (v && !desk.current && !desk.fresh && !desk.today && v.sessions.length) return deskRoute();
+  if (v && !desk.current && !desk.fresh && !desk.today && v.sessions.length && !boardOn()) return deskRoute();
   if (!desk.current) drawEmpty(false);      // the welcome, once there's a project: the new chat
   if (desk.pending && (row(desk.pending.id) || Date.now() > desk.pending.until)) return deskRoute();
   chime(v);
