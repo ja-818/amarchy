@@ -183,3 +183,15 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .board-focus-chat > .chat { flex: 1; min-height: 0; }
 .board-focus-chat .chat-dock { padding: 0 16px 14px; }
 .tasks-board .today-go:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-item); }
+
+/* Tasks' search, in the middle of its bar (tasks.js boardSearch). */
+.board-search { flex: 1; min-width: 0; max-width: 520px; margin: 0 auto; height: 38px; }
+.board-search input { font-size: var(--body); }
+.board-search-key { flex: none; margin-right: 8px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px;
+                    font-size: var(--caption); color: var(--text-muted); font-family: inherit; }
+.board-search:focus-within .board-search-key { display: none; }
+.tcard.k-search { --tone: var(--ph); }
+.tcard mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
+.tcard-text.found { display: flex; gap: 8px; align-items: baseline; }
+.found-who { flex: none; font-size: var(--caption); font-weight: 800; color: var(--text-muted); min-width: 3.4em; }
+.found-who.you { color: var(--accent); }

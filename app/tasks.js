@@ -20,6 +20,8 @@ const board = {
   chat: null,        // its Chat
   composing: false,  // the new chat's box at the top
   waitFor: null,     // a chat just started: opened once the list has it
+  query: "",         // what the search box has: the board shows what it finds instead of Today
+  found: null,       // the server's answer for it: {q, results}
 };
 
 // The chat the keys go to: the open one in Tasks, the middle's in Chats.
@@ -31,7 +33,7 @@ function boardBuild() {
   board.head = h("header", { class: "board-head" },
     h("div", { class: "board-head-in" },
       board.switchEl,
-      h("span", { class: "board-gap" }),
+      boardSearchBox(),
       h("button", { class: "control", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() }, glyph("plus"), "New chat"),
       automationsButton("control organize"),
       h("button", { class: "control organize", type: "button", title: "Settings (right click or Ctrl+Alt+M: the Amarchy menu)", "aria-label": "Settings",
@@ -64,6 +66,7 @@ function boardKeys(e) {
     return;
   }
   if (typing) return;
+  if (e.key === "/") { e.preventDefault(); board.search.focus(); board.search.select(); return; }
   const goes = [...board.box.querySelectorAll(".ticket > * > .today-go")];
   const at = goes.findIndex((b) => b === document.activeElement || b.parentElement.contains(document.activeElement));
   const ticket = at >= 0 ? goes[at].closest(".ticket") : null;
@@ -125,7 +128,8 @@ function boardRefresh(force) {
     board.waitFor = null;
     boardOpen(id);
   }
-  todayFill(board.box, force);
+  if (board.query) boardSearchDraw();
+  else todayFill(board.box, force);
   if (board.open) boardFocusHead();
   modeButtons();
 }
@@ -203,7 +207,7 @@ function boardBack(quiet) {
   board.focusEl.replaceChildren();
   board.el.classList.remove("focused");
   if (/^#\/s\//.test(here())) go("#/today");
-  todayFill(board.box, true);
+  if (board.query) boardSearchDraw(); else todayFill(board.box, true);
   if (typeof board.from === "number") board.scroll.scrollTop = board.from;
   if (!quiet) {
     const t = board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`);
@@ -257,3 +261,83 @@ setInterval(() => {
   if (boardOn() && board.open && document.visibilityState === "visible" && document.hasFocus())
     api(`/api/session/${encodeURIComponent(board.open)}/seen`).catch(() => {});
 }, 10000);
+
+// ---- search: a chat by its name, or by anything said in it
+//
+// The box in the middle of the bar (/ to get there). As you type, the board
+// shows the chats that have every word: in their name at once, and in what
+// was said in them from the host (/api/search, bin/amarchy search_chats),
+// with the lines that have them. Enter opens the first; Esc empties it.
+
+function boardSearchBox() {
+  board.search = h("input", { type: "search", placeholder: "Search chats and what was said in them", "aria-label": "Search chats",
+                              autocomplete: "off", spellcheck: "false", enterkeyhint: "search",
+                              oninput: () => boardSearch(board.search.value),
+                              onkeydown: (e) => {
+                                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); board.search.value = ""; boardSearch(""); board.scroll.focus(); }
+                                else if (e.key === "Enter") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.click(); }
+                                else if (e.key === "ArrowDown") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.focus(); }
+                              } });
+  return h("label", { class: "searchbox board-search" }, glyph("search"), board.search, h("kbd", { class: "board-search-key" }, "/"));
+}
+
+let searchTimer = null, searchSeq = 0;
+function boardSearch(q) {
+  board.query = q.trim();
+  clearTimeout(searchTimer);
+  board.el.classList.toggle("searching", !!board.query);
+  if (!board.query) { board.found = null; todayFill(board.box, true); return; }
+  boardSearchDraw();
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq, asked = board.query;
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { headers: { Accept: "application/json" } });
+      const d = await r.json();
+      if (seq !== searchSeq || asked !== board.query) return;      // you typed on
+      board.found = d;
+    } catch (e) {
+      board.found = { q: asked, results: [], error: "Can't reach Amarchy" };
+    }
+    boardSearchDraw();
+  }, 160);
+}
+
+// A text with the words lit.
+function lit(text, words) {
+  const t = String(text || ""), low = t.toLowerCase();
+  const on = new Array(t.length).fill(false);
+  for (const w of words) for (let i = low.indexOf(w); w && i >= 0; i = low.indexOf(w, i + w.length)) on.fill(true, i, i + w.length);
+  let html = "", open = false;
+  for (let i = 0; i < t.length; i++) {
+    if (on[i] !== open) { html += on[i] ? "<mark>" : "</mark>"; open = on[i]; }
+    html += esc(t[i]);
+  }
+  return open ? `${html}</mark>` : html;
+}
+
+function boardSearchDraw() {
+  const v = app.view;
+  if (!v || !board.query) return;
+  const words = board.query.toLowerCase().split(/\s+/).filter(Boolean);
+  const named = (s) => { const n = [s.task, s.claude_title, s.repo, s.name, s.assistant_name].join(" ").toLowerCase(); return words.every((w) => n.includes(w)); };
+  const found = board.found && board.found.q === board.query ? board.found.results : null;
+  // Its name has them now; what was said, once the host answers.
+  const byId = new Map((found || []).map((r) => [r.id, r]));
+  const rows = [...(found || []).map((r) => r.id), ...v.sessions.filter((s) => named(s) && !byId.has(s.id)).map((s) => s.id)]
+    .map((id) => row(id)).filter(Boolean);
+  const cards = rows.map((s) => {
+    const r = byId.get(s.id);
+    const lines = (r && r.lines) || [];
+    const name = s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat";
+    return boardTicket(s, todayCard({ kind: "search", hue: todayHue(s.repo), chip: todayChip(s), id: s.id,
+      title: h("span", { class: "task", html: lit(name, words) }), lead: s.assistant === "main" ? avatar(s, "small") : null,
+      pill: todayStatePill(s), open: () => boardOpen(s.id),
+      body: [r && r.hits ? h("p", { class: "tcard-text muted" }, `${r.hits} message${r.hits === 1 ? "" : "s"}${r.at ? ` · last ${autoPast(r.at)}` : ""}`) : null,
+             ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
+               h("span", { html: lit(l.text, words) })))] }));
+  });
+  const head = h("div", { class: "today-summary" }, found ? `${rows.length ? rows.length : "No"} chat${rows.length === 1 ? "" : "s"} with “${board.query}”` : `Searching “${board.query}”…`);
+  keepFocus(board.box, () => board.box.replaceChildren(head, ...(cards.length ? [h("div", { class: "tsec-cards" }, ...cards)]
+    : found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name or in what was said. Fewer words find more.")] : [])));
+  board.box.dataset.key = "";      // Today draws itself again when the search is emptied
+}

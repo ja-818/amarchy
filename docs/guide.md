@@ -265,6 +265,9 @@ else installed.
   lit, `Enter` to open it. On the board, `j` / `k` go from ticket to ticket, `1`-`4`
   pick an answer, `x` closes (with Undo) and `n` starts a new chat, its box at the
   top (as **New chat** and `Ctrl+Alt+N` do); the chat it starts opens at once.
+  In the middle of the bar, **search** (`/`): a chat by its name, or by anything
+  said in it (your messages and Claude's words), every word found, the best first,
+  with the lines that have them lit; `Enter` opens the first, `Esc` empties it.
   **Chats** is the rest of this section.
 - **The list** shows each chat as the phone does. Over it, **New chat**, **Tasks**
   (with how many things are your move) and the cog, Settings (a right click on it,

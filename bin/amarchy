@@ -8832,6 +8832,110 @@ def cmd_today(args):
     return 0
 
 
+# ---- search: a chat by its name, or by anything said in it
+#
+# Tasks' search box (app/tasks.js) asks /api/search?q=: every open chat whose
+# name or conversation has all the words, the best first, with the lines that
+# have them. What each conversation says (your messages and Claude's words,
+# not tools' output) is kept in memory, read again only from where it grew.
+
+_said_in = {}       # transcript path -> {"off": bytes read, "items": [(who, at, text, lower)]}
+_said_lock = threading.Lock()
+SEARCH_MAX = 30
+
+
+def said_in(s):
+    """What was said in a session's conversation: [(who: you|claude, at, text,
+    its lowercase)], oldest first, read again only from where the file grew."""
+    f = transcript(s)
+    if not f:
+        return []
+    try:
+        size = f.stat().st_size
+    except OSError:
+        return []
+    with _said_lock:
+        got = _said_in.get(str(f))
+        if not got or got["off"] > size:
+            got = _said_in[str(f)] = {"off": 0, "items": []}
+        if got["off"] == size:
+            return got["items"]
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(got["off"])
+                data = fh.read(size - got["off"])
+        except OSError:
+            return got["items"]
+        end = data.rfind(b"\n") + 1      # a line half written waits for the rest
+        got["off"] += end
+        for line in data[:end].splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta") or r.get("type") not in ("user", "assistant"):
+                continue
+            content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+            if isinstance(content, list):
+                text = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+            else:
+                text = content if isinstance(content, str) else ""
+            text = without_goal(text).strip()
+            if not text or (r["type"] == "user" and (text.startswith("<") or text.startswith("amarchy:"))):
+                continue
+            got["items"].append(("you" if r["type"] == "user" else "claude", timestamp(r) or 0, text, text.lower()))
+        return got["items"]
+
+
+def search_snippet(text, lower, words, width=90):
+    """The part of a message around its first word found, in a line."""
+    at = min((lower.find(w) for w in words if lower.find(w) >= 0), default=0)
+    start = max(0, at - width // 2)
+    end = min(len(text), at + width + width // 2)
+    cut = " ".join(re.sub(r"(?m)\*\*|__|`+|^#+\s*|^>\s*", "", text[start:end]).split())       # words, not markdown's marks
+    return ("…" if start else "") + cut + ("…" if end < len(text) else "")
+
+
+def search_chats(q, ss):
+    """The chats with every word of q in their name or what was said in them:
+    [{id, name (its name has them all), hits (how many messages), lines:
+    [{who, at, text}]}], the best first (its name, then the most and newest
+    messages)."""
+    words = [w for w in q.lower().split() if w][:8]
+    if not words:
+        return []
+    out = []
+    for s in ss:
+        if s.get("setup"):
+            continue
+        name = " ".join(str(s.get(k) or "") for k in ("task", "claude_title", "repo", "name", "branch", "assistant_name")).lower()
+        in_name = all(w in name for w in words)
+        found = [it for it in said_in(s) if all(w in it[3] for w in words)]
+        if not found and not in_name:
+            # Every word somewhere: in its name or in one message or another.
+            items = said_in(s)
+            if not all(w in name or any(w in it[3] for it in items) for w in words):
+                continue
+            found = [it for it in items if any(w in it[3] for w in words)]
+        lines = [{"who": who, "at": at, "text": search_snippet(text, low, words)} for who, at, text, low in reversed(found[-3:])]
+        newest = max((it[1] for it in found), default=0)
+        out.append({"id": s["id"], "name": in_name, "hits": len(found), "lines": lines, "at": newest})
+    out.sort(key=lambda r: (not r["name"], -min(r["hits"], 20), -r["at"]))
+    return out[:SEARCH_MAX]
+
+
+def search_warm(st):
+    """Read every open chat's conversation once in the background, so the first
+    search doesn't wait for it; then keep up every minute."""
+    while True:
+        for s in list(st.view.get("sessions") or []):
+            try:
+                said_in(s)
+            except Exception:
+                pass
+        time.sleep(60)
+
+
 def app_words(st, ss):
     """The list's words for each session: the last thing its Claude wrote
     (said), the step it's on while it works (doing: {tool, input}, which
@@ -9302,6 +9406,11 @@ def app_handler(st, users, address):
                 return
             if path == "/api/dictate":      # dictation written down here (see "dictation on the host")
                 return self.dictate(args)
+            if path == "/api/search":       # Tasks' search: a chat by its name or what was said in it
+                q = (args.get("q") or [""])[0][:200]
+                with st.changed:
+                    ss = list(st.view.get("sessions") or [])
+                return self.send(200, {"q": q, "results": search_chats(q, ss)})
             if path == "/api/automations":      # what runs by itself (see "automations")
                 return self.send(200, {"automations": automation_list(), "at": time.time()})
             if path == "/api/automations/log":
@@ -10211,6 +10320,7 @@ def app_serve():
     server = http.server.ThreadingHTTPServer(("127.0.0.1", app_port()), app_handler(st, users, address))
     server.daemon_threads = True
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
+    threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     version = os.stat(SELF).st_mtime_ns
 
     def updated():

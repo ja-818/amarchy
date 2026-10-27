@@ -305,6 +305,31 @@ async function wide(browser, port) {
   check(where, await until(p, () => !board.open), "sent: back on the board");
   check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !n || n.contains(document.activeElement); }), "the next one lit, the keys on it");
 
+  // Search: names at once, what was said from the host; Enter opens the first, Esc empties it.
+  await p.route("**/api/search*", (r) => {
+    const q = new URL(r.request().url()).searchParams.get("q");
+    r.fulfill({ json: { q, results: /pricing/i.test(q) ? [{ id: "proj-done", name: false, hits: 2, at: Date.now() / 1000 - 3600,
+      lines: [{ who: "claude", at: 0, text: "…the pricing table for C21 is ready…" }, { who: "you", at: 0, text: "check the pricing again" }] }] : [] } });
+  });
+  await p.evaluate(() => { document.activeElement && document.activeElement.blur(); });
+  await p.keyboard.press("/");
+  check(where, await p.evaluate(() => document.activeElement === board.search), "/: the search box");
+  await p.keyboard.type("json");
+  check(where, await until(p, () => /Eval: json-render/.test(board.box.innerText) && !!board.box.querySelector(".tcard mark")
+                                   && !/Your move/i.test(board.box.innerText)), "a chat by its name, the word lit, instead of Today");
+  await p.evaluate(() => { board.search.value = ""; });
+  await p.keyboard.type("pricing");
+  check(where, await until(p, () => /Study: T3 vs amarchy/.test(board.box.innerText) && /pricing table for C21/.test(board.box.innerText)
+                                   && /2 messages/.test(board.box.innerText)), "a chat by what was said in it, with its lines");
+  await p.screenshot({ path: path.join(SHOTS, "wide-search.png") });
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => board.open === "proj-done"), "Enter opens the first");
+  await p.evaluate(() => boardBack());
+  check(where, await p.evaluate(() => !!board.query && /pricing/.test(board.box.innerText)), "back: the search as it was");
+  await p.evaluate(() => board.search.focus());
+  await p.keyboard.press("Escape");
+  check(where, await until(p, () => !board.query && /Your move/i.test(board.box.innerText)), "Esc: Today again");
+
   // Keys: j / k move, n a new chat, Esc away.
   await p.evaluate(() => { document.activeElement.blur(); board.scroll.focus(); });
   await p.keyboard.press("j");

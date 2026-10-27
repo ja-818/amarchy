@@ -77,5 +77,16 @@ with open(f, "a") as fh:
 r = am.chat_reply({"id": "x"})
 check(r["state"] == "done" and r["goal_at"] > 0, "done, and when")
 
+# Search: by name, by what was said (every word), its lines without markdown, a tool's output not.
+with open(f, "a") as fh:
+    fh.write(rec("user", [{"type": "tool_result", "tool_use_id": "2", "content": "secret pricing in a log"}]) + "\n")
+    fh.write(rec("assistant", [{"type": "text", "text": "The **pricing** table for C21 is ready"}]) + "\n")
+s = {"id": "x", "task": "Build: Today home", "repo": "amarchy", "name": "today"}
+r = am.search_chats("pricing c21", [s])
+check(len(r) == 1 and r[0]["hits"] == 1 and "**" not in r[0]["lines"][0]["text"] and "pricing" in r[0]["lines"][0]["text"], f"found by what was said ({r})")
+check(am.search_chats("today home", [s])[0]["name"] is True, "found by its name")
+check(am.search_chats("pricing nowhere", [s]) == [], "every word, or nothing")
+check(am.search_chats("log", [s]) == [], "a tool's output isn't searched")
+
 print(f"\n{len(failed)} failed: {failed}" if failed else "\nAll passed.")
 sys.exit(1 if failed else 0)
