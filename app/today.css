@@ -116,7 +116,7 @@
 .tasks-board { display: none; position: absolute; inset: 0; z-index: 4; flex-direction: column; background: var(--pane-bg); }
 .tasks-mode .tasks-board { display: flex; }
 .tasks-mode .stage, .tasks-mode .ball { display: none; }
-.board-head { flex: none; border-bottom: 1px solid var(--border-faint); }
+.board-head { flex: none; }
 .board-head-in { max-width: 920px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 8px; }
 .board-head .control { min-height: 38px; }
 .board-switch { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border-faint); border-radius: var(--radius-control); background: var(--control-bg); }
@@ -153,11 +153,12 @@
 body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
 
 /* Tasks: a chat opened, the whole window; Back (Esc) to the board. */
-.board-focus { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--pane-bg);
-               backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+/* On the board's own see-through pane: the wallpaper shows, as in Chats (no second pane, no blur). */
+.board-focus { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: none; }
 .board-focus[hidden] { display: none; }
 .tasks-board.focused > .board-head, .tasks-board.focused > .board-scroll { visibility: hidden; }
-.board-focus-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border-faint); min-width: 0; }
+/* No rule under it, as Chats' bar over a chat. */
+.board-focus-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 20px; min-width: 0; }
 .board-focus-head .task { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--title); }
 .board-focus-head .head-state { flex: none; font-size: var(--caption); font-weight: 700; }
 .board-focus-head .danger { color: var(--danger); }
