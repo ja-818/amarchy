@@ -214,7 +214,8 @@ finished, and its priority on the right. Your assistant's card stays on top (see
   does in a sentence, and **Add a project from GitHub** or **Start an empty
   project**.
 - **Opening the app is for something new**: back after 10 minutes or more away,
-  it's on Today and its **What do you want to do?**, not the chat you left
+  it's on Today, not the chat you left (the **+** at the top brings up **What do
+  you want to do?** in one tap)
   (back sooner, the same chat; a notification you tap still opens its chat, and a
   chat with an answer half given stays).
 - **Share to Amarchy**: a screenshot or photo, from the phone's share sheet to a
@@ -600,7 +601,8 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 
 **Today** is the app's home (the phone's first tab, with **Chats** beside it; on a
 computer its button over your chats, and the middle when no chat is open). It says
-what to do now without reading any chat, in three parts:
+what to do now without reading any chat, each chat with its project as a colored
+label (higher priority first, then your projects' order), in three parts:
 
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission or a secret to give

@@ -460,6 +460,8 @@ function listView() {
   const meta = h("div", { class: "meta" });
   const head = h("div", { class: "hero" },
     h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
+    // A new chat, one tap away: its box comes up over Today (which keeps the room otherwise).
+    h("button", { class: "icon-btn new-btn", "aria-label": "New chat", title: "New chat", onclick: () => composeNew() }, glyph("plus")),
     automationsButton(), h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));      // automations.js
   // Above the list, as in the wide layout beside Claude: the search, and how
   // the list is grouped and sorted.
@@ -497,6 +499,14 @@ function listView() {
   const scroll = h("div", { class: "scroll" }, today, list);
   app.newChat = newChat();
   const dock = h("div", { class: "dock" }, app.newChat.el);
+  // On Today the new chat's box shows only while you're starting one: left
+  // empty, it goes again.
+  dock.addEventListener("focusout", () => setTimeout(() => {
+    if (app.composing && !dock.contains(document.activeElement) && !app.newChat.field.value.trim() && !document.querySelector(".sheet-back, .picker-back")) {
+      app.composing = false;
+      renderList();
+    }
+  }, 250));
   const view = app.listEl = h("div", { class: "view list-view" }, head, tabs, shade, toolbar, offline, scroll, dock);
   Object.assign(app.listEl, { meta, offline, list, scroll, search, toolbar, clear, organize, menu, shade, dock, tabs, today });
   return app.listEl;
@@ -533,7 +543,7 @@ function renderList() {
   view.list.hidden = onToday;
   if (onToday) todayFill(view.today);      // only when what it shows changed: its scroll stays (today.js)
   view.toolbar.hidden = !v || !v.sessions.length || onToday;
-  view.dock.hidden = first;
+  view.dock.hidden = first || (onToday && !app.composing && !(app.newChat && app.newChat.field.value.trim()));
   view.clear.hidden = !app.query;
   if (view.toolbar.hidden) view.menu.hidden = true;
   view.shade.hidden = view.menu.hidden;
@@ -567,6 +577,14 @@ function renderList() {
   });
   view.scroll.scrollTop = top;
   app.newChat.update();
+}
+
+// The + over the list: the new chat's box, its keyboard up.
+function composeNew() {
+  app.composing = true;
+  if (app.session) go("#/");
+  renderList();
+  if (app.newChat) app.newChat.focus();     // now, in the tap: iOS brings the keyboard up only then
 }
 
 // A new user's first screen, with no projects yet: what Amarchy is, in a

@@ -586,20 +586,16 @@ function drawEmpty(changed) {
   const v = app.view;
   const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);
   const kind = !v ? "off" : first ? "welcome" : desk.today && v.sessions.length ? "today" : "new";
-  if ((kind === "new" || kind === "today") && !desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
+  if (kind === "new" && !desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
     desk.pending = { id, until: Date.now() + 15000 };
     go2(id);
   } });
   if (kind === "today") {
-    // Today, and under it the new chat: what to do now, or something new.
+    // Today: what to do now (a new chat is New chat's, Ctrl+Alt+N).
     if (desk.emptyKind !== "today") {
       desk.todayEl = todayBox();
-      desk.empty.replaceChildren(h("div", { class: "today-scroll" }, desk.todayEl), h("div", { class: "today-dock" }, desk.newChat.el));
+      desk.empty.replaceChildren(h("div", { class: "today-scroll" }, desk.todayEl));
     } else todayFill(desk.todayEl);
-    desk.newChat.update();
-    if (changed || desk.emptyKind !== "today") requestAnimationFrame(() => {
-      if (!desk.current && !document.querySelector(".picker-back, .sheet-back")) desk.newChat.focus();
-    });
   } else if (kind === "new") {
     if (desk.emptyKind !== "new") desk.empty.replaceChildren(desk.newChat.el);
     desk.newChat.update();

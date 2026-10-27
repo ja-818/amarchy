@@ -1,9 +1,10 @@
 // What the app opens on, in a browser. Checked: on a phone's home-screen
 // app, back after AWAY in the background, the list and its new chat rather
 // than the chat you left; back sooner, the same chat; a notification tapped
-// on the way back, its chat. On a computer, launched: Today, with the new
-// chat ("What do you want to do?") under it, not the last chat; reloaded: the
-// chat it was on; a link to a chat: that chat. With screenshots.
+// on the way back, its chat. On a computer, launched: Today, not the last
+// chat; New chat: "What do you want to do?", and Esc back to the chat you
+// were in; reloaded: the chat it was on; a link to a chat: that chat. With
+// screenshots.
 //
 //   node test/open-new-chat.js          both layouts
 //   node test/open-new-chat.js phone    one layout (phone | wide)
@@ -192,11 +193,13 @@ async function wide(browser, port) {
   await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); sessionStorage.setItem("seeded", "1"); } });
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.today && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .today")
-                                   && !!document.querySelector(".desk-empty:not([hidden]) .start-chat.wide")),
-        "launched: Today and the new chat under it, not the last chat");
+  check(where, await until(p, () => desk.today && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .today")),
+        "launched: Today, not the last chat");
   await sleep(300);
   await p.screenshot({ path: path.join(SHOTS, "wide-launched.png") });
+  await p.evaluate(() => document.querySelector(".panel-buttons .new-chat").click());
+  check(where, await until(p, () => desk.fresh && !!document.querySelector(".desk-empty:not([hidden]) .start-chat.wide")), "New chat: What do you want to do?");
+  await sleep(300);
   check(where, await p.evaluate(() => document.activeElement && document.activeElement.matches(".start-chat textarea")), "its box has the keyboard");
   await p.keyboard.press("Escape");
   check(where, await until(p, () => desk.current === "proj-b"), "Escape: back to the last chat");

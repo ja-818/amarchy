@@ -64,9 +64,33 @@ function todayState(s) {
   return t.state || "idle";
 }
 
+// Each project its own color, the same everywhere (one of the theme's hues,
+// by its name), so you tell them apart at a glance.
+const TODAY_HUES = 7;
+function todayHue(repo) {
+  let n = 0;
+  for (const c of String(repo || "")) n = (n * 31 + c.charCodeAt(0)) >>> 0;
+  return n % TODAY_HUES;
+}
+
+function projectChip(s) {
+  const name = s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo);
+  return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}` }, name);
+}
+
+// In order: higher priority first, then your projects' order, then the newest.
+function todaySort(v, ss) {
+  const rank = new Map(((v.projects || []).map((p) => p.name)).map((name, i) => [name, i]));
+  const prio = { high: 0, normal: 1, low: 2 };
+  return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
+    || (a.assistant ? -1 : 0) - (b.assistant ? -1 : 0)
+    || (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99)
+    || ((b.today || {}).at || 0) - ((a.today || {}).at || 0));
+}
+
 // The chats and loops, sorted into Today's parts.
 function todayParts(v) {
-  const ss = (v.sessions || []).filter((s) => !s.setup);
+  const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup));
   const loops = (v.today && v.today.loops) || [];
   const isMain = (s) => s.assistant === "main";
   const now = Date.now() / 1000;
@@ -117,7 +141,8 @@ function todayOpen(s) {
 function todayChatName(s) {
   return h("button", { class: "today-chat", type: "button", onclick: () => todayOpen(s) },
     s.assistant === "main" ? avatar(s, "small") : stateIcon(s),
-    taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat"),
+    h("span", { class: "today-chat-text" }, s.assistant === "main" ? null : projectChip(s),
+      taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat")),
     glyph("next", "go"));
 }
 
@@ -239,7 +264,7 @@ function todayChat(s, kind) {
   return h("div", { class: `today-line ${kind}` },
     h("button", { class: "today-line-main", type: "button", onclick: () => todayOpen(s) },
       stateIcon(s),
-      h("span", { class: "text" }, taskText(s.task || "New chat"),
+      h("span", { class: "text" }, h("span", { class: "today-line-top" }, projectChip(s), taskText(s.task || "New chat")),
         h("small", {}, [word, t.goal].filter(Boolean).join(" · ")))),
     btns);
 }

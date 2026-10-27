@@ -171,6 +171,8 @@ async function common(p, where) {
   check(where, /Submit it now\?/.test(t) && /Claude asks to run gcloud/.test(t), "a chat's question and a permission are your move");
   check(where, /Fix the per-minute calc/.test(t) && /Submit the fellowship/.test(t), "loops due by tomorrow are your move");
   check(where, /1 day|yesterday/.test(t), "a late loop says how late");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".today-card.ask .pchip")].every((c) => c.innerText === "Proj")
+                                      && document.querySelectorAll(".today-line .pchip").length >= 2), "every chat says its project");
   check(where, /Study: T3 vs amarchy/.test(await text(p, ".today-finish")), "a done chat is to finish");
   check(where, /Eval: json-render/.test(await text(p, ".today-finish")), "a chat quiet for days is to finish");
   check(where, !/Jaken/.test(await text(p, ".today-finish")), "your assistant is never to finish");
@@ -220,7 +222,11 @@ async function phone(browser, port) {
   await ready(p);
   check(where, await until(p, () => !!document.querySelector(".home-tabs .tab.on[data-tab=today]") && !!document.querySelector(".today:not([hidden]) .today-part")), "opens on Today");
   check(where, /4/.test(await text(p, ".home-tabs .tab[data-tab=today]")), "its tab counts your move (2 asks, 2 loops)");
-  check(where, !!(await p.$(".list-view .dock .start-chat")), "the new chat stays under it");
+  check(where, await p.evaluate(() => document.querySelector(".list-view .dock").hidden), "no new chat's box under it: Today has the room");
+  await p.evaluate(() => document.querySelector(".hero .new-btn").click());
+  check(where, await p.evaluate(() => !document.querySelector(".list-view .dock").hidden && document.activeElement === app.newChat.field), "+: the new chat's box, its keyboard up");
+  await p.evaluate(() => document.activeElement.blur());
+  check(where, await until(p, () => document.querySelector(".list-view .dock").hidden), "left empty, it goes again");
   // It scrolls, and stays where you scrolled it while the list changes under it.
   const kept = await p.evaluate(async () => {
     const sc = document.querySelector(".list-view .scroll");
@@ -250,7 +256,7 @@ async function wide(browser, port) {
   const sc = await p.evaluate(() => {
     const el = document.querySelector(".today-scroll");
     el.scrollTop = 200;
-    return { top: el.scrollTop, fits: el.clientHeight < window.innerHeight };
+    return { top: el.scrollTop, fits: el.clientHeight <= window.innerHeight };
   });
   check(where, sc.top > 0 && sc.fits, `the middle scrolls (${JSON.stringify(sc)})`);
   await p.evaluate(() => { document.querySelector(".today-scroll").scrollTop = 0; });
