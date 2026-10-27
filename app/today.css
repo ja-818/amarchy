@@ -136,3 +136,7 @@
               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tasks-board .today-line-main, .tasks-board .today-chat { cursor: pointer; }
 .today-line.assistant { border-color: var(--accent); }
+/* The next one, after you sent the last (tasks.js boardSent): lit a moment. */
+.ticket.next { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .4s; }
+@media (prefers-reduced-motion: no-preference) { .ticket.next { animation: ticket-next 1.2s ease-out 2; } }
+@keyframes ticket-next { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 35%, transparent); } }

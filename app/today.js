@@ -24,7 +24,17 @@ const todayUI = {
   answers: new Map(),   // a chat's questions answered here: id -> {key, picks, sent}
   told: new Map(),      // a loop or chat acted on here, until the view says so too: key -> what
   version: 0,           // bumped by what's tapped here: drawn again (todayFill)
+  sent: new Map(),      // a chat you just answered: id -> when (it isn't your move while that reaches it)
 };
+
+const TODAY_SENT = 20000;     // ms an answered chat waits off Your move for its conversation to say so
+
+// You just answered it (here, or in its ticket): not your move any more,
+// unless it asks again (a permission, after it read your answer).
+function todayAnswered(id) {
+  todayUI.sent.set(id, Date.now());
+  todayUI.version++;
+}
 
 // ---- the facts
 
@@ -94,8 +104,9 @@ function todayParts(v) {
   const loops = (v.today && v.today.loops) || [];
   const isMain = (s) => s.assistant === "main";
   const now = Date.now() / 1000;
-  const asks = ss.filter((s) => s.status === "waiting" || (s.secret_asks || []).length
-    || (s.status !== "working" && ((s.today || {}).asks || []).length));
+  const answered = (s) => Date.now() - (todayUI.sent.get(s.id) || 0) < TODAY_SENT && s.status !== "waiting";
+  const asks = ss.filter((s) => !answered(s) && (s.status === "waiting" || (s.secret_asks || []).length
+    || (s.status !== "working" && ((s.today || {}).asks || []).length)));
   const blocked = ss.filter((s) => !asks.includes(s) && s.status !== "working" && (s.today || {}).state === "blocked");
   const due = loops.filter((l) => l.kind === "due" && l.due).sort((a, b) => a.due.localeCompare(b.due));
   const dueNow = due.filter((l) => todayDay(l.due) <= 1);
@@ -171,6 +182,8 @@ function todayAsk(s) {
     todayRedraw();
     try {
       await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text });
+      todayAnswered(s.id);
+      todayRedraw();
       toast(`Sent to ${s.task || "the chat"}`);
     } catch (e) {
       st.sent = false;

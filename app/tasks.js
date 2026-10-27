@@ -130,7 +130,8 @@ function boardOpen(id) {
   const s = row(id);
   if (!s) return;
   if (board.chat) board.chat.close();
-  const chat = new Chat({ id, row: s, noSwitch: true, onGone: (why) => { if (!why && board.chat === chat) boardCollapse(); } });
+  const chat = new Chat({ id, row: s, noSwitch: true, onGone: (why) => { if (!why && board.chat === chat) boardCollapse(); },
+                          onSent: () => { if (board.chat === chat) boardSent(id); } });
   board.open = id;
   board.chat = chat;
   const btn = (label, act, cls = "") => h("button", { class: `text-btn ${cls}`, type: "button", onclick: act }, label);
@@ -149,6 +150,24 @@ function boardOpen(id) {
     if (t) t.scrollIntoView({ block: "start", behavior: "smooth" });
     chat.grow();
   });
+}
+
+// You sent it something (a message, an answer, an approval): it works on
+// it, and its ticket folds so you're on the next thing at once: the next
+// that's your move, in view and lit, Enter to open it.
+function boardSent(id) {
+  todayAnswered(id);
+  boardCollapse();
+  const next = [...board.box.querySelectorAll(".today-yours .ticket")].find((t) => t.dataset.id !== id)
+    || board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"]`);
+  if (!next) return;
+  next.classList.add("next");
+  setTimeout(() => next.classList.remove("next"), 2400);
+  next.scrollIntoView({ block: "center", behavior: "smooth" });
+  const btn = next.querySelector(".today-chat, .today-line-main");
+  if (btn) btn.focus({ preventScroll: true });
+  const left = board.box.querySelectorAll(".today-yours .ticket").length;
+  toast(left ? `Sent. Next: ${left} more for you` : "Sent. Nothing else waits on you");
 }
 
 function boardCollapse() {

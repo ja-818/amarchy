@@ -1313,8 +1313,13 @@ class Chat {
   }
 
   // A request to the session's routes ("keys", "send", "answer", "interrupt"...).
+  // What you send or answer goes; once it's gone, whoever holds the chat is
+  // told (opts.onSent: Tasks folds its ticket, tasks.js). Not Esc's stop.
   post(route, body) {
-    return api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
+    const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
+    const done = api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
+    if (sent && this.opts.onSent) done.then(() => this.opts.onSent(route), () => {});
+    return done;
   }
 
   // ---- what shows: the conversation, or another view of the session's

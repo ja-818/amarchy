@@ -261,7 +261,9 @@ else installed.
   Click one and it opens in place, the chat itself live in it: answer, approve,
   write, **Close chat**, **Open in Chats**, and **Fold** (or `Esc`, or click it
   again) to put it away. One is open at a time, and the page holds still while it
-  is. **New chat** (`Ctrl+Alt+N`) puts its box at the top, and the chat it starts
+  is. Send it something (a message, an answer, an approval) and it folds while it
+  works on it, and the next thing that's your move comes into view, lit, `Enter` to
+  open it. **New chat** (`Ctrl+Alt+N`) puts its box at the top, and the chat it starts
   opens as a ticket. **Chats** is the rest of this section.
 - **The list** shows each chat as the phone does. Over it, **New chat**, **Tasks**
   (with how many things are your move) and the cog, Settings (a right click on it,

@@ -273,6 +273,19 @@ async function wide(browser, port) {
   await p.evaluate(() => todayOpen(row("proj-quiet")));
   check(where, await until(p, () => !board.open), "clicked again: it folds");
 
+  // Sent from an open ticket: it folds, it's off your move, and the next is lit and has the keys.
+  await p.evaluate(() => todayOpen(row("proj-ask")));
+  check(where, await until(p, () => board.open === "proj-ask"), "a ticket that asks, opened");
+  await p.evaluate(() => board.chat.post("send", { text: "Wait until Friday" }));
+  check(where, await until(p, () => !board.open), "sent: its ticket folds");
+  check(where, await p.evaluate(() => !document.querySelector(".today-yours .ticket[data-id=proj-ask]")), "it's off your move while it works on it");
+  check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !!n && n.dataset.id === "proj-perm" && n.contains(document.activeElement); }),
+        "the next one lit, the keys on it");
+  await p.screenshot({ path: path.join(SHOTS, "wide-after-send.png") });
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => board.open === "proj-perm"), "Enter opens it");
+  await p.evaluate(() => boardCollapse());
+
   // A new chat at the top of the board.
   await p.evaluate(() => [...document.querySelectorAll(".board-head .control")].find((b) => /New chat/.test(b.innerText)).click());
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && !!document.querySelector(".board-new .start-chat")
