@@ -120,6 +120,7 @@ class Dictate {
     const base = field.value.replace(/\s+$/, "");
     const r = this.run = { way, base, first: base, held: true, words: "", wrote: false, started: Date.now() };
     live.add(r);
+    this.keys();
     this.opts.button.classList.add("on");
     if (this.opts.changed) this.opts.changed();
     if (way === "host") this.host(r);
@@ -172,6 +173,20 @@ class Dictate {
     this.opts.button.classList.remove("on");
     this.say(null);
     if (this.opts.changed) this.opts.changed();
+    if (!r.cancelled) this.keys();
+  }
+
+  // On a computer, the keys go to the box being dictated into: Enter stops
+  // the dictation there, and the next Enter sends (no click in the box
+  // first). Not on a phone: its keyboard would come up over the words.
+  keys() {
+    const field = this.opts.field;
+    if (!field.isConnected || document.activeElement === field || !matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    const at = document.activeElement;
+    if (at && at !== document.body && at.matches("input, textarea, [contenteditable]")) return;      // you're typing elsewhere
+    field.focus({ preventScroll: true });
+    const end = field.value.length;
+    try { field.setSelectionRange(end, end); } catch (e) { /* not a text field */ }
   }
 
   // ---- written down on the host

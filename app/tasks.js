@@ -20,6 +20,7 @@ const board = {
   chat: null,        // its Chat
   composing: false,  // the new chat's box at the top
   waitFor: null,     // a chat just started: opened once the list has it
+  tab: "chats",      // Chats (your chats) or Tasks (your loops): the one you were on (boardBuild)
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
 };
@@ -29,6 +30,7 @@ function chatNow() { return boardOn() ? board.chat : desk.chat; }
 
 function boardBuild() {
   if (board.el) return board.el;
+  board.tab = store.get("board-tab") === "tasks" ? "tasks" : "chats";
   board.switchEl = h("div", { class: "seg board-switch", role: "tablist" });
   board.head = h("header", { class: "board-head" },
     h("div", { class: "board-head-in" },
@@ -36,6 +38,9 @@ function boardBuild() {
       boardSearchBox(),
       h("button", { class: "control", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() }, glyph("plus"), "New chat"),
       automationsButton("control organize"),
+      // The standard layout: the list on the left, a chat beside it.
+      h("button", { class: "control organize board-classic", type: "button", title: "The list and a chat beside it (Ctrl+Alt+H)",
+                    "aria-label": "The list and a chat", onclick: () => deskMode("chats") }, glyph("project")),
       h("button", { class: "control organize", type: "button", title: "Settings (right click or Ctrl+Alt+M: the Amarchy menu)", "aria-label": "Settings",
                     onclick: () => openSettings(), oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } }, glyph("gear"))));
   board.slot = h("div", { class: "board-new", hidden: true });
@@ -43,8 +48,10 @@ function boardBuild() {
   board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.box);
   board.focusEl = h("div", { class: "board-focus", hidden: true });
   board.el = h("div", { class: "tasks-board" }, board.head, board.scroll, board.focusEl);
-  // Its keys wherever the keyboard is (nothing focused, too), while it's up.
+  // Its keys wherever the keyboard is (nothing focused, too), while it's up;
+  // Esc over an open chat before the chat has it (there it would stop Claude).
   window.addEventListener("keydown", (e) => { if (boardOn()) boardKeys(e); });
+  window.addEventListener("keydown", (e) => { if (boardOn() && board.open) boardEsc(e); }, true);
   return board.el;
 }
 
@@ -53,18 +60,7 @@ function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back")) return;
   const typing = e.target.closest("textarea, input, [contenteditable]");
-  if (board.open) {
-    // Esc: back to the board. In the box you type in only when it's empty
-    // and Claude isn't at work (there Esc stops Claude, as in any chat).
-    if (e.key !== "Escape") return;
-    const working = board.chat && board.chat.row && board.chat.row.status === "working";
-    if (typing && (e.target.value || working)) return;
-    if (e.target.closest(".card")) return;
-    e.preventDefault();
-    e.stopPropagation();
-    boardBack();
-    return;
-  }
+  if (board.open) return;      // (its Esc: boardEsc)
   if (typing) return;
   if (e.key === "/") { e.preventDefault(); board.search.focus(); board.search.select(); return; }
   const goes = [...board.box.querySelectorAll(".ticket > * > .today-go")];
@@ -87,17 +83,40 @@ function boardKeys(e) {
   }
 }
 
-// The switch's two sides, wherever they are, with what's your move.
+// Esc over an open chat: back to the board, always (what you were writing
+// stays, as a chat's draft does). But for what Esc does first: stop a
+// dictation, close a menu or a sheet.
+function boardEsc(e) {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (document.querySelector(".sheet-back, .picker-back")) return;
+  const c = board.chat;
+  if (c && (c.talk.on() || c.menu)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  boardBack();
+}
+
+// The board's tabs, Chats and Tasks, each with what's your move; and over
+// the list in the standard layout, the way back to the board.
 function modeButtons() {
   if (!app.view) return;
-  const n = todayCount(app.view);
-  const count = () => (n ? h("span", { class: "tab-count" }, String(n)) : "");     // one each: an element is in one place
+  const count = (only) => { const n = todayCount(app.view, only); return n ? h("span", { class: "tab-count" }, String(n)) : ""; };
   if (board.switchEl) {
-    const side = (mode, ...label) => h("button", { class: `control${desk.mode === mode ? " on" : ""}`, type: "button", role: "tab",
-                                                   "aria-selected": String(desk.mode === mode), onclick: () => deskMode(mode) }, ...label);
-    board.switchEl.replaceChildren(side("tasks", "Tasks", count()), side("chats", "Chats"));
+    const side = (tab, label) => h("button", { class: `control${board.tab === tab ? " on" : ""}`, type: "button", role: "tab",
+                                               "aria-selected": String(board.tab === tab), onclick: () => boardTab(tab) }, label, count(tab));
+    board.switchEl.replaceChildren(side("chats", "Chats"), side("tasks", "Tasks"));
   }
-  if (desk.todayBtn) desk.todayBtn.replaceChildren("Tasks", count());
+  if (desk.todayBtn) desk.todayBtn.replaceChildren("Board", count());
+}
+
+// Chats or Tasks on the board, kept for the next time.
+function boardTab(tab) {
+  board.tab = tab === "tasks" ? "tasks" : "chats";
+  store.set("board-tab", board.tab);
+  if (board.open) boardBack(true);
+  board.scroll.scrollTop = 0;
+  if (board.query) boardSearchDraw(); else todayFill(board.box, true);
+  modeButtons();
 }
 
 // Tasks or Chats, kept for the next time the app opens.
@@ -270,7 +289,7 @@ setInterval(() => {
 // with the lines that have them. Enter opens the first; Esc empties it.
 
 function boardSearchBox() {
-  board.search = h("input", { type: "search", placeholder: "Search chats and what was said in them", "aria-label": "Search chats",
+  board.search = h("input", { type: "search", placeholder: "Search chats, what was said, your tasks", "aria-label": "Search chats",
                               autocomplete: "off", spellcheck: "false", enterkeyhint: "search",
                               oninput: () => boardSearch(board.search.value),
                               onkeydown: (e) => {
@@ -336,8 +355,14 @@ function boardSearchDraw() {
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
                h("span", { html: lit(l.text, words) })))] }));
   });
-  const head = h("div", { class: "today-summary" }, found ? `${rows.length ? rows.length : "No"} chat${rows.length === 1 ? "" : "s"} with “${board.query}”` : `Searching “${board.query}”…`);
-  keepFocus(board.box, () => board.box.replaceChildren(head, ...(cards.length ? [h("div", { class: "tsec-cards" }, ...cards)]
-    : found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name or in what was said. Fewer words find more.")] : [])));
+  // Your tasks that have them too (who and what), first on the Tasks tab.
+  const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
+  const taskCards = loops.map((l) => todayLoop(l, v));
+  const chatsSec = cards.length ? todaySection("found-chats", "Chats", { count: cards.length }, cards) : null;
+  const tasksSec = taskCards.length ? todaySection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
+  const n = rows.length + loops.length;
+  const head = h("div", { class: "today-summary" }, found || loops.length ? `${n || "Nothing"} with “${board.query}”` : `Searching “${board.query}”…`);
+  keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),
+    ...(!n && found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
   board.box.dataset.key = "";      // Today draws itself again when the search is emptied
 }

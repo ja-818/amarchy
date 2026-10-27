@@ -195,3 +195,10 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-text.found { display: flex; gap: 8px; align-items: baseline; }
 .found-who { flex: none; font-size: var(--caption); font-weight: 800; color: var(--text-muted); min-width: 3.4em; }
 .found-who.you { color: var(--accent); }
+
+/* Ask your assistant about a task: a box the card's width, its buttons under it. */
+.tcard-askbox { display: flex; flex-direction: column; gap: 8px; padding: 2px 14px 0; }
+.tcard-ask { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; padding: 10px 12px; font: inherit; line-height: 1.4; color: var(--text);
+             border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); }
+.tcard-ask:focus-visible { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
+.tcard-askbox .tcard-actions { padding: 0 0 12px; }

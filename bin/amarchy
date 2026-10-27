@@ -8746,14 +8746,19 @@ def today_view():
 LOOP_ASKS = {
     "done": "Loop done: {said}. Tick it off in {source}.",
     "chase": "Chase {who} on: {what}{since}. Draft the message for me to send.",
+    "ask": "About this loop: {said}\n\n{text}",
 }
 
 
-def loop_tell(key, action):
-    """Today's Done or Chase on a loop: told to your assistant (as if you'd
-    typed it), which keeps the file. None, or what's wrong."""
+def loop_tell(key, action, text=""):
+    """Today's Done, Follow up (chase) or Ask (text: what you want done about
+    it) on a loop: told to your assistant (as if you'd typed it), which keeps
+    the file. None, or what's wrong."""
     if action not in LOOP_ASKS:
-        return "done or chase"
+        return "done, chase or ask"
+    text = text.strip() if isinstance(text, str) else ""
+    if action == "ask" and not text:
+        return "What should your assistant do about it?"
     loops, source, _ = read_loops()
     loop = next((l for l in loops if l["key"] == key), None)
     if not loop:
@@ -8765,7 +8770,7 @@ def loop_tell(key, action):
         return "Only someone you're waiting on can be chased"
     said = loop["line"]
     since = f" (waiting since {loop['since']})" if loop["since"] else ""
-    text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since)
+    text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since, text=text[:4000])
     r = run_amarchy("send", mine["id"], text, "--no-wait")
     if r.returncode != 0:
         return gist(r.stderr) or f"{mine['name']} didn't take it"
@@ -9680,7 +9685,7 @@ def app_handler(st, users, address):
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
             if self.path == "/api/today/loop":      # Done or Chase on one of your loops: {key, action}, to your assistant
-                why = loop_tell(data.get("key"), data.get("action"))
+                why = loop_tell(data.get("key"), data.get("action"), data.get("text") or "")
                 return self.error(409, why) if why else self.send(200, {})
             if self.path == "/api/today/loops":     # your loops file: {path} ("" for none)
                 p = data.get("path")

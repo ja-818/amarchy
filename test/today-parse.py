@@ -89,4 +89,6 @@ check(am.search_chats("pricing nowhere", [s]) == [], "every word, or nothing")
 check(am.search_chats("log", [s]) == [], "a tool's output isn't searched")
 
 print(f"\n{len(failed)} failed: {failed}" if failed else "\nAll passed.")
+import shutil
+shutil.rmtree(home, ignore_errors=True)
 sys.exit(1 if failed else 0)

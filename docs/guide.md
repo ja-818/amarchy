@@ -254,22 +254,26 @@ is a see-through pane over your wallpaper, in your theme and font. A Mac, or any
 computer with Tailscale and a browser, can use the host's chats without anything
 else installed.
 
-- **Tasks or Chats**: two ways to work, switched with **Tasks | Chats** (or
-  `Ctrl+Alt+H`); the app opens on the one you used last, Tasks at first. **Tasks**
-  is the whole window with no list: [Today](#today) with every chat a ticket (its
-  project, its state, its goal and what it last said, its question's buttons).
-  Click one (or `Enter`) and the chat takes the whole window, its box ready:
-  answer, approve, write, **Close chat**, **Open in Chats**. **← Back** (or `Esc`)
-  is the board again, where you were; so is sending it something (a message, an
-  answer, an approval): it works on that, and the next thing that's your move is
-  lit, `Enter` to open it. On the board, `j` / `k` go from ticket to ticket, `1`-`4`
-  pick an answer, `x` closes (with Undo) and `n` starts a new chat, its box at the
-  top (as **New chat** and `Ctrl+Alt+N` do); the chat it starts opens at once.
-  In the middle of the bar, **search** (`/`): a chat by its name, or by anything
-  said in it (your messages and Claude's words), every word found, the best first,
-  with the lines that have them lit; `Enter` opens the first, `Esc` empties it.
-  **Chats** is the rest of this section.
-- **The list** shows each chat as the phone does. Over it, **New chat**, **Tasks**
+- **The board, or the list and a chat**: two ways to work; the app opens on the one
+  you used last, the board at first. `Ctrl+Alt+H` switches; so do **Board** over the
+  list and the list's button on the board. **The board** is the whole window with no
+  list, and two tabs, each with what's your move: **Chats**, every chat a card (its
+  project, its state, its goal and what it last said, its question's buttons), and
+  **Tasks**, your own (your loops file: due now, waiting on others, this week,
+  further out, someday), each with **Follow up** (your assistant drafts the message
+  to whoever you wait on), **Ask Jaken…** (tell your assistant what to do about it)
+  and **Done**. Click a chat (or `Enter`) and it takes the whole window, its box
+  ready: answer, approve, write, **Close chat**, **Open in Chats**. **← Back** or
+  `Esc` (always: what you were writing stays) is the board again, where you were;
+  so is sending it something, the next thing that's your move lit. On the board `j`
+  / `k` go from card to card, `1`-`4` pick an answer, `x` closes (with Undo), `n`
+  starts a new chat (as **New chat** and `Ctrl+Alt+N` do), and `/` is the
+  **search** in the middle of the bar: a chat by its name or anything said in it,
+  and your tasks, every word found, the lines that have them lit; `Enter` opens the
+  first, `Esc` empties it. Dictating, the keys go to the box: `Enter` stops it, the
+  next `Enter` sends.
+  **The list and a chat** is the rest of this section.
+- **The list** shows each chat as the phone does. Over it, **New chat**, **Board**
   (with how many things are your move) and the cog, Settings (a right click on it,
   or `Ctrl+Alt+M`, opens the Amarchy menu). **New chat** is **What do you want to do?** in the middle, a big box with the
   project and the model under it (the model stays the default of every new chat,
@@ -351,7 +355,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
 | `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
-| `Ctrl+Alt+H` | Tasks / Chats. |
+| `Ctrl+Alt+H` | The board / the list and a chat. |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / close the chat. |
 | `Ctrl+Alt+T` | The look: theme, font and wallpaper (see [Theme](#theme)). |

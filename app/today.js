@@ -26,6 +26,8 @@ const TODAY_UNDO_CLOSE = 5000;      // ms a close waits for Undo
 const TODAY_SHOW = 5;               // Finish's rows before "+N more"
 const todayUI = {
   open: new Map(),      // a fold you opened or closed: its key -> open
+  asking: new Set(),    // tasks whose Ask Jaken box is open
+  askText: new Map(),   // what you wrote in it, kept across redraws
   answers: new Map(),   // a chat's questions being answered here: id -> {key, picks}
   told: new Map(),      // a loop or chat acted on here, until the view says so too: key -> what
   sent: new Map(),      // a chat you answered: id -> {key: what it asked then, at}
@@ -147,21 +149,24 @@ function todayParts(v) {
     .sort((a, b) => quietFor(b) - quietFor(a));
   const working = rest.filter((s) => s.status === "working");
   const idle = rest.filter((s) => !done.includes(s) && !stale.includes(s) && !working.includes(s));
-  return { asks, blocked, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle };
+  const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
+  return { asks, blocked, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle, someday };
 }
 
 // What's your move: the count on Today's tab, the switch, the page's top.
-function todayCount(v) {
+function todayCount(v, only = null) {
   if (!v) return 0;
   const p = todayParts(v);
-  return p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
+  const chats = p.asks.length + p.blocked.length, tasks = p.dueNow.length + p.chaseNow.length;
+  return only === "chats" ? chats : only === "tasks" ? tasks : chats + tasks;
 }
 
 // The one count line: what's your move, what's to close.
-function todaySummary(v) {
+function todaySummary(v, only = null) {
   const p = todayParts(v);
-  const yours = p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
-  return [yours ? `${yours} for you to do` : "Nothing waits on you", p.done.length ? `${p.done.length} to close` : ""].filter(Boolean).join(" · ");
+  const yours = todayCount(v, only);
+  if (only === "tasks") return yours ? `${yours} task${yours === 1 ? "" : "s"} for now` : "No task is due now";
+  return [yours ? `${yours} for you to do` : "Nothing waits on you", only !== "tasks" && p.done.length ? `${p.done.length} to close` : ""].filter(Boolean).join(" · ");
 }
 
 // ---- doing
@@ -372,14 +377,16 @@ function todayLoop(l, v) {
   const sent = (v.today.sent || {})[l.key] || (todayUI.told.has(l.key) ? { action: todayUI.told.get(l.key) } : null);
   const late = l.kind === "due" ? todayDay(l.due) < 0 : l.chase && todayDay(l.chase) <= 0;
   const name = (v.today.assistant || {}).name || "your assistant";
-  const when = l.kind === "waiting" ? (l.chase ? `chase ${todayWhen(l.chase).replace(/^since /, "")}` : l.since ? `since ${todayAgo(l.since)}` : "")
-    : todayWhen(l.due);
-  const act = async (action) => {
+  const when = l.kind === "waiting" ? (l.chase ? `follow up ${todayWhen(l.chase).replace(/^since /, "")}` : l.since ? `since ${todayAgo(l.since)}` : "")
+    : l.kind === "due" ? todayWhen(l.due) : "someday";
+  const act = async (action, text) => {
     todayUI.told.set(l.key, action);
+    todayUI.asking.delete(l.key);
     todayRedraw();
     try {
-      await api("/api/today/loop", { key: l.key, action });
-      toast(action === "done" ? `Told ${name}: done` : `${name} drafts the chase`);
+      await api("/api/today/loop", { key: l.key, action, text });
+      todayUI.askText.delete(l.key);
+      toast(action === "done" ? `Told ${name}: done` : action === "chase" ? `${name} drafts the follow-up for you` : `Sent to ${name}`);
     } catch (e) {
       todayUI.told.delete(l.key);
       todayRedraw();
@@ -389,14 +396,35 @@ function todayLoop(l, v) {
   const can = !!v.today.assistant;
   const open = todayUI.expand.has(l.key);
   const chase = l.kind === "waiting";
+  const asking = todayUI.asking.has(l.key);
+  const said = { done: `Sent to ${name}: done`, chase: `${name} drafts the follow-up`, ask: `Sent to ${name}` };
   // Its head: who, what (a tap shows all of it). Under it, one line: when (and
-  // since), and its buttons.
-  const meta = sent ? h("span", { class: "tcard-meta done" }, sent.action === "chase" ? `${name} drafts it` : `Sent to ${name}`)
+  // since), and its buttons: Follow up (your assistant drafts the message to
+  // whoever you wait on), Ask (tell your assistant what to do about it), Done.
+  const meta = sent ? h("span", { class: "tcard-meta done" }, said[sent.action] || `Sent to ${name}`)
     : h("span", { class: `tcard-meta${late ? " late" : ""}` }, [when, chase && l.since && l.chase ? `asked ${todayAgo(l.since)}` : ""].filter(Boolean).join(" · "));
-  return todayCard({ kind: chase ? "chase" : "due", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
+  const box = asking ? (() => {
+    const field = h("textarea", { class: "tcard-ask", rows: 2, placeholder: `What should ${name} do about it?`,
+                                  oninput: () => todayUI.askText.set(l.key, field.value),
+                                  onkeydown: (e) => {
+                                    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (field.value.trim()) act("ask", field.value.trim()); }
+                                    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); todayUI.asking.delete(l.key); todayRedraw(); }
+                                  } });
+    field.value = todayUI.askText.get(l.key) || "";
+    requestAnimationFrame(() => { if (field.isConnected && document.activeElement !== field) field.focus({ preventScroll: true }); });
+    return h("div", { class: "tcard-askbox" }, field, h("div", { class: "tcard-actions" },
+      todayBtn("Cancel", () => { todayUI.asking.delete(l.key); todayRedraw(); }, false, "quiet"),
+      todayBtn(`Send to ${name}`, () => { if (field.value.trim()) act("ask", field.value.trim()); }, true)));
+  })() : null;
+  return todayCard({ kind: chase ? "chase" : l.kind === "due" ? "due" : "someday", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
     title: h("span", { class: `tcard-what${open ? " open" : ""}` }, l.what), label: l.what,
     open: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); },
-    actions: [meta, ...(sent || !can ? [] : [chase ? todayBtn("Chase", () => act("chase"), late) : null, todayBtn("Done", () => act("done"), !chase && late)])] });
+    body: [box],
+    actions: asking ? [] : [meta, ...(sent || !can ? [] : [
+      chase ? h("button", { class: `tbtn${late ? " primary" : ""}`, type: "button", title: `${name} drafts a message to ${l.who || "them"} for you to send`,
+                            onclick: () => act("chase") }, "Follow up") : null,
+      h("button", { class: "tbtn", type: "button", title: `Tell ${name} what to do about it`, onclick: () => { todayUI.asking.add(l.key); todayRedraw(); } }, `Ask ${name}…`),
+      todayBtn("Done", () => act("done"), !chase && late)])] });
 }
 
 // A chat: its project, its name, where it stands; its goal (and in Tasks
@@ -420,34 +448,45 @@ function todayChat(s, kind) {
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the
 // phone has it in its header). board: each chat a ticket (tasks.js).
-function todayNodes({ board = false, top = true } = {}) {
+// only: "chats" (the chats alone), "tasks" (your loops alone), else both
+// (the phone's Today, a computer's middle).
+function todayNodes({ board = false, top = true, only = null } = {}) {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
   const p = todayParts(v);
   const tk = (draw, ...more) => (s) => (board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more));
+  const loop = (l) => todayLoop(l, v);
   const hasLoops = !!(v.today && v.today.source);
-  const yours = p.asks.length + p.blocked.length + p.dueNow.length + p.chaseNow.length;
+  const chats = only !== "tasks", tasks = only !== "chats";
   const close = p.done.length;
+  const yours = (chats ? p.asks.length + p.blocked.length : 0) + (tasks ? p.dueNow.length + p.chaseNow.length : 0);
   const nodes = [];
-  if (top) nodes.push(h("div", { class: "today-summary" }, todaySummary(v)));
-  if (p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, on top
-  nodes.push(todaySection("yours", "Your move", { count: yours },
-    p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)),
-    p.chaseNow.map((l) => todayLoop(l, v)), p.dueNow.map((l) => todayLoop(l, v))));
+  if (top) nodes.push(h("div", { class: "today-summary" }, todaySummary(v, only)));
+  if (chats && p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, on top
+  nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Your move", { count: yours },
+    chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked))] : [],
+    tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
   if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"),
-    close ? ` Nothing waits on you. ${close} to close, below.` : p.stale.length ? ` Nothing waits on you. ${p.stale.length} stalled, below.` : " Nothing waits on you."));
-  const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
-  nodes.push(todaySection("finish", "Finish", { count: close + p.stale.length, extra: all },
-    todayFirst("finish", [...p.done.map(tk(todayChat, "done")), ...p.stale.map(tk(todayChat, "stale"))])));
-  nodes.push(todaySection("working", "At work", { count: p.working.length, fold: true }, p.working.map(tk(todayChat, "working"))));
-  nodes.push(todaySection("chase", "Waiting on others", { count: p.waiting.length, fold: false }, p.waiting.map((l) => todayLoop(l, v))));
-  nodes.push(todaySection("week", "Later this week", { count: p.week.length, fold: false }, p.week.map((l) => todayLoop(l, v))));
-  nodes.push(todaySection("later", "Further out", { count: p.later.length, fold: false }, p.later.map((l) => todayLoop(l, v))));
-  nodes.push(todaySection("idle", "Other chats", { count: p.idle.length, fold: false }, p.idle.map(tk(todayChat, "idle"))));
-  if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
-  if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your commitments can show here too: set your loops file in ",
-    h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
-  else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark loops done from here."));
+    chats && close ? ` Nothing waits on you. ${close} to close, below.` : chats && p.stale.length ? ` Nothing waits on you. ${p.stale.length} stalled, below.` : " Nothing waits on you."));
+  if (chats) {
+    const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
+    nodes.push(todaySection("finish", "Finish", { count: close + p.stale.length, extra: all },
+      todayFirst("finish", [...p.done.map(tk(todayChat, "done")), ...p.stale.map(tk(todayChat, "stale"))])));
+    nodes.push(todaySection("working", "At work", { count: p.working.length, fold: true }, p.working.map(tk(todayChat, "working"))));
+  }
+  if (tasks) {
+    nodes.push(todaySection("chase", "Waiting on others", { count: p.waiting.length, fold: only === "tasks" }, p.waiting.map(loop)));
+    nodes.push(todaySection("week", "Later this week", { count: p.week.length, fold: only === "tasks" }, p.week.map(loop)));
+    nodes.push(todaySection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
+    if (only === "tasks") nodes.push(todaySection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
+  }
+  if (chats) nodes.push(todaySection("idle", "Other chats", { count: p.idle.length, fold: false }, p.idle.map(tk(todayChat, "idle"))));
+  if (tasks) {
+    if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
+    if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your tasks show here from your loops file: set it in ",
+      h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
+    else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark tasks done from here."));
+  }
   return nodes.filter(Boolean);
 }
 
@@ -463,6 +502,8 @@ function todayKey(v) {
                                    (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
 }
 
+function boardTabNow() { return typeof board !== "undefined" && board.tab === "tasks" ? "tasks" : "chats"; }
+
 function boardOn() { return !!app.desk && typeof desk !== "undefined" && desk.mode === "tasks"; }
 
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
@@ -473,7 +514,7 @@ function todayFill(box, force) {
   const board = box.classList.contains("board-today");
   const scroller = box.closest(".scroll, .today-scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
-  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, top: !box.classList.contains("phone-today") })));
+  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, top: !box.classList.contains("phone-today"), only: board ? boardTabNow() : null })));
   if (scroller) scroller.scrollTop = top;
 }
 

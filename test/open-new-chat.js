@@ -238,6 +238,7 @@ async function wide(browser, port) {
   } finally {
     await browser.close();
     server.kill();
+    fs.rmSync(home, { recursive: true, force: true });      // its own home: 70 MB in /tmp each run otherwise
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : `\nAll passed. Screenshots: ${SHOTS}`);
   process.exit(failures.length ? 1 : 0);

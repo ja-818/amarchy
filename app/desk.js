@@ -434,7 +434,7 @@ function deskStart() {
       // The new chat ("What do you want to do?") in the middle: newSession().
       h("button", { class: "control new-chat", title: "New chat (Ctrl+Alt+N)", onclick: () => newSession() }, glyph("plus"), "New chat"),
       // Tasks (tasks.js): the whole window your chats as tickets, with how many things are your move.
-      desk.todayBtn = h("button", { class: "control today-btn", title: "Tasks: your chats as tickets (Ctrl+Alt+H)", onclick: () => deskMode("tasks") }, "Tasks"),
+      desk.todayBtn = h("button", { class: "control today-btn", title: "The board: your chats and your tasks as cards (Ctrl+Alt+H)", onclick: () => deskMode("tasks") }, "Board"),
       // Settings; a right click (or Ctrl+Alt+M), the Amarchy menu.
       desk.brand = h("button", { class: "control brand", title: "Settings (right click or Ctrl+Alt+M: the Amarchy menu)", "aria-label": "Settings",
                                  onclick: () => openSettings(), oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } },
@@ -1798,7 +1798,7 @@ function deskMenu() {
   const items = [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
     { label: "New project", icon: "plus", key: "Ctrl+Alt+P", act: () => newProject() },
-    { label: boardOn() ? "Chats" : "Tasks", icon: "status", detail: boardOn() ? "the list and one chat" : "your chats as tickets", key: "Ctrl+Alt+H",
+    { label: boardOn() ? "The list and a chat" : "The board", icon: "status", detail: boardOn() ? "the standard layout" : "your chats and tasks as cards", key: "Ctrl+Alt+H",
       act: () => deskMode(boardOn() ? "chats" : "tasks") },
   ];
   if (s) items.push(
@@ -1877,7 +1877,7 @@ function showKeys() {
     ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
     ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
-    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+H", "Tasks / Chats"],
+    ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+H", "The board / the list and a chat"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
     ["Ctrl+Alt+X", "Close this chat"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your chats, in a list to pick from"],
     ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],
