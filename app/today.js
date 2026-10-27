@@ -252,58 +252,84 @@ function todayPermit(s, choice) {
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }
 
-// ---- drawing
+// ---- drawing: one card for everything
+//
+// Every item on Today is the same card: a stripe in its color on the left
+// (the project's, or the person's for a loop), a head (its project or who,
+// its name, and a pill that says where it stands), a body (the question, the
+// goal, what it last said), and its actions. Sections are the same too: a
+// small head with a count, folded or not.
 
-function todayFold(key, title, count, kids, open = false) {
+const TODAY_PILLS = { ask: "Asks you", permission: "Permission", secret: "A secret", blocked: "Blocked", done: "Done",
+                      working: "Working" };
+
+function todayPill(text, tone) {
+  return h("span", { class: `tpill t-${tone}` }, tone === "working" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null, text);
+}
+
+// Where a chat stands, as its card's badge says it (the open chat's bar too).
+function todayStatePill(s) {
+  const t = s.today || {};
+  if (s.status === "waiting" || (s.secret_asks || []).length || (s.status !== "working" && (t.asks || []).length && !todayIsAnswered(s)))
+    return todayPill(s.permission ? "Permission" : "Asks you", "ask");
+  if (s.status === "working") return todayPill("Working", "working");
+  if (t.state === "blocked") return todayPill("Blocked", "late");
+  if (t.state === "done") return todayPill("Done", "done");
+  return todayPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
+}
+
+// A card. head: what opens it (a chat) or opens its text (a loop).
+function todayCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label }) {
+  const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
+    lead, chip ? h("span", { class: "tcard-chip" }, chip) : null,
+    h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
+  return h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null }, head,
+    ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
+}
+
+function todayBtn(label, act, primary = false, cls = "") {
+  return h("button", { class: `tbtn${primary ? " primary" : ""}${cls ? ` ${cls}` : ""}`, type: "button", onclick: act }, label);
+}
+
+function todayChip(s) { return s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo); }
+
+// A section: its head (a count, folded or not, and an action), its cards.
+function todaySection(kind, title, { count = null, fold = null, extra = null } = {}, ...kids) {
+  kids = kids.flat().filter(Boolean);
   if (!kids.length) return null;
-  const isOpen = todayUI.open.has(key) ? todayUI.open.get(key) : open;
-  const d = h("details", { class: "today-fold", ...(isOpen ? { open: true } : {}) },
-    h("summary", { "aria-label": `${title}, ${count}` }, h("span", { class: "today-fold-title" }, title),
-      count !== null ? h("span", { class: "today-count" }, String(count)) : null),
-    h("div", { class: "today-rows" }, ...kids));
-  d.addEventListener("toggle", () => todayUI.open.set(key, d.open));
+  const head = h("h2", { class: "tsec-head" }, h("span", { class: "tsec-title" }, title),
+    count !== null ? h("span", { class: "tsec-count" }, String(count)) : null, h("span", { class: "tsec-gap" }), extra);
+  if (fold === null) return h("section", { class: `tsec today-${kind}` }, head, h("div", { class: "tsec-cards" }, ...kids));
+  const isOpen = todayUI.open.has(kind) ? todayUI.open.get(kind) : fold;
+  const d = h("details", { class: `tsec today-${kind}`, ...(isOpen ? { open: true } : {}) },
+    h("summary", { "aria-label": `${title}, ${count}` }, head), h("div", { class: "tsec-cards" }, ...kids));
+  d.addEventListener("toggle", () => todayUI.open.set(kind, d.open));
   return d;
 }
 
 // The first few, then "+N more" for the rest.
 function todayFirst(key, kids, n = TODAY_SHOW) {
   if (kids.length <= n || todayUI.more.has(key)) return kids;
-  return [...kids.slice(0, n), h("button", { class: "text-btn today-more", type: "button",
-    onclick: () => { todayUI.more.add(key); todayRedraw(); } }, `+${kids.length - n} more`)];
+  return [...kids.slice(0, n), h("button", { class: "tbtn today-more", type: "button",
+    onclick: () => { todayUI.more.add(key); todayRedraw(); } }, `${kids.length - n} more`)];
 }
 
-function todaySection(kind, title, extra, ...kids) {
-  kids = kids.flat().filter(Boolean);
-  if (!kids.length) return null;
-  return h("section", { class: `today-part today-${kind}` }, h("h2", { class: "today-head" }, h("span", {}, title), extra || null), ...kids);
-}
-
-// A chat's head: its mark (? when it asks you, the bell for a permission,
-// else its state), its project and its name on one line, a tap opening it.
-function todayChatName(s, asking) {
-  const main = s.assistant === "main";
-  const mark = main ? avatar(s, "small")
-    : asking ? h("span", { class: `today-mark${s.status === "waiting" ? " bell" : ""}`, "aria-label": "Asks you" }, s.status === "waiting" ? glyph("waiting") : "?")
-    : stateIcon(s);
-  return h("button", { class: "today-chat today-go", type: "button", onclick: () => todayOpen(s) },
-    mark, main ? null : projectChip(s), taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat"), glyph("next", "go"));
-}
-
-// What a chat asks you, answered here: its last reply's questions with their
-// buttons (all of them picked, they go as one message, after Undo's
+// What a chat asks you, answered on its card: its last reply's questions
+// with their answers (all picked, they go as one message, after Undo's
 // moment), a permission's Allow and Deny, else Answer (a secret, a plan,
 // Claude's own question: in the chat, at its card).
 function todayAsk(s) {
   const t = s.today || {};
   const qs = s.status !== "waiting" ? (t.asks || []).filter((q) => (q.options || []).length).slice(0, 3) : [];
-  const card = h("article", { class: "today-card ask" }, todayChatName(s, true));
+  const base = { kind: "ask", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", open: () => todayOpen(s), id: s.id,
+                 lead: s.assistant === "main" ? avatar(s, "small") : null };
   if (!qs.length) {
-    const what = (s.secret_asks || []).length ? "Asks you for a secret" : s.asks || "Needs your answer";
-    card.append(h("p", { class: "today-q" }, what), h("div", { class: "today-btns" },
-      s.permission ? h("button", { class: "control today-opt", type: "button", onclick: () => todayPermit(s, "allow") }, "Allow") : null,
-      s.permission ? h("button", { class: "control today-opt", type: "button", onclick: () => todayPermit(s, "deny") }, "Deny") : null,
-      h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, s.permission ? "Open" : "Answer")));
-    return card;
+    const secret = (s.secret_asks || []).length;
+    const tone = secret ? "secret" : s.permission ? "permission" : "ask";
+    return todayCard({ ...base, pill: todayPill(TODAY_PILLS[tone], "ask"),
+      body: [h("p", { class: "tcard-text" }, secret ? "Asks you for a secret" : s.asks || "Needs your answer")],
+      actions: s.permission ? [todayBtn("Allow", () => todayPermit(s, "allow"), false, "today-opt"), todayBtn("Deny", () => todayPermit(s, "deny"), false, "today-opt"), todayBtn("Open", () => todayOpen(s))]
+                            : [todayBtn("Answer", () => todayOpen(s), true)] });
   }
   const key = JSON.stringify(qs);
   let st = todayUI.answers.get(s.id);
@@ -320,35 +346,33 @@ function todayAsk(s) {
         .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
     }, () => { todayUI.sent.delete(s.id); st.picks = {}; todayRedraw(); });
   };
-  qs.forEach((q, i) => {
-    card.append(h("p", { class: "today-q", html: inline(q.question || "What should it do?") }),
-      h("div", { class: "today-btns" }, ...q.options.map((o, k) => h("button", {
-        class: `control today-opt${st.picks[i] === k ? " chosen" : ""}`, type: "button",
-        onclick: () => {
-          // One you finish in your own words: in the chat, where you write them.
-          if (o.draft || /[:…]\s*$/.test(o.send || "")) return todayOpen(s);
-          st.picks[i] = k;
-          if (qs.every((_, j) => st.picks[j] !== undefined)) send();
-          else todayRedraw();
-        } }, o.label)), h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, "Other…")));
-  });
-  return card;
+  const body = qs.map((q, i) => h("div", { class: "tcard-q" }, h("p", { class: "tcard-text", html: inline(q.question || "What should it do?") }),
+    h("div", { class: "tcard-opts" }, ...q.options.map((o, k) => h("button", {
+      class: `tbtn today-opt${st.picks[i] === k ? " chosen" : ""}`, type: "button",
+      onclick: () => {
+        // One you finish in your own words: in the chat, where you write them.
+        if (o.draft || /[:…]\s*$/.test(o.send || "")) return todayOpen(s);
+        st.picks[i] = k;
+        if (qs.every((_, j) => st.picks[j] !== undefined)) send();
+        else todayRedraw();
+      } }, o.label)), i === qs.length - 1 ? todayBtn("Other…", () => todayOpen(s), false, "quiet") : null)));
+  return todayCard({ ...base, pill: todayPill(TODAY_PILLS.ask, "ask"), body });
 }
 
 function todayBlocked(s) {
-  return h("article", { class: "today-card blocked" }, todayChatName(s),
-    h("p", { class: "today-q" }, h("b", {}, "Blocked"), (s.today || {}).goal ? ` · ${s.today.goal}` : ""),
-    h("div", { class: "today-btns" }, h("button", { class: "control", type: "button", onclick: () => todayOpen(s) }, "See why")));
+  return todayCard({ kind: "blocked", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", id: s.id,
+    open: () => todayOpen(s), pill: todayPill("Blocked", "late"),
+    body: [(s.today || {}).goal ? h("p", { class: "tcard-text muted" }, s.today.goal) : null],
+    actions: [todayBtn("See why", () => todayOpen(s), true)] });
 }
 
-// One of your loops: who (a label), what (a tap shows all of it), when, and
+// One of your loops: who (or Due), what (a tap shows all of it), when, and
 // Done or Chase for your assistant.
 function todayLoop(l, v) {
   const sent = (v.today.sent || {})[l.key] || (todayUI.told.has(l.key) ? { action: todayUI.told.get(l.key) } : null);
   const late = l.kind === "due" ? todayDay(l.due) < 0 : l.chase && todayDay(l.chase) <= 0;
   const name = (v.today.assistant || {}).name || "your assistant";
-  const meta = l.kind === "waiting"
-    ? [l.since ? `asked ${todayAgo(l.since)}` : "", l.chase ? `chase ${todayWhen(l.chase).replace(/^since /, "")}` : ""].filter(Boolean).join(" · ")
+  const when = l.kind === "waiting" ? (l.chase ? `chase ${todayWhen(l.chase).replace(/^since /, "")}` : l.since ? `since ${todayAgo(l.since)}` : "")
     : todayWhen(l.due);
   const act = async (action) => {
     todayUI.told.set(l.key, action);
@@ -363,44 +387,35 @@ function todayLoop(l, v) {
     }
   };
   const can = !!v.today.assistant;
-  const btns = sent
-    ? h("span", { class: "today-sent" }, sent.action === "chase" ? `${name} drafts it` : `Sent to ${name}`)
-    : h("span", { class: "today-btns inline" },
-      l.kind === "waiting" && can ? h("button", { class: "control", type: "button", onclick: () => act("chase") }, "Chase") : null,
-      can ? h("button", { class: "control", type: "button", title: `Tell ${name} it's done`, onclick: () => act("done") }, glyph("check"), "Done") : null);
   const open = todayUI.expand.has(l.key);
-  return h("div", { class: `today-loop${late ? " late" : ""}${sent ? " sent" : ""}` },
-    h("button", { class: `today-loop-text${open ? " open" : ""}`, type: "button", "aria-expanded": String(open),
-                  onclick: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); } },
-      h("span", { class: "what" }, l.who ? h("span", { class: "who" }, l.who) : null, l.what),
-      meta ? h("small", { class: late ? "late" : "" }, meta) : null),
-    btns);
+  const chase = l.kind === "waiting";
+  // Its head: who, what (a tap shows all of it). Under it, one line: when (and
+  // since), and its buttons.
+  const meta = sent ? h("span", { class: "tcard-meta done" }, sent.action === "chase" ? `${name} drafts it` : `Sent to ${name}`)
+    : h("span", { class: `tcard-meta${late ? " late" : ""}` }, [when, chase && l.since && l.chase ? `asked ${todayAgo(l.since)}` : ""].filter(Boolean).join(" · "));
+  return todayCard({ kind: chase ? "chase" : "due", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
+    title: h("span", { class: `tcard-what${open ? " open" : ""}` }, l.what), label: l.what,
+    open: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); },
+    actions: [meta, ...(sent || !can ? [] : [chase ? todayBtn("Chase", () => act("chase"), late) : null, todayBtn("Done", () => act("done"), !chase && late)])] });
 }
 
-// A chat in a line: its project and name, its state and goal (and in Tasks
-// what it last said), and for one that's done or stalled, Close (and Ask
-// status).
+// A chat: its project, its name, where it stands; its goal (and in Tasks
+// what it last said); for one that's done or stalled, Close (and Ask status).
 function todayChat(s, kind) {
   const t = s.today || {};
-  const since = t.at ? autoPast(t.at) : "";
-  const told = todayUI.told.get(s.id);
-  const btns = kind === "done" || kind === "stale"
-    ? h("span", { class: "today-btns inline" },
-      kind === "stale" ? (told ? h("span", { class: "today-sent" }, told === "nudging" ? "Asking…" : "Asked")
-        : h("button", { class: "control", type: "button", onclick: () => todayNudge(s) }, "Ask status")) : null,
-      h("button", { class: "control", type: "button", onclick: () => todayClose(s) }, "Close"))
-    : null;
-  const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
-  const word = kind === "done" ? "Done" : kind === "stale" ? `Stalled ${quiet} days` : kind === "working" || kind === "assistant" ? statusWords(s) : since;
   const main = s.assistant === "main";
-  return h("div", { class: `today-line ${kind}` },
-    h("button", { class: "today-line-main today-go", type: "button", onclick: () => todayOpen(s) },
-      main ? avatar(s, "small") : stateIcon(s),
-      h("span", { class: "text" }, h("span", { class: "today-line-top" }, main ? null : projectChip(s), taskText(main ? s.assistant_name || s.task : s.task || "New chat")),
-        h("small", {}, [word, main ? "" : t.goal].filter(Boolean).join(" · ")),
-        // Tasks: what it last said, so a ticket says where it is before you open it.
-        boardOn() && !main && s.said && kind !== "done" ? h("span", { class: "today-said" }, s.said) : null)),
-    btns);
+  const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
+  const told = todayUI.told.get(s.id);
+  const pill = kind === "done" ? todayPill("Done", "done") : kind === "stale" ? todayPill(`Stalled ${quiet}d`, "warn")
+    : kind === "working" || s.status === "working" ? todayPill("Working", "working")
+    : main ? todayPill(statusWords(s), "quiet") : t.at ? todayPill(autoPast(t.at), "quiet") : null;
+  const said = boardOn() && !main && s.said && kind !== "done" ? s.said : "";
+  return todayCard({ kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s), title: main ? s.assistant_name || s.task : s.task || "New chat",
+    lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
+    body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said ? h("p", { class: "tcard-text muted said" }, said) : null],
+    actions: kind === "done" ? [todayBtn("Close", () => todayClose(s), true)]
+      : kind === "stale" ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : todayBtn("Ask status", () => todayNudge(s)),
+                            todayBtn("Close", () => todayClose(s))] : [] });
 }
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the
@@ -415,22 +430,20 @@ function todayNodes({ board = false, top = true } = {}) {
   const close = p.done.length;
   const nodes = [];
   if (top) nodes.push(h("div", { class: "today-summary" }, todaySummary(v)));
-  if (p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, a line on top
-  nodes.push(todaySection("yours", "Your move", null,
+  if (p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, on top
+  nodes.push(todaySection("yours", "Your move", { count: yours },
     p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)),
-    p.chaseNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, `Chase today · ${p.chaseNow.length}`), ...p.chaseNow.map((l) => todayLoop(l, v))) : null,
-    p.dueNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, `Due · ${p.dueNow.length}`), ...p.dueNow.map((l) => todayLoop(l, v))) : null));
+    p.chaseNow.map((l) => todayLoop(l, v)), p.dueNow.map((l) => todayLoop(l, v))));
   if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"),
     close ? ` Nothing waits on you. ${close} to close, below.` : p.stale.length ? ` Nothing waits on you. ${p.stale.length} stalled, below.` : " Nothing waits on you."));
-  const all = close >= 2 ? h("button", { class: "text-btn today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
-  nodes.push(todaySection("finish", "Finish", all,
+  const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
+  nodes.push(todaySection("finish", "Finish", { count: close + p.stale.length, extra: all },
     todayFirst("finish", [...p.done.map(tk(todayChat, "done")), ...p.stale.map(tk(todayChat, "stale"))])));
-  nodes.push(todaySection("theirs", "Waiting", null,
-    todayFold("working", "At work", p.working.length, p.working.map(tk(todayChat, "working")), true),
-    todayFold("chase", "On others", p.waiting.length, p.waiting.map((l) => todayLoop(l, v))),
-    todayFold("week", "Later this week", p.week.length, p.week.map((l) => todayLoop(l, v))),
-    todayFold("later", "Further out", p.later.length, p.later.map((l) => todayLoop(l, v))),
-    todayFold("idle", "Other chats", p.idle.length, p.idle.map(tk(todayChat, "idle")))));
+  nodes.push(todaySection("working", "At work", { count: p.working.length, fold: true }, p.working.map(tk(todayChat, "working"))));
+  nodes.push(todaySection("chase", "Waiting on others", { count: p.waiting.length, fold: false }, p.waiting.map((l) => todayLoop(l, v))));
+  nodes.push(todaySection("week", "Later this week", { count: p.week.length, fold: false }, p.week.map((l) => todayLoop(l, v))));
+  nodes.push(todaySection("later", "Further out", { count: p.later.length, fold: false }, p.later.map((l) => todayLoop(l, v))));
+  nodes.push(todaySection("idle", "Other chats", { count: p.idle.length, fold: false }, p.idle.map(tk(todayChat, "idle"))));
   if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
   if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your commitments can show here too: set your loops file in ",
     h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));

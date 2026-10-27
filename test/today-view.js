@@ -169,21 +169,21 @@ const click = (p, sel, label) => p.evaluate(({ sel, label }) => {
 
 async function common(p, where) {
   const t = await text(p, ".today:not([hidden])");
-  check(where, /Your move/i.test(t) && /Finish/i.test(t) && /Waiting/i.test(t), "Your move, Finish, Waiting");
+  check(where, /Your move/i.test(t) && /Finish/i.test(t) && /At work/i.test(t), "Your move, Finish, the rest");
   check(where, /Submit it now\?/.test(t) && /Claude asks to run gcloud/.test(t), "a chat's question and a permission are your move");
   check(where, /Fix the per-minute calc/.test(t) && /Submit the fellowship/.test(t), "loops due by tomorrow are your move");
-  check(where, /Chase today/.test(await text(p, ".today-yours")) && /Felipe/.test(await text(p, ".today-yours")), "who to chase today is your move");
+  check(where, /Felipe/.test(await text(p, ".today-yours")) && !!(await p.$(".today-yours .tcard.k-chase")), "who to chase today is your move");
   check(where, /1 day|yesterday/.test(t), "a late loop says how late");
   check(where, /Study: T3 vs amarchy/.test(await text(p, ".today-finish")) && /Eval: json-render/.test(await text(p, ".today-finish")), "done and stalled chats are to finish, unfolded");
   check(where, /Close all 2 done/.test(await text(p, ".today-finish")), "Close all done, with two done");
-  check(where, !/Jaken/.test(await text(p, ".today-finish")) && !!(await p.$(".today-line.assistant")), "your assistant: a line on top, never to finish");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".today-card.ask .pchip")].every((c) => c.innerText === "Proj")
-                                      && document.querySelectorAll(".today-line .pchip").length >= 2), "every chat says its project");
-  check(where, await p.evaluate(() => !document.querySelector(".today-opt.accent")), "no option is pushed on you");
+  check(where, !/Jaken/.test(await text(p, ".today-finish")) && !!(await p.$(".tcard.k-assistant")), "your assistant: a line on top, never to finish");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.k-ask .tcard-chip")].every((c) => c.innerText === "Proj")
+                                      && document.querySelectorAll(".tcard .tcard-chip").length >= 2), "every chat says its project");
+  check(where, await p.evaluate(() => !document.querySelector(".today-opt.primary")), "no option is pushed on you");
   await p.screenshot({ path: path.join(SHOTS, `${where}-today.png`), fullPage: true });
 
   // An answer: off the page at once, with Undo; sent once Undo's gone.
-  check(where, await click(p, ".today-card.ask .control", "Submit"), "a question's option tapped");
+  check(where, await click(p, ".tcard.k-ask .tbtn", "Submit"), "a question's option tapped");
   check(where, await until(p, () => !/Submit it now\?/.test(document.querySelector(".today:not([hidden])").innerText) && !!document.querySelector(".undo-toast")), "it goes, Undo up");
   check(where, !p.posts.some((x) => /proj-ask\/send/.test(x.url)), "not sent yet");
   await sleep(4200);
@@ -191,17 +191,17 @@ async function common(p, where) {
   check(where, !!sent && sent.body.text === "Submit it now", `then sent to the chat (${JSON.stringify(sent && sent.body)})`);
 
   // A permission: Allow, Undo, it comes back; Allow again, it goes.
-  check(where, await click(p, ".today-card.ask .control", "Allow"), "Allow, right on Today");
+  check(where, await click(p, ".tcard.k-ask .tbtn", "Allow"), "Allow, right on Today");
   await p.evaluate(() => [...document.querySelectorAll(".undo-toast .text-btn")].pop().click());
   check(where, await until(p, () => /Claude asks to run gcloud/.test(document.querySelector(".today:not([hidden])").innerText)), "Undo: it's back");
-  await click(p, ".today-card.ask .control", "Allow");
+  await click(p, ".tcard.k-ask .tbtn", "Allow");
   await sleep(4000);
   const allowed = p.posts.find((x) => /proj-perm\/answer/.test(x.url));
   check(where, !!allowed && allowed.body.choice === "allow" && allowed.body.request_id === "req-1", "allowed, once");
 
   const tapIn = (what, label) => p.evaluate(({ what, label }) => {
-    const row = [...document.querySelectorAll(".today:not([hidden]) .today-loop")].find((r) => r.innerText.includes(what));
-    const b = row && [...row.querySelectorAll(".control")].find((x) => x.innerText.trim().replace(/^[^A-Za-z]+/, "") === label);
+    const row = [...document.querySelectorAll(".today:not([hidden]) .tcard.k-due, .today:not([hidden]) .tcard.k-chase")].find((r) => r.innerText.includes(what));
+    const b = row && [...row.querySelectorAll(".tbtn")].find((x) => x.innerText.trim().replace(/^[^A-Za-z]+/, "") === label);
     if (b) b.click();
     return !!b;
   }, { what, label });
@@ -214,12 +214,12 @@ async function common(p, where) {
   await sleep(300);
   check(where, p.posts.some((x) => /today\/loop/.test(x.url) && x.body.action === "chase" && x.body.key === "wait1"), "the chase goes to your assistant");
 
-  check(where, await click(p, ".today-line.stale .control", "Ask status"), "a stalled chat asked");
+  check(where, await click(p, ".tcard.k-stale .tbtn", "Ask status"), "a stalled chat asked");
   await sleep(300);
   check(where, p.posts.some((x) => /proj-quiet\/send/.test(x.url) && /Where does this stand/.test(x.body.text)), "the ask goes to that chat");
 
   // Close with nothing to lose: at once, with Undo.
-  check(where, await click(p, ".today-line.done .control", "Close"), "a done chat's Close tapped");
+  check(where, await click(p, ".tcard.k-done .tbtn", "Close"), "a done chat's Close tapped");
   check(where, await until(p, () => !!document.querySelector(".undo-toast") && !document.querySelector(".sheet")), "no sheet: closed, with Undo");
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-done\/close/.test(x.url)), "closed once Undo's gone");
@@ -239,7 +239,7 @@ async function phone(browser, port) {
   const p = await page(browser, "phone", port);
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => !!document.querySelector(".home-tabs .tab.on[data-tab=today]") && !!document.querySelector(".today:not([hidden]) .today-part")), "opens on Today");
+  check(where, await until(p, () => !!document.querySelector(".home-tabs .tab.on[data-tab=today]") && !!document.querySelector(".today:not([hidden]) .tsec")), "opens on Today");
   check(where, /5/.test(await text(p, ".home-tabs .tab[data-tab=today]")), "its tab counts your move (2 asks, 2 loops due, 1 chase)");
   check(where, /5 for you to do · 2 to close/i.test(await text(p, ".hero .meta")), `one count, in the header (${await text(p, ".hero .meta")})`);
   check(where, await p.evaluate(() => document.querySelector(".list-view .dock").hidden), "no new chat's box under it: Today has the room");
@@ -274,7 +274,7 @@ async function wide(browser, port) {
   const p = await page(browser, "wide", port);
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.mode === "tasks" && !!document.querySelector(".tasks-board .board-today .today-part")
+  check(where, await until(p, () => desk.mode === "tasks" && !!document.querySelector(".tasks-board .board-today .tsec")
                                    && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: Tasks, the whole window, no list");
   check(where, /Tasks\s*5/.test(await text(p, ".board-switch")) && /Chats/.test(await text(p, ".board-switch")), "its switch: Tasks (5) | Chats");
   check(where, /Try json-render/.test(await text(p, ".board-today")), "a ticket says its goal");

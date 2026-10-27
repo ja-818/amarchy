@@ -184,9 +184,10 @@ function boardFocusHead() {
   const btn = (label, act, cls = "") => h("button", { class: `text-btn ${cls}`, type: "button", onclick: act }, label);
   keepFocus(board.focusHead, () => board.focusHead.replaceChildren(...[      // (filtered: replaceChildren writes a null as "null")
     h("button", { class: "control board-back", type: "button", title: "Back to Tasks (Esc)", onclick: () => boardBack() }, glyph("back"), "Back"),
-    stateIcon(s), s.assistant === "main" ? null : projectChip(s),
-    taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat"),
-    h("span", { class: `head-state is-${statusTone(s)}` }, statusWords(s)),
+    // Its card's head, as on the board: its project in its color, its name, its badge.
+    s.assistant === "main" ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
+    h("span", { class: "tcard-title" }, taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat")),
+    todayStatePill(s),
     h("span", { class: "board-gap" }),
     btn("Open in Chats", () => { const id = s.id; deskMode("chats"); go2(id); }),
     s.assistant === "main" ? null : btn("Close chat", () => { boardBack(true); todayClose(s); }, "danger")].filter(Boolean)));
