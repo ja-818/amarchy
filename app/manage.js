@@ -411,7 +411,8 @@ let titleWas = "";
 function markWaiting() {
   const v = app.view;
   if (!v) return;
-  const waiting = v.sessions.filter((s) => s.status === "waiting").length;
+  // What needs you (bin/amarchy needs_you): a chat asking, or one whose last reply asks you something.
+  const waiting = typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
   const done = v.sessions.filter((s) => s.status === "idle" && s.unseen).length;
   const t = waiting ? `(${waiting}) Amarchy` : done ? "• Amarchy" : "Amarchy";
   if (t !== titleWas) { document.title = titleWas = t; markIcon(waiting ? "waiting" : done ? "done" : ""); }

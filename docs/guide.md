@@ -190,7 +190,8 @@ With Show terminals off, a chat's menu still opens its project terminal, under
 ## Your phone
 
 The app is a web app you add to the home screen, made for an iPhone (any phone
-with a current browser works). It shows your chats as a list, with the same
+with a current browser works). It opens on [Today](#today): what to do now. Its
+**Chats** tab shows your chats as a list, with the same
 groups and sort as a computer: each one's name, its state in words and its
 project, then what it asks you ("Asks: Which theme should be the default?") or the
 last thing its Claude wrote; its time, a dot while you haven't read what it
@@ -213,7 +214,7 @@ finished, and its priority on the right. Your assistant's card stays on top (see
   does in a sentence, and **Add a project from GitHub** or **Start an empty
   project**.
 - **Opening the app is for something new**: back after 10 minutes or more away,
-  it's on the list and its **What do you want to do?**, not the chat you left
+  it's on Today and its **What do you want to do?**, not the chat you left
   (back sooner, the same chat; a notification you tap still opens its chat, and a
   chat with an answer half given stays).
 - **Share to Amarchy**: a screenshot or photo, from the phone's share sheet to a
@@ -255,9 +256,10 @@ else installed.
 - **The list** shows each chat as the phone does. Over it, the amarchy menu and
   **New chat**: **What do you want to do?** in the middle, a big box with the
   project and the model under it (the model stays the default of every new chat,
-  as on the phone) and the mic. It's what the app opens on (a reload stays on its
-  chat, a link to a chat opens that chat); `Esc` in its empty box goes back to the
-  chat you were in. A right click on a chat opens its menu.
+  as on the phone) and the mic. Above your chats, **Today** puts [Today](#today) in
+  the middle, with **What do you want to do?** under it: it's what the app opens on
+  (a reload stays on its chat, a link to a chat opens that chat); `Esc` in its empty
+  box goes back to the chat you were in. A right click on a chat opens its menu.
 - **Over the chat**: the chat's name (click: rename) and state, and, while the side
   panel is closed, its tabs as buttons; `⋯` is the chat's menu.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you drag
@@ -592,6 +594,51 @@ amarchy secret set NAME [--project <name>|--all]          # its value from stdin
 amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 ```
 
+## Today
+
+**Today** is the app's home (the phone's first tab, with **Chats** beside it; on a
+computer the row above your chats, and the middle when no chat is open). It says
+what to do now without reading any chat, in three parts:
+
+- **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
+  to the chat; **Other…** opens it to say more), a permission or a secret to give
+  (**Answer** opens the chat at its card), a chat that's blocked, and your
+  commitments due by tomorrow, late ones in red. The red number on the tab, the
+  app's icon and the browser tab counts what waits on you.
+- **Finish**: a chat exists to reach its goal and be closed. A chat whose goal is
+  reached says **Done** with **Close** (asked first; it refuses work not shipped, as
+  any close); one quiet for two days or more offers **Nudge** (it asks the chat
+  where it stands, and to finish or say what it needs) and **Close**.
+- **Their move**: the people you wait on (**Chase** once their chase date comes:
+  your assistant drafts the message), the chats at work, the rest of your week,
+  further out, and the other chats.
+
+Each chat knows its goal and where it stands because every reply ends with a goal
+block (amarchy's reply format asks for it): the goal in a sentence, and working,
+waiting, blocked or done. It isn't shown in the reply: the goal is under the chat's
+name, and a done chat shows **Done · Close chat** over the box you type in.
+
+Your commitments come from a **loops file** of yours (a Markdown file your assistant
+keeps), one loop a line:
+
+```text
+- [ ] 2026-10-30 · Demo to Felipe · nudge 10-29 · → log/2026-10-27.md
+- [ ] waiting · Felipe · the valuation doc · since 10-23 · chase 10-27
+- [ ] someday · Pick a gym
+- [x] 2026-10-20 · a loop that's done
+```
+
+```sh
+amarchy today --loops ~/notes/loops.md   # Today reads your loops from there (Settings → Today too)
+amarchy today --loops off                # no loops file: Today shows your chats only
+amarchy today [--json]                   # Today in a terminal
+```
+
+Today only reads that file. **Done** on a loop, and **Chase**, go to [your
+assistant](#your-assistant) as a message (`Loop done: …`, `Chase Felipe on: …`),
+and it ticks the line and keeps the file; the loop shows **Sent** until it does.
+Today adds no notifications of its own.
+
 ## Automations
 
 **Automations** (the clock beside the gear in the phone's list; on a computer the
@@ -891,6 +938,10 @@ amarchy dictation setup               fetch the speech model (Parakeet TDT 0.6B 
 amarchy dictation remove              delete the model again
 amarchy dictation log [--json]        the last dictations and how each went
 amarchy dictation transcribe <file>   write down a recording, as a dictation would be
+
+Today:
+amarchy today [--json]                what needs you, what's due, who you wait on, each chat's goal and state
+amarchy today --loops [<file>|off]    your loops file, or none (prints it without one)
 
 Automations:
 amarchy automations [--json]          what runs by itself (systemd user timers): what, when, next, last

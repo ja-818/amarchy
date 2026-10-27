@@ -528,6 +528,7 @@ function row(id) { return app.view && app.view.sessions.find((s) => s.id === id)
 function deskRoute() {
   closeSheets();
   if (here() === "#/new") return show(null, true);
+  if (here() === "#/today") return show(null, false, true);      // Today (today.js): home
   const m = here().match(/^#\/s\/(.+)$/);
   let id = m ? decodeURIComponent(m[1]) : null;
   const p = desk.pending;
@@ -543,11 +544,12 @@ function deskRoute() {
 // The session's chat in the middle, or (id null) the new chat: "What do
 // you want to do?" (#/new, Ctrl+Alt+N, and what there is with no chat yet),
 // or with no project yet the welcome.
-function show(id, fresh = false) {
+function show(id, fresh = false, today = false) {
   if (id && app.view && !row(id)) id = null;
-  const changed = id !== desk.current || (!id && fresh !== !!desk.fresh);
+  const changed = id !== desk.current || (!id && (fresh !== !!desk.fresh || today !== !!desk.today));
   desk.current = id;
   desk.fresh = !id && fresh;
+  desk.today = !id && today;
   desk.empty.hidden = !!id || !app.view;
   desk.chatSlot.hidden = !id;
   if (changed) {
@@ -579,12 +581,22 @@ function show(id, fresh = false) {
 function drawEmpty(changed) {
   const v = app.view;
   const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);
-  const kind = !v ? "off" : first ? "welcome" : "new";
-  if (kind === "new") {
-    if (!desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
-      desk.pending = { id, until: Date.now() + 15000 };
-      go2(id);
-    } });
+  const kind = !v ? "off" : first ? "welcome" : desk.today && v.sessions.length ? "today" : "new";
+  if ((kind === "new" || kind === "today") && !desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
+    desk.pending = { id, until: Date.now() + 15000 };
+    go2(id);
+  } });
+  if (kind === "today") {
+    // Today, and under it the new chat: what to do now, or something new.
+    if (desk.emptyKind !== "today") {
+      desk.todayEl = todayBox();
+      desk.empty.replaceChildren(h("div", { class: "today-scroll" }, desk.todayEl), h("div", { class: "today-dock" }, desk.newChat.el));
+    } else keepFocus(desk.todayEl, () => desk.todayEl.replaceChildren(...todayNodes()));
+    desk.newChat.update();
+    if (changed || desk.emptyKind !== "today") requestAnimationFrame(() => {
+      if (!desk.current && !document.querySelector(".picker-back, .sheet-back")) desk.newChat.focus();
+    });
+  } else if (kind === "new") {
     if (desk.emptyKind !== "new") desk.empty.replaceChildren(desk.newChat.el);
     desk.newChat.update();
     if (changed || desk.emptyKind !== "new") requestAnimationFrame(() => {
@@ -596,6 +608,7 @@ function drawEmpty(changed) {
     desk.empty.replaceChildren(h("div", { class: "big" }, app.failed || "Connecting…"));
   }
   desk.empty.classList.toggle("new", kind === "new");
+  desk.empty.classList.toggle("today-pane", kind === "today");
   desk.emptyKind = kind;
 }
 
@@ -1244,11 +1257,11 @@ function deskList() {
     if (next) return go2(next);
     return show(null);
   }
-  if (v && !desk.current && !desk.fresh && v.sessions.length) return deskRoute();
+  if (v && !desk.current && !desk.fresh && !desk.today && v.sessions.length) return deskRoute();
   if (!desk.current) drawEmpty(false);      // the welcome, once there's a project: the new chat
   if (desk.pending && (row(desk.pending.id) || Date.now() > desk.pending.until)) return deskRoute();
   chime(v);
-  const waiting = v ? v.sessions.filter((s) => s.status === "waiting").length : 0;
+  const waiting = !v ? 0 : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
   document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
   for (const b of [desk.brand, desk.ball]) b.classList.toggle("lit", waiting > 0);
   // Show terminals turned on or off: the panel and the header follow.
@@ -1291,6 +1304,14 @@ function fillList(list, query, cursorId) {
     el.addEventListener("contextmenu", (e) => { e.preventDefault(); rowMenu(s); });
     return el;
   };
+  // Today first (today.js): what to do now, in the middle.
+  if (v.sessions.length && !query) {
+    const n = todayCount(v), on = !cursorId && desk.today;
+    list.append(h("button", { class: `row today-row${on ? " cursor" : ""}`, type: "button", onclick: () => go("#/today") },
+      glyph("clock", "state"), h("span", { class: "main" }, h("div", { class: "task" }, h("b", {}, "Today")),
+        h("div", { class: "status-line" }, n ? `${n} for you to do` : "Nothing waits on you")),
+      n ? h("span", { class: "tab-count" }, String(n)) : null));
+  }
   // Your assistant first, in a place of its own above the groups, as on the phone.
   const mine = shown.filter((s) => s.assistant);
   if (mine.length)

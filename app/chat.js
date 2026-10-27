@@ -860,6 +860,22 @@ function activityOf(items, results, userView) {
 // the outcome (the card's title), then markdown with "## " sections, and fenced
 // blocks named for what they hold, which the card gives buttons.
 
+// Where the chat stands, in the goal block each reply ends with (bin/amarchy
+// REPLY_FORMAT): its goal and its state. Not shown as words: under the
+// chat's name, on Today, and as the strip that offers to close a done chat.
+const GOAL_STATES = ["working", "waiting", "blocked", "done"];
+const GOAL_FENCE = /^```[ \t]*goal\b([^\n]*)\n([\s\S]*?)^```[ \t]*$\n?/gm;
+
+function replyGoal(text) {
+  const found = [...String(text || "").matchAll(GOAL_FENCE)].pop();
+  if (!found) return null;
+  const state = (replyAttrs(found[1]).state || "").trim().toLowerCase();
+  const goal = found[2].split(/\s+/).join(" ").trim();
+  return goal || state ? { goal, state: GOAL_STATES.includes(state) ? state : "" } : null;
+}
+
+function withoutGoal(text) { return String(text || "").replace(GOAL_FENCE, "").replace(/\s+$/, ""); }
+
 const REPLY_BLOCKS = ["whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "contact", "place", "session", "file", "choices"];
 
 function replyAttrs(s) {
@@ -922,6 +938,7 @@ function parseReply(text) {
       const kind = (fence[1] || "").toLowerCase();
       const body = [];
       for (i++; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
+      if (kind === "goal") continue;      // where the chat stands: not part of the card (replyGoal)
       if (kind === "choices") { flush(); choices.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
       else if (REPLY_BLOCKS.includes(kind)) { flush(); things.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
       else buf.push(line, ...body, "```");
@@ -932,7 +949,7 @@ function parseReply(text) {
   flush();
   inferActions(sections, choices, things);
   // A section left empty by what moved out of it (only its block) goes.
-  return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things };
+  return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things, goal: replyGoal(text) };
 }
 
 // What a reply asks of you or gives you, when Claude wrote it in its prose
@@ -1177,6 +1194,7 @@ class Chat {
     this.box = h("div", { class: "composer-wrap" }, this.menuEl, this.pills, this.composer);
     this.queueEl = h("div", { class: "queue" });
     this.bgEl = h("div", { class: "bg-strip", hidden: true });
+    this.doneEl = h("div", { class: "done-strip", hidden: true });
     this.drawPills();
     this.drawTray();
     this.takeShare();
@@ -1420,14 +1438,24 @@ class Chat {
     else this.items.push(...fresh);
     // What the chat is for: the goal in the newest reply that says one (shown
     // under its name, opts.onGoal; not on each reply).
-    let goal = null;
+    // Its state with it (the goal block's): a done chat offers to close (renderDone).
+    let goal = null, state = "";
     for (let i = this.items.length - 1; i >= 0 && goal === null; i--) {
-      const b = this.items[i].brief;
+      const it = this.items[i], b = it.brief;
       if (b && typeof b.goal === "string" && b.goal.trim()) goal = b.goal.trim();
+      else if (it.kind === "claude" && !it.aside && /```[ \t]*goal\b/.test(it.text || "")) {
+        const g = replyGoal(it.text);
+        if (g && g.goal) { goal = g.goal; state = g.state; }
+      }
+    }
+    if (state !== this.goalState) {
+      this.goalState = state;
+      this.renderDone();
     }
     if (goal !== this.goal) {
       this.goal = goal;
       if (this.opts.onGoal) this.opts.onGoal(goal);
+      this.renderDone();
     }
   }
 
@@ -1605,7 +1633,8 @@ class Chat {
     // choices a reply in the format ends with), as the Needs you form.
     const ask = !last ? [] : b ? (t.briefKey === (this.brief && this.brief.key) ? b.waiting : [])
       : reply ? reply.choices.filter((c) => c.options.length) : [];
-    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status : reply ? (ask.length ? "waiting" : "done") : "plain";
+    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status
+      : reply ? (ask.length ? "waiting" : reply.goal && reply.goal.state in BRIEF_STATES ? reply.goal.state : "done") : "plain";
     const open = this.isOpen(key, last);
     const card = h("article", { class: `reply st-${st}${open ? " open" : ""}${live ? " live" : ""}` });      // st-: not the chat's own .working
     const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
@@ -2189,7 +2218,7 @@ class Chat {
       where.append(long ? h("details", { class: "msg note long" }, h("summary", {}, cut(text.split("\n")[0], 70)), h("pre", {}, text))
                         : h("div", { class: "msg note" }, text));
     } else if (it.kind === "claude") {
-      where.append(h("div", { class: "msg claude", html: md(it.text) }));
+      where.append(h("div", { class: "msg claude", html: md(withoutGoal(it.text)) }));
       if (!earlier) {
         // What Claude was writing is in the conversation now.
         this.said = String(it.text || "").replace(/\s+$/, "");
@@ -2628,7 +2657,8 @@ class Chat {
     this.drawPills();
     if (key === this.cardKey) { this.sendButtons(); return; }
     this.cardKey = key;
-    const kids = [content ? this.bgEl : null, ...this.view.above].filter(Boolean);
+    this.renderDone();
+    const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -2695,6 +2725,26 @@ class Chat {
   // (subagents) and commands, as one line over the box that opens to name
   // each and say for how long. Shown whatever Claude itself is doing, as
   // they go on after its turn ends.
+  // The chat reached its goal (its newest goal block says done) and Claude
+  // isn't at work: a strip over the box you type in that says so, and
+  // offers to close it (app.js confirmClose, which says what would be lost).
+  // A chat exists to reach its goal and be closed. Not your assistant's: it
+  // stays.
+  renderDone() {
+    if (!this.doneEl) return;
+    const r = this.row || {};
+    const show = this.goalState === "done" && r.status !== "working" && r.status !== "waiting" && r.assistant !== "main"
+      && typeof confirmClose === "function";
+    const key = show ? `${this.goal}|${r.id}` : "";
+    if (key === this.doneKey) return;
+    this.doneKey = key;
+    this.doneEl.hidden = !show;
+    if (!show) return this.doneEl.replaceChildren();
+    this.doneEl.replaceChildren(glyph("check", "done-mark"),
+      h("span", { class: "done-words" }, h("b", {}, "Done"), this.goal ? ` · ${this.goal}` : ""),
+      h("button", { class: "text-btn", type: "button", onclick: () => confirmClose(this.row || { id: this.id }) }, "Close chat"));
+  }
+
   renderBackground() {
     const live = this.engine === "chat" ? this.live : null;
     const tasks = live && Array.isArray(live.tasks) ? live.tasks : [];

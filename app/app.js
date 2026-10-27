@@ -5,7 +5,7 @@
 
 const root = document.getElementById("root");
 const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
-              query: "", organize: null };
+              query: "", organize: null, tab: "today" };     // tab: the phone's home, Today or Chats (today.js)
 const STATUS = { waiting: "Needs your answer", working: "Working", done: "Done", idle: "Ready", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -481,6 +481,11 @@ function listView() {
   const shade = h("div", { class: "organize-shade", onclick: () => { menu.hidden = true; renderList(); } });
   const toolbar = h("div", { class: "toolbar" }, h("label", { class: "searchbox" }, glyph("search"), search, clear), organize, menu);
   const offline = h("div", { class: "offline" }, "Reconnecting to Amarchy…");
+  // Today (what to do now: today.js) or Chats (all of them), Today first: it's home.
+  const tab = (key, label) => h("button", { class: "tab", type: "button", role: "tab", "data-tab": key,
+                                             onclick: () => { app.tab = key; renderList(); view.scroll.scrollTop = 0; } }, label);
+  const tabs = h("div", { class: "home-tabs", role: "tablist" }, tab("today", "Today"), tab("chats", "Chats"));
+  const today = h("div", { class: "today" });
   const list = h("div", { class: "list" });
   menuKeys(list);       // ↑/↓ from session to session, ↵ opens one
   list.addEventListener("keydown", (e) => {     // ↑ from the first: back to the search
@@ -489,11 +494,11 @@ function listView() {
       search.focus();
     }
   }, true);
-  const scroll = h("div", { class: "scroll" }, list);
+  const scroll = h("div", { class: "scroll" }, today, list);
   app.newChat = newChat();
   const dock = h("div", { class: "dock" }, app.newChat.el);
-  app.listEl = h("div", { class: "view list-view" }, head, shade, toolbar, offline, scroll, dock);
-  Object.assign(app.listEl, { meta, offline, list, scroll, search, toolbar, clear, organize, menu, shade, dock });
+  const view = app.listEl = h("div", { class: "view list-view" }, head, tabs, shade, toolbar, offline, scroll, dock);
+  Object.assign(app.listEl, { meta, offline, list, scroll, search, toolbar, clear, organize, menu, shade, dock, tabs, today });
   return app.listEl;
 }
 
@@ -507,12 +512,27 @@ function renderList() {
   const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);      // a new user: the welcome
   view.meta.replaceChildren();
   if (v && v.sessions.length) {
-    const waiting = v.sessions.filter((s) => s.status === "waiting").length;
+    const waiting = typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
     view.meta.append(`${v.sessions.length} chat${v.sessions.length === 1 ? "" : "s"}`);
     if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
   }
   view.offline.hidden = app.online || !v;
-  view.toolbar.hidden = !v || !v.sessions.length;
+  // Today, unless there's nothing yet (the welcome) or you're searching.
+  const onToday = app.tab === "today" && !!v && !!v.sessions.length && !app.query;
+  view.tabs.hidden = !v || !v.sessions.length;
+  for (const b of view.tabs.children) {
+    const on = (b.dataset.tab === "today") === onToday;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+    if (b.dataset.tab === "today") {
+      const n = todayCount(v);
+      b.replaceChildren("Today", n ? h("span", { class: "tab-count" }, String(n)) : "");
+    }
+  }
+  view.today.hidden = !onToday;
+  view.list.hidden = onToday;
+  if (onToday) keepFocus(view.today, () => view.today.replaceChildren(...todayNodes()));
+  view.toolbar.hidden = !v || !v.sessions.length || onToday;
   view.dock.hidden = first;
   view.clear.hidden = !app.query;
   if (view.toolbar.hidden) view.menu.hidden = true;
@@ -2007,6 +2027,7 @@ async function openSettings() {
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
     kids.push(...engineSettings());
+    kids.push(...todaySettings());      // today.js
     kids.push(...terminalSettings(draw), ...secretsSettings(), ...automationsSettings());     // terminal.js, secrets.js, automations.js
     const look = (app.view && app.view.look) || {};
     kids.push(h("div", { class: "section" }, "Look"),
@@ -2305,6 +2326,7 @@ document.addEventListener("visibilitychange", () => {
     if (app.session) app.session.close();
   } else {
     openList();
+    if (backFromAway()) app.tab = "today";       // home again: Today first
     if (app.session && backFromAway()) go("#/");
     else if (app.session) app.session.reopen();
   }
@@ -2373,10 +2395,11 @@ async function start() {
   // address never shows it, so it's kept), and the build it is.
   takeKept();
   if (kept && standalone && kept.hash) routed.hash = kept.hash;
-  // A computer's, launched with no chat asked for: the new chat, not the last one.
+  // A computer's, launched with no chat asked for: Today (and under it the
+  // new chat), not the last one.
   if (app.desk && launched() && !asked && !/^#\/s\//.test(here())) {
-    routed.hash = "#/new";
-    if (!standalone) history.replaceState(null, "", location.pathname + location.search + "#/new");
+    routed.hash = "#/today";
+    if (!standalone) history.replaceState(null, "", location.pathname + location.search + "#/today");
   }
   app.build = (document.querySelector('meta[name="app-build"]') || {}).content || null;
   if (app.desk) deskStart();

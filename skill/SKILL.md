@@ -148,6 +148,12 @@ command's usage without running it (an option it doesn't know fails instead).
   When you set up a timer for the user, give it `X-Amarchy-Name=` and
   `X-Amarchy-About=` lines (plain words: what it does and why) so it reads well
   there; `X-Amarchy-Children=<glob>` puts the timers it makes under it.
+- `amarchy today [--json]`: the app's home page, Today, as the user sees it:
+  what needs them, their commitments due and who they wait on (their loops
+  file, `amarchy today --loops`; only read: Done and Chase from the app go to
+  their assistant), and every chat's goal and state, from the goal block each
+  reply ends with. Keep yours true: it's how the user knows this chat is done
+  and can be closed.
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the

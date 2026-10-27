@@ -1,9 +1,9 @@
 // What the app opens on, in a browser. Checked: on a phone's home-screen
 // app, back after AWAY in the background, the list and its new chat rather
 // than the chat you left; back sooner, the same chat; a notification tapped
-// on the way back, its chat. On a computer, launched: the new chat ("What do
-// you want to do?"), not the last chat; reloaded: the chat it was on; a link
-// to a chat: that chat. With screenshots.
+// on the way back, its chat. On a computer, launched: Today, with the new
+// chat ("What do you want to do?") under it, not the last chat; reloaded: the
+// chat it was on; a link to a chat: that chat. With screenshots.
 //
 //   node test/open-new-chat.js          both layouts
 //   node test/open-new-chat.js phone    one layout (phone | wide)
@@ -192,8 +192,9 @@ async function wide(browser, port) {
   await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); sessionStorage.setItem("seeded", "1"); } });
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.fresh && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .start-chat.wide")),
-        "launched: the new chat, not the last chat");
+  check(where, await until(p, () => desk.today && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .today")
+                                   && !!document.querySelector(".desk-empty:not([hidden]) .start-chat.wide")),
+        "launched: Today and the new chat under it, not the last chat");
   await sleep(300);
   await p.screenshot({ path: path.join(SHOTS, "wide-launched.png") });
   check(where, await p.evaluate(() => document.activeElement && document.activeElement.matches(".start-chat textarea")), "its box has the keyboard");
@@ -213,7 +214,7 @@ async function wide(browser, port) {
   await p.goto("about:blank");
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.fresh && !desk.current && location.hash === "#/new"), "the bare address in a tab: the new chat, #/new");
+  check(where, await until(p, () => desk.today && !desk.current && location.hash === "#/today"), "the bare address in a tab: Today, #/today");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

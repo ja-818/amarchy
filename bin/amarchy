@@ -171,6 +171,15 @@ X-Amarchy-Owner= and X-Amarchy-Children=<glob> lines, which systemd ignores; doc
                                         amarchy's own; no unit is changed or removed)
   amarchy automations resume <timer>    back on its schedule
 
+Today (the app's home: what needs you, what's due, who you're waiting on, and every chat's goal and
+state, with Close for the done ones; docs/guide.md, "Today"):
+  amarchy today [--json]                the same in a terminal
+  amarchy today --loops [<file>|off]    your loops file (your commitments and who you wait on, one per line:
+                                        `- [ ] 2026-10-30 · what · nudge 10-29`, `- [ ] waiting · who · what ·
+                                        since 10-23 · chase 10-27`, `- [ ] someday · what`, `- [x]` when done),
+                                        or none; prints it without one. Today only reads it: its Done and
+                                        Chase go to your assistant, which keeps it
+
 Terminals:
   amarchy terminals [on|off]            Show terminals: whether the app shows the sessions' terminals (the
                                         Terminal tab, the panel beside the chat). Off on a new install,
@@ -257,6 +266,7 @@ State: ~/.local/state/amarchy/.
 
 import base64
 import calendar
+import datetime
 import fcntl
 import fnmatch
 import hashlib
@@ -671,7 +681,7 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "unseen", "assistant", "assistant_name", "said", "picture")
+               "unseen", "assistant", "assistant_name", "said", "picture", "today")
 
 
 def own_session_id():
@@ -3978,6 +3988,7 @@ def last_words(s, limit=240):
                         step = {"tool": uses[-1].get("name") or "", "input": step_input(uses[-1].get("input"))}
             text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
                 if isinstance(content, list) else content if isinstance(content, str) else ""
+            text = without_goal(text)      # where the chat stands: Today's, not words of the reply
             # Markdown's marks and list bullets out: words, in a line.
             # (Only emphasis marks: TEST_KEY keeps its underscore.)
             text = re.sub(r"(?m)^\s*(?:[-*+•]|\d+[.)]|#+|>)\s+", "", text)
@@ -8423,7 +8434,7 @@ def app_watch(st):
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
                     "new_model": new_model(), "models": known_models(), "share": share_state(),
-                    "engine_problem": protocol_problem()}
+                    "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss)}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -8481,6 +8492,346 @@ def ask_line(s):
     return "Needs your answer"      # a classic terminal's question is on its screen, which nothing reads
 
 
+# ------------------------------------------------------------------ Today
+#
+# The app's home (app/today.js): what to do now, without reading a chat.
+# Your move first (what a chat asks you, your commitments due), then the
+# chats to finish (done ones to close, stale ones to close or nudge), then
+# theirs (chats at work, the people you wait on). A chat says where it
+# stands in the goal block each reply ends with (REPLY_FORMAT): its goal,
+# and working, waiting, blocked or done. Your commitments are in your loops
+# file (amarchy today --loops), which Today only reads: Done and Chase go to
+# your assistant, which keeps it.
+
+LOOPS_FILE = STATE / "loops"                # the loops file's path (amarchy today --loops)
+LOOPS_SENT = STATE / "loops-sent.json"      # {key: {action, at}}: what Today told your assistant, until it's done
+GOAL_STATES = ("working", "waiting", "blocked", "done")
+GOAL_BLOCK = re.compile(r"(?ms)^```[ \t]*goal\b([^\n]*)\n(.*?)^```[ \t]*$\n?")
+CHOICES_BLOCK = re.compile(r"(?ms)^```[ \t]*choices\b([^\n]*)\n(.*?)^```[ \t]*$")
+STALE_DAYS = 2      # a chat idle longer: close or nudge it
+
+
+def block_attrs(line):
+    """A fenced block's key="value" pairs (on its opening line)."""
+    return {k.lower(): v for k, v in re.findall(r'(\w+)\s*=\s*"([^"]*)"', line or "")}
+
+
+def without_goal(text):
+    """A reply without its goal block: what's shown of it as words."""
+    return GOAL_BLOCK.sub("", text or "").rstrip()
+
+
+def reply_goal(text):
+    """The goal block a reply ends with: {"goal", "state"}, or None."""
+    found = list(GOAL_BLOCK.finditer(text or ""))
+    if not found:
+        return None
+    m = found[-1]
+    state = block_attrs(m.group(1)).get("state", "").strip().lower()
+    goal = " ".join(m.group(2).split())[:200]
+    return {"goal": goal, "state": state if state in GOAL_STATES else ""} if goal or state else None
+
+
+def reply_choices(text):
+    """The questions a reply asks with its choices blocks, as the app's
+    Needs you form has them (chat.js replyBlock): [{question, options:
+    [{label, send}]}], options at most 4."""
+    out = []
+    for m in CHOICES_BLOCK.finditer(text or ""):
+        opts = []
+        for line in m.group(2).splitlines():
+            o = re.match(r"^\s*[-*]\s*(.+?)\s*$", line)
+            if not o:
+                continue
+            label, _, send = o.group(1).partition(" | ")
+            opts.append({"label": label.strip(), "send": (send or label).strip()})
+        if opts:
+            out.append({"question": block_attrs(m.group(1)).get("question", ""), "options": opts[:4]})
+    return out[:3]
+
+
+def human_turn(r):
+    """Whether a conversation record is something you said (not a tool's
+    result, nor what Claude Code or amarchy put in your name)."""
+    if r.get("type") != "user" or r.get("isMeta") or r.get("isSidechain"):
+        return False
+    content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+    if isinstance(content, list):
+        content = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    text = (content or "").strip() if isinstance(content, str) else ""
+    return bool(text) and not text.startswith(("<", "amarchy:", "This session is being continued"))
+
+
+_replies = {}
+def chat_reply(s):
+    """Where a chat stands, from its conversation: its goal and state (the
+    newest goal block, and when it was written: goal_at), the questions its
+    last reply asks that you haven't answered (asks), and when anything last
+    happened in it (at). Read again only when the conversation has moved."""
+    empty = {"goal": "", "state": "", "goal_at": 0, "asks": [], "at": 0}
+    f = transcript(s) if s.get("id") else None
+    if not f:
+        return empty
+    try:
+        st = f.stat()
+    except OSError:
+        return empty
+    cached = _replies.get(str(f))
+    if cached and cached[0] == st.st_mtime_ns:
+        return cached[1]
+    out = {**empty, "at": st.st_mtime}
+    answered, reply_seen = False, False
+    for tail in (200_000, 2_000_000):
+        out.update(goal="", state="", goal_at=0, asks=[])
+        answered, reply_seen = False, False
+        for r in reversed(conversation_records(f, tail=tail)):
+            if not isinstance(r, dict) or r.get("isSidechain"):
+                continue
+            if not reply_seen and human_turn(r):
+                answered = True
+                continue
+            if r.get("type") != "assistant":
+                continue
+            content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+            text = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
+                if isinstance(content, list) else content if isinstance(content, str) else ""
+            if not text.strip():
+                continue
+            if not reply_seen:
+                reply_seen = True
+                if not answered:
+                    out["asks"] = reply_choices(text)
+            goal = reply_goal(text)
+            if goal:
+                out.update(goal=goal["goal"], state=goal["state"], goal_at=timestamp(r) or 0)
+                break
+        if out["goal"] or st.st_size <= tail:
+            break
+    _replies[str(f)] = (st.st_mtime_ns, out)
+    if len(_replies) > 500:
+        _replies.clear()
+    return out
+
+
+def needs_you(ss):
+    """How many things wait on you: a chat asking (a permission, a question,
+    a secret), or one whose last reply asks you something you haven't
+    answered. The app's badge."""
+    return sum(1 for s in ss if not s.get("setup") and (
+        s.get("status") == "waiting" or s.get("secret_asks")
+        or (s.get("status") != "working" and (s.get("today") or {}).get("asks"))))
+
+
+# ---- your loops
+
+def loops_path():
+    """Your loops file (amarchy today --loops), or None."""
+    try:
+        p = LOOPS_FILE.read_text().strip()
+    except OSError:
+        return None
+    return Path(os.path.expanduser(p)) if p else None
+
+
+def loop_date(word, today, past=False):
+    """A loop's date: YYYY-MM-DD, or MM-DD in the year that puts it nearest
+    today (past: the nearest not after today, for a since). As YYYY-MM-DD,
+    or "" when it isn't one."""
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", word.strip())
+    try:
+        if m:
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", word.strip())
+        if not m:
+            return ""
+        near = [datetime.date(today.year + dy, int(m.group(1)), int(m.group(2))) for dy in (-1, 0, 1)]
+    except ValueError:
+        return ""
+    if past:
+        near = [d for d in near if d <= today] or near
+    return min(near, key=lambda d: abs((d - today).days)).isoformat()
+
+
+def parse_loops(text, today=None):
+    """The open loops in a loops file: each `- [ ] ...` line, its fields
+    split on " · ". [{key, kind: due|waiting|someday|other, what, who, due,
+    nudge, since, chase, ref, line}]. A loop's key is its line's hash: done
+    (`- [x]`) or changed, it's another."""
+    today = today or datetime.date.today()
+    out = []
+    for raw in (text or "").splitlines():
+        m = re.match(r"^\s*[-*]\s+\[ \]\s+(.+?)\s*$", raw)
+        if not m:
+            continue
+        line = m.group(1)
+        parts = [p.strip() for p in re.split(r"\s+·\s+", line) if p.strip()]
+        loop = {"key": hashlib.sha1(line.encode()).hexdigest()[:12], "kind": "other", "what": "", "who": "",
+                "due": "", "nudge": "", "since": "", "chase": "", "ref": "", "line": line}
+        rest = []
+        for p in parts:
+            low = p.lower()
+            field = re.match(r"^(nudge|since|chase)\s+(\S+)$", low)
+            if field and loop_date(field.group(2), today):
+                loop[field.group(1)] = loop_date(field.group(2), today, past=field.group(1) == "since")
+            elif p.startswith(("→", "->")):
+                loop["ref"] = p.lstrip("→->").strip()
+            else:
+                rest.append(p)
+        if rest and loop_date(rest[0], today):
+            loop["kind"], loop["due"] = "due", loop_date(rest[0], today)
+            rest = rest[1:]
+        elif rest and rest[0].lower() == "waiting":
+            loop["kind"] = "waiting"
+            rest = rest[1:]
+            if len(rest) > 1:
+                loop["who"], rest = rest[0], rest[1:]
+        elif rest and rest[0].lower() == "someday":
+            loop["kind"] = "someday"
+            rest = rest[1:]
+        loop["what"] = " · ".join(rest) or line
+        out.append(loop)
+    return out
+
+
+_loops = {"key": None, "loops": [], "error": ""}
+def read_loops():
+    """Your open loops, read again only when the file changed: (loops, the
+    file or "", what's wrong or "")."""
+    p = loops_path()
+    if not p:
+        return [], "", ""
+    try:
+        key = (str(p), p.stat().st_mtime_ns, datetime.date.today().isoformat())
+    except OSError:
+        return [], str(p), f"Can't read {p}"
+    if _loops["key"] != key:
+        try:
+            _loops.update(key=key, loops=parse_loops(p.read_text(errors="replace")), error="")
+        except OSError as e:
+            _loops.update(key=key, loops=[], error=f"Can't read {p}: {e.strerror}")
+    return _loops["loops"], str(p), _loops["error"]
+
+
+def loops_sent(open_keys=None):
+    """What Today told your assistant about, by loop: {key: {action, at}}.
+    One that isn't open any more (it was ticked, or changed) goes, and so
+    does one told about more than two days ago (told again, then)."""
+    try:
+        d = json.loads(LOOPS_SENT.read_text())
+    except (OSError, ValueError):
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    now = time.time()
+    keep = {k: v for k, v in d.items() if isinstance(v, dict) and now - v.get("at", 0) < 2 * 86400
+            and (open_keys is None or k in open_keys)}
+    if keep != d and open_keys is not None:
+        try:
+            write_file(LOOPS_SENT, json.dumps(keep))
+        except OSError:
+            pass
+    return keep
+
+
+def today_view():
+    """Today's part of the app's view, beside the sessions' (each has its
+    own: today): your loops, where they're from, what your assistant was
+    told, and your assistant."""
+    loops, source, error = read_loops()
+    mine = assistant()
+    return {"loops": loops, "source": source, "error": error, "sent": loops_sent({l["key"] for l in loops}),
+            "assistant": {"id": mine["id"], "name": mine["name"]} if mine else None}
+
+
+LOOP_ASKS = {
+    "done": "Loop done: {said}. Tick it off in {source}.",
+    "chase": "Chase {who} on: {what}{since}. Draft the message for me to send.",
+}
+
+
+def loop_tell(key, action):
+    """Today's Done or Chase on a loop: told to your assistant (as if you'd
+    typed it), which keeps the file. None, or what's wrong."""
+    if action not in LOOP_ASKS:
+        return "done or chase"
+    loops, source, _ = read_loops()
+    loop = next((l for l in loops if l["key"] == key), None)
+    if not loop:
+        return "That loop isn't open any more"
+    mine = assistant()
+    if not mine:
+        return "You have no assistant to tell: make one of your chats your assistant first"
+    if action == "chase" and loop["kind"] != "waiting":
+        return "Only someone you're waiting on can be chased"
+    said = loop["line"]
+    since = f" (waiting since {loop['since']})" if loop["since"] else ""
+    text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since)
+    r = run_amarchy("send", mine["id"], text, "--no-wait")
+    if r.returncode != 0:
+        return gist(r.stderr) or f"{mine['name']} didn't take it"
+    sent = loops_sent()
+    sent[key] = {"action": action, "at": time.time()}
+    try:
+        write_file(LOOPS_SENT, json.dumps(sent))
+    except OSError:
+        pass
+    return None
+
+
+def cmd_today(args):
+    if args and args[0] == "--loops":
+        if len(args) == 1:
+            p = loops_path()
+            print(p if p else "none")
+            return 0
+        if args[1] == "off":
+            LOOPS_FILE.unlink(missing_ok=True)
+            print("No loops file: Today shows your chats only")
+            return 0
+        p = Path(os.path.expanduser(args[1])).resolve()
+        if not p.is_file():
+            print(f"amarchy: {p} isn't a file", file=sys.stderr)
+            return 1
+        write_file(LOOPS_FILE, str(p) + "\n")
+        print(f"Today reads your loops from {p}")
+        return 0
+    ss = session_view()
+    for s in ss:
+        s["today"] = chat_reply(s)
+    t = today_view()
+    if "--json" in args:
+        print(json.dumps({"needs": needs_you(ss), **t, "sessions": [
+            {"id": s["id"], "task": s.get("task", ""), "status": s.get("status"), **s["today"]} for s in ss]}, indent=1))
+        return 0
+    today = datetime.date.today().isoformat()
+    print(f"Needs you: {needs_you(ss)}")
+    for s in ss:
+        r = s["today"]
+        if s.get("status") == "waiting" or (s.get("status") != "working" and r["asks"]):
+            ask = r["asks"][0]["question"] if r["asks"] else ask_line(s)
+            print(f"  {s.get('task') or s['id']}: {ask}")
+    due = sorted((l for l in t["loops"] if l["kind"] == "due"), key=lambda l: l["due"])
+    if due:
+        print("Due:")
+        for l in due:
+            print(f"  {l['due']}{' (overdue)' if l['due'] < today else ''}  {l['what']}")
+    waiting = [l for l in t["loops"] if l["kind"] == "waiting"]
+    if waiting:
+        print("Waiting on others:")
+        for l in waiting:
+            late = " (chase now)" if l["chase"] and l["chase"] <= today else ""
+            chase = f" · chase {l['chase']}" if l["chase"] else ""
+            print(f"  {l['who']}: {l['what']}{chase}{late}")
+    print("Chats:")
+    for s in ss:
+        r = s["today"]
+        state = r["state"] or s.get("status") or ""
+        print(f"  [{state}] {s.get('task') or s['id']}{': ' + r['goal'] if r['goal'] else ''}")
+    if t["error"]:
+        print(t["error"], file=sys.stderr)
+    return 0
+
+
 def app_words(st, ss):
     """The list's words for each session: the last thing its Claude wrote
     (said), the step it's on while it works (doing: {tool, input}, which
@@ -8489,8 +8840,9 @@ def app_words(st, ss):
     now = time.time()
     for s in ss:
         if s.get("setup"):
-            s["said"], s["doing"], s["asks"] = "", None, ""
+            s["said"], s["doing"], s["asks"], s["today"] = "", None, "", chat_reply({})
             continue
+        s["today"] = chat_reply(s)      # its goal, its state, what its last reply asks you (Today)
         words = last_words(s)
         if not s.get("assistant"):
             s["said"] = words["said"]
@@ -8514,7 +8866,7 @@ def app_moments(st, ss):
     was, st.statuses = st.statuses, now
     if was is None:
         return
-    waiting = sum(1 for s in ss if s["status"] == "waiting")
+    waiting = needs_you(ss)       # the app's badge: what needs you (Today)
     for s in ss:
         state, prev = s["status"], was.get(s["id"])
         pending = app_asking(s) if state == "waiting" else []
@@ -9213,6 +9565,16 @@ def app_handler(st, users, address):
                 return self.assistant(None, data)
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
+            if self.path == "/api/today/loop":      # Done or Chase on one of your loops: {key, action}, to your assistant
+                why = loop_tell(data.get("key"), data.get("action"))
+                return self.error(409, why) if why else self.send(200, {})
+            if self.path == "/api/today/loops":     # your loops file: {path} ("" for none)
+                p = data.get("path")
+                if not isinstance(p, str):
+                    return self.error(400, "which file (path)")
+                r = run_amarchy("today", "--loops", p.strip() or "off")
+                return self.send(200, {"source": loops_path() and str(loops_path()) or ""}) if r.returncode == 0 \
+                    else self.error(400, gist(r.stderr))
             if self.path == "/api/automations":     # {id, action: run|pause|resume}
                 a = automation_find(data.get("id") if isinstance(data.get("id"), str) else "")
                 if not a:
@@ -10840,6 +11202,10 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   ```
 - A link for them to open goes in a link block; a date to keep, in an event block.
 - Sources you used go last, under "## Sources", as links.
+- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
+  ```goal state="working"
+  Make Today the app's home screen
+  ```
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 
@@ -12300,6 +12666,7 @@ OPTIONS = {
     "migrate": (set(), set(), set()),
     "dictation": ({"--status", "--json"}, set(), set()),
     "automations": ({"--json"}, set(), set()),
+    "today": ({"--json", "--loops"}, set(), set()),
     "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
@@ -12460,6 +12827,8 @@ def main(argv):
         return cmd_secret(args)
     elif cmd == "automations":
         return cmd_automations(args)
+    elif cmd == "today":
+        return cmd_today(args)
     elif cmd == "terminals":
         return cmd_terminals(args)
     elif cmd == "protocol-check":
