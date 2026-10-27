@@ -251,23 +251,56 @@ async function wide(browser, port) {
   const p = await page(browser, "wide", port);
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.today && !!document.querySelector(".desk-empty:not([hidden]) .today")), "launched: Today in the middle");
-  await p.setViewportSize({ width: 1280, height: 520 });
-  const sc = await p.evaluate(() => {
-    const el = document.querySelector(".today-scroll");
-    el.scrollTop = 200;
-    return { top: el.scrollTop, fits: el.clientHeight <= window.innerHeight };
-  });
-  check(where, sc.top > 0 && sc.fits, `the middle scrolls (${JSON.stringify(sc)})`);
-  await p.evaluate(() => { document.querySelector(".today-scroll").scrollTop = 0; });
-  await p.setViewportSize({ width: 1280, height: 800 });
-  check(where, /Today/.test(await text(p, ".panel-buttons .today-btn")) && await p.evaluate(() => document.querySelector(".today-btn").classList.contains("on")), "its button over the list, on");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".panel-buttons .control")].map((b) => b.className.split(" ")[1]).join(",")) === "new-chat,today-btn,brand", "the bar: New chat, Today, the cog");
+  check(where, await until(p, () => desk.mode === "tasks" && !!document.querySelector(".tasks-board .board-today .today-part")
+                                   && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: Tasks, the whole window, no list");
+  check(where, /Tasks\s*4/.test(await text(p, ".board-switch")) && /Chats/.test(await text(p, ".board-switch")), "its switch: Tasks (4) | Chats");
+  check(where, await p.evaluate(() => !!document.querySelector(".board-today .ticket[data-id=me-jaken]")), "your assistant, a ticket on top");
+  check(where, /Try json-render/.test(await text(p, ".board-today")), "a ticket says its goal");
   await common(p, where);
+
+  // A ticket opens in place, the chat live in it; Fold, or Esc, closes it.
+  await p.evaluate(() => document.querySelector(".ticket[data-id=proj-work] .today-line-main").click());
+  check(where, await until(p, () => board.open === "proj-work" && !!document.querySelector(".ticket.open[data-id=proj-work] .ticket-body .chat")), "a ticket opens, its chat inside");
+  await sleep(300);
+  await p.screenshot({ path: path.join(SHOTS, "wide-ticket-open.png") });
+  const held = await p.evaluate(() => { const box = board.box; const key = box.dataset.key; app.view = { ...app.view, needs: 9 }; refresh(); return box.dataset.key === key && !!document.querySelector(".ticket.open .chat"); });
+  check(where, held, "while it's open the board holds still");
+  await p.evaluate(() => document.querySelector(".ticket.open").click());
+  await p.evaluate(() => [...document.querySelectorAll(".ticket-bar .text-btn")].find((b) => b.innerText === "Fold").click());
+  check(where, await until(p, () => !board.open && !document.querySelector(".ticket.open")), "Fold: closed again");
+  await p.evaluate(() => todayOpen(row("proj-quiet")));
+  check(where, await until(p, () => board.open === "proj-quiet"), "another opens");
+  await p.evaluate(() => todayOpen(row("proj-quiet")));
+  check(where, await until(p, () => !board.open), "clicked again: it folds");
+
+  // A new chat at the top of the board.
+  await p.evaluate(() => [...document.querySelectorAll(".board-head .control")].find((b) => /New chat/.test(b.innerText)).click());
+  check(where, await until(p, () => !document.querySelector(".board-new").hidden && !!document.querySelector(".board-new .start-chat")
+                                   && document.activeElement === document.querySelector(".board-new textarea")), "New chat: its box at the top, the keyboard in it");
+  await p.keyboard.press("Escape");
+  check(where, await until(p, () => document.querySelector(".board-new").hidden), "Esc: away again");
+
+  // It scrolls.
+  await p.setViewportSize({ width: 1280, height: 520 });
+  const sc = await p.evaluate(() => { const el = document.querySelector(".board-scroll"); el.scrollTop = 200; return el.scrollTop; });
+  check(where, sc > 0, `the board scrolls (${sc})`);
+  await p.setViewportSize({ width: 1280, height: 800 });
+
+  // Chats: the list and one chat, its bar New chat, Tasks, the cog.
+  await p.evaluate(() => [...document.querySelectorAll(".board-switch .control")].find((b) => b.innerText === "Chats").click());
+  check(where, await until(p, () => desk.mode === "chats" && getComputedStyle(document.querySelector(".tasks-board")).display === "none"), "Chats: the list again");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".panel-buttons .control")].map((b) => b.className.split(" ")[1]).join(",")) === "new-chat,today-btn,brand", "the bar: New chat, Tasks, the cog");
+  await p.evaluate(() => go("#/today"));
+  check(where, await until(p, () => desk.today && !!document.querySelector(".desk-empty:not([hidden]) .today")), "Today in the middle still, in Chats");
   await p.evaluate(() => go2("proj-work"));
   check(where, await until(p, () => desk.current === "proj-work"), "a chat opened");
+  await p.reload();
+  await ready(p);
+  check(where, await until(p, () => desk.mode === "chats"), "the app opens on the one you used last");
   await p.evaluate(() => document.querySelector(".today-btn").click());
-  check(where, await until(p, () => desk.today && !desk.current), "the Today button: Today again");
+  check(where, await until(p, () => desk.mode === "tasks"), "Tasks over the list: Tasks again");
+  await p.keyboard.press("Control+Alt+KeyH");
+  check(where, await until(p, () => desk.mode === "chats"), "Ctrl+Alt+H switches");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

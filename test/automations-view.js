@@ -124,6 +124,7 @@ function dropTimer() {
 async function run(browser, port, layout, home) {
   const ctx = await browser.newContext({ ...LAYOUTS[layout], baseURL: `http://127.0.0.1:${port}` });
   const page = await ctx.newPage();
+  await page.addInitScript(() => { try { localStorage.setItem("desk-mode", "chats"); } catch (e) { /* about:blank */ } });     // the list's bar (not Tasks)
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const shot = async (name) => { await page.waitForTimeout(400); return page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) }); };
@@ -138,7 +139,7 @@ async function run(browser, port, layout, home) {
     check(layout, await clock.isVisible(), "the clock is in the list's bar");
     await shot("bar");
     await page.evaluate(() => { desk.toolbar.hidden = true; });
-    await page.locator(".panel-buttons .brand").click();
+    await page.locator(".panel-buttons .brand").click({ button: "right" });      // the cog's right click: the Amarchy menu
     const item = page.locator(".picker-row", { hasText: "Automations" }).first();
     await item.waitFor({ timeout: 3000 }).catch(() => {});
     check(layout, await item.isVisible().catch(() => false), "the menu has Automations");

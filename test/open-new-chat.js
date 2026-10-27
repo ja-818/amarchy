@@ -190,7 +190,7 @@ async function wide(browser, port) {
   const where = "wide";
   // The home-screen app (Safari's Add to Dock): no address to keep the view in.
   let p = await page(browser, "wide", port, true);
-  await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); sessionStorage.setItem("seeded", "1"); } });
+  await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); localStorage.setItem("desk-mode", "chats"); sessionStorage.setItem("seeded", "1"); } });
   await p.goto("/");
   await ready(p);
   check(where, await until(p, () => desk.today && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .today")),
@@ -211,6 +211,7 @@ async function wide(browser, port) {
 
   // In a browser tab: a link to a chat opens that chat; the bare address, the new chat.
   p = await page(browser, "wide", port, false);
+  await p.addInitScript(() => { try { localStorage.setItem("desk-mode", "chats"); } catch (e) { /* about:blank */ } });
   await p.goto("/#/s/proj-a");
   await ready(p);
   check(where, await until(p, () => desk.current === "proj-a"), "a link to a chat: that chat");

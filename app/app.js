@@ -434,7 +434,7 @@ function openList() {
 
 // The list changed: on a wide screen the wide layout (desk.js), else the list's view.
 function refresh() {
-  if (app.desk) deskList();
+  if (app.desk) { deskList(); boardRefresh(); }      // Tasks (tasks.js)
   else if (!app.session) renderList();
   keptListScroll();
 }

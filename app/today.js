@@ -133,6 +133,7 @@ function todaySection(kind, title, sub, ...kids) {
 }
 
 function todayOpen(s) {
+  if (boardOn()) return boardToggle(s.id);       // Tasks: it opens in its ticket (tasks.js)
   if (app.desk && typeof go2 === "function") go2(s.id);
   else go(`#/s/${encodeURIComponent(s.id)}`);
 }
@@ -264,16 +265,20 @@ function todayChat(s, kind) {
   return h("div", { class: `today-line ${kind}` },
     h("button", { class: "today-line-main", type: "button", onclick: () => todayOpen(s) },
       stateIcon(s),
-      h("span", { class: "text" }, h("span", { class: "today-line-top" }, projectChip(s), taskText(s.task || "New chat")),
-        h("small", {}, [word, t.goal].filter(Boolean).join(" · ")))),
+      h("span", { class: "text" }, h("span", { class: "today-line-top" }, projectChip(s), taskText(kind === "assistant" ? s.assistant_name || s.task : s.task || "New chat")),
+        h("small", {}, [word, t.goal].filter(Boolean).join(" · ")),
+        // Tasks: what it last said, so a ticket says where it is before you open it.
+        boardOn() && s.said ? h("span", { class: "today-said" }, s.said) : null)),
     btns);
 }
 
 // Today, as nodes, for whoever shows it (the phone's list, desk.js's middle).
-function todayNodes() {
+// board: drawn for Tasks (tasks.js), each chat a ticket that opens in place.
+function todayNodes(board = false) {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
   const p = todayParts(v);
+  const tk = (draw, ...more) => (s) => (board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more));
   const hasLoops = !!(v.today && v.today.source);
   const name = (v.today && v.today.assistant || {}).name || "your assistant";
   const yours = p.asks.length + p.blocked.length + p.dueNow.length;
@@ -281,19 +286,22 @@ function todayNodes() {
   const nodes = [h("div", { class: "today-top" }, h("div", { class: "today-date" }, date),
     h("div", { class: "today-summary" }, yours ? `${yours} for you to do` : "Nothing waits on you",
       p.done.length ? ` · ${p.done.length} to close` : ""))];
+  // Tasks: your assistant first, a ticket too (it never asks to be closed).
+  const mine = board ? (v.sessions || []).find((s) => s.assistant === "main" && !p.asks.includes(s)) : null;
+  if (mine) nodes.push(boardTicket(mine, todayChat(mine, "assistant")));
   nodes.push(todaySection("yours", "Your move", null,
-    p.asks.map(todayAsk), p.blocked.map(todayBlocked),
+    p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)),
     p.dueNow.length ? h("div", { class: "today-card loops" }, h("div", { class: "today-k" }, "Due"), ...p.dueNow.map((l) => todayLoop(l, v))) : null));
   if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing waits on you right now."));
   nodes.push(todaySection("finish", "Finish", "a chat exists to reach its goal and be closed",
-    p.done.map((s) => todayChat(s, "done")),
-    todayFold("stale", "Quiet for days", p.stale.length, p.stale.map((s) => todayChat(s, "stale")), p.stale.length <= 3)));
+    p.done.map(tk(todayChat, "done")),
+    todayFold("stale", "Quiet for days", p.stale.length, p.stale.map(tk(todayChat, "stale")), p.stale.length <= 3)));
   nodes.push(todaySection("theirs", "Their move", null,
     todayFold("chase", "Waiting on others", p.waiting.length, p.waiting.map((l) => todayLoop(l, v)), p.chaseNow.length > 0),
-    todayFold("working", "At work", p.working.length, p.working.map((s) => todayChat(s, "working")), true),
+    todayFold("working", "At work", p.working.length, p.working.map(tk(todayChat, "working")), true),
     todayFold("week", "Later this week", p.week.length, p.week.map((l) => todayLoop(l, v))),
     todayFold("later", "Further out", p.later.length, p.later.map((l) => todayLoop(l, v))),
-    todayFold("idle", "Other chats", p.idle.length, p.idle.map((s) => todayChat(s, "idle")))));
+    todayFold("idle", "Other chats", p.idle.length, p.idle.map(tk(todayChat, "idle")), board)));
   if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
   if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your commitments can show here too: set your loops file in ",
     h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
@@ -322,13 +330,17 @@ function todayKey(v) {
 }
 
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
+// Tasks' (board) holds still while a ticket is open (its chat is live in it;
+// drawn again, it would lose its place): it catches up when it's closed.
 function todayFill(box, force) {
+  const board = box.classList.contains("board-today");
+  if (board && !force && boardHolds()) return;
   const key = todayKey(app.view);
   if (!force && box.dataset.key === key) return;
   box.dataset.key = key;
-  const scroller = box.closest(".scroll, .today-scroll");
+  const scroller = box.closest(".scroll, .today-scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
-  keepFocus(box, () => box.replaceChildren(...todayNodes()));
+  keepFocus(box, () => box.replaceChildren(...todayNodes(board)));
   if (scroller) scroller.scrollTop = top;
 }
 
