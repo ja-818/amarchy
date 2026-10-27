@@ -10800,7 +10800,7 @@ BRIEF_ASK = (
 # blocks named for what they hold (a draft, a command, an event...) that the
 # app gives buttons (chat.js parseReply). No second rendition of the reply, so
 # nothing is lost or said twice, and no extra step at the end of a turn.
-REPLY_FORMAT = """amarchy shows the person each of your replies as a card built from your markdown, on their phone or computer. They read that, so write every reply (not your working notes in between, only your final message of a turn) like this:
+REPLY_FORMAT = """amarchy shows the person each of your replies as a card built from your markdown, on their phone or computer. They read that, so write every reply (not your working notes in between, only your final message of a turn) like this. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and put it in these blocks, because buttons come only from them.
 
 - First line: the outcome in one plain sentence, as you'd say it to them. It becomes the card's title. No greeting, no "Here's...", no heading mark.
 - Then the rest, as you normally would, in markdown: short paragraphs and lists, "## " headings for sections (each folds in the card), a table for any comparison or side-by-side data, code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point: the card is all they read.
@@ -10832,12 +10832,13 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   ```session id="houston-os-c21-crm"
   what that chat is doing
   ```
-- Lists they track (still open, waiting on, loops) go in a todos block.
-- When you need them to decide, end with a choices block; each option is "- Label | the full message it sends" (or just "- Label"):
+- Lists they track (still open, waiting on, loops) go in a todos block, every time you list them.
+- Any question you ask them, a yes or no included, goes in a choices block at the end, never only in your prose; each option is "- Label | the full message it sends" (or just "- Label"):
   ```choices question="Ship it to main?"
   - Ship it | Ship it: merge to main and push
   - Not yet
   ```
+- A link for them to open goes in a link block; a date to keep, in an event block.
 - Sources you used go last, under "## Sources", as links.
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]

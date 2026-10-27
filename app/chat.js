@@ -930,8 +930,79 @@ function parseReply(text) {
     buf.push(line);
   }
   flush();
+  inferActions(sections, choices, things);
   // A section left empty by what moved out of it (only its block) goes.
   return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things };
+}
+
+// What a reply asks of you or gives you, when Claude wrote it in its prose
+// instead of a block (a persona's own style, a habit): its list of what's
+// still open as a to-do list, its question as one to answer with a tap, the
+// links it gives you to open. So none of it is lost in the text. Each only if
+// the reply has no block of that kind already.
+function inferActions(sections, choices, things) {
+  const isSources = (sec) => sec.head && /^sources\b/i.test(sec.head.replace(/[*_`]/g, "").trim());
+  const mds = sections.filter((sec) => !isSources(sec)).flatMap((sec) => sec.blocks.filter((b) => b.type === "md"));
+  const clean = (x) => x.replace(/\*\*|__|`/g, "").replace(/^[*_]+|[*_]+$/g, "").trim();
+  // "Still open:", "Waiting on Felipe:"… and the list under it.
+  if (!things.some((t) => t.type === "todos")) {
+    const lead = /^\s*(?:\*\*|__)?((?:still open|waiting on|open loops?|loops|to ?dos?|pending|next steps?|left to do)\b[^\n]{0,60}?)(?:\*\*|__)?\s*:?\s*(?:\*\*|__)?\s*$/i;
+    for (const b of mds) {
+      const lines = b.text.split("\n");
+      for (let n = 0; n < lines.length; n++) {
+        const m = lines[n].match(lead);
+        if (!m) continue;
+        let e = n + 1;
+        while (e < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[e])) e++;
+        if (e - n < 2) continue;
+        const items = lines.slice(n + 1, e).map((l) => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[( |x|X)\]\s*)?/, (_, x) => (x && /x/i.test(x) ? "\u0000" : "")))
+          .map((l) => ({ text: l.replace(/\u0000/, ""), due: "", done: l.startsWith("\u0000") }));
+        things.push({ type: "todos", title: clean(m[1]).replace(/:$/, ""), items });
+        // Out of the text, with a "====" line that only set it apart.
+        let from = n;
+        while (from > 0 && /^\s*(=+|-{3,}|\*{3,})?\s*$/.test(lines[from - 1])) from--;
+        lines.splice(from, e - from);
+        n = from - 1;
+      }
+      b.text = lines.join("\n").trim();
+    }
+  }
+  // The question it ends on: in its last two paragraphs, the last sentence
+  // ending in "?" (or "? (yes)"). Yes or no when it's shaped so, else an
+  // answer you write.
+  if (!choices.some((c) => c.options.length)) {
+    const paras = mds.map((b) => b.text).join("\n\n").replace(/```[\s\S]*?```/g, "").split(/\n\s*\n/)
+      .filter((x) => x.trim() && !/^\s*\|/.test(x)).slice(-2);
+    let q = "";
+    for (const para of paras.reverse()) {
+      const found = [...para.replace(/\n\s*([-*+]|\d+[.)])\s+/g, "\n").split(/\n|(?<=[.!])\s+/)]
+        .map((x) => x.trim()).filter((x) => /\?(\s*\([^)]{0,40}\))?[*_]*$/.test(x)).pop();
+      if (found) { q = found; break; }
+    }
+    if (q) {
+      q = q.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+      const yesNo = /\((?:yes|no|y\/n)\b[^)]*\)[*_]*$/i.test(q) || /^[*_]*(shall|should|do|does|did|can|could|want|would|will|is|are|was|may|ok|okay|ready|go|ship|merge|send|keep|proceed|try|start)\b/i.test(clean(q));
+      const question = clean(q.replace(/\s*\((?:yes|no|y\/n)\b[^)]*\)[*_]*$/i, ""));
+      if (question.length > 3) choices.push({ type: "choices", question, options: yesNo
+        ? [{ label: "Yes", send: "Yes" }, { label: "No", send: "No" }, { label: "Answer", send: "", draft: true }]
+        : [{ label: "Answer", send: "", draft: true }] });
+    }
+  }
+  // The links it gives you (not its sources), a button each to open, unless
+  // it cites so many it's a reading list.
+  if (!things.some((t) => t.type === "link")) {
+    const seen = new Map();
+    for (const b of mds) {
+      const text = b.text.replace(/```[\s\S]*?```/g, "");
+      for (const m of text.matchAll(/\[([^\]]{1,80})\]\((https?:\/\/[^\s)]+)\)|(?<![(\[<"])\b(https?:\/\/[^\s<>)\]"'`*]+[^\s<>)\]"'`*.,;:!?])/g)) {
+        const url = m[2] || m[3];
+        if (/\.\.|…/.test(url)) continue;     // "http://amarchy:3123/...": not a link to open
+        if (!seen.has(url)) seen.set(url, m[1] ? clean(m[1]) : "");
+      }
+    }
+    if (seen.size && seen.size <= 4)
+      for (const [url, label] of seen) things.push({ type: "link", url, title: label || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").slice(0, 60), note: "" });
+  }
 }
 
 // What a folded section holds, in a few words: its table ("Table · 8 rows"),

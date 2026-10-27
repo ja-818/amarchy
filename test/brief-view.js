@@ -612,6 +612,39 @@ async function run(browser, base, layout) {
   check(layout, s.replies === 7 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind" &&
     s.titles[5] === "The demo moved to Friday: here's the message for Felipe." && s.titles[6] === "The deck and the email are drafted; nothing was sent.", "back to the brief view");
 
+  // A reply that asks and lists in its prose, not in blocks (a persona's own
+  // style): its question still gets buttons, its open list a to-do list, its link a button.
+  const PROSE = [
+    "Touch point with Felipe: Houston becomes a platform for implementers.",
+    "",
+    "The new price is **$250 a month**. The plan is at [the plan](https://example.com/plan).",
+    "",
+    "This changes the brief for `houston-os-iteration`. Shall Jaken pass it the pivot and the Friday demo? (yes)",
+    "",
+    "====",
+    "Still open:",
+    "- **Anthropic:** finish today",
+    "- Rotate the Meta token",
+  ].join("\n");
+  await page.evaluate(({ PROSE }) => {
+    window.__chat.conversation({ items: [{ kind: "user", text: "Felipe call", turn: true, key: "88888888-aaaa-4aaa-8aaa-000000000008:0", at: "" },
+      { kind: "claude", text: PROSE, key: "h1:0", at: "" }] });
+  }, { PROSE });
+  const prose = await page.evaluate(() => {
+    const r = [...document.querySelectorAll(".reply")].at(-1);
+    return { q: r.querySelector(".reply-needs .bq-q")?.textContent, opts: [...r.querySelectorAll(".reply-needs .bq-opt")].map((x) => x.textContent),
+      arts: [...r.querySelectorAll(".reply-artifacts .art-title")].map((x) => x.textContent), body: r.querySelector(".reply-body")?.textContent || "" };
+  });
+  check(layout, prose.q === "Shall Jaken pass it the pivot and the Friday demo?" && JSON.stringify(prose.opts) === JSON.stringify(["Yes", "No", "Answer"]),
+    `a question in the prose gets buttons (${JSON.stringify([prose.q, prose.opts])})`);
+  check(layout, JSON.stringify(prose.arts) === JSON.stringify(["Still open", "the plan"]) && !/Rotate the Meta|====/.test(prose.body) && /\$250/.test(prose.body),
+    `its open list a to-do list (out of the text), its link a button (${JSON.stringify(prose.arts)})`);
+  const before2 = posts.filter((p) => p.url.endsWith("/send")).length;
+  await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).querySelector(".reply-needs .bq-opt").click());
+  await page.waitForTimeout(300);
+  const yes = posts.filter((p) => p.url.endsWith("/send")).slice(before2)[0];
+  check(layout, !!yes && yes.body === JSON.stringify({ text: "Yes" }), `Yes sends "Yes" (${yes && yes.body})`);
+
   // On the phone the choice is in Settings: Replies, Brief | Chat.
   await page.evaluate(() => openSettings());
   await page.waitForSelector(".sheet-back.settings .seg");
