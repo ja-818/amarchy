@@ -202,8 +202,9 @@ async function todayClose(s, said = "") {
 function todayCloseNow(ss, said = "") {
   ss.forEach((s) => todayUI.closing.add(s.id));
   todayRedraw();
-  const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); todayRedraw(); };
-  const what = said || (ss.length === 1 ? `Closed ${ss[0].task || "the chat"}` : `Closed ${ss.length} chats`);
+  missionComplete(ss.length === 1 ? ss[0].task || "Your chat" : `${ss.length} chats`, ss.length);
+  const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); missionsAdd(-ss.length); todayRedraw(); };
+  const what = said || (ss.length === 1 ? `Mission complete: ${ss[0].task || "the chat"}` : `Mission complete: ${ss.length} chats`);
   todayUndo(what, async () => {
     const failed = [];
     for (const s of ss) {
@@ -457,7 +458,7 @@ function todayChat(s, kind) {
   const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
-  const complete = finished && !main ? todayBtn("Complete", () => todayComplete(s), true, "complete") : null;
+  const complete = finished && !main ? todayBtn("Complete mission", () => todayComplete(s), true, "complete") : null;
   const seenBtn = kind === "fresh" && !finished ? todayBtn("Seen", () => todaySeen(s), false, "quiet") : null;
   return todayCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
@@ -466,7 +467,7 @@ function todayChat(s, kind) {
     actions: finished ? [review, complete]
       : kind === "fresh" ? [seenBtn]
       : kind === "stale" || stalled ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : todayBtn("Ask status", () => todayNudge(s)),
-                                       todayBtn("Close", () => todayClose(s))] : [] });
+                                       todayBtn("Complete mission", () => todayComplete(s), false, "complete")] : [] });
 }
 
 // Seen without opening it: off Needs you.
@@ -486,8 +487,69 @@ async function todayComplete(s) {
     card.classList.add("completing");
     card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, "Mission complete")));
   }
-  await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 200 : 1100));
+  await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 650));
   todayClose(s, `Mission complete: ${s.task || "the chat"}`);
+}
+
+// ---- mission complete: what closing a chat feels like
+//
+// The chat reached its goal, and you closed it: your theme's colors burst
+// over your wallpaper, a tick lands, MISSION COMPLETE in big letters, how
+// many you've completed today against what's still waiting (a bar of
+// blocks), a fanfare (unless your chimes are off), and Next mission. A
+// click, Esc, or three seconds, and it's gone; Undo is under it the while.
+
+const MISSION_HUES = ["--red", "--yellow", "--green", "--blue", "--magenta", "--cyan", "--orange", "--accent"];
+
+function missionsKey() { return `missions:${new Date().toDateString()}`; }
+function missionsToday() { return Number(store.get(missionsKey()) || 0); }
+function missionsAdd(n) { store.set(missionsKey(), String(Math.max(0, missionsToday() + n))); }
+
+function missionComplete(title, n = 1) {
+  missionsAdd(n);
+  const done = missionsToday();
+  const left = app.view ? todayCount(app.view, typeof board !== "undefined" && boardOn() ? "chats" : null) : 0;
+  const v = app.view || {};
+  if (v.sound !== "off") { const a = new Audio("/sound/mission"); a.volume = 0.8; a.play().catch(() => {}); }
+  document.querySelectorAll(".mission").forEach((m) => m.remove());
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const burst = h("div", { class: "mission-burst", "aria-hidden": "true" });
+  if (!calm) for (let i = 0; i < 90; i++) {
+    const bit = h("i");
+    const angle = Math.random() * Math.PI * 2, far = 18 + Math.random() * 42;
+    bit.style.setProperty("--dx", `${Math.cos(angle) * far}vw`);
+    bit.style.setProperty("--dy", `${Math.sin(angle) * far * 0.8 + 12 + Math.random() * 20}vh`);
+    bit.style.setProperty("--rot", `${Math.round(Math.random() * 1080 - 540)}deg`);
+    bit.style.setProperty("--d", `${1.1 + Math.random() * 0.9}s`);
+    bit.style.setProperty("--c", `var(${MISSION_HUES[i % MISSION_HUES.length]})`);
+    if (i % 3 === 0) bit.classList.add("round");
+    burst.append(bit);
+  }
+  const ordinal = (k) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][k % 10] || "th"}`;
+  const blocks = Math.min(14, done + left);
+  const bar = h("div", { class: "mission-bar", "aria-hidden": "true" },
+    ...Array.from({ length: blocks }, (_, i) => h("span", { class: i < Math.min(done, blocks) ? "on" : "" })));
+  const go = () => {
+    el.remove();
+    const next = document.querySelector(".today:not([hidden]) .today-yours .today-go");
+    if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); }
+  };
+  const nextBtn = h("button", { class: "tbtn primary mission-next", type: "button", onclick: (e) => { e.stopPropagation(); go(); } },
+    left ? "Next mission →" : "Keep going →");
+  const el = h("div", { class: "mission", role: "status", "aria-live": "polite", onclick: () => el.remove() }, burst,
+    h("div", { class: "mission-card" },
+      h("div", { class: "mission-tick" }, glyph("check")),
+      h("div", { class: "mission-kicker" }, "Mission complete"),
+      h("div", { class: "mission-title" }, title),
+      bar,
+      h("div", { class: "mission-stats" }, `${ordinal(done)} today`, left ? ` · ${left} still need${left === 1 ? "s" : ""} you` : " · nothing else needs you"),
+      nextBtn));
+  const esc = (e) => { if (e.key === "Escape" && el.isConnected) { e.preventDefault(); e.stopPropagation(); el.remove(); } };
+  window.addEventListener("keydown", esc, true);
+  document.body.append(el);
+  if (app.desk) nextBtn.focus({ preventScroll: true });
+  setTimeout(() => { el.classList.add("leaving"); setTimeout(() => el.remove(), 400); }, calm ? 2400 : 3400);
+  setTimeout(() => window.removeEventListener("keydown", esc, true), 4000);
 }
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the

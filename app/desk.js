@@ -1846,7 +1846,7 @@ function deskMenu() {
       { label: "Search", key: "Ctrl+Alt+S", act: () => deskSearch() },
       { label: "Zen mode", detail: on(desk.zen), key: "Ctrl+Alt+Z", act: () => toggleZen() },
       { label: "Group & sort", act: () => organizePicker() },
-      { label: "Close one…", act: () => picker({ title: "Close which chat?", items: ((app.view && app.view.sessions) || []).map((x) =>
+      { label: "Complete one…", act: () => picker({ title: "Complete which chat's mission?", items: ((app.view && app.view.sessions) || []).map((x) =>
         ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
     { label: "Automations", icon: "clock", detail: "what runs by itself", act: () => automationsSheet() },
     { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
@@ -1892,7 +1892,7 @@ function sessionItems(s) {
       { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
-    { label: "Close", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
+    { label: "Complete mission", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
   ];
 }
 
@@ -1909,7 +1909,7 @@ function showKeys() {
     ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Run the project"],
     ["Ctrl+Alt+C", "Run a command"], ["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+H", "The board / the list and a chat"],
     ["Ctrl+Alt+Up / Down", "Raise / lower priority"], ["Ctrl+Alt+E", "Rename"], ["Ctrl+Alt+M", "Amarchy menu"],
-    ["Ctrl+Alt+X", "Close this chat"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your chats, in a list to pick from"],
+    ["Ctrl+Alt+X", "Complete this chat's mission"], ["Ctrl+Alt+T", "Theme, font and wallpaper"], ["Ctrl+Alt+A", "Your chats, in a list to pick from"],
     ["Ctrl+Alt+Space / Enter", "Dictate into the chat: hold, or tap and tap again"],
     ["Enter / Shift+Enter", "Send / a new line, in the chat"], ["Esc", "Stop Claude, in the chat's empty box"],
     ["⌘V / drop", "An image goes with your next message"]];

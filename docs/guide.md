@@ -264,8 +264,7 @@ else installed.
   first whatever the grouping; or not grouped, by where each stands: **At work** (folded, how many working),
   **Needs you** (what asks you, what's blocked, and what finished that you haven't
   opened yet, with what it said and **Seen**), **Done** (its goal reached: **Review**
-  opens the link its last reply gave, **Complete ✓** says mission complete and closes
-  it, with Undo) and **Ready** (every other chat, open). A click anywhere on a card
+  opens the link its last reply gave, **Complete mission** closes it, with Undo) and **Ready** (every other chat, open). A click anywhere on a card
   opens it; its buttons do their own thing. And
   **Tasks**, your own (your loops file: due now, waiting on others, this week,
   further out, someday), each with **Follow up** (your assistant drafts the message
@@ -646,6 +645,11 @@ priority first, then your projects' order), and one count in the header:
   that amarchy runs from) asks first.
 - **Waiting**: the chats at work, the people you wait on, the rest of your week,
   further out, and the other chats, folded but for what's at work.
+
+Closing a chat is completing its mission (**Complete mission**, wherever Close used
+to be): your theme's colors burst over your wallpaper, a tick lands, **MISSION
+COMPLETE**, how many you've completed today against what still needs you, a short
+fanfare (not when your chimes are off), and **Next mission**. Undo stays under it.
 
 Your assistant is a line on top. What you answer, allow or close goes after a few
 seconds with **Undo** at the bottom of the screen, so a slip costs nothing. A chat you

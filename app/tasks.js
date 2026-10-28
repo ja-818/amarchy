@@ -218,9 +218,7 @@ function boardFocusHead() {
     todayStatePill(s),
     h("span", { class: "board-gap" }),
     btn("Open in Chats", () => { const id = s.id; deskMode("chats"); go2(id); }),
-    s.assistant === "main" ? null : (s.today || {}).state === "done"
-      ? btn("Complete ✓", () => { boardBack(true); todayComplete(s); }, "complete")
-      : btn("Close chat", () => { boardBack(true); todayClose(s); }, "danger")].filter(Boolean)));
+    s.assistant === "main" ? null : btn("Complete mission ✓", () => { boardBack(true); todayComplete(s); }, "complete")].filter(Boolean)));
 }
 
 // Back to the board, where you were, on the ticket you opened.

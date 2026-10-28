@@ -250,10 +250,13 @@ async function common(p, where) {
   check(where, p.posts.some((x) => /proj-quiet\/send/.test(x.url) && /Where does this stand/.test(x.body.text)), "the ask goes to that chat");
 
   // Complete: mission accomplished, then closed (nothing to lose: no sheet), with Undo.
-  check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete"), "a done chat's Complete tapped");
+  check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete mission"), "a done chat's Complete mission tapped");
   check(where, await until(p, () => !!document.querySelector(".tcard.completing .tcard-complete")), "Mission complete, on its card");
-  await sleep(550);
+  check(where, await until(p, () => !!document.querySelector(".mission .mission-kicker") && /1st today/.test(document.querySelector(".mission-stats").innerText)),
+        "then the celebration: MISSION COMPLETE, the 1st today");
+  await sleep(700);
   await p.screenshot({ path: path.join(SHOTS, `${where}-complete.png`) });
+  await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   check(where, await until(p, () => !!document.querySelector(".undo-toast") && /Mission complete/.test(document.querySelector(".undo-toast").innerText) && !document.querySelector(".sheet")), "then closed, with Undo");
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-done\/close/.test(x.url)), "closed once Undo's gone");
@@ -391,8 +394,9 @@ async function wide(browser, port) {
   await until(p, () => board.open === "proj-quiet");
   await p.evaluate(() => board.chat.input.focus());
   await p.keyboard.press("Control+Alt+KeyX");
-  check(where, await until(p, () => !board.open && !!document.querySelector(".undo-toast") && /Closed Eval/.test(document.querySelector(".undo-toast").innerText)),
-        "Ctrl+Alt+X: the open chat closes, with Undo");
+  check(where, await until(p, () => !board.open && !!document.querySelector(".undo-toast") && /Mission complete: Eval/.test(document.querySelector(".undo-toast").innerText)),
+        "Ctrl+Alt+X: the open chat's mission completes, with Undo");
+  await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-quiet\/close/.test(x.url)), "closed once Undo's gone");
 

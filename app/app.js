@@ -867,7 +867,7 @@ function sessionActions(s, opened) {
 }
 
 function closeButton(s) {
-  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Close chat");
+  return h("button", { class: "control wide danger", onclick: () => confirmClose(s) }, "Complete mission");
 }
 
 // Closing, asked first: it removes the worktree, and
@@ -896,14 +896,16 @@ async function confirmClose(s, known) {
       if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheets();
-      toast(`Closing ${s.task || `${projectName(s.repo)} · ${s.name}`}`);
+      // A chat closed is a mission completed (today.js): celebrated.
+      if (typeof missionComplete === "function") missionComplete(s.task || `${projectName(s.repo)} · ${s.name}`);
+      else toast(`Closing ${s.task || `${projectName(s.repo)} · ${s.name}`}`);
       if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
-  } }, n ? "Close and discard changes" : "Close chat");
-  sheet({ key: "close" }, sheetHead(`Close ${s.task || where(s)}?`, `${detail} · ${where(s)}`), yes,
+  } }, n ? "Complete and discard changes" : "Complete mission ✓");
+  sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 

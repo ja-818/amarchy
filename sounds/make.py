@@ -137,3 +137,14 @@ add(x, 0.09, [0.8 * v for v in partials(note(67), HORN, 0.5, attack=0.025)])
 add(x, 0.24, partials(note(72), HORN, 1.3, attack=0.03))
 write("herald", x)
 
+
+# mission: a mission complete (the board's Complete): a quick horn pickup, a
+# bright major chord landing, and a sparkle over it. Not one of the chimes to
+# pick: it plays when you complete a chat, unless your chimes are off.
+x = buf(2.4)
+for k, n in enumerate((67, 67, 67)):
+    add(x, k * 0.085, [0.55 * v for v in partials(note(n), HORN, 0.12, attack=0.012)])
+for n, a in ((72, 1.0), (76, 0.7), (79, 0.6), (84, 0.45)):
+    add(x, 0.3, [a * v for v in partials(note(n), HORN, 1.6, attack=0.03)])
+sparkle(x, 0.42, (96, 100, 103, 108), 0.05, 0.35, 1.2)
+write("mission", x)

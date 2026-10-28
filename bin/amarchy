@@ -8285,7 +8285,8 @@ APP_SOUND_MAX = 5_000_000           # bytes of a sound of yours added from the a
 def app_sound_file(name):
     """A sound as a browser plays it (Safari has no Ogg): (file, type), the
     Ogg ones made WAV once (kept by their hash), or None."""
-    f = sound_file(name) if name != "off" else None
+    # The mission fanfare (Today's Complete): amarchy's own, not a chime to pick.
+    f = SOUNDS / "mission.wav" if name == "mission" else sound_file(name) if name != "off" else None
     if not f or not f.is_file():
         return None
     kind = APP_SOUND_TYPES.get(f.suffix.lower())
