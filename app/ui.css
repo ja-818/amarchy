@@ -17,7 +17,7 @@
   --card-pad-x: 14px;
   --card-gap: 8px;            /* between cards */
   /* A pill (uiPill): where something stands. */
-  --pill-radius: 999px;
+  --pill-radius: var(--button-radius);     /* square as the buttons */
   --pill-border-width: 1px;
   --pill-border-mix: 45%;     /* how much of its tone its border has */
   /* A button (uiButton). */

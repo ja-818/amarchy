@@ -38,7 +38,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--card-bg`, `--card-border`, `--card-border-width`, `--card-radius` | A card's surface, its rule, its corners |
 | `--card-hover-bg`, `--card-hover-border`, `--card-focus-bg`, `--card-focus-border` | A card under the pointer, under the keys |
 | `--card-pad-x`, `--card-gap` | Inside a card, between cards |
-| `--pill-radius`, `--pill-border-width`, `--pill-border-mix` | A pill's corners and rule (how much of its tone the rule has) |
+| `--pill-radius`, `--pill-border-width`, `--pill-border-mix` | A pill's corners and rule (square as the buttons: `--button-radius`) (how much of its tone the rule has) |
 | `--button-bg`, `--button-border`, `--button-hover-bg`, `--button-radius`, `--button-primary-bg`, `--button-primary-text` | A button at rest, hovered, the primary one |
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
