@@ -164,11 +164,10 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .tbtn.complete::before { content: "✓"; margin-right: 6px; font-weight: 800; }
 
 /* ---- tabs (uiTabs): one of a few, each with its count */
-.ui-tabs { flex: none; display: flex; gap: 4px; height: var(--control-h); box-sizing: border-box; padding: 3px;
-           border: 1px solid var(--tab-border); border-radius: var(--radius-control); background: var(--tab-bg); }
-.ui-tabs .control { border: 0; background: none; height: 100%; min-height: 0; padding: 0 14px; font-weight: 700; color: var(--text-muted); gap: 6px; }
-.ui-tabs .control:hover { color: var(--text); }
-.ui-tabs .control.on { background: var(--tab-on-bg); color: var(--text); }
+/* Tabs: words in a bar's slots (as Omarchy's workspaces), no box round them;
+   the one you're on, lit. */
+.ui-tabs { flex: none; display: flex; gap: 2px; }
+.ui-tabs .control { font-size: var(--body); padding: 0 12px; }
 .tab-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--tab-count-bg); color: var(--on-accent);
              font-size: var(--caption); line-height: 18px; text-align: center; }
 
@@ -199,11 +198,47 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 /* No keys on a phone: no key to show. */
 @media (pointer: coarse) { .ui-search-key { display: none; } }
 
-/* ---- a tool in a bar (uiTool): an icon, no box until you point at it */
-.ui-tool { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; flex: none; border-color: transparent; background: none; color: var(--text-muted); font-size: 16px; }
-.ui-tool:hover { color: var(--text); background: var(--control-hover); }
-.ui-tool .glyph svg { width: 18px; height: 18px; }
-
+/* ---- a bar (.ui-bar): the board's and an open chat's are one, as
+   Omarchy's bar is: where you are on the left (the Ⓐ and Chats | Tasks;
+   Back), what you look at in the middle (the search; the chat's name), and
+   on the right icons in slots of one size, no box until you point at one,
+   and one outlined action (New chat; Complete). One height, one gap. */
+.ui-bar { display: flex; align-items: center; gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+/* A slot: a tool (uiTool), a tab, a chat's buttons. Words or an icon, muted,
+   lit under the pointer; on (the tab you're on, the panel that's open): the
+   selection's. */
+.ui-tool, .head-btn, .ui-tabs .control {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-h); min-height: var(--control-h); min-width: var(--control-h); padding: 0 10px; box-sizing: border-box;
+  border: 1px solid transparent; border-radius: var(--radius-control); background: none;
+  color: var(--text-muted); font-size: var(--caption); font-weight: 700; white-space: nowrap;
+}
+.ui-tool { padding: 0; font-size: 16px; }
+.ui-tool:hover, .head-btn:hover, .ui-tabs .control:hover { color: var(--text); background: var(--control-hover); }
+.head-btn.on, .ui-tabs .control.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
+.ui-tool .glyph svg, .head-btn .glyph svg, .ui-action .glyph svg { width: 18px; height: 18px; }
+.head-btn .ic { width: 18px; height: 18px; }
+/* The Ⓐ: Amarchy's mark, the menu under it. */
+.ui-brand { color: var(--text); }
+.ui-brand .ui-brand-mark svg { width: 22px; height: 22px; }
+/* A menu on the phone (uiMenu): its icon, its words and under them what it does. */
+.ui-menu .menu-item .label { flex-direction: row; align-items: center; gap: 10px; }
+.ui-menu-text { display: flex; flex-direction: column; min-width: 0; }
+.ui-brand:hover { color: var(--accent); }
+/* The bar's one thing to do: outlined, its key beside its words. */
+.ui-action {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: var(--control-h); min-height: var(--control-h); min-width: var(--control-h); padding: 0 12px; box-sizing: border-box;
+  border: 1px solid var(--button-border); border-radius: var(--button-radius); background: var(--button-bg);
+  color: var(--text); font-weight: 700; white-space: nowrap;
+}
+.ui-action:hover { background: var(--button-hover-bg); }
+.ui-key { font: inherit; font-size: var(--caption); padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; line-height: 16px; color: var(--text-muted); }
+.ui-action.complete { color: var(--success); border-color: color-mix(in srgb, var(--success) 50%, transparent); }
+.ui-action.complete:hover { background: color-mix(in srgb, var(--success) 14%, transparent); }
+/* No keys on a phone; narrow, the action is its icon. */
+@media (pointer: coarse) { .ui-key { display: none; } }
+@media (max-width: 719px) { .ui-action .label, .ui-action .ui-key { display: none; } .ui-action { padding: 0; } }
 
 /* ---- over an open chat (uiChatHead): Back, its project and name (a tap:
    rename), where it stands and what it's for; its tools, Complete, ⋯. The
@@ -226,26 +261,11 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-title .avatar.small { width: 22px; height: 22px; }
 .head-title .tcard-chip { max-width: 22%; }
 .head-btn.board-back { color: var(--text); padding-left: 6px; }
-.head-btn.board-back .glyph svg { width: 16px; height: 16px; }
-.head-btn.complete { color: var(--success); }
-.head-btn.complete:hover { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
 .head-btns { flex: none; display: flex; gap: 2px; }
-.head-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: var(--control-h); padding: 0 10px; box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  color: var(--text-muted); font-size: var(--caption); font-weight: 700;
-}
-.head-btn .ic { width: 16px; height: 16px; }
-.head-btn:hover { color: var(--text); background: var(--control-hover); }
-.head-btn.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
 .head-btn.more { width: var(--control-h); padding: 0; justify-content: center; font-size: 16px; }
-.phone-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid var(--border-faint); }
+.phone-head { flex: none; gap: 4px; padding-left: var(--page-pad); padding-right: var(--page-pad); }
 .phone-head .head-btn .label { display: none; }
 .phone-head .head-btn { width: var(--control-h); padding: 0; justify-content: center; }
 .phone-head .head-title .task { font-size: var(--body); }
 .phone-head .tpill.long { max-width: 40%; }
-.phone-head .head-btn { font-size: 18px; color: var(--text); }
-.phone-head .head-btn .glyph svg { width: 20px; height: 20px; }
-.phone-head .head-btn.complete { color: var(--success); }
+

@@ -18,6 +18,15 @@
 // - uiTool: a tool's icon button in a bar.
 // - uiChatHead: over an open chat: Back, its project and name (a tap:
 //   rename), its pill, what it's for; its tools, Complete, its menu.
+// - uiAction: a bar's one thing to do (New chat, Complete), outlined.
+// - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
+// - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
+//   find, ↑ ↓ ↵), a sheet on the phone; the same items.
+//
+// The two bars (the board's, an open chat's) are one bar (.ui-bar), as
+// Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
+// what you look at in the middle (the search; the chat's name), and on the
+// right icons in slots of one size, no box, and one outlined action.
 //
 // Their look is app/ui.css, styled only through its tokens (--card-*,
 // --pill-*, --button-*, --tab-*...), which a theme can set: borders, corners
@@ -130,8 +139,39 @@ function uiChatHead(s, { goal = "", back, rename, tools = [], complete, more, ba
           todayStatePill(s), sleepMark(s)),
         goal ? h("span", { class: "head-goal", title: goal }, goal) : null)),
     h("div", { class: "head-btns" }, ...tools,
-      main || !complete ? null : h("button", { class: "head-btn complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
+      main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
                                                "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete")),
       h("button", { class: "head-btn more", type: "button", title: "This chat (Ctrl+Alt+M)", "aria-label": "This chat", onclick: more }, glyph("more"))),
   ];
+}
+
+// A bar's one thing to do, outlined (not filled): an icon, its words (an
+// icon alone on a phone), the key that does it on a computer.
+function uiAction(icon, label, act, { title = "", key = "", cls = "" } = {}) {
+  return h("button", { class: `control ui-action${cls ? ` ${cls}` : ""}`, type: "button", title: title || label, "aria-label": label, onclick: act },
+    glyph(icon), h("span", { class: "label" }, label), key ? h("kbd", { class: "ui-key" }, key) : null);
+}
+
+// The Ⓐ: the Amarchy menu (everything you can do, each with its key), as
+// Omarchy's mark opens its own. Its dot: an automation that failed.
+function uiBrand(act, title = "Amarchy menu (m, Ctrl+Alt+M)") {
+  return h("button", { class: "control ui-tool ui-brand auto-btn", type: "button", title, "aria-label": "Amarchy menu", "aria-haspopup": "menu",
+                       onclick: act, oncontextmenu: (e) => { e.preventDefault(); act(); } },
+    glyph("brand", "ui-brand-mark"), h("span", { class: "auto-dot", "aria-hidden": "true" }));
+}
+
+// A menu: items [{label, detail, icon, key, act, group: () => ({title,
+// items}), desk: only on a computer}]. On a computer the keyboard's card
+// (desk.js picker); on the phone a sheet, a group opening one of its own.
+function uiMenu(title, items) {
+  items = items.filter((it) => it && (app.desk || !it.desk));
+  if (app.desk && typeof picker === "function") return picker({ title, items });
+  const row = (it) => h("button", { class: `menu-item${it.danger ? " danger" : ""}`, type: "button", onclick: async () => {
+    if (it.group) { const g = await it.group(); return uiMenu(g.title, g.items); }
+    closeSheets();
+    if (it.act) it.act("");
+  } }, h("span", { class: "label" }, it.icon ? glyph(it.icon, "icon") : null,
+         h("span", { class: "ui-menu-text" }, it.label, it.detail ? h("small", {}, it.detail) : null)),
+    it.group ? h("span", { class: "val" }, "›") : null);
+  return sheet(sheetHead(title), h("div", { class: "menu ui-menu" }, ...items.map(row)));
 }

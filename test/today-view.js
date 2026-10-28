@@ -421,8 +421,23 @@ async function wide(browser, port) {
   check(where, await until(p, () => !!document.querySelector(".tasks-board .board-today .tsec")
                                    && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: the board, the whole window");
   check(where, await p.evaluate(() => !document.querySelector(".panel, .ball, .board-classic, .today-btn")), "no list beside it: the board is the only layout");
-  check(where, await p.evaluate(() => [...document.querySelector(".board-head-in").children].map((c) => c.className.split(" ").pop()).join(",")) === "board-switch,board-find,board-tools,board-new-btn",
-        "the bar: Chats | Tasks, the search (and Group & sort), the tools, New chat");
+  check(where, await p.evaluate(() => { const kids = [...document.querySelector(".board-head-in").children];
+    return kids.length === 4 && [".ui-brand", ".board-switch", ".board-search", ".board-new-btn.ui-action"].every((sel, i) => kids[i].matches(sel)); }),
+        "the bar: the Ⓐ (its menu), Chats | Tasks, the search, New chat (outlined)");
+  // One bar for both: the board's and an open chat's are .ui-bar, their slots one height.
+  check(where, await p.evaluate(() => !!document.querySelector(".board-head-in.ui-bar") && !!document.querySelector(".desk-head.ui-bar")), "the board's bar and a chat's are one bar");
+  await p.keyboard.press("m");
+  check(where, await until(p, () => !!document.querySelector(".picker") && /Group & sort/.test(document.querySelector(".picker").innerText)), "m: the Amarchy menu, Group & sort in it");
+  await p.keyboard.press("Escape");
+  await p.keyboard.press("o");
+  check(where, await until(p, () => /Group by/.test((document.querySelector(".sheet") || {}).innerText || "")), "o: Group & sort");
+  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Project/.test(b.innerText)).click());
+  check(where, await until(p, () => (app.organize || app.view).group.includes("project") && document.querySelector(".sheet .menu-item.on") && /Project/.test(document.querySelector(".sheet .menu-item.on").innerText)),
+        "a grouping picked: on at once, the sheet still up");
+  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Not grouped/.test(b.innerText)).click());
+  await p.keyboard.press("Escape");
+  await until(p, () => !document.querySelector(".sheet-back"));
+  await p.evaluate(() => boardRefocus());
   check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard > .today-go")), "the keys on the first card at once");
   // One card, one surface: no stripe on its left, its head no box of its own.
   const look = await p.evaluate(() => {
@@ -451,7 +466,7 @@ async function wide(browser, port) {
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .tcard-text").click());
   check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
   check(where, await p.evaluate(() => !!document.querySelector(".desk-head .board-back") && /Fix/.test(document.querySelector(".desk-head").innerText)
-                                   && !!document.querySelector(".desk-head .head-btn.complete")), "over it: Back, its name, Complete");
+                                   && !!document.querySelector(".desk-head .ui-action.complete")), "over it: Back, its name, Complete");
   await p.evaluate(() => boardBack());
   await p.evaluate(() => boardOpen("proj-work"));
   await until(p, () => desk.current === "proj-work");

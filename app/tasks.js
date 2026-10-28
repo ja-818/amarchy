@@ -7,13 +7,14 @@
 // is the board again, where you were; and so is sending it something: it
 // works on that, and the next that's your move is lit, Enter to open it.
 //
-// The bar: Chats | Tasks (what's your move on each), the search, Group &
-// sort; Automations and Settings; New chat.
+// The bar: the Ⓐ (the Amarchy menu: Group & sort, Automations, the look,
+// Settings, Keys), Chats | Tasks (what's your move on each), the search,
+// New chat.
 //
 // Everything has its key (? shows them): j / k (or the arrows) from card
 // to card, Enter opens, 1-4 picks an answer, x completes its mission (with
 // Undo), r opens what a done chat made, s marks one seen, h / l (or ← / →)
-// Chats or Tasks, / searches, n starts a new chat.
+// Chats or Tasks, / searches, n starts a new chat, m the menu, o Group & sort.
 
 const board = {
   el: null, box: null, head: null, slot: null, scroll: null,
@@ -33,18 +34,15 @@ function boardBuild() {
   if (board.el) return board.el;
   board.tab = store.get("board-tab") === "tasks" ? "tasks" : "chats";
   board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats or tasks" });
-  const tool = (icon, label, keys, act, extra = {}) => uiTool(icon, label, act, { title: `${label} (${keys})`, extra });
+  // The bar (ui.css .ui-bar), as an open chat's: where you are (the Ⓐ, its
+  // menu: Group & sort, Automations, the look, Settings, Keys…; Chats |
+  // Tasks), what you look for (the search), and the one thing to start.
   board.head = h("header", { class: "board-head" },
-    h("div", { class: "board-head-in" },
+    h("div", { class: "board-head-in ui-bar" },
+      uiBrand(() => deskMenu()),
       board.switchEl,
-      h("div", { class: "board-find" }, boardSearchBox(), boardOrganize()),
-      h("div", { class: "board-tools" },
-        automationsButton("control ui-tool"),
-        tool("gear", "Settings", "right click or Ctrl+Alt+M: the Amarchy menu", () => openSettings(),
-             { oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } }),
-        tool("keys", "Keys", "?", () => showKeys(), { class: "control ui-tool board-keys" })),
-      h("button", { class: "control board-new-btn", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() },
-        glyph("plus"), h("span", {}, "New chat"), h("kbd", {}, "N"))));
+      boardSearchBox(),
+      uiAction("plus", "New chat", () => boardCompose(), { title: "New chat (n, Ctrl+Alt+N)", key: "N", cls: "board-new-btn" })));
   board.slot = h("div", { class: "board-new", hidden: true });
   board.box = h("div", { class: "today board-today" });
   board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.box);
@@ -97,7 +95,7 @@ function boardRefocus() {
 function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
-  if (e.target.closest("textarea, input, select, [contenteditable], .organize-menu")) return;
+  if (e.target.closest("textarea, input, select, [contenteditable]")) return;
   const stops = boardStops();
   const at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
@@ -113,6 +111,8 @@ function boardKeys(e) {
   else if (k === "/") { e.preventDefault(); board.search.focus(); board.search.select(); }
   else if (k === "n") { e.preventDefault(); boardCompose(); }
   else if (k === "?") { e.preventDefault(); showKeys(); }
+  else if (k === "m") { e.preventDefault(); deskMenu(); }
+  else if (k === "o") { e.preventDefault(); organizeSheet(); }
   else if (!card) {
     // Nothing under the keys yet: Enter takes the first card.
     if (k === "Enter" && at < 0 && stops.length) to(0);
@@ -191,7 +191,6 @@ function boardRefresh(force) {
     board.keyed = true;
     if (!document.activeElement || document.activeElement === document.body || document.activeElement === board.scroll) boardRefocus();
   }
-  if (board.organize && !board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
   modeButtons();
 }
 
@@ -366,22 +365,6 @@ function boardSearchDraw() {
   keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),
     ...(!n && found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
   board.box.dataset.key = "";      // Today draws itself again when the search is emptied
-}
-
-// Group & sort, as the list's (the same setting: app.js organizeMenu): the
-// board's Chats by priority, by project, or by where they stand.
-function boardOrganize() {
-  const btn = h("button", { class: "control organize board-organize", type: "button", title: "Group and sort", "aria-haspopup": "menu",
-                            onclick: () => toggleOrganize(board.organize, btn, boardOrganizeDraw) }, glyph("organize"));
-  board.organize = organizeBox(() => btn, boardOrganizeDraw);
-  return h("div", { class: "board-organize-wrap" }, btn, board.organize);
-}
-
-function boardOrganizeDraw() {
-  if (!board.organize) return;
-  if (!board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
-  board.box.dataset.key = "";
-  if (board.tab === "chats" && !board.query) boardFill(true);
 }
 
 // Ctrl+Alt+J / K: from chat to chat in the board's order, the open one

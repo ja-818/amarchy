@@ -28,18 +28,8 @@
 .chat-open .tasks-board { display: none; }
 .desk-root:not(.chat-open) .stage { display: none; }
 .board-head { flex: none; }
-/* The bar: where you are (Chats | Tasks), what you look for (the search, by
-   it Group & sort), the tools (Automations, Settings, Keys), and the one
-   thing to start (New chat, filled). */
-.board-head-in { padding-top: 14px; padding-bottom: 6px; display: flex; align-items: center; gap: 12px; }
-.board-find { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
-.board-tools { flex: none; display: flex; gap: 2px; }
-/* New chat: an outlined button like the rest (no fill), its key as the search's. */
-.board-new-btn { flex: none; height: var(--control-h); gap: 8px; padding: 0 8px 0 14px; font-weight: 700; white-space: nowrap;
-                 color: var(--text); background: var(--button-bg); border-color: var(--button-border); }
-.desk .board-new-btn:hover { background: var(--button-hover-bg); }
-.board-new-btn kbd { font: inherit; font-size: var(--caption); padding: 0 6px; border: 1px solid var(--border); border-radius: 4px;
-                     line-height: 16px; color: var(--text-muted); }
+/* The bar (ui.css .ui-bar): the Ⓐ, Chats | Tasks, the search, New chat. */
+.board-head-in .board-search { flex: 1; min-width: 0; margin: 0 4px; }
 .board-gap { flex: 1; }
 .board-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
 .board-scroll .today { padding-top: 18px; padding-bottom: 48px; }
@@ -55,18 +45,15 @@
 .home-view .offline { margin: 8px 12px 0; }
 .home-view .tasks-board { position: relative; inset: auto; z-index: auto; flex: 1; min-height: 0; }
 @media (max-width: 719px) {
-  .board-head-in { flex-wrap: wrap; gap: 8px; padding-top: 10px; padding-bottom: 4px; }
-  .board-find { order: 3; flex-basis: 100%; }
-  .board-tools { margin-left: auto; }
-  .board-new-btn { width: var(--control-h); padding: 0; justify-content: center; }
-  .board-new-btn > span:not(.glyph), .board-new-btn kbd { display: none; }
-  .board-new-btn .glyph svg { width: 20px; height: 20px; }
+  .board-head-in { flex-wrap: wrap; row-gap: 10px; padding-top: 10px; padding-bottom: 4px; }
+  .board-head-in .board-search { order: 3; flex-basis: 100%; margin: 0; }
+  .board-head-in .board-new-btn { margin-left: auto; }
   .board-scroll .today { padding-top: 10px; padding-bottom: 40px; }
   .board-new { padding-top: 10px; }
 }
 /* The phone's (no keys to show; the search at 16px: less, and iOS zooms in on it). */
 body:not(.desk) .board-search input { font-size: 16px; }
-body:not(.desk) .board-new-btn kbd, body:not(.desk) .ui-search-key, body:not(.desk) .board-keys { display: none; }
+body:not(.desk) .ui-key, body:not(.desk) .ui-search-key { display: none; }
 
 /* A ticket: Today's row or card. */
 .ticket { display: flex; flex-direction: column; border-radius: var(--radius-card); }
@@ -83,7 +70,6 @@ body:not(.desk) .board-new-btn kbd, body:not(.desk) .ui-search-key, body:not(.de
 body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
 
 /* Tasks' search, in the middle of its bar (tasks.js boardSearch). */
-.board-search { flex: 1; min-width: 0; }
 .board-search input { font-size: var(--body); }
 .tcard mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
 .tcard-text.found { display: flex; gap: 8px; align-items: baseline; }
@@ -98,11 +84,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-askbox .tcard-actions { padding: 0 0 12px; }
 
 /* The board's Group & sort (the list's menu), by the search. */
-.board-organize-wrap { position: relative; flex: none; }
-.board-head .board-organize { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); border-color: transparent; background: none; color: var(--text-muted); }
-.desk .board-head .board-organize:hover, .board-head .board-organize[aria-expanded="true"] { color: var(--text); background: var(--control-hover); }
-.board-organize-wrap .organize-menu { right: 0; left: auto; top: calc(100% + 6px); }
-/* Inside a group, the next grouping's name over its cards (a project, under High priority). */
+.desk /* Inside a group, the next grouping's name over its cards (a project, under High priority). */
 .tsec-sub { margin: 6px 2px 0; font-size: var(--caption); font-weight: 700; color: var(--text-muted); }
 .tcard-head .prio { flex: none; font-size: 12px; }
 .tcard-head .prio.high { color: var(--danger); }

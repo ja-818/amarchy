@@ -254,12 +254,16 @@ as cards, the whole window. Open one and the chat takes the window, with the
 theme and font. A Mac, or any computer with Tailscale and a browser, can use the
 host's chats without anything else installed.
 
-- **The bar**, left to right: where you are, **Chats** or **Tasks** (each with
-  what's your move); the **search** (`/`: a chat by its name or anything said in
-  it, and your tasks, every word found, the lines that have them lit; `Enter` opens
-  the first, `Esc` empties it) and by it **Group & sort**; then **Automations**,
-  **Settings** (a right click on it, or `Ctrl+Alt+M`, opens the Amarchy menu) and
-  **Keys** (`?`); and **New chat** (`n`).
+- **The bar**, as Omarchy's, the same over the board and over an open chat:
+  where you are on the left, what you look at in the middle, icons and one
+  outlined action on the right. On the board: the **Ⓐ** (`m`, `Ctrl+Alt+M`),
+  the **Amarchy menu**: New chat, **Group & sort** (`o`), Automations (a dot on
+  the Ⓐ when one failed), theme, font and wallpaper, sound, a new project,
+  Settings, Keys; then **Chats** or **Tasks** (each with what's your move); the
+  **search** (`/`: a chat by its name or anything said in it, and your tasks,
+  every word found, the lines that have them lit; `Enter` opens the first, `Esc`
+  empties it); and **New chat** (`n`). On the phone the same, the search under
+  it and New chat a +; the menu a sheet.
 - **Chats**: every chat a card (its project, its state, its goal and what it last
   said, its question's buttons). Not grouped, by where each stands: **At work**
   (folded, how many working), **Needs you** (what asks you, what's blocked, and
@@ -280,7 +284,7 @@ host's chats without anything else installed.
   `o`) opens, `1`-`9` pick the card's answer, `x` completes its mission (with
   Undo; a task's Done), `r` opens what a done chat made (Review), `s` marks it
   seen, `Tab` goes through the card's buttons, `h` / `l` (or `←` / `→`) are Chats
-  and Tasks, `/` the search, `n` a new chat, `?` all the keys.
+  and Tasks, `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot
