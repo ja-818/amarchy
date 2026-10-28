@@ -383,8 +383,8 @@ new chat, Claude's questions, and the phone's list itself. `↑`/`↓` go from l
 line (buttons side by side, as High · Normal · Low, are one line: `←`/`→` go along
 it), `Home`/`End` to the ends, `↵` or `Space` picks, `Tab` stays inside, `Esc`
 closes and gives the keys back where they were. In Claude's question a choice's
-number picks it and `Esc` says no, as in Claude's own. On the phone's list, the
-menu key (or `Shift+F10`) on a chat opens its menu, and `↓` from the search goes into the list.
+number picks it and `Esc` says no, as in Claude's own. On the board, the menu key
+(or `Shift+F10`) on a chat's card opens its menu, and `↓` from the search goes to the first card.
 
 ## Sleep
 
@@ -634,10 +634,11 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 
 ## Today
 
-**Today** is the app's home: the phone's first tab (with **Chats** beside it, and
-the **+** for a new chat), and on a computer **Tasks**. It's one queue of what to do,
-without reading any chat, each chat with its project as a colored label (higher
-priority first, then your projects' order), and one count in the header:
+**Today** is the app's home, the same on the phone and on a computer: the board,
+its bar with **Chats | Tasks** (each with what's your move), the search, Group &
+sort, the tools and **New chat** (a **+** on the phone). It's one queue of what to
+do, without reading any chat, each chat with its project as a colored label (higher
+priority first, then your projects' order), and one count over it:
 
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission's **Allow** and
@@ -652,7 +653,10 @@ priority first, then your projects' order), and one count in the header:
   lose happens at once, with **Undo**; one that would lose work not committed (or
   that amarchy runs from) asks first.
 - **Waiting**: the chats at work, the people you wait on, the rest of your week,
-  further out, and the other chats, folded but for what's at work.
+  further out, and the other chats, folded but for what's at work. A chat whose turn
+  ended while what it started still runs (a test run, a helper) is at work too:
+  **Running · what runs**, never Done, and completing it asks first, as it would stop
+  the run. A dev server it left serving doesn't count: it never ends.
 
 Closing a chat is completing its mission (**Complete mission**, wherever Close used
 to be): your theme's colors burst over your wallpaper, a tick lands, **MISSION
@@ -661,7 +665,9 @@ fanfare (not when your chimes are off), and **Next mission**. Undo stays under i
 
 Your assistant is a line on top. What you answer, allow or close goes after a few
 seconds with **Undo** at the bottom of the screen, so a slip costs nothing. A chat you
-open from Today on the phone comes back to Today once you send it something.
+open from the board comes back to the board once you send it something. Held down
+on the phone (a right click on a computer), a chat's card opens its menu: priority,
+name, commands, **Complete mission**.
 
 Each chat knows its goal and where it stands because every reply ends with a goal
 block (amarchy's reply format asks for it): the goal in a sentence, and working,
@@ -784,8 +790,8 @@ notifications), not in amarchy. Every list shows it, and the notifications. It g
 a hash of itself, so a new one shows at once everywhere, the phone's saved copy of the
 app included.
 
-In the app all of it is a chat's menu away (its ••• on the phone, a hold on it in the
-list, or the menu in a browser): **Make it my assistant…** with its name, and on your
+In the app all of it is a chat's menu away (its ••• on the phone, a hold on its card on
+the board, or the menu in a browser): **Make it my assistant…** with its name, and on your
 assistant **name, picture, chime…**: rename it, pick its chime, go back to amarchy's
 imp, or **Not my assistant any more**. **Choose…** a picture from the phone's photos or
 the computer, drag it into the circle and zoom (the slider, the wheel, two fingers, or

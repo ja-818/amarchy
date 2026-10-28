@@ -1,16 +1,6 @@
 /* Today (today.js): the home page, its tabs on the phone, its place in a
    computer's middle, and its setting. Design tokens only (docs/design-tokens.md). */
 
-/* The phone's home: Today | Chats. */
-.home-tabs { display: flex; gap: 4px; margin: 0 12px 10px; padding: 3px; border: 1px solid var(--border-faint);
-             border-radius: var(--radius-control); background: var(--control-bg); }
-.home-tabs[hidden] { display: none; }
-.home-tabs .tab { flex: 1; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-                  border-radius: var(--radius-control); font-weight: 700; color: var(--text-muted); }
-.home-tabs .tab.on { background: var(--control-selected); color: var(--text); }
-.tab-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--danger); color: var(--on-accent);
-             font-size: var(--caption); line-height: 18px; text-align: center; }
-
 .today { padding: 0 12px 24px; display: flex; flex-direction: column; gap: 10px; }
 .today[hidden] { display: none; }
 .today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0; }
@@ -19,98 +9,6 @@
 .today-note { margin: 6px 2px 0; font-size: var(--caption); color: var(--text-muted); }
 .today-note.bad { color: var(--danger); }
 
-/* ---- one card for everything (today.js todayCard): the chat's reply card's
-   look (screen.css .reply), so a card here and the reply in its chat are one
-   thing: one surface, a rule round it, a round badge saying where it stands.
-   The whole card lights as one, under the pointer and under the keys: its
-   head is no box of its own. */
-.tcard {
-  display: flex; flex-direction: column; min-width: 0; background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius-card);
-  transition: background-color .12s, border-color .12s, box-shadow .12s;
-}
-.tcard-head {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px 14px; box-sizing: border-box;
-  text-align: left; color: var(--text); cursor: pointer; background: none; border-radius: 0; outline: none;
-}
-.tcard-head .avatar { width: 26px; height: 26px; flex: none; }
-/* Under the pointer, and under the keys: the card, the whole of it. */
-.tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover {
-  background: linear-gradient(var(--control-hover), var(--control-hover)), var(--surface); border-color: var(--selected-border);
-}
-.tcard-head:focus-visible { outline: none; }
-.tcard:has(> .tcard-head:focus-visible) {
-  background: linear-gradient(var(--selected-bg), var(--selected-bg)), var(--surface);
-  border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring);
-}
-/* Its project (or who), in its own color: a word, not a box. */
-.tcard-chip { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-              font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
-.tcard-title { flex: 1; min-width: 0; line-height: 1.35; }
-.tcard-title .task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tcard-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
-.tcard-what.open { display: block; }
-/* Where it stands: the reply card's badge. */
-.tpill {
-  flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--caption); font-weight: 700; padding: 2px 9px;
-  border-radius: 999px; white-space: nowrap; color: var(--pill); border: 1px solid color-mix(in srgb, var(--pill) 45%, transparent);
-}
-.tpill.t-ask { --pill: var(--warn, var(--warning)); }
-.tpill.t-late { --pill: var(--danger); }
-.tpill.t-done { --pill: var(--success); }
-.tpill.t-working, .tpill.t-running { --pill: var(--accent); }
-.tpill.t-warn { --pill: var(--warn, var(--warning)); }
-.tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
-.tpill .spinner { line-height: 1; }
-.tpill.t-running { flex: 0 1 auto; min-width: 0; max-width: 50%; }
-.tpill.t-running .tpill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tcard > .tcard-text, .tcard > .tcard-q { margin: -4px 14px 10px; }
-.tcard-text { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
-.tcard-text.muted { color: var(--text-muted); font-size: var(--caption); }
-.tcard-text.said { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tcard-q { display: flex; flex-direction: column; gap: 8px; }
-.tcard-q .tcard-text { font-weight: 600; }
-.tcard-q + .tcard-q { margin-top: 2px; }
-.tcard-opts { display: flex; flex-wrap: wrap; gap: 8px; }
-.tcard-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 14px 12px; }
-.tcard-note { align-self: center; font-size: var(--caption); color: var(--text-muted); font-weight: 700; }
-/* Its buttons: the reply card's answers. */
-.tbtn {
-  min-height: 38px; padding: 7px 14px; font-weight: 600; color: var(--text); cursor: pointer;
-  border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); overflow-wrap: anywhere;
-}
-.tcard-opts .tbtn { flex: 1 1 auto; overflow-wrap: normal; }
-/* A loop: when it's due (or who to chase since when) and its buttons, one line. */
-.tcard-meta { flex: 1; min-width: 0; align-self: center; font-size: var(--caption); color: var(--text-muted); font-weight: 600; }
-.tcard-meta.late { color: var(--danger); font-weight: 700; }
-.tcard-meta.done { color: var(--success); font-weight: 700; }
-.tcard.k-due > .tcard-head, .tcard.k-chase > .tcard-head { padding-bottom: 4px; align-items: flex-start; }
-.tcard.k-due, .tcard.k-chase, .tcard.k-someday { cursor: pointer; }
-.tcard.k-due .tcard-actions, .tcard.k-chase .tcard-actions { flex-wrap: nowrap; align-items: center; }
-.tcard.k-due .tbtn, .tcard.k-chase .tbtn { min-height: 34px; padding: 5px 14px; }
-.tbtn:hover { background: var(--control-hover); }
-.tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.tbtn.primary { color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
-.tbtn.chosen { color: var(--primary-text); background: var(--success); border-color: var(--success); }
-.tbtn.quiet { background: none; border-color: transparent; color: var(--link); }
-.tbtn.quiet:hover { background: var(--control-hover); }
-.today-more { align-self: flex-start; }
-
-/* ---- a section: a small head and its count, folded (a chevron) or not */
-.tsec { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.tsec-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px;
-             font-size: var(--caption); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
-.tsec-count { font-weight: 700; letter-spacing: 0; color: var(--text-muted); opacity: 0.8; }
-.tsec-gap { flex: 1; }
-.tsec-head .tbtn { letter-spacing: 0; text-transform: none; font-size: var(--caption); min-height: 30px; padding: 4px 10px; }
-.today-yours > .tsec-head { color: var(--accent); }
-.tsec-cards { display: flex; flex-direction: column; gap: 8px; }
-details.tsec > summary { list-style: none; cursor: pointer; border-radius: var(--radius-item); }
-details.tsec > summary::-webkit-details-marker { display: none; }
-details.tsec > summary .tsec-head::before { content: "›"; display: inline-block; width: 10px; font-size: var(--body); transition: transform .15s; }
-details.tsec[open] > summary .tsec-head::before { transform: rotate(90deg); }
-details.tsec > summary:hover .tsec-head { color: var(--text); }
-
 /* Each project its own color (today.js todayHue); a due loop, the warning's. */
 .ph-0 { --ph: var(--blue); } .ph-1 { --ph: var(--magenta); } .ph-2 { --ph: var(--green); } .ph-3 { --ph: var(--orange); }
 .ph-4 { --ph: var(--cyan); } .ph-5 { --ph: var(--yellow); } .ph-6 { --ph: var(--red); }
@@ -118,18 +16,11 @@ details.tsec > summary:hover .tsec-head { color: var(--text); }
 .pchip { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30%;
          font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
 
-/* A thumb's size on the phone. */
-@media (pointer: coarse) {
-  .tbtn { min-height: 44px; }
-}
-
 /* Settings → Today. */
 .today-setting { display: flex; gap: 6px; }
 .today-setting input { flex: 1; min-width: 0; min-height: 38px; padding: 6px 10px; border: 1px solid var(--control-border);
                        border-radius: var(--radius-control); background: var(--control-bg); }
 
-/* The phone's + : a new chat, its box over Today. */
-.hero .new-btn .glyph svg { width: 22px; height: 22px; }
 
 /* ---- the board (tasks.js): a computer's whole window, your chats and tasks
    as cards; a chat opened is the window over it (desk.css .stage). */
@@ -142,15 +33,8 @@ details.tsec > summary:hover .tsec-head { color: var(--text); }
    thing to start (New chat, filled). */
 .board-head-in { max-width: 920px; margin: 0 auto; padding: 14px 24px 6px; display: flex; align-items: center; gap: 12px; }
 .board-head .control { min-height: 38px; }
-.board-switch { flex: none; display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border-faint); border-radius: var(--radius-control); background: var(--control-bg); }
-.board-switch .control { border: 0; background: none; min-height: 32px; padding: 2px 14px; font-weight: 700; color: var(--text-muted); gap: 6px; }
-.board-switch .control:hover { color: var(--text); }
-.board-switch .control.on { background: var(--control-selected); color: var(--text); }
 .board-find { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .board-tools { flex: none; display: flex; gap: 2px; }
-.board-head .board-tool { width: 38px; height: 38px; min-height: 38px; padding: 0; flex: none; border-color: transparent; background: none; color: var(--text-muted); font-size: 16px; }
-.board-head .board-tool:hover { color: var(--text); background: var(--control-hover); }
-.board-tool .glyph svg { width: 18px; height: 18px; }
 .board-new-btn { flex: none; gap: 8px; padding: 4px 8px 4px 14px; font-weight: 700; white-space: nowrap;
                  color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
 .desk .board-new-btn:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
@@ -163,6 +47,26 @@ details.tsec > summary:hover .tsec-head { color: var(--text); }
 .board-new { max-width: 920px; margin: 0 auto; padding: 18px 24px 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .board-new[hidden] { display: none; }
 .board-new .start-chat { width: 100%; max-width: none; }
+
+/* The phone: the same board (app.js homeView), in its screen rather than
+   over a computer's window; its bar in two rows, where you are and the
+   tools over the search; New chat a + . Narrow windows on a computer too. */
+.home-view { position: relative; }
+.home-view .offline { margin: 8px 12px 0; }
+.home-view .tasks-board { position: relative; inset: auto; z-index: auto; flex: 1; min-height: 0; }
+@media (max-width: 719px) {
+  .board-head-in { flex-wrap: wrap; gap: 8px; padding: 10px 12px 4px; }
+  .board-find { order: 3; flex-basis: 100%; }
+  .board-tools { margin-left: auto; }
+  .board-new-btn { width: 38px; padding: 0; justify-content: center; }
+  .board-new-btn > span:not(.glyph), .board-new-btn kbd { display: none; }
+  .board-new-btn .glyph svg { width: 20px; height: 20px; }
+  .board-scroll .today { padding: 10px 12px 40px; }
+  .board-new { padding: 10px 12px 0; }
+}
+/* The phone's (no keys to show; the search at 16px: less, and iOS zooms in on it). */
+body:not(.desk) .board-search input { font-size: 16px; }
+body:not(.desk) .board-new-btn kbd, body:not(.desk) .ui-search-key, body:not(.desk) .board-keys { display: none; }
 
 /* A ticket: Today's row or card. */
 .ticket { display: flex; flex-direction: column; border-radius: var(--radius-card); }
@@ -181,9 +85,6 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 /* Tasks' search, in the middle of its bar (tasks.js boardSearch). */
 .board-search { flex: 1; min-width: 0; height: 38px; }
 .board-search input { font-size: var(--body); }
-.board-search-key { flex: none; margin-right: 8px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px;
-                    font-size: var(--caption); color: var(--text-muted); font-family: inherit; }
-.board-search:focus-within .board-search-key { display: none; }
 .tcard mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
 .tcard-text.found { display: flex; gap: 8px; align-items: baseline; }
 .found-who { flex: none; font-size: var(--caption); font-weight: 800; color: var(--text-muted); min-width: 3.4em; }
@@ -206,12 +107,6 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-head .prio { flex: none; font-size: 12px; }
 .tcard-head .prio.high { color: var(--danger); }
 .tcard-head .prio.low { color: var(--text-muted); }
-
-/* The whole card opens it. */
-.tcard[data-id] { cursor: pointer; }
-a.tbtn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
-a.tbtn .glyph svg { width: 12px; height: 12px; }
-.tbtn.complete::before { content: "✓"; margin-right: 6px; font-weight: 800; }
 
 /* Mission complete: the card goes green, a tick lands, then it's closed (today.js todayComplete). */
 .tcard { position: relative; overflow: hidden; }

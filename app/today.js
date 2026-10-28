@@ -30,7 +30,6 @@ const TODAY_UNDO = 3500;            // ms an answer waits for Undo before it goe
 const TODAY_UNDO_CLOSE = 5000;      // ms a close waits for Undo
 const TODAY_SHOW = 5;               // Finish's rows before "+N more"
 const todayUI = {
-  open: new Map(),      // a fold you opened or closed: its key -> open
   asking: new Set(),    // tasks whose Ask Jaken box is open
   askText: new Map(),   // what you wrote in it, kept across redraws
   answers: new Map(),   // a chat's questions being answered here: id -> {key, picks}
@@ -186,9 +185,7 @@ function todaySummary(v, only = null) {
 // ---- doing
 
 function todayOpen(s) {
-  if (app.desk) return boardOpen(s.id);      // a computer's: the whole window (tasks.js)
-  app.fromToday = s.id;      // sent there, the phone comes back here (app.js SessionView)
-  go(`#/s/${encodeURIComponent(s.id)}`);
+  boardOpen(s.id);      // over the board: a computer's whole window, the phone's screen (tasks.js)
 }
 
 // Close it: at once, with Undo, when nothing would be lost; else asked, as
@@ -283,64 +280,26 @@ function todayPermit(s, choice) {
 const TODAY_PILLS = { ask: "Asks you", permission: "Permission", secret: "A secret", blocked: "Blocked", done: "Done",
                       working: "Working" };
 
-function todayPill(text, tone) {
-  return h("span", { class: `tpill t-${tone}` }, tone === "working" || tone === "running" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null, text);
-}
-
 // What it runs while its turn is over: "Running · Run the e2e tests", cut
 // short with "…" where the card is narrow (all of it on hover).
 function todayRunningPill(s) {
   const what = s.running || "";
-  return h("span", { class: "tpill t-running", title: `${what || "Something it started"} still runs: it goes on when that ends` },
-    h("span", { class: "spinner" }, SPINNER[spin.frame]), h("span", { class: "tpill-text" }, what ? `Running · ${what}` : "Running"));
+  return uiPill(what ? `Running · ${what}` : "Running", "running", { long: true, title: `${what || "Something it started"} still runs: it goes on when that ends` });
 }
 
 // Where a chat stands, as its card's badge says it (the open chat's bar too).
 function todayStatePill(s) {
   const t = s.today || {};
   if (s.status === "waiting" || (s.secret_asks || []).length || (s.status !== "working" && (t.asks || []).length && !todayIsAnswered(s)))
-    return todayPill(s.permission ? "Permission" : "Asks you", "ask");
-  if (s.status === "working") return todayPill("Working", "working");
+    return uiPill(s.permission ? "Permission" : "Asks you", "ask");
+  if (s.status === "working") return uiPill("Working", "working");
   if (s.status === "running") return todayRunningPill(s);
-  if (t.state === "blocked") return todayPill("Blocked", "late");
-  if (t.state === "done") return todayPill("Done", "done");
-  return todayPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
-}
-
-// A card. head: what opens it (a chat) or opens its text (a loop).
-function todayCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label }) {
-  // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓ sets it).
-  const s = id ? rowOf(id) : null;
-  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
-  if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
-  const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
-    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
-    h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
-  // The whole card opens it (its buttons, links and boxes do their own thing).
-  return h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null,
-                        onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
-    ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
-}
-
-function todayBtn(label, act, primary = false, cls = "") {
-  return h("button", { class: `tbtn${primary ? " primary" : ""}${cls ? ` ${cls}` : ""}`, type: "button", onclick: act }, label);
+  if (t.state === "blocked") return uiPill("Blocked", "late");
+  if (t.state === "done") return uiPill("Done", "done");
+  return uiPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
 }
 
 function todayChip(s) { return s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo); }
-
-// A section: its head (a count, folded or not, and an action), its cards.
-function todaySection(kind, title, { count = null, fold = null, extra = null } = {}, ...kids) {
-  kids = kids.flat().filter(Boolean);
-  if (!kids.length) return null;
-  const head = h("h2", { class: "tsec-head" }, h("span", { class: "tsec-title" }, title),
-    count !== null ? h("span", { class: "tsec-count" }, String(count)) : null, h("span", { class: "tsec-gap" }), extra);
-  if (fold === null) return h("section", { class: `tsec today-${kind}` }, head, h("div", { class: "tsec-cards" }, ...kids));
-  const isOpen = todayUI.open.has(kind) ? todayUI.open.get(kind) : fold;
-  const d = h("details", { class: `tsec today-${kind}`, ...(isOpen ? { open: true } : {}) },
-    h("summary", { "aria-label": `${title}, ${count}` }, head), h("div", { class: "tsec-cards" }, ...kids));
-  d.addEventListener("toggle", () => todayUI.open.set(kind, d.open));
-  return d;
-}
 
 // The first few, then "+N more" for the rest.
 function todayFirst(key, kids, n = TODAY_SHOW) {
@@ -361,10 +320,10 @@ function todayAsk(s) {
   if (!qs.length) {
     const secret = (s.secret_asks || []).length;
     const tone = secret ? "secret" : s.permission ? "permission" : "ask";
-    return todayCard({ ...base, pill: todayPill(TODAY_PILLS[tone], "ask"),
+    return uiCard({ ...base, pill: uiPill(TODAY_PILLS[tone], "ask"),
       body: [h("p", { class: "tcard-text" }, secret ? "Asks you for a secret" : s.asks || "Needs your answer")],
-      actions: s.permission ? [todayBtn("Allow", () => todayPermit(s, "allow"), false, "today-opt"), todayBtn("Deny", () => todayPermit(s, "deny"), false, "today-opt"), todayBtn("Open", () => todayOpen(s))]
-                            : [todayBtn("Answer", () => todayOpen(s), true)] });
+      actions: s.permission ? [uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"), uiButton("Open", () => todayOpen(s))]
+                            : [uiButton("Answer", () => todayOpen(s), true)] });
   }
   const key = JSON.stringify(qs);
   let st = todayUI.answers.get(s.id);
@@ -390,15 +349,15 @@ function todayAsk(s) {
         st.picks[i] = k;
         if (qs.every((_, j) => st.picks[j] !== undefined)) send();
         else todayRedraw();
-      } }, o.label)), i === qs.length - 1 ? todayBtn("Other…", () => todayOpen(s), false, "quiet") : null)));
-  return todayCard({ ...base, pill: todayPill(TODAY_PILLS.ask, "ask"), body });
+      } }, o.label)), i === qs.length - 1 ? uiButton("Other…", () => todayOpen(s), false, "quiet") : null)));
+  return uiCard({ ...base, pill: uiPill(TODAY_PILLS.ask, "ask"), body });
 }
 
 function todayBlocked(s) {
-  return todayCard({ kind: "blocked", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", id: s.id,
-    open: () => todayOpen(s), pill: todayPill("Blocked", "late"),
+  return uiCard({ kind: "blocked", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", id: s.id,
+    open: () => todayOpen(s), pill: uiPill("Blocked", "late"),
     body: [(s.today || {}).goal ? h("p", { class: "tcard-text muted" }, s.today.goal) : null],
-    actions: [todayBtn("See why", () => todayOpen(s), true)] });
+    actions: [uiButton("See why", () => todayOpen(s), true)] });
 }
 
 // One of your loops: who (or Due), what (a tap shows all of it), when, and
@@ -443,10 +402,10 @@ function todayLoop(l, v) {
     field.value = todayUI.askText.get(l.key) || "";
     requestAnimationFrame(() => { if (field.isConnected && document.activeElement !== field) field.focus({ preventScroll: true }); });
     return h("div", { class: "tcard-askbox" }, field, h("div", { class: "tcard-actions" },
-      todayBtn("Cancel", () => { todayUI.asking.delete(l.key); todayRedraw(); }, false, "quiet"),
-      todayBtn(`Send to ${name}`, () => { if (field.value.trim()) act("ask", field.value.trim()); }, true)));
+      uiButton("Cancel", () => { todayUI.asking.delete(l.key); todayRedraw(); }, false, "quiet"),
+      uiButton(`Send to ${name}`, () => { if (field.value.trim()) act("ask", field.value.trim()); }, true)));
   })() : null;
-  return todayCard({ kind: chase ? "chase" : l.kind === "due" ? "due" : "someday", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
+  return uiCard({ kind: chase ? "chase" : l.kind === "due" ? "due" : "someday", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
     title: h("span", { class: `tcard-what${open ? " open" : ""}` }, l.what), label: l.what,
     open: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); },
     body: [box],
@@ -454,7 +413,7 @@ function todayLoop(l, v) {
       chase ? h("button", { class: `tbtn${late ? " primary" : ""}`, type: "button", title: `${name} drafts a message to ${l.who || "them"} for you to send`,
                             onclick: () => act("chase") }, "Follow up") : null,
       h("button", { class: "tbtn", type: "button", title: `Tell ${name} what to do about it`, onclick: () => { todayUI.asking.add(l.key); todayRedraw(); } }, `Ask ${name}…`),
-      todayBtn("Done", () => act("done"), !chase && late, "loop-done")])] });
+      uiButton("Done", () => act("done"), !chase && late, "loop-done")])] });
 }
 
 // A chat: its project, its name, where it stands; its goal (and in Tasks
@@ -469,26 +428,26 @@ function todayChat(s, kind) {
   const finished = t.state === "done" && !running;
   const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
   const pill = running ? todayRunningPill(s)
-    : kind === "fresh" ? todayPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
-    : kind === "done" ? todayPill("Done", "done") : kind === "stale" || stalled ? todayPill(`Stalled ${quiet}d`, "warn")
-    : kind === "working" || s.status === "working" ? todayPill("Working", "working")
-    : main ? todayPill(statusWords(s), "quiet") : t.at ? todayPill(autoPast(t.at), "quiet") : null;
+    : kind === "fresh" ? uiPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
+    : kind === "done" ? uiPill("Done", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
+    : kind === "working" || s.status === "working" ? uiPill("Working", "working")
+    : main ? uiPill(statusWords(s), "quiet") : t.at ? uiPill(autoPast(t.at), "quiet") : null;
   const said = (boardOn() || kind === "fresh") && !main && s.said ? s.said : "";
   // Done: Review (where to see what it made, from its reply) and Complete.
   const link = (t.links || [])[0];
   const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
-  const complete = finished && !main ? todayBtn("Complete mission", () => todayComplete(s), true, "complete") : null;
-  const seenBtn = kind === "fresh" && !finished ? todayBtn("Seen", () => todaySeen(s), false, "quiet seen") : null;
-  return todayCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
+  const complete = finished && !main ? uiButton("Complete mission", () => todayComplete(s), true, "complete") : null;
+  const seenBtn = kind === "fresh" && !finished ? uiButton("Seen", () => todaySeen(s), false, "quiet seen") : null;
+  return uiCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
     actions: finished ? [review, complete]
       : kind === "fresh" ? [seenBtn]
-      : kind === "stale" || stalled ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : todayBtn("Ask status", () => todayNudge(s)),
-                                       todayBtn("Complete mission", () => todayComplete(s), false, "complete")] : [] });
+      : kind === "stale" || stalled ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : uiButton("Ask status", () => todayNudge(s)),
+                                       uiButton("Complete mission", () => todayComplete(s), false, "complete")] : [] });
 }
 
 // Seen without opening it: off Needs you.
@@ -602,34 +561,34 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     const order = new Map((v.sessions || []).map((x, i) => [x.id, i]));
     needs.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     const cardOf = (x) => p.asks.includes(x) ? tk(todayAsk)(x) : p.blocked.includes(x) ? tk(todayBlocked)(x) : tk(todayChat, "fresh")(x);
-    nodes.push(todaySection("yours", "Needs you", { count: needs.length }, needs.map(cardOf)));
+    nodes.push(uiSection("yours", "Needs you", { count: needs.length }, needs.map(cardOf)));
     if (!needs.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
     const all = p.done.length >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${p.done.length}`) : null;
-    nodes.push(todaySection("finish", "Done", { count: p.done.length, extra: all }, p.done.map(tk(todayChat, "done"))));
+    nodes.push(uiSection("finish", "Done", { count: p.done.length, extra: all }, p.done.map(tk(todayChat, "done"))));
     return [...nodes, ...todayGrouped(v, p, groups, tk, new Set([...needs, ...p.done].map((x) => x.id)))];
   }
   // At work on top, folded, its count in sight; then what needs you (asks,
   // blocked, finished and not seen yet, your tasks due); then what's done
   // (Review, Complete); then every other chat, open: none is out of sight.
   const runs = p.working.filter((s) => s.status === "running").length, works = p.working.length - runs;
-  if (chats) nodes.push(todaySection("working", "At work", { count: p.working.length, fold: false,
-    extra: p.working.length ? todayPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },
+  if (chats) nodes.push(uiSection("working", "At work", { count: p.working.length, fold: false,
+    extra: p.working.length ? uiPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },
     p.working.map(tk(todayChat, "working"))));
   const needs = yours + (chats ? p.fresh.length : 0);
-  nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Needs you", { count: needs },
+  nodes.push(uiSection("yours", only === "tasks" ? "Now" : "Needs you", { count: needs },
     chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)), p.fresh.map(tk(todayChat, "fresh"))] : [],
     tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
   if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), chats && close ? ` Nothing needs you. ${close} done, below.` : " Nothing needs you."));
   if (chats) {
     const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${close}`) : null;
-    nodes.push(todaySection("finish", "Done", { count: close, extra: all }, p.done.map(tk(todayChat, "done"))));
-    nodes.push(todaySection("idle", "Ready", { count: p.ready.length }, p.ready.map(tk(todayChat, "ready"))));
+    nodes.push(uiSection("finish", "Done", { count: close, extra: all }, p.done.map(tk(todayChat, "done"))));
+    nodes.push(uiSection("idle", "Ready", { count: p.ready.length }, p.ready.map(tk(todayChat, "ready"))));
   }
   if (tasks) {
-    nodes.push(todaySection("chase", "Waiting on others", { count: p.waiting.length, fold: only === "tasks" }, p.waiting.map(loop)));
-    nodes.push(todaySection("week", "Later this week", { count: p.week.length, fold: only === "tasks" }, p.week.map(loop)));
-    nodes.push(todaySection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
-    if (only === "tasks") nodes.push(todaySection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
+    nodes.push(uiSection("chase", "Waiting on others", { count: p.waiting.length, fold: only === "tasks" }, p.waiting.map(loop)));
+    nodes.push(uiSection("week", "Later this week", { count: p.week.length, fold: only === "tasks" }, p.week.map(loop)));
+    nodes.push(uiSection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
+    if (only === "tasks") nodes.push(uiSection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
   }
   if (tasks) {
     if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
@@ -676,7 +635,7 @@ function todayGrouped(v, p, groups, tk, shown = new Set()) {
     }
     const asking = ss.filter((s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s)).length;
     const key = `g-${groups[0]}-${name}`.toLowerCase().replace(/[^\w-]+/g, "-");
-    out.push(todaySection(key, name, { count: ss.length, extra: asking ? todayPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null,
+    out.push(uiSection(key, name, { count: ss.length, extra: asking ? uiPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null,
                                        fold: /^low/i.test(name) ? false : null }, kids));
   }
   return out;
@@ -698,7 +657,8 @@ function todayKey(v) {
 function boardTabNow() { return typeof board !== "undefined" && board.tab === "tasks" ? "tasks" : "chats"; }
 
 // A computer's: the board (tasks.js) is the home, each chat a card.
-function boardOn() { return !!app.desk && typeof desk !== "undefined"; }
+// The board (tasks.js) is the home, on the phone as on a computer.
+function boardOn() { return typeof board !== "undefined" && !!board.el; }
 
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
 function todayFill(box, force) {
@@ -708,7 +668,7 @@ function todayFill(box, force) {
   const board = box.classList.contains("board-today");
   const scroller = box.closest(".scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
-  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, top: !box.classList.contains("phone-today"), only: board ? boardTabNow() : null })));
+  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, only: board ? boardTabNow() : null })));
   if (scroller) scroller.scrollTop = top;
 }
 
@@ -716,8 +676,7 @@ function todayFill(box, force) {
 function todayRedraw() {
   todayUI.version++;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
-  if (!app.desk && !app.session && app.listEl) renderList();      // the header's count
-  if (app.desk && typeof modeButtons === "function") modeButtons();
+  if (typeof modeButtons === "function") modeButtons();      // the tabs' counts
 }
 
 // Settings → Today: the loops file.

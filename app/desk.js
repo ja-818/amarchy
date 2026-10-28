@@ -414,7 +414,7 @@ function deskStart() {
   desk.terminal = makeTerminal();
   desk.changes = new DeskChanges();
   desk.details = new DeskDetails();
-  desk.head = h("header", { class: "desk-head" });
+  desk.head = h("header", { class: "desk-head chat-head" });
   desk.chatSlot = h("div", { class: "desk-chat" });
   desk.column = h("main", { class: "column" }, desk.head, desk.chatSlot);
   desk.side = buildSide();
@@ -579,28 +579,15 @@ function deskHead() {
   const s = row(desk.current);
   if (!s) { desk.head.replaceChildren(); return; }
   const tab = sideTab();
-  const main = s.assistant === "main";
   const goal = desk.chat && desk.chat.id === s.id ? desk.chat.goal : null;      // what the chat is for (chat.js keepItems)
   const toggle = ([key, label, keys]) => h("button", {
     class: `head-btn${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key),
     title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
-  keepFocus(desk.head, () => desk.head.replaceChildren(
-    h("button", { class: "head-btn board-back", type: "button", title: "Back to the board (Esc)", "aria-label": "Back to the board",
-                  onclick: () => boardBack() }, glyph("back"), h("span", { class: "label" }, "Back")),
-    h("button", { class: `head-title${goal ? " has-goal" : ""}`, type: "button", title: `${where(s)} · rename (Ctrl+Alt+E)`, onclick: () => renameSession() },
-      h("span", { class: "head-col" },
-        h("span", { class: "head-row" },
-          main ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-          taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled"),
-          todayStatePill(s), sleepMark(s)),
-        goal ? h("span", { class: "head-goal", title: goal }, goal) : null)),
-    h("div", { class: "head-btns" },
-      // The panel's tabs, while it's closed (open, its own head has them).
-      ...(tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle)),
-      main ? null : h("button", { class: "head-btn complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
-                                  onclick: () => closeCurrent() }, glyph("check"), h("span", { class: "label" }, "Complete")),
-      h("button", { class: "head-btn more", type: "button", title: "This chat (Ctrl+Alt+M)", "aria-label": "This chat",
-                    onclick: () => sessionMenu(s) }, glyph("more")))));
+  // The chat's head (ui.js), as the phone's; here the side panel's tabs too, while it's closed.
+  keepFocus(desk.head, () => desk.head.replaceChildren(...uiChatHead(s, {
+    goal, backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
+    tools: tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle),
+    complete: () => closeCurrent(), more: () => sessionMenu(s) })));
 }
 
 const SIDE_ICONS = { term: "run", changes: "diff", details: "info" };

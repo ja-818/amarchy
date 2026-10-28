@@ -32,18 +32,17 @@ function shown(el) { return el.checkVisibility ? el.checkVisibility() : !el.clos
 function boardBuild() {
   if (board.el) return board.el;
   board.tab = store.get("board-tab") === "tasks" ? "tasks" : "chats";
-  board.switchEl = h("div", { class: "seg board-switch", role: "tablist", "aria-label": "Chats or tasks" });
-  const tool = (icon, label, keys, act, extra = {}) => h("button", { class: "control board-tool", type: "button", title: `${label} (${keys})`,
-                                                                      "aria-label": label, onclick: act, ...extra }, glyph(icon));
+  board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats or tasks" });
+  const tool = (icon, label, keys, act, extra = {}) => uiTool(icon, label, act, { title: `${label} (${keys})`, extra });
   board.head = h("header", { class: "board-head" },
     h("div", { class: "board-head-in" },
       board.switchEl,
       h("div", { class: "board-find" }, boardSearchBox(), boardOrganize()),
       h("div", { class: "board-tools" },
-        automationsButton("control board-tool"),
+        automationsButton("control ui-tool"),
         tool("gear", "Settings", "right click or Ctrl+Alt+M: the Amarchy menu", () => openSettings(),
              { oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } }),
-        tool("keys", "Keys", "?", () => showKeys())),
+        tool("keys", "Keys", "?", () => showKeys(), { class: "control ui-tool board-keys" })),
       h("button", { class: "control board-new-btn", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() },
         glyph("plus"), h("span", {}, "New chat"), h("kbd", {}, "N"))));
   board.slot = h("div", { class: "board-new", hidden: true });
@@ -146,10 +145,8 @@ function boardEsc(e) {
 // The board's tabs, Chats and Tasks, each with what's your move.
 function modeButtons() {
   if (!app.view || !board.switchEl) return;
-  const count = (only) => { const n = todayCount(app.view, only); return n ? h("span", { class: "tab-count" }, String(n)) : ""; };
-  const side = (tab, label, key) => h("button", { class: `control${board.tab === tab ? " on" : ""}`, type: "button", role: "tab", title: `${label} (${key})`,
-                                                  "aria-selected": String(board.tab === tab), onclick: () => boardTab(tab) }, label, count(tab));
-  keepFocus(board.switchEl, () => board.switchEl.replaceChildren(side("chats", "Chats", "h"), side("tasks", "Tasks", "l")));
+  uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (h)" },
+          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (l)" }], board.tab, boardTab, board.switchEl);
 }
 
 // Chats or Tasks on the board, kept for the next time.
@@ -204,16 +201,25 @@ function boardTicket(s, node) {
 }
 
 // A chat over the board, the whole window (desk.js show), its address the
-// chat's (the browser's Back is the board's).
+// chat's (the browser's Back is the board's). On the phone, its own screen
+// (app.js SessionView); back, the board where it was.
 function boardOpen(id) {
   if (!row(id)) return;
+  if (!app.desk) {
+    board.from = board.scroll.scrollTop;
+    board.last = id;
+    app.fromToday = id;
+    return go(`#/s/${encodeURIComponent(id)}`);
+  }
   show(id);
   if (here() !== `#/s/${encodeURIComponent(id)}`) go2(id);
 }
 
-// The board again (desk.js show(null)): drawn, where it was scrolled.
+// The board again (desk.js show(null), the phone back from a chat): drawn,
+// where it was scrolled.
 function boardShown() {
   if (board.query) boardSearchDraw(); else boardFill(true);
+  modeButtons();
   if (typeof board.from === "number") board.scroll.scrollTop = board.from;
   board.from = null;
 }
@@ -235,8 +241,7 @@ function boardSent(id) {
   todayAnswered(id);
   boardBack(true);
   const next = [...board.box.querySelectorAll(".today-yours .ticket")].find((t) => t.dataset.id !== id);
-  const left = board.box.querySelectorAll(".today-yours .ticket").length;
-  toast(left ? `Sent. ${left} more for you` : "Sent. Nothing else waits on you");
+  boardSentToast(id);
   if (!next) return boardRefocus();
   next.classList.add("next");
   setTimeout(() => next.classList.remove("next"), 2400);
@@ -245,8 +250,15 @@ function boardSent(id) {
   if (btn) btn.focus({ preventScroll: true });
 }
 
+// Sent: how much more waits on you.
+function boardSentToast(id) {
+  const left = [...board.box.querySelectorAll(".today-yours .ticket")].filter((t) => t.dataset.id !== id).length;
+  toast(left ? `Sent. ${left} more for you` : "Sent. Nothing else waits on you");
+}
+
 // The new chat's box at the top of the board (what you were writing stays).
 function boardCompose() {
+  if (!app.desk && app.session) go("#/");
   if (desk.current) boardBack(true);
   board.composing = true;
   boardComposeShow();
@@ -257,7 +269,7 @@ function boardCompose() {
 function boardComposeShow() {
   if (!board.slot) return;
   // Started: the box goes, the board stays (the chat is at work on it).
-  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: true, started: () => {
+  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: !!app.desk, started: () => {
     board.composing = false;
     boardComposeShow();
     boardRefocus();
@@ -278,15 +290,15 @@ function boardComposeShow() {
 // with the lines that have them. Enter opens the first; Esc empties it.
 
 function boardSearchBox() {
-  board.search = h("input", { type: "search", placeholder: "Search", "aria-label": "Search chats, what was said in them, your tasks",
-                              autocomplete: "off", spellcheck: "false", enterkeyhint: "search",
-                              oninput: () => boardSearch(board.search.value),
-                              onkeydown: (e) => {
-                                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); board.search.value = ""; boardSearch(""); board.scroll.focus(); }
-                                else if (e.key === "Enter") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.click(); }
-                                else if (e.key === "ArrowDown") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.focus(); }
-                              } });
-  return h("label", { class: "searchbox board-search" }, glyph("search"), board.search, h("kbd", { class: "board-search-key" }, "/"));
+  const box = uiSearch({ cls: "board-search", label: "Search chats, what was said in them, your tasks", input: {
+    oninput: () => boardSearch(board.search.value),
+    onkeydown: (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); board.search.value = ""; boardSearch(""); board.scroll.focus(); }
+      else if (e.key === "Enter") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.click(); else board.search.blur(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); const first = board.box.querySelector(".today-go"); if (first) first.focus(); }
+    } } });
+  board.search = box.field;
+  return box;
 }
 
 let searchTimer = null, searchSeq = 0;
@@ -337,7 +349,7 @@ function boardSearchDraw() {
     const r = byId.get(s.id);
     const lines = (r && r.lines) || [];
     const name = s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat";
-    return boardTicket(s, todayCard({ kind: "search", hue: todayHue(s.repo), chip: todayChip(s), id: s.id,
+    return boardTicket(s, uiCard({ kind: "search", hue: todayHue(s.repo), chip: todayChip(s), id: s.id,
       title: h("span", { class: "task", html: lit(name, words) }), lead: s.assistant === "main" ? avatar(s, "small") : null,
       pill: todayStatePill(s), open: () => boardOpen(s.id),
       body: [r && r.hits ? h("p", { class: "tcard-text muted" }, `${r.hits} message${r.hits === 1 ? "" : "s"}${r.at ? ` · last ${autoPast(r.at)}` : ""}`) : null,
@@ -347,8 +359,8 @@ function boardSearchDraw() {
   // Your tasks that have them too (who and what), first on the Tasks tab.
   const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
   const taskCards = loops.map((l) => todayLoop(l, v));
-  const chatsSec = cards.length ? todaySection("found-chats", "Chats", { count: cards.length }, cards) : null;
-  const tasksSec = taskCards.length ? todaySection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
+  const chatsSec = cards.length ? uiSection("found-chats", "Chats", { count: cards.length }, cards) : null;
+  const tasksSec = taskCards.length ? uiSection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
   const n = rows.length + loops.length;
   const head = h("div", { class: "today-summary" }, found || loops.length ? `${n || "Nothing"} with “${board.query}”` : `Searching “${board.query}”…`);
   keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),

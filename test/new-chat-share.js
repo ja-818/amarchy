@@ -170,8 +170,8 @@ async function run(browser, layout, port, home) {
   }, CHATS);
   await page.goto(layout === "wide" ? "/#/new" : "/");
   await until(page, () => window.app && app.view && app.view.sessions && app.view.sessions.length);
-  // The phone opens on Today: its + is the new chat's box.
-  if (layout === "phone") await page.evaluate(() => document.querySelector(".hero .new-btn").click());
+  // The phone opens on the board: its + is the new chat's box.
+  if (layout === "phone") await page.evaluate(() => document.querySelector(".board-new-btn").click());
 
   // ---- the new chat's model
   await sleep(500);

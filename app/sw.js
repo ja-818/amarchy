@@ -13,7 +13,7 @@
 const BUILD = "{{build}}";
 const SHELL = `amarchy-shell-${BUILD}`;
 const PICTURES = "amarchy-pictures";     // not a build's: kept until a newer one of yours replaces it
-const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/screen.css", "/terminal.css", "/secrets.css", "/automations.css", "/today.css", "/theme.css", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/automations.js", "/today.js", "/tasks.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
+const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/screen.css", "/terminal.css", "/secrets.css", "/automations.css", "/ui.css", "/today.css", "/theme.css", "/ui.js", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/automations.js", "/today.js", "/tasks.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 // A response that may be kept: it worked, and it's this build's (a file with
 // no build, as theme.css, belongs to none).

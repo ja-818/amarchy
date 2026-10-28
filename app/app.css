@@ -247,16 +247,7 @@ body::before {
 }
 .icon-btn:active { background: var(--selected-bg); border-color: var(--selected-border); color: var(--selected-text); }
 
-/* ---- the list: the panel's hero up top, then the sessions as amarchy lists them */
-
-.hero {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 8px 12px 16px;
-}
-.hero .main { flex: 1; min-width: 0; }
-.hero h1 { margin: 0; font-size: var(--display); line-height: 1.15; font-weight: 700; color: var(--accent); }
-.hero .meta { margin-top: 3px; }
-.hero .meta .waiting { color: var(--selected-text); }
+/* ---- the phone's home (app.js homeView): the board, a line over it when the host can't be reached */
 
 .offline {
   margin: 0 12px 8px;
@@ -268,30 +259,6 @@ body::before {
   font-weight: 700;
 }
 
-.list { padding: 2px 6px 18px; display: flex; flex-direction: column; gap: 2px; }
-
-/* Above the list: the search, and the button for how
-   the list is grouped and sorted, its menu dropping over the list. */
-.toolbar { position: relative; display: flex; gap: 6px; padding: 0 12px 8px; }
-.searchbox {
-  flex: 1; min-width: 0;
-  display: flex; align-items: center; gap: 8px;
-  height: 46px;     /* its field inside is 44: a finger's target */
-  padding: 0 4px 0 12px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-control);
-  background: var(--control-bg);
-}
-.searchbox:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
-.searchbox > .glyph { flex: none; color: var(--text-muted); font-size: 16px; }
-.searchbox input {
-  flex: 1; min-width: 0; height: 100%;
-  border: 0; background: none; outline: none; padding: 0;
-  font-size: 16px;      /* less, and iOS zooms in on it */
-  -webkit-appearance: none; appearance: none;
-}
-.searchbox input::placeholder { color: var(--text-muted); }
-.searchbox input::-webkit-search-cancel-button { display: none; }
 .searchbox .clear { flex: none; width: 34px; height: 34px; display: grid; place-items: center; color: var(--text-muted); font-size: 15px; }
 .control.organize { width: 44px; min-height: 44px; height: 44px; padding: 0; flex: none; font-size: 18px; }
 .organize-menu {
@@ -325,20 +292,6 @@ body::before {
 .menu-item .label { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .menu-item .label .icon { width: 18px; flex: none; font-size: 16px; text-align: center; opacity: 0.8; }
 .menu-item .level { font-weight: 700; min-width: 1em; text-align: center; }
-
-/* A group's header: a plain label, or (the outermost of several) a rule
-   across the list with its name in the middle. */
-.group-head { font-size: var(--caption); font-weight: 700; color: var(--text-muted); padding: 12px 8px 4px; }
-.group-head:first-child { padding-top: 4px; }
-.group-head.ruled { display: flex; align-items: center; gap: 8px; padding-left: 8px; padding-right: 8px; }
-.group-head.ruled::before, .group-head.ruled::after { content: ""; flex: 1; height: 1px; background: var(--border); }
-/* A project's opens the order of your projects (in the wide layout, arrows
-   under the pointer move it past the project next to it). */
-.project-head { position: relative; cursor: pointer; min-height: 44px; display: flex; align-items: center; }
-.project-head .moves { display: none; }
-.project-head .move { width: 22px; height: 18px; display: inline-grid; place-items: center; color: var(--text-muted); }
-.project-head .move:hover:not(:disabled) { color: var(--text); }
-.project-head .move:disabled { opacity: 0.25; }
 
 /* The order of your projects: each with its arrows. */
 .project-order .menu-item { padding: 4px 4px 4px 8px; }
@@ -388,8 +341,6 @@ body::before {
    bigger and with its picture but otherwise a row like the rest (no tint or
    outline: only the selected row looks selected), the other sessions of its
    project under it, set apart from the rest by the space under it. */
-.assistant-section { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; margin-bottom: 4px; }
-.row.assistant { gap: 14px; padding: 12px 12px 12px 10px; margin-bottom: 2px; }
 .avatar { display: block; width: 100%; height: 100%; border-radius: 50%; -webkit-user-drag: none; }
 .avatar.small { width: 22px; height: 22px; flex: none; }
 .avatar-wrap { position: relative; flex: none; width: 60px; height: 60px; }
@@ -397,30 +348,9 @@ body::before {
                       font-size: 15px; line-height: 24px; border-radius: 50%; opacity: 1;
                       background: var(--surface); box-shadow: 0 0 0 1px var(--border); }
 .avatar-wrap .state.idle, .avatar-wrap .state.asleep { color: var(--text-muted); }
-.row.assistant .name { font-size: var(--display); font-weight: 700; line-height: 1.1; color: var(--accent); }
-.row.assistant .line { margin-top: 3px; font-size: var(--body); white-space: nowrap; overflow: hidden;
-                       text-overflow: ellipsis; }
-.row.assistant .line.waiting { color: var(--selected-text); font-weight: 700; }
-.bar .title .avatar-wrap.small { width: 34px; height: 34px; }
-.bar .title .avatar-wrap.small .state { width: 17px; height: 17px; font-size: 11px; line-height: 17px; right: -4px; bottom: -4px; }
 .assistant-name { font-weight: 700; color: var(--accent); }
-/* Unread: a turn finished you haven't opened yet, on any device. The
-   assistant's card shows the start of what it wrote, with "New" by its name;
-   every row gets a dot by its time. */
-.row.assistant .new { display: inline-block; vertical-align: middle; margin-left: 10px; padding: 2px 7px;
-                      font-size: var(--caption); font-weight: 700; letter-spacing: 0.04em; line-height: 1.3;
-                      color: var(--on-accent); background: var(--accent); border-radius: var(--radius-item); }
-.row.assistant .line.said { color: var(--text); white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
-                            -webkit-line-clamp: 2; line-clamp: 2; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
 
-/* One session (sessionRow), on the phone and beside the chat alike: what
-   it's about; its state in words, in its color, and its project; what it
-   asks you or the last thing its Claude wrote. Its state's icon by the title. */
-.session-row { align-items: flex-start; }
-.session-row > .state { margin-top: calc((var(--title) * 1.3 - var(--icon-large)) / 2); }
-.desk .session-row > .state { margin-top: calc((var(--body) * 1.3 - var(--icon-large)) / 2); }
-.session-row .side { padding-top: 3px; }
 .status-line {
   margin-top: 2px;
   font-size: var(--caption); line-height: 1.35;
@@ -431,7 +361,6 @@ body::before {
 .status.is-waiting { color: var(--warning); }
 .status.is-working, .status.is-running { color: var(--accent); }
 .status.is-done { color: var(--success); }
-.row.assistant .status-line { margin-top: 4px; }
 .preview {
   margin-top: 3px;
   font-size: var(--caption); line-height: 1.4;
@@ -439,11 +368,8 @@ body::before {
   overflow: hidden; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
-/* Unread, or what it asks you: in the text's color, to read first. */
-.row.unread .preview, .preview.asks { color: var(--text); }
-.session-row.is-quiet .task { color: var(--text-muted); }
 
-/* ---- a new user's first screen (welcome), and no chat yet (noChats) */
+/* ---- a new user's first screen (welcome) */
 
 .welcome {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
@@ -458,18 +384,9 @@ body::before {
 .welcome-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 10px; }
 .empty .big { font-size: var(--title); font-weight: 700; color: var(--text); margin-bottom: 6px; }
 
-/* ---- a session: its header (SessionHeader), and what's in code, tables
+/* ---- a session: what's in code, tables
    and Claude's screen (the conversation itself is chat.css) */
 
-.bar {
-  display: flex; align-items: center; gap: 4px;
-  padding: 4px;
-  border-bottom: 1px solid var(--border-faint);
-}
-.bar .title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 4px; }
-.bar .title .state { font-size: 18px; width: 18px; }
-.bar .title .text { flex: 1; min-width: 0; }
-.bar .task { font-size: var(--body); }
 
 code, pre { font-family: var(--font-code); font-size: 0.93em; }
 :not(pre) > code { color: var(--code-text); }
@@ -749,7 +666,7 @@ body.desk .sheet .head::before { display: none; }
 @keyframes up { from { transform: translateY(24px); opacity: 0.6; } }
 
 @media (min-width: 720px) {
-  .list, .conv, .hero { max-width: 760px; margin: 0 auto; width: 100%; }
+  .conv { max-width: 760px; margin: 0 auto; width: 100%; }
   .sheet { max-width: 560px; margin: 0 auto; }
   .toast { max-width: 420px; left: auto; }
 }

@@ -53,6 +53,9 @@ its background's lightness.
 
 ## Role tokens
 
+The components' own (a card's border, a pill's corners, a button's fill) are
+in `app/ui.css`: see [components.md](components.md).
+
 | Token | Made from | Used for |
 | --- | --- | --- |
 | `--surface-glass` | `--surface` at 88% | The app over your wallpaper, edge to edge |

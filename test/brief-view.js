@@ -664,7 +664,8 @@ async function run(browser, base, layout) {
       app.session.row = { id: "fake-brief", task: "Search page", status: "idle", repo: "r", name: "n", engine: "chat" };
       app.session.chat.conversation({ reset: true, start: 0, items });
       const t = app.session.titleEl;
-      return { task: t.querySelector(".task")?.textContent, line: t.querySelector(".status-line")?.textContent, goal: !!t.querySelector(".status-line.goal") };
+      app.session.renderHeader();
+      return { task: t.querySelector(".task")?.textContent, line: t.querySelector(".head-goal")?.textContent, goal: !!t.querySelector(".head-goal") };
     }, { items: ITEMS });
     check(layout, head.goal && head.line === "Ship the search page", `the goal under the chat's name in the header (${JSON.stringify(head)})`);
   }

@@ -190,7 +190,7 @@ async function running(p, where) {
   check(where, await p.evaluate(() => /1 working · 1 running/.test(document.querySelector(".today:not([hidden]) .today-working .tsec-head").textContent)), "At work counts it: 1 working · 1 running");
   await p.evaluate(() => { document.querySelector(".today:not([hidden]) .today-working").open = true; });
   await p.screenshot({ path: path.join(SHOTS, `${where}-running.png`), fullPage: true });
-  await p.evaluate(() => { document.querySelector(".today:not([hidden]) .today-working").open = false; todayUI.open.delete("working"); });
+  await p.evaluate(() => { document.querySelector(".today:not([hidden]) .today-working").open = false; uiState.open.delete("working"); });
   await p.evaluate(() => todayComplete(row("proj-run")));
   check(where, await until(p, (what) => { const s = document.querySelector(".sheet"); return !!s && s.textContent.includes(`Stops what's still running: ${what}`) && /Stop it and complete/.test(s.textContent); }, RUNNING),
         "Complete anyway: asked first, saying the run stops");
@@ -311,47 +311,102 @@ async function common(p, where) {
   check(where, !/Ship Today/.test(r.body) && !/goal/.test(r.said), "and never shown in the reply");
 }
 
+// The board as a structure, for the phone's and the computer's to be compared:
+// the bar's parts, the tabs and their counts, and on each tab its sections,
+// each card's chat, pill and buttons. Only the layout may differ.
+const SHAPE = () => {
+  const bar = [...document.querySelector(".board-head-in").children].map((c) => c.className.split(" ").pop());
+  const tabs = [...document.querySelectorAll(".board-switch .control")].map((b) => b.textContent.trim());
+  const sections = () => [...board.box.querySelectorAll(":scope > .tsec, :scope > .tcard, :scope > .ticket")].map((s) => ({
+    title: (s.querySelector(".tsec-title") || {}).textContent || s.className,
+    cards: [...s.querySelectorAll(".tcard")].map((c) => [c.dataset.id || (c.querySelector(".tcard-title") || {}).textContent,
+      ((c.querySelector(".tpill") || {}).textContent || "").replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, ""), [...c.querySelectorAll(".tcard-actions .tbtn")].map((x) => x.textContent.trim()).join("|")]) }));
+  const was = board.tab;
+  boardTab("chats"); const chats = sections();
+  boardTab("tasks"); const tasks = sections();
+  boardTab(was);
+  return JSON.stringify({ bar, tabs, chats, tasks });
+};
+const shapes = {};
+
+// An open chat's head, as a structure: its buttons (by what they do), its name, its pill.
+const HEAD = () => {
+  const hd = document.querySelector(".chat-head");
+  return JSON.stringify({ btns: [...hd.querySelectorAll(".head-btn:not(.on)")].filter((b) => !/side|term|changes|details/i.test(b.title))
+                            .map((b) => b.getAttribute("aria-label")), name: (hd.querySelector(".task") || {}).textContent,
+                          chip: (hd.querySelector(".tcard-chip") || {}).textContent,
+                          pill: ((hd.querySelector(".tpill") || {}).textContent || "").replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, "") });
+};
+
+// The Tasks tab, for the eye; a task's line (when, its buttons) on one row, never a word a line.
+async function shotTasks(p, where) {
+  await p.evaluate(() => boardTab("tasks"));
+  await p.screenshot({ path: path.join(SHOTS, `${where}-tasks.png`) });
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.k-chase .tcard-meta, .tcard.k-due .tcard-meta")]
+    .every((m) => m.getBoundingClientRect().height < 2.6 * parseFloat(getComputedStyle(m).lineHeight || "16") || m.getBoundingClientRect().height < 48)),
+        "a task's when and its buttons fit: no word a line");
+  await p.evaluate(() => boardTab("chats"));
+}
+
 async function phone(browser, port) {
   const where = "phone";
   const p = await page(browser, "phone", port);
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => !!document.querySelector(".home-tabs .tab.on[data-tab=today]") && !!document.querySelector(".today:not([hidden]) .tsec")), "opens on Today");
-  check(where, /6/.test(await text(p, ".home-tabs .tab[data-tab=today]")), "its tab counts what needs you (2 asks, 1 new, 2 loops due, 1 to follow up)");
-  check(where, /6 need you · 2 done/i.test(await text(p, ".hero .meta")), `one count, in the header (${await text(p, ".hero .meta")})`);
-  check(where, await p.evaluate(() => document.querySelector(".list-view .dock").hidden), "no new chat's box under it: Today has the room");
-  await p.evaluate(() => document.querySelector(".hero .new-btn").click());
-  check(where, await p.evaluate(() => !document.querySelector(".list-view .dock").hidden && document.activeElement === app.newChat.field), "+: the new chat's box, its keyboard up");
-  await p.evaluate(() => document.activeElement.blur());
-  check(where, await until(p, () => document.querySelector(".list-view .dock").hidden), "left empty, it goes again");
-  // Started: you stay on Today (it shows there once it's done), as after sending any chat something.
+  check(where, await until(p, () => !!document.querySelector(".home-view .tasks-board .board-today .tsec")), "opens on the board, as a computer does");
+  check(where, await p.evaluate(() => !document.querySelector(".list-view, .home-tabs, .hero, .session-row")), "no list of its own: the board is the home");
+  shapes.phone = await p.evaluate(SHAPE);
+  await shotTasks(p, where);
+  check(where, /^Chats\s*3\s*Tasks\s*3$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) (${JSON.stringify(await text(p, ".board-switch"))})`);
+  check(where, await p.evaluate(() => { const r = document.querySelector(".board-switch").getBoundingClientRect(), s = document.querySelector(".board-search").getBoundingClientRect();
+                                        return s.top >= r.bottom - 1 && s.width > 300 && document.documentElement.scrollWidth <= innerWidth; }),
+        "its bar fits the phone: the search on a row of its own, nothing wider than the screen");
+  check(where, await p.evaluate(() => getComputedStyle(document.querySelector(".board-search input")).fontSize === "16px"), "the search at 16px: iOS doesn't zoom in on it");
+  // + : the new chat's box at the top of the board, its keyboard up; Not now: away.
+  await p.evaluate(() => document.querySelector(".board-new-btn").click());
+  check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "+: the new chat's box, its keyboard up");
+  await p.evaluate(() => document.querySelector(".board-new-close").click());
+  check(where, await until(p, () => document.querySelector(".board-new").hidden), "Not now: away again");
+  // Started: you stay on the board (it shows there once it's done), as after sending any chat something.
   await p.route("**/api/new", (r) => r.fulfill({ json: { id: "proj-work" } }));
-  await p.evaluate(() => document.querySelector(".hero .new-btn").click());
+  await p.evaluate(() => document.querySelector(".board-new-btn").click());
   await p.keyboard.type("Look into the search page");
-  await p.evaluate(() => document.querySelector(".list-view .start-chat .send").click());
+  await p.evaluate(() => document.querySelector(".board-new .start-chat .send").click());
   await sleep(500);
-  check(where, await p.evaluate(() => !app.session && app.tab === "today" && /Started in Proj/.test((document.querySelector(".toast") || {}).innerText || "")),
-        "a new chat started: you stay on Today");
+  check(where, await p.evaluate(() => !app.session && document.querySelector(".board-new").hidden && /Started in Proj/.test((document.querySelector(".toast") || {}).innerText || "")),
+        "a new chat started: you stay on the board");
   await p.unroute("**/api/new");
   const kept = await p.evaluate(async () => {
-    const sc = document.querySelector(".list-view .scroll");
+    const sc = board.scroll;
     sc.scrollTop = 300;
     const was = sc.scrollTop;
-    renderList(); app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, said: "new words" })) }; renderList();
+    app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, said: "new words" })) }; refresh();
     await new Promise((r) => setTimeout(r, 50));
     return { was, now: sc.scrollTop };
   });
   check(where, kept.was > 0 && kept.now === kept.was, `it scrolls, and keeps its place as the list changes (${JSON.stringify(kept)})`);
-  await p.evaluate(() => { document.querySelector(".list-view .scroll").scrollTop = 0; });
+  await p.evaluate((chats) => { app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); board.scroll.scrollTop = 0; }, CHATS);
   await common(p, where);
-  // A chat opened from Today: sent something, back on Today.
+  // A card opens its chat, its own screen; Back: the board, where it was.
+  await p.evaluate(() => { board.scroll.scrollTop = 120; document.querySelector(".ticket[data-id=proj-work] .today-go").click(); });
+  check(where, await until(p, () => app.session && app.session.id === "proj-work"), "a card opens its chat");
+  shapes.phoneHead = await p.evaluate(HEAD);
+  await p.screenshot({ path: path.join(SHOTS, "phone-chat-open.png") });
+  await p.evaluate(() => go("#/"));
+  check(where, await until(p, () => !app.session && !!document.querySelector(".home-view .tasks-board") && board.scroll.scrollTop === 120), "back: the board, where it was");
+  // Sent something: back on the board, told what's left.
   await p.evaluate(() => todayOpen(app.view.sessions.find((s) => s.id === "proj-work")));
-  check(where, await until(p, () => app.session && app.session.id === "proj-work"), "a chat opened from Today");
+  await until(p, () => app.session && app.session.id === "proj-work");
   await p.evaluate(() => app.session.chat.post("send", { text: "go on" }));
-  check(where, await until(p, () => !app.session && app.tab === "today" && !!document.querySelector(".today:not([hidden])")), "sent: back on Today");
-  await p.evaluate(() => document.querySelector(".home-tabs .tab[data-tab=chats]").click());
-  check(where, await until(p, () => !document.querySelector(".list-view .list").hidden && document.querySelector(".today").hidden), "Chats: the list");
-  check(where, (await text(p, ".session-row[data-id=proj-run] .status")).startsWith(`Running · ${RUNNING}`), `the list says Running · what (${await text(p, ".session-row[data-id=proj-run] .status-line")})`);
+  check(where, await until(p, () => !app.session && !!document.querySelector(".home-view .tasks-board") && /^Sent/.test((document.querySelector(".toast") || {}).innerText || "")), "sent: back on the board");
+  // Held down, a chat's card: its menu (priority, name, Complete).
+  await p.evaluate(() => { const hd = document.querySelector(".tcard[data-id=proj-work] .tcard-head"), r = hd.getBoundingClientRect();
+                           hd.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: r.x + 30, clientY: r.y + 10, pointerType: "touch" })); });
+  await sleep(650);
+  await p.evaluate(() => document.querySelector(".tcard[data-id=proj-work] .tcard-head").dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" })));
+  check(where, await until(p, () => !!document.querySelector(".sheet") && /Priority/.test(document.querySelector(".sheet").textContent)), "held down, a card: its menu");
+  await p.evaluate(() => closeSheets());
+  await p.screenshot({ path: path.join(SHOTS, "phone-board.png"), fullPage: false });
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }
@@ -376,6 +431,10 @@ async function wide(browser, port) {
   check(where, look.left === look.right && look.leftColor === look.rightColor && /rgba\(0, 0, 0, 0\)|transparent/.test(look.headBg), `no stripe, no box in the card (${JSON.stringify(look)})`);
   check(where, /^Chats\s*3\s*Tasks\s*3$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) (${JSON.stringify(await text(p, ".board-switch"))})`);
   check(where, /Try json-render/.test(await text(p, ".board-today")), "a ticket says its goal");
+  shapes.wide = await p.evaluate(SHAPE);
+  await shotTasks(p, where);
+  // The phone and the computer: one app. The same bar, tabs, sections, cards, pills and buttons.
+  if (shapes.phone) check("both", shapes.phone === shapes.wide, `the phone's board is the computer's${shapes.phone === shapes.wide ? "" : `\n    phone ${shapes.phone}\n    wide  ${shapes.wide}`}`);
   await common(p, where);
 
   // Hovered: the whole card lights, as one.
@@ -391,6 +450,11 @@ async function wide(browser, port) {
   check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
   check(where, await p.evaluate(() => !!document.querySelector(".desk-head .board-back") && /Fix/.test(document.querySelector(".desk-head").innerText)
                                    && !!document.querySelector(".desk-head .head-btn.complete")), "over it: Back, its name, Complete");
+  await p.evaluate(() => boardBack());
+  await p.evaluate(() => boardOpen("proj-work"));
+  await until(p, () => desk.current === "proj-work");
+  const wideHead = await p.evaluate(HEAD);
+  if (shapes.phoneHead) check("both", wideHead === shapes.phoneHead, `an open chat's head is the same on both${wideHead === shapes.phoneHead ? "" : `\n    phone ${shapes.phoneHead}\n    wide  ${wideHead}`}`);
   await p.evaluate(() => boardBack());
 
   // Opened: the whole window, its box ready; Back and Esc: the board, where you were.

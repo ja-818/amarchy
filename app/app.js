@@ -364,7 +364,7 @@ function loadWhenSafe() {
 function reloadWait() {
   if (dictationUnderWay()) return true;
   if ([app.session && app.session.chat, desk.chat].some((c) => c && c.tray.length)) return true;
-  if ([app.newChat, desk.newChat].some((n) => n && n.tray().length)) return true;      // pictures for a new chat
+  if (desk.newChat && desk.newChat.tray().length) return true;      // pictures for a new chat
   if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done")) return true;     // an answer picked, not sent
   return [...document.querySelectorAll("textarea, input")].some((f) =>
     !NOT_WORDS.includes(f.type) && f.value.trim() && !f.closest(".composer-wrap, .start-chat"));
@@ -375,8 +375,7 @@ function reloadWait() {
 // the scrolls, the search. The drafts are in the store already.
 function keepForReload() {
   const chat = (app.session && app.session.chat) || desk.chat;
-  const list = app.desk ? board.scroll : app.listEl && app.listEl.scroll;
-  const search = app.desk ? board.search : app.listEl && app.listEl.search;
+  const list = board.scroll, search = board.search;
   try {
     sessionStorage.setItem(KEPT, JSON.stringify({
       at: Date.now(), hash: here(),
@@ -393,13 +392,12 @@ function takeKept() {
     sessionStorage.removeItem(KEPT);
     if (d && Date.now() - d.at < KEPT_FOR) kept = d;
   } catch (e) { /* none */ }
-  if (kept && kept.search) app.query = kept.search;      // the list's search, whether or not the list is on screen
 }
 
 // The list's scroll, once the list is on screen.
 function keptListScroll() {
   if (!kept || kept.list === null) return;
-  const el = app.desk ? board.box && board.scroll : (!app.session && app.listEl && app.listEl.scroll);
+  const el = board.box && (app.desk || !app.session) ? board.scroll : null;
   if (!el || !el.childElementCount) return;
   el.scrollTop = kept.list;
   kept.list = null;
@@ -438,10 +436,10 @@ function openList() {
   });
 }
 
-// The list changed: on a wide screen the wide layout (desk.js), else the list's view.
+// The list changed: the board (tasks.js), on a computer under its chat (desk.js).
 function refresh() {
-  if (app.desk) { deskList(); boardRefresh(); }      // Tasks (tasks.js)
-  else if (!app.session) renderList();
+  if (app.desk) { deskList(); boardRefresh(); }
+  else if (!app.session) renderHome();
   keptListScroll();
 }
 
@@ -459,140 +457,26 @@ function groupLabel(s, g) {
   return STATUS[doneOf(s)];
 }
 
-// The list's view, built once and kept: its bar holds what you're typing
-// while the list under it changes.
-function listView() {
-  if (app.listEl) return app.listEl;
-  const meta = h("div", { class: "meta" });
-  const head = h("div", { class: "hero" },
-    h("div", { class: "main" }, h("h1", {}, "Amarchy"), meta),
-    // A new chat, one tap away: its box comes up over Today (which keeps the room otherwise).
-    h("button", { class: "icon-btn new-btn", "aria-label": "New chat", title: "New chat", onclick: () => composeNew() }, glyph("plus")),
-    automationsButton(), h("button", { class: "icon-btn", "aria-label": "Settings", onclick: openSettings }, glyph("gear")));      // automations.js
-  // Above the list, as in the wide layout beside Claude: the search, and how
-  // the list is grouped and sorted.
-  const search = h("input", { type: "search", placeholder: "Search chats", enterkeyhint: "search",
-                              autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
-                              oninput: () => { app.query = search.value; renderList(); },
-                              onkeydown: (e) => {
-                                if (e.key === "Enter") search.blur();
-                                else if (e.key === "ArrowDown") { e.preventDefault(); const first = menuItems(list)[0]; if (first) first.focus(); }
-                              } });
-  if (app.query) search.value = app.query;
-  const clear = h("button", { class: "clear", "aria-label": "Clear the search",
-                              onclick: () => { search.value = app.query = ""; renderList(); search.focus(); } }, glyph("close"));
-  const organize = h("button", { class: "control organize", "aria-label": "Group and sort the list", "aria-haspopup": "menu",
-                                 onclick: () => toggleOrganize(menu, organize, renderList),
-                                 onkeydown: (e) => { if (e.key === "ArrowDown" && menu.hidden) { e.preventDefault(); toggleOrganize(menu, organize, renderList); } } },
-                     glyph("organize"));
-  const menu = organizeBox(() => organize, renderList);
-  const shade = h("div", { class: "organize-shade", onclick: () => { menu.hidden = true; renderList(); } });
-  const toolbar = h("div", { class: "toolbar" }, h("label", { class: "searchbox" }, glyph("search"), search, clear), organize, menu);
+// The phone's home: the board (tasks.js), the very one a computer has:
+// Chats | Tasks, the search, Group & sort, the tools, New chat, the same
+// cards. Only its layout fits the phone (today.css). A chat opens over it
+// (SessionView); back, it's where you were.
+function homeView() {
+  if (app.homeEl) return app.homeEl;
   const offline = h("div", { class: "offline" }, "Reconnecting to Amarchy…");
-  // Today (what to do now: today.js) or Chats (all of them), Today first: it's home.
-  const tab = (key, label) => h("button", { class: "tab", type: "button", role: "tab", "data-tab": key,
-                                             onclick: () => { app.tab = key; renderList(); view.scroll.scrollTop = 0; } }, label);
-  const tabs = h("div", { class: "home-tabs", role: "tablist" }, tab("today", "Today"), tab("chats", "Chats"));
-  const today = h("div", { class: "today phone-today" });      // its count line is the header's
-  const list = h("div", { class: "list" });
-  menuKeys(list);       // ↑/↓ from session to session, ↵ opens one
-  list.addEventListener("keydown", (e) => {     // ↑ from the first: back to the search
-    if (e.key === "ArrowUp" && !e.defaultPrevented && menuItems(list)[0] === document.activeElement && !toolbar.hidden) {
-      e.preventDefault();
-      search.focus();
-    }
-  }, true);
-  const scroll = h("div", { class: "scroll" }, today, list);
-  app.newChat = newChat();
-  const dock = h("div", { class: "dock" }, app.newChat.el);
-  // On Today the new chat's box shows only while you're starting one: left
-  // empty, it goes again.
-  dock.addEventListener("focusout", () => setTimeout(() => {
-    if (app.composing && !dock.contains(document.activeElement) && !app.newChat.field.value.trim() && !document.querySelector(".sheet-back, .picker-back")) {
-      app.composing = false;
-      renderList();
-    }
-  }, 250));
-  const view = app.listEl = h("div", { class: "view list-view" }, head, tabs, shade, toolbar, offline, scroll, dock);
-  Object.assign(app.listEl, { meta, offline, list, scroll, search, toolbar, clear, organize, menu, shade, dock, tabs, today });
-  return app.listEl;
+  app.homeEl = h("div", { class: "view home-view" }, offline, boardBuild());
+  app.homeEl.offline = offline;
+  return app.homeEl;
 }
 
-function renderList() {
-  const view = listView();
+function renderHome() {
+  const view = homeView();
   if (!root.contains(view)) {
     root.replaceChildren(view);
-    view.scroll.scrollTop = 0;
+    boardShown();
   }
-  const v = app.view;
-  const first = !!v && !v.sessions.length && !(v.projects && v.projects.length);      // a new user: the welcome
-  view.meta.replaceChildren();
-  // Today, unless there's nothing yet (the welcome) or you're searching.
-  const onToday = app.tab === "today" && !!v && !!v.sessions.length && !app.query;
-  // Under the name, one count: Today's (what's your move, what's to close), or the chats'.
-  if (onToday) view.meta.append(h("span", { class: todayCount(v) ? "waiting" : "" }, todaySummary(v)));
-  else if (v && v.sessions.length) {
-    const waiting = typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
-    view.meta.append(`${v.sessions.length} chat${v.sessions.length === 1 ? "" : "s"}`);
-    if (waiting) view.meta.append(" · ", h("span", { class: "waiting" }, `${waiting} need${waiting === 1 ? "s" : ""} you`));
-  }
-  view.offline.hidden = app.online || !v;
-  view.tabs.hidden = !v || !v.sessions.length;
-  for (const b of view.tabs.children) {
-    const on = (b.dataset.tab === "today") === onToday;
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-selected", String(on));
-    if (b.dataset.tab === "today") {
-      const n = todayCount(v);
-      b.replaceChildren("Today", n ? h("span", { class: "tab-count" }, String(n)) : "");
-    }
-  }
-  view.today.hidden = !onToday;
-  view.list.hidden = onToday;
-  if (onToday) todayFill(view.today);      // only when what it shows changed: its scroll stays (today.js)
-  view.toolbar.hidden = !v || !v.sessions.length || onToday;
-  view.dock.hidden = first || (onToday && !app.composing && !(app.newChat && app.newChat.field.value.trim()));
-  view.clear.hidden = !app.query;
-  if (view.toolbar.hidden) view.menu.hidden = true;
-  view.shade.hidden = view.menu.hidden;
-  view.organize.classList.toggle("on", !view.menu.hidden);
-  if (!view.menu.hidden) keepFocus(view.menu, () => view.menu.replaceChildren(...organizeMenu()));
-  const list = view.list;
-  const top = view.scroll.scrollTop;      // a session going or coming: the list stays where it is
-  keepFocus(list, () => {
-    list.replaceChildren();
-    const shown = v ? matching(v.sessions, app.query) : [];
-    if (!v) {
-      list.append(h("div", { class: "empty" }, app.failed || "Connecting…"));
-    } else if (first) {
-      list.append(welcome((p) => app.newChat.use(p)));
-    } else if (!v.sessions.length) {
-      list.append(noChats());
-    } else if (!shown.length) {
-      list.append(h("div", { class: "empty" }, `No chat matches “${app.query.trim()}”`, h("br"),
-        h("button", { class: "control", onclick: () => { app.listEl.querySelector(".clear").click(); } }, "Show them all")));
-    } else {
-      // Your assistant first, in a place of its own above the groups (amarchy
-      // assistant): its card, the other sessions of its project under it.
-      const mine = shown.filter((s) => s.assistant);
-      if (mine.length)
-        list.append(h("div", { class: "assistant-section" },
-          ...mine.map((s) => s.assistant === "main" ? assistantCard(s) : sessionRow(s, [], true))));
-      // The rest grouped as amarchy groups them, outermost first. With more than
-      // one grouping the outermost is a rule across the list, its name in the middle.
-      grouped(list, shown, v.group || [], (s) => sessionRow(s, v.group || []));
-    }
-  });
-  view.scroll.scrollTop = top;
-  app.newChat.update();
-}
-
-// The + over the list: the new chat's box, its keyboard up.
-function composeNew() {
-  app.composing = true;
-  if (app.session) go("#/");
-  renderList();
-  if (app.newChat) app.newChat.focus();     // now, in the tap: iOS brings the keyboard up only then
+  boardRefresh();
+  view.offline.hidden = app.online || !app.view;
 }
 
 // A new user's first screen, with no projects yet: what Amarchy is, in a
@@ -609,60 +493,6 @@ function welcome(added) {
     h("div", { class: "welcome-actions" },
       h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),
       h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
-}
-
-// Projects, but no chat yet: the new chat is the way to start one.
-function noChats() {
-  return h("div", { class: "empty no-chats" },
-    h("div", { class: "big" }, "No chats yet"),
-    h("div", {}, app.desk ? "Say what you want to do, and Claude starts on it." : "Say what you want to do below, and Claude starts on it."));
-}
-
-// The sessions under your assistant's section, grouped as amarchy groups
-// them, outermost first: a header where a group changes. With more than one
-// grouping the outermost is a rule across the list, its name in the middle.
-// A project's header opens the order of your projects (and in the wide
-// layout, under the pointer, has arrows to move it past the project next to it).
-function grouped(list, shown, groups, rowOf) {
-  const rest = shown.filter((s) => !s.assistant);
-  let prev = [];
-  rest.forEach((s, n) => {
-    const labels = groups.map((g) => groupLabel(s, g));
-    const at = labels.findIndex((l, i) => l !== prev[i]);
-    if (at >= 0)
-      for (let i = at; i < labels.length; i++) {
-        const ruled = i === 0 && groups.length > 1;
-        list.append(groups[i] === "project"
-          ? projectHead(s.repo, ruled, nextProject(rest, n, groups, -1), nextProject(rest, n, groups, 1))
-          : h("div", { class: `group-head${ruled ? " ruled" : ""}` }, labels[i]));
-      }
-    prev = labels;
-    list.append(rowOf(s));
-  });
-}
-
-// The project next to the nth session's (dy -1 above, 1 under) inside the
-// same outer groups, or "" at either end of them.
-function nextProject(rest, n, groups, dy) {
-  const s = rest[n], outer = groups.slice(0, groups.indexOf("project"));
-  for (let i = n + dy; i >= 0 && i < rest.length; i += dy) {
-    const o = rest[i];
-    if (outer.some((g) => groupLabel(o, g) !== groupLabel(s, g))) return "";
-    if (o.repo !== s.repo) return o.repo;
-  }
-  return "";
-}
-
-function projectHead(repo, ruled, above, below) {
-  const arrow = (icon, label, where, other) => h("button", {
-    class: "move", "aria-label": label, disabled: !other,
-    onclick: (e) => { e.stopPropagation(); moveProject(repo, where, other); } }, glyph(icon));
-  return h("div", { class: `group-head project-head${ruled ? " ruled" : ""}`, role: "button", tabindex: "0",
-                    title: "Order your projects", onclick: () => orderProjects(repo),
-                    onkeydown: (e) => { if (e.key === "Enter") orderProjects(repo); } },
-    h("span", { class: "name" }, projectName(repo)),
-    h("span", { class: "moves" }, arrow("up", `Move ${projectName(repo)} up`, "before", above),
-      arrow("under", `Move ${projectName(repo)} down`, "after", below)));
 }
 
 // Move a project ("before" or "after" another, "up", "down", "top", "bottom")
@@ -730,17 +560,6 @@ function orderProjects(lit) {
   if (lastInput.keys) arrowOn(lit || names[0], "up");
 }
 
-// The sessions the search matches by name (what it's about, Claude's title
-// for it, its project and its branch), every word of it.
-function matching(sessions, query) {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return sessions;
-  return sessions.filter((s) => {
-    const name = `${s.task || ""} ${s.claude_title || ""} ${s.repo || ""} ${s.name || ""}`.toLowerCase();
-    return words.every((w) => name.includes(w));
-  });
-}
-
 function same(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
 
 // How the list is grouped (any of them, nested in the order you turn them
@@ -791,10 +610,10 @@ function toggleOrganize(menu, button, redraw) {
   else if (menu.contains(document.activeElement)) button.focus();
 }
 
-// The group & sort menu goes, wherever it is (the phone's list, beside Claude in the wide layout).
+// The group & sort menu goes (the board's, by its search).
 // The keys, if they were in it, go back to its button.
 function closeOrganize() {
-  for (const menu of [app.listEl && app.listEl.menu, typeof board !== "undefined" && board.organize]) {
+  for (const menu of [typeof board !== "undefined" && board.organize]) {
     if (!menu) continue;
     const had = menu.contains(document.activeElement);
     menu.hidden = true;
@@ -929,61 +748,6 @@ function avatar(s, cls) {
   return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
 }
 
-// Your assistant, at the top of the list: its picture with its state on it,
-// its name, and what it's on.
-// What it wrote and you haven't read (a turn it finished since you last
-// looked, on any device) shows as its first words, with "New" by its name.
-function assistantCard(s) {
-  const st = doneOf(s);
-  const name = s.assistant_name || "Assistant";
-  const task = s.task && s.task.toLowerCase() !== name.toLowerCase() ? s.task : "";
-  const unread = s.unseen && !!s.said;
-  const line = s.setup ? "Setting up…" : st === "waiting" ? s.asks || STATUS.waiting : unread ? s.said
-    : task || (st === "working" ? "On it…" : "Here for you");
-  return holdable(h("button", { class: `row assistant ${st}${unread ? " unread" : ""}`, "data-id": s.id,
-                                onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
-    h("span", { class: "avatar-wrap" }, avatar(s), stateIcon(s)),
-    h("span", { class: "main" },
-      h("div", { class: "name" }, name, unread ? h("span", { class: "new" }, "New") : null),
-      h("div", { class: `line${st === "waiting" ? " waiting" : ""}${unread ? " said" : ""}` }, line),
-      h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(s)}` }, statusLine(s)),
-        unread && task ? ` · ${task}` : "")),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s))), () => rowMenu(s));
-}
-
-// A session that finished a turn you haven't opened yet: a dot by its time.
-function unreadDot(s) {
-  return s.unseen ? h("span", { class: "dot", title: "Unread", "aria-label": "Unread" }) : null;
-}
-
-// One session in the list, the same on the phone and beside the chat on a
-// computer: what it's about (the keyword in bold); its state in words, in
-// its color ("Needs your answer", "Working · reading app.js", "Done",
-// "Ready", "Asleep") and its project, unless a header above says it; then
-// what it asks you, or the last thing its Claude wrote. Its time, the unread
-// dot and its priority (unless a header says it) on the right. near:
-// another session of your assistant's project, under it, with its picture small.
-function sessionRow(s, groups, near = false) {
-  const st = doneOf(s), tone = statusTone(s);
-  const prio = !groups.includes("priority") && s.priority && s.priority !== "normal"
-    ? glyph(s.priority, `prio ${s.priority}`) : null;
-  const task = s.setup ? title(s) : (s.task || "New chat");
-  // Running says the first of them already: the others, if any.
-  const others = (s.background || 0) - (st === "running" ? 1 : 0);
-  const bg = others > 0 ? ` · ${others}${st === "running" ? " more" : ""} in the background` : "";
-  const preview = s.setup ? "" : st === "waiting" ? s.asks || "" : s.said || "";
-  return holdable(h("button", { class: `row session-row is-${tone}${s.priority === "low" ? " low" : ""}${s.unseen ? " unread" : ""}`,
-                                "data-id": s.id, onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },
-    stateIcon(s),
-    near ? avatar(s, "small") : null,
-    h("span", { class: "main" },
-      taskText(task, s.task ? "" : "untitled"),
-      h("div", { class: "status-line" }, h("span", { class: `status is-${tone}` }, statusLine(s)),
-        groups.includes("project") ? null : h("span", { class: "repo" }, ` · ${projectName(s.repo)}`), bg),
-      preview ? h("div", { class: `preview${st === "waiting" ? " asks" : ""}` }, preview) : null),
-    h("span", { class: "side" }, h("span", { class: "age" }, s.age || ""), unreadDot(s), prio)), () => rowMenu(s));
-}
-
 // ---- a session
 
 class SessionView {
@@ -998,12 +762,9 @@ class SessionView {
   }
 
   build() {
-    this.titleEl = h("div", { class: "title" });
-    const bar = h("div", { class: "bar" },
-      // Back: from a terminal to the chat, from the chat to the list.
-      h("button", { class: "icon-btn", "aria-label": "Back", onclick: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); } }, glyph("back")),
-      this.titleEl,
-      h("button", { class: "icon-btn", "aria-label": "More", onclick: () => this.menu() }, glyph("more")));
+    // Its head (ui.js uiChatHead), a computer's open chat's: Back, its name and state, Complete, ⋯.
+    this.titleEl = h("header", { class: "chat-head phone-head" });
+    const bar = this.titleEl;
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({
       id: this.id, row: this.row, noSwitch: true,      // Cards | Chat: in Settings and the menu (⋯)
@@ -1020,9 +781,8 @@ class SessionView {
         if (app.fromToday !== this.id) return;
         app.fromToday = null;
         todayAnswered(this.id);
-        app.tab = "today";
         go("#/");
-        toast("Sent: it's working on it");
+        boardSentToast(this.id);
       },
     });
     // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
@@ -1068,30 +828,17 @@ class SessionView {
       api(`/api/session/${encodeURIComponent(this.id)}/seen`).catch(() => {});
   }
 
-  // The strip above Claude: its state, what it's about, project · name.
+  // Over the chat: its head (ui.js uiChatHead), as a computer's. Back: from a
+  // terminal to the chat, from the chat to the board.
   renderHeader() {
-    if (!this.row) {
-      this.titleEl.replaceChildren(h("div", { class: "text" }, taskText("…")));
-      return;
-    }
-    // Your assistant's, under its name and picture: you know who you're talking to.
-    const r = this.row;
-    if (r.assistant === "main") {
-      const name = r.assistant_name || "Assistant";
-      const task = r.task && r.task.toLowerCase() !== name.toLowerCase() ? `${r.task} · ` : "";
-      this.chat.setPlaceholder(`Message ${name}`);
-      this.titleEl.replaceChildren(h("span", { class: "avatar-wrap small" }, avatar(r), stateIcon(r)),
-        h("div", { class: "text" }, h("div", { class: "task assistant-name" }, name),
-          h("div", { class: "status-line" }, task, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)))));
-      return;
-    }
-    // Under its name, what the chat is for (the goal in its replies: chat.js), else its state in
-    // words and its project as the list says them (the branch: in its menu; the state: its icon).
-    const goal = this.chat && this.chat.goal;
-    this.titleEl.replaceChildren(stateIcon(r), ...[r.assistant ? avatar(r, "small") : null].filter(Boolean),
-      h("div", { class: "text" }, taskText(r.task || "New chat", r.task ? "" : "untitled"),
-        goal ? h("div", { class: "status-line goal", title: goal }, goal)
-             : h("div", { class: "status-line" }, h("span", { class: `status is-${statusTone(r)}` }, statusWords(r)), ` · ${projectName(r.repo)}`)));
+    const r = this.row || { id: this.id, repo: "", task: "…" };
+    if (r.assistant === "main") this.chat.setPlaceholder(`Message ${r.assistant_name || "Assistant"}`);
+    keepFocus(this.titleEl, () => this.titleEl.replaceChildren(...uiChatHead(r, {
+      goal: (this.chat && this.chat.goal) || "",
+      back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
+      rename: () => { if (this.row) renameSheet(this.row); },
+      complete: this.row ? () => todayComplete(this.row) : null,
+      more: () => this.menu() })));
   }
 
   // The conversation, or the session's terminals (the project's, or Claude's
@@ -2119,7 +1866,7 @@ async function openSettings() {
       helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
              : h("p", {}, "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant."),
       h("div", { class: "section" }, "Projects"),
-      h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { if (app.newChat) app.newChat.use(p); if (app.desk) newChatIn(p); }) }, "New project…"),
+      h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(h("div", { class: "section" }, "Replies"), chatViewSeg(() => draw()),
       h("p", {}, chatView() === "screen" ? "Brief: each chat's goal, where it stands, what changed and what waits on you, kept up to date by Claude; its own words a tap away."
@@ -2408,7 +2155,7 @@ function route() {
   if (id) {
     if (!app.session) app.session = new SessionView(id);
   } else {
-    renderList();
+    renderHome();
   }
 }
 
@@ -2428,7 +2175,7 @@ document.addEventListener("visibilitychange", () => {
     if (app.session) app.session.close();
   } else {
     openList();
-    if (backFromAway()) app.tab = "today";       // home again: Today first
+    if (backFromAway() && board.tab !== "chats") boardTab("chats");       // home again: your chats first
     if (app.session && backFromAway()) go("#/");
     else if (app.session) app.session.reopen();
   }

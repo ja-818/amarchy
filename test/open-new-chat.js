@@ -161,7 +161,7 @@ async function phone(browser, port) {
   const p = await page(browser, "phone", port, true);
   await p.goto("/");
   await ready(p);
-  check(where, await p.evaluate(() => !app.session && !!document.querySelector(".list-view .start-chat")), "launched: the list and its new chat");
+  check(where, await until(p, () => !app.session && !!document.querySelector(".home-view .tasks-board .board-switch")), "launched: the board");
 
   await p.evaluate(() => go("#/s/proj-a"));
   check(where, await until(p, () => app.session && app.session.id === "proj-a"), "a chat opened");
@@ -169,7 +169,7 @@ async function phone(browser, port) {
   check(where, await p.evaluate(() => !!app.session && app.session.id === "proj-a" && !app.session.closed), "back after 2 minutes: the same chat, open again");
 
   await away(p, 11 * MIN);
-  check(where, await p.evaluate(() => !app.session && !!document.querySelector(".list-view .start-chat textarea")), "back after 11 minutes: the list and its new chat");
+  check(where, await p.evaluate(() => !app.session && !!document.querySelector(".home-view .tasks-board") && board.tab === "chats"), "back after 11 minutes: the board, on your chats");
   await p.screenshot({ path: path.join(SHOTS, "phone-back-after-away.png") });
 
   // A notification tapped: the service worker says where before the page is back.

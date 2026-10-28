@@ -1,0 +1,233 @@
+/* amarchy's components (app/ui.js): what every screen is built from, on the
+   phone and on a computer alike. Styled only through the tokens below, made
+   from the base tokens (docs/design-tokens.md); a theme can set any of them
+   (its vars): a card's border, a pill's corners, a button's fill change
+   everywhere at once. docs/components.md has the list. */
+
+:root {
+  /* A card (uiCard): the chat's reply card's look. */
+  --card-bg: var(--surface);
+  --card-border-width: 1px;
+  --card-border: var(--border);
+  --card-radius: var(--radius-card);
+  --card-hover-bg: var(--control-hover);
+  --card-hover-border: var(--selected-border);
+  --card-focus-bg: var(--selected-bg);
+  --card-focus-border: var(--focus-ring);
+  --card-pad-x: 14px;
+  --card-gap: 8px;            /* between cards */
+  /* A pill (uiPill): where something stands. */
+  --pill-radius: 999px;
+  --pill-border-width: 1px;
+  --pill-border-mix: 45%;     /* how much of its tone its border has */
+  /* A button (uiButton). */
+  --button-bg: var(--control-bg);
+  --button-border: var(--control-border);
+  --button-hover-bg: var(--control-hover);
+  --button-radius: var(--radius-control);
+  --button-primary-bg: var(--primary-bg);
+  --button-primary-text: var(--primary-text);
+  /* A section's head (uiSection). */
+  --section-head: var(--text-muted);
+  --section-head-yours: var(--accent);
+  /* Tabs (uiTabs). */
+  --tab-bg: var(--control-bg);
+  --tab-border: var(--border-faint);
+  --tab-on-bg: var(--control-selected);
+  --tab-count-bg: var(--danger);
+  /* The search box (uiSearch). */
+  --search-bg: var(--control-bg);
+  --search-border: var(--control-border);
+}
+
+/* ---- one card for everything (today.js todayCard): the chat's reply card's
+   look (screen.css .reply), so a card here and the reply in its chat are one
+   thing: one surface, a rule round it, a round badge saying where it stands.
+   The whole card lights as one, under the pointer and under the keys: its
+   head is no box of its own. */
+.tcard {
+  display: flex; flex-direction: column; min-width: 0; background: var(--card-bg);
+  border: var(--card-border-width) solid var(--card-border); border-radius: var(--card-radius);
+  transition: background-color .12s, border-color .12s, box-shadow .12s;
+}
+.tcard-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px var(--card-pad-x); box-sizing: border-box;
+  text-align: left; color: var(--text); cursor: pointer; background: none; border-radius: 0; outline: none;
+}
+.tcard-head .avatar { width: 26px; height: 26px; flex: none; }
+/* Under the pointer, and under the keys: the card, the whole of it. */
+.tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover {
+  background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--card-bg); border-color: var(--card-hover-border);
+}
+.tcard-head:focus-visible { outline: none; }
+.tcard:has(> .tcard-head:focus-visible) {
+  background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--card-bg);
+  border-color: var(--card-focus-border); box-shadow: 0 0 0 1px var(--card-focus-border);
+}
+/* Its project (or who), in its own color: a word, not a box. */
+.tcard-chip { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
+.tcard-title { flex: 1; min-width: 0; line-height: 1.35; }
+.tcard-title .task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
+.tcard-what.open { display: block; }
+/* Where it stands: the reply card's badge. */
+.tpill {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--caption); font-weight: 700; padding: 2px 9px;
+  border-radius: var(--pill-radius); white-space: nowrap; color: var(--pill);
+  border: var(--pill-border-width) solid color-mix(in srgb, var(--pill) var(--pill-border-mix), transparent);
+}
+.tpill.t-ask { --pill: var(--warn, var(--warning)); }
+.tpill.t-late { --pill: var(--danger); }
+.tpill.t-done { --pill: var(--success); }
+.tpill.t-working, .tpill.t-running { --pill: var(--accent); }
+.tpill.t-warn { --pill: var(--warn, var(--warning)); }
+.tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
+.tpill .spinner { line-height: 1; }
+/* Words that may not fit (Running · what runs): cut short with … */
+.tpill.long { flex: 0 1 auto; min-width: 0; max-width: 50%; }
+.tpill.long .tpill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tcard > .tcard-text, .tcard > .tcard-q { margin: -4px var(--card-pad-x) 10px; }
+.tcard-text { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.tcard-text.muted { color: var(--text-muted); font-size: var(--caption); }
+.tcard-text.said { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tcard-q { display: flex; flex-direction: column; gap: 8px; }
+.tcard-q .tcard-text { font-weight: 600; }
+.tcard-q + .tcard-q { margin-top: 2px; }
+.tcard-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.tcard-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 var(--card-pad-x) 12px; }
+.tcard-note { align-self: center; font-size: var(--caption); color: var(--text-muted); font-weight: 700; }
+/* Its buttons: the reply card's answers. */
+.tbtn {
+  min-height: 38px; padding: 7px 14px; font-weight: 600; color: var(--text); cursor: pointer;
+  border: 1px solid var(--button-border); border-radius: var(--button-radius); background: var(--button-bg); overflow-wrap: anywhere;
+}
+.tcard-opts .tbtn { flex: 1 1 auto; overflow-wrap: normal; }
+/* A loop: when it's due (or who to chase since when) and its buttons, one line. */
+/* Its when on one line, its buttons beside it, or under it where there's no room. */
+.tcard-meta { flex: 1 1 12em; min-width: 0; align-self: center; font-size: var(--caption); color: var(--text-muted); font-weight: 600; }
+.tcard-meta.late { color: var(--danger); font-weight: 700; }
+.tcard-meta.done { color: var(--success); font-weight: 700; }
+.tcard.k-due > .tcard-head, .tcard.k-chase > .tcard-head { padding-bottom: 4px; align-items: flex-start; }
+.tcard.k-due, .tcard.k-chase, .tcard.k-someday { cursor: pointer; }
+.tcard.k-due .tcard-actions, .tcard.k-chase .tcard-actions { flex-wrap: wrap; align-items: center; row-gap: 6px; }
+@media (max-width: 559px) { .tcard.k-due .tcard-meta, .tcard.k-chase .tcard-meta { flex-basis: 100%; } }
+.tcard.k-due .tbtn, .tcard.k-chase .tbtn { min-height: 34px; padding: 5px 14px; }
+.tbtn:hover { background: var(--button-hover-bg); }
+.tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.tbtn.primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
+.tbtn.chosen { color: var(--primary-text); background: var(--success); border-color: var(--success); }
+.tbtn.quiet { background: none; border-color: transparent; color: var(--link); }
+.tbtn.quiet:hover { background: var(--control-hover); }
+.today-more { align-self: flex-start; }
+
+/* ---- a section: a small head and its count, folded (a chevron) or not */
+.tsec { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.tsec-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px;
+             font-size: var(--caption); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--section-head); }
+.tsec-count { font-weight: 700; letter-spacing: 0; color: var(--text-muted); opacity: 0.8; }
+.tsec-gap { flex: 1; }
+.tsec-head .tbtn { letter-spacing: 0; text-transform: none; font-size: var(--caption); min-height: 30px; padding: 4px 10px; }
+.today-yours > .tsec-head { color: var(--section-head-yours); }
+.tsec-cards { display: flex; flex-direction: column; gap: var(--card-gap); }
+details.tsec > summary { list-style: none; cursor: pointer; border-radius: var(--radius-item); }
+details.tsec > summary::-webkit-details-marker { display: none; }
+details.tsec > summary .tsec-head::before { content: "›"; display: inline-block; width: 10px; font-size: var(--body); transition: transform .15s; }
+details.tsec[open] > summary .tsec-head::before { transform: rotate(90deg); }
+details.tsec > summary:hover .tsec-head { color: var(--text); }
+
+/* A thumb's size on the phone. */
+@media (pointer: coarse) {
+  .tbtn { min-height: 44px; }
+}
+
+/* The whole card opens it. */
+.tcard[data-id] { cursor: pointer; }
+a.tbtn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+a.tbtn .glyph svg { width: 12px; height: 12px; }
+.tbtn.complete::before { content: "✓"; margin-right: 6px; font-weight: 800; }
+
+/* ---- tabs (uiTabs): one of a few, each with its count */
+.ui-tabs { flex: none; display: flex; gap: 4px; padding: 3px; border: 1px solid var(--tab-border); border-radius: var(--radius-control); background: var(--tab-bg); }
+.ui-tabs .control { border: 0; background: none; min-height: 32px; padding: 2px 14px; font-weight: 700; color: var(--text-muted); gap: 6px; }
+.ui-tabs .control:hover { color: var(--text); }
+.ui-tabs .control.on { background: var(--tab-on-bg); color: var(--text); }
+.tab-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--tab-count-bg); color: var(--on-accent);
+             font-size: var(--caption); line-height: 18px; text-align: center; }
+
+/* ---- the search box (uiSearch) */
+.searchbox {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  height: 46px;     /* its field inside is 44: a finger's target */
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--search-border);
+  border-radius: var(--radius-control);
+  background: var(--search-bg);
+}
+.searchbox:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
+.searchbox > .glyph { flex: none; color: var(--text-muted); font-size: 16px; }
+.searchbox input {
+  flex: 1; min-width: 0; height: 100%;
+  border: 0; background: none; outline: none; padding: 0;
+  font-size: 16px;      /* less, and iOS zooms in on it */
+  -webkit-appearance: none; appearance: none;
+}
+.searchbox input::placeholder { color: var(--text-muted); }
+.searchbox input::-webkit-search-cancel-button { display: none; }
+.ui-search-key { flex: none; margin-right: 8px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px;
+                    font-size: var(--caption); color: var(--text-muted); font-family: inherit; }
+.ui-search:focus-within .ui-search-key { display: none; }
+/* No keys on a phone: no key to show. */
+@media (pointer: coarse) { .ui-search-key { display: none; } }
+
+/* ---- a tool in a bar (uiTool): an icon, no box until you point at it */
+.ui-tool { width: 38px; height: 38px; min-height: 38px; padding: 0; flex: none; border-color: transparent; background: none; color: var(--text-muted); font-size: 16px; }
+.ui-tool:hover { color: var(--text); background: var(--control-hover); }
+.ui-tool .glyph svg { width: 18px; height: 18px; }
+
+
+/* ---- over an open chat (uiChatHead): Back, its project and name (a tap:
+   rename), where it stands and what it's for; its tools, Complete, ⋯. The
+   phone's (.phone-head) shows its buttons as icons. */
+.chat-head .ic svg { width: 100%; height: 100%; display: block; }
+.chat-head .ic { display: inline-grid; place-items: center; }
+.head-title {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 9px;
+  min-height: 36px; padding: 0 8px;
+  border-radius: var(--radius-control);
+  text-align: left; white-space: nowrap; overflow: hidden;
+}
+.head-title:hover { background: var(--control-hover); }
+.head-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.head-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.head-title.has-goal { padding-top: 2px; padding-bottom: 2px; }
+.head-goal { font-size: var(--caption); line-height: 1.3; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-title .task { font-size: var(--title); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.head-title .avatar.small { width: 22px; height: 22px; }
+.head-title .tcard-chip { max-width: 22%; }
+.head-btn.board-back { color: var(--text); padding-left: 6px; }
+.head-btn.board-back .glyph svg { width: 16px; height: 16px; }
+.head-btn.complete { color: var(--success); }
+.head-btn.complete:hover { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.head-btns { flex: none; display: flex; gap: 2px; }
+.head-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-muted); font-size: var(--caption); font-weight: 700;
+}
+.head-btn .ic { width: 16px; height: 16px; }
+.head-btn:hover { color: var(--text); background: var(--control-hover); }
+.head-btn.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
+.head-btn.more { width: 34px; padding: 0; justify-content: center; font-size: 16px; }
+.phone-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid var(--border-faint); }
+.phone-head .head-btn .label { display: none; }
+.phone-head .head-btn { width: 40px; height: 40px; padding: 0; justify-content: center; }
+.phone-head .head-title .task { font-size: var(--body); }
+.phone-head .tpill.long { max-width: 40%; }
+.phone-head .head-btn { font-size: 18px; color: var(--text); }
+.phone-head .head-btn .glyph svg { width: 20px; height: 20px; }
+.phone-head .head-btn.complete { color: var(--success); }
