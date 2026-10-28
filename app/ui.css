@@ -233,12 +233,12 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-tool .glyph svg, .head-btn .glyph svg, .ui-action .glyph svg { width: 18px; height: 18px; }
 .head-btn .ic { width: 18px; height: 18px; }
 /* The Ⓐ: Amarchy's mark, the menu under it. */
-.ui-brand { color: var(--text); }
+.ui-brand.ui-action { color: var(--text); }
 .ui-brand .ui-brand-mark svg { width: 22px; height: 22px; }
 /* A menu on the phone (uiMenu): its icon, its words and under them what it does. */
 .ui-menu .menu-item .label { flex-direction: row; align-items: center; gap: 10px; }
 .ui-menu-text { display: flex; flex-direction: column; min-width: 0; }
-.ui-brand:hover { color: var(--accent); }
+.ui-brand.ui-action:hover { color: var(--accent); }
 /* The bar's one thing to do: outlined, its key beside its words. */
 .ui-action {
   flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -248,8 +248,8 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 }
 .ui-action:hover { background: var(--button-hover-bg); }
 .ui-key { font: inherit; font-size: var(--caption); padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; line-height: 16px; color: var(--text-muted); }
-.ui-action.complete { color: var(--success); border-color: color-mix(in srgb, var(--success) 50%, transparent); }
-.ui-action.complete:hover { background: color-mix(in srgb, var(--success) 14%, transparent); }
+/* A square of one (‹, Ⓐ, ⋯): its icon alone. */
+.ui-action.square, .ui-action.board-back, .ui-action.more, .ui-action.ui-brand { width: var(--control-h); padding: 0; }
 /* No keys on a phone; narrow, the action is its icon. */
 @media (pointer: coarse) { .ui-key { display: none; } }
 @media (max-width: 719px) { .ui-action .label, .ui-action .ui-key { display: none; } .ui-action { padding: 0; } }
@@ -272,9 +272,17 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-title .task { flex: 0 1 auto; min-width: 0; font-size: var(--title); overflow: hidden; text-overflow: ellipsis; }
 .head-title .avatar.small { width: 22px; height: 22px; flex: none; }
 .head-title .tcard-chip { max-width: 22%; }
-.head-state { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; max-width: 45%; }
+/* Where it stands: a box of the buttons' size, neutral, its tone a dot. */
+.head-state {
+  flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px;
+  height: var(--control-h); padding: 0 12px; box-sizing: border-box;
+  border: 1px solid var(--button-border); border-radius: var(--button-radius);
+}
+.head-state .tpill { border: 0; padding: 0; color: var(--text); font-weight: 700; min-width: 0; max-width: none; }
+.head-state .tpill:not(.t-working):not(.t-running)::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pill); }
+.head-state .tpill .spinner { color: var(--pill); }
 .ui-action.board-back { width: var(--control-h); padding: 0; color: var(--text); }
-.head-btns { flex: none; display: flex; gap: 2px; }
+.head-btns { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .head-btn.more { width: var(--control-h); padding: 0; justify-content: center; font-size: 16px; }
 .phone-head { flex: none; gap: 4px; padding-left: var(--page-pad); padding-right: var(--page-pad); }
 .phone-head .head-btn .label { display: none; }
@@ -345,3 +353,5 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-chart-label { font-size: var(--caption); color: var(--text-muted); }
 .ui-chart-bar.on .ui-chart-fill { background: var(--chart-on); }
 .ui-chart-bar.on .ui-chart-n, .ui-chart-bar.on .ui-chart-label { color: var(--text); font-weight: 700; }
+/* Narrow (a phone): the chat's name has the room; its project is on its card. */
+@media (max-width: 719px) { .chat-head .head-title .tcard-chip { display: none; } .chat-head .head-state { padding: 0 10px; } }

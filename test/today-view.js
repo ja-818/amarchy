@@ -566,9 +566,12 @@ async function wide(browser, port) {
   check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
   check(where, await p.evaluate(() => { const kids = [...document.querySelector(".desk-head").children];
     const btns = [...document.querySelector(".desk-head .head-btns").children];
-    return kids[0].matches(".ui-action.board-back") && !kids[0].innerText.trim() && /Fix/.test(kids[1].innerText) && !!kids[1].querySelector(".head-state .tpill")
-      && !document.querySelector(".desk-head .head-goal, .desk-head .head-btn.tool") && btns[0].matches(".more") && btns[btns.length - 1].matches(".ui-action.complete"); }),
-        "over it: Back (a chevron), its name and pill, then ⋯ and Complete last");
+    const h = (el) => Math.round(el.getBoundingClientRect().height);
+    return kids[0].matches(".ui-action.board-back") && !kids[0].innerText.trim() && /Fix/.test(kids[1].innerText)
+      && !document.querySelector(".desk-head .head-goal, .desk-head .head-btn.tool")
+      && btns[0].matches(".head-state") && !!btns[0].querySelector(".tpill") && btns[1].matches(".ui-action.more") && btns[2].matches(".ui-action.complete")
+      && [kids[0], ...btns].every((b) => h(b) === h(kids[0])) && getComputedStyle(btns[2]).color === getComputedStyle(kids[0]).color; }),
+        "over it, boxes of one height, neutral: ‹, its name, where it stands, ⋯, Complete last");
   await p.evaluate(() => document.querySelector(".desk-head .more").click());
   check(where, await until(p, () => !!document.querySelector(".picker") && /Changes/.test(document.querySelector(".picker").innerText) && /Details/.test(document.querySelector(".picker").innerText)),
         "⋯: Changes and Details are in it");

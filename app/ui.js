@@ -184,11 +184,11 @@ function uiChart(items) {
       h("span", { class: "ui-chart-label" }, b.label))));
 }
 
-// Over an open chat, on the phone as on a computer, as its card's head:
-// Back (a chevron, outlined); its project (or your assistant's picture) and
-// its name (a tap: rename), where it stands at the end of it, as on its
-// card; then ⋯ (its menu: the Terminal, Changes and Details, its name, its
-// priority…) and Complete, the bar's one action, last. Returns the
+// Over an open chat, on the phone as on a computer: one row of boxes of
+// one height, neutral: Back (‹); its project (or your assistant's
+// picture) and its name (a tap: rename); where it stands (its tone a dot);
+// ⋯ (its menu: the Terminal, Changes and Details, its name, its
+// priority…); Complete, last. Returns the
 // children, for the head to hold.
 function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}) {
   const main = s.assistant === "main";
@@ -196,10 +196,11 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
     h("button", { class: "head-title", type: "button", title: `${where(s)} · rename`, onclick: rename },
       main ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-      taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled"),
-      h("span", { class: "head-state" }, todayStatePill(s), sleepMark(s))),
+      taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled")),
     h("div", { class: "head-btns" },
-      h("button", { class: "head-btn more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
+      // Where it stands: a box as the buttons are, its tone a dot in it.
+      h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
+      h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
       main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
                                                "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete"))),
@@ -216,7 +217,7 @@ function uiAction(icon, label, act, { title = "", key = "", cls = "" } = {}) {
 // The Ⓐ: the Amarchy menu (everything you can do, each with its key), as
 // Omarchy's mark opens its own. Its dot: an automation that failed.
 function uiBrand(act, title = "Amarchy menu (m, Ctrl+Alt+M)") {
-  return h("button", { class: "control ui-tool ui-brand auto-btn", type: "button", title, "aria-label": "Amarchy menu", "aria-haspopup": "menu",
+  return h("button", { class: "control ui-action ui-brand auto-btn", type: "button", title, "aria-label": "Amarchy menu", "aria-haspopup": "menu",
                        onclick: act, oncontextmenu: (e) => { e.preventDefault(); act(); } },
     glyph("brand", "ui-brand-mark"), h("span", { class: "auto-dot", "aria-hidden": "true" }));
 }
