@@ -506,9 +506,13 @@ function openList() {
     app.build = app.build || app.view.build;     // the page's own: index.html's (start)
     wearLook(app.view.look);
     badge();
-    refresh();
+    // Drawn again once your finger's off the page (ui.js): the list comes
+    // every second or so, and a card moved under a tap opens the wrong one.
+    uiWhenStill("list", () => {
+      refresh();
+      if (typeof missionsWatch === "function") missionsWatch();     // a badge earned, a fast reply (today.js)
+    });
     shareCheck();
-    if (typeof missionsWatch === "function") missionsWatch();     // a badge earned, a fast reply (today.js)
   });
   es.addEventListener("open", () => { if (!app.online) { app.online = true; refresh(); } });
   es.addEventListener("error", () => {
@@ -830,7 +834,7 @@ class SessionView {
     this.chat = new Chat({
       id: this.id, row: this.row, noSwitch: true,      // Cards | Chat: in Settings and the menu (⋯)
       onGoal: () => this.renderHeader(),              // what the chat is for, under its name
-      onSession: (row) => { this.row = row; this.renderHeader(); },
+      onSession: (row) => { this.row = row; uiWhenStill(`head-${this.id}`, () => this.renderHeader()); },
       onGone: (why) => {
         toast(why ? "Can't open that chat." : "That chat was closed.");
         go("#/");
@@ -894,11 +898,11 @@ class SessionView {
   renderHeader() {
     const r = this.row || { id: this.id, repo: "", task: "…" };
     if (r.assistant === "main") this.chat.setPlaceholder(`Message ${r.assistant_name || "Assistant"}`);
-    keepFocus(this.titleEl, () => this.titleEl.replaceChildren(...uiChatHead(r, {
+    uiSwap(this.titleEl, uiChatHead(r, {
       back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
       rename: () => { if (this.row) renameSheet(this.row); },
       complete: this.row ? () => todayComplete(this.row) : null,
-      more: () => this.menu() })));
+      more: () => this.menu() }));
   }
 
   // The conversation, or the session's terminals (the project's, or Claude's

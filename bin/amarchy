@@ -2229,9 +2229,11 @@ def conversation_records(f, tail=None):
     """The records of a conversation file, the last `tail` bytes of it only if given."""
     try:
         with open(f, "rb") as fh:
-            if tail:
-                fh.seek(max(fh.seek(0, 2) - tail, 0))
+            if tail and fh.seek(0, 2) > tail:
+                fh.seek(-tail, 2)
                 fh.readline()       # most likely cut in half
+            else:
+                fh.seek(0)          # all of it: its first line is whole
             data = fh.read()
     except OSError:
         return []
@@ -9025,7 +9027,12 @@ def chat_reply(s):
         return empty
     cached = _replies.get(str(f))
     if cached and cached[0] == st.st_mtime_ns:
-        return cached[1]
+        return cached[2]
+    # The file only grows: a goal read before is still its newest unless the
+    # end has a newer one. A chat at work a long while pushes its last goal
+    # block out of the end read; it keeps it (not a chat with no goal, then
+    # its goal again, every other second), and the end is all that's read.
+    before = cached[2] if cached and cached[1] <= st.st_size else None
     out = {**empty, "at": st.st_mtime}
     answered, reply_seen = False, False
     for tail in (200_000, 2_000_000):
@@ -9053,9 +9060,11 @@ def chat_reply(s):
             if goal:
                 out.update(goal=goal["goal"], state=goal["state"], goal_at=timestamp(r) or 0)
                 break
-        if out["goal"] or st.st_size <= tail:
+        if out["goal"] or st.st_size <= tail or (before and before["goal"]):
             break
-    _replies[str(f)] = (st.st_mtime_ns, out)
+    if not out["goal"] and before and before["goal"]:
+        out.update(goal=before["goal"], state=before["state"], goal_at=before["goal_at"])
+    _replies[str(f)] = (st.st_mtime_ns, st.st_size, out)
     if len(_replies) > 500:
         _replies.clear()
     return out
@@ -9411,6 +9420,9 @@ def app_words(st, ss):
             s["said"], s["doing"], s["asks"], s["today"], s["permission"] = "", None, "", chat_reply({}), None
             continue
         s["today"] = chat_reply(s)      # its goal, its state, what its last reply asks you (Today)
+        # When it last moved, to the minute (Today says "5m ago" at most): a
+        # chat at work writes every second, and the list isn't new for that.
+        s["today"] = {**s["today"], "at": s["today"]["at"] // 60 * 60}
         words = last_words(s)
         if not s.get("assistant"):
             s["said"] = words["said"]

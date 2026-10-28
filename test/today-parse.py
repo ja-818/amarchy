@@ -80,6 +80,27 @@ with open(f, "a") as fh:
 r = am.chat_reply({"id": "x"})
 check(r["state"] == "done" and r["goal_at"] > 0, "done, and when")
 
+# A chat at work a long while: its goal block far back (more than the end
+# that's read), it keeps its goal; not a chat with none, then its goal again.
+g = Path(home) / "long.jsonl"
+g.write_text(rec("assistant", [{"type": "text", "text": 'On it\n\n```goal state="working"\nPort the outbound\n```'}], "2026-10-27T09:00:00Z") + "\n")
+am.transcript = lambda s: g
+check(am.chat_reply({"id": "y"})["goal"] == "Port the outbound", "a long chat's goal, read")
+big = rec("user", [{"type": "tool_result", "tool_use_id": "3", "content": "x" * 100_000}])
+for i in range(25):
+    with open(g, "a") as fh:
+        fh.write(big + "\n")
+    os.utime(g, (2 + i, 2 + i))
+    r = am.chat_reply({"id": "y"})
+    if r["goal"] != "Port the outbound":
+        break
+check(g.stat().st_size > 2_000_000 and r["goal"] == "Port the outbound" and r["state"] == "working" and r["goal_at"] > 0,
+      f"2.5 MB of work after it: still its goal ({r})")
+with open(g, "a") as fh:
+    fh.write(rec("assistant", [{"type": "text", "text": 'Done\n\n```goal state="done"\nPort the outbound\n```'}]) + "\n")
+check(am.chat_reply({"id": "y"})["state"] == "done", "a newer goal block: that one")
+am.transcript = lambda s: f
+
 # Search: by name, by what was said (every word), its lines without markdown, a tool's output not.
 with open(f, "a") as fh:
     fh.write(rec("user", [{"type": "tool_result", "tool_use_id": "2", "content": "secret pricing in a log"}]) + "\n")

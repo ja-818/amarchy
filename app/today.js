@@ -121,13 +121,16 @@ function projectChip(s) {
   return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
-// In order: higher priority first, then your projects' order, then the newest.
+// In order: higher priority first, then your projects' order, then the
+// newest reply (not the last thing done: a chat at work does something every
+// second, and the cards would trade places under your finger).
 function todaySort(v, ss) {
   const rank = new Map(((v.projects || []).map((p) => p.name)).map((name, i) => [name, i]));
   const prio = { high: 0, normal: 1, low: 2 };
+  const when = (s) => (s.today || {}).goal_at || (s.today || {}).at || 0;
   return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
     || (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99)
-    || ((b.today || {}).at || 0) - ((a.today || {}).at || 0));
+    || when(b) - when(a) || (a.id < b.id ? -1 : 1));
 }
 
 // At work: Claude working, or what it started running (status "running":
@@ -878,7 +881,8 @@ function todayKey(v) {
   const said = boardOn();
   return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs, (app.organize || v).group, v.sort,
     (v.sessions || []).map((s) => s.id).join(),
-    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today, s.permission,
+    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks,
+                                   { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission,
                                    (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
 }
 

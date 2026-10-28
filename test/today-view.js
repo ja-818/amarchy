@@ -219,8 +219,38 @@ async function running(p, where) {
   await until(p, () => !!document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run]"));
 }
 
+// The list comes every second or so while chats work: the board isn't drawn
+// again for what it doesn't show (a working chat's last second, its step),
+// its cards keep their order, and what does change waits for your finger
+// to lift (a card moved under a tap opened the one next to it, or under it).
+async function steady(p, where) {
+  const r = await p.evaluate(async () => {
+    const card = document.querySelector(".board-today .tcard");
+    const order = () => [...document.querySelectorAll(".board-today .tcard")].map((c) => c.dataset.id || c.innerText.slice(0, 30)).join("|");
+    const before = order();
+    const tabs = document.querySelector(".board-switch").firstElementChild;
+    const tick = (f) => { app.view = JSON.parse(JSON.stringify(app.view)); app.view.sessions.forEach(f); refresh(); };
+    tick((s) => { if (s.today) s.today.at = Math.floor(s.today.at / 60) * 60 + 30; s.doing = { tool: "Read", input: "x" }; });
+    tick((s) => { if (s.today) s.today.at += 15; });
+    const kept = card.isConnected && tabs.isConnected && order() === before;
+    // A finger down: the news waits; lifted, it's drawn.
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    let ran = 0;
+    uiWhenStill("test", () => { ran++; });
+    const waited = ran === 0;
+    document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    await new Promise((ok) => setTimeout(ok, 200));
+    const stillWaits = ran === 0;
+    await new Promise((ok) => setTimeout(ok, 500));
+    return { kept, waited, stillWaits, ran };
+  });
+  check(where, r.kept, "a working chat's every second: the board and its tabs stay, in their order");
+  check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
+}
+
 async function common(p, where) {
   await running(p, where);
+  await steady(p, where);
   await tab(p, "chats");
   let t = await text(p, ".today:not([hidden])");
   const board = await p.evaluate(() => boardOn());
