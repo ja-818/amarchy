@@ -455,7 +455,7 @@ function todayChat(s, kind) {
   const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
-  const complete = finished && !main ? uiButton("Complete mission", () => todayComplete(s), true, "complete") : null;
+  const complete = finished && !main ? uiButton("Complete mission", () => todayComplete(s), false, "complete") : null;
   const seenBtn = kind === "fresh" && !finished ? uiButton("Seen", () => todaySeen(s), false, "quiet seen") : null;
   return uiCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
