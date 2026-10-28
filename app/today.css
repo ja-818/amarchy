@@ -58,10 +58,12 @@
 .tpill.t-ask { --pill: var(--warn, var(--warning)); }
 .tpill.t-late { --pill: var(--danger); }
 .tpill.t-done { --pill: var(--success); }
-.tpill.t-working { --pill: var(--accent); }
+.tpill.t-working, .tpill.t-running { --pill: var(--accent); }
 .tpill.t-warn { --pill: var(--warn, var(--warning)); }
 .tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
 .tpill .spinner { line-height: 1; }
+.tpill.t-running { flex: 0 1 auto; min-width: 0; max-width: 50%; }
+.tpill.t-running .tpill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tcard > .tcard-text, .tcard > .tcard-q { margin: -4px 14px 10px; }
 .tcard-text { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
 .tcard-text.muted { color: var(--text-muted); font-size: var(--caption); }

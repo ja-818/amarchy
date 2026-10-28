@@ -12,6 +12,11 @@
 // - Waiting: the people you wait on, the chats at work, the rest of your
 //   week, the other chats. Folded, but for what's at work.
 //
+// At work: a chat working, or one whose turn ended while something it
+// started still runs ("Running · the e2e tests": a test run, a helper; its
+// Claude goes on when that ends). Neither is done, new or stalled, and
+// neither offers Complete mission: closing it would stop the run halfway.
+//
 // What you do here goes with an Undo a few seconds long (todayUndo), so a
 // thumb's slip costs nothing. A chat says where it stands in the goal block
 // each reply ends with (its today: goal, state, asks; bin/amarchy
@@ -126,6 +131,10 @@ function todaySort(v, ss) {
     || ((b.today || {}).at || 0) - ((a.today || {}).at || 0));
 }
 
+// At work: Claude working, or what it started running (status "running":
+// bin/amarchy session_view). A dev server it left serving doesn't count.
+function todayBusy(s) { return s.status === "working" || s.status === "running"; }
+
 // The chats and loops, sorted into Today's parts.
 function todayParts(v) {
   const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
@@ -134,7 +143,7 @@ function todayParts(v) {
   const now = Date.now() / 1000;
   const asks = ss.filter((s) => !todayIsAnswered(s) && (s.status === "waiting" || (s.secret_asks || []).length
     || (s.status !== "working" && ((s.today || {}).asks || []).length)));
-  const blocked = ss.filter((s) => !asks.includes(s) && s.status !== "working" && (s.today || {}).state === "blocked");
+  const blocked = ss.filter((s) => !asks.includes(s) && !todayBusy(s) && (s.today || {}).state === "blocked");
   const due = loops.filter((l) => l.kind === "due" && l.due).sort((a, b) => a.due.localeCompare(b.due));
   const dueNow = due.filter((l) => todayDay(l.due) <= 1);
   const week = due.filter((l) => todayDay(l.due) > 1 && todayDay(l.due) <= 7);
@@ -144,13 +153,13 @@ function todayParts(v) {
   const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
   const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
   // Finished a turn you haven't opened: it needs you too (to see what it did).
-  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && s.status !== "working" && s.unseen && !todayUI.seen.has(s.id));
+  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && !todayBusy(s) && s.unseen && !todayUI.seen.has(s.id));
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isMain(s));
-  const done = rest.filter((s) => s.status !== "working" && (s.today || {}).state === "done");
+  const done = rest.filter((s) => !todayBusy(s) && (s.today || {}).state === "done");
   const quietFor = (s) => now - ((s.today || {}).at || 0);
-  const stale = rest.filter((s) => !done.includes(s) && s.status !== "working" && (s.today || {}).at && quietFor(s) > TODAY_STALE)
+  const stale = rest.filter((s) => !done.includes(s) && !todayBusy(s) && (s.today || {}).at && quietFor(s) > TODAY_STALE)
     .sort((a, b) => quietFor(b) - quietFor(a));
-  const working = rest.filter((s) => s.status === "working");
+  const working = rest.filter(todayBusy);
   const idle = rest.filter((s) => !done.includes(s) && !stale.includes(s) && !working.includes(s));
   const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
   // Ready: every other chat, stalled ones among them (as the list orders them).
@@ -193,7 +202,8 @@ async function todayClose(s, said = "") {
   } catch (e) {
     return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
   }
-  if (c.changes || c.amarchy) { todayRedraw(); return confirmClose(s, c); }
+  // Uncommitted work, amarchy running from it, or a run that hasn't ended (it would stop halfway): asked first.
+  if (c.changes || c.amarchy || (c.running || []).length) { todayRedraw(); return confirmClose(s, c); }
   todayCloseNow([s], said);
 }
 
@@ -227,7 +237,7 @@ async function todayCloseDone(ss) {
   for (const s of ss) {
     try {
       const c = await (await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`)).json();
-      (c.changes || c.amarchy ? ask : quick).push([s, c]);
+      (c.changes || c.amarchy || (c.running || []).length ? ask : quick).push([s, c]);
     } catch (e) {
       return toast("Can't reach Amarchy");
     }
@@ -274,7 +284,15 @@ const TODAY_PILLS = { ask: "Asks you", permission: "Permission", secret: "A secr
                       working: "Working" };
 
 function todayPill(text, tone) {
-  return h("span", { class: `tpill t-${tone}` }, tone === "working" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null, text);
+  return h("span", { class: `tpill t-${tone}` }, tone === "working" || tone === "running" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null, text);
+}
+
+// What it runs while its turn is over: "Running · Run the e2e tests", cut
+// short with "…" where the card is narrow (all of it on hover).
+function todayRunningPill(s) {
+  const what = s.running || "";
+  return h("span", { class: "tpill t-running", title: `${what || "Something it started"} still runs: it goes on when that ends` },
+    h("span", { class: "spinner" }, SPINNER[spin.frame]), h("span", { class: "tpill-text" }, what ? `Running · ${what}` : "Running"));
 }
 
 // Where a chat stands, as its card's badge says it (the open chat's bar too).
@@ -283,6 +301,7 @@ function todayStatePill(s) {
   if (s.status === "waiting" || (s.secret_asks || []).length || (s.status !== "working" && (t.asks || []).length && !todayIsAnswered(s)))
     return todayPill(s.permission ? "Permission" : "Asks you", "ask");
   if (s.status === "working") return todayPill("Working", "working");
+  if (s.status === "running") return todayRunningPill(s);
   if (t.state === "blocked") return todayPill("Blocked", "late");
   if (t.state === "done") return todayPill("Done", "done");
   return todayPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
@@ -445,9 +464,12 @@ function todayChat(s, kind) {
   const main = s.assistant === "main";
   const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
   const told = todayUI.told.get(s.id);
-  const finished = t.state === "done";
-  const stalled = kind === "ready" && s.status !== "working" && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
-  const pill = kind === "fresh" ? todayPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
+  // Running (its turn over, what it started still at it): not finished yet, whatever its goal block says.
+  const running = s.status === "running";
+  const finished = t.state === "done" && !running;
+  const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
+  const pill = running ? todayRunningPill(s)
+    : kind === "fresh" ? todayPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
     : kind === "done" ? todayPill("Done", "done") : kind === "stale" || stalled ? todayPill(`Stalled ${quiet}d`, "warn")
     : kind === "working" || s.status === "working" ? todayPill("Working", "working")
     : main ? todayPill(statusWords(s), "quiet") : t.at ? todayPill(autoPast(t.at), "quiet") : null;
@@ -481,6 +503,8 @@ function todaySeen(s) {
 // then it closes (as Close does: at once with Undo when nothing would be
 // lost, else asked).
 async function todayComplete(s) {
+  // Still running something: asked first (todayClose), not celebrated yet.
+  if ((rowOf(s.id) || s).status === "running") return todayClose(s, `Mission complete: ${s.task || "the chat"}`);
   const card = document.querySelector(`.tcard[data-id="${CSS.escape(s.id)}"]`);
   if (card) {
     card.classList.add("completing");
@@ -587,8 +611,10 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // At work on top, folded, its count in sight; then what needs you (asks,
   // blocked, finished and not seen yet, your tasks due); then what's done
   // (Review, Complete); then every other chat, open: none is out of sight.
+  const runs = p.working.filter((s) => s.status === "running").length, works = p.working.length - runs;
   if (chats) nodes.push(todaySection("working", "At work", { count: p.working.length, fold: false,
-    extra: p.working.length ? todayPill(`${p.working.length} working`, "working") : null }, p.working.map(tk(todayChat, "working"))));
+    extra: p.working.length ? todayPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },
+    p.working.map(tk(todayChat, "working"))));
   const needs = yours + (chats ? p.fresh.length : 0);
   nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Needs you", { count: needs },
     chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)), p.fresh.map(tk(todayChat, "fresh"))] : [],
@@ -665,7 +691,7 @@ function todayKey(v) {
   const said = boardOn();
   return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs, (app.organize || v).group, v.sort,
     (v.sessions || []).map((s) => s.id).join(),
-    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today, s.permission,
+    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today, s.permission,
                                    (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
 }
 

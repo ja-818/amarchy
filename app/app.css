@@ -429,7 +429,7 @@ body::before {
 }
 .status { font-weight: 700; }
 .status.is-waiting { color: var(--warning); }
-.status.is-working { color: var(--accent); }
+.status.is-working, .status.is-running { color: var(--accent); }
 .status.is-done { color: var(--success); }
 .row.assistant .status-line { margin-top: 4px; }
 .preview {
@@ -674,6 +674,7 @@ body.desk .sheet .head::before { display: none; }
 .sheet-close:active, .sheet-close:hover { color: var(--text); background: var(--selected-bg); }
 .sheet h2 { font-size: var(--title); font-weight: 700; margin: 0; overflow-wrap: anywhere; }
 .sheet p { margin: 6px 0; color: var(--text-muted); }
+.sheet p.close-stops { color: var(--warn, var(--warning)); margin: 0 0 12px; overflow-wrap: anywhere; }
 /* One of a few, omalauncher's joined toggle: the one that's on filled in. */
 .seg { display: flex; }
 .seg .control { flex: 1; }

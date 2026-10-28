@@ -2738,7 +2738,7 @@ class Chat {
   renderDone() {
     if (!this.doneEl) return;
     const r = this.row || {};
-    const show = this.goalState === "done" && r.status !== "working" && r.status !== "waiting" && r.assistant !== "main"
+    const show = this.goalState === "done" && !["working", "waiting", "running"].includes(r.status) && r.assistant !== "main"
       && typeof confirmClose === "function";
     const key = show ? `${this.goal}|${r.id}` : "";
     if (key === this.doneKey) return;

@@ -6,7 +6,9 @@
 const root = document.getElementById("root");
 const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
               query: "", organize: null, tab: "today" };     // tab: the phone's home, Today or Chats (today.js)
-const STATUS = { waiting: "Needs your answer", working: "Working", done: "Done", idle: "Ready", asleep: "Asleep" };
+// running: its turn ended, but something it started still runs (a test run,
+// a helper): Claude goes on when that ends (bin/amarchy session_view).
+const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // The glyphs of amarchy's list (Nerd Font icons), when the
@@ -73,7 +75,7 @@ function glyph(name, cls) {
 // check in the accent when it finished and you haven't opened it yet.
 function stateIcon(s) {
   const st = doneOf(s);
-  if (st === "working") return h("span", { class: "state working", title: STATUS.working }, SPINNER[spin.frame]);
+  if (st === "working" || st === "running") return h("span", { class: `state working${st === "running" ? " running" : ""}`, title: STATUS[st] }, SPINNER[spin.frame]);
   const el = glyph(st, `state ${st}`);
   el.title = STATUS[st];
   return el;
@@ -282,9 +284,11 @@ function statusWords(s) {
   return STATUS[doneOf(s)] || "";
 }
 
-// The list's: what it's doing too, while it works ("Working · reading app.js").
+// The list's: what it's doing too, while it works ("Working · reading app.js"),
+// or what runs while it waits on that ("Running · the e2e tests").
 function statusLine(s) {
   const words = statusWords(s);
+  if (statusTone(s) === "running") return s.running ? `${words} · ${s.running}` : words;
   const d = s.doing;
   if (statusTone(s) !== "working" || !d || !d.tool || typeof stepWords !== "function" || HIDDEN_TOOLS.has(d.tool)) return words;
   const now = stepWords(d.tool, d.input || {}).now;
@@ -889,6 +893,9 @@ async function confirmClose(s, known) {
   const n = c.changes || 0;
   let detail = n ? `${n} uncommitted file${n === 1 ? "" : "s"} lost` : "Removes its worktree";
   if (c.amarchy) detail += " · amarchy runs from it, and goes back to its project's checkout";
+  // What it runs that hasn't ended (a test run, a helper) stops halfway: said whole.
+  const runs = c.running || [];
+  const stops = runs.length ? h("p", { class: "close-stops" }, `Stops what's still running: ${runs[0]}${runs.length > 1 ? ` (and ${runs.length - 1} more)` : ""}.`) : null;
   const yes = h("button", { class: "control wide danger", onclick: async () => {
     yes.disabled = true;
     try {
@@ -906,8 +913,8 @@ async function confirmClose(s, known) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
-  } }, n ? "Complete and discard changes" : "Complete mission ✓");
-  sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), yes,
+  } }, n ? "Complete and discard changes" : runs.length ? "Stop it and complete" : "Complete mission ✓");
+  sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), stops, yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
@@ -961,7 +968,9 @@ function sessionRow(s, groups, near = false) {
   const prio = !groups.includes("priority") && s.priority && s.priority !== "normal"
     ? glyph(s.priority, `prio ${s.priority}`) : null;
   const task = s.setup ? title(s) : (s.task || "New chat");
-  const bg = s.background > 0 ? ` · ${s.background} in the background` : "";
+  // Running says the first of them already: the others, if any.
+  const others = (s.background || 0) - (st === "running" ? 1 : 0);
+  const bg = others > 0 ? ` · ${others}${st === "running" ? " more" : ""} in the background` : "";
   const preview = s.setup ? "" : st === "waiting" ? s.asks || "" : s.said || "";
   return holdable(h("button", { class: `row session-row is-${tone}${s.priority === "low" ? " low" : ""}${s.unseen ? " unread" : ""}`,
                                 "data-id": s.id, onclick: () => { go(`#/s/${encodeURIComponent(s.id)}`); } },

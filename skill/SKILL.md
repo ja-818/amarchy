@@ -119,15 +119,18 @@ command's usage without running it (an option it doesn't know fails instead).
 
 - `amarchy list --compact`: all sessions as JSON, in list order: `id`, `repo`,
   `name`, `branch`, `path`, `status` (`waiting` = needs the user, `working`,
-  `idle`), `sleeping` (its Claude Code isn't running until the user types in it
+  `running` = its turn ended but something it started still runs to an end, a
+  test run or a helper, and its Claude goes on when that ends; `idle`),
+  `running` (what runs, in words), `serving` (a dev server or watcher it left
+  running: it never ends, so the session counts as idle), `sleeping` (its Claude Code isn't running until the user types in it
   or sends it something; it still shows as idle), `unseen` (idle, and finished a
   turn the user hasn't opened yet), `priority` (`high`, `normal`, `low`), `task`
   (what it's about: the user's name for it, else Claude Code's title cut down to
   "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current`
   (on screen), `agent` (the name its Claude goes by in `ListAgents` /
   `SendMessage`, empty until its Claude runs), `engine` (`chat`: the app's chat
-  engine, or `terminal`: Claude Code's own terminal app), `background` (Claude
-  Code background sessions running in its worktree).
+  engine, or `terminal`: Claude Code's own terminal app), `background` (how many
+  background tasks and Claude Code background sessions it has going).
 - `amarchy projects --json`: the user's projects and how many sessions each
   has, in the user's order (`amarchy projects order` prints just the names).
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all

@@ -58,7 +58,7 @@ Sessions:
                                         new sessions are normal
   amarchy group [project|priority|status] [on|off]
                                         group the list by project, priority (High, Normal, Low) and/or
-                                        status (Needs you, Working, Done, Idle), nested in the order you
+                                        status (Needs you, Working, Running, Done, Idle), nested in the order you
                                         turn them on (a new one goes inside the others); without
                                         on|off switches it, without anything prints the grouping
                                         outermost first; `group none` drops them all
@@ -684,7 +684,7 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission")
+               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission")
 
 
 def own_session_id():
@@ -2111,6 +2111,91 @@ def background_sessions(s, every=None):
             if (d.get("cwd") or "") == s["path"] or (d.get("cwd") or "").startswith(s["path"] + "/")]
 
 
+# A background command that serves rather than finishes: a dev server, a
+# watcher, a log followed. It runs until it's stopped, so it doesn't keep its
+# chat "Running" (Claude isn't waiting on it to go on); it's "Serving". Told
+# by what Claude called it (the task's description: "Start the dev server",
+# "Serve the app on port 8080") or by the command itself (npm run dev, vite,
+# python -m http.server, uvicorn...). A test run that starts a server of its
+# own on the way (Playwright's webServer) is still a run: its command and
+# its description say test, not serve.
+SERVING_SAID = re.compile(r"(?:\b(?:dev|web|http|app|api|static|local|preview|file)[ -]?server\b"
+                          r"|\b(?:start|starting|run|running|launch|launching|boot|restart|restarting)s?\s+(?:the\s+|a\s+)?(?:[\w-]+\s+){0,2}server\b"
+                          r"|\bserv(?:e|es|ing)\b|\bon port \d+|\btail(?:ing)? the logs?\b)"
+                          r"(?!(?:'s)?\s+(?:tests?|specs?|e2e|checks?|suite|build)\b)", re.I)
+SERVING_NOT = re.compile(r"\b(?:tests?|testing|e2e|specs?|checks?|suite|build|lint|playwright|pytest|benchmark)\b", re.I)
+SERVING_RUN = re.compile(r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|preview|watch)\b"
+                         r"|\bvite\s*(?:$|[;&|])|\b(?:vite|next|nuxt|astro)\s+(?:dev|preview|start)\b"
+                         r"|http\.server|\brunserver\b|\b(?:uvicorn|gunicorn|hypercorn|nodemon|live-server|webpack-dev-server)\b"
+                         r"|\bflask\s+run\b|\brails\s+s(?:erver)?\b|\bphp\s+-S\b|\bjekyll\s+serve\b|\bhugo\s+server\b"
+                         r"|\bamarchy\s+app\s+serve\b|--watch\b|\btail\s+-[fF]\b|\bjournalctl\b.*\s-f\b", re.I)
+_task_commands = {}     # task id -> its command ("" not found yet: (at, "") to look again later)
+
+
+def task_command(task_id):
+    """The command a background Bash task runs: its shell's, the one whose
+    output goes to Claude Code's tasks/<id>.output (its stdout). "" when
+    it can't be found (gone, or not a Bash task). Looked up once, and again
+    no sooner than a minute after it wasn't found."""
+    if not task_id or not re.fullmatch(r"[\w-]{1,64}", task_id):
+        return ""
+    known = _task_commands.get(task_id)
+    if known is not None and (known[1] or time.time() - known[0] < 60):
+        return known[1]
+    found = ""
+    end = f"/tasks/{task_id}.output"
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            if not os.readlink(f"/proc/{d}/fd/1").endswith(end):
+                continue
+        except OSError:
+            continue
+        line = " ".join(cmdline(d))
+        if "eval " in line:
+            found = re.sub(r"^.*?&& eval '?|'? < /dev/null.*$|' && pwd -P.*$", "", line, flags=re.S)
+            break
+        found = found or line
+    if len(_task_commands) > 500:
+        _task_commands.clear()
+    _task_commands[task_id] = (time.time(), found)
+    return found
+
+
+def task_serves(t):
+    """Whether a background task serves (a dev server, a watcher) rather than
+    runs to an end: see SERVING_SAID. Helpers (subagents) and watches
+    (Monitor) end, and Claude goes on when they do."""
+    if t.get("task_type") != "local_bash":
+        return False
+    said = t.get("description") or ""
+    # "Run e2e against the dev server" is a test run: when in doubt, it runs
+    # (a chat left Running costs less than a run stopped halfway).
+    return bool((SERVING_SAID.search(said) and not SERVING_NOT.search(said))
+                or SERVING_RUN.search(task_command(t.get("task_id") or "")))
+
+
+def task_words(t):
+    return " ".join(str(t.get("description") or t.get("summary") or t.get("command") or t.get("subagent_type")
+                        or "a task in the background").split())[:200]
+
+
+def background_runs(tasks, bgs):
+    """What a session has going in the background, split in two: what runs
+    to an end, and Claude goes on when it does (a test run, a build, a
+    helper, a busy /bg session), and what serves until it's stopped (a dev
+    server: task_serves). The words for each, in order."""
+    runs, serves = [], []
+    for t in tasks:
+        if isinstance(t, dict):
+            (serves if task_serves(t) else runs).append(task_words(t))
+    for d in bgs:
+        if d.get("status") not in (None, "", "idle"):
+            runs.append(" ".join(str(d.get("name") or "a background session").split())[:200])
+    return runs, serves
+
+
 def stop_background(s, only_idle=True):
     """Stop the session's background sessions (all of them, or those with
     nothing to do). Claude Code keeps their conversations: `claude attach`
@@ -3280,7 +3365,7 @@ def task_title(pane_title):
 
 # States, most urgent first, for the list grouped by status: one that finished
 # and you haven't opened yet ("Done") comes before the idle ones you have.
-STATUS_GROUPS = {state: i for i, state in enumerate(("waiting", "working", "done", "idle", "asleep"))}
+STATUS_GROUPS = {state: i for i, state in enumerate(("waiting", "working", "running", "done", "idle", "asleep"))}
 
 
 def status_group(s):
@@ -3687,9 +3772,17 @@ def session_view():
         s["age"] = age(s["id"]) if s["awake"] else ""
         # Claude Code background sessions (/bg) still running in its worktree, and on the
         # chat engine the background tasks its Claude runs (live.json's tasks).
-        s["background"] = len(background_sessions(s, background))
-        if engine(s) == "chat" and s["awake"]:
-            s["background"] += len(agent_live(s["id"]).get("tasks") or [])
+        bgs = background_sessions(s, background)
+        tasks = (agent_live(s["id"]).get("tasks") or []) if engine(s) == "chat" and s["awake"] else []
+        s["background"] = len(bgs) + len(tasks)
+        # Its turn ended, but something it started still runs to an end (a test
+        # run, a helper): it's at work, "running", not done; Claude Code wakes
+        # it when that ends, and it goes on (working, then idle). What only
+        # serves (a dev server) doesn't count: it never ends.
+        runs, serves = background_runs(tasks, bgs)
+        s["running"], s["serving"] = (runs or [""])[0], (serves or [""])[0]
+        if s["status"] == "idle" and runs and not s["sleeping"] and not s.get("setup"):
+            s["status"] = "running"
         s["priority"] = priority(s)
         # Done, and you haven't opened it since.
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
@@ -6812,11 +6905,14 @@ class AppConversation:
 
 def app_closing(s):
     """What closing a session would cost, for the phone to ask first (as
-    confirm_close does): its uncommitted files, and whether amarchy runs
-    from its worktree."""
+    confirm_close does): its uncommitted files, whether amarchy runs from
+    its worktree, and what it runs in the background that would stop
+    halfway (a test run, a helper; not a dev server, which only serves)."""
     path = Path(s["path"])
     changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.is_dir() else 0
-    return {"changes": changes, "amarchy": installed_from(path)}
+    tasks = (agent_live(s["id"]).get("tasks") or []) if engine(s) == "chat" else []
+    runs, _ = background_runs(tasks, background_sessions(s))
+    return {"changes": changes, "amarchy": installed_from(path), "running": runs}
 
 
 # ---- the wide layout's side panel (desk.js): a session's Changes and Details
@@ -8885,8 +8981,9 @@ def cmd_today(args):
     print("Chats:")
     for s in ss:
         r = s["today"]
-        state = r["state"] or s.get("status") or ""
-        print(f"  [{state}] {s.get('task') or s['id']}{': ' + r['goal'] if r['goal'] else ''}")
+        state = "running" if s.get("status") == "running" else r["state"] or s.get("status") or ""
+        running = f" (running: {s['running']})" if s.get("status") == "running" else ""
+        print(f"  [{state}] {s.get('task') or s['id']}{': ' + r['goal'] if r['goal'] else ''}{running}")
     if t["error"]:
         print(t["error"], file=sys.stderr)
     return 0

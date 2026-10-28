@@ -4,7 +4,8 @@
 // Close (asked first); a quiet one nudged; the Chats tab with the list. On a
 // computer: Today in the middle with the new chat under it, and its row
 // above the list. And a reply's goal block: never shown, the chat's goal and
-// state. With screenshots.
+// state. A chat whose turn ended while what it started still runs: at work,
+// "Running · what", never done, and closing it asks first. With screenshots.
 //
 //   node test/today-view.js          both layouts
 //   node test/today-view.js phone    one layout (phone | wide)
@@ -121,7 +122,11 @@ const CHATS = [
   { id: "proj-fresh", repo: "proj", name: "fresh", task: "Fix: login loop", status: "idle", unseen: true, engine: "chat", path: "/tmp/f", said: "The login loop came from a stale cookie; fixed.", today: T({ goal: "Fix the login loop" }) },
   { id: "proj-quiet", repo: "proj", name: "quiet", task: "Eval: json-render", status: "idle", engine: "chat", path: "/tmp/q", today: T({ goal: "Try json-render", state: "working", at: NOW - 4 * 86400 }) },
   { id: "proj-work", repo: "proj", name: "work", task: "Build: Today", status: "working", engine: "chat", path: "/tmp/w", today: T({ goal: "Make Today the home" }), priority: "high" },
+  // Its turn over (its goal block even says done), its e2e still running: at work.
+  { id: "proj-run", repo: "proj", name: "run", task: "Check: e2e chain", status: "running", running: "Run the full check, e2e and tour chain", background: 1,
+    engine: "chat", path: "/tmp/r", today: T({ goal: "Get the e2e chain green", state: "done", at: NOW - 3 * 86400 }) },
 ];
+const RUNNING = "Run the full check, e2e and tour chain";
 
 const LOOPS = [
   { key: "late1", kind: "due", what: "Fix the per-minute calc", who: "", due: iso(-1), nudge: "", since: "", chase: "", ref: "", line: "x" },
@@ -138,7 +143,7 @@ async function page(browser, layout, port) {
   p.on("pageerror", (e) => p.errors.push(e.message));
   await p.route("**/api/session/*/stream", (r) => r.fulfill({ status: 200, contentType: "text/event-stream", body: "retry: 600000\n\n" }));
   await p.route("**/api/session/*/composer", (r) => r.fulfill({ json: { engine: "chat", commands: [], models: [], model: "opus", mode: "default" } }));
-  await p.route("**/api/session/*/closing", (r) => r.fulfill({ json: { changes: 0 } }));
+  await p.route("**/api/session/*/closing", (r) => r.fulfill({ json: /proj-run/.test(r.request().url()) ? { changes: 0, running: [RUNNING] } : { changes: 0 } }));
   for (const what of ["send", "close", "answer", "interrupt", "keys"]) {
     await p.route(`**/api/session/*/${what}`, (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: {} }); });
   }
@@ -171,7 +176,42 @@ const click = (p, sel, label) => p.evaluate(({ sel, label }) => {
 // On the board, its tab (Chats or Tasks); elsewhere both are on one page.
 const tab = (p, which) => p.evaluate((which) => { if (boardOn() && board.tab !== which) boardTab(which); }, which);
 
+// A running chat: under At work with what runs, not Done, new or stalled, no
+// Complete on its card; completing it anyway asks first, saying the run stops.
+async function running(p, where) {
+  await tab(p, "chats");
+  check(where, await p.evaluate((what) => {
+    const c = document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run]");
+    return !!c && c.querySelector(".tpill.t-running").textContent.includes(`Running · ${what}`);
+  }, RUNNING), "a running chat: under At work, Running · what runs");
+  check(where, await p.evaluate(() => [".today-finish", ".today-yours", ".today-idle"].every((s) => !document.querySelector(`.today:not([hidden]) ${s} .tcard[data-id=proj-run]`))),
+        "not under Done, Needs you or Ready (nor Stalled)");
+  check(where, await p.evaluate(() => ![...document.querySelectorAll(".tcard[data-id=proj-run] .tbtn")].some((b) => /Complete/.test(b.innerText))), "no Complete mission on it");
+  check(where, await p.evaluate(() => /1 working · 1 running/.test(document.querySelector(".today:not([hidden]) .today-working .tsec-head").textContent)), "At work counts it: 1 working · 1 running");
+  await p.evaluate(() => { document.querySelector(".today:not([hidden]) .today-working").open = true; });
+  await p.screenshot({ path: path.join(SHOTS, `${where}-running.png`), fullPage: true });
+  await p.evaluate(() => { document.querySelector(".today:not([hidden]) .today-working").open = false; todayUI.open.delete("working"); });
+  await p.evaluate(() => todayComplete(row("proj-run")));
+  check(where, await until(p, (what) => { const s = document.querySelector(".sheet"); return !!s && s.textContent.includes(`Stops what's still running: ${what}`) && /Stop it and complete/.test(s.textContent); }, RUNNING),
+        "Complete anyway: asked first, saying the run stops");
+  check(where, !(await p.$(".mission")), "and not celebrated yet");
+  await sleep(500);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-running-close.png`) });
+  await p.evaluate(() => closeSheets());
+  check(where, !p.posts.some((x) => /proj-run\/close/.test(x.url)), "nothing closed");
+  // It ended: Claude goes on (Working), then it's done, as any chat.
+  const set = (o) => p.evaluate((o) => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === "proj-run" ? { ...x, ...o } : x)) }; refresh(); }, o);
+  await set({ status: "working", running: "", background: 0 });
+  check(where, await until(p, () => /Working/.test((document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run] .tpill") || {}).textContent || "")), "the run ended: Working");
+  await set({ status: "idle", unseen: true });
+  check(where, await until(p, () => /Done/.test((document.querySelector(".today:not([hidden]) .today-yours .tcard[data-id=proj-run] .tpill") || {}).textContent || "")), "then Done, new: under Needs you");
+  // Back as the test's chats are (the list as the host sends it).
+  await p.evaluate((chats) => { app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); }, CHATS);
+  await until(p, () => !!document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run]"));
+}
+
 async function common(p, where) {
+  await running(p, where);
   await tab(p, "chats");
   let t = await text(p, ".today:not([hidden])");
   const board = await p.evaluate(() => boardOn());
@@ -311,6 +351,7 @@ async function phone(browser, port) {
   check(where, await until(p, () => !app.session && app.tab === "today" && !!document.querySelector(".today:not([hidden])")), "sent: back on Today");
   await p.evaluate(() => document.querySelector(".home-tabs .tab[data-tab=chats]").click());
   check(where, await until(p, () => !document.querySelector(".list-view .list").hidden && document.querySelector(".today").hidden), "Chats: the list");
+  check(where, (await text(p, ".session-row[data-id=proj-run] .status")).startsWith(`Running · ${RUNNING}`), `the list says Running · what (${await text(p, ".session-row[data-id=proj-run] .status-line")})`);
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }
