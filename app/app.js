@@ -34,6 +34,7 @@ const ICONS = {
   organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  brand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M8.2 16.8 12 7l3.8 9.8M9.6 13.4h4.8"/></svg>',
   keys: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14.5h8"/></svg>',
   image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
@@ -576,56 +577,36 @@ const GROUPINGS = [["project", "project", "Project"], ["priority", "high", "Prio
                    ["status", "status", "Status"], ["none", "organize", "Not grouped"]];
 const SORTINGS = [["priority", "high", "Priority"], ["newest", "newest", "Newest first"], ["oldest", "oldest", "Oldest first"]];
 
-function organizeMenu() {
-  const v = app.organize || app.view || {};
-  const groups = v.group || [], sort = v.sort || "priority";
-  const row = (icon, label, on, level, pick) =>
-    h("button", { class: `menu-item${on ? " on" : ""}`, onclick: pick },
-      h("span", { class: "label" }, glyph(icon, "icon"), label),
-      on ? (level ? h("span", { class: "val level" }, level) : glyph("check", "val")) : null);
-  return [
-    h("div", { class: "menu-head top" }, "Group by",
-      h("button", { class: "menu-close", "aria-label": "Close", title: "Close (Esc)", onclick: () => closeOrganize() }, glyph("close"))),
-    ...GROUPINGS.map(([what, icon, label]) => {
-      const on = what === "none" ? !groups.length : groups.includes(what);
-      const level = on && what !== "none" && groups.length > 1 ? String(groups.indexOf(what) + 1) : "";
-      const next = what === "none" ? [] : on ? groups.filter((g) => g !== what) : [...groups, what];
-      return row(icon, label, on, level, () => organizeList(next, sort));
-    }),
-    h("div", { class: "menu-head" }, "Sort by"),
-    ...SORTINGS.map(([what, icon, label]) => row(icon, label, sort === what, "", () => organizeList(groups, what))),
-    h("div", { class: "menu-head" }, "Projects"),
-    row("order", "Order projects…", false, "", () => { closeOrganize(); orderProjects(); }),
-  ];
-}
-
-// The group & sort menu's box (the phone's list, beside Claude in the wide
-// layout), with the keys of a menu: Esc closes it, back to its button.
-function organizeBox(button, redraw) {
-  const menu = h("div", { class: "organize-menu", role: "menu", tabindex: "-1", hidden: true });
-  menu.button = button;
-  menuKeys(menu, { close: () => { menu.hidden = true; redraw(); button().focus(); } });
-  return menu;
-}
-
-// Its button opens it (with the keys, the cursor on its first line) or closes it.
-function toggleOrganize(menu, button, redraw) {
-  menu.hidden = !menu.hidden;
-  redraw();
-  if (!menu.hidden) menuFocus(menu);
-  else if (menu.contains(document.activeElement)) button.focus();
-}
-
-// The group & sort menu goes (the board's, by its search).
-// The keys, if they were in it, go back to its button.
-function closeOrganize() {
-  for (const menu of [typeof board !== "undefined" && board.organize]) {
-    if (!menu) continue;
-    const had = menu.contains(document.activeElement);
-    menu.hidden = true;
-    if (had) menu.button().focus();
-  }
-  refresh();
+// Group & sort, a sheet (the board's: the Amarchy menu, o on the board):
+// any of the groupings, nested in the order you turn them on (each saying
+// its level), the sort inside them, and your projects' order. It stays up
+// as you pick, each pick shown at once.
+function organizeSheet() {
+  const box = h("div", { class: "menu organize" });
+  const draw = () => {
+    const v = app.organize || app.view || {};
+    const groups = v.group || [], sort = v.sort || "priority";
+    const row = (icon, label, on, level, pick) =>
+      h("button", { class: `menu-item${on ? " on" : ""}`, type: "button", role: "menuitemcheckbox", "aria-checked": String(on),
+                    onclick: () => { pick(); draw(); } },
+        h("span", { class: "label" }, glyph(icon, "icon"), label),
+        on ? (level ? h("span", { class: "val level" }, level) : glyph("check", "val")) : null);
+    keepFocus(box, () => box.replaceChildren(
+      h("div", { class: "section" }, "Group by"),
+      ...GROUPINGS.map(([what, icon, label]) => {
+        const on = what === "none" ? !groups.length : groups.includes(what);
+        const level = on && what !== "none" && groups.length > 1 ? String(groups.indexOf(what) + 1) : "";
+        const next = what === "none" ? [] : on ? groups.filter((g) => g !== what) : [...groups, what];
+        return row(icon, label, on, level, () => organizeList(next, sort));
+      }),
+      h("div", { class: "section" }, "Sort by"),
+      ...SORTINGS.map(([what, icon, label]) => row(icon, label, sort === what, "", () => organizeList(groups, what))),
+      h("div", { class: "section" }, "Projects"),
+      h("button", { class: "menu-item", type: "button", onclick: () => orderProjects() },
+        h("span", { class: "label" }, glyph("order", "icon"), "Order projects…"))));
+  };
+  draw();
+  sheet(sheetHead("Group & sort", "Your chats, on every screen"), box);
 }
 
 async function organizeList(group, sort) {
@@ -769,7 +750,7 @@ class SessionView {
 
   build() {
     // Its head (ui.js uiChatHead), a computer's open chat's: Back, its name and state, Complete, ⋯.
-    this.titleEl = h("header", { class: "chat-head phone-head" });
+    this.titleEl = h("header", { class: "chat-head phone-head ui-bar" });
     const bar = this.titleEl;
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({

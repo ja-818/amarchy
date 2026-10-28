@@ -15,10 +15,14 @@ the change.
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
 | `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
-| `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar. | the board's Automations, Settings, Keys |
+| `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
+| `uiAction(icon, label, act, {title, key, cls})` | A bar's one thing to do, outlined (its key beside its words; an icon alone on a phone). | New chat, Complete |
+| `uiBrand(act)` | The Ⓐ: the Amarchy menu, as Omarchy's mark opens its own; its dot, an automation that failed. | the board's bar |
+| `uiMenu(title, items)` | A menu: a keyboard's card on a computer (type to find, ↑ ↓ ↵), a sheet on the phone; items `{label, detail, icon, key, act, group, desk}`. | the Amarchy menu |
+| `.ui-bar` | One bar, as Omarchy's: where you are on the left, what you look at in the middle, icons in slots of one size and one outlined action on the right. | the board's bar, an open chat's (both layouts) |
 | `uiScore({streak, today, risk, title, act})` | Your score in a pill: the streak's flame (dim and pulsing while it's at risk), today's missions. A tap opens the rest. | the board's summary line |
 | `uiTiles([{n, label, on}])` | A few big numbers, each its word under it (`on`: lit, a record). | Your missions |
-| `uiBars([{n, label}])` | A few days' counts as bars, the last (today) lit. | Your missions |
+| `uiChart([{n, label}])` | A few days' counts as bars, the last (today) lit. | Your missions |
 
 ## Theming
 
@@ -37,7 +41,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |
 | `--score-flame`, `--score-bg`, `--score-border` | Your score's flame and pill |
-| `--tile-bg`, `--tile-border`, `--tile-on`, `--bar-bg`, `--bar-on` | Big numbers and bars, and the lit one |
+| `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
 | `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
 

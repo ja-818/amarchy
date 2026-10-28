@@ -414,7 +414,7 @@ function deskStart() {
   desk.terminal = makeTerminal();
   desk.changes = new DeskChanges();
   desk.details = new DeskDetails();
-  desk.head = h("header", { class: "desk-head chat-head" });
+  desk.head = h("header", { class: "desk-head chat-head ui-bar" });
   desk.chatSlot = h("div", { class: "desk-chat" });
   desk.column = h("main", { class: "column" }, desk.head, desk.chatSlot);
   desk.side = buildSide();
@@ -1537,53 +1537,31 @@ function saveCommand(s) {
   });
 }
 
-function organizePicker() {
-  const v = app.view || {};
-  const groups = v.group || [], sort = v.sort || "priority";
-  picker({ title: "Group & sort", items: [
-    ...GROUPINGS.map(([what, icon, label]) => {
-      const on = what === "none" ? !groups.length : groups.includes(what);
-      const next = what === "none" ? [] : on ? groups.filter((g) => g !== what) : [...groups, what];
-      return { label: `Group by ${label.toLowerCase()}`, icon, detail: on ? "on" : "", act: () => organizeList(next, sort) };
-    }),
-    ...SORTINGS.map(([what, icon, label]) => ({ label: `Sort: ${label.toLowerCase()}`, icon, detail: sort === what ? "on" : "",
-                                                act: () => organizeList(groups, what) })),
-    { label: "Order projects…", icon: "order", act: () => orderProjects() }] });
-}
-
-// The amarchy menu (Ctrl+Alt+M): everything you can do from here, with its key.
+// The Amarchy menu (the Ⓐ, m on the board, Ctrl+Alt+M): everything you
+// can do from here, each with its key. A keyboard's card on a computer, a
+// sheet on the phone (ui.js uiMenu); what needs keys or a chat open, on a
+// computer only.
 function deskMenu() {
-  const s = row(keyedId());
-  const on = (x) => (x ? "on" : "");
-  const items = [
-    { label: "New chat", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
-    { label: "New project", icon: "plus", key: "Ctrl+Alt+P", act: () => newProject() },
-    { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", act: () => chatPicker() },
-    desk.current ? { label: "Back to the board", icon: "back", key: "Esc", act: () => boardBack() } : null,
-  ];
-  if (s) items.push(
-    !desk.current ? null : { label: "View", icon: "status", group: () => ({ title: "View", items: viewItems() }) },
-    { label: "Run", icon: "send", group: () => ({ title: "Run", items: [
+  const s = app.desk ? row(keyedId()) : null;
+  uiMenu("Amarchy", [
+    { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardCompose() },
+    { label: "Group & sort…", icon: "organize", key: "O", act: () => organizeSheet() },
+    { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
+    desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,
+    s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
+    s && desk.current ? { label: "Run", icon: "send", desk: true, group: () => ({ title: "Run", items: [
       { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
       { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, () => toTerminal("term")) },
-      { label: "The terminal", key: "Ctrl+Alt+→", act: () => toTerminal("term") }] }) },
-    { label: "This chat", icon: "more", group: () => ({ title: s.task || where(s), items: sessionItems(s) }) });
-  items.push(
-    { label: "Chats", icon: "status", group: () => ({ title: "Chats", items: [
-      { label: "Next", key: "Ctrl+Alt+J", act: () => step(1) },
-      { label: "Previous", key: "Ctrl+Alt+K", act: () => step(-1) },
-      { label: "Search", key: "Ctrl+Alt+S", act: () => deskSearch() },
-      { label: "Group & sort", act: () => organizePicker() },
-      { label: "Complete one…", act: () => picker({ title: "Complete which chat's mission?", items: ((app.view && app.view.sessions) || []).map((x) =>
-        ({ label: x.task || x.name, detail: where(x), act: () => confirmClose(x) })) }) }] }) },
-    { label: "Automations", icon: "clock", detail: "what runs by itself", act: () => automationsSheet() },
-    { label: "Settings", icon: "gear", group: () => ({ title: "Settings", items: [
-      { label: "Notifications, layout…", act: () => openSettings() },
-      { label: "Theme, font, wallpaper…", key: "Ctrl+Alt+T", act: () => openLook() },
-      { label: "Sound…", detail: "the chimes, each played as you pick it", act: () => soundSheet(false) },
-      { label: "Keys", act: () => showKeys() }] }) });
-  picker({ title: "Amarchy", items: items.filter(Boolean) });
+      { label: "The terminal", key: "Ctrl+Alt+→", act: () => toTerminal("term") }] }) } : null,
+    s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
+    { label: "Automations", icon: "clock", detail: autoState.failed ? `${autoState.failed} failed last time` : "what runs by itself", act: () => automationsSheet() },
+    { label: "Theme, font and wallpaper…", icon: "image", key: "Ctrl+Alt+T", act: () => openLook() },
+    { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(false) },
+    { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", act: () => (app.desk ? newProject() : newProjectSheet()) },
+    { label: "Settings", icon: "gear", act: () => openSettings() },
+    { label: "Keys", icon: "keys", key: "?", desk: true, act: () => showKeys() },
+  ]);
 }
 
 // What the window shows: the chat, the side panel's tabs, its width.
@@ -1636,7 +1614,7 @@ function showKeys() {
       ["Enter  or  o", "Open the chat (a folded group: unfold it)"], ["1 – 4", "Pick that answer on the card"],
       ["x", "Complete the chat's mission, with Undo"], ["r", "Review: open the link a done chat gave"],
       ["s", "Seen: off Needs you without opening it"], ["Tab", "The card's buttons, one by one"],
-      ["← / →  or  h / l", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["?", "These keys"]]),
+      ["← / →  or  h / l", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Group & sort"], ["?", "These keys"]]),
     ...part("In a chat", [["Esc", "Back to the board"], ["Enter / Shift+Enter", "Send / a new line"],
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),

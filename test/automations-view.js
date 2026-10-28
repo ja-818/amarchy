@@ -129,19 +129,16 @@ async function run(browser, port, layout, home) {
   const shot = async (name) => { await page.waitForTimeout(400); return page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) }); };
   await page.goto("/");
   await page.waitForFunction(() => typeof automationsSheet === "function" && document.readyState === "complete");
-  const clock = page.locator(".board-tools .auto-btn").first();      // the board's bar, on the phone too
-  await clock.waitFor({ state: "attached", timeout: 8000 });
-  check(layout, await clock.isVisible(), "the clock is in the board's bar");
-  if (layout === "wide") {
-    await shot("bar");
-    await page.locator(".board-tools .ui-tool[aria-label=Settings]").click({ button: "right" });      // the cog's right click: the Amarchy menu
-    const item = page.locator(".picker-row", { hasText: "Automations" }).first();
-    await item.waitFor({ timeout: 3000 }).catch(() => {});
-    check(layout, await item.isVisible().catch(() => false), "the menu has Automations");
-    await item.click();
-  } else {
-    await clock.click();
-  }
+  // The Ⓐ in the board's bar (its dot: an automation that failed): its menu has Automations.
+  const brand = page.locator(".board-head .ui-brand.auto-btn").first();
+  await brand.waitFor({ state: "attached", timeout: 8000 });
+  check(layout, await brand.isVisible(), "the Ⓐ is in the board's bar");
+  await shot("bar");
+  await brand.click();
+  const item = page.locator(layout === "wide" ? ".picker-row" : ".sheet .menu-item", { hasText: "Automations" }).first();
+  await item.waitFor({ timeout: 3000 }).catch(() => {});
+  check(layout, await item.isVisible().catch(() => false), "the menu has Automations");
+  await item.click();
   await page.locator(".auto-row").first().waitFor({ timeout: 8000 });
   const rows = await page.locator(".auto-row").evaluateAll((els) => els.map((e) => e.dataset.id));
   const real = sh("systemctl", "--user", "list-timers", "--all", "--no-legend", "--plain").split("\n")

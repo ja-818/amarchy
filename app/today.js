@@ -21,8 +21,8 @@
 // thumb's slip costs nothing. A chat says where it stands in the goal block
 // each reply ends with (its today: goal, state, asks; bin/amarchy
 // chat_reply). Your commitments are your loops file's (amarchy today
-// --loops), which Today only reads: Done and Chase go to your assistant,
-// which keeps it (loop_tell).
+// --loops), which Today only reads: Done, Chase, Ask and New chat go to your
+// assistant, which keeps it (loop_tell).
 
 const TODAY_STALE = 2 * 86400;      // s idle before a chat is stalled: Close or Ask status (bin/amarchy STALE_DAYS)
 const TODAY_NUDGE = "Where does this stand? Finish what's left for this chat's goal, or tell me what you need from me to close it.";
@@ -30,7 +30,7 @@ const TODAY_UNDO = 3500;            // ms an answer waits for Undo before it goe
 const TODAY_UNDO_CLOSE = 5000;      // ms a close waits for Undo
 const TODAY_SHOW = 5;               // Finish's rows before "+N more"
 const todayUI = {
-  asking: new Set(),    // tasks whose Ask Jaken box is open
+  asking: new Map(),    // tasks whose box is open: key -> "ask" (Ask Jaken) or "session" (New chat)
   askText: new Map(),   // what you wrote in it, kept across redraws
   answers: new Map(),   // a chat's questions being answered here: id -> {key, picks}
   told: new Map(),      // a loop or chat acted on here, until the view says so too: key -> what
@@ -362,7 +362,9 @@ function todayBlocked(s) {
 }
 
 // One of your loops: who (or Due), what (a tap shows all of it), when, and
-// Done or Chase for your assistant.
+// Done, Chase, Ask or New chat for your assistant. A loop whose line names
+// its chat (`(chat <id>)`, written there by your assistant once it started
+// one) has Open chat instead of New chat.
 function todayLoop(l, v) {
   const sent = (v.today.sent || {})[l.key] || (todayUI.told.has(l.key) ? { action: todayUI.told.get(l.key) } : null);
   const late = l.kind === "due" ? todayDay(l.due) < 0 : l.chase && todayDay(l.chase) <= 0;
@@ -376,7 +378,8 @@ function todayLoop(l, v) {
     try {
       await api("/api/today/loop", { key: l.key, action, text });
       todayUI.askText.delete(l.key);
-      toast(action === "done" ? `Told ${name}: done` : action === "chase" ? `${name} drafts the follow-up for you` : `Sent to ${name}`);
+      toast(action === "done" ? `Told ${name}: done` : action === "chase" ? `${name} drafts the follow-up for you`
+          : action === "session" ? `${name} starts a chat for it` : `Sent to ${name}`);
     } catch (e) {
       todayUI.told.delete(l.key);
       todayRedraw();
@@ -386,35 +389,44 @@ function todayLoop(l, v) {
   const can = !!v.today.assistant;
   const open = todayUI.expand.has(l.key);
   const chase = l.kind === "waiting";
-  const asking = todayUI.asking.has(l.key);
-  const said = { done: `Sent to ${name}: done`, chase: `${name} drafts the follow-up`, ask: `Sent to ${name}` };
+  const asking = todayUI.asking.get(l.key);
+  const session = asking === "session";
+  const chat = l.chat && rowOf(l.chat);
+  const said = { done: `Sent to ${name}: done`, chase: `${name} drafts the follow-up`, ask: `Sent to ${name}`, session: `${name} starts a chat for it` };
+  const ask = (mode) => { todayUI.asking.set(l.key, mode); todayRedraw(); };
+  // Ask needs words; a new chat's note is optional (your assistant writes its brief from the loop).
+  const go = (value) => { if (session || value) act(asking, value); };
   // Its head: who, what (a tap shows all of it). Under it, one line: when (and
   // since), and its buttons: Follow up (your assistant drafts the message to
-  // whoever you wait on), Ask (tell your assistant what to do about it), Done.
+  // whoever you wait on), Ask (tell your assistant what to do about it), New
+  // chat (your assistant starts one just for it) or Open chat, Done.
   const meta = sent ? h("span", { class: "tcard-meta done" }, said[sent.action] || `Sent to ${name}`)
     : h("span", { class: `tcard-meta${late ? " late" : ""}` }, [when, chase && l.since && l.chase ? `asked ${todayAgo(l.since)}` : ""].filter(Boolean).join(" · "));
+  const openChat = chat ? h("button", { class: "tbtn loop-chat", type: "button", title: `Open ${chat.task || chat.id}, the chat for it`, onclick: () => todayOpen(chat) }, "Open chat") : null;
   const box = asking ? (() => {
-    const field = h("textarea", { class: "tcard-ask", rows: 2, placeholder: `What should ${name} do about it?`,
+    const field = h("textarea", { class: "tcard-ask", rows: 2,
+                                  placeholder: session ? `Anything for the new chat? (optional: ${name} writes its brief)` : `What should ${name} do about it?`,
                                   oninput: () => todayUI.askText.set(l.key, field.value),
                                   onkeydown: (e) => {
-                                    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (field.value.trim()) act("ask", field.value.trim()); }
+                                    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(field.value.trim()); }
                                     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); todayUI.asking.delete(l.key); todayRedraw(); }
                                   } });
     field.value = todayUI.askText.get(l.key) || "";
     requestAnimationFrame(() => { if (field.isConnected && document.activeElement !== field) field.focus({ preventScroll: true }); });
     return h("div", { class: "tcard-askbox" }, field, h("div", { class: "tcard-actions" },
       uiButton("Cancel", () => { todayUI.asking.delete(l.key); todayRedraw(); }, false, "quiet"),
-      uiButton(`Send to ${name}`, () => { if (field.value.trim()) act("ask", field.value.trim()); }, true)));
+      uiButton(session ? "Start a chat for this" : `Send to ${name}`, () => go(field.value.trim()), true)));
   })() : null;
   return uiCard({ kind: chase ? "chase" : l.kind === "due" ? "due" : "someday", hue: chase ? todayHue(l.who) : "due", chip: chase ? l.who : "", id: null,
     title: h("span", { class: `tcard-what${open ? " open" : ""}` }, l.what), label: l.what,
     open: () => { if (open) todayUI.expand.delete(l.key); else todayUI.expand.add(l.key); todayRedraw(); },
     body: [box],
-    actions: asking ? [] : [meta, ...(sent || !can ? [] : [
+    actions: asking ? [] : sent || !can ? [meta, chat ? openChat : null] : [meta,
       chase ? h("button", { class: `tbtn${late ? " primary" : ""}`, type: "button", title: `${name} drafts a message to ${l.who || "them"} for you to send`,
                             onclick: () => act("chase") }, "Follow up") : null,
-      h("button", { class: "tbtn", type: "button", title: `Tell ${name} what to do about it`, onclick: () => { todayUI.asking.add(l.key); todayRedraw(); } }, `Ask ${name}…`),
-      uiButton("Done", () => act("done"), !chase && late, "loop-done")])] });
+      h("button", { class: "tbtn", type: "button", title: `Tell ${name} what to do about it`, onclick: () => ask("ask") }, `Ask ${name}…`),
+      chat ? openChat : h("button", { class: "tbtn loop-chat", type: "button", title: `${name} starts a chat just for this, with its brief`, onclick: () => ask("session") }, "New chat…"),
+      uiButton("Done", () => act("done"), !chase && late, "loop-done")] });
 }
 
 // A chat: its project, its name, where it stands; its goal (and in Tasks
@@ -538,7 +550,10 @@ function missionComplete(ss, title) {
   }
   const m = missionsNow();
   const left = app.view ? Math.max(0, todayCount(app.view, typeof board !== "undefined" && boardOn() ? "chats" : null)) : 0;
-  const clear = left === 0;
+  // Done ones still to complete count too: all clear is nothing needs you and nothing's left to complete.
+  const gone = new Set(ss.map((s) => s.id));
+  const more = app.view ? todayParts(app.view).done.filter((s) => !gone.has(s.id) && s.assistant !== "main").length : 0;
+  const clear = left === 0 && more === 0;
   const v = app.view || {};
   if (v.sound !== "off") {
     // A step (a whole tone) higher for each in a combo, up to an octave.
@@ -579,11 +594,12 @@ function missionComplete(ss, title) {
   const took = ss.length === 1 && missionPending.get(ss[0].id) ? missionTook(missionPending.get(ss[0].id).took) : "";
   const go = () => {
     el.remove();
-    const next = document.querySelector(".today:not([hidden]) .today-yours .today-go");
+    const next = document.querySelector(".today:not([hidden]) .today-yours .today-go")
+      || document.querySelector(".today:not([hidden]) .tcard.k-done .tbtn.complete");
     if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); }
   };
   const nextBtn = h("button", { class: "tbtn primary mission-next", type: "button", onclick: (e) => { e.stopPropagation(); go(); } },
-    left ? "Next mission →" : "Keep going →");
+    left || more ? "Next mission →" : "Keep going →");
   const el = h("div", { class: `mission${clear ? " clear" : ""}${m.combo > 1 ? " combo" : ""}`, role: "status", "aria-live": "polite", onclick: () => el.remove() }, burst,
     h("div", { class: "mission-card" },
       h("div", { class: "mission-tick" }, glyph("check")),
@@ -592,7 +608,7 @@ function missionComplete(ss, title) {
       earned.length ? h("div", { class: "mission-earned" }, ...earned) : null,
       bar,
       h("div", { class: "mission-stats" }, [`${missionOrdinal(m.n)} today`, took ? `done in ${took}` : "",
-        left ? `${left} still need${left === 1 ? "s" : ""} you` : "nothing else needs you"].filter(Boolean).join(" · ")),
+        left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you"].filter(Boolean).join(" · ")),
       nextBtn));
   const esc = (e) => { if (e.key === "Escape" && el.isConnected) { e.preventDefault(); e.stopPropagation(); el.remove(); } };
   window.addEventListener("keydown", esc, true);
@@ -633,7 +649,7 @@ function missionsSheet() {
   sheet({ key: "missions" }, sheetHead("Your missions", meta),
     uiTiles([{ n: m.n, label: "today", on: record }, { n: m.streak, label: m.streak === 1 ? "day streak" : "days streak" },
              { n: m.best, label: "best day" }, { n: m.total, label: "all time" }]),
-    uiBars(days),
+    uiChart(days),
     list.length ? uiSection("missions-done", "Completed today", { count: list.length }, h("ol", { class: "missions-list" }, ...list)) : null);
 }
 
@@ -798,6 +814,6 @@ function todaySettings() {
     save.disabled = false;
   } }, "Save");
   return [h("div", { class: "section" }, "Today"),
-    h("p", {}, "Your home page: what needs you, what's due, who to chase, and the chats to finish. Your commitments come from a loops file, one per line (- [ ] 2026-10-30 · what, - [ ] waiting · who · what · chase 10-30). Today only reads it: Done and Chase go to your assistant, which keeps it."),
+    h("p", {}, "Your home page: what needs you, what's due, who to chase, and the chats to finish. Your commitments come from a loops file, one per line (- [ ] 2026-10-30 · what, - [ ] waiting · who · what · chase 10-30). Today only reads it: Done, Follow up, Ask and New chat go to your assistant, which keeps it."),
     h("div", { class: "today-setting" }, field, save)];
 }

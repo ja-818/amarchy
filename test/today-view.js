@@ -133,6 +133,8 @@ const LOOPS = [
   { key: "tom1", kind: "due", what: "Submit the fellowship", who: "", due: iso(1), nudge: "", since: "", chase: "", ref: "", line: "y" },
   { key: "week1", kind: "due", what: "Demo to Felipe", who: "", due: iso(3), nudge: "", since: "", chase: "", ref: "", line: "z" },
   { key: "wait1", kind: "waiting", what: "the valuation doc", who: "Felipe", due: "", nudge: "", since: iso(-4), chase: iso(0), ref: "", line: "w" },
+  // One a chat is at already: its line names it.
+  { key: "chat1", kind: "due", what: "Try json-render (chat proj-quiet)", who: "", due: iso(2), nudge: "", since: "", chase: "", ref: "", chat: "proj-quiet", line: "v" },
 ];
 
 async function page(browser, layout, port) {
@@ -286,6 +288,21 @@ async function common(p, where) {
   await sleep(300);
   const asked = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "ask");
   check(where, !!asked && asked.body.key === "tom1" && asked.body.text === "Draft it for me tonight", `what to do goes to your assistant (${JSON.stringify(asked && asked.body)})`);
+  // New chat…: a chat just for it, its note optional (Enter in an empty box starts it).
+  check(where, await tapIn("Demo to Felipe", "New chat…"), "New chat… tapped");
+  check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard-ask") && /optional/.test(document.activeElement.placeholder)), "its box, the note optional");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-loop-chat.png`) });
+  await p.keyboard.press("Enter");
+  await sleep(300);
+  const started = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "session");
+  check(where, !!started && started.body.key === "week1" && !started.body.text, `a new chat for it goes to your assistant (${JSON.stringify(started && started.body)})`);
+  check(where, /Jaken starts a chat for it/.test(await text(p, ".today:not([hidden])")), "the loop says so");
+  // A loop whose line names its chat: Open chat, no New chat.
+  check(where, !(await tapIn("Try json-render", "New chat…")), "a loop with its chat: no New chat…");
+  check(where, await tapIn("Try json-render", "Open chat"), "Open chat tapped");
+  check(where, await until(p, () => desk.current === "proj-quiet" || here() === "#/s/proj-quiet"), "its chat opens");
+  await p.evaluate(() => { if (desk.current) boardBack(true); else go("#/today"); });
+  await until(p, () => !desk.current && !/^#\/s\//.test(here()) && !!document.querySelector(".today:not([hidden])"));
   await tab(p, "chats");
 
   check(where, await click(p, ".tcard.k-stale .tbtn", "Ask status"), "a stalled chat asked");
@@ -300,6 +317,10 @@ async function common(p, where) {
   check(where, await until(p, () => !!document.querySelector(".tcard.completing .tcard-complete")), "Mission complete, on its card");
   check(where, await until(p, () => !!document.querySelector(".mission .mission-kicker") && /1st today/.test(document.querySelector(".mission-stats").innerText)),
         "then the celebration: MISSION COMPLETE, the 1st today");
+  check(where, /1 more to complete/.test(await text(p, ".mission-stats")) && !(await p.evaluate(() => !!document.querySelector(".mission.clear"))),
+        "another done one left: not all clear, it's still to complete");
+  const first = await p.evaluate(() => [...document.querySelectorAll(".mission-earned .tpill")].map((x) => x.innerText.trim()));
+  check(where, first.includes("Day 4 streak") && first.includes("10th mission"), `the streak's day and a milestone earned (${first.join(", ")})`);
   await sleep(700);
   await p.screenshot({ path: path.join(SHOTS, `${where}-complete.png`) });
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
@@ -315,7 +336,7 @@ async function common(p, where) {
   check(where, await until(p, () => /2nd today/.test((document.querySelector(".mission-stats") || {}).innerText || "")), "the 2nd today");
   const got = await earned(p);
   check(where, got.includes("Combo ×2") && got.includes("New record"), `it earned a combo and a record (${got.join(", ")})`);
-  check(where, await until(p, () => document.querySelector(".mission.clear") || /still need/.test(document.querySelector(".mission-stats").innerText)), "all clear, or what's left");
+  check(where, await until(p, () => !!document.querySelector(".mission.clear") && /All clear/i.test(document.querySelector(".mission-kicker").innerText)), "the last one: ALL CLEAR");
   await sleep(700);
   await p.screenshot({ path: path.join(SHOTS, `${where}-combo.png`) });
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
@@ -326,7 +347,7 @@ async function common(p, where) {
   await sleep(500);
   const sheetSays = await p.evaluate(() => ({
     tiles: [...document.querySelectorAll(".sheet .ui-tile")].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
-    bars: document.querySelectorAll(".sheet .ui-bar").length,
+    bars: document.querySelectorAll(".sheet .ui-chart-bar").length,
     rows: [...document.querySelectorAll(".sheet .missions-row")].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
   }));
   check(where, sheetSays.tiles.join("|") === "2 today|4 days streak|1 best day|11 all time", `its numbers (${sheetSays.tiles.join("|")})`);
@@ -459,8 +480,23 @@ async function wide(browser, port) {
   check(where, await until(p, () => !!document.querySelector(".tasks-board .board-today .tsec")
                                    && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: the board, the whole window");
   check(where, await p.evaluate(() => !document.querySelector(".panel, .ball, .board-classic, .today-btn")), "no list beside it: the board is the only layout");
-  check(where, await p.evaluate(() => [...document.querySelector(".board-head-in").children].map((c) => c.className.split(" ").pop()).join(",")) === "board-switch,board-find,board-tools,board-new-btn",
-        "the bar: Chats | Tasks, the search (and Group & sort), the tools, New chat");
+  check(where, await p.evaluate(() => { const kids = [...document.querySelector(".board-head-in").children];
+    return kids.length === 4 && [".ui-brand", ".board-switch", ".board-search", ".board-new-btn.ui-action"].every((sel, i) => kids[i].matches(sel)); }),
+        "the bar: the Ⓐ (its menu), Chats | Tasks, the search, New chat (outlined)");
+  // One bar for both: the board's and an open chat's are .ui-bar, their slots one height.
+  check(where, await p.evaluate(() => !!document.querySelector(".board-head-in.ui-bar") && !!document.querySelector(".desk-head.ui-bar")), "the board's bar and a chat's are one bar");
+  await p.keyboard.press("m");
+  check(where, await until(p, () => !!document.querySelector(".picker") && /Group & sort/.test(document.querySelector(".picker").innerText)), "m: the Amarchy menu, Group & sort in it");
+  await p.keyboard.press("Escape");
+  await p.keyboard.press("o");
+  check(where, await until(p, () => /Group by/.test((document.querySelector(".sheet") || {}).innerText || "")), "o: Group & sort");
+  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Project/.test(b.innerText)).click());
+  check(where, await until(p, () => (app.organize || app.view).group.includes("project") && document.querySelector(".sheet .menu-item.on") && /Project/.test(document.querySelector(".sheet .menu-item.on").innerText)),
+        "a grouping picked: on at once, the sheet still up");
+  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Not grouped/.test(b.innerText)).click());
+  await p.keyboard.press("Escape");
+  await until(p, () => !document.querySelector(".sheet-back"));
+  await p.evaluate(() => boardRefocus());
   check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard > .today-go")), "the keys on the first card at once");
   // One card, one surface: no stripe on its left, its head no box of its own.
   const look = await p.evaluate(() => {
@@ -489,7 +525,7 @@ async function wide(browser, port) {
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .tcard-text").click());
   check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
   check(where, await p.evaluate(() => !!document.querySelector(".desk-head .board-back") && /Fix/.test(document.querySelector(".desk-head").innerText)
-                                   && !!document.querySelector(".desk-head .head-btn.complete")), "over it: Back, its name, Complete");
+                                   && !!document.querySelector(".desk-head .ui-action.complete")), "over it: Back, its name, Complete");
   await p.evaluate(() => boardBack());
   await p.evaluate(() => boardOpen("proj-work"));
   await until(p, () => desk.current === "proj-work");

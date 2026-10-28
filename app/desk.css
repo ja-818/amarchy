@@ -49,9 +49,6 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 .stage { position: relative; flex: 1; min-height: 0; display: flex; }
 .desk .control:hover { background: var(--control-hover); }
 .desk .searchbox input { font-size: var(--body); }
-.desk .control.organize { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); font-size: 16px; }
-.desk .organize-menu { right: 0; top: 100%; }
-.desk .organize-menu .menu-item:hover { background: var(--selected-bg); }
 
 /* ---- the chat, in the middle */
 
