@@ -334,6 +334,16 @@ async function wide(browser, port) {
   check(where, await until(p, () => !board.open), "sent: back on the board");
   check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !n || n.contains(document.activeElement); }), "the next one lit, the keys on it");
 
+  // Ctrl+Alt+X on the board: the open chat closes (with Undo), from its box too.
+  await p.evaluate(() => todayOpen(row("proj-quiet")));
+  await until(p, () => board.open === "proj-quiet");
+  await p.evaluate(() => board.chat.input.focus());
+  await p.keyboard.press("Control+Alt+KeyX");
+  check(where, await until(p, () => !board.open && !!document.querySelector(".undo-toast") && /Closed Eval/.test(document.querySelector(".undo-toast").innerText)),
+        "Ctrl+Alt+X: the open chat closes, with Undo");
+  await sleep(5600);
+  check(where, p.posts.some((x) => /proj-quiet\/close/.test(x.url)), "closed once Undo's gone");
+
   // Dictating on a computer: the keys go to the box (Enter stops it there, the next sends).
   await p.evaluate(() => todayOpen(row("proj-work")));
   await until(p, () => board.open === "proj-work");

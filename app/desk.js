@@ -1453,8 +1453,8 @@ const DESK_KEYS = {
   KeyL: () => classicTerminal(),
   KeyR: () => runProject(), KeyC: () => pickCommand(),
   KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => deskMode(boardOn() ? "chats" : "tasks"),
-  ArrowUp: () => desk.current && setPriority(row(desk.current), "up"),
-  ArrowDown: () => desk.current && setPriority(row(desk.current), "down"),
+  ArrowUp: () => keyedId() && setPriority(row(keyedId()), "up"),
+  ArrowDown: () => keyedId() && setPriority(row(keyedId()), "down"),
   KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(), KeyA: () => barDrop(),
 };
 
@@ -1703,8 +1703,30 @@ async function addProject(body) {
   }
 }
 
+// The chat the keys act on (rename, priority, close, the menu's This chat):
+// the one in the middle; on the board, the one open over it, else the card
+// the keyboard is on.
+function keyedId() {
+  if (!boardOn()) return desk.current;
+  if (board.open) return board.open;
+  const t = document.activeElement && document.activeElement.closest(".ticket, .tcard[data-id]");
+  return t ? t.dataset.id : null;
+}
+
+// What needs the chat's terminal (Run): on the board, the chat in the
+// standard layout first, its terminal beside it.
+function besideTerminal(again) {
+  if (!boardOn()) return false;
+  const id = keyedId();
+  if (!id) { toast("Open a chat first"); return true; }
+  deskMode("chats");
+  go2(id);
+  setTimeout(again, 400);
+  return true;
+}
+
 function renameSession() {
-  const s = row(desk.current);
+  const s = row(keyedId());
   if (!s) return;
   picker({ title: `Name for ${s.task || where(s)}`, text: true, value: s.title || "",
            note: "↵ names it; empty, it goes back to Claude's title",
@@ -1728,11 +1750,17 @@ async function setPriority(s, dir) {
 }
 
 async function closeCurrent() {
-  const s = row(desk.current);
-  if (s) confirmClose(s);
+  const s = row(keyedId());
+  if (!s) return;
+  if (!boardOn()) return confirmClose(s);
+  // The board's way: at once with Undo when nothing would be lost (today.js).
+  if (s.assistant === "main") return toast("Your assistant stays: it isn't closed");
+  if (board.open === s.id) boardBack(true);
+  todayClose(s);
 }
 
 async function runProject(name) {
+  if (besideTerminal(() => runProject(name))) return;
   const s = row(desk.current);
   if (!s) return;
   try {
@@ -1752,6 +1780,7 @@ async function runProject(name) {
 }
 
 async function pickCommand() {
+  if (besideTerminal(() => pickCommand())) return;
   const s = row(desk.current);
   if (!s) return;
   let cmds = [];
@@ -1793,7 +1822,7 @@ function organizePicker() {
 
 // The amarchy menu (Ctrl+Alt+M): everything you can do from here, with its key.
 function deskMenu() {
-  const s = row(desk.current);
+  const s = row(keyedId());
   const on = (x) => (x ? "on" : "");
   const items = [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+N", act: () => newSession() },
@@ -1802,7 +1831,7 @@ function deskMenu() {
       act: () => deskMode(boardOn() ? "chats" : "tasks") },
   ];
   if (s) items.push(
-    { label: "View", icon: "status", group: () => ({ title: "View", items: viewItems() }) },
+    boardOn() ? null : { label: "View", icon: "status", group: () => ({ title: "View", items: viewItems() }) },
     { label: "Run", icon: "send", group: () => ({ title: "Run", items: [
       { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
       { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
@@ -1824,7 +1853,7 @@ function deskMenu() {
       { label: "Theme, font, wallpaper…", key: "Ctrl+Alt+T", act: () => openLook() },
       { label: "Sound…", detail: "the chimes, each played as you pick it", act: () => soundSheet(false) },
       { label: "Keys", act: () => showKeys() }] }) });
-  picker({ title: "Amarchy", items });
+  picker({ title: "Amarchy", items: items.filter(Boolean) });
 }
 
 // What the window shows: the chat, the side panel's tabs, its width.
