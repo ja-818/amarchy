@@ -212,7 +212,7 @@ body::before {
 
 .control {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 38px;
+  min-height: var(--control-h);
   padding: 6px 12px;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
@@ -222,7 +222,7 @@ body::before {
 .control.on { color: var(--selected-text); }
 .control.accent { border-color: var(--accent); color: var(--accent); }
 .control.accent:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.control.wide { width: 100%; margin-top: 10px; min-height: 46px; font-weight: 700; }
+.control.wide { width: 100%; margin-top: 10px; min-height: var(--control-h); font-weight: 700; }
 .control.danger { border-color: var(--danger); color: var(--danger); }
 .control.danger:active { background: color-mix(in srgb, var(--danger) 18%, transparent); }
 

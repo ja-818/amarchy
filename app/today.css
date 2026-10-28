@@ -31,20 +31,19 @@
 /* The bar: where you are (Chats | Tasks), what you look for (the search, by
    it Group & sort), the tools (Automations, Settings, Keys), and the one
    thing to start (New chat, filled). */
-.board-head-in { max-width: 920px; margin: 0 auto; padding: 14px 24px 6px; display: flex; align-items: center; gap: 12px; }
-.board-head .control { min-height: 38px; }
+.board-head-in { padding-top: 14px; padding-bottom: 6px; display: flex; align-items: center; gap: 12px; }
 .board-find { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .board-tools { flex: none; display: flex; gap: 2px; }
-.board-new-btn { flex: none; gap: 8px; padding: 4px 8px 4px 14px; font-weight: 700; white-space: nowrap;
+.board-new-btn { flex: none; height: var(--control-h); gap: 8px; padding: 0 8px 0 14px; font-weight: 700; white-space: nowrap;
                  color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
 .desk .board-new-btn:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
 .board-new-btn kbd { font: inherit; font-size: var(--caption); padding: 0 6px; border-radius: 4px; line-height: 18px;
                      background: color-mix(in srgb, var(--primary-text) 16%, transparent); }
 .board-gap { flex: 1; }
 .board-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
-.board-scroll .today { max-width: 920px; margin: 0 auto; padding: 18px 24px 48px; }
+.board-scroll .today { padding-top: 18px; padding-bottom: 48px; }
 .board-scroll .welcome { margin: 10vh auto 0; }
-.board-new { max-width: 920px; margin: 0 auto; padding: 18px 24px 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.board-new { padding-top: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .board-new[hidden] { display: none; }
 .board-new .start-chat { width: 100%; max-width: none; }
 
@@ -55,14 +54,14 @@
 .home-view .offline { margin: 8px 12px 0; }
 .home-view .tasks-board { position: relative; inset: auto; z-index: auto; flex: 1; min-height: 0; }
 @media (max-width: 719px) {
-  .board-head-in { flex-wrap: wrap; gap: 8px; padding: 10px 12px 4px; }
+  .board-head-in { flex-wrap: wrap; gap: 8px; padding-top: 10px; padding-bottom: 4px; }
   .board-find { order: 3; flex-basis: 100%; }
   .board-tools { margin-left: auto; }
-  .board-new-btn { width: 38px; padding: 0; justify-content: center; }
+  .board-new-btn { width: var(--control-h); padding: 0; justify-content: center; }
   .board-new-btn > span:not(.glyph), .board-new-btn kbd { display: none; }
   .board-new-btn .glyph svg { width: 20px; height: 20px; }
-  .board-scroll .today { padding: 10px 12px 40px; }
-  .board-new { padding: 10px 12px 0; }
+  .board-scroll .today { padding-top: 10px; padding-bottom: 40px; }
+  .board-new { padding-top: 10px; }
 }
 /* The phone's (no keys to show; the search at 16px: less, and iOS zooms in on it). */
 body:not(.desk) .board-search input { font-size: 16px; }
@@ -83,7 +82,7 @@ body:not(.desk) .board-new-btn kbd, body:not(.desk) .ui-search-key, body:not(.de
 body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
 
 /* Tasks' search, in the middle of its bar (tasks.js boardSearch). */
-.board-search { flex: 1; min-width: 0; height: 38px; }
+.board-search { flex: 1; min-width: 0; }
 .board-search input { font-size: var(--body); }
 .tcard mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
 .tcard-text.found { display: flex; gap: 8px; align-items: baseline; }
@@ -99,7 +98,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 
 /* The board's Group & sort (the list's menu), by the search. */
 .board-organize-wrap { position: relative; flex: none; }
-.desk .board-head .board-organize { width: 38px; height: 38px; min-height: 38px; border-color: transparent; background: none; color: var(--text-muted); }
+.board-head .board-organize { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); border-color: transparent; background: none; color: var(--text-muted); }
 .desk .board-head .board-organize:hover, .board-head .board-organize[aria-expanded="true"] { color: var(--text); background: var(--control-hover); }
 .board-organize-wrap .organize-menu { right: 0; left: auto; top: calc(100% + 6px); }
 /* Inside a group, the next grouping's name over its cards (a project, under High priority). */

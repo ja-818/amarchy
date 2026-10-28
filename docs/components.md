@@ -33,6 +33,8 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |
+| `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
+| `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
 
 ## Keeping the phone and the computer together
 

@@ -581,7 +581,7 @@ function deskHead() {
   const tab = sideTab();
   const goal = desk.chat && desk.chat.id === s.id ? desk.chat.goal : null;      // what the chat is for (chat.js keepItems)
   const toggle = ([key, label, keys]) => h("button", {
-    class: `head-btn${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key),
+    class: `head-btn tool${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key), "aria-label": label,
     title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
   // The chat's head (ui.js), as the phone's; here the side panel's tabs too, while it's closed.
   keepFocus(desk.head, () => desk.head.replaceChildren(...uiChatHead(s, {

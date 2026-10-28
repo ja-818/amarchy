@@ -10,7 +10,7 @@
 
 /* A readable column on a wide screen, the dock lined up with it. */
 .chat-conv {
-  padding: 18px 16px 12px;
+  padding-top: 18px; padding-bottom: 12px;
   display: flex; flex-direction: column; gap: 14px;
   width: 100%; max-width: var(--chat-column, 760px); margin: 0 auto;
 }
@@ -22,7 +22,7 @@
 
 .chat .earlier {
   align-self: center;
-  min-height: 36px; padding: 6px 14px;
+  min-height: var(--control-h); padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   color: var(--link);
@@ -412,13 +412,13 @@
 .card-actions.stack { flex-direction: column; align-items: stretch; }
 .card-actions .hint { margin-left: auto; }
 .cta {
-  min-height: 46px; padding: 10px 16px;
+  min-height: var(--control-h); padding: 8px 16px;
   font-weight: 700; text-align: center;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
   background: var(--control-bg);
 }
-.cta.opt { display: block; min-height: 46px; }
+.cta.opt { display: block; min-height: var(--control-h); }
 .cta:hover:not(:disabled) { background: var(--control-hover); }
 .cta:active:not(:disabled), .cta.chosen { background: var(--control-pressed); }
 .cta.primary { color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
@@ -441,7 +441,7 @@
 
 /* A computer: the pointer's hover; a card's choices a little tighter. */
 @media (hover: hover) and (pointer: fine) {
-  .opt { min-height: 42px; padding: 9px 12px; }
+  .opt { min-height: var(--control-h); padding: 8px 12px; }
 }
 
 /* Tables break a word only when it can't fit (not anywhere, as text does). */
@@ -458,7 +458,7 @@
 .pill {
   display: inline-flex; align-items: center; gap: 5px;
   flex: 0 1 auto; min-width: 0;
-  min-height: 44px; padding: 3px 8px 3px 9px;
+  min-height: var(--control-h); padding: 3px 8px 3px 9px; box-sizing: border-box;
   color: var(--text-muted);
   font-size: var(--caption);
   border: 1px solid var(--border-faint);

@@ -9,7 +9,7 @@
 .chat[hidden] { display: none; }
 
 .term-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border-faint); }
-.term-bar .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; white-space: nowrap; }
+.term-bar .control { min-height: var(--control-h); padding: 4px 10px; font-size: var(--caption); font-weight: 700; white-space: nowrap; }
 .term-bar .control .glyph { font-size: 14px; }
 .term-bar .term-gap { flex: 1; }
 .term-bar .control[hidden] { display: none; }
@@ -27,7 +27,7 @@
 .term-banner .text b { color: var(--selected-text); }
 .term-banner .text span { color: var(--text-muted); font-size: var(--caption); }
 .term-banner .actions { display: flex; gap: 6px; }
-.term-banner .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; }
+.term-banner .control { min-height: var(--control-h); padding: 4px 10px; font-size: var(--caption); font-weight: 700; }
 
 /* The terminal fills what's left; on the phone it's on the app's glass, as
    the chat is. */

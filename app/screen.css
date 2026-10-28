@@ -20,7 +20,7 @@
 
 .screen-stage {
   width: 100%; max-width: var(--chat-column, 760px); margin: 0 auto; box-sizing: border-box;
-  padding: 18px 16px 12px; display: flex; flex-direction: column; gap: 18px;
+  padding: 18px var(--page-pad) 12px; display: flex; flex-direction: column; gap: 18px;
 }
 .turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .turn-you:empty { display: none; }
@@ -126,7 +126,7 @@
 .art-toggle .chev { flex: none; width: 14px; height: 14px; opacity: 0.55; transform: rotate(90deg); transition: transform 0.15s ease; }
 .art.open .art-toggle .chev { transform: rotate(-90deg); }
 .art-btn {
-  flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 4px 12px; box-sizing: border-box;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-h); padding: 4px 12px; box-sizing: border-box;
   font: inherit; font-size: var(--caption); font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; cursor: pointer;
   border: 1px solid var(--control-border); border-radius: 999px; background: var(--control-bg);
 }
@@ -396,7 +396,7 @@ button.act-row:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .bq.answered .bq-q::before { content: "✓ "; color: var(--success); }
 .bq-opts { display: flex; flex-wrap: wrap; gap: 8px; }
 .bq-opt {
-  flex: 1 1 0; min-width: 6em; min-height: 40px; padding: 8px 12px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
+  flex: 1 1 0; min-width: 6em; min-height: var(--control-h); padding: 8px 12px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
   border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); overflow-wrap: anywhere;
 }
 .bq-opt:hover { background: var(--control-hover); }
