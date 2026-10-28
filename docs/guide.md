@@ -285,8 +285,10 @@ host's chats without anything else installed.
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot
   pasted** into it (`⌘V`, `Ctrl+V`), or a picture dropped on it or picked, goes
-  with what you wrote: Claude sees it with its first message. `Enter` starts it,
-  and the chat opens; `Esc` in its empty box puts it away.
+  with what you wrote: Claude sees it with its first message. `Enter` starts it
+  and you stay on the board, on with the rest (as after sending any chat
+  something): it works under **At work**, and shows under **Needs you** once it's
+  done. `Esc` in its empty box puts it away.
 - **A chat opened** takes the whole window, its box ready: answer, approve, write.
   **← Back** or `Esc` (always, but in a terminal: what you were writing stays) is
   the board again, where you were, the keys on the card you opened; so is sending

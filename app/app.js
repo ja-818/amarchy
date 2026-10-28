@@ -1613,8 +1613,9 @@ function swipeToClose(back, card) {
 // on, the host's for every new chat (Opus until you pick another here, for
 // this chat and the ones after, on every device). Under the list on the
 // phone; on a computer, the middle of the window (wide: desk.js's
-// newSession, Ctrl+Alt+N), where Enter starts it. started(id): where to go
-// once it has started (the phone opens it).
+// newSession, Ctrl+Alt+N), where Enter starts it. Started, it isn't opened:
+// you stay where you were, as after sending any chat something. started(id):
+// what else to do then.
 function newChat({ wide = false, started = null } = {}) {
   let repo = store.get("last-project");
   let picked = false;       // you picked the project for this one: no guessing
@@ -1817,10 +1818,13 @@ function newChat({ wide = false, started = null } = {}) {
     try {
       const images = tray.map((a) => ({ type: a.type, data: a.data }));
       const { id } = await api("/api/new", { repo, prompt: field.value, model: model(), ...(images.length ? { images } : {}) });
+      // It works on it; you stay where you were, on with the rest. It's
+      // under At work, and asks you (Needs you) once it's done.
+      const where = projectName(repo);
       reset();
       field.blur();
+      toast(`Started in ${where}: it shows under Needs you once it's done`);
       if (started) started(id);
-      else go(`#/s/${encodeURIComponent(id)}`);
     } catch (e) {
       toast(e.message);
     }

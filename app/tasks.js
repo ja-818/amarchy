@@ -18,7 +18,7 @@
 const board = {
   el: null, box: null, head: null, slot: null, scroll: null,
   composing: false,  // the new chat's box at the top
-  waitFor: null,     // a chat just started: opened once the list has it
+  waitFor: null,     // a chat its address asks for that the list hasn't yet: opened once it has
   tab: "chats",      // Chats (your chats) or Tasks (your loops): the one you were on (boardBuild)
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
@@ -256,11 +256,11 @@ function boardCompose() {
 
 function boardComposeShow() {
   if (!board.slot) return;
-  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
+  // Started: the box goes, the board stays (the chat is at work on it).
+  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: true, started: () => {
     board.composing = false;
     boardComposeShow();
-    board.waitFor = id;
-    if (row(id)) boardOpen(id);
+    boardRefocus();
   } });
   board.slot.hidden = !board.composing;
   if (board.composing) {

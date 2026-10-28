@@ -284,6 +284,15 @@ async function phone(browser, port) {
   check(where, await p.evaluate(() => !document.querySelector(".list-view .dock").hidden && document.activeElement === app.newChat.field), "+: the new chat's box, its keyboard up");
   await p.evaluate(() => document.activeElement.blur());
   check(where, await until(p, () => document.querySelector(".list-view .dock").hidden), "left empty, it goes again");
+  // Started: you stay on Today (it shows there once it's done), as after sending any chat something.
+  await p.route("**/api/new", (r) => r.fulfill({ json: { id: "proj-work" } }));
+  await p.evaluate(() => document.querySelector(".hero .new-btn").click());
+  await p.keyboard.type("Look into the search page");
+  await p.evaluate(() => document.querySelector(".list-view .start-chat .send").click());
+  await sleep(500);
+  check(where, await p.evaluate(() => !app.session && app.tab === "today" && /Started in Proj/.test((document.querySelector(".toast") || {}).innerText || "")),
+        "a new chat started: you stay on Today");
+  await p.unroute("**/api/new");
   const kept = await p.evaluate(async () => {
     const sc = document.querySelector(".list-view .scroll");
     sc.scrollTop = 300;
@@ -507,7 +516,10 @@ async function wide(browser, port) {
   });
   check(where, await until(p, () => !!document.querySelector(".board-new .tray .att.image img")), "a screenshot pasted into the new chat: on it");
   await p.keyboard.press("Enter");
-  check(where, await until(p, () => desk.current === "proj-work"), "started: the chat opens");
+  check(where, await until(p, () => document.querySelector(".board-new").hidden), "started: the box goes");
+  await sleep(400);
+  check(where, await p.evaluate(() => !desk.current && getComputedStyle(document.querySelector(".tasks-board")).display !== "none"
+                                   && /Started in Proj/.test((document.querySelector(".toast") || {}).innerText || "")), "and you stay on the board, on with the rest");
   check(where, made.length === 1 && made[0].prompt === "Fix what this shows" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
         `the picture goes with it (${JSON.stringify(made.map((x) => ({ ...x, images: (x.images || []).length })))})`);
   check(where, await p.evaluate(() => !document.querySelector(".board-new .tray .att")), "and the box is empty again");
