@@ -510,7 +510,19 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // The board's Chats, grouped as you group the list (by priority, by
   // project): its groups, what asks you first in each (todayGrouped).
   const groups = (app.organize || v).group || [];
-  if (board && only === "chats" && groups.length && groups[0] !== "status") return [...nodes, ...todayGrouped(v, p, groups, tk)];
+  if (board && only === "chats" && groups.length && groups[0] !== "status") {
+    // Grouped too, what needs you (an answer, a look at what it did) comes
+    // first, then what's done (Review, Complete), then your groups for the rest.
+    const needs = [...p.asks, ...p.blocked, ...p.fresh];
+    const order = new Map((v.sessions || []).map((x, i) => [x.id, i]));
+    needs.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    const cardOf = (x) => p.asks.includes(x) ? tk(todayAsk)(x) : p.blocked.includes(x) ? tk(todayBlocked)(x) : tk(todayChat, "fresh")(x);
+    nodes.push(todaySection("yours", "Needs you", { count: needs.length }, needs.map(cardOf)));
+    if (!needs.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
+    const all = p.done.length >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${p.done.length}`) : null;
+    nodes.push(todaySection("finish", "Done", { count: p.done.length, extra: all }, p.done.map(tk(todayChat, "done"))));
+    return [...nodes, ...todayGrouped(v, p, groups, tk, new Set([...needs, ...p.done].map((x) => x.id)))];
+  }
   // At work on top, folded, its count in sight; then what needs you (asks,
   // blocked, finished and not seen yet, your tasks due); then what's done
   // (Review, Complete); then every other chat, open: none is out of sight.
@@ -546,11 +558,11 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
 // each project, in your order), the next grouping's names over its cards
 // inside, and in each, what asks you first, then the rest as the list has
 // them. Each card says where it stands, so nothing that's done waits unseen.
-function todayGrouped(v, p, groups, tk) {
+function todayGrouped(v, p, groups, tk, shown = new Set()) {
   const card = (s) => p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
   const label = (s, g) => (g === "project" ? projectName(s.repo) : groupLabel(s, g));
-  const first = (v.sessions || []).filter((s) => !s.setup && s.assistant !== "main" && !todayUI.closing.has(s.id));
+  const first = (v.sessions || []).filter((s) => !s.setup && s.assistant !== "main" && !todayUI.closing.has(s.id) && !shown.has(s.id));
   const sections = new Map();
   for (const s of first) {
     const k = label(s, groups[0]);

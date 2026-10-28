@@ -353,14 +353,21 @@ async function wide(browser, port) {
   // Grouped as the list is: by priority (High first, what asks you first in each), by project.
   await p.evaluate(() => { app.organize = { group: ["priority"], sort: "priority" }; refresh(); });
   const grouped = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
-  check(where, grouped[0] === "High priority" && grouped.includes("Normal priority") && !grouped.includes("Needs you"), `by priority: its groups (${grouped.join(", ")})`);
-  check(where, /Build: Today/.test(await text(p, ".board-today .tsec")) && !!(await p.$(".board-today .tsec .prio.high")), "the high one on top, its mark on it");
-  const normal = await p.evaluate(() => { const sec = [...board.box.querySelectorAll(".tsec")].find((x) => /normal/i.test(x.textContent)); return sec ? [...sec.querySelectorAll(".tcard")].map((c) => c.className) : []; });
-  const firstIdle = normal.findIndex((c) => !/k-ask|k-blocked/.test(c)), lastAsk = normal.map((c) => /k-ask|k-blocked/.test(c)).lastIndexOf(true);
-  check(where, lastAsk < 0 || lastAsk < firstIdle || firstIdle < 0, `in a group, what asks you first (${normal.join(" | ")})`);
+  const clear = await p.evaluate(() => /Nothing needs you/.test(board.box.innerText));
+  check(where, (grouped[0] === "Needs you" || (clear && grouped[0] === "Done")) && grouped.includes("High priority") && grouped.includes("Normal priority"),
+        `by priority: Needs you (or that nothing does) first, Done, then its groups (${grouped.join(", ")})`);
+  check(where, grouped.indexOf("High priority") < grouped.indexOf("Normal priority"), "High before Normal");
+  check(where, /Build: Today/.test(await p.evaluate(() => [...board.box.querySelectorAll(".tsec")].find((x) => /^High/.test(x.querySelector(".tsec-title").textContent)).innerText))
+               && !!(await p.$(".board-today .tsec .prio.high")), "the high one in High, its mark on it");
+  const inGroups = await p.evaluate(() => [...board.box.querySelectorAll(".tsec")].filter((x) => /priority$/.test(x.querySelector(".tsec-title").textContent))
+    .flatMap((x) => [...x.querySelectorAll(".tcard")].map((c) => c.className)));
+  check(where, !inGroups.some((c) => /k-ask|k-blocked|k-fresh/.test(c)), "what needs you isn't in the groups too");
+  await p.evaluate(() => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === "proj-done2" ? { ...x, unseen: true, today: { ...x.today, state: "" } } : x)) }; refresh(); });
+  const unseenFirst = await p.evaluate(() => { const sec = board.box.querySelector(".tsec"); return sec && sec.querySelector(".tsec-title").textContent === "Needs you" && !!sec.querySelector(".tcard[data-id=proj-done2]"); });
+  check(where, unseenFirst, "grouped, a chat you haven't opened is under Needs you, first");
   await p.evaluate(() => { app.organize = { group: ["project"], sort: "priority" }; refresh(); });
   const byProject = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
-  check(where, byProject.includes("Proj") && byProject.includes("Other"), `by project: one group each (${byProject.join(", ")})`);
+  check(where, byProject.includes("Proj") && !byProject.includes("High priority"), `by project: one group each (${byProject.join(", ")})`);
   await p.screenshot({ path: path.join(SHOTS, "wide-by-project.png") });
   await p.evaluate(() => { app.organize = { group: [], sort: "priority" }; refresh(); });
   check(where, /Needs you/i.test(await text(p, ".board-today")), "not grouped: Needs you, Done… again");
