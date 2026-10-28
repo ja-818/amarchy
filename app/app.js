@@ -11,8 +11,9 @@ const app = { view: null, key: "", user: "", online: true, list: null, session: 
 const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-// The glyphs of amarchy's list (Nerd Font icons), when the
-// look's font has them; else the drawings below and plain marks.
+// The glyphs of amarchy's list (Nerd Font icons), for what has no drawing
+// below (ICONS, used first: they never wait on a font), when the look's
+// font has them; else plain marks.
 const NERD = {
   waiting: "\u{F009E}", idle: "\u{F012C}", done: "\u{F05E0}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
   back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
@@ -31,6 +32,8 @@ const ICONS = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>',
   organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   keys: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14.5h8"/></svg>',
   image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
@@ -62,11 +65,13 @@ function projectName(repo) {
   return String(repo || "").split(/[-_]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
-// An icon: the Nerd Font glyph, or the drawing / plain mark without one.
+// An icon: its drawing, else the Nerd Font glyph, else a plain mark.
 function glyph(name, cls) {
   const el = h("span", { class: `glyph${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
-  if (app.nerd && NERD[name]) el.textContent = NERD[name];
-  else if (ICONS[name]) el.innerHTML = ICONS[name];
+  // A drawing first: it never waits on a font (a Nerd Font's glyph is blank
+  // until the font has come, and for good if it doesn't: Send's arrow, the mic).
+  if (ICONS[name]) el.innerHTML = ICONS[name];
+  else if (app.nerd && NERD[name]) el.textContent = NERD[name];
   else el.textContent = PLAIN[name] || "";
   return el;
 }

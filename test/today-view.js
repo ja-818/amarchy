@@ -391,6 +391,8 @@ async function phone(browser, port) {
   await p.evaluate(() => { board.scroll.scrollTop = 120; document.querySelector(".ticket[data-id=proj-work] .today-go").click(); });
   check(where, await until(p, () => app.session && app.session.id === "proj-work"), "a card opens its chat");
   shapes.phoneHead = await p.evaluate(HEAD);
+  check(where, await until(p, () => !!document.querySelector(".chat-dock .cbtn.send svg") && !!document.querySelector(".chat-dock .cbtn.mic svg")),
+        "Send and the mic are drawings: they never wait on the font");
   await p.screenshot({ path: path.join(SHOTS, "phone-chat-open.png") });
   await p.evaluate(() => go("#/"));
   check(where, await until(p, () => !app.session && !!document.querySelector(".home-view .tasks-board") && board.scroll.scrollTop === 120), "back: the board, where it was");
@@ -454,6 +456,8 @@ async function wide(browser, port) {
   await p.evaluate(() => boardOpen("proj-work"));
   await until(p, () => desk.current === "proj-work");
   const wideHead = await p.evaluate(HEAD);
+  check(where, await until(p, () => !!document.querySelector(".chat-dock .cbtn.send svg") && !!document.querySelector(".chat-dock .cbtn.mic svg")),
+        "Send and the mic are drawings: they never wait on the font");
   if (shapes.phoneHead) check("both", wideHead === shapes.phoneHead, `an open chat's head is the same on both${wideHead === shapes.phoneHead ? "" : `\n    phone ${shapes.phoneHead}\n    wide  ${wideHead}`}`);
   await p.evaluate(() => boardBack());
 
