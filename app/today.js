@@ -1,6 +1,6 @@
 // ---- Today: what to do now, without reading a chat
 //
-// The app's home (the phone's first tab; on a computer, Tasks: tasks.js).
+// The app's home (the phone's first tab; on a computer, the board: tasks.js).
 // One queue, in the order things cost you:
 //
 // - Your move: what a chat asks you (its question's buttons, a permission's
@@ -177,8 +177,7 @@ function todaySummary(v, only = null) {
 // ---- doing
 
 function todayOpen(s) {
-  if (boardOn()) return boardOpen(s.id);      // Tasks: the whole window (tasks.js)
-  if (app.desk && typeof go2 === "function") return go2(s.id);
+  if (app.desk) return boardOpen(s.id);      // a computer's: the whole window (tasks.js)
   app.fromToday = s.id;      // sent there, the phone comes back here (app.js SessionView)
   go(`#/s/${encodeURIComponent(s.id)}`);
 }
@@ -265,11 +264,11 @@ function todayPermit(s, choice) {
 
 // ---- drawing: one card for everything
 //
-// Every item on Today is the same card: a stripe in its color on the left
-// (the project's, or the person's for a loop), a head (its project or who,
-// its name, and a pill that says where it stands), a body (the question, the
-// goal, what it last said), and its actions. Sections are the same too: a
-// small head with a count, folded or not.
+// Every item on Today is the same card, one surface: a head (its project or
+// who in its color, its name, and a pill that says where it stands), a body
+// (the question, the goal, what it last said), and its actions. The whole of
+// it lights under the pointer and under the keys, as one. Sections are the
+// same too: a small head with a count, folded or not.
 
 const TODAY_PILLS = { ask: "Asks you", permission: "Permission", secret: "A secret", blocked: "Blocked", done: "Done",
                       working: "Working" };
@@ -436,7 +435,7 @@ function todayLoop(l, v) {
       chase ? h("button", { class: `tbtn${late ? " primary" : ""}`, type: "button", title: `${name} drafts a message to ${l.who || "them"} for you to send`,
                             onclick: () => act("chase") }, "Follow up") : null,
       h("button", { class: "tbtn", type: "button", title: `Tell ${name} what to do about it`, onclick: () => { todayUI.asking.add(l.key); todayRedraw(); } }, `Ask ${name}…`),
-      todayBtn("Done", () => act("done"), !chase && late)])] });
+      todayBtn("Done", () => act("done"), !chase && late, "loop-done")])] });
 }
 
 // A chat: its project, its name, where it stands; its goal (and in Tasks
@@ -459,7 +458,7 @@ function todayChat(s, kind) {
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
   const complete = finished && !main ? todayBtn("Complete mission", () => todayComplete(s), true, "complete") : null;
-  const seenBtn = kind === "fresh" && !finished ? todayBtn("Seen", () => todaySeen(s), false, "quiet") : null;
+  const seenBtn = kind === "fresh" && !finished ? todayBtn("Seen", () => todaySeen(s), false, "quiet seen") : null;
   return todayCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
@@ -672,7 +671,8 @@ function todayKey(v) {
 
 function boardTabNow() { return typeof board !== "undefined" && board.tab === "tasks" ? "tasks" : "chats"; }
 
-function boardOn() { return !!app.desk && typeof desk !== "undefined" && desk.mode === "tasks"; }
+// A computer's: the board (tasks.js) is the home, each chat a card.
+function boardOn() { return !!app.desk && typeof desk !== "undefined"; }
 
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
 function todayFill(box, force) {
@@ -680,7 +680,7 @@ function todayFill(box, force) {
   if (!force && box.dataset.key === key) return;
   box.dataset.key = key;
   const board = box.classList.contains("board-today");
-  const scroller = box.closest(".scroll, .today-scroll, .board-scroll");
+  const scroller = box.closest(".scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
   keepFocus(box, () => box.replaceChildren(...todayNodes({ board, top: !box.classList.contains("phone-today"), only: board ? boardTabNow() : null })));
   if (scroller) scroller.scrollTop = top;
@@ -692,13 +692,6 @@ function todayRedraw() {
   for (const box of document.querySelectorAll(".today")) todayFill(box);
   if (!app.desk && !app.session && app.listEl) renderList();      // the header's count
   if (app.desk && typeof modeButtons === "function") modeButtons();
-}
-
-// A box Today fills, kept drawn by the list's changes (app.js refresh).
-function todayBox() {
-  const box = h("div", { class: "today" });
-  todayFill(box);
-  return box;
 }
 
 // Settings → Today: the loops file.

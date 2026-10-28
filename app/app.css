@@ -595,6 +595,11 @@ th { font-weight: 700; }
 .start-chat.wide .prompt textarea { min-height: 96px; font-size: var(--body); }
 .start-chat.wide .new-under .hint { margin-left: auto; }
 .start-chat.wide .cta.go { min-height: 38px; padding: 6px 22px; }
+/* Its pictures (a screenshot pasted, dropped or picked), over the box; a drop on it, the box dashed. */
+.start-chat .tray { padding: 2px 0 0; }
+.start-chat.dropping .prompt { border-color: var(--accent); border-style: dashed; }
+.start-chat .mic.pic { color: var(--text-muted); }
+.start-chat .mic.pic:hover { color: var(--text); }
 
 .keys { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .keys .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; }

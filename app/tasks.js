@@ -1,242 +1,231 @@
-// ---- Tasks: your chats as tickets, the whole window (a computer's)
+// ---- the board: a computer's whole window, your chats and tasks as cards
 //
-// The other way to work on a computer, beside Chats (the list on the left,
-// one chat in the middle): no list, only Today's queue (today.js) with every
-// chat a ticket: its project, its state, its goal and what it last said,
-// with what it asks you as buttons. Opened (a click, Enter), the chat takes
-// the whole window, live (chat.js): answer, approve, write. Back (the
-// button, Esc) is the board again, where you were; and so is sending it
-// something: it works on that, and the next that's your move is lit, Enter
-// to open it.
+// Today's queue (today.js), every chat a card: its project, its state, its
+// goal and what it last said, with what it asks you as buttons. Opened (a
+// click, Enter), the chat takes the window (desk.js show): answer, approve,
+// write, its Terminal, Changes and Details beside it. Back (the button, Esc)
+// is the board again, where you were; and so is sending it something: it
+// works on that, and the next that's your move is lit, Enter to open it.
 //
-// Keys on the board: j / k (or the arrows) from ticket to ticket, Enter
-// opens, 1-4 picks an answer, x closes (with Undo), n a new chat.
-// The switch: Tasks | Chats over the board, Tasks over the list in Chats,
-// Ctrl+Alt+H. The app opens on the one you used last (Tasks at first).
+// The bar: Chats | Tasks (what's your move on each), the search, Group &
+// sort; Automations and Settings; New chat.
+//
+// Everything has its key (? shows them): j / k (or the arrows) from card
+// to card, Enter opens, 1-4 picks an answer, x completes its mission (with
+// Undo), r opens what a done chat made, s marks one seen, h / l (or ← / →)
+// Chats or Tasks, / searches, n starts a new chat.
 
 const board = {
-  el: null, box: null, head: null, slot: null, focusEl: null,
-  open: null,        // the chat open over the board
-  chat: null,        // its Chat
+  el: null, box: null, head: null, slot: null, scroll: null,
   composing: false,  // the new chat's box at the top
   waitFor: null,     // a chat just started: opened once the list has it
   tab: "chats",      // Chats (your chats) or Tasks (your loops): the one you were on (boardBuild)
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
+  from: null,        // where the board was scrolled when a chat opened
+  last: null,        // the card the keys were on: its chat's id, or its place
 };
 
 // In sight: not in a folded part (a closed <details> keeps its boxes, hidden).
 function shown(el) { return el.checkVisibility ? el.checkVisibility() : !el.closest("details:not([open]) > :not(summary)"); }
 
-// The chat the keys go to: the open one in Tasks, the middle's in Chats.
-function chatNow() { return boardOn() ? board.chat : desk.chat; }
-
 function boardBuild() {
   if (board.el) return board.el;
   board.tab = store.get("board-tab") === "tasks" ? "tasks" : "chats";
-  board.switchEl = h("div", { class: "seg board-switch", role: "tablist" });
+  board.switchEl = h("div", { class: "seg board-switch", role: "tablist", "aria-label": "Chats or tasks" });
+  const tool = (icon, label, keys, act, extra = {}) => h("button", { class: "control board-tool", type: "button", title: `${label} (${keys})`,
+                                                                      "aria-label": label, onclick: act, ...extra }, glyph(icon));
   board.head = h("header", { class: "board-head" },
     h("div", { class: "board-head-in" },
       board.switchEl,
-      boardSearchBox(),
-      boardOrganize(),
-      h("button", { class: "control", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() }, glyph("plus"), "New chat"),
-      automationsButton("control organize"),
-      // The standard layout: the list on the left, a chat beside it.
-      h("button", { class: "control organize board-classic", type: "button", title: "The list and a chat beside it (Ctrl+Alt+H)",
-                    "aria-label": "The list and a chat", onclick: () => deskMode("chats") }, glyph("project")),
-      h("button", { class: "control organize", type: "button", title: "Settings (right click or Ctrl+Alt+M: the Amarchy menu)", "aria-label": "Settings",
-                    onclick: () => openSettings(), oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } }, glyph("gear"))));
+      h("div", { class: "board-find" }, boardSearchBox(), boardOrganize()),
+      h("div", { class: "board-tools" },
+        automationsButton("control board-tool"),
+        tool("gear", "Settings", "right click or Ctrl+Alt+M: the Amarchy menu", () => openSettings(),
+             { oncontextmenu: (e) => { e.preventDefault(); deskMenu(); } }),
+        tool("keys", "Keys", "?", () => showKeys())),
+      h("button", { class: "control board-new-btn", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() },
+        glyph("plus"), h("span", {}, "New chat"), h("kbd", {}, "N"))));
   board.slot = h("div", { class: "board-new", hidden: true });
   board.box = h("div", { class: "today board-today" });
   board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.box);
-  board.focusEl = h("div", { class: "board-focus", hidden: true });
-  board.el = h("div", { class: "tasks-board" }, board.head, board.scroll, board.focusEl);
+  board.el = h("div", { class: "tasks-board" }, board.head, board.scroll);
+  // The card the keys are on, kept: back from a chat, a sheet, a redraw, there again.
+  board.box.addEventListener("focusin", (e) => { const t = e.target.closest(".tcard"); if (t) board.last = cardKey(t); });
   // Its keys wherever the keyboard is (nothing focused, too), while it's up;
   // Esc over an open chat before the chat has it (there it would stop Claude).
-  window.addEventListener("keydown", (e) => { if (boardOn()) boardKeys(e); });
-  window.addEventListener("keydown", (e) => { if (boardOn() && board.open) boardEsc(e); }, true);
+  window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
+  window.addEventListener("keydown", (e) => { if (desk.current) boardEsc(e); }, true);
+  // The search it had, over an update (app.js keepForReload).
+  if (typeof kept !== "undefined" && kept && kept.search) { board.search.value = kept.search; boardSearch(kept.search); }
   return board.el;
+}
+
+// A card, as the keys find it again: its chat's id, else its place among the cards.
+function cardKey(card) {
+  if (card.dataset.id) return card.dataset.id;
+  return `#${[...board.box.querySelectorAll(".tcard")].indexOf(card)}`;
+}
+
+// What j / k go through: each card in sight (its head), and the head of a
+// group that folds (Enter unfolds it).
+function boardStops() {
+  return [...board.box.querySelectorAll(".tcard > .today-go, details.tsec > summary")].filter(shown);
+}
+
+// The keys to a card (its head), in sight.
+function boardFocus(el, smooth) {
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" });
+}
+
+// Back on the board (from a chat, a sheet): the keys on the card they were
+// on, else the first.
+function boardRefocus() {
+  if (desk.current || !board.box) return;
+  if (document.activeElement && board.el.contains(document.activeElement) && document.activeElement !== board.scroll) return;
+  const k = board.last;
+  const cards = [...board.box.querySelectorAll(".tcard")];
+  const card = k && (k[0] === "#" ? cards[Number(k.slice(1))] : board.box.querySelector(`.tcard[data-id="${CSS.escape(k)}"]`));
+  const go = card && shown(card) ? card.querySelector(":scope > .today-go")
+    : boardStops().find((x) => x.matches(".today-go")) || boardStops()[0];      // the first card, before a folded group's head
+  if (go) go.focus({ preventScroll: true });
+  else board.scroll.focus({ preventScroll: true });
 }
 
 // The board's keys (none while you type, or a sheet is up).
 function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (document.querySelector(".sheet-back, .picker-back")) return;
-  const typing = e.target.closest("textarea, input, [contenteditable]");
-  if (board.open) return;      // (its Esc: boardEsc)
-  if (typing) return;
-  if (e.key === "/") { e.preventDefault(); board.search.focus(); board.search.select(); return; }
-  const goes = [...board.box.querySelectorAll(".ticket > * > .today-go")].filter(shown);      // not in a folded part
-  const at = goes.findIndex((b) => b === document.activeElement || b.parentElement.contains(document.activeElement));
-  const ticket = at >= 0 ? goes[at].closest(".ticket") : null;
-  const move = (d) => {
-    const next = goes[Math.max(0, Math.min(goes.length - 1, at < 0 ? 0 : at + d))];
-    if (next) { next.focus(); next.scrollIntoView({ block: "nearest" }); }
-  };
-  if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
-  else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-  else if (e.key === "n") { e.preventDefault(); boardCompose(); }
-  else if (/^[1-4]$/.test(e.key) && ticket) {
-    const opts = ticket.querySelectorAll(".today-opt");
-    const o = opts[Number(e.key) - 1];
+  if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
+  if (e.target.closest("textarea, input, select, [contenteditable], .organize-menu")) return;
+  const stops = boardStops();
+  const at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
+  const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
+  const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
+  const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
+  const k = e.key;
+  if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
+  else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
+  else if (k === "g" || k === "Home") to(0);
+  else if (k === "G" || k === "End") to(stops.length - 1);
+  else if (k === "h" || k === "ArrowLeft") { e.preventDefault(); if (board.tab !== "chats") boardTab("chats"); }
+  else if (k === "l" || k === "ArrowRight") { e.preventDefault(); if (board.tab !== "tasks") boardTab("tasks"); }
+  else if (k === "/") { e.preventDefault(); board.search.focus(); board.search.select(); }
+  else if (k === "n") { e.preventDefault(); boardCompose(); }
+  else if (k === "?") { e.preventDefault(); showKeys(); }
+  else if (!card) {
+    // Nothing under the keys yet: Enter takes the first card.
+    if (k === "Enter" && at < 0 && stops.length) to(0);
+  } else if (k === "o") { e.preventDefault(); stops[at].click(); }
+  else if (/^[1-9]$/.test(k)) {
+    const o = card.querySelectorAll(".today-opt")[Number(k) - 1];
     if (o) { e.preventDefault(); o.click(); }
-  } else if (e.key === "x" && ticket) {
-    const s = row(ticket.dataset.id);
-    if (s && s.assistant !== "main") { e.preventDefault(); todayClose(s); }
-  }
+  } else if (k === "x") {
+    const s = card.dataset.id && row(card.dataset.id);
+    if (s && s.assistant !== "main") { e.preventDefault(); todayComplete(s); }
+    else if (!s) press(".tbtn.loop-done");      // a task: Done
+  } else if (k === "r") press("a.tbtn");
+  else if (k === "s") press(".tbtn.seen");
 }
 
 // Esc over an open chat: back to the board, always (what you were writing
 // stays, as a chat's draft does). But for what Esc does first: stop a
-// dictation, close a menu or a sheet.
+// dictation, close a menu or a sheet; and in a terminal, Esc is the terminal's.
 function boardEsc(e) {
-  if (e.key !== "Escape" || e.defaultPrevented) return;
-  if (document.querySelector(".sheet-back, .picker-back")) return;
-  const c = board.chat;
+  if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
+  if (e.target.closest && e.target.closest(".term-box")) return;
+  const c = desk.chat;
   if (c && (c.talk.on() || c.menu)) return;
   e.preventDefault();
   e.stopPropagation();
   boardBack();
 }
 
-// The board's tabs, Chats and Tasks, each with what's your move; and over
-// the list in the standard layout, the way back to the board.
+// The board's tabs, Chats and Tasks, each with what's your move.
 function modeButtons() {
-  if (!app.view) return;
+  if (!app.view || !board.switchEl) return;
   const count = (only) => { const n = todayCount(app.view, only); return n ? h("span", { class: "tab-count" }, String(n)) : ""; };
-  if (board.switchEl) {
-    const side = (tab, label) => h("button", { class: `control${board.tab === tab ? " on" : ""}`, type: "button", role: "tab",
-                                               "aria-selected": String(board.tab === tab), onclick: () => boardTab(tab) }, label, count(tab));
-    board.switchEl.replaceChildren(side("chats", "Chats"), side("tasks", "Tasks"));
-  }
-  if (desk.todayBtn) desk.todayBtn.replaceChildren("Board", count());
+  const side = (tab, label, key) => h("button", { class: `control${board.tab === tab ? " on" : ""}`, type: "button", role: "tab", title: `${label} (${key})`,
+                                                  "aria-selected": String(board.tab === tab), onclick: () => boardTab(tab) }, label, count(tab));
+  keepFocus(board.switchEl, () => board.switchEl.replaceChildren(side("chats", "Chats", "h"), side("tasks", "Tasks", "l")));
 }
 
 // Chats or Tasks on the board, kept for the next time.
 function boardTab(tab) {
   board.tab = tab === "tasks" ? "tasks" : "chats";
   store.set("board-tab", board.tab);
-  if (board.open) boardBack(true);
+  if (desk.current) boardBack(true);
   board.scroll.scrollTop = 0;
-  if (board.query) boardSearchDraw(); else todayFill(board.box, true);
+  board.last = null;
+  if (board.query) boardSearchDraw(); else boardFill(true);
   modeButtons();
+  boardRefocus();
 }
 
-// Tasks or Chats, kept for the next time the app opens.
-function deskMode(mode) {
-  if (mode !== "tasks" && mode !== "chats") return;
-  desk.mode = mode;
-  store.set("desk-mode", mode);
-  desk.el.classList.toggle("tasks-mode", mode === "tasks");
-  if (mode === "tasks") {
-    boardRefresh(true);
-    requestAnimationFrame(() => { if (!board.open) board.scroll.focus({ preventScroll: true }); });
-  } else {
-    boardBack(true);
-    board.composing = false;
-    deskLayout();
-    deskList();
-    deskRefocus();
+// The board drawn: Today's queue, or with no project yet the welcome.
+function boardFill(force) {
+  const v = app.view;
+  if (v && !v.sessions.length && !(v.projects || []).length) {
+    if (board.box.dataset.key !== "welcome") board.box.replaceChildren(welcome((p) => newChatIn(p)));
+    board.box.dataset.key = "welcome";
+    return;
   }
-  modeButtons();
+  todayFill(board.box, force);
 }
 
 // The view changed (app.js refresh).
 function boardRefresh(force) {
   if (!board.box) return;
-  if (board.open && app.view && !row(board.open)) boardBack(true);     // closed
   if (board.waitFor && row(board.waitFor)) {
     const id = board.waitFor;
     board.waitFor = null;
     boardOpen(id);
   }
+  // Projects and no chat yet: the new chat's box, the way to start one.
+  const v = app.view;
+  if (v && !v.sessions.length && (v.projects || []).length && !board.composing && !desk.current) { board.composing = true; boardComposeShow(); }
+  else if (board.composing && desk.newChat) desk.newChat.update();      // its projects, its model, as the list has them now
   if (board.query) boardSearchDraw();
-  else todayFill(board.box, force);
+  else boardFill(force);
+  // The first time it's drawn, the keys on its first card: they work at once.
+  if (!board.keyed && v && !desk.current && !board.composing && boardStops().length) {
+    board.keyed = true;
+    if (!document.activeElement || document.activeElement === document.body || document.activeElement === board.scroll) boardRefocus();
+  }
   if (board.organize && !board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
-  if (board.open) boardFocusHead();
   modeButtons();
 }
 
-// A route in Tasks (desk.js deskRoute): a chat's opens it, a new chat's the
-// box at the top. true when it took it.
-function boardRoute() {
-  if (!boardOn()) return false;
-  const m = here().match(/^#\/s\/(.+)$/);
-  if (m) {
-    const id = decodeURIComponent(m[1]);
-    board.composing = false;
-    boardComposeShow();
-    if (row(id)) { if (board.open !== id) boardOpen(id); }
-    else board.waitFor = id;      // just started: once the list has it
-    return true;
-  }
-  if (here() === "#/new") { boardCompose(); return true; }
-  return true;      // (an open chat stays: Back, Esc or sending it something closes it)
-}
-
-// A ticket: Today's row or card, as it is.
+// A ticket: Today's card, as it is.
 function boardTicket(s, node) {
   return h("div", { class: "ticket", "data-id": s.id }, node);
 }
 
-// The chat over the board, the whole window: a bar (Back, its project and
-// name, its state; Open in Chats, Close chat), and the chat, its box ready.
+// A chat over the board, the whole window (desk.js show), its address the
+// chat's (the browser's Back is the board's).
 function boardOpen(id) {
-  const s = row(id);
-  if (!s) return;
-  if (board.chat) board.chat.close();
-  board.from = board.open ? board.from : board.scroll.scrollTop;
-  const chat = new Chat({ id, row: s, noSwitch: true,
-                          onGone: (why) => { if (!why && board.chat === chat) boardBack(true); },
-                          onSession: () => { if (board.chat === chat) boardFocusHead(); },
-                          onSent: () => { if (board.chat === chat) boardSent(id); } });
-  board.open = id;
-  board.chat = chat;
-  board.focusHead = h("div", { class: "board-focus-head" });
-  board.focusEl.replaceChildren(board.focusHead, h("div", { class: "board-focus-chat" }, chat.el));
-  board.focusEl.hidden = false;
-  board.el.classList.add("focused");
-  boardFocusHead();
-  chat.open();
-  api(`/api/session/${encodeURIComponent(id)}/seen`).catch(() => {});
-  requestAnimationFrame(() => {
-    chat.grow();
-    if (chat.dock.contains(chat.input)) chat.input.focus({ preventScroll: true });
-  });
+  if (!row(id)) return;
+  show(id);
+  if (here() !== `#/s/${encodeURIComponent(id)}`) go2(id);
 }
 
-function boardFocusHead() {
-  const s = board.open && row(board.open);
-  if (!s || !board.focusHead) return;
-  const btn = (label, act, cls = "") => h("button", { class: `text-btn ${cls}`, type: "button", onclick: act }, label);
-  keepFocus(board.focusHead, () => board.focusHead.replaceChildren(...[      // (filtered: replaceChildren writes a null as "null")
-    h("button", { class: "control board-back", type: "button", title: "Back to Tasks (Esc)", onclick: () => boardBack() }, glyph("back"), "Back"),
-    // Its card's head, as on the board: its project in its color, its name, its badge.
-    s.assistant === "main" ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-    h("span", { class: "tcard-title" }, taskText(s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat")),
-    todayStatePill(s),
-    h("span", { class: "board-gap" }),
-    btn("Open in Chats", () => { const id = s.id; deskMode("chats"); go2(id); }),
-    s.assistant === "main" ? null : btn("Complete mission ✓", () => { boardBack(true); todayComplete(s); }, "complete")].filter(Boolean)));
-}
-
-// Back to the board, where you were, on the ticket you opened.
-function boardBack(quiet) {
-  if (!board.open) return;
-  const id = board.open;
-  if (board.chat) board.chat.close();
-  board.chat = board.open = board.focusHead = null;
-  board.focusEl.hidden = true;
-  board.focusEl.replaceChildren();
-  board.el.classList.remove("focused");
-  if (/^#\/s\//.test(here())) go("#/today");
-  if (board.query) boardSearchDraw(); else todayFill(board.box, true);
+// The board again (desk.js show(null)): drawn, where it was scrolled.
+function boardShown() {
+  if (board.query) boardSearchDraw(); else boardFill(true);
   if (typeof board.from === "number") board.scroll.scrollTop = board.from;
-  if (!quiet) {
-    const t = board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`);
-    if (t) t.focus({ preventScroll: true });
-  }
+  board.from = null;
+}
+
+// Back to the board, where you were, on the card you opened.
+function boardBack(quiet) {
+  if (!desk.current) return;
+  const id = desk.current;
+  show(null);
+  if (/^#\/s\//.test(here())) go("#/today");
+  board.last = id;
+  if (!quiet) boardRefocus();
 }
 
 // You sent it something (a message, an answer, an approval): it works on
@@ -248,7 +237,7 @@ function boardSent(id) {
   const next = [...board.box.querySelectorAll(".today-yours .ticket")].find((t) => t.dataset.id !== id);
   const left = board.box.querySelectorAll(".today-yours .ticket").length;
   toast(left ? `Sent. ${left} more for you` : "Sent. Nothing else waits on you");
-  if (!next) return;
+  if (!next) return boardRefocus();
   next.classList.add("next");
   setTimeout(() => next.classList.remove("next"), 2400);
   next.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -256,10 +245,9 @@ function boardSent(id) {
   if (btn) btn.focus({ preventScroll: true });
 }
 
-// The new chat's box at the top of the board (the same one as Chats' middle:
-// what you were writing stays).
+// The new chat's box at the top of the board (what you were writing stays).
 function boardCompose() {
-  if (board.open) boardBack(true);
+  if (desk.current) boardBack(true);
   board.composing = true;
   boardComposeShow();
   board.scroll.scrollTop = 0;
@@ -269,22 +257,18 @@ function boardCompose() {
 function boardComposeShow() {
   if (!board.slot) return;
   if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: true, started: (id) => {
-    desk.pending = { id, until: Date.now() + 15000 };
-    go2(id);
+    board.composing = false;
+    boardComposeShow();
+    board.waitFor = id;
+    if (row(id)) boardOpen(id);
   } });
   board.slot.hidden = !board.composing;
   if (board.composing) {
-    board.slot.replaceChildren(desk.newChat.el, h("button", { class: "text-btn board-new-close", type: "button",
-      onclick: () => { board.composing = false; boardComposeShow(); } }, "Not now"));
+    if (!board.slot.contains(desk.newChat.el)) board.slot.replaceChildren(desk.newChat.el, h("button", { class: "text-btn board-new-close", type: "button",
+      title: "Esc", onclick: () => leaveNewChat() }, "Not now"));
     desk.newChat.update();
   } else if (desk.newChat && board.slot.contains(desk.newChat.el)) board.slot.replaceChildren();
 }
-
-// While a chat is open and in sight, it's seen.
-setInterval(() => {
-  if (boardOn() && board.open && document.visibilityState === "visible" && document.hasFocus())
-    api(`/api/session/${encodeURIComponent(board.open)}/seen`).catch(() => {});
-}, 10000);
 
 // ---- search: a chat by its name, or by anything said in it
 //
@@ -310,7 +294,7 @@ function boardSearch(q) {
   board.query = q.trim();
   clearTimeout(searchTimer);
   board.el.classList.toggle("searching", !!board.query);
-  if (!board.query) { board.found = null; todayFill(board.box, true); return; }
+  if (!board.query) { board.found = null; boardFill(true); return; }
   boardSearchDraw();
   searchTimer = setTimeout(async () => {
     const seq = ++searchSeq, asked = board.query;
@@ -385,17 +369,18 @@ function boardOrganizeDraw() {
   if (!board.organize) return;
   if (!board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
   board.box.dataset.key = "";
-  if (board.tab === "chats" && !board.query) todayFill(board.box, true);
+  if (board.tab === "chats" && !board.query) boardFill(true);
 }
 
-// Ctrl+Alt+J / K on the board: from chat to chat in its order, the open one
+// Ctrl+Alt+J / K: from chat to chat in the board's order, the open one
 // opening the next, else the keys going to the next card.
 function boardStep(n) {
-  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(shown).map((t) => t.dataset.id))];
+  // (Under an open chat the board isn't in sight: then not in a folded group.)
+  const inSight = (t) => (desk.current ? !t.closest("details:not([open])") : shown(t));
+  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(inSight).map((t) => t.dataset.id))];
   if (!ids.length) return;
   const at = ids.indexOf(keyedId());
   const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];
-  if (board.open) return boardOpen(id);
-  const go = board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`);
-  if (go) { go.focus(); go.scrollIntoView({ block: "nearest" }); }
+  if (desk.current) return boardOpen(id);
+  boardFocus(board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`));
 }

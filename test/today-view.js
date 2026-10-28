@@ -311,46 +311,67 @@ async function wide(browser, port) {
   const p = await page(browser, "wide", port);
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.mode === "tasks" && !!document.querySelector(".tasks-board .board-today .tsec")
-                                   && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: Tasks, the whole window, no list");
+  check(where, await until(p, () => !!document.querySelector(".tasks-board .board-today .tsec")
+                                   && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: the board, the whole window");
+  check(where, await p.evaluate(() => !document.querySelector(".panel, .ball, .board-classic, .today-btn")), "no list beside it: the board is the only layout");
+  check(where, await p.evaluate(() => [...document.querySelector(".board-head-in").children].map((c) => c.className.split(" ").pop()).join(",")) === "board-switch,board-find,board-tools,board-new-btn",
+        "the bar: Chats | Tasks, the search (and Group & sort), the tools, New chat");
+  check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard > .today-go")), "the keys on the first card at once");
+  // One card, one surface: no stripe on its left, its head no box of its own.
+  const look = await p.evaluate(() => {
+    const c = document.querySelector(".tcard.k-ask"), hd = c.querySelector(".tcard-head"), cs = getComputedStyle(c);
+    return { left: cs.borderLeftWidth, right: cs.borderRightWidth, leftColor: cs.borderLeftColor, rightColor: cs.borderRightColor,
+             headBg: getComputedStyle(hd).backgroundColor };
+  });
+  check(where, look.left === look.right && look.leftColor === look.rightColor && /rgba\(0, 0, 0, 0\)|transparent/.test(look.headBg), `no stripe, no box in the card (${JSON.stringify(look)})`);
   check(where, /^Chats\s*3\s*Tasks\s*3$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) (${JSON.stringify(await text(p, ".board-switch"))})`);
   check(where, /Try json-render/.test(await text(p, ".board-today")), "a ticket says its goal");
   await common(p, where);
 
+  // Hovered: the whole card lights, as one.
+  const box = await p.evaluate(() => { const r = document.querySelector(".tcard[data-id=proj-fresh] .tcard-text").getBoundingClientRect(); return { x: r.x + 20, y: r.y + r.height / 2 }; });
+  await p.mouse.move(box.x, box.y);
+  await sleep(250);
+  const hov = await p.evaluate(() => { const c = document.querySelector(".tcard[data-id=proj-fresh]"); return [getComputedStyle(c).backgroundImage, getComputedStyle(c.querySelector(".tcard-head")).backgroundColor]; });
+  check(where, /gradient/.test(hov[0]) && /rgba\(0, 0, 0, 0\)|transparent/.test(hov[1]), `the card lights under the pointer, not its head alone (${hov.join(" | ")})`);
+  await p.mouse.move(5, 790);
+
   // The whole card opens it, not only its head.
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .tcard-text").click());
-  check(where, await until(p, () => board.open === "proj-fresh"), "a click anywhere on the card opens it");
+  check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
+  check(where, await p.evaluate(() => !!document.querySelector(".desk-head .board-back") && /Fix/.test(document.querySelector(".desk-head").innerText)
+                                   && !!document.querySelector(".desk-head .head-btn.complete")), "over it: Back, its name, Complete");
   await p.evaluate(() => boardBack());
 
   // Opened: the whole window, its box ready; Back and Esc: the board, where you were.
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .today-go").click());
-  check(where, await until(p, () => board.open === "proj-fresh" && !document.querySelector(".board-focus").hidden
-                                   && !!document.querySelector(".board-focus .chat")), "a ticket opens over the whole window");
+  check(where, await until(p, () => desk.current === "proj-fresh" && getComputedStyle(document.querySelector(".tasks-board")).display === "none"
+                                   && !!document.querySelector(".stage .chat")), "a ticket opens over the whole window");
   // The list changes under it (every second, live): it stays open.
   await p.evaluate(() => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, said: `${x.said || ""}.` })) }; refresh(); refresh(); });
   await sleep(300);
-  check(where, await p.evaluate(() => board.open === "proj-fresh" && !document.querySelector(".board-focus").hidden), "it stays open as the list changes");
+  check(where, await p.evaluate(() => desk.current === "proj-fresh" && !!document.querySelector(".stage .chat")), "it stays open as the list changes");
   await p.screenshot({ path: path.join(SHOTS, "wide-ticket-open.png") });
-  await p.evaluate(() => document.querySelector(".board-back").click());
-  check(where, await until(p, () => !board.open && document.querySelector(".board-focus").hidden), "Back: the board");
+  await p.evaluate(() => document.querySelector(".desk-head .board-back").click());
+  check(where, await until(p, () => !desk.current && getComputedStyle(document.querySelector(".stage")).display === "none"), "Back: the board");
   check(where, await p.evaluate(() => document.activeElement && document.activeElement.closest(".ticket[data-id=proj-fresh]")), "on the ticket it opened");
   await p.keyboard.press("Enter");
-  check(where, await until(p, () => board.open === "proj-fresh"), "Enter opens it again");
+  check(where, await until(p, () => desk.current === "proj-fresh"), "Enter opens it again");
   await p.evaluate(() => document.activeElement.blur());
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => !board.open), "Esc: back");
+  check(where, await until(p, () => !desk.current), "Esc: back");
   await p.keyboard.press("Enter");
-  await until(p, () => board.open === "proj-fresh");
-  await p.evaluate(() => { board.chat.row = { ...board.chat.row, status: "working" }; board.chat.input.focus(); });
+  await until(p, () => desk.current === "proj-fresh");
+  await p.evaluate(() => { desk.chat.row = { ...desk.chat.row, status: "working" }; desk.chat.input.focus(); });
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => !board.open), "Esc in the box, Claude at work: back too (not a stop)");
+  check(where, await until(p, () => !desk.current), "Esc in the box, Claude at work: back too (not a stop)");
   check(where, !p.posts.some((x) => /proj-fresh\/(interrupt|keys)/.test(x.url)), "and Claude wasn't stopped");
 
   // Sent from an open chat: back to the board, it's off your move, the next lit with the keys.
   await p.evaluate(() => todayOpen(row("proj-quiet")));
-  check(where, await until(p, () => board.open === "proj-quiet"), "another opened");
-  await p.evaluate(() => board.chat.post("send", { text: "Go on" }));
-  check(where, await until(p, () => !board.open), "sent: back on the board");
+  check(where, await until(p, () => desk.current === "proj-quiet"), "another opened");
+  await p.evaluate(() => desk.chat.post("send", { text: "Go on" }));
+  check(where, await until(p, () => !desk.current), "sent: back on the board");
   check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !n || n.contains(document.activeElement); }), "the next one lit, the keys on it");
 
   // Grouped as the list is: by priority (High first, what asks you first in each), by project.
@@ -383,18 +404,18 @@ async function wide(browser, port) {
   const j2 = await p.evaluate(() => keyedId());
   check(where, !!j1 && !!j2 && j1 !== j2, `Ctrl+Alt+J moves from card to card (${j1} → ${j2})`);
   await p.keyboard.press("Enter");
-  await until(p, (id) => board.open === id, j2);
+  await until(p, (id) => desk.current === id, j2);
   await p.keyboard.press("Control+Alt+KeyK");
-  check(where, await until(p, (id) => board.open === id, j1), "with one open, Ctrl+Alt+K opens the one before");
+  check(where, await until(p, (id) => desk.current === id, j1), "with one open, Ctrl+Alt+K opens the one before");
   await p.evaluate(() => boardBack());
   check(where, await p.evaluate(() => board.search.placeholder === "Search"), "the search box says only Search");
 
   // Ctrl+Alt+X on the board: the open chat closes (with Undo), from its box too.
   await p.evaluate(() => todayOpen(row("proj-quiet")));
-  await until(p, () => board.open === "proj-quiet");
-  await p.evaluate(() => board.chat.input.focus());
+  await until(p, () => desk.current === "proj-quiet");
+  await p.evaluate(() => desk.chat.input.focus());
   await p.keyboard.press("Control+Alt+KeyX");
-  check(where, await until(p, () => !board.open && !!document.querySelector(".undo-toast") && /Mission complete: Eval/.test(document.querySelector(".undo-toast").innerText)),
+  check(where, await until(p, () => !desk.current && !!document.querySelector(".undo-toast") && /Mission complete: Eval/.test(document.querySelector(".undo-toast").innerText)),
         "Ctrl+Alt+X: the open chat's mission completes, with Undo");
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   await sleep(5600);
@@ -402,8 +423,8 @@ async function wide(browser, port) {
 
   // Dictating on a computer: the keys go to the box (Enter stops it there, the next sends).
   await p.evaluate(() => todayOpen(row("proj-work")));
-  await until(p, () => board.open === "proj-work");
-  const keyed = await p.evaluate(() => { document.activeElement.blur(); board.chat.talk.keys(); return document.activeElement === board.chat.input; });
+  await until(p, () => desk.current === "proj-work");
+  const keyed = await p.evaluate(() => { document.activeElement.blur(); desk.chat.talk.keys(); return document.activeElement === desk.chat.input; });
   check(where, keyed, "dictation puts the keys in the message box");
   await p.evaluate(() => boardBack());
 
@@ -425,7 +446,7 @@ async function wide(browser, port) {
                                    && /2 messages/.test(board.box.innerText)), "a chat by what was said in it, with its lines");
   await p.screenshot({ path: path.join(SHOTS, "wide-search.png") });
   await p.keyboard.press("Enter");
-  check(where, await until(p, () => board.open === "proj-done"), "Enter opens the first");
+  check(where, await until(p, () => desk.current === "proj-done"), "Enter opens the first");
   await p.evaluate(() => boardBack());
   check(where, await p.evaluate(() => !!board.query && /pricing/.test(board.box.innerText)), "back: the search as it was");
   await p.evaluate(() => board.search.focus());
@@ -437,8 +458,29 @@ async function wide(browser, port) {
   await p.keyboard.press("j");
   const first = await p.evaluate(() => document.activeElement.closest(".ticket") && document.activeElement.closest(".ticket").dataset.id);
   await p.keyboard.press("j");
+  await p.keyboard.press("j");
   const second = await p.evaluate(() => document.activeElement.closest(".ticket") && document.activeElement.closest(".ticket").dataset.id);
-  check(where, !!first && !!second && first !== second, `j moves from ticket to ticket (${first} → ${second})`);
+  check(where, !!first && !!second && first !== second, `j moves from card to card (${first} → ${second})`);
+  check(where, await p.evaluate(() => { const c = document.activeElement.closest(".tcard"); return getComputedStyle(c).borderTopColor === getComputedStyle(document.documentElement).getPropertyValue("--focus-ring").trim() || /gradient/.test(getComputedStyle(c).backgroundImage); }),
+        "the card under the keys is lit, the whole of it");
+  await p.keyboard.press("k");
+  check(where, await p.evaluate((id) => (document.activeElement.closest(".ticket") || {}).dataset?.id !== id, second), "k goes back");
+  await p.keyboard.press("End");
+  const last = await p.evaluate(() => document.activeElement.closest(".tcard") && document.activeElement.closest(".tcard").dataset.id);
+  await p.keyboard.press("g");
+  const top = await p.evaluate(() => document.activeElement.closest(".tcard") && document.activeElement.closest(".tcard").dataset.id);
+  check(where, !!last && top === "me-jaken" && last !== top, `End / g: the last card and the first (${last}, ${top})`);
+  // On Tasks too: your tasks are cards the keys go through.
+  await p.keyboard.press("l");
+  check(where, await until(p, () => board.tab === "tasks"), "l: Tasks");
+  await p.keyboard.press("j");
+  check(where, await p.evaluate(() => !!document.activeElement.closest(".tcard.k-due, .tcard.k-chase, .tsec")), "j on Tasks: from task to task");
+  await p.keyboard.press("h");
+  check(where, await until(p, () => board.tab === "chats"), "h: Chats");
+  await p.keyboard.press("?");
+  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "")), "?: the keys");
+  await p.keyboard.press("Escape");
+  await until(p, () => !document.querySelector(".sheet-back"));
   await p.keyboard.press("n");
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "n: a new chat, its box at the top");
   await p.keyboard.press("Escape");
@@ -449,18 +491,39 @@ async function wide(browser, port) {
   check(where, sc > 0, `the board scrolls (${sc})`);
   await p.setViewportSize({ width: 1280, height: 800 });
 
-  await p.evaluate(() => document.querySelector(".board-classic").click());
-  check(where, await until(p, () => desk.mode === "chats" && getComputedStyle(document.querySelector(".tasks-board")).display === "none"), "the standard layout: the list again");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".panel-buttons .control")].map((b) => b.className.split(" ")[1]).join(",")) === "new-chat,today-btn,brand", "the bar: New chat, Board, the cog");
-  await p.evaluate(() => go2("proj-work"));
-  check(where, await until(p, () => desk.current === "proj-work"), "a chat opened");
+  // A screenshot pasted into the new chat: it goes with what you wrote.
+  const made = [];
+  await p.route("**/api/new", (r) => { made.push(r.request().postDataJSON()); r.fulfill({ json: { id: "proj-work" } }); });
+  await p.keyboard.press("n");
+  await until(p, () => document.activeElement === document.querySelector(".board-new textarea"));
+  await p.keyboard.type("Fix what this shows");
+  await p.evaluate(async () => {
+    const c = document.createElement("canvas"); c.width = 40; c.height = 30;
+    c.getContext("2d").fillRect(0, 0, 40, 30);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/png"));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "image.png", { type: "image/png" }));
+    document.activeElement.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  check(where, await until(p, () => !!document.querySelector(".board-new .tray .att.image img")), "a screenshot pasted into the new chat: on it");
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => desk.current === "proj-work"), "started: the chat opens");
+  check(where, made.length === 1 && made[0].prompt === "Fix what this shows" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
+        `the picture goes with it (${JSON.stringify(made.map((x) => ({ ...x, images: (x.images || []).length })))})`);
+  check(where, await p.evaluate(() => !document.querySelector(".board-new .tray .att")), "and the box is empty again");
+  // Ctrl+Alt+H: the board; Ctrl+Alt+A: any chat, by its name.
+  await p.keyboard.press("Control+Alt+KeyH");
+  check(where, await until(p, () => !desk.current), "Ctrl+Alt+H: the board");
+  await p.keyboard.press("Control+Alt+KeyA");
+  check(where, await until(p, () => !!document.querySelector(".picker")), "Ctrl+Alt+A: go to a chat");
+  await p.keyboard.type("login");
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => desk.current === "proj-fresh"), "picked by its name, it opens");
+  await p.keyboard.press("Escape");
+  check(where, await until(p, () => !desk.current), "Esc: the board");
   await p.reload();
   await ready(p);
-  check(where, await until(p, () => desk.mode === "chats"), "the app opens on the one you used last");
-  await p.evaluate(() => document.querySelector(".today-btn").click());
-  check(where, await until(p, () => desk.mode === "tasks"), "Board over the list: the board again");
-  await p.keyboard.press("Control+Alt+KeyH");
-  check(where, await until(p, () => desk.mode === "chats"), "Ctrl+Alt+H switches");
+  check(where, await until(p, () => !!document.querySelector(".tasks-board .tcard") && getComputedStyle(document.querySelector(".stage")).display === "none"), "reloaded: the board");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

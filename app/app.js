@@ -29,6 +29,7 @@ const ICONS = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>',
   organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg>',
+  keys: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14.5h8"/></svg>',
   image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
@@ -359,6 +360,7 @@ function loadWhenSafe() {
 function reloadWait() {
   if (dictationUnderWay()) return true;
   if ([app.session && app.session.chat, desk.chat].some((c) => c && c.tray.length)) return true;
+  if ([app.newChat, desk.newChat].some((n) => n && n.tray().length)) return true;      // pictures for a new chat
   if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done")) return true;     // an answer picked, not sent
   return [...document.querySelectorAll("textarea, input")].some((f) =>
     !NOT_WORDS.includes(f.type) && f.value.trim() && !f.closest(".composer-wrap, .start-chat"));
@@ -369,8 +371,8 @@ function reloadWait() {
 // the scrolls, the search. The drafts are in the store already.
 function keepForReload() {
   const chat = (app.session && app.session.chat) || desk.chat;
-  const list = app.desk ? desk.listEl && desk.listEl.parentElement : app.listEl && app.listEl.scroll;
-  const search = app.desk ? desk.search : app.listEl && app.listEl.search;
+  const list = app.desk ? board.scroll : app.listEl && app.listEl.scroll;
+  const search = app.desk ? board.search : app.listEl && app.listEl.search;
   try {
     sessionStorage.setItem(KEPT, JSON.stringify({
       at: Date.now(), hash: here(),
@@ -393,7 +395,7 @@ function takeKept() {
 // The list's scroll, once the list is on screen.
 function keptListScroll() {
   if (!kept || kept.list === null) return;
-  const el = app.desk ? desk.listEl && desk.listEl.parentElement : (!app.session && app.listEl && app.listEl.scroll);
+  const el = app.desk ? board.box && board.scroll : (!app.session && app.listEl && app.listEl.scroll);
   if (!el || !el.childElementCount) return;
   el.scrollTop = kept.list;
   kept.list = null;
@@ -788,7 +790,7 @@ function toggleOrganize(menu, button, redraw) {
 // The group & sort menu goes, wherever it is (the phone's list, beside Claude in the wide layout).
 // The keys, if they were in it, go back to its button.
 function closeOrganize() {
-  for (const menu of [app.listEl && app.listEl.menu, typeof desk !== "undefined" && desk.organize, typeof board !== "undefined" && board.organize]) {
+  for (const menu of [app.listEl && app.listEl.menu, typeof board !== "undefined" && board.organize]) {
     if (!menu) continue;
     const had = menu.contains(document.activeElement);
     menu.hidden = true;
@@ -1636,6 +1638,44 @@ function newChat({ wide = false, started = null } = {}) {
                                   else if (e.key === "Escape" && !field.value.trim() && typeof leaveNewChat === "function") { e.preventDefault(); leaveNewChat(); }
                                 } });
   field.value = store.get("draft:new") || "";
+  // Pictures that go with it (a screenshot pasted, dropped, or picked): its
+  // first message's, as a chat's tray has them (chat.js).
+  let tray = [];
+  const trayEl = h("div", { class: "tray", hidden: true });
+  const drawTray = () => {
+    trayEl.hidden = !tray.length;
+    trayEl.replaceChildren(...tray.map((a) => h("div", { class: `att image${a.url ? "" : " busy"}`, title: a.name },
+      a.url ? h("img", { src: a.url, alt: a.name }) : spinner(),
+      h("button", { class: "att-x", type: "button", "aria-label": `Take ${a.name} off`, title: "Take it off",
+                    onclick: () => { a.removed = true; tray = tray.filter((x) => x !== a); if (a.url) URL.revokeObjectURL(a.url); drawTray(); field.focus(); } },
+        icon("failed")))));
+    buttons();
+  };
+  const addFiles = (files) => {
+    for (const f of files) {
+      if (!f) continue;
+      if (!/^image\//.test(f.type) || /svg/.test(f.type)) { toast(`${f.name || "That file"}: only pictures go with a new chat (files, once it's started)`); continue; }
+      if (tray.length >= IMAGES_MAX) { toast(`${IMAGES_MAX} pictures at most`); break; }
+      const a = { name: f.name || "image" };
+      tray.push(a);
+      claudeImage(f).then(async (img) => {
+        if (a.removed) return;
+        Object.assign(a, { type: img.type, data: await base64Of(img), url: URL.createObjectURL(img) });
+        drawTray();
+      }).catch(() => { tray = tray.filter((x) => x !== a); drawTray(); toast(`This browser can't read ${a.name}`); });
+    }
+    drawTray();
+  };
+  // Pasted: a picture goes with it (text pasted is text, even when an image of it comes along).
+  field.addEventListener("paste", (e) => {
+    const d = e.clipboardData;
+    const files = d ? Array.from(d.files || []) : [];
+    if (!files.length || (d.getData("text/plain") || "").trim()) return;
+    e.preventDefault();
+    addFiles(files);
+  });
+  const imgBtn = h("button", { class: "mic pic", type: "button", "aria-label": "Add a picture", title: "Add a picture (or paste one, or drop it here)",
+                               onclick: async () => { const f = await pickFiles("image/*", { multiple: true }); if (f.length) addFiles(f); field.focus(); } }, glyph("image"));
   const send = h("button", { class: wide ? "cta go" : "send", type: "button", "aria-label": "Start the chat", title: wide ? "Start (Enter)" : null,
                              onclick: () => start() }, wide ? "Start" : glyph("send"));
   const micBtn = h("button", { class: "mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true }, glyph("mic"));
@@ -1644,10 +1684,21 @@ function newChat({ wide = false, started = null } = {}) {
   const dictate = new Dictate({ field, button: micBtn,
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); } });
-  const box = h("div", { class: "prompt new" }, field, micBtn, wide ? null : send);
-  const under = h("div", { class: "new-under" }, pick, why, modelPick, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
+  const box = h("div", { class: "prompt new" }, field, imgBtn, micBtn, wide ? null : send);
+  const under = h("div", { class: "new-under" }, pick, why, modelPick, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line · paste a screenshot") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
-    wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, box, under);
+    wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, trayEl, box, under);
+  // Dropped on it: the pictures go with it too.
+  const files = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  el.addEventListener("dragover", (e) => { if (files(e)) { e.preventDefault(); el.classList.add("dropping"); } });
+  el.addEventListener("dragleave", (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove("dropping"); });
+  el.addEventListener("drop", (e) => {
+    el.classList.remove("dropping");
+    if (!files(e)) return;
+    e.preventDefault();
+    addFiles(Array.from(e.dataTransfer.files || []));
+    field.focus();
+  });
   const projects = () => (app.view && app.view.projects) || [];
   const grow = () => {
     field.style.height = "auto";
@@ -1669,7 +1720,8 @@ function newChat({ wide = false, started = null } = {}) {
   };
   const buttons = () => {
     const none = !projects().length;
-    send.disabled = none || !field.value.trim() || dictate.on();
+    send.disabled = none || !field.value.trim() || dictate.on() || tray.some((a) => !a.data);
+    imgBtn.hidden = none;
     under.hidden = none;
     micBtn.hidden = none || !dictate.available();
     micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
@@ -1747,6 +1799,9 @@ function newChat({ wide = false, started = null } = {}) {
     field.focus();
   };
   const reset = () => {
+    for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
+    tray = [];
+    drawTray();
     field.value = "";
     store.set("draft:new", "");
     store.set("last-project", repo);
@@ -1756,10 +1811,12 @@ function newChat({ wide = false, started = null } = {}) {
   };
   const start = async () => {
     if (!field.value.trim() || !repo) return;
+    if (tray.some((a) => !a.data)) return toast("A picture is still on its way: a moment");
     send.disabled = true;
     el.classList.add("busy");
     try {
-      const { id } = await api("/api/new", { repo, prompt: field.value, model: model() });
+      const images = tray.map((a) => ({ type: a.type, data: a.data }));
+      const { id } = await api("/api/new", { repo, prompt: field.value, model: model(), ...(images.length ? { images } : {}) });
       reset();
       field.blur();
       if (started) started(id);
@@ -1771,7 +1828,7 @@ function newChat({ wide = false, started = null } = {}) {
     buttons();
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
-  return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field };
+  return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field, addFiles, tray: () => tray };
 }
 
 // ---- what you shared into amarchy (bin/amarchy's "sharing into amarchy")
@@ -2427,9 +2484,9 @@ async function start() {
   // address never shows it, so it's kept), and the build it is.
   takeKept();
   if (kept && standalone && kept.hash) routed.hash = kept.hash;
-  // A computer's, launched with no chat asked for: Today (and under it the
-  // new chat), not the last one.
-  if (app.desk && launched() && !asked && !/^#\/s\//.test(here())) {
+  // A computer's, launched with no chat (or new chat) asked for: the board,
+  // not the last chat.
+  if (app.desk && launched() && !asked && !/^#\/(s\/|new$)/.test(here())) {
     routed.hash = "#/today";
     if (!standalone) history.replaceState(null, "", location.pathname + location.search + "#/today");
   }

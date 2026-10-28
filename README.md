@@ -73,13 +73,14 @@ On a computer's browser:
 | --- | --- |
 | `Ctrl+Alt+N` | New chat |
 | `Ctrl+Alt+J` / `K` | Next / previous chat |
+| `j` / `k`, `Enter`, `Esc` | On the board: card to card, open it, back (`?`: every key) |
 | `Ctrl+Alt+S` | Search chats |
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |
 | `Ctrl+Alt+R` | Run the project in the terminal |
 | `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority |
-| `Ctrl+Alt+Z` | Zen mode: the chat alone |
-| `Ctrl+Alt+X` | Close the chat |
+| `Ctrl+Alt+A` | Go to a chat, by its name |
+| `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
 Every action is also a command: `amarchy help`.

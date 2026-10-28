@@ -190,35 +190,42 @@ async function wide(browser, port) {
   const where = "wide";
   // The home-screen app (Safari's Add to Dock): no address to keep the view in.
   let p = await page(browser, "wide", port, true);
-  await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); localStorage.setItem("desk-mode", "chats"); sessionStorage.setItem("seeded", "1"); } });
+  await p.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem("desk-last", "proj-b"); sessionStorage.setItem("seeded", "1"); } });
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.today && !desk.current && !!document.querySelector(".desk-empty:not([hidden]) .today")),
-        "launched: Today, not the last chat");
+  check(where, await until(p, () => !desk.current && !!document.querySelector(".tasks-board .board-today .tcard")
+                                   && getComputedStyle(document.querySelector(".stage")).display === "none"), "launched: the board, not the last chat");
   await sleep(300);
   await p.screenshot({ path: path.join(SHOTS, "wide-launched.png") });
-  await p.evaluate(() => document.querySelector(".panel-buttons .new-chat").click());
-  check(where, await until(p, () => desk.fresh && !!document.querySelector(".desk-empty:not([hidden]) .start-chat.wide")), "New chat: What do you want to do?");
+  await p.evaluate(() => document.querySelector(".board-new-btn").click());
+  check(where, await until(p, () => board.composing && !!document.querySelector(".board-new:not([hidden]) .start-chat.wide")), "New chat: What do you want to do?");
   await sleep(300);
   check(where, await p.evaluate(() => document.activeElement && document.activeElement.matches(".start-chat textarea")), "its box has the keyboard");
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => desk.current === "proj-b"), "Escape: back to the last chat");
-  await p.reload();
-  await ready(p);
-  check(where, await until(p, () => desk.current === "proj-b"), "reloaded: the chat it was on");
+  check(where, await until(p, () => !board.composing && document.querySelector(".board-new").hidden && !desk.current), "Escape: the box goes, the board stays");
+  await p.evaluate(() => go("#/s/proj-b"));
+  check(where, await until(p, () => desk.current === "proj-b"), "a chat opened");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 
-  // In a browser tab: a link to a chat opens that chat; the bare address, the new chat.
+  // In a browser tab: a link to a chat opens that chat; the bare address, the board.
   p = await page(browser, "wide", port, false);
-  await p.addInitScript(() => { try { localStorage.setItem("desk-mode", "chats"); } catch (e) { /* about:blank */ } });
   await p.goto("/#/s/proj-a");
   await ready(p);
   check(where, await until(p, () => desk.current === "proj-a"), "a link to a chat: that chat");
+  await p.reload();
+  await ready(p);
+  check(where, await until(p, () => desk.current === "proj-a"), "reloaded: the chat it was on");
+  await p.goBack().catch(() => {});
   await p.goto("about:blank");
   await p.goto("/");
   await ready(p);
-  check(where, await until(p, () => desk.today && !desk.current && location.hash === "#/today"), "the bare address in a tab: Today, #/today");
+  check(where, await until(p, () => !desk.current && location.hash === "#/today"), "the bare address in a tab: the board, #/today");
+  // Opened from the board: the browser's Back is the board again.
+  await p.evaluate(() => boardOpen("proj-a"));
+  check(where, await until(p, () => desk.current === "proj-a" && location.hash === "#/s/proj-a"), "opened: its address");
+  await p.goBack();
+  check(where, await until(p, () => !desk.current), "the browser's Back: the board");
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

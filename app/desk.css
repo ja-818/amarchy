@@ -1,8 +1,8 @@
-/* amarchy in a browser on your computer (desk.js), its wide layout. Your
-   sessions on the left, the session's chat in the middle (chat.css), and the
-   side panel on the right (its Terminal, Changes, Details): each a
-   see-through pane from the top of the screen to the bottom over your
-   wallpaper. Design tokens only (docs/design-tokens.md).
+/* amarchy in a browser on your computer (desk.js), its wide layout. The
+   board has the window (today.css); a chat opened is the window over it
+   (chat.css), the side panel on its right (its Terminal, Changes, Details):
+   each a see-through pane from the top of the screen to the bottom over
+   your wallpaper. Design tokens only (docs/design-tokens.md).
    The terminals' colors are your theme's (theme.css puts them over these,
    Tokyo Night's). */
 
@@ -44,91 +44,15 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 .desk-root.resizing { cursor: col-resize; user-select: none; }
 .desk-root.resizing iframe, .desk-root.resizing .term-box { pointer-events: none; }
 
-/* No bar: the panes go from the top of the screen to the bottom. In zen
-   mode, with no list, an Ⓐ in the corner opens your sessions (lit when one
-   needs you); a red dot on it, and on the menu's, while you dictate. */
-.ball {
-  position: fixed; z-index: 7; top: 8px; left: 8px;
-  display: none;
-  width: 30px; height: 30px; border-radius: var(--radius-control);
-  font-size: 21px; line-height: 30px; text-align: center;
-  color: var(--text);
-}
-.zen .ball { display: block; }
-.ball:hover, .ball.lit, .panel-buttons .brand.lit .a { color: var(--accent); }
-body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
-  content: "●"; position: absolute; top: 2px; right: 0; color: var(--danger); font-size: 9px; line-height: 1;
-}
-.panel-buttons .brand .a { position: relative; }
-
-/* The list, the chat and the side panel, side by side; the panel over the
-   chat when the window is too narrow for both. */
+/* The chat and the side panel, side by side; the panel over the chat when
+   the window is too narrow for both. */
 .stage { position: relative; flex: 1; min-height: 0; display: flex; }
-
-/* ---- your sessions, on the left */
-
-.panel {
-  flex: none; width: var(--sidebar);
-  display: flex; flex-direction: column; gap: 14px;
-  padding: 16px 12px 0;
-  background: var(--pane-bg);
-}
-.zen .panel { display: none; }
-.panel-buttons { display: flex; gap: 8px; flex: none; }
-/* New chat the width left; Today and Settings (the cog) on the right. */
-.panel-buttons .control { min-height: 38px; padding: 4px 12px; gap: 8px; font-size: var(--body); white-space: nowrap; overflow: hidden; }
-.panel-buttons .brand { flex: none; width: 38px; padding: 0; }
-.panel-buttons .brand .glyph svg { width: 18px; height: 18px; }
-.panel-buttons .today-btn { flex: none; font-weight: 700; }
-.panel-buttons .today-btn.on { border-color: var(--accent); color: var(--accent); }
-/* Outline, like the rest of the buttons here: not filled. */
-.panel-buttons .new-chat { flex: 1; min-width: 0; justify-content: center; }
-.panel-buttons .a { font-size: var(--title); line-height: 1; }
 .desk .control:hover { background: var(--control-hover); }
-.desk .toolbar { padding: 0; flex: none; }
 .desk .searchbox { height: 38px; }
 .desk .searchbox input { font-size: var(--body); }
-.desk .searchbox .hint { display: none; flex: none; padding-right: 8px; font-size: var(--caption); color: var(--text-muted); }
-.desk .searchbox:focus-within .hint { display: none; }
 .desk .control.organize { width: 38px; height: 38px; min-height: 38px; font-size: 16px; }
 .desk .organize-menu { right: 0; top: 100%; }
 .desk .organize-menu .menu-item:hover { background: var(--selected-bg); }
-.panel .scroll { margin: 0 -6px; padding-bottom: 12px; }
-.desk .list { padding: 0 6px; gap: 2px; }
-.desk .row { padding: 8px 10px 8px 6px; gap: 10px; }
-.desk .row:hover { background: var(--control-hover); }
-.desk .row.cursor { background: var(--selected-bg); border-color: var(--selected-border); }
-.desk .row.cursor .task, .desk .row.cursor .state { color: var(--selected-text); opacity: 1; }
-.desk .row .meta { font-size: var(--caption); }
-.desk .row .side { font-size: 11px; }
-.desk .row > .state { flex: none; width: 16px; text-align: center; }
-/* A session in the list (app.css's .session-row), a size smaller: its
-   preview one line. */
-.desk .session-row .task { font-size: var(--body); }
-.desk .session-row .preview { display: block; white-space: nowrap; text-overflow: ellipsis; }
-.desk .row.cursor .preview { color: var(--text); }
-/* Your assistant's section ends where its last row does: the space above the
-   next group's title sets it apart, as much as between two projects. */
-.desk .assistant-section { padding-bottom: 0; margin-bottom: 0; }
-/* Your assistant's card keeps its size beside the chat too, selected like any row. */
-.desk .row.assistant { padding: 11px 10px 11px 8px; gap: 13px; }
-.desk .row.assistant .avatar-wrap { width: 52px; height: 52px; }
-.desk .row.assistant .name { font-size: 22px; }
-.desk .row.assistant.cursor .name, .desk .row.assistant.cursor .line { color: var(--selected-text); }
-.desk .group-head { padding: 12px 6px 4px; font-size: var(--caption); }
-/* The outermost group (a project, say) a section title, as the Details
-   tab's are: no rule across the list, space above it instead; the group
-   inside it (a priority) stays a plain label under it. */
-.desk .group-head.ruled {
-  display: block; min-height: 0;
-  padding: 26px 6px 6px;
-  color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em;
-}
-.desk .group-head.ruled:first-child { padding-top: 6px; }
-.desk .group-head.ruled::before, .desk .group-head.ruled::after { content: none; }
-.desk .group-head.ruled + .group-head { padding-top: 2px; }
-.desk .project-head:hover .moves { display: flex; position: absolute; right: 6px; bottom: 2px; }
-.desk .empty { padding: 32px 12px; }
 
 /* ---- the chat, in the middle */
 
@@ -147,43 +71,34 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 .desk-chat > .chat { flex: 1; }
 .desk-chat .chat-dock { padding: 0 16px 14px; }
 .desk-chat .chat-conv { padding-top: 22px; }
-.desk-empty {
-  flex: 1;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
-  color: var(--text-muted);
-}
-.desk-empty .big { font-size: var(--title); font-weight: 700; color: var(--text); }
-/* The new chat: up from the middle, where your eyes are. */
-.desk-empty.new { justify-content: flex-start; padding: max(12vh, 48px) 24px 24px; }
-
-/* Over the chat: the session's state and name (click: rename), its state in
-   words, and the side panel's tabs. */
+/* Over the chat: Back to the board, its project and name (click: rename),
+   where it stands and what it's for; the side panel's tabs, Complete, ⋯. */
 .desk-head {
   flex: none;
-  height: var(--head-height);
+  min-height: var(--head-height);
   display: flex; align-items: center; gap: 8px;
-  padding: 0 8px 0 10px;
+  padding: 6px 8px 6px 10px;
 }
-.zen .desk-head { padding-left: 46px; }
 .desk-head:empty { display: none; }
 .head-title {
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 9px;
-  height: 36px; padding: 0 8px;
+  min-height: 36px; padding: 0 8px;
   border-radius: var(--radius-control);
   text-align: left; white-space: nowrap; overflow: hidden;
 }
 .head-title:hover { background: var(--control-hover); }
 .head-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-.head-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.head-title.has-goal { height: auto; min-height: 36px; padding-top: 2px; padding-bottom: 2px; }
+.head-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.head-title.has-goal { padding-top: 2px; padding-bottom: 2px; }
 .head-goal { font-size: var(--caption); line-height: 1.3; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.head-title .state { font-size: var(--body); width: var(--body); flex: none; }
 .head-title .task { font-size: var(--title); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .head-title .avatar.small { width: 22px; height: 22px; }
-.head-state { flex: none; font-size: var(--caption); color: var(--text-muted); }
-.head-state.is-waiting { color: var(--warning); font-weight: 700; }
-.head-state.is-working { color: var(--accent); }
+.head-title .tcard-chip { max-width: 22%; }
+.head-btn.board-back { color: var(--text); padding-left: 6px; }
+.head-btn.board-back .glyph svg { width: 16px; height: 16px; }
+.head-btn.complete { color: var(--success); }
+.head-btn.complete:hover { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
 .head-btns { flex: none; display: flex; gap: 2px; }
 .head-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -353,25 +268,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   font-size: var(--caption);
 }
 
-/* ---- your sessions under the Ⓐ (in zen mode, the way to them) */
-
-.bar-shade { position: fixed; inset: 0; z-index: 8; }
-.bar-drop {
-  position: fixed; z-index: 9;
-  top: 8px; left: 8px;
-  width: min(380px, calc(100vw - 16px));
-  max-height: calc(100vh - 60px);
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 8px;
-  border: var(--popup-border-width) solid transparent;
-  border-radius: var(--radius-card);
-  background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--border-popup) border-box;
-  box-shadow: var(--shadow-popup);
-  outline: none;
-  animation: fade 0.12s ease-out;
-}
-.bar-drop .scroll { flex: 1; }
-
 /* ---- the menu card: the amarchy menu, new session, commands… */
 
 .picker-back {
@@ -392,7 +288,7 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
 }
 .picker-top { display: flex; align-items: flex-start; }
 .picker-title { flex: 1; min-width: 0; padding: 12px 16px 0; color: var(--accent); font-weight: 700; }
-/* The ✕ of a menu card, and of the list under the Ⓐ. */
+/* The ✕ of a menu card. */
 .picker-close {
   flex: none; width: 44px; height: 44px; margin-left: auto;
   display: grid; place-items: center;
@@ -400,8 +296,6 @@ body.dictating .ball::after, body.dictating .panel-buttons .brand .a::after {
   color: var(--text-muted); font-size: 16px;
 }
 .picker-close:hover { color: var(--text); background: var(--selected-bg); }
-.bar-drop-top { display: flex; align-items: center; gap: 4px; }
-.bar-drop-top .searchbox { flex: 1; }
 .picker-input { display: block; padding: 10px 16px; border-bottom: 1px solid var(--border-faint); }
 .picker-input input { width: 100%; border: 0; outline: none; background: none; font-size: var(--title); padding: 2px 0; }
 .picker-input input::placeholder { color: var(--text-muted); }

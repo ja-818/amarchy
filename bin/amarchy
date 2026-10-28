@@ -31,6 +31,9 @@ Sessions:
   amarchy new <project> [name] --model <model>
                                         on that model (opus, sonnet, haiku, a model id) instead of the new
                                         chat's default (the app's new chat picks it; Opus until you do)
+  amarchy new <project> [name] --prompt <text|-> --attach <image>...
+                                        with pictures (PNG, JPEG, GIF or WebP files) going with that first
+                                        message (the app's new chat: a screenshot pasted into it)
   amarchy send <id> <text|->            a message for a session's Claude, as if typed and sent (- reads it
                                         from stdin), once Claude is free: after the turn under way, not
                                         over a question it asks; a session asleep or whose Claude exited
@@ -1653,11 +1656,12 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name, prompt=None, model=None):
+def create(repo, name, prompt=None, model=None, images=None):
     """Start a session: its row in the list right away, and its Claude in
     tmux, which makes the worktree first (setup_session) and is then Claude,
-    asked prompt first if given, on model (else the new chat's, new_model).
-    Returns the session id, or None, having said why not."""
+    asked prompt first if given (images, Claude's image blocks, going with
+    it), on model (else the new chat's, new_model). Returns the session id,
+    or None, having said why not."""
     repo_dir = WORK / repo
     name = slug(name)
     if not (repo_dir / ".git").exists():
@@ -1687,6 +1691,8 @@ def create(repo, name, prompt=None, model=None):
     if prompt is not None:
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
+    if images:
+        chat_attach_later(sid, images)      # with that first message (Agent.load_attached), before its Claude starts
     # Its Claude starts on it (Agent.restore, before the first message; the
     # classic terminal's first start: claude_argv) and wakes in it.
     agent_remember(sid, model=model or new_model())
@@ -1925,16 +1931,22 @@ def cmd_claude(sid):
 
 
 def cmd_new(args):
-    """amarchy new <project> [name] [--prompt <text>|-] [--model <model>]: the
-    new session's id on stdout. --prompt is the first thing its Claude is
-    asked (- reads it from stdin); --model the model it's on (else the new
-    chat's: new_model). --no-jump, from when a desktop showed the new
-    session, is still taken, and changes nothing: nothing opens anywhere."""
-    prompt, model, rest = None, None, []
+    """amarchy new <project> [name] [--prompt <text>|-] [--attach <image>]
+    [--model <model>]: the new session's id on stdout. --prompt is the first
+    thing its Claude is asked (- reads it from stdin), each --attach a
+    picture going with it; --model the model it's on (else the new chat's:
+    new_model). --no-jump, from when a desktop showed the new session, is
+    still taken, and changes nothing: nothing opens anywhere."""
+    prompt, model, rest, attach = None, None, [], []
     it = iter(args)
     for a in it:
         if a == "--no-jump":
             pass
+        elif a == "--attach" or a.startswith("--attach="):
+            f = a.split("=", 1)[1] if "=" in a else next(it, None)
+            if not f:
+                return fail("--attach needs a picture's file")
+            attach.append(f)
         elif a == "--prompt":
             prompt = next(it, None)
             if prompt is None:
@@ -1946,7 +1958,7 @@ def cmd_new(args):
             if not model or not re.fullmatch(MODEL_RE, model):
                 return fail("--model needs a model: opus, sonnet, haiku, or a model id (claude-opus-5-5)")
         elif a.startswith("--"):
-            return fail(f"amarchy new doesn't know {a} (it takes --prompt and --model)")
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach and --model)")
         else:
             rest.append(a)
     if not rest or len(rest) > 2:
@@ -1956,8 +1968,23 @@ def cmd_new(args):
         prompt = sys.stdin.read()
     if prompt is not None and not prompt.strip():
         return fail("--prompt is empty")
+    if attach and prompt is None:
+        return fail("--attach goes with --prompt: the pictures go with that first message")
+    images = []
+    for f in attach:
+        kind = PICTURE_TYPES.get(Path(f).suffix.lower(), "")
+        if not CLIP_TYPES.fullmatch(kind):
+            return fail(f"{f}: only pictures (PNG, JPEG, GIF or WebP)")
+        try:
+            data = Path(f).read_bytes()
+        except OSError as e:
+            return fail(f"can't read {f}: {e.strerror}")
+        images.append({"type": kind, "data": base64.b64encode(data).decode()})
+    blocks = chat_images(images) if images else []
+    if isinstance(blocks, str):
+        return fail(f"--attach: {blocks}")
     repo = rest[0]
-    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model)
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks)
     if not sid:
         return 1
     print(sid)
@@ -8234,6 +8261,7 @@ def share_parse(ctype, body):
 
 CLIP_MAX = 25_000_000                           # bytes of one pasted image or text (as base64 in its JSON)
 CLIP_TYPES = re.compile(r"image/(png|jpeg|gif|webp)")
+PICTURE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}     # a picture's file, by its name
 TTY_PING = 25                                   # seconds between pings on a terminal's WebSocket
 
 
@@ -9690,7 +9718,7 @@ def app_handler(st, users, address):
                 return self.share_in()
             if not self.allowed(write=True):
                 return
-            big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper") \
+            big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
                 or bool(re.fullmatch(r"/api/session/[^/]+/send", self.path))      # images, on the chat engine
             upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
             data = self.body(UPLOAD_MAX if upload else CLIP_MAX if big else 200_000)
@@ -10218,6 +10246,8 @@ def app_handler(st, users, address):
             return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
 
         def new(self, data):
+            """{repo, prompt, model, images: [{type, data (base64)}]}: a new
+            chat, the pictures (a screenshot pasted) going with its prompt."""
             repo, prompt, model = data.get("repo"), data.get("prompt"), data.get("model")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])} \
                     and repo not in {p["name"] for p in projects()}:      # one just added: not in the list yet
@@ -10226,13 +10256,26 @@ def app_handler(st, users, address):
             if model is not None and not (isinstance(model, str) and re.fullmatch(MODEL_RE, model)):
                 return self.error(400, "which model")
             on = ["--model", model] if model else []
+            images = chat_images(data.get("images"))
+            if isinstance(images, str):
+                return self.error(400, images)
             # Without a prompt when it's to be dictated, once it's up.
             if prompt is None or isinstance(prompt, str) and not prompt.strip():
+                if images:
+                    return self.error(400, "say what it's for: the pictures go with it")
                 r = run_amarchy("new", repo, *on, timeout=300)
             elif not isinstance(prompt, str) or len(prompt) > 60_000:
                 return self.error(400, "say what it's for")
             else:
-                r = run_amarchy("new", repo, *on, "--prompt", "-", input=prompt, timeout=300)
+                # The pictures as files for `amarchy new --attach`, gone once it has them.
+                with tempfile.TemporaryDirectory(prefix="amarchy-new-") as tmp:
+                    attach = []
+                    for i, b in enumerate(images):
+                        ext = next(e for e, t in PICTURE_TYPES.items() if t == b["source"]["media_type"])
+                        f = Path(tmp) / f"{i + 1}{ext}"
+                        f.write_bytes(base64.b64decode(b["source"]["data"]))
+                        attach += ["--attach", str(f)]
+                    r = run_amarchy("new", repo, *on, "--prompt", "-", *attach, input=prompt, timeout=300)
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
@@ -12787,7 +12830,7 @@ def cmd_agent(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt", "--no-jump", "--model"}, {"--prompt", "--model"}, set()),
+    "new": ({"--prompt", "--no-jump", "--model", "--attach"}, {"--prompt", "--model", "--attach"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact"}, set(), set()),
@@ -12865,7 +12908,7 @@ def check_args(cmd, args):
         if a in HELP:
             print(usage(cmd))
             return 0
-        name = "--prompt" if cmd == "new" and a.startswith("--prompt=") else a     # new's only --option=value
+        name = a.split("=", 1)[0] if cmd == "new" and re.match(r"--(prompt|model|attach)=", a) else a     # new's --option=value
         if name in text:
             break
         if name in values and name == a:

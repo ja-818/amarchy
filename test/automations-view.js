@@ -124,26 +124,21 @@ function dropTimer() {
 async function run(browser, port, layout, home) {
   const ctx = await browser.newContext({ ...LAYOUTS[layout], baseURL: `http://127.0.0.1:${port}` });
   const page = await ctx.newPage();
-  await page.addInitScript(() => { try { localStorage.setItem("desk-mode", "chats"); } catch (e) { /* about:blank */ } });     // the list's bar (not Tasks)
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const shot = async (name) => { await page.waitForTimeout(400); return page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) }); };
   await page.goto("/");
   await page.waitForFunction(() => typeof automationsSheet === "function" && document.readyState === "complete");
-  const clock = page.locator(layout === "wide" ? ".toolbar .auto-btn" : ".hero .auto-btn").first();
+  const clock = page.locator(layout === "wide" ? ".board-tools .auto-btn" : ".hero .auto-btn").first();
   await clock.waitFor({ state: "attached", timeout: 8000 });
-  if (layout === "phone") check(layout, await clock.isVisible(), "the clock is there");
+  check(layout, await clock.isVisible(), layout === "wide" ? "the clock is in the board's bar" : "the clock is there");
   if (layout === "wide") {
-    // The bar is there once there's a chat (this server has none): shown as it would be.
-    await page.evaluate(() => { desk.toolbar.hidden = false; });
-    check(layout, await clock.isVisible(), "the clock is in the list's bar");
     await shot("bar");
-    await page.evaluate(() => { desk.toolbar.hidden = true; });
-    await page.locator(".panel-buttons .brand").click({ button: "right" });      // the cog's right click: the Amarchy menu
+    await page.locator(".board-tools .board-tool[aria-label=Settings]").click({ button: "right" });      // the cog's right click: the Amarchy menu
     const item = page.locator(".picker-row", { hasText: "Automations" }).first();
     await item.waitFor({ timeout: 3000 }).catch(() => {});
     check(layout, await item.isVisible().catch(() => false), "the menu has Automations");
-    await item.click();         // no chats here, so no bar: the menu's way in
+    await item.click();
   } else {
     await clock.click();
   }
