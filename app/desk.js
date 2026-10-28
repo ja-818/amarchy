@@ -548,7 +548,7 @@ function leaveNewChat() {
 function deskChat(id) {
   const chat = new Chat({
     id, row: row(id), noSwitch: true,
-    onSession: (r) => { if (chat === desk.chat) { deskHead(); desk.details.sessionChanged(r); } },
+    onSession: (r) => { if (chat === desk.chat) { uiWhenStill("desk-head", deskHead); desk.details.sessionChanged(r); } },
     onGoal: () => { if (chat === desk.chat) deskHead(); },        // what the chat is for, under its name
     onSent: () => { if (chat === desk.chat) boardSent(id); },     // it works on it: back to the board (tasks.js)
     onGone: (why) => {
@@ -579,9 +579,9 @@ function deskHead() {
   const s = row(desk.current);
   if (!s) { desk.head.replaceChildren(); return; }
   // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
-  keepFocus(desk.head, () => desk.head.replaceChildren(...uiChatHead(s, {
+  uiSwap(desk.head, uiChatHead(s, {
     backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
-    complete: () => closeCurrent(), more: () => sessionMenu(s) })));
+    complete: () => closeCurrent(), more: () => sessionMenu(row(desk.current) || s) }));
 }
 
 const SIDE_ICONS = { term: "run", changes: "diff", details: "info" };

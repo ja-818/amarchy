@@ -43,7 +43,69 @@
 
 const uiState = {
   open: new Map(),      // a section you opened or closed: its key -> open (kept across redraws)
+  down: 0,              // when a finger (or the mouse button) went down on the page, while it's down
+  up: 0,                // when it lifted (or the page last scrolled)
+  later: new Map(),     // what waits for it to lift: key -> fn
 };
+
+// ---- drawn again only when it changed, and never under your finger
+//
+// The list comes every second or so while chats work. Drawn again each
+// time, what you're about to tap is a new button, or moved: the tap lands
+// on the one next to it, or under it. So a box's children are replaced
+// only when they'd look different (uiSwap), and what the list's news
+// redraws waits while a finger is down and the moment its tap takes
+// (uiWhenStill). What you do yourself is drawn at once.
+
+const UI_TAP = 450;     // a finger lifted: its click (and a double tap's second) still to come
+const UI_HOLD = 5000;   // a finger down longer (or a lift the page never heard of): drawn anyway
+
+addEventListener("pointerdown", () => { uiState.down = Date.now(); }, true);
+for (const type of ["pointerup", "pointercancel"]) {
+  addEventListener(type, () => { uiState.down = 0; uiState.up = Date.now(); uiStillSoon(); }, true);
+}
+// A list still gliding after the finger's gone counts too: drawn again, it
+// would stop under you.
+addEventListener("scroll", () => { uiState.up = Date.now(); uiStillSoon(); }, { capture: true, passive: true });
+
+function uiTouching() {
+  const now = Date.now();
+  return (uiState.down && now - uiState.down < UI_HOLD) || now - uiState.up < UI_TAP;
+}
+
+// fn now, or once the finger's gone (the last one under key, if more come).
+function uiWhenStill(key, fn) {
+  if (!uiTouching()) { uiState.later.delete(key); fn(); return; }
+  uiState.later.set(key, fn);
+  uiStillSoon();
+}
+
+let uiStillTimer = 0;
+function uiStillSoon() {
+  if (!uiState.later.size) return;
+  const now = Date.now();
+  const at = Math.max(uiState.up + UI_TAP, uiState.down ? uiState.down + UI_HOLD : 0, now) + 10;
+  clearTimeout(uiStillTimer);
+  uiStillTimer = setTimeout(uiStill, at - now);
+}
+
+function uiStill() {
+  if (uiTouching()) return uiStillSoon();
+  const fns = [...uiState.later.values()];
+  uiState.later.clear();
+  for (const fn of fns) fn();
+}
+
+// box's children made nodes, unless they'd look the same (then it keeps its
+// own, under your finger and in focus). True when it changed.
+function uiSwap(box, nodes) {
+  const next = document.createElement("div");
+  next.append(...nodes.filter((n) => n !== null && n !== undefined && n !== false));
+  if (next.innerHTML === box.innerHTML) return false;
+  const fill = () => box.replaceChildren(...next.childNodes);
+  if (typeof keepFocus === "function") keepFocus(box, fill); else fill();
+  return true;
+}
 
 // A card. head: what opens it (a chat) or opens its text (a task). kind: what
 // it is (k-<kind>, for its look); hue: its project's color (ph-<hue>); lead:
@@ -106,8 +168,7 @@ function uiTabs(items, on, pick, el = null, label = "") {
   const kids = items.map((t) => h("button", { class: `control${t.key === on ? " on" : ""}`, type: "button", role: "tab", "data-tab": t.key,
                                               title: t.title || null, "aria-selected": String(t.key === on), onclick: () => pick(t.key) },
     t.label, t.count ? h("span", { class: "tab-count" }, String(t.count)) : ""));
-  if (typeof keepFocus === "function") keepFocus(box, () => box.replaceChildren(...kids));
-  else box.replaceChildren(...kids);
+  uiSwap(box, kids);
   return box;
 }
 

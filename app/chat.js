@@ -2723,7 +2723,7 @@ class Chat {
     const n = live && live.attachments;
     if (n) kids.push(h("div", { class: "queued images" }, icon("image"),
       h("div", { class: "text" }, h("div", { class: "what" }, n === 1 ? "An image goes with your next message" : `${n} images go with your next message`))));
-    this.queueEl.replaceChildren(...kids);
+    uiSwap(this.queueEl, kids);      // the same, it stays: its buttons under your finger
   }
 
   // What Claude left running in the background (live.tasks): its helpers
