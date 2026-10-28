@@ -33,6 +33,7 @@ const todayUI = {
   sent: new Map(),      // a chat you answered: id -> {key: what it asked then, at}
   closing: new Set(),   // chats closing (their Undo still up): off the page
   more: new Set(),      // lists with "+N more" opened
+  seen: new Set(),      // chats you marked seen here (until the view says so)
   expand: new Set(),    // loops whose whole text you opened
   version: 0,           // bumped by what's done here: drawn again (todayFill)
 };
@@ -142,7 +143,9 @@ function todayParts(v) {
   const chaseNow = waitingAll.filter((l) => l.chase && todayDay(l.chase) <= 0);
   const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
   const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
-  const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s));
+  // Finished a turn you haven't opened: it needs you too (to see what it did).
+  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && s.status !== "working" && s.unseen && !todayUI.seen.has(s.id));
+  const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isMain(s));
   const done = rest.filter((s) => s.status !== "working" && (s.today || {}).state === "done");
   const quietFor = (s) => now - ((s.today || {}).at || 0);
   const stale = rest.filter((s) => !done.includes(s) && s.status !== "working" && (s.today || {}).at && quietFor(s) > TODAY_STALE)
@@ -150,14 +153,16 @@ function todayParts(v) {
   const working = rest.filter((s) => s.status === "working");
   const idle = rest.filter((s) => !done.includes(s) && !stale.includes(s) && !working.includes(s));
   const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
-  return { asks, blocked, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle, someday };
+  // Ready: every other chat, stalled ones among them (as the list orders them).
+  const ready = rest.filter((s) => !done.includes(s) && !working.includes(s));
+  return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle, ready, someday };
 }
 
 // What's your move: the count on Today's tab, the switch, the page's top.
 function todayCount(v, only = null) {
   if (!v) return 0;
   const p = todayParts(v);
-  const chats = p.asks.length + p.blocked.length, tasks = p.dueNow.length + p.chaseNow.length;
+  const chats = p.asks.length + p.blocked.length + p.fresh.length, tasks = p.dueNow.length + p.chaseNow.length;
   return only === "chats" ? chats : only === "tasks" ? tasks : chats + tasks;
 }
 
@@ -166,7 +171,7 @@ function todaySummary(v, only = null) {
   const p = todayParts(v);
   const yours = todayCount(v, only);
   if (only === "tasks") return yours ? `${yours} task${yours === 1 ? "" : "s"} for now` : "No task is due now";
-  return [yours ? `${yours} for you to do` : "Nothing waits on you", only !== "tasks" && p.done.length ? `${p.done.length} to close` : ""].filter(Boolean).join(" · ");
+  return [yours ? `${yours} need${yours === 1 ? "s" : ""} you` : "Nothing needs you", only !== "tasks" && p.done.length ? `${p.done.length} done` : ""].filter(Boolean).join(" · ");
 }
 
 // ---- doing
@@ -180,7 +185,7 @@ function todayOpen(s) {
 
 // Close it: at once, with Undo, when nothing would be lost; else asked, as
 // any close is (app.js confirmClose says what would go).
-async function todayClose(s) {
+async function todayClose(s, said = "") {
   let c;
   try {
     const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
@@ -189,16 +194,16 @@ async function todayClose(s) {
   } catch (e) {
     return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
   }
-  if (c.changes || c.amarchy) return confirmClose(s, c);
-  todayCloseNow([s]);
+  if (c.changes || c.amarchy) { todayRedraw(); return confirmClose(s, c); }
+  todayCloseNow([s], said);
 }
 
 // These close, after their Undo (off the page meanwhile).
-function todayCloseNow(ss) {
+function todayCloseNow(ss, said = "") {
   ss.forEach((s) => todayUI.closing.add(s.id));
   todayRedraw();
   const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); todayRedraw(); };
-  const what = ss.length === 1 ? `Closed ${ss[0].task || "the chat"}` : `Closed ${ss.length} chats`;
+  const what = said || (ss.length === 1 ? `Closed ${ss[0].task || "the chat"}` : `Closed ${ss.length} chats`);
   todayUndo(what, async () => {
     const failed = [];
     for (const s of ss) {
@@ -227,7 +232,7 @@ async function todayCloseDone(ss) {
       return toast("Can't reach Amarchy");
     }
   }
-  if (quick.length) todayCloseNow(quick.map(([s]) => s));
+  if (quick.length) todayCloseNow(quick.map(([s]) => s), quick.length === 1 ? `Mission complete: ${quick[0][0].task || "the chat"}` : `Mission complete: ${quick.length} chats`);
   if (ask.length) confirmClose(ask[0][0], ask[0][1]);
 }
 
@@ -292,7 +297,9 @@ function todayCard({ kind, hue, lead = null, chip = "", title, pill = null, body
   const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
     lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
     h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
-  return h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null }, head,
+  // The whole card opens it (its buttons, links and boxes do their own thing).
+  return h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null,
+                        onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
     ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
 }
 
@@ -438,16 +445,49 @@ function todayChat(s, kind) {
   const main = s.assistant === "main";
   const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
   const told = todayUI.told.get(s.id);
-  const pill = kind === "done" ? todayPill("Done", "done") : kind === "stale" ? todayPill(`Stalled ${quiet}d`, "warn")
+  const finished = t.state === "done";
+  const stalled = kind === "ready" && s.status !== "working" && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
+  const pill = kind === "fresh" ? todayPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
+    : kind === "done" ? todayPill("Done", "done") : kind === "stale" || stalled ? todayPill(`Stalled ${quiet}d`, "warn")
     : kind === "working" || s.status === "working" ? todayPill("Working", "working")
     : main ? todayPill(statusWords(s), "quiet") : t.at ? todayPill(autoPast(t.at), "quiet") : null;
-  const said = boardOn() && !main && s.said && kind !== "done" ? s.said : "";
-  return todayCard({ kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s), title: main ? s.assistant_name || s.task : s.task || "New chat",
+  const said = (boardOn() || kind === "fresh") && !main && s.said ? s.said : "";
+  // Done: Review (where to see what it made, from its reply) and Complete.
+  const link = (t.links || [])[0];
+  const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
+    title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
+    glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
+  const complete = finished && !main ? todayBtn("Complete", () => todayComplete(s), true, "complete") : null;
+  const seenBtn = kind === "fresh" && !finished ? todayBtn("Seen", () => todaySeen(s), false, "quiet") : null;
+  return todayCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
+    title: main ? s.assistant_name || s.task : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
-    body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said ? h("p", { class: "tcard-text muted said" }, said) : null],
-    actions: kind === "done" ? [todayBtn("Close", () => todayClose(s), true)]
-      : kind === "stale" ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : todayBtn("Ask status", () => todayNudge(s)),
-                            todayBtn("Close", () => todayClose(s))] : [] });
+    body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
+    actions: finished ? [review, complete]
+      : kind === "fresh" ? [seenBtn]
+      : kind === "stale" || stalled ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : todayBtn("Ask status", () => todayNudge(s)),
+                                       todayBtn("Close", () => todayClose(s))] : [] });
+}
+
+// Seen without opening it: off Needs you.
+function todaySeen(s) {
+  todayUI.seen.add(s.id);
+  todayRedraw();
+  api(`/api/session/${encodeURIComponent(s.id)}/seen`).catch(() => {});
+  setTimeout(() => { todayUI.seen.delete(s.id); }, 30000);
+}
+
+// Mission complete: the chat reached its goal. Its card says so, a moment,
+// then it closes (as Close does: at once with Undo when nothing would be
+// lost, else asked).
+async function todayComplete(s) {
+  const card = document.querySelector(`.tcard[data-id="${CSS.escape(s.id)}"]`);
+  if (card) {
+    card.classList.add("completing");
+    card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, "Mission complete")));
+  }
+  await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 200 : 1100));
+  todayClose(s, `Mission complete: ${s.task || "the chat"}`);
 }
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the
@@ -471,16 +511,20 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // project): its groups, what asks you first in each (todayGrouped).
   const groups = (app.organize || v).group || [];
   if (board && only === "chats" && groups.length && groups[0] !== "status") return [...nodes, ...todayGrouped(v, p, groups, tk)];
-  nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Your move", { count: yours },
-    chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked))] : [],
+  // At work on top, folded, its count in sight; then what needs you (asks,
+  // blocked, finished and not seen yet, your tasks due); then what's done
+  // (Review, Complete); then every other chat, open: none is out of sight.
+  if (chats) nodes.push(todaySection("working", "At work", { count: p.working.length, fold: false,
+    extra: p.working.length ? todayPill(`${p.working.length} working`, "working") : null }, p.working.map(tk(todayChat, "working"))));
+  const needs = yours + (chats ? p.fresh.length : 0);
+  nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Needs you", { count: needs },
+    chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)), p.fresh.map(tk(todayChat, "fresh"))] : [],
     tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
-  if (!yours) nodes.push(h("p", { class: "today-clear" }, glyph("check"),
-    chats && close ? ` Nothing waits on you. ${close} to close, below.` : chats && p.stale.length ? ` Nothing waits on you. ${p.stale.length} stalled, below.` : " Nothing waits on you."));
+  if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), chats && close ? ` Nothing needs you. ${close} done, below.` : " Nothing needs you."));
   if (chats) {
-    const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Close all ${close} done`) : null;
-    nodes.push(todaySection("finish", "Finish", { count: close + p.stale.length, extra: all },
-      todayFirst("finish", [...p.done.map(tk(todayChat, "done")), ...p.stale.map(tk(todayChat, "stale"))])));
-    nodes.push(todaySection("working", "At work", { count: p.working.length, fold: true }, p.working.map(tk(todayChat, "working"))));
+    const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${close}`) : null;
+    nodes.push(todaySection("finish", "Done", { count: close, extra: all }, p.done.map(tk(todayChat, "done"))));
+    nodes.push(todaySection("idle", "Ready", { count: p.ready.length }, p.ready.map(tk(todayChat, "ready"))));
   }
   if (tasks) {
     nodes.push(todaySection("chase", "Waiting on others", { count: p.waiting.length, fold: only === "tasks" }, p.waiting.map(loop)));
@@ -488,7 +532,6 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     nodes.push(todaySection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
     if (only === "tasks") nodes.push(todaySection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
   }
-  if (chats) nodes.push(todaySection("idle", "Other chats", { count: p.idle.length, fold: false }, p.idle.map(tk(todayChat, "idle"))));
   if (tasks) {
     if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
     if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your tasks show here from your loops file: set it in ",
@@ -505,7 +548,7 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
 // them. Each card says where it stands, so nothing that's done waits unseen.
 function todayGrouped(v, p, groups, tk) {
   const card = (s) => p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
-    : tk(todayChat, p.done.includes(s) ? "done" : p.stale.includes(s) ? "stale" : p.working.includes(s) ? "working" : "idle")(s);
+    : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
   const label = (s, g) => (g === "project" ? projectName(s.repo) : groupLabel(s, g));
   const first = (v.sessions || []).filter((s) => !s.setup && s.assistant !== "main" && !todayUI.closing.has(s.id));
   const sections = new Map();
@@ -529,12 +572,12 @@ function todayGrouped(v, p, groups, tk) {
     const kids = [];
     for (const [k, list] of [...subs].sort((a, b) => subRank(a[0]) - subRank(b[0]))) {
       if (k) kids.push(h("div", { class: "tsec-sub" }, k));
-      const asking = (s) => p.asks.includes(s) || p.blocked.includes(s);
+      const asking = (s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s);
       kids.push(...[...list.filter(asking), ...list.filter((s) => !asking(s))].map(card));
     }
-    const asking = ss.filter((s) => p.asks.includes(s) || p.blocked.includes(s)).length;
+    const asking = ss.filter((s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s)).length;
     const key = `g-${groups[0]}-${name}`.toLowerCase().replace(/[^\w-]+/g, "-");
-    out.push(todaySection(key, name, { count: ss.length, extra: asking ? todayPill(`${asking} ask${asking === 1 ? "s" : ""} you`, "ask") : null,
+    out.push(todaySection(key, name, { count: ss.length, extra: asking ? todayPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null,
                                        fold: /^low/i.test(name) ? false : null }, kids));
   }
   return out;

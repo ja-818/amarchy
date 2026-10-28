@@ -25,6 +25,9 @@ const board = {
   found: null,       // the server's answer for it: {q, results}
 };
 
+// In sight: not in a folded part (a closed <details> keeps its boxes, hidden).
+function shown(el) { return el.checkVisibility ? el.checkVisibility() : !el.closest("details:not([open]) > :not(summary)"); }
+
 // The chat the keys go to: the open one in Tasks, the middle's in Chats.
 function chatNow() { return boardOn() ? board.chat : desk.chat; }
 
@@ -64,7 +67,7 @@ function boardKeys(e) {
   if (board.open) return;      // (its Esc: boardEsc)
   if (typing) return;
   if (e.key === "/") { e.preventDefault(); board.search.focus(); board.search.select(); return; }
-  const goes = [...board.box.querySelectorAll(".ticket > * > .today-go")];
+  const goes = [...board.box.querySelectorAll(".ticket > * > .today-go")].filter(shown);      // not in a folded part
   const at = goes.findIndex((b) => b === document.activeElement || b.parentElement.contains(document.activeElement));
   const ticket = at >= 0 ? goes[at].closest(".ticket") : null;
   const move = (d) => {
@@ -215,7 +218,9 @@ function boardFocusHead() {
     todayStatePill(s),
     h("span", { class: "board-gap" }),
     btn("Open in Chats", () => { const id = s.id; deskMode("chats"); go2(id); }),
-    s.assistant === "main" ? null : btn("Close chat", () => { boardBack(true); todayClose(s); }, "danger")].filter(Boolean)));
+    s.assistant === "main" ? null : (s.today || {}).state === "done"
+      ? btn("Complete ✓", () => { boardBack(true); todayComplete(s); }, "complete")
+      : btn("Close chat", () => { boardBack(true); todayClose(s); }, "danger")].filter(Boolean)));
 }
 
 // Back to the board, where you were, on the ticket you opened.
@@ -388,7 +393,7 @@ function boardOrganizeDraw() {
 // Ctrl+Alt+J / K on the board: from chat to chat in its order, the open one
 // opening the next, else the keys going to the next card.
 function boardStep(n) {
-  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].map((t) => t.dataset.id))];
+  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(shown).map((t) => t.dataset.id))];
   if (!ids.length) return;
   const at = ids.indexOf(keyedId());
   const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];

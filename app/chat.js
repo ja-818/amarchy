@@ -2747,7 +2747,8 @@ class Chat {
     if (!show) return this.doneEl.replaceChildren();
     this.doneEl.replaceChildren(glyph("check", "done-mark"),
       h("span", { class: "done-words" }, h("b", {}, "Done"), this.goal ? ` · ${this.goal}` : ""),
-      h("button", { class: "text-btn", type: "button", onclick: () => confirmClose(this.row || { id: this.id }) }, "Close chat"));
+      h("button", { class: "text-btn", type: "button", title: "The goal is reached: close the chat",
+                    onclick: () => (typeof todayComplete === "function" ? todayComplete(this.row || { id: this.id }) : confirmClose(this.row || { id: this.id })) }, "Complete ✓"));
   }
 
   renderBackground() {

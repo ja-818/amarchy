@@ -8550,6 +8550,31 @@ def reply_choices(text):
     return out[:3]
 
 
+LINK_BLOCK = re.compile(r"(?ms)^```[ \t]*link\b([^\n]*)\n(.*?)^```")
+
+
+def reply_links(text):
+    """Where to see what a reply made (its link blocks, else the links in its
+    words, not its Sources): [{label, url}], at most 3. A done chat's Review."""
+    out = []
+    for m in LINK_BLOCK.finditer(text or ""):
+        url = next((l.strip() for l in m.group(2).splitlines() if re.match(r"https?://", l.strip())), "")
+        a = block_attrs(m.group(1))
+        if url:
+            out.append({"label": a.get("label") or a.get("title") or "", "url": url})
+    if not out:
+        words = re.split(r"(?mi)^##\s+sources\b", without_goal(text or ""))[0]
+        words = re.sub(r"(?ms)^```.*?^```", "", words)
+        for m in re.finditer(r"\[([^\]]{1,80})\]\((https?://[^\s)]+)\)|(?<![(\[<\"])\b(https?://[^\s<>)\]\"'`*]+[^\s<>)\]\"'`*.,;:!?])", words):
+            out.append({"label": m.group(1) or "", "url": m.group(2) or m.group(3)})
+    seen, uniq = set(), []
+    for l in out:
+        if l["url"] not in seen:
+            seen.add(l["url"])
+            uniq.append(l)
+    return uniq[:3]
+
+
 def human_turn(r):
     """Whether a conversation record is something you said (not a tool's
     result, nor what Claude Code or amarchy put in your name)."""
@@ -8568,7 +8593,7 @@ def chat_reply(s):
     newest goal block, and when it was written: goal_at), the questions its
     last reply asks that you haven't answered (asks), and when anything last
     happened in it (at). Read again only when the conversation has moved."""
-    empty = {"goal": "", "state": "", "goal_at": 0, "asks": [], "at": 0}
+    empty = {"goal": "", "state": "", "goal_at": 0, "asks": [], "at": 0, "links": []}
     f = transcript(s) if s.get("id") else None
     if not f:
         return empty
@@ -8582,7 +8607,7 @@ def chat_reply(s):
     out = {**empty, "at": st.st_mtime}
     answered, reply_seen = False, False
     for tail in (200_000, 2_000_000):
-        out.update(goal="", state="", goal_at=0, asks=[])
+        out.update(goal="", state="", goal_at=0, asks=[], links=[])
         answered, reply_seen = False, False
         for r in reversed(conversation_records(f, tail=tail)):
             if not isinstance(r, dict) or r.get("isSidechain"):
@@ -8599,6 +8624,7 @@ def chat_reply(s):
                 continue
             if not reply_seen:
                 reply_seen = True
+                out["links"] = reply_links(text)       # where to see what it made: Review
                 if not answered:
                     out["asks"] = reply_choices(text)
             goal = reply_goal(text)
@@ -11322,7 +11348,7 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   ```
 - A link for them to open goes in a link block; a date to keep, in an event block.
 - Sources you used go last, under "## Sources", as links.
-- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
+- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, the reply gives them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one: it's the Review button on the chat's card. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
   ```goal state="working"
   Make Today the app's home screen
   ```

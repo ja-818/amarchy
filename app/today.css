@@ -211,3 +211,27 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-head .prio { flex: none; font-size: 12px; }
 .tcard-head .prio.high { color: var(--danger); }
 .tcard-head .prio.low { color: var(--text-muted); }
+
+/* The whole card opens it. */
+.tcard[data-id] { cursor: pointer; }
+.tcard[data-id]:hover { border-color: color-mix(in srgb, var(--tone) 50%, var(--border)); }
+.tcard.k-fresh { --tone: var(--accent); }
+a.tbtn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+a.tbtn .glyph svg { width: 12px; height: 12px; }
+.tbtn.complete::before { content: "✓"; margin-right: 6px; font-weight: 800; }
+.board-focus-head .complete { color: var(--success); }
+
+/* Mission complete: the card goes green, a tick lands, then it's closed (today.js todayComplete). */
+.tcard { position: relative; overflow: hidden; }
+.tcard.completing { --tone: var(--success); border-color: var(--success);
+                    background: color-mix(in srgb, var(--success) 14%, var(--surface)); transition: background .3s, border-color .3s; }
+.tcard-complete { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px;
+                  background: color-mix(in srgb, var(--success) 22%, var(--surface)); color: var(--success);
+                  font-size: var(--title); letter-spacing: 0.02em; animation: complete-in .35s ease-out both; }
+.tcard-complete .tick { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+                        background: var(--success); color: var(--on-accent); font-size: 22px; animation: complete-tick .5s cubic-bezier(.2, 1.6, .4, 1) .1s both; }
+.tcard-complete .tick .glyph svg { width: 22px; height: 22px; }
+@keyframes complete-in { from { opacity: 0; } }
+@keyframes complete-tick { from { transform: scale(0) rotate(-30deg); } }
+@media (prefers-reduced-motion: reduce) { .tcard-complete, .tcard-complete .tick { animation: none; } }
+.tbtn.primary.complete { background: var(--success); border-color: var(--success); color: var(--on-accent); }

@@ -260,8 +260,13 @@ else installed.
   list, and two tabs, each with what's your move: **Chats**, every chat a card (its
   project, its state, its goal and what it last said, its question's buttons),
   grouped as you group the list (its group & sort button, by the search): by
-  priority (High first) or by project, what asks you first in each, or not grouped,
-  by where each stands (Your move, Finish, At work, Other chats); and
+  priority (High first) or by project, what needs you first in each, or not
+  grouped, by where each stands: **At work** (folded, how many working),
+  **Needs you** (what asks you, what's blocked, and what finished that you haven't
+  opened yet, with what it said and **Seen**), **Done** (its goal reached: **Review**
+  opens the link its last reply gave, **Complete ✓** says mission complete and closes
+  it, with Undo) and **Ready** (every other chat, open). A click anywhere on a card
+  opens it; its buttons do their own thing. And
   **Tasks**, your own (your loops file: due now, waiting on others, this week,
   further out, someday), each with **Follow up** (your assistant drafts the message
   to whoever you wait on), **Ask Jaken…** (tell your assistant what to do about it)
