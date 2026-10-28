@@ -16,6 +16,10 @@
 // - uiTabs: one of a few (Chats | Tasks), each with what's your move.
 // - uiSearch: the search box.
 // - uiTool: a tool's icon button in a bar.
+// - uiScore: your score in a word or two (the streak's flame, today's
+//   missions); a tap opens the rest.
+// - uiTiles: a few big numbers, each with its word under it.
+// - uiBars: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat: Back, its project and name (a tap:
 //   rename), its pill, what it's for; its tools, Complete, its menu.
 //
@@ -52,7 +56,7 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
 }
 
 // A pill: its words in its tone's color (ask, late, done, working, running,
-// warn, quiet). working and running spin. long: words that may not fit, cut
+// accent, warn, quiet). working and running spin. long: words that may not fit, cut
 // short with "…" (all of them on hover).
 function uiPill(text, tone, { long = false, title = null } = {}) {
   const wheel = tone === "working" || tone === "running" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null;
@@ -110,6 +114,30 @@ function uiSearch({ placeholder = "Search", label = "Search", key = "/", cls = "
 function uiTool(icon, label, act, { title = "", cls = "", extra = {} } = {}) {
   return h("button", { class: `control ui-tool${cls ? ` ${cls}` : ""}`, type: "button", title: title || label, "aria-label": label,
                        onclick: act, ...extra }, glyph(icon));
+}
+
+// Your score: the streak (its flame lit, or dim while today has none yet and
+// it's at risk), and today's missions. act: what a tap opens.
+function uiScore({ streak = 0, today = 0, risk = false, title = "", act }) {
+  return h("button", { class: `ui-score${risk ? " risk" : ""}${streak ? "" : " cold"}`, type: "button", title, "aria-label": title, onclick: act },
+    h("span", { class: "ui-score-streak" }, glyph("flame"), String(streak)),
+    h("span", { class: "ui-score-today" }, h("b", {}, String(today)), " today"));
+}
+
+// Big numbers: [{n, label, on}], each its word under it (on: lit, a record).
+function uiTiles(items) {
+  return h("div", { class: "ui-tiles" }, ...items.map((t) =>
+    h("div", { class: `ui-tile${t.on ? " on" : ""}` }, h("b", {}, String(t.n)), h("span", {}, t.label))));
+}
+
+// Bars: [{n, label}], scaled to the biggest; the last is lit (today).
+function uiBars(items) {
+  const top = Math.max(1, ...items.map((b) => b.n));
+  return h("div", { class: "ui-bars", role: "img", "aria-label": items.map((b) => `${b.label} ${b.n}`).join(", ") },
+    ...items.map((b, i) => h("div", { class: `ui-bar${i === items.length - 1 ? " on" : ""}` },
+      h("span", { class: "ui-bar-n" }, b.n ? String(b.n) : ""),
+      h("span", { class: "ui-bar-fill", style: `height:${Math.round((b.n / top) * 100)}%` }),
+      h("span", { class: "ui-bar-label" }, b.label))));
 }
 
 // Over an open chat, on the phone as on a computer: Back; its project (or

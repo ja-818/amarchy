@@ -3,7 +3,9 @@
 
 .today { padding: 0 12px 24px; display: flex; flex-direction: column; gap: 10px; }
 .today[hidden] { display: none; }
-.today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0; }
+.today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0;
+                 display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.today-summary-text { min-width: 0; }
 .today-clear { margin: 2px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
 .today-clear .glyph { color: var(--success); }
 .today-note { margin: 6px 2px 0; font-size: var(--caption); color: var(--text-muted); }
@@ -160,8 +162,22 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 @keyframes mission-block { from { transform: scaleY(0); } }
 .mission-stats { font-size: var(--caption); font-weight: 700; color: var(--text-muted); letter-spacing: .04em; }
 .mission-next { margin-top: 6px; min-width: 180px; }
+.mission-earned { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.mission-earned .tpill { animation: mission-earn .45s cubic-bezier(.2, 1.6, .4, 1) both; }
+.mission-earned .tpill:nth-child(2) { animation-delay: .12s; }
+.mission-earned .tpill:nth-child(3) { animation-delay: .24s; }
+.mission-earned .tpill:nth-child(4) { animation-delay: .36s; }
+@keyframes mission-earn { from { transform: scale(.4); opacity: 0; } }
+/* Nothing else needs you: ALL CLEAR, a bigger burst, the kicker a touch bigger. */
+.mission.clear .mission-kicker { font-size: calc(var(--title) * 2); }
+/* Your missions (today.js missionsSheet): what you completed today. */
+.missions-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.missions-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-width: 0;
+                background: var(--card-bg); border: var(--card-border-width) solid var(--card-border); border-radius: var(--card-radius); }
+.missions-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.missions-when { flex: none; font-size: var(--caption); color: var(--text-muted); }
 @media (prefers-reduced-motion: reduce) {
-  .mission, .mission-card, .mission-tick, .mission-bar span { animation: none !important; }
+  .mission, .mission-card, .mission-tick, .mission-bar span, .mission-earned .tpill { animation: none !important; }
 }
 .mission-tick .glyph { font-size: 34px; line-height: 1; }
 .tcard-complete .tick .glyph { font-size: 22px; line-height: 1; }

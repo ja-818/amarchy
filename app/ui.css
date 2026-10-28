@@ -38,6 +38,15 @@
   /* The search box (uiSearch). */
   --search-bg: var(--control-bg);
   --search-border: var(--control-border);
+  /* Your score (uiScore), big numbers (uiTiles) and bars (uiBars). */
+  --score-flame: var(--orange, var(--warn, var(--warning)));
+  --score-bg: var(--control-bg);
+  --score-border: var(--control-border);
+  --tile-bg: var(--control-bg);
+  --tile-border: var(--border-faint);
+  --tile-on: var(--success);
+  --bar-bg: var(--control-selected);
+  --bar-on: var(--success);
   /* One size for every control, wherever it is: a button on a card, a tab,
      the search, a tool, New chat, the buttons over a chat and in its side
      panel, the composer's menus. A finger's on a touch screen. */
@@ -100,7 +109,7 @@
 .tpill.t-ask { --pill: var(--warn, var(--warning)); }
 .tpill.t-late { --pill: var(--danger); }
 .tpill.t-done { --pill: var(--success); }
-.tpill.t-working, .tpill.t-running { --pill: var(--accent); }
+.tpill.t-working, .tpill.t-running, .tpill.t-accent { --pill: var(--accent); }
 .tpill.t-warn { --pill: var(--warn, var(--warning)); }
 .tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
 .tpill .spinner { line-height: 1; }
@@ -249,3 +258,35 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .phone-head .head-btn { font-size: 18px; color: var(--text); }
 .phone-head .head-btn .glyph svg { width: 20px; height: 20px; }
 .phone-head .head-btn.complete { color: var(--success); }
+
+/* Your score (uiScore): the streak's flame and today's missions, a pill you tap. */
+.ui-score { display: inline-flex; align-items: center; gap: 10px; height: var(--control-h-small); padding: 0 12px; flex: none;
+            border-radius: var(--pill-radius); background: var(--score-bg); border: 1px solid var(--score-border);
+            color: var(--text); font: inherit; font-size: var(--caption); font-weight: 700; cursor: pointer; }
+.ui-score:hover { background: var(--button-hover-bg); }
+.ui-score-streak { display: inline-flex; align-items: center; gap: 4px; color: var(--score-flame); }
+.ui-score-streak .glyph svg { width: 15px; height: 15px; display: block; }
+.ui-score.risk .ui-score-streak { animation: score-risk 1.6s ease-in-out infinite; }
+.ui-score.cold .ui-score-streak { color: var(--text-muted); opacity: .6; }
+.ui-score-today { color: var(--text-muted); }
+.ui-score-today b { color: var(--text); }
+@keyframes score-risk { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .ui-score.risk .ui-score-streak { animation: none; opacity: .6; } }
+
+/* Big numbers (uiTiles). */
+.ui-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.ui-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px;
+           background: var(--tile-bg); border: var(--card-border-width) solid var(--tile-border); border-radius: var(--card-radius); }
+.ui-tile b { font-size: calc(var(--title) * 1.8); font-weight: 800; line-height: 1.1; color: var(--text); }
+.ui-tile span { font-size: var(--caption); color: var(--text-muted); text-align: center; }
+.ui-tile.on { border-color: var(--tile-on); }
+.ui-tile.on b { color: var(--tile-on); }
+
+/* Bars (uiBars): a few days, the last lit. */
+.ui-bars { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; height: 120px; }
+.ui-bar { display: grid; grid-template-rows: auto 1fr auto; justify-items: center; gap: 4px; min-width: 0; }
+.ui-bar-n { font-size: var(--caption); font-weight: 700; color: var(--text-muted); min-height: 1.2em; }
+.ui-bar-fill { align-self: end; width: 100%; max-width: 34px; min-height: 3px; border-radius: 3px 3px 1px 1px; background: var(--bar-bg); }
+.ui-bar-label { font-size: var(--caption); color: var(--text-muted); }
+.ui-bar.on .ui-bar-fill { background: var(--bar-on); }
+.ui-bar.on .ui-bar-n, .ui-bar.on .ui-bar-label { color: var(--text); font-weight: 700; }

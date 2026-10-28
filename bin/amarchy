@@ -308,6 +308,7 @@ SORT_FILE = STATE / "sort"      # how it's sorted inside its groups: "priority",
 ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
 PROJECT_ORDER = STATE / "project-order"  # the order your projects come in, one name a line (see project_order)
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
+MISSIONS = STATE / "missions.jsonl"   # every chat completed (closed): when, which, how long it took (missions_view)
 CLAUDE_STATE = STATE / "claude" # per session: its conversation, and what sleep keeps for it (see "sleep")
 SLEEP_AFTER = STATE / "sleep-after"     # minutes idle and open nowhere before a session sleeps, or "off"
 SELF = str(Path(__file__).resolve())
@@ -2972,8 +2973,75 @@ def close(sid, force=False):
     (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
     (STATUS / sid).unlink(missing_ok=True)
     mark_seen(sid)
+    mission_done(s)
     detach([ENTRY, "reap", sid])
     return None
+
+
+def mission_done(s):
+    """A chat closed is a mission completed: written down, from the app or
+    amarchy close alike (your assistant's and a worktree still being set up
+    aren't missions). The app's streak, best day and combos count them."""
+    if s.get("setup") or assistant_role(s) == "main":
+        return
+    try:
+        task = session_task(s, "")
+    except Exception:
+        task = s.get("title") or ""
+    rec = {"at": int(time.time()), "id": s["id"], "repo": s.get("repo", ""), "task": task, "created": s.get("created")}
+    try:
+        MISSIONS.parent.mkdir(parents=True, exist_ok=True)
+        with open(MISSIONS, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError as e:
+        print(f"amarchy: couldn't write down the mission: {e}", file=sys.stderr)
+
+
+_missions = {}
+
+MISSION_COMBO = 15 * 60       # completed this soon after the one before: the same combo
+
+
+def missions_view():
+    """What you've completed, for the app's score (the same on the phone and
+    the computer): today's (id, when, its title and how long it took),
+    the streak (days in a row with one at least, today's or up to
+    yesterday's while today has none yet), the best day before today, the
+    last seven days, and all of them. Read again when the file or the day
+    changes."""
+    today = datetime.date.today()
+    try:
+        st = MISSIONS.stat()
+        stamp = (st.st_mtime_ns, st.st_size, today)
+    except OSError:
+        stamp = (None, None, today)
+    if _missions.get("stamp") == stamp:
+        return _missions["view"]
+    days, mine = {}, []
+    try:
+        lines = MISSIONS.read_text().splitlines() if stamp[0] is not None else []
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            r = json.loads(line)
+            at = int(r["at"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        d = datetime.date.fromtimestamp(at)
+        days[d] = days.get(d, 0) + 1
+        if d == today:
+            took = at - int(r["created"]) if isinstance(r.get("created"), (int, float)) else None
+            mine.append({"id": r.get("id", ""), "at": at, "task": r.get("task", ""), "repo": r.get("repo", ""),
+                         "took": took if took and took > 0 else None})
+    streak, d = 0, today if days.get(today) else today - datetime.timedelta(days=1)
+    while days.get(d):
+        streak, d = streak + 1, d - datetime.timedelta(days=1)
+    view = {"today": mine[-200:], "streak": streak, "best": max((n for k, n in days.items() if k != today), default=0),
+            "week": [days.get(today - datetime.timedelta(days=i), 0) for i in range(6, -1, -1)],
+            "total": sum(days.values()), "combo": MISSION_COMBO}
+    _missions.update(stamp=stamp, view=view)
+    return view
 
 
 def resume_closing():
@@ -8559,7 +8627,8 @@ def app_watch(st):
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
                     "new_model": new_model(), "models": known_models(), "share": share_state(),
-                    "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss)}
+                    "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss),
+                    "missions": missions_view()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)

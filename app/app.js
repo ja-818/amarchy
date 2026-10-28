@@ -40,6 +40,7 @@ const ICONS = {
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  flame: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 3.2 2.4 4.9 4 6.6 1.6 1.7 3 3.5 3 6.1A7 7 0 0 1 5 15.2c0-2.3 1-4.2 2.6-5.6.2 1.7.9 2.9 2.2 3.6-.5-3.9.6-7.6 2.2-10.7z"/></svg>',
 };
 
 // ---- small helpers
@@ -730,7 +731,7 @@ async function confirmClose(s, known) {
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheets();
       // A chat closed is a mission completed (today.js): celebrated.
-      if (typeof missionComplete === "function") missionComplete(s.task || `${projectName(s.repo)} · ${s.name}`);
+      if (typeof missionComplete === "function") missionComplete([s], s.task || `${projectName(s.repo)} · ${s.name}`);
       else toast(`Closing ${s.task || `${projectName(s.repo)} · ${s.name}`}`);
       if (app.session && app.session.id === s.id) go("#/");
     } catch (e) {

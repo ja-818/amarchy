@@ -272,6 +272,17 @@ host's chats without anything else installed.
   further out, someday), each with **Follow up** (your assistant drafts the
   message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
   about it) and **Done**.
+- **Missions**: completing a chat (closing it, from the board, its head or
+  `amarchy close`) is a mission complete: confetti in your theme's colors, its
+  sound (a step higher for each in a combo: one within 15 minutes of the one
+  before), and what it earned (**Combo ×3**, **New record** for a day,
+  **Day 5 streak**, the **100th mission**); **All clear** when nothing else needs
+  you. By the summary, your score: the streak's flame (dim and pulsing while
+  today has none yet: complete one to keep it) and today's count. A tap opens
+  **Your missions**: today, the streak, the best day and all of them, the week in
+  bars, and what you completed today, with how long each took. They're written
+  down on the server (`~/.local/state/amarchy/missions.jsonl`): the same on the
+  phone and the computer.
 - **A card** is one surface: it lights as a whole under the pointer, and under the
   keys. A click anywhere on it opens the chat; its buttons do their own thing.
 - **Everything has its key**, the keys on the first card as the board opens: `j` /

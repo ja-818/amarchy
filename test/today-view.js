@@ -158,6 +158,9 @@ async function page(browser, layout, port) {
         v.projects = [{ name: "proj", sessions: 5 }, { name: "me", sessions: 1 }];
         v.today = { loops, source: "/home/x/loops.md", error: "", sent: {}, assistant: { id: "me-jaken", name: "Jaken" } };
         v.needs = 2;
+        // What you completed, the server's: three days in a row up to
+        // yesterday, none today yet; a best day of 1, nine in all.
+        v.missions = { today: [], streak: 3, best: 1, week: [0, 0, 0, 0, 2, 1, 0], total: 9, combo: 900 };
       }
       return v;
     };
@@ -290,6 +293,9 @@ async function common(p, where) {
   check(where, p.posts.some((x) => /proj-quiet\/send/.test(x.url) && /Where does this stand/.test(x.body.text)), "the ask goes to that chat");
 
   // Complete: mission accomplished, then closed (nothing to lose: no sheet), with Undo.
+  // Your score: the streak at risk (none today yet), its flame dim.
+  check(where, await until(p, () => { const x = document.querySelector(".today:not([hidden]) .ui-score.risk"); return x && /3/.test(x.innerText) && /0 today/.test(x.innerText); }),
+        "the score: a 3-day streak at risk, 0 today");
   check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete mission"), "a done chat's Complete mission tapped");
   check(where, await until(p, () => !!document.querySelector(".tcard.completing .tcard-complete")), "Mission complete, on its card");
   check(where, await until(p, () => !!document.querySelector(".mission .mission-kicker") && /1st today/.test(document.querySelector(".mission-stats").innerText)),
@@ -300,6 +306,38 @@ async function common(p, where) {
   check(where, await until(p, () => !!document.querySelector(".undo-toast") && /Mission complete/.test(document.querySelector(".undo-toast").innerText) && !document.querySelector(".sheet")), "then closed, with Undo");
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-done\/close/.test(x.url)), "closed once Undo's gone");
+  const earned = (p2) => p2.evaluate(() => [...document.querySelectorAll(".mission-earned .tpill")].map((x) => x.innerText.trim()));
+  check(where, await until(p, () => { const x = document.querySelector(".today:not([hidden]) .ui-score"); return x && !x.matches(".risk") && /4/.test(x.innerText) && /1 today/.test(x.innerText); }),
+        "the score after it: a 4-day streak, 1 today");
+
+  // Another, soon after: a combo, a record (2 beats the best day's 1), the score up.
+  check(where, await click(p, ".tcard[data-id=proj-done2] .tbtn", "Complete mission"), "a second Complete mission");
+  check(where, await until(p, () => /2nd today/.test((document.querySelector(".mission-stats") || {}).innerText || "")), "the 2nd today");
+  const got = await earned(p);
+  check(where, got.includes("Combo ×2") && got.includes("New record"), `it earned a combo and a record (${got.join(", ")})`);
+  check(where, await until(p, () => document.querySelector(".mission.clear") || /still need/.test(document.querySelector(".mission-stats").innerText)), "all clear, or what's left");
+  await sleep(700);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-combo.png`) });
+  await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
+
+  // Your missions: a tap on the score.
+  await p.evaluate(() => document.querySelector(".today:not([hidden]) .ui-score").click());
+  check(where, await until(p, () => !!document.querySelector(".sheet .ui-tiles")), "the score opens Your missions");
+  await sleep(500);
+  const sheetSays = await p.evaluate(() => ({
+    tiles: [...document.querySelectorAll(".sheet .ui-tile")].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
+    bars: document.querySelectorAll(".sheet .ui-bar").length,
+    rows: [...document.querySelectorAll(".sheet .missions-row")].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
+  }));
+  check(where, sheetSays.tiles.join("|") === "2 today|4 days streak|1 best day|11 all time", `its numbers (${sheetSays.tiles.join("|")})`);
+  check(where, sheetSays.bars === 7, "the week, in bars");
+  check(where, sheetSays.rows.length === 2 && /Docs: the guide/.test(sheetSays.rows[0]), `what was completed today, the last first (${sheetSays.rows[0]})`);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-missions.png`) });
+  await p.evaluate(() => closeSheet());
+
+  // Undone: not completed after all.
+  await p.evaluate(() => [...document.querySelectorAll(".undo-toast .text-btn")].pop().click());
+  check(where, await until(p, () => /1 today/.test(document.querySelector(".today:not([hidden]) .ui-score").innerText)), "Undo takes it off the score");
 
   // The goal block: the chat's, never shown in its reply.
   const r = await p.evaluate(() => {
