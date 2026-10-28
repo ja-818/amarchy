@@ -258,29 +258,28 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
    phone's (.phone-head) shows its buttons as icons. */
 .chat-head .ic svg { width: 100%; height: 100%; display: block; }
 .chat-head .ic { display: inline-grid; place-items: center; }
+/* Its name as its card's: the project, the name (cut short with …), where
+   it stands at the end; a tap renames it. */
 .head-title {
   flex: 1; min-width: 0;
-  display: flex; align-items: center; gap: 9px;
-  min-height: var(--control-h); padding: 0 8px;
+  display: flex; align-items: center; gap: 10px;
+  min-height: var(--control-h); padding: 0 10px;
   border-radius: var(--radius-control);
   text-align: left; white-space: nowrap; overflow: hidden;
 }
 .head-title:hover { background: var(--control-hover); }
-.head-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-.head-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.head-title.has-goal { padding-top: 2px; padding-bottom: 2px; }
-.head-goal { font-size: var(--caption); line-height: 1.3; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.head-title .task { font-size: var(--title); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.head-title .avatar.small { width: 22px; height: 22px; }
+.head-title .task { flex: 0 1 auto; min-width: 0; font-size: var(--title); overflow: hidden; text-overflow: ellipsis; }
+.head-title .avatar.small { width: 22px; height: 22px; flex: none; }
 .head-title .tcard-chip { max-width: 22%; }
-.head-btn.board-back { color: var(--text); padding-left: 6px; }
+.head-state { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; max-width: 45%; }
+.ui-action.board-back { width: var(--control-h); padding: 0; color: var(--text); }
 .head-btns { flex: none; display: flex; gap: 2px; }
 .head-btn.more { width: var(--control-h); padding: 0; justify-content: center; font-size: 16px; }
 .phone-head { flex: none; gap: 4px; padding-left: var(--page-pad); padding-right: var(--page-pad); }
 .phone-head .head-btn .label { display: none; }
 .phone-head .head-btn { width: var(--control-h); padding: 0; justify-content: center; }
 .phone-head .head-title .task { font-size: var(--body); }
-.phone-head .tpill.long { max-width: 40%; }
+.phone-head .head-title { padding: 0 6px; gap: 8px; }
 
 /* Your score (uiScore): the streak's flame and today's missions (a ring to your goal), a pill you tap. */
 .ui-score-box { display: inline-flex; align-items: center; gap: 6px; flex: none; }

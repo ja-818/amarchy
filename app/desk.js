@@ -578,15 +578,9 @@ function deskHead() {
   if (!desk.head) return;
   const s = row(desk.current);
   if (!s) { desk.head.replaceChildren(); return; }
-  const tab = sideTab();
-  const goal = desk.chat && desk.chat.id === s.id ? desk.chat.goal : null;      // what the chat is for (chat.js keepItems)
-  const toggle = ([key, label, keys]) => h("button", {
-    class: `head-btn tool${tab === key ? " on" : ""}`, type: "button", "aria-pressed": String(tab === key), "aria-label": label,
-    title: `${label} (${keys})`, onclick: () => sideToggle(key) }, deskIcon(SIDE_ICONS[key]), h("span", { class: "label" }, label));
-  // The chat's head (ui.js), as the phone's; here the side panel's tabs too, while it's closed.
+  // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
   keepFocus(desk.head, () => desk.head.replaceChildren(...uiChatHead(s, {
-    goal, backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
-    tools: tab ? [] : SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(toggle),
+    backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
     complete: () => closeCurrent(), more: () => sessionMenu(s) })));
 }
 
@@ -1602,8 +1596,14 @@ function sessionItems(s) {
   ];
 }
 
+// A chat's ⋯: what it shows beside it (Terminal, Changes, Details, each
+// with its key; on, it closes), then what you can do to it.
 function sessionMenu(s) {
-  picker({ title: s.task || where(s), items: sessionItems(s) });
+  const tab = desk.current === s.id ? sideTab() : null;
+  const panel = SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) => ({
+    label, icon: { term: "send", changes: "organize", details: "status" }[key], key: keys, detail: tab === key ? "open: closes it" : "",
+    act: () => sideToggle(key) }));
+  picker({ title: s.task || where(s), items: [...(desk.current === s.id ? panel : []), ...sessionItems(s)] });
 }
 
 function showKeys() {

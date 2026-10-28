@@ -323,9 +323,11 @@ host's chats without anything else installed.
   `Ctrl+Alt+J` / `K` open the next or previous chat in the board's order,
   `Ctrl+Alt+A` any chat by its name. Dictating, the keys go to the box: `Enter`
   stops it, the next `Enter` sends.
-- **Over the chat**: **← Back**, its project and name (click: rename), where it
-  stands and what it's for; while the side panel is closed, its tabs as buttons;
-  **Complete** (its mission: closed, with Undo) and `⋯`, the chat's menu.
+- **Over the chat**, as its card's head: **‹** (Back, outlined), its project
+  and name (click: rename), where it stands at the end of it; then `⋯`, its
+  menu (the side panel's **Terminal**, **Changes** and **Details**, each with its
+  key; rename, priority, a secret…), and **Complete** (its mission: closed,
+  with Undo), last.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you drag
   its left edge (double-click: back to its width), or the whole window (`⤢`,
   `Ctrl+Alt+F`); `✕` closes it. Short of room, the panel lies over the chat.

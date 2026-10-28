@@ -166,7 +166,7 @@ async function page(browser, layout, port) {
         const goal = v.missions ? v.missions.goal : 5;
         v.missions = { today: [], streak: 3, best: 1, week: [0, 0, 0, 0, 2, 1, 0], total: 9, combo: 900, goal, fast: 120,
                        replies: { n: 2, fast: 1, streak: 1, best: 4 },
-                       badges: [{ key: "speedrun", name: "Speedrun", about: "Fast", at: 1700000000 }, { key: "night", name: "Night owl", about: "Late", at: null }] };
+                       badges: [{ key: "speedrun", name: "Speedrun", about: "Fast", at: 1700000000 }, { key: "night", name: "Night owl", about: "Late", at: window.__nightAt || null }] };
       }
       return v;
     };
@@ -364,7 +364,8 @@ async function common(p, where) {
   check(where, await until(p, () => /Fast reply ×2/.test((document.querySelector(".today:not([hidden]) .ui-score-flash") || {}).innerText || "")), "a fast reply flashes by the score");
 
   // A badge earned (the server says so): its own moment, once.
-  await p.evaluate(() => { app.view.missions = { ...app.view.missions, badges: app.view.missions.badges.map((b) => (b.key === "night" ? { ...b, at: Math.floor(Date.now() / 1000) } : b)) }; missionsWatch(); });
+  // (Kept by the list's seed too: the next list from the host says it's earned.)
+  await p.evaluate(() => { window.__nightAt = Math.floor(Date.now() / 1000); app.view.missions = { ...app.view.missions, badges: app.view.missions.badges.map((b) => (b.key === "night" ? { ...b, at: window.__nightAt } : b)) }; missionsWatch(); });
   check(where, await until(p, () => !!document.querySelector(".mission.badge") && /Night owl/.test(document.querySelector(".mission-title").innerText)), "a badge earned: BADGE UNLOCKED, Night owl");
   await sleep(600);
   await p.screenshot({ path: path.join(SHOTS, `${where}-badge.png`) });
@@ -563,8 +564,18 @@ async function wide(browser, port) {
   // The whole card opens it, not only its head.
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .tcard-text").click());
   check(where, await until(p, () => desk.current === "proj-fresh"), "a click anywhere on the card opens it");
-  check(where, await p.evaluate(() => !!document.querySelector(".desk-head .board-back") && /Fix/.test(document.querySelector(".desk-head").innerText)
-                                   && !!document.querySelector(".desk-head .ui-action.complete")), "over it: Back, its name, Complete");
+  check(where, await p.evaluate(() => { const kids = [...document.querySelector(".desk-head").children];
+    const btns = [...document.querySelector(".desk-head .head-btns").children];
+    return kids[0].matches(".ui-action.board-back") && !kids[0].innerText.trim() && /Fix/.test(kids[1].innerText) && !!kids[1].querySelector(".head-state .tpill")
+      && !document.querySelector(".desk-head .head-goal, .desk-head .head-btn.tool") && btns[0].matches(".more") && btns[btns.length - 1].matches(".ui-action.complete"); }),
+        "over it: Back (a chevron), its name and pill, then ⋯ and Complete last");
+  await p.evaluate(() => document.querySelector(".desk-head .more").click());
+  check(where, await until(p, () => !!document.querySelector(".picker") && /Changes/.test(document.querySelector(".picker").innerText) && /Details/.test(document.querySelector(".picker").innerText)),
+        "⋯: Changes and Details are in it");
+  await p.keyboard.type("Changes");
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => sideTab() === "changes"), "picked: the side panel shows Changes");
+  await p.evaluate(() => sideToggle(null));
   await p.evaluate(() => boardBack());
   await p.evaluate(() => boardOpen("proj-work"));
   await until(p, () => desk.current === "proj-work");

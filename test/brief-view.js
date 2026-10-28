@@ -656,7 +656,7 @@ async function run(browser, base, layout) {
   check(layout, settings === "Brief,Chat", `Settings: Replies, Brief | Chat (${settings})`);
   await page.evaluate(() => closeSheets());
 
-  // On the phone, the chat's goal is under its name in the header.
+  // On the phone, the chat's head is its name and where it stands: its goal isn't a second line under it.
   if (layout === "phone") {
     const head = await page.evaluate(({ items }) => {
       window.EventSource = class { constructor() {} addEventListener() {} close() {} };
@@ -665,9 +665,9 @@ async function run(browser, base, layout) {
       app.session.chat.conversation({ reset: true, start: 0, items });
       const t = app.session.titleEl;
       app.session.renderHeader();
-      return { task: t.querySelector(".task")?.textContent, line: t.querySelector(".head-goal")?.textContent, goal: !!t.querySelector(".head-goal") };
+      return { task: t.querySelector(".task")?.textContent, goal: !!t.querySelector(".head-goal"), pill: !!t.querySelector(".head-state .tpill") };
     }, { items: ITEMS });
-    check(layout, head.goal && head.line === "Ship the search page", `the goal under the chat's name in the header (${JSON.stringify(head)})`);
+    check(layout, /Search/.test(head.task || "") && !head.goal && head.pill, `the chat's head: its name and its pill, no second line (${JSON.stringify(head)})`);
   }
   check(layout, errors.length === 0, `no page errors (${errors.join("; ") || "none"})`);
   await ctx.close();

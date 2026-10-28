@@ -824,7 +824,6 @@ class SessionView {
     const r = this.row || { id: this.id, repo: "", task: "…" };
     if (r.assistant === "main") this.chat.setPlaceholder(`Message ${r.assistant_name || "Assistant"}`);
     keepFocus(this.titleEl, () => this.titleEl.replaceChildren(...uiChatHead(r, {
-      goal: (this.chat && this.chat.goal) || "",
       back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
       rename: () => { if (this.row) renameSheet(this.row); },
       complete: this.row ? () => todayComplete(this.row) : null,

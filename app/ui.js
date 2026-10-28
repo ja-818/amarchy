@@ -23,8 +23,8 @@
 // - uiBadges: badges, earned and to earn.
 // - uiTiles: a few big numbers, each with its word under it.
 // - uiChart: a few days' counts, as bars, the last one lit.
-// - uiChatHead: over an open chat: Back, its project and name (a tap:
-//   rename), its pill, what it's for; its tools, Complete, its menu.
+// - uiChatHead: over an open chat, as its card's head: Back, its project
+//   and name (a tap: rename), its pill; its menu, Complete.
 // - uiAction: a bar's one thing to do (New chat, Complete), outlined.
 // - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
 // - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
@@ -184,27 +184,25 @@ function uiChart(items) {
       h("span", { class: "ui-chart-label" }, b.label))));
 }
 
-// Over an open chat, on the phone as on a computer: Back; its project (or
-// your assistant's picture), its name and where it stands, what it's for
-// under them (a tap: rename); then tools (a computer's side panel tabs),
-// Complete (not your assistant's), and ⋯ its menu. Returns the children,
-// for the head to hold.
-function uiChatHead(s, { goal = "", back, rename, tools = [], complete, more, backTitle = "Back" } = {}) {
+// Over an open chat, on the phone as on a computer, as its card's head:
+// Back (a chevron, outlined); its project (or your assistant's picture) and
+// its name (a tap: rename), where it stands at the end of it, as on its
+// card; then ⋯ (its menu: the Terminal, Changes and Details, its name, its
+// priority…) and Complete, the bar's one action, last. Returns the
+// children, for the head to hold.
+function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}) {
   const main = s.assistant === "main";
   return [
-    h("button", { class: "head-btn board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back },
-      glyph("back"), h("span", { class: "label" }, "Back")),
-    h("button", { class: `head-title${goal ? " has-goal" : ""}`, type: "button", title: `${where(s)} · rename`, onclick: rename },
-      h("span", { class: "head-col" },
-        h("span", { class: "head-row" },
-          main ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-          taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled"),
-          todayStatePill(s), sleepMark(s)),
-        goal ? h("span", { class: "head-goal", title: goal }, goal) : null)),
-    h("div", { class: "head-btns" }, ...tools,
+    h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
+    h("button", { class: "head-title", type: "button", title: `${where(s)} · rename`, onclick: rename },
+      main ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
+      taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled"),
+      h("span", { class: "head-state" }, todayStatePill(s), sleepMark(s))),
+    h("div", { class: "head-btns" },
+      h("button", { class: "head-btn more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
+                    "aria-haspopup": "menu", onclick: more }, glyph("more")),
       main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
-                                               "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete")),
-      h("button", { class: "head-btn more", type: "button", title: "This chat (Ctrl+Alt+M)", "aria-label": "This chat", onclick: more }, glyph("more"))),
+                                               "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete"))),
   ];
 }
 

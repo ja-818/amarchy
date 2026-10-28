@@ -77,12 +77,9 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 }
 .desk-head:empty { display: none; }
 /* Narrow: the tabs as icons only. */
-/* The side panel's tabs as icons (their names on hover): the chat's name has
-   the room. Narrower still, every button an icon. */
+/* Narrow, Complete is its tick alone: the chat's name has the room. */
 .desk-head { container-type: inline-size; }
-.desk-head .head-btn.tool .label { display: none; }
-.desk-head .head-btn.tool { width: var(--control-h); padding: 0; justify-content: center; }
-@container (max-width: 640px) { .desk-head .head-btn .label { display: none; } .desk-head .head-btn { width: var(--control-h); padding: 0; justify-content: center; } }
+@container (max-width: 640px) { .desk-head .ui-action .label { display: none; } .desk-head .ui-action { padding: 0; } }
 
 /* ---- the side panel, on the right: Terminal, Changes, Details */
 
