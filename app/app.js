@@ -1275,17 +1275,29 @@ function menuFocus(box) {
   else box.focus({ preventScroll: true });
 }
 
-// Draws a menu anew with the cursor kept where it was: on the same session,
+// Draws a menu anew with the cursor kept where it was: on the same thing
+// (the same chat's card and the same button on it, the same group's head),
 // or the same words, or else the same place.
 function keepFocus(box, fill) {
-  const was = menuItems(box, true);
+  const items = () => Array.from(box.querySelectorAll("button, [tabindex='0'], textarea, input, summary, a[href]"))
+    .filter((el) => !el.disabled && el.getClientRects().length);
+  const was = items();
   const at = was.indexOf(document.activeElement);
   const el = was[at];
+  const where = (x) => {
+    // What it's on (a chat's card, a group), and which of its kind there:
+    // a card's pill says "5m ago" now and "Working" later, its place moves.
+    const on = x.closest("[data-id], details, section");
+    const scope = on && box.contains(on) ? on : box;
+    const same = [...scope.querySelectorAll(x.tagName)].filter((y) => y.className === x.className);
+    return `${scope === box ? "" : scope.dataset.id ? `#${scope.dataset.id}` : scope.className}|${x.tagName}|${x.className}|${same.indexOf(x)}`;
+  };
+  const key = el && where(el);
   fill();
   if (at < 0) return;
-  const now = menuItems(box, true);
+  const now = items();
   const text = (x) => x.getAttribute("aria-label") || x.textContent;
-  const to = (el.dataset.id && now.find((x) => x.dataset.id === el.dataset.id))
+  const to = now.find((x) => where(x) === key)
     || now.find((x) => x.className === el.className && text(x) === text(el))
     || now[Math.min(at, now.length - 1)];
   if (to) to.focus({ preventScroll: true });

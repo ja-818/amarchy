@@ -245,6 +245,33 @@ async function steady(p, where) {
     return { kept, waited, stillWaits, ran };
   });
   check(where, r.kept, "a working chat's every second: the board and its tabs stay, in their order");
+  // The keys on a card, or a group's head: drawn again (its pill changed, a
+  // card before it gone), they stay on that one, not on the place it was.
+  const f = await p.evaluate(() => {
+    const was = app.view;
+    const go = [...document.querySelectorAll(".board-today .tcard[data-id] > .today-go")];
+    const target = go[go.length - 1];
+    const id = target.closest("[data-id]").dataset.id;
+    target.focus();
+    const first = go[0].closest("[data-id]").dataset.id;
+    const v = JSON.parse(JSON.stringify(app.view));
+    v.sessions = v.sessions.filter((s) => s.id !== first || s.id === id);
+    v.sessions.forEach((s) => { if (s.id === id && s.today) s.today.at -= 3600; });
+    app.view = v; todayRedraw();
+    const a = document.activeElement;
+    const card = a.closest("[data-id]");
+    const onCard = !!card && card.dataset.id === id && a.matches(".today-go");
+    const sum = document.querySelector(".board-today details.tsec > summary");
+    let onHead = true;
+    if (sum) {
+      sum.focus();
+      app.view = JSON.parse(JSON.stringify(app.view)); app.view.sessions.forEach((s) => { s.task = (s.task || "") + " "; }); todayRedraw();
+      onHead = document.activeElement.matches("details.tsec > summary");
+    }
+    app.view = was; todayRedraw();
+    return { onCard, onHead, id, now: card && card.dataset.id };
+  });
+  check(where, f.onCard && f.onHead, `the keys stay on their card, and on a group's head, over a redraw (${JSON.stringify(f)})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }
 
