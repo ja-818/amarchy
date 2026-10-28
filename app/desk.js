@@ -1508,6 +1508,7 @@ function deskKeysUp(e) {
 }
 
 function step(n) {
+  if (boardOn()) return boardStep(n);      // the board's order (tasks.js)
   const ids = Array.from(desk.listEl.querySelectorAll(".row")).map((r) => r.dataset.id);
   const all = ids.length ? ids : ((app.view && app.view.sessions) || []).map((s) => s.id);
   if (!all.length) return;

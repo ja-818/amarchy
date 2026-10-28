@@ -788,7 +788,7 @@ function toggleOrganize(menu, button, redraw) {
 // The group & sort menu goes, wherever it is (the phone's list, beside Claude in the wide layout).
 // The keys, if they were in it, go back to its button.
 function closeOrganize() {
-  for (const menu of [app.listEl && app.listEl.menu, typeof desk !== "undefined" && desk.organize]) {
+  for (const menu of [app.listEl && app.listEl.menu, typeof desk !== "undefined" && desk.organize, typeof board !== "undefined" && board.organize]) {
     if (!menu) continue;
     const had = menu.contains(document.activeElement);
     menu.hidden = true;

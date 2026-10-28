@@ -202,3 +202,12 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
              border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); }
 .tcard-ask:focus-visible { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 .tcard-askbox .tcard-actions { padding: 0 0 12px; }
+
+/* The board's Group & sort (the list's menu), by the search. */
+.board-organize-wrap { position: relative; flex: none; }
+.board-organize-wrap .organize-menu { right: 0; left: auto; top: calc(100% + 6px); }
+/* Inside a group, the next grouping's name over its cards (a project, under High priority). */
+.tsec-sub { margin: 6px 2px 0; font-size: var(--caption); font-weight: 700; color: var(--text-muted); }
+.tcard-head .prio { flex: none; font-size: 12px; }
+.tcard-head .prio.high { color: var(--danger); }
+.tcard-head .prio.low { color: var(--text-muted); }

@@ -36,6 +36,7 @@ function boardBuild() {
     h("div", { class: "board-head-in" },
       board.switchEl,
       boardSearchBox(),
+      boardOrganize(),
       h("button", { class: "control", type: "button", title: "New chat (n, Ctrl+Alt+N)", onclick: () => boardCompose() }, glyph("plus"), "New chat"),
       automationsButton("control organize"),
       // The standard layout: the list on the left, a chat beside it.
@@ -149,6 +150,7 @@ function boardRefresh(force) {
   }
   if (board.query) boardSearchDraw();
   else todayFill(board.box, force);
+  if (board.organize && !board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
   if (board.open) boardFocusHead();
   modeButtons();
 }
@@ -289,7 +291,7 @@ setInterval(() => {
 // with the lines that have them. Enter opens the first; Esc empties it.
 
 function boardSearchBox() {
-  board.search = h("input", { type: "search", placeholder: "Search chats, what was said, your tasks", "aria-label": "Search chats",
+  board.search = h("input", { type: "search", placeholder: "Search", "aria-label": "Search chats, what was said in them, your tasks",
                               autocomplete: "off", spellcheck: "false", enterkeyhint: "search",
                               oninput: () => boardSearch(board.search.value),
                               onkeydown: (e) => {
@@ -365,4 +367,32 @@ function boardSearchDraw() {
   keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),
     ...(!n && found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
   board.box.dataset.key = "";      // Today draws itself again when the search is emptied
+}
+
+// Group & sort, as the list's (the same setting: app.js organizeMenu): the
+// board's Chats by priority, by project, or by where they stand.
+function boardOrganize() {
+  const btn = h("button", { class: "control organize board-organize", type: "button", title: "Group and sort", "aria-haspopup": "menu",
+                            onclick: () => toggleOrganize(board.organize, btn, boardOrganizeDraw) }, glyph("organize"));
+  board.organize = organizeBox(() => btn, boardOrganizeDraw);
+  return h("div", { class: "board-organize-wrap" }, btn, board.organize);
+}
+
+function boardOrganizeDraw() {
+  if (!board.organize) return;
+  if (!board.organize.hidden) keepFocus(board.organize, () => board.organize.replaceChildren(...organizeMenu()));
+  board.box.dataset.key = "";
+  if (board.tab === "chats" && !board.query) todayFill(board.box, true);
+}
+
+// Ctrl+Alt+J / K on the board: from chat to chat in its order, the open one
+// opening the next, else the keys going to the next card.
+function boardStep(n) {
+  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].map((t) => t.dataset.id))];
+  if (!ids.length) return;
+  const at = ids.indexOf(keyedId());
+  const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];
+  if (board.open) return boardOpen(id);
+  const go = board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`);
+  if (go) { go.focus(); go.scrollIntoView({ block: "nearest" }); }
 }

@@ -285,8 +285,12 @@ function todayStatePill(s) {
 
 // A card. head: what opens it (a chat) or opens its text (a loop).
 function todayCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label }) {
+  // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓ sets it).
+  const s = id ? rowOf(id) : null;
+  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
+  if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
-    lead, chip ? h("span", { class: "tcard-chip" }, chip) : null,
+    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
     h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
   return h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null }, head,
     ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
@@ -463,6 +467,10 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   const nodes = [];
   if (top) nodes.push(h("div", { class: "today-summary" }, todaySummary(v, only)));
   if (chats && p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, on top
+  // The board's Chats, grouped as you group the list (by priority, by
+  // project): its groups, what asks you first in each (todayGrouped).
+  const groups = (app.organize || v).group || [];
+  if (board && only === "chats" && groups.length && groups[0] !== "status") return [...nodes, ...todayGrouped(v, p, groups, tk)];
   nodes.push(todaySection("yours", only === "tasks" ? "Now" : "Your move", { count: yours },
     chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked))] : [],
     tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
@@ -490,6 +498,48 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   return nodes.filter(Boolean);
 }
 
+// The board's chats in the list's groups and order (app.js groupLabel):
+// a section for each of the first grouping (High priority, Normal...; or
+// each project, in your order), the next grouping's names over its cards
+// inside, and in each, what asks you first, then the rest as the list has
+// them. Each card says where it stands, so nothing that's done waits unseen.
+function todayGrouped(v, p, groups, tk) {
+  const card = (s) => p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
+    : tk(todayChat, p.done.includes(s) ? "done" : p.stale.includes(s) ? "stale" : p.working.includes(s) ? "working" : "idle")(s);
+  const label = (s, g) => (g === "project" ? projectName(s.repo) : groupLabel(s, g));
+  const first = (v.sessions || []).filter((s) => !s.setup && s.assistant !== "main" && !todayUI.closing.has(s.id));
+  const sections = new Map();
+  for (const s of first) {
+    const k = label(s, groups[0]);
+    if (!sections.has(k)) sections.set(k, []);
+    sections.get(k).push(s);
+  }
+  // The groups in order whatever order the chats came in: High, Normal, Low; your projects' order.
+  const prioRank = { "High priority": 0, "Normal priority": 1, "Low priority": 2 };
+  const projRank = new Map((v.projects || []).map((pr, i) => [projectName(pr.name), i]));
+  const rank = (name) => (groups[0] === "priority" ? prioRank[name] ?? 1 : projRank.get(name) ?? 99);
+  const out = [];
+  for (const [name, ss] of [...sections].sort((a, b) => rank(a[0]) - rank(b[0]))) {
+    // By the next grouping (a project under High priority) if there's one, in
+    // its order; in each, what asks you first.
+    const subOf = (s) => (groups[1] && groups[1] !== "status" ? label(s, groups[1]) : "");
+    const subs = new Map();
+    for (const s of ss) { const k = subOf(s); if (!subs.has(k)) subs.set(k, []); subs.get(k).push(s); }
+    const subRank = (k) => (groups[1] === "priority" ? prioRank[k] ?? 1 : groups[1] === "project" ? projRank.get(k) ?? 99 : 0);
+    const kids = [];
+    for (const [k, list] of [...subs].sort((a, b) => subRank(a[0]) - subRank(b[0]))) {
+      if (k) kids.push(h("div", { class: "tsec-sub" }, k));
+      const asking = (s) => p.asks.includes(s) || p.blocked.includes(s);
+      kids.push(...[...list.filter(asking), ...list.filter((s) => !asking(s))].map(card));
+    }
+    const asking = ss.filter((s) => p.asks.includes(s) || p.blocked.includes(s)).length;
+    const key = `g-${groups[0]}-${name}`.toLowerCase().replace(/[^\w-]+/g, "-");
+    out.push(todaySection(key, name, { count: ss.length, extra: asking ? todayPill(`${asking} ask${asking === 1 ? "s" : ""} you`, "ask") : null,
+                                       fold: /^low/i.test(name) ? false : null }, kids));
+  }
+  return out;
+}
+
 // What Today shows of the view: drawn again only when it changes (each
 // second the list may change for something Today doesn't show, and a page
 // drawn again under your finger stops its scroll), or every minute (its
@@ -497,7 +547,8 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
   const said = boardOn();
-  return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs,
+  return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs, (app.organize || v).group, v.sort,
+    (v.sessions || []).map((s) => s.id).join(),
     (v.sessions || []).map((s) => [s.id, s.task, s.status, s.setup, s.sleeping, s.waking, s.unseen, s.asks, s.today, s.permission,
                                    (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
 }

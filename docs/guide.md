@@ -258,7 +258,10 @@ else installed.
   you used last, the board at first. `Ctrl+Alt+H` switches; so do **Board** over the
   list and the list's button on the board. **The board** is the whole window with no
   list, and two tabs, each with what's your move: **Chats**, every chat a card (its
-  project, its state, its goal and what it last said, its question's buttons), and
+  project, its state, its goal and what it last said, its question's buttons),
+  grouped as you group the list (its group & sort button, by the search): by
+  priority (High first) or by project, what asks you first in each, or not grouped,
+  by where each stands (Your move, Finish, At work, Other chats); and
   **Tasks**, your own (your loops file: due now, waiting on others, this week,
   further out, someday), each with **Follow up** (your assistant drafts the message
   to whoever you wait on), **Ask Jaken…** (tell your assistant what to do about it)
@@ -266,7 +269,8 @@ else installed.
   ready: answer, approve, write, **Close chat**, **Open in Chats**. **← Back** or
   `Esc` (always: what you were writing stays) is the board again, where you were;
   so is sending it something, the next thing that's your move lit. On the board `j`
-  / `k` go from card to card, `1`-`4` pick an answer, `x` closes (with Undo), `n`
+  / `k` (or `Ctrl+Alt+J` / `K`, which with a chat open open the next) go from card
+  to card, `Ctrl+Alt+↑` / `↓` raise or lower its priority, `1`-`4` pick an answer, `x` closes (with Undo), `n`
   starts a new chat (as **New chat** and `Ctrl+Alt+N` do), and `/` is the
   **search** in the middle of the bar: a chat by its name or anything said in it,
   and your tasks, every word found, the lines that have them lit; `Enter` opens the

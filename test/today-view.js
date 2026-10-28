@@ -119,7 +119,7 @@ const CHATS = [
   { id: "proj-done2", repo: "other", name: "done2", task: "Docs: the guide", status: "idle", engine: "chat", path: "/tmp/d2", today: T({ goal: "Write the guide", state: "done" }) },
   { id: "proj-done", repo: "proj", name: "done", task: "Study: T3 vs amarchy", status: "idle", engine: "chat", path: "/tmp/d", today: T({ goal: "Compare T3 with amarchy", state: "done" }) },
   { id: "proj-quiet", repo: "proj", name: "quiet", task: "Eval: json-render", status: "idle", engine: "chat", path: "/tmp/q", today: T({ goal: "Try json-render", state: "working", at: NOW - 4 * 86400 }) },
-  { id: "proj-work", repo: "proj", name: "work", task: "Build: Today", status: "working", engine: "chat", path: "/tmp/w", today: T({ goal: "Make Today the home" }) },
+  { id: "proj-work", repo: "proj", name: "work", task: "Build: Today", status: "working", engine: "chat", path: "/tmp/w", today: T({ goal: "Make Today the home" }), priority: "high" },
 ];
 
 const LOOPS = [
@@ -333,6 +333,35 @@ async function wide(browser, port) {
   await p.evaluate(() => board.chat.post("send", { text: "Go on" }));
   check(where, await until(p, () => !board.open), "sent: back on the board");
   check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !n || n.contains(document.activeElement); }), "the next one lit, the keys on it");
+
+  // Grouped as the list is: by priority (High first, what asks you first in each), by project.
+  await p.evaluate(() => { app.organize = { group: ["priority"], sort: "priority" }; refresh(); });
+  const grouped = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
+  check(where, grouped[0] === "High priority" && grouped.includes("Normal priority") && !grouped.includes("Your move"), `by priority: its groups (${grouped.join(", ")})`);
+  check(where, /Build: Today/.test(await text(p, ".board-today .tsec")) && !!(await p.$(".board-today .tsec .prio.high")), "the high one on top, its mark on it");
+  const normal = await p.evaluate(() => { const sec = [...board.box.querySelectorAll(".tsec")].find((x) => /normal/i.test(x.textContent)); return sec ? [...sec.querySelectorAll(".tcard")].map((c) => c.className) : []; });
+  const firstIdle = normal.findIndex((c) => !/k-ask|k-blocked/.test(c)), lastAsk = normal.map((c) => /k-ask|k-blocked/.test(c)).lastIndexOf(true);
+  check(where, lastAsk < 0 || lastAsk < firstIdle || firstIdle < 0, `in a group, what asks you first (${normal.join(" | ")})`);
+  await p.evaluate(() => { app.organize = { group: ["project"], sort: "priority" }; refresh(); });
+  const byProject = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
+  check(where, byProject.includes("Proj") && byProject.includes("Other"), `by project: one group each (${byProject.join(", ")})`);
+  await p.screenshot({ path: path.join(SHOTS, "wide-by-project.png") });
+  await p.evaluate(() => { app.organize = { group: [], sort: "priority" }; refresh(); });
+  check(where, /Your move/i.test(await text(p, ".board-today")), "not grouped: Your move, Finish… again");
+
+  // Ctrl+Alt+J / K: from chat to chat in the board's order.
+  await p.evaluate(() => { board.scroll.focus(); });
+  await p.keyboard.press("Control+Alt+KeyJ");
+  const j1 = await p.evaluate(() => keyedId());
+  await p.keyboard.press("Control+Alt+KeyJ");
+  const j2 = await p.evaluate(() => keyedId());
+  check(where, !!j1 && !!j2 && j1 !== j2, `Ctrl+Alt+J moves from card to card (${j1} → ${j2})`);
+  await p.keyboard.press("Enter");
+  await until(p, (id) => board.open === id, j2);
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(where, await until(p, (id) => board.open === id, j1), "with one open, Ctrl+Alt+K opens the one before");
+  await p.evaluate(() => boardBack());
+  check(where, await p.evaluate(() => board.search.placeholder === "Search"), "the search box says only Search");
 
   // Ctrl+Alt+X on the board: the open chat closes (with Undo), from its box too.
   await p.evaluate(() => todayOpen(row("proj-quiet")));
