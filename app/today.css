@@ -34,11 +34,12 @@
 .board-head-in { padding-top: 14px; padding-bottom: 6px; display: flex; align-items: center; gap: 12px; }
 .board-find { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .board-tools { flex: none; display: flex; gap: 2px; }
+/* New chat: an outlined button like the rest (no fill), its key as the search's. */
 .board-new-btn { flex: none; height: var(--control-h); gap: 8px; padding: 0 8px 0 14px; font-weight: 700; white-space: nowrap;
-                 color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
-.desk .board-new-btn:hover { background: color-mix(in srgb, var(--primary-bg) 85%, var(--text)); }
-.board-new-btn kbd { font: inherit; font-size: var(--caption); padding: 0 6px; border-radius: 4px; line-height: 18px;
-                     background: color-mix(in srgb, var(--primary-text) 16%, transparent); }
+                 color: var(--text); background: var(--button-bg); border-color: var(--button-border); }
+.desk .board-new-btn:hover { background: var(--button-hover-bg); }
+.board-new-btn kbd { font: inherit; font-size: var(--caption); padding: 0 6px; border: 1px solid var(--border); border-radius: 4px;
+                     line-height: 16px; color: var(--text-muted); }
 .board-gap { flex: 1; }
 .board-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
 .board-scroll .today { padding-top: 18px; padding-bottom: 48px; }
