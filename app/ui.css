@@ -38,6 +38,26 @@
   /* The search box (uiSearch). */
   --search-bg: var(--control-bg);
   --search-border: var(--control-border);
+  /* One size for every control, wherever it is: a button on a card, a tab,
+     the search, a tool, New chat, the buttons over a chat and in its side
+     panel, the composer's menus. A finger's on a touch screen. */
+  --control-h: 38px;
+  --control-h-small: 30px;    /* words only, in a section's head (Complete all) */
+  /* One column for every page: the board, and an open chat (its head, what
+     was said, the box you type in), centered, lined up with each other. */
+  --page-width: 880px;
+  --page-pad: 24px;
+  --chat-column: var(--page-width);
+}
+@media (pointer: coarse) { :root { --control-h: 44px; } }
+@media (max-width: 719px) { :root { --page-pad: 12px; } }
+
+/* A page's column (the board's bar and cards, an open chat's head, its
+   conversation and its box): as wide as --page-width, centered, --page-pad
+   in from its edges, so everything lines up from screen to screen. */
+.board-head-in, .board-scroll .today, .board-new, .desk-head, .chat-conv, .chat-dock {
+  width: 100%; max-width: var(--page-width); margin-left: auto; margin-right: auto; box-sizing: border-box;
+  padding-left: var(--page-pad); padding-right: var(--page-pad);
 }
 
 /* ---- one card for everything (today.js todayCard): the chat's reply card's
@@ -99,7 +119,7 @@
 .tcard-note { align-self: center; font-size: var(--caption); color: var(--text-muted); font-weight: 700; }
 /* Its buttons: the reply card's answers. */
 .tbtn {
-  min-height: 38px; padding: 7px 14px; font-weight: 600; color: var(--text); cursor: pointer;
+  min-height: var(--control-h); padding: 7px 14px; font-weight: 600; color: var(--text); cursor: pointer;
   border: 1px solid var(--button-border); border-radius: var(--button-radius); background: var(--button-bg); overflow-wrap: anywhere;
 }
 .tcard-opts .tbtn { flex: 1 1 auto; overflow-wrap: normal; }
@@ -112,7 +132,7 @@
 .tcard.k-due, .tcard.k-chase, .tcard.k-someday { cursor: pointer; }
 .tcard.k-due .tcard-actions, .tcard.k-chase .tcard-actions { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 @media (max-width: 559px) { .tcard.k-due .tcard-meta, .tcard.k-chase .tcard-meta { flex-basis: 100%; } }
-.tcard.k-due .tbtn, .tcard.k-chase .tbtn { min-height: 34px; padding: 5px 14px; }
+.tcard.k-due .tbtn, .tcard.k-chase .tbtn { padding: 5px 14px; }
 .tbtn:hover { background: var(--button-hover-bg); }
 .tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .tbtn.primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
@@ -127,7 +147,7 @@
              font-size: var(--caption); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--section-head); }
 .tsec-count { font-weight: 700; letter-spacing: 0; color: var(--text-muted); opacity: 0.8; }
 .tsec-gap { flex: 1; }
-.tsec-head .tbtn { letter-spacing: 0; text-transform: none; font-size: var(--caption); min-height: 30px; padding: 4px 10px; }
+.tsec-head .tbtn { letter-spacing: 0; text-transform: none; font-size: var(--caption); min-height: var(--control-h-small); padding: 4px 10px; }
 .today-yours > .tsec-head { color: var(--section-head-yours); }
 .tsec-cards { display: flex; flex-direction: column; gap: var(--card-gap); }
 details.tsec > summary { list-style: none; cursor: pointer; border-radius: var(--radius-item); }
@@ -136,10 +156,6 @@ details.tsec > summary .tsec-head::before { content: "›"; display: inline-bloc
 details.tsec[open] > summary .tsec-head::before { transform: rotate(90deg); }
 details.tsec > summary:hover .tsec-head { color: var(--text); }
 
-/* A thumb's size on the phone. */
-@media (pointer: coarse) {
-  .tbtn { min-height: 44px; }
-}
 
 /* The whole card opens it. */
 .tcard[data-id] { cursor: pointer; }
@@ -148,8 +164,9 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .tbtn.complete::before { content: "✓"; margin-right: 6px; font-weight: 800; }
 
 /* ---- tabs (uiTabs): one of a few, each with its count */
-.ui-tabs { flex: none; display: flex; gap: 4px; padding: 3px; border: 1px solid var(--tab-border); border-radius: var(--radius-control); background: var(--tab-bg); }
-.ui-tabs .control { border: 0; background: none; min-height: 32px; padding: 2px 14px; font-weight: 700; color: var(--text-muted); gap: 6px; }
+.ui-tabs { flex: none; display: flex; gap: 4px; height: var(--control-h); box-sizing: border-box; padding: 3px;
+           border: 1px solid var(--tab-border); border-radius: var(--radius-control); background: var(--tab-bg); }
+.ui-tabs .control { border: 0; background: none; height: 100%; min-height: 0; padding: 0 14px; font-weight: 700; color: var(--text-muted); gap: 6px; }
 .ui-tabs .control:hover { color: var(--text); }
 .ui-tabs .control.on { background: var(--tab-on-bg); color: var(--text); }
 .tab-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--tab-count-bg); color: var(--on-accent);
@@ -159,7 +176,8 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .searchbox {
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 8px;
-  height: 46px;     /* its field inside is 44: a finger's target */
+  height: var(--control-h);
+  box-sizing: border-box;
   padding: 0 4px 0 12px;
   border: 1px solid var(--search-border);
   border-radius: var(--radius-control);
@@ -182,7 +200,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @media (pointer: coarse) { .ui-search-key { display: none; } }
 
 /* ---- a tool in a bar (uiTool): an icon, no box until you point at it */
-.ui-tool { width: 38px; height: 38px; min-height: 38px; padding: 0; flex: none; border-color: transparent; background: none; color: var(--text-muted); font-size: 16px; }
+.ui-tool { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; flex: none; border-color: transparent; background: none; color: var(--text-muted); font-size: 16px; }
 .ui-tool:hover { color: var(--text); background: var(--control-hover); }
 .ui-tool .glyph svg { width: 18px; height: 18px; }
 
@@ -195,7 +213,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-title {
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 9px;
-  min-height: 36px; padding: 0 8px;
+  min-height: var(--control-h); padding: 0 8px;
   border-radius: var(--radius-control);
   text-align: left; white-space: nowrap; overflow: hidden;
 }
@@ -214,7 +232,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-btns { flex: none; display: flex; gap: 2px; }
 .head-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 10px;
+  height: var(--control-h); padding: 0 10px; box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   color: var(--text-muted); font-size: var(--caption); font-weight: 700;
@@ -222,10 +240,10 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-btn .ic { width: 16px; height: 16px; }
 .head-btn:hover { color: var(--text); background: var(--control-hover); }
 .head-btn.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
-.head-btn.more { width: 34px; padding: 0; justify-content: center; font-size: 16px; }
+.head-btn.more { width: var(--control-h); padding: 0; justify-content: center; font-size: 16px; }
 .phone-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid var(--border-faint); }
 .phone-head .head-btn .label { display: none; }
-.phone-head .head-btn { width: 40px; height: 40px; padding: 0; justify-content: center; }
+.phone-head .head-btn { width: var(--control-h); padding: 0; justify-content: center; }
 .phone-head .head-title .task { font-size: var(--body); }
 .phone-head .tpill.long { max-width: 40%; }
 .phone-head .head-btn { font-size: 18px; color: var(--text); }
