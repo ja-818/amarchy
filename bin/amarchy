@@ -180,8 +180,8 @@ state, with Close for the done ones; docs/guide.md, "Today"):
   amarchy today --loops [<file>|off]    your loops file (your commitments and who you wait on, one per line:
                                         `- [ ] 2026-10-30 · what · nudge 10-29`, `- [ ] waiting · who · what ·
                                         since 10-23 · chase 10-27`, `- [ ] someday · what`, `- [x]` when done),
-                                        or none; prints it without one. Today only reads it: its Done and
-                                        Chase go to your assistant, which keeps it
+                                        or none; prints it without one. Today only reads it: its Done, Chase,
+                                        Ask and New chat go to your assistant, which keeps it
 
 Terminals:
   amarchy terminals [on|off]            Show terminals: whether the app shows the sessions' terminals (the
@@ -8625,8 +8625,8 @@ def ask_line(s):
 # theirs (chats at work, the people you wait on). A chat says where it
 # stands in the goal block each reply ends with (REPLY_FORMAT): its goal,
 # and working, waiting, blocked or done. Your commitments are in your loops
-# file (amarchy today --loops), which Today only reads: Done and Chase go to
-# your assistant, which keeps it.
+# file (amarchy today --loops), which Today only reads: Done, Chase, Ask and
+# New chat go to your assistant, which keeps it.
 
 LOOPS_FILE = STATE / "loops"                # the loops file's path (amarchy today --loops)
 LOOPS_SENT = STATE / "loops-sent.json"      # {key: {action, at}}: what Today told your assistant, until it's done
@@ -8806,8 +8806,9 @@ def loop_date(word, today, past=False):
 def parse_loops(text, today=None):
     """The open loops in a loops file: each `- [ ] ...` line, its fields
     split on " · ". [{key, kind: due|waiting|someday|other, what, who, due,
-    nudge, since, chase, ref, line}]. A loop's key is its line's hash: done
-    (`- [x]`) or changed, it's another."""
+    nudge, since, chase, ref, chat, line}]. chat: the chat (session) the
+    line names for it, `(chat <id>)` or `(session <id>)`: one already at it.
+    A loop's key is its line's hash: done (`- [x]`) or changed, it's another."""
     today = today or datetime.date.today()
     out = []
     for raw in (text or "").splitlines():
@@ -8817,7 +8818,10 @@ def parse_loops(text, today=None):
         line = m.group(1)
         parts = [p.strip() for p in re.split(r"\s+·\s+", line) if p.strip()]
         loop = {"key": hashlib.sha1(line.encode()).hexdigest()[:12], "kind": "other", "what": "", "who": "",
-                "due": "", "nudge": "", "since": "", "chase": "", "ref": "", "line": line}
+                "due": "", "nudge": "", "since": "", "chase": "", "ref": "", "chat": "", "line": line}
+        named = re.findall(r"\((?:chat|session)\s+([A-Za-z0-9][\w.-]*)", line)
+        if named:
+            loop["chat"] = named[-1]
         rest = []
         for p in parts:
             low = p.lower()
@@ -8898,15 +8902,18 @@ LOOP_ASKS = {
     "done": "Loop done: {said}. Tick it off in {source}.",
     "chase": "Chase {who} on: {what}{since}. Draft the message for me to send.",
     "ask": "About this loop: {said}\n\n{text}",
+    "session": "Start a session for this loop: {said}{note}",
 }
 
 
 def loop_tell(key, action, text=""):
-    """Today's Done, Follow up (chase) or Ask (text: what you want done about
-    it) on a loop: told to your assistant (as if you'd typed it), which keeps
-    the file. None, or what's wrong."""
+    """Today's Done, Follow up (chase), Ask (text: what you want done about
+    it) or New chat (session; text: an optional note for its brief) on a
+    loop: told to your assistant (as if you'd typed it), which keeps the file
+    (and for a new chat, starts it and names it on the loop's line). None, or
+    what's wrong."""
     if action not in LOOP_ASKS:
-        return "done, chase or ask"
+        return "done, chase, ask or session"
     text = text.strip() if isinstance(text, str) else ""
     if action == "ask" and not text:
         return "What should your assistant do about it?"
@@ -8921,7 +8928,8 @@ def loop_tell(key, action, text=""):
         return "Only someone you're waiting on can be chased"
     said = loop["line"]
     since = f" (waiting since {loop['since']})" if loop["since"] else ""
-    text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since, text=text[:4000])
+    note = f"\n\n{text[:4000]}" if text else ""
+    text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since, text=text[:4000], note=note)
     r = run_amarchy("send", mine["id"], text, "--no-wait")
     if r.returncode != 0:
         return gist(r.stderr) or f"{mine['name']} didn't take it"
@@ -9836,7 +9844,7 @@ def app_handler(st, users, address):
                 return self.assistant(None, data)
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
-            if self.path == "/api/today/loop":      # Done or Chase on one of your loops: {key, action}, to your assistant
+            if self.path == "/api/today/loop":      # Done, Chase, Ask or New chat on one of your loops: {key, action, text}, to your assistant
                 why = loop_tell(data.get("key"), data.get("action"), data.get("text") or "")
                 return self.error(409, why) if why else self.send(200, {})
             if self.path == "/api/today/loops":     # your loops file: {path} ("" for none)

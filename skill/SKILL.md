@@ -153,10 +153,17 @@ command's usage without running it (an option it doesn't know fails instead).
   there; `X-Amarchy-Children=<glob>` puts the timers it makes under it.
 - `amarchy today [--json]`: the app's home page, Today, as the user sees it:
   what needs them, their commitments due and who they wait on (their loops
-  file, `amarchy today --loops`; only read: Done and Chase from the app go to
-  their assistant), and every chat's goal and state, from the goal block each
+  file, `amarchy today --loops`; only read: Done, Follow up, Ask and New chat
+  from the app go to their assistant), and every chat's goal and state, from the goal block each
   reply ends with. Keep yours true: it's how the user knows this chat is done
   and can be closed.
+  If you're the user's assistant, Today's buttons on a loop reach you as
+  messages: `Loop done: <line>. Tick it off in <file>.`, `Chase <who> on: …`,
+  `About this loop: <line>` and what they want, and `Start a session for this
+  loop: <line>` (New chat), maybe with a note under it. For that last one,
+  pick the project the loop belongs to, start a session for it with the whole
+  brief (`amarchy new <project> [name] --prompt "<brief>"`, the note in it),
+  and add `(chat <its id>)` to the loop's line: the loop then has Open chat.
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the
