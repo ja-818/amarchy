@@ -108,9 +108,11 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 
 /* ---- Mission complete (today.js missionComplete): the Omarchy way, your
    theme's own hues bursting over your wallpaper, its font, a bar of blocks
-   like a tiling desktop's. Under the toasts (its Undo stays in reach). */
+   like a tiling desktop's. Under the toasts (its Undo stays in reach). A
+   shade, no backdrop-filter: in Safari a blur over the board's scroller left
+   the board blank once it went (its cards unpainted). */
 .mission { position: fixed; inset: 0; z-index: 19; display: flex; align-items: center; justify-content: center;
-           background: color-mix(in srgb, var(--surface) 35%, transparent); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+           background: color-mix(in srgb, var(--surface) 55%, transparent);
            animation: mission-in .25s ease-out both; cursor: pointer; }
 .mission.leaving { animation: mission-out .4s ease-in both; }
 @keyframes mission-in { from { opacity: 0; } }

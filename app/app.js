@@ -171,6 +171,77 @@ async function api(path, body) {
   return data;
 }
 
+// ---- sounds: the chimes, Mission complete's, a chime's preview
+//
+// Played with Web Audio, never an <audio> element: a page that played one is
+// the Mac's "Now Playing" app after it, and the keyboard's play/pause (F8)
+// plays the chime again instead of your music. Web Audio isn't media to the
+// system. A sound it can't decode (Safari and an .oga) plays in an element
+// let go once it ends, so it doesn't stay there either.
+
+const sounds = { ctx: null, buffers: new Map() };
+
+function soundContext() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!sounds.ctx || sounds.ctx.state === "closed") {
+    sounds.ctx = new AC();
+    // Not allowed to start until you've used the page: it starts at your first key or tap.
+    const wake = () => { if (sounds.ctx && sounds.ctx.state === "suspended") sounds.ctx.resume().catch(() => {}); };
+    for (const ev of ["pointerdown", "keydown", "touchend"]) window.addEventListener(ev, wake, { capture: true, passive: true });
+  }
+  return sounds.ctx;
+}
+
+// src: the sound's address; rate: faster and higher (1 as it is); volume: 0 to 1.
+// Returns a stop().
+function playSound(src, { rate = 1, volume = 1 } = {}) {
+  const ctx = soundContext();
+  let stopped = false, node = null, el = null;
+  const stop = () => {
+    stopped = true;
+    if (node) try { node.stop(); } catch (e) { /* ended */ }
+    if (el) releaseAudio(el);
+  };
+  const viaElement = () => {
+    if (stopped) return;
+    el = new Audio(src);
+    el.volume = volume;
+    el.preservesPitch = el.mozPreservesPitch = el.webkitPreservesPitch = false;
+    el.playbackRate = rate;
+    el.addEventListener("ended", () => releaseAudio(el), { once: true });
+    el.play().catch(() => releaseAudio(el));
+  };
+  if (!ctx) { viaElement(); return stop; }
+  (async () => {
+    let buf = sounds.buffers.get(src);
+    if (!buf) {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`no sound (${res.status})`);
+      const data = await res.arrayBuffer();
+      buf = await new Promise((ok, no) => { const p = ctx.decodeAudioData(data, ok, no); if (p && p.catch) p.catch(no); });
+      sounds.buffers.set(src, buf);
+    }
+    if (stopped) return;
+    // Not started yet (you haven't used the page): no sound, rather than one late.
+    if (ctx.state !== "running") await Promise.race([ctx.resume().catch(() => {}), new Promise((ok) => setTimeout(ok, 300))]);
+    if (ctx.state !== "running") return;
+    node = ctx.createBufferSource();
+    node.buffer = buf;
+    node.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    node.connect(gain).connect(ctx.destination);
+    node.start();
+  })().catch(viaElement);
+  return stop;
+}
+
+// An element done with: emptied, so the system forgets it played.
+function releaseAudio(el) {
+  try { el.pause(); el.removeAttribute("src"); el.load(); } catch (e) { /* gone */ }
+}
+
 let toastTimer = null;
 function toast(text) {
   document.querySelectorAll(".toast:not(.stay)").forEach((t) => t.remove());
@@ -717,7 +788,7 @@ async function confirmClose(s, known) {
       // A chat closed is a mission completed (today.js): celebrated.
       if (typeof missionComplete === "function") missionComplete([s], s.task || `${projectName(s.repo)} · ${s.name}`);
       else toast(`Closing ${s.task || `${projectName(s.repo)} · ${s.name}`}`);
-      if (app.session && app.session.id === s.id) go("#/");
+      todayLeave(s.id);
     } catch (e) {
       yes.disabled = false;
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);

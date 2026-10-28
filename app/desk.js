@@ -1156,7 +1156,6 @@ function deskList() {
 // The chime this page plays when a session needs you or is done (the one
 // you're looking at only when this window isn't), as amarchy alerts lets the
 // others: your assistant's always, with its own chime.
-let chimeAudio = null;
 function chime(v) {
   if (!v) return;
   const now = Object.fromEntries(v.sessions.map((s) => [s.id, s.status]));
@@ -1176,10 +1175,7 @@ function chime(v) {
   if (!rings.length) return;
   const sound = rings.some((s) => s.assistant === "main") ? v.assistant_sound || "herald" : v.sound || "kalimba";
   if (sound === "off") return;
-  const src = `/sound/${encodeURIComponent(sound)}`;
-  if (!chimeAudio || !chimeAudio.src.endsWith(src)) chimeAudio = new Audio(src);
-  chimeAudio.currentTime = 0;
-  chimeAudio.play().catch(() => { /* not until you've clicked the page once */ });
+  playSound(`/sound/${encodeURIComponent(sound)}`);      // app.js: never the Mac's Now Playing
 }
 
 // ---- Go to a chat (Ctrl+Alt+A): every chat, by its name, its project or
@@ -1478,10 +1474,9 @@ async function setPriority(s, dir) {
 async function closeCurrent() {
   const s = row(keyedId());
   if (!s) return;
-  // At once with Undo when nothing would be lost (today.js).
+  // At once with Undo when nothing would be lost (today.js): then the board.
   if (s.assistant === "main") return toast("Your assistant stays: it isn't closed");
-  if (desk.current === s.id) boardBack(true);
-  todayClose(s);
+  todayComplete(s);
 }
 
 async function runProject(name) {

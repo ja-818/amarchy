@@ -207,6 +207,7 @@ async function todayClose(s, said = "") {
 // These close, after their Undo (off the page meanwhile).
 function todayCloseNow(ss, said = "") {
   ss.forEach((s) => todayUI.closing.add(s.id));
+  ss.forEach((s) => todayLeave(s.id));
   todayRedraw();
   missionComplete(ss, ss.length === 1 ? ss[0].task || "Your chat" : `${ss.length} chats`);
   const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); missionUndo(ss); };
@@ -226,6 +227,14 @@ function todayCloseNow(ss, said = "") {
     // Gone from the list by then: forgotten here too.
     setTimeout(() => ss.forEach((s) => { if (!rowOf(s.id)) todayUI.closing.delete(s.id); }), 8000);
   }, back, TODAY_UNDO_CLOSE);
+}
+
+// A chat completed while it's open: back home, with every chat, at once
+// (not when its close reaches the server): on a computer the board, on the
+// phone its home.
+function todayLeave(id) {
+  if (app.desk) { if (typeof desk !== "undefined" && desk.current === id) boardBack(true); }
+  else if (app.session && app.session.id === id) go("#/");
 }
 
 // Close every done chat: the ones with nothing to lose at once (one Undo),
@@ -481,12 +490,13 @@ function todaySeen(s) {
 async function todayComplete(s) {
   // Still running something: asked first (todayClose), not celebrated yet.
   if ((rowOf(s.id) || s).status === "running") return todayClose(s, `Mission complete: ${s.task || "the chat"}`);
-  const card = document.querySelector(`.tcard[data-id="${CSS.escape(s.id)}"]`);
+  // Its card says so a moment, when it's in sight (not from the open chat).
+  const card = [...document.querySelectorAll(`.tcard[data-id="${CSS.escape(s.id)}"]`)].find((c) => c.offsetParent);
   if (card) {
     card.classList.add("completing");
     card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, "Mission complete")));
+    await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 650));
   }
-  await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 650));
   todayClose(s, `Mission complete: ${s.task || "the chat"}`);
 }
 
@@ -569,11 +579,7 @@ function missionUndo(ss) {
 // Its sound: rate, higher for a combo (a whole tone a step, up to an octave).
 function missionSound(rate = 1) {
   if ((app.view || {}).sound === "off") return;
-  const a = new Audio("/sound/mission");
-  a.volume = 0.8;
-  a.preservesPitch = a.mozPreservesPitch = a.webkitPreservesPitch = false;
-  a.playbackRate = rate;
-  a.play().catch(() => {});
+  playSound("/sound/mission", { rate, volume: 0.8 });
 }
 
 // The moment itself, over everything: confetti (bits of it, flying far),

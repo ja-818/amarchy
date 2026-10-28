@@ -447,6 +447,27 @@ async function shotTasks(p, where) {
   await p.evaluate(() => boardTab("chats"));
 }
 
+// Complete mission from an open chat (its bar's Complete): home at once,
+// every chat on it and in sight, whatever the overlay did (a blur over the
+// board left it blank in Safari); its sound is Web Audio, never an <audio>
+// (that made the page the Mac's Now Playing: F8 played the chime again).
+async function completeOpen(p, where) {
+  await p.evaluate(() => { window.__media = 0; const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () { window.__media++; return play.call(this); }; });
+  await p.evaluate(() => todayOpen(row("proj-fresh")));
+  check(where, await until(p, () => (app.desk ? desk.current : app.session && app.session.id) === "proj-fresh"), "a chat open");
+  await p.evaluate(() => [...document.querySelectorAll(".ui-action.complete")].find((b) => b.offsetParent).click());
+  check(where, await until(p, () => !(app.desk ? desk.current : app.session) && !!document.querySelector(".mission")),
+        "its bar's Complete: home at once, Mission complete over it");
+  check(where, await p.evaluate(() => getComputedStyle(document.querySelector(".mission")).backdropFilter === "none"), "no blur over the board");
+  await p.evaluate(() => document.querySelector(".mission").click());
+  const seen = await p.evaluate(() => { const b = document.querySelector(".board-scroll").getBoundingClientRect();
+    return [...document.querySelectorAll(".board-today .tcard")].filter((c) => { const r = c.getBoundingClientRect(); return r.height > 0 && r.bottom > b.top && r.top < b.bottom; }).length; });
+  check(where, seen >= 2 && !(await p.evaluate(() => !!document.querySelector(".tcard[data-id=proj-fresh]"))), `every other chat, in sight (${seen} cards)`);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-completed-open.png`) });
+  check(where, await p.evaluate(() => window.__media === 0), "its sound isn't an <audio> element");
+}
+
 async function phone(browser, port) {
   const where = "phone";
   const p = await page(browser, "phone", port);
@@ -508,6 +529,7 @@ async function phone(browser, port) {
   check(where, await until(p, () => !!document.querySelector(".sheet") && /Priority/.test(document.querySelector(".sheet").textContent)), "held down, a card: its menu");
   await p.evaluate(() => closeSheets());
   await p.screenshot({ path: path.join(SHOTS, "phone-board.png"), fullPage: false });
+  await completeOpen(p, where);
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }
@@ -769,6 +791,7 @@ async function wide(browser, port) {
   check(where, await until(p, () => desk.current === "proj-fresh"), "picked by its name, it opens");
   await p.keyboard.press("Escape");
   check(where, await until(p, () => !desk.current), "Esc: the board");
+  await completeOpen(p, where);
   await p.reload();
   await ready(p);
   check(where, await until(p, () => !!document.querySelector(".tasks-board .tcard") && getComputedStyle(document.querySelector(".stage")).display === "none"), "reloaded: the board");

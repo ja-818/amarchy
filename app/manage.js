@@ -136,11 +136,10 @@ function commandForm(s, name, command, opened) {
 
 let previewing = null;
 function previewSound(name) {
-  if (previewing) previewing.pause();
+  if (previewing) previewing();
   previewing = null;
   if (!name || name === "off") return;
-  previewing = new Audio(`/sound/${encodeURIComponent(name)}`);
-  previewing.play().catch(() => {});
+  previewing = playSound(`/sound/${encodeURIComponent(name)}`);
 }
 
 async function soundSheet(forAssistant) {
