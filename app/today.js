@@ -374,6 +374,9 @@ function todayLoop(l, v) {
   const act = async (action, text) => {
     todayUI.told.set(l.key, action);
     todayUI.asking.delete(l.key);
+    // A task done is a mission too: celebrated, and on your score.
+    const done = action === "done" ? [{ id: `task:${l.key}`, task: l.what }] : null;
+    if (done) missionComplete(done, l.what, { task: true });
     todayRedraw();
     try {
       await api("/api/today/loop", { key: l.key, action, text });
@@ -382,6 +385,7 @@ function todayLoop(l, v) {
           : action === "session" ? `${name} starts a chat for it` : `Sent to ${name}`);
     } catch (e) {
       todayUI.told.delete(l.key);
+      if (done) { missionUndo(done); document.querySelectorAll(".mission").forEach((x) => x.remove()); }
       todayRedraw();
       toast(e.message);
     }
@@ -488,21 +492,26 @@ async function todayComplete(s) {
 
 // ---- mission complete: what closing a chat feels like
 //
-// The chat reached its goal, and you closed it: your theme's colors burst
-// over your wallpaper, a tick lands, MISSION COMPLETE in big letters (ALL
-// CLEAR when nothing else needs you), what it earned (a combo, a record, a
-// day more of your streak, a milestone), how many you've completed today
-// against what's still waiting (a bar of blocks), its sound (a step higher
-// for each in a combo, unless your chimes are off), and Next mission. A
-// click, Esc, or three seconds, and it's gone; Undo is under it the while.
+// The chat reached its goal, and you closed it (or a task's Done): your
+// theme's colors burst over your wallpaper, a tick lands, MISSION COMPLETE in
+// big letters (DAILY GOAL when it gets you there, ALL CLEAR when nothing else
+// needs you or waits to be completed), what it earned (a combo, a record, a
+// day more of your streak, a rank, a rescue), how many you've completed today
+// against what's still waiting (a bar of blocks), its sound (a step higher for
+// each in a combo, unless your chimes are off), and Next mission. A click,
+// Esc, or three seconds, and it's gone; Undo is under it the while.
 //
-// What you've completed is the server's (missions_view): the same on the
-// phone and the computer. One completed here is counted at once (pending),
-// before its Undo is over and its close reaches the server.
+// What you've done is the server's (missions_view): the same on the phone and
+// the computer. One completed here counts at once (pending), before its Undo
+// is over and its close reaches the server. A badge the server says you
+// earned has a moment of its own (missionBadge); a fast reply, a flash by the
+// score (missionsWatch).
 
 const MISSION_HUES = ["--red", "--yellow", "--green", "--blue", "--magenta", "--cyan", "--orange", "--accent"];
-const MISSION_MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
-const missionPending = new Map();     // completed here, not in the server's list yet: id -> {id, at, task, repo, took}
+const MISSION_RANKS = [[0, "Cadet"], [10, "Ensign"], [25, "Pilot"], [50, "Lieutenant"], [100, "Commander"],
+                       [250, "Captain"], [500, "Admiral"], [1000, "Legend"]];
+const missionPending = new Map();     // completed here, not in the server's list yet: id -> {id, at, task, repo, took, kind}
+const missionUI = { flash: null, replies: null, queue: [] };
 
 // Your missions now: the server's, and the ones completed here it doesn't have yet.
 function missionsNow() {
@@ -520,7 +529,24 @@ function missionsNow() {
   const week = (m.week || [0, 0, 0, 0, 0, 0, 0]).slice();
   week[week.length - 1] += extra.length;
   return { today, n: today.length, streak: (m.streak || 0) + (extra.length && !mine.length ? 1 : 0),
-           best: m.best || 0, week, total: (m.total || 0) + extra.length, combo };
+           best: m.best || 0, week, total: (m.total || 0) + extra.length, combo, goal: m.goal || 0,
+           replies: m.replies || { n: 0, fast: 0, streak: 0, best: 0 }, badges: m.badges || [], fast: m.fast || 120 };
+}
+
+// Your rank, by all you've completed: {name, at, next: [at, name] or null}.
+function missionRank(total) {
+  let i = 0;
+  while (i + 1 < MISSION_RANKS.length && total >= MISSION_RANKS[i + 1][0]) i++;
+  return { name: MISSION_RANKS[i][1], at: MISSION_RANKS[i][0], next: MISSION_RANKS[i + 1] || null };
+}
+
+// Chats stalled (quiet for days, not done): they cool your flame; completing one is a rescue.
+function missionIsStalled(s) {
+  const t = s.today || {};
+  return s.assistant !== "main" && !s.setup && t.state !== "done" && !todayBusy(s) && !!t.at && Date.now() / 1000 - t.at > TODAY_STALE;
+}
+function missionStalled(v) {
+  return v ? (v.sessions || []).filter((s) => !todayUI.closing.has(s.id) && missionIsStalled(s)) : [];
 }
 
 // "42 min", "2 h 5 min", "3 days": how long a chat took, from its start.
@@ -540,98 +566,157 @@ function missionUndo(ss) {
   todayRedraw();
 }
 
-// ss: the chats completed (their rows); title: what to call them.
-function missionComplete(ss, title) {
+// Its sound: rate, higher for a combo (a whole tone a step, up to an octave).
+function missionSound(rate = 1) {
+  if ((app.view || {}).sound === "off") return;
+  const a = new Audio("/sound/mission");
+  a.volume = 0.8;
+  a.preservesPitch = a.mozPreservesPitch = a.webkitPreservesPitch = false;
+  a.playbackRate = rate;
+  a.play().catch(() => {});
+}
+
+// The moment itself, over everything: confetti (bits of it, flying far),
+// a mark, the kicker in big letters, a title, pills, a line under them, a
+// button. Gone on a click, Esc, or after stay ms.
+function missionMoment({ cls = "", mark = "check", kicker, title, earned = [], extra = null, stats = "", next = "Keep going →", go = null, bits = 90, far = 42, stay = 3400 }) {
+  document.querySelectorAll(".mission").forEach((x) => x.remove());
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const burst = h("div", { class: "mission-burst", "aria-hidden": "true" });
+  if (!calm) for (let i = 0; i < bits; i++) {
+    const bit = h("i");
+    const angle = Math.random() * Math.PI * 2, d = 18 + Math.random() * far;
+    bit.style.setProperty("--dx", `${Math.cos(angle) * d}vw`);
+    bit.style.setProperty("--dy", `${Math.sin(angle) * d * 0.8 + 12 + Math.random() * 20}vh`);
+    bit.style.setProperty("--rot", `${Math.round(Math.random() * 1080 - 540)}deg`);
+    bit.style.setProperty("--d", `${1.1 + Math.random() * (far > 42 ? 1.4 : 0.9)}s`);
+    bit.style.setProperty("--c", `var(${MISSION_HUES[i % MISSION_HUES.length]})`);
+    if (i % 3 === 0) bit.classList.add("round");
+    burst.append(bit);
+  }
+  const done = () => { el.remove(); if (go) go(calm); missionNextBadge(); };
+  const nextBtn = h("button", { class: "tbtn primary mission-next", type: "button", onclick: (e) => { e.stopPropagation(); done(); } }, next);
+  const el = h("div", { class: `mission${cls ? ` ${cls}` : ""}`, role: "status", "aria-live": "polite", onclick: () => { el.remove(); missionNextBadge(); } }, burst,
+    h("div", { class: "mission-card" },
+      h("div", { class: "mission-tick" }, glyph(mark)),
+      h("div", { class: "mission-kicker" }, kicker),
+      h("div", { class: "mission-title" }, title),
+      earned.length ? h("div", { class: "mission-earned" }, ...earned) : null,
+      extra,
+      stats ? h("div", { class: "mission-stats" }, stats) : null,
+      nextBtn));
+  const esc = (e) => { if (e.key === "Escape" && el.isConnected) { e.preventDefault(); e.stopPropagation(); el.remove(); missionNextBadge(); } };
+  window.addEventListener("keydown", esc, true);
+  document.body.append(el);
+  if (app.desk) nextBtn.focus({ preventScroll: true });
+  stay = (calm ? stay - 1000 : stay) + earned.length * 400;
+  setTimeout(() => { if (!el.isConnected) return; el.classList.add("leaving"); setTimeout(() => { if (el.isConnected) { el.remove(); missionNextBadge(); } }, 400); }, stay);
+  setTimeout(() => window.removeEventListener("keydown", esc, true), stay + 600);
+  return el;
+}
+
+// ss: what was completed (chats' rows, or a task as {id: "task:<key>", task}); title: what to call them.
+function missionComplete(ss, title, { task = false } = {}) {
   const before = missionsNow();
   const now = Date.now() / 1000;
+  const rescued = task ? 0 : ss.filter((s) => missionIsStalled(rowOf(s.id) || s)).length;
   for (const s of ss) {
-    missionPending.set(s.id, { id: s.id, at: now, task: s.task || "", repo: s.repo || "",
-                               took: s.created ? Math.max(0, Math.round(now - s.created)) : null });
+    missionPending.set(s.id, { id: s.id, at: now, task: s.task || "", repo: s.repo || "", kind: task ? "task" : "chat",
+                               took: !task && s.created ? Math.max(0, Math.round(now - s.created)) : null });
   }
   const m = missionsNow();
   const left = app.view ? Math.max(0, todayCount(app.view, typeof board !== "undefined" && boardOn() ? "chats" : null)) : 0;
   // Done ones still to complete count too: all clear is nothing needs you and nothing's left to complete.
   const gone = new Set(ss.map((s) => s.id));
   const more = app.view ? todayParts(app.view).done.filter((s) => !gone.has(s.id) && s.assistant !== "main").length : 0;
-  const clear = left === 0 && more === 0;
-  const v = app.view || {};
-  if (v.sound !== "off") {
-    // A step (a whole tone) higher for each in a combo, up to an octave.
-    const a = new Audio("/sound/mission");
-    a.volume = 0.8;
-    a.preservesPitch = a.mozPreservesPitch = a.webkitPreservesPitch = false;
-    a.playbackRate = 2 ** (Math.min(m.combo - 1, 6) * 2 / 12);
-    a.play().catch(() => {});
-  }
-  if (navigator.vibrate) try { navigator.vibrate(m.combo > 1 ? [30, 40, 30] : 30); } catch (e) { /* not here */ }
-  document.querySelectorAll(".mission").forEach((x) => x.remove());
-  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const burst = h("div", { class: "mission-burst", "aria-hidden": "true" });
-  // More of it for a combo, and the most when nothing's left.
-  const bits = clear ? 160 : Math.min(150, 90 + (m.combo - 1) * 15);
-  if (!calm) for (let i = 0; i < bits; i++) {
-    const bit = h("i");
-    const angle = Math.random() * Math.PI * 2, far = 18 + Math.random() * (clear ? 60 : 42);
-    bit.style.setProperty("--dx", `${Math.cos(angle) * far}vw`);
-    bit.style.setProperty("--dy", `${Math.sin(angle) * far * 0.8 + 12 + Math.random() * 20}vh`);
-    bit.style.setProperty("--rot", `${Math.round(Math.random() * 1080 - 540)}deg`);
-    bit.style.setProperty("--d", `${1.1 + Math.random() * (clear ? 1.4 : 0.9)}s`);
-    bit.style.setProperty("--c", `var(${MISSION_HUES[i % MISSION_HUES.length]})`);
-    if (i % 3 === 0) bit.classList.add("round");
-    burst.append(bit);
-  }
-  // What it earned, each a pill: a combo, a record, the streak's day, a milestone.
+  const clear = !task && left === 0 && more === 0;
+  if (clear) api("/api/missions/clear").catch(() => {});
+  const goal = m.goal && before.n < m.goal && m.n >= m.goal;
+  missionSound(2 ** (Math.min(m.combo - 1, 6) * 2 / 12));
+  if (navigator.vibrate) try { navigator.vibrate(m.combo > 1 || clear || goal ? [30, 40, 30] : 30); } catch (e) { /* not here */ }
+  // What it earned, each a pill: a combo, a record, the goal, the streak's day, a rank, a rescue.
   const earned = [];
   if (m.combo > 1) earned.push(uiPill(`Combo ×${m.combo}`, "ask"));
   if (m.best && m.n > m.best) earned.push(uiPill(before.n <= m.best ? "New record" : `Record · ${m.n}`, "done"));
+  if (goal) earned.push(uiPill(`Goal ${m.n}/${m.goal}`, "done"));
   if (!before.n && m.streak > 1) earned.push(uiPill(`Day ${m.streak} streak`, "warn"));
-  const passed = MISSION_MILESTONES.find((k) => before.total < k && m.total >= k)
-    || (Math.floor(m.total / 1000) > Math.floor(before.total / 1000) ? Math.floor(m.total / 1000) * 1000 : 0);
-  if (passed) earned.push(uiPill(`${missionOrdinal(passed)} mission`, "accent"));
-  const blocks = Math.min(14, m.n + left);
+  const was = missionRank(before.total), is = missionRank(m.total);
+  if (is.name !== was.name) earned.push(uiPill(`Promoted · ${is.name}`, "accent"));
+  else if (Math.floor(m.total / 1000) > Math.floor(before.total / 1000)) earned.push(uiPill(`${missionOrdinal(Math.floor(m.total / 1000) * 1000)} mission`, "accent"));
+  if (rescued) earned.push(uiPill(rescued > 1 ? `${rescued} rescues` : "Rescue", "late"));
+  const blocks = Math.min(14, Math.max(m.n + left, m.goal || 0));
   const bar = h("div", { class: "mission-bar", "aria-hidden": "true" },
-    ...Array.from({ length: blocks }, (_, i) => h("span", { class: i < Math.min(m.n, blocks) ? "on" : "" })));
+    ...Array.from({ length: blocks }, (_, i) => h("span", { class: `${i < Math.min(m.n, blocks) ? "on" : ""}${m.goal && i === m.goal - 1 ? " goal" : ""}` })));
   const took = ss.length === 1 && missionPending.get(ss[0].id) ? missionTook(missionPending.get(ss[0].id).took) : "";
-  const go = () => {
-    el.remove();
-    const next = document.querySelector(".today:not([hidden]) .today-yours .today-go")
-      || document.querySelector(".today:not([hidden]) .tcard.k-done .tbtn.complete");
-    if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); }
-  };
-  const nextBtn = h("button", { class: "tbtn primary mission-next", type: "button", onclick: (e) => { e.stopPropagation(); go(); } },
-    left || more ? "Next mission →" : "Keep going →");
-  const el = h("div", { class: `mission${clear ? " clear" : ""}${m.combo > 1 ? " combo" : ""}`, role: "status", "aria-live": "polite", onclick: () => el.remove() }, burst,
-    h("div", { class: "mission-card" },
-      h("div", { class: "mission-tick" }, glyph("check")),
-      h("div", { class: "mission-kicker" }, clear ? "All clear" : "Mission complete"),
-      h("div", { class: "mission-title" }, title),
-      earned.length ? h("div", { class: "mission-earned" }, ...earned) : null,
-      bar,
-      h("div", { class: "mission-stats" }, [`${missionOrdinal(m.n)} today`, took ? `done in ${took}` : "",
-        left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you"].filter(Boolean).join(" · ")),
-      nextBtn));
-  const esc = (e) => { if (e.key === "Escape" && el.isConnected) { e.preventDefault(); e.stopPropagation(); el.remove(); } };
-  window.addEventListener("keydown", esc, true);
-  document.body.append(el);
-  if (app.desk) nextBtn.focus({ preventScroll: true });
-  const stay = (calm ? 2400 : 3400) + earned.length * 400;
-  setTimeout(() => { el.classList.add("leaving"); setTimeout(() => el.remove(), 400); }, stay);
-  setTimeout(() => window.removeEventListener("keydown", esc, true), stay + 600);
+  missionMoment({
+    cls: [clear ? "clear" : "", m.combo > 1 ? "combo" : "", goal ? "goal" : ""].filter(Boolean).join(" "),
+    kicker: clear ? "All clear" : goal ? "Daily goal" : task ? "Task done" : "Mission complete", title, earned, extra: bar,
+    stats: [`${missionOrdinal(m.n)} today`, took ? `done in ${took}` : "",
+            left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you"].filter(Boolean).join(" · "),
+    next: left || more ? "Next mission →" : "Keep going →",
+    go: (calm) => {
+      const next = document.querySelector(".today:not([hidden]) .today-yours .today-go")
+        || document.querySelector(".today:not([hidden]) .tcard.k-done .tbtn.complete");
+      if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); }
+    },
+    bits: clear || goal ? 160 : Math.min(150, 90 + (m.combo - 1) * 15), far: clear || goal ? 60 : 42,
+  });
   todayRedraw();
 }
 
-// Your score, by the summary: the streak's flame and today's missions; a
-// tap opens Your missions.
+// A badge earned: its own moment, once (on each device that's open then; a
+// mission's moment first, if one is up).
+function missionBadge(b) {
+  missionSound(1.5);
+  missionMoment({ cls: "badge", mark: "medal", kicker: "Badge unlocked", title: b.name, stats: b.about, bits: 120, far: 50 });
+}
+
+function missionNextBadge() {
+  if (document.querySelector(".mission")) return;
+  const b = missionUI.queue.shift();
+  if (b) setTimeout(() => (document.querySelector(".mission") ? missionUI.queue.unshift(b) : missionBadge(b)), 300);
+}
+
+// The list changed (app.js): a badge just earned has its moment; a fast
+// reply (your replies' fast count up), a flash by the score.
+function missionsWatch() {
+  const m = app.view && app.view.missions;
+  if (!m) return;
+  const now = Date.now() / 1000;
+  let shown;
+  try { shown = new Set(JSON.parse(store.get("badges-shown") || "[]")); } catch (e) { shown = new Set(); }
+  const fresh = (m.badges || []).filter((b) => b.at && now - b.at < 300 && !shown.has(b.key));
+  if (fresh.length) {
+    fresh.forEach((b) => { shown.add(b.key); missionUI.queue.push(b); });
+    store.set("badges-shown", JSON.stringify([...shown]));
+    missionNextBadge();
+  }
+  const r = m.replies || {};
+  if (missionUI.replies && r.fast > missionUI.replies.fast) {
+    missionUI.flash = { text: r.streak > 1 ? `Fast reply ×${r.streak}` : "Fast reply", until: Date.now() + 2600 };
+    todayRedraw();
+    setTimeout(() => { if (missionUI.flash && missionUI.flash.until <= Date.now()) { missionUI.flash = null; todayRedraw(); } }, 2700);
+  }
+  missionUI.replies = r;
+}
+
+// Your score, by the summary: the streak's flame, today's missions (to your
+// goal); a tap opens Your missions.
 function missionScore() {
   const m = missionsNow();
   const risk = m.streak > 0 && !m.n;
-  const title = risk ? `Complete one today to keep your ${m.streak}-day streak`
-    : m.streak ? `${m.streak}-day streak · ${m.n} completed today` : `${m.n} completed today`;
-  return uiScore({ streak: m.streak, today: m.n, risk, title, act: (e) => { e.stopPropagation(); missionsSheet(); } });
+  const cool = missionStalled(app.view).length;
+  const title = [risk ? `Complete one today to keep your ${m.streak}-day streak` : m.streak ? `${m.streak}-day streak` : "",
+                 m.goal ? `${m.n} of ${m.goal} today` : `${m.n} completed today`,
+                 cool ? `${cool} stalled chat${cool === 1 ? "" : "s"} cool${cool === 1 ? "s" : ""} your flame` : ""].filter(Boolean).join(" · ");
+  const flash = missionUI.flash && missionUI.flash.until > Date.now() ? missionUI.flash.text : "";
+  return uiScore({ streak: m.streak, today: m.n, goal: m.goal, risk, cool: !!cool, flash, title,
+                   act: (e) => { e.stopPropagation(); missionsSheet(); } });
 }
 
-// Your missions: today, the streak, the best day, all of them; the week in
-// bars; what you completed today, and how long each took.
+// Your missions: your rank and how far to the next; today (to your goal),
+// the streak, the best day, all of them; the week in bars; your goal; your
+// replies; your badges; what you completed today, and how long each took.
 function missionsSheet() {
   const m = missionsNow();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -641,16 +726,34 @@ function missionsSheet() {
   });
   const record = m.best && m.n > m.best;
   const meta = m.streak && !m.n ? `Complete one today to keep your ${m.streak}-day streak`
-    : record ? "Your best day yet" : m.n ? `${m.n} completed today` : "Complete a chat to start your streak";
+    : record ? "Your best day yet" : m.goal && m.n >= m.goal ? "Daily goal reached" : m.n ? `${m.n} completed today` : "Complete a chat to start your streak";
+  const rank = missionRank(m.total);
+  const r = m.replies;
+  const earned = m.badges.filter((b) => b.at).length;
   const list = m.today.slice().reverse().map((x) => h("li", { class: "missions-row" },
-    h("span", { class: `tcard-chip ph-${todayHue(x.repo)}` }, projectName(x.repo || "")),
+    h("span", { class: `tcard-chip ph-${x.kind === "task" ? "due" : todayHue(x.repo)}` }, x.kind === "task" ? "Task" : projectName(x.repo || "")),
     h("span", { class: "missions-task" }, x.task || "A chat"),
     h("span", { class: "missions-when" }, [missionTook(x.took), new Date(x.at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · "))));
-  sheet({ key: "missions" }, sheetHead("Your missions", meta),
-    uiTiles([{ n: m.n, label: "today", on: record }, { n: m.streak, label: m.streak === 1 ? "day streak" : "days streak" },
+  const setGoal = async (g) => {
+    try { await api("/api/missions/goal", { goal: g }); } catch (e) { return toast(e.message); }
+    if (app.view && app.view.missions) app.view.missions = { ...app.view.missions, goal: g };
+    todayRedraw();
+    missionsSheet();
+  };
+  sheet({ key: "missions" }, sheetHead("Your missions", meta), h("div", { class: "missions-body" },
+    uiProgress({ label: rank.name, value: m.total - rank.at, max: rank.next ? rank.next[0] - rank.at : 1,
+                 note: rank.next ? `${rank.next[0] - m.total} to ${rank.next[1]}` : "the top rank" }),
+    uiTiles([{ n: m.goal ? `${m.n}/${m.goal}` : m.n, label: "today", on: record || (m.goal && m.n >= m.goal) },
+             { n: m.streak, label: m.streak === 1 ? "day streak" : "days streak" },
              { n: m.best, label: "best day" }, { n: m.total, label: "all time" }]),
     uiChart(days),
-    list.length ? uiSection("missions-done", "Completed today", { count: list.length }, h("ol", { class: "missions-list" }, ...list)) : null);
+    uiStepper({ label: "Daily goal", value: m.goal, min: 0, max: 50, show: (g) => (g ? String(g) : "None"), set: setGoal }),
+    uiSection("missions-replies", "Replies today", { count: r.n },
+      uiTiles([{ n: r.fast, label: `fast (within ${Math.round(m.fast / 60)} min)` }, { n: r.streak, label: "fast in a row" }, { n: r.best, label: "best run" }])),
+    uiSection("missions-badges", "Badges", { count: `${earned}/${m.badges.length}` },
+      uiBadges(m.badges.map((b) => ({ name: b.name, about: b.about, on: !!b.at,
+                                      when: b.at ? `Earned ${new Date(b.at * 1000).toLocaleDateString([], { day: "numeric", month: "short" })}` : "" })))),
+    list.length ? uiSection("missions-done", "Completed today", { count: list.length }, h("ol", { class: "missions-list" }, ...list)) : null));
 }
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the

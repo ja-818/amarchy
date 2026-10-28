@@ -17,7 +17,10 @@
 // - uiSearch: the search box.
 // - uiTool: a tool's icon button in a bar.
 // - uiScore: your score in a word or two (the streak's flame, today's
-//   missions); a tap opens the rest.
+//   missions against your goal, a ring); a tap opens the rest.
+// - uiProgress: progress to something (a rank's to the next).
+// - uiStepper: a number to pick, with − and + (your daily goal).
+// - uiBadges: badges, earned and to earn.
 // - uiTiles: a few big numbers, each with its word under it.
 // - uiChart: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat: Back, its project and name (a tap:
@@ -125,17 +128,49 @@ function uiTool(icon, label, act, { title = "", cls = "", extra = {} } = {}) {
                        onclick: act, ...extra }, glyph(icon));
 }
 
-// Your score: the streak (its flame lit, or dim while today has none yet and
-// it's at risk), and today's missions. act: what a tap opens.
-function uiScore({ streak = 0, today = 0, risk = false, title = "", act }) {
-  return h("button", { class: `ui-score${risk ? " risk" : ""}${streak ? "" : " cold"}`, type: "button", title, "aria-label": title, onclick: act },
-    h("span", { class: "ui-score-streak" }, glyph("flame"), String(streak)),
-    h("span", { class: "ui-score-today" }, h("b", {}, String(today)), " today"));
+// Your score: the streak (its flame lit; dim and pulsing while today has
+// none yet and it's at risk; cooled while chats are stalled), and today's
+// missions (a ring filling to your goal, if you have one). flash: a moment's
+// pill by it (a fast reply). act: what a tap opens.
+function uiScore({ streak = 0, today = 0, goal = 0, risk = false, cool = false, flash = "", title = "", act }) {
+  const ring = goal ? h("span", { class: `ui-ring${today >= goal ? " full" : ""}` }) : null;
+  if (ring) {
+    const f = Math.min(1, today / goal), c = 2 * Math.PI * 6;
+    ring.innerHTML = `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><circle class="on" cx="8" cy="8" r="6" stroke-dasharray="${(f * c).toFixed(2)} ${c.toFixed(2)}"/></svg>`;
+  }
+  return h("span", { class: "ui-score-box" },
+    flash ? h("span", { class: "ui-score-flash" }, glyph("bolt"), flash) : null,
+    h("button", { class: `ui-score${risk ? " risk" : ""}${cool ? " cool" : ""}${streak ? "" : " cold"}`, type: "button", title, "aria-label": title, onclick: act },
+      h("span", { class: "ui-score-streak" }, glyph("flame"), String(streak)),
+      h("span", { class: "ui-score-today" }, ring, h("span", {}, h("b", {}, String(today)), goal ? `/${goal}` : " today"))));
 }
 
-// Big numbers: [{n, label, on}], each its word under it (on: lit, a record).
+// Progress to something: its name, a bar, a note ("12 to Lieutenant").
+function uiProgress({ label, value, max, note = "" }) {
+  const f = max > 0 ? Math.max(0, Math.min(1, value / max)) : 1;
+  return h("div", { class: "ui-progress" },
+    h("div", { class: "ui-progress-head" }, h("b", {}, label), note ? h("span", {}, note) : null),
+    h("div", { class: "ui-progress-track" }, h("span", { class: "ui-progress-fill", style: `width:${Math.round(f * 100)}%` })));
+}
+
+// A number to pick, with − and +: its label, what it shows (show(n)), set(n).
+function uiStepper({ label, value, min = 0, max = 99, show = String, set }) {
+  return h("div", { class: "ui-stepper" }, h("span", { class: "ui-stepper-label" }, label),
+    h("button", { class: "tbtn", type: "button", "aria-label": `Less: ${label}`, disabled: value <= min || null, onclick: () => set(value - 1) }, "−"),
+    h("b", { class: "ui-stepper-value" }, show(value)),
+    h("button", { class: "tbtn", type: "button", "aria-label": `More: ${label}`, disabled: value >= max || null, onclick: () => set(value + 1) }, "+"));
+}
+
+// Badges: [{name, about, on, when}], the earned lit, the rest to earn, dim.
+function uiBadges(items) {
+  return h("div", { class: "ui-badges" }, ...items.map((b) =>
+    h("div", { class: `ui-badge${b.on ? " on" : ""}`, title: b.about },
+      glyph("medal"), h("b", {}, b.name), h("span", {}, b.on ? b.when || b.about : b.about))));
+}
+
+// Big numbers: [{n, label, on}], each its word under it (on: lit, a record), in one row.
 function uiTiles(items) {
-  return h("div", { class: "ui-tiles" }, ...items.map((t) =>
+  return h("div", { class: "ui-tiles", style: `--tiles:${items.length}` }, ...items.map((t) =>
     h("div", { class: `ui-tile${t.on ? " on" : ""}` }, h("b", {}, String(t.n)), h("span", {}, t.label))));
 }
 

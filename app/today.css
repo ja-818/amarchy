@@ -140,6 +140,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .mission-bar { display: flex; gap: 4px; margin-top: 4px; }
 .mission-bar span { width: 18px; height: 10px; border-radius: 2px; background: var(--control-selected); }
 .mission-bar span.on { background: var(--success); }
+.mission-bar span.goal { box-shadow: 0 0 0 2px var(--accent); }
 .mission-bar span.on:last-of-type, .mission-bar span.on:nth-last-child(1 of .on) { animation: mission-block .6s ease-out .35s both; }
 @keyframes mission-block { from { transform: scaleY(0); } }
 .mission-stats { font-size: var(--caption); font-weight: 700; color: var(--text-muted); letter-spacing: .04em; }
@@ -150,9 +151,15 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .mission-earned .tpill:nth-child(3) { animation-delay: .24s; }
 .mission-earned .tpill:nth-child(4) { animation-delay: .36s; }
 @keyframes mission-earn { from { transform: scale(.4); opacity: 0; } }
-/* Nothing else needs you: ALL CLEAR, a bigger burst, the kicker a touch bigger. */
-.mission.clear .mission-kicker { font-size: calc(var(--title) * 2); }
-/* Your missions (today.js missionsSheet): what you completed today. */
+/* Nothing else needs you: ALL CLEAR (your daily goal, DAILY GOAL), a bigger burst, the kicker a touch bigger. */
+.mission.clear .mission-kicker, .mission.goal .mission-kicker { font-size: calc(var(--title) * 2); }
+/* A badge unlocked: its medal in the badge's gold. */
+.mission.badge .mission-card { border-color: var(--badge-on); }
+.mission.badge .mission-tick { background: var(--badge-on); }
+.mission.badge .mission-kicker { color: var(--badge-on); text-shadow: 0 0 18px color-mix(in srgb, var(--badge-on) 45%, transparent); }
+/* Your missions (today.js missionsSheet): its parts apart; what you completed today. */
+.missions-body { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+.missions-body .tsec { margin: 0; }
 .missions-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .missions-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-width: 0;
                 background: var(--card-bg); border: var(--card-border-width) solid var(--card-border); border-radius: var(--card-radius); }

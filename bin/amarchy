@@ -129,6 +129,9 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         JPEG or WebP, cut to a round square: the middle of it, or the square
                                         at x,y of that size in its pixels), or amarchy's own again
   amarchy sound --assistant [name|off]  its chime (herald until you pick one); prints it without one
+  amarchy missions [--goal <n>]         what you've completed: today, your streak, best day, all of them,
+                                        your replies and badges; --goal sets how many a day you aim for
+                                        (0: none)
   amarchy alerts [all|needs-you|assistant]
                                         what the other sessions tell you about on your phones: when they
                                         need you or are done (all), only when one needs you (needs-you,
@@ -2978,6 +2981,18 @@ def close(sid, force=False):
     return None
 
 
+def mission_log(rec):
+    """A line of what you've done, at the end of MISSIONS: a mission (a chat
+    completed, or a task's Done: kind "task"), an all clear ("clear"), a
+    question or permission answered ("reply": how long it waited)."""
+    try:
+        MISSIONS.parent.mkdir(parents=True, exist_ok=True)
+        with open(MISSIONS, "a") as f:
+            f.write(json.dumps({"at": int(time.time()), **rec}) + "\n")
+    except OSError as e:
+        print(f"amarchy: couldn't write down the mission: {e}", file=sys.stderr)
+
+
 def mission_done(s):
     """A chat closed is a mission completed: written down, from the app or
     amarchy close alike (your assistant's and a worktree still being set up
@@ -2988,40 +3003,93 @@ def mission_done(s):
         task = session_task(s, "")
     except Exception:
         task = s.get("title") or ""
-    rec = {"at": int(time.time()), "id": s["id"], "repo": s.get("repo", ""), "task": task, "created": s.get("created")}
-    try:
-        MISSIONS.parent.mkdir(parents=True, exist_ok=True)
-        with open(MISSIONS, "a") as f:
-            f.write(json.dumps(rec) + "\n")
-    except OSError as e:
-        print(f"amarchy: couldn't write down the mission: {e}", file=sys.stderr)
+    mission_log({"id": s["id"], "repo": s.get("repo", ""), "task": task, "created": s.get("created")})
 
 
 _missions = {}
 
 MISSION_COMBO = 15 * 60       # completed this soon after the one before: the same combo
+MISSION_GOAL = STATE / "missions-goal"      # how many a day you aim for (0: none)
+MISSION_BADGES = STATE / "missions-badges.json"     # badges earned outside the log (five at once): key -> when
+MISSION_TOLD = STATE / "missions-told.json"         # the streak's reminder and the week's recap: the day each was last sent
+MISSION_FAST = 120            # a question or permission answered this soon: a fast reply
+MISSION_GOAL_DEFAULT = 5
+
+# The badges: key, name, how it's earned. Earned once, kept (when, in missions_view).
+BADGES = (("speedrun", "Speedrun", "A chat completed within 10 minutes of starting it"),
+          ("combo5", "Combo ×5", "Five missions in a row, each within 15 minutes"),
+          ("ten", "Ten in a day", "Ten missions in one day"),
+          ("night", "Night owl", "A mission completed between midnight and 5"),
+          ("clean", "Clean week", "All clear five days in a row"),
+          ("five", "Five at once", "Five chats at work at the same time"),
+          ("quick", "Quick draw", "Ten fast replies in a row (each within 2 minutes)"),
+          ("century", "Century", "A hundred missions"))
+
+
+def mission_goal():
+    try:
+        return max(0, min(50, int(MISSION_GOAL.read_text().strip())))
+    except (OSError, ValueError):
+        return MISSION_GOAL_DEFAULT
+
+
+def mission_badges_kept():
+    try:
+        d = json.loads(MISSION_BADGES.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def mission_badge(key):
+    """A badge earned outside the log (five at once): kept, when first."""
+    kept = mission_badges_kept()
+    if key not in kept:
+        kept[key] = int(time.time())
+        try:
+            write_file(MISSION_BADGES, json.dumps(kept))
+        except OSError:
+            pass
+
+
+def mission_days_in_a_row(days, today):
+    """How many days in a row have one (today's, or up to yesterday's while today has none)."""
+    n, d = 0, today if days.get(today) else today - datetime.timedelta(days=1)
+    while days.get(d):
+        n, d = n + 1, d - datetime.timedelta(days=1)
+    return n
 
 
 def missions_view():
     """What you've completed, for the app's score (the same on the phone and
-    the computer): today's (id, when, its title and how long it took),
-    the streak (days in a row with one at least, today's or up to
+    the computer): today's (id, when, its title, how long it took, a task or
+    a chat), the streak (days in a row with one at least, today's or up to
     yesterday's while today has none yet), the best day before today, the
-    last seven days, and all of them. Read again when the file or the day
-    changes."""
+    last seven days, all of them; your daily goal; your replies today (how
+    many, how many fast, the fast ones in a row); the badges (each, when
+    earned or null). Read again when a file or the day changes."""
     today = datetime.date.today()
-    try:
-        st = MISSIONS.stat()
-        stamp = (st.st_mtime_ns, st.st_size, today)
-    except OSError:
-        stamp = (None, None, today)
+    stamp = [today]
+    for f in (MISSIONS, MISSION_GOAL, MISSION_BADGES):
+        try:
+            st = f.stat()
+            stamp.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            stamp.append(None)
+    stamp = tuple(stamp)
     if _missions.get("stamp") == stamp:
         return _missions["view"]
-    days, mine = {}, []
+    days, clears, mine, ats, earned = {}, {}, [], [], dict(mission_badges_kept())
+    replies = {"n": 0, "fast": 0, "streak": 0, "best": 0}
+    run = 0
     try:
-        lines = MISSIONS.read_text().splitlines() if stamp[0] is not None else []
+        lines = MISSIONS.read_text().splitlines() if stamp[1] else []
     except OSError:
         lines = []
+
+    def earn(key, at):
+        earned.setdefault(key, at)
+
     for line in lines:
         try:
             r = json.loads(line)
@@ -3029,19 +3097,145 @@ def missions_view():
         except (ValueError, KeyError, TypeError):
             continue
         d = datetime.date.fromtimestamp(at)
+        kind = r.get("kind") or "chat"
+        if kind == "clear":
+            clears[d] = True
+            if mission_days_in_a_row(clears, d) >= 5:
+                earn("clean", at)
+            continue
+        if kind == "reply":
+            fast = isinstance(r.get("wait"), (int, float)) and r["wait"] <= MISSION_FAST
+            run = run + 1 if fast else 0
+            replies["best"] = max(replies["best"], run)
+            if run >= 10:
+                earn("quick", at)
+            if d == today:
+                replies["n"] += 1
+                replies["fast"] += fast
+            continue
+        if kind not in ("chat", "task"):
+            continue
         days[d] = days.get(d, 0) + 1
+        took = at - int(r["created"]) if isinstance(r.get("created"), (int, float)) else None
+        took = took if took and took > 0 else None
+        if kind == "chat" and took and took <= 600:
+            earn("speedrun", at)
+        if datetime.datetime.fromtimestamp(at).hour < 5:
+            earn("night", at)
+        if days[d] >= 10:
+            earn("ten", at)
+        ats.append(at)
+        k = 1
+        while k < len(ats) and ats[-k] - ats[-k - 1] <= MISSION_COMBO:
+            k += 1
+        if k >= 5:
+            earn("combo5", at)
+        if len(ats) >= 100:
+            earn("century", at)
         if d == today:
-            took = at - int(r["created"]) if isinstance(r.get("created"), (int, float)) else None
             mine.append({"id": r.get("id", ""), "at": at, "task": r.get("task", ""), "repo": r.get("repo", ""),
-                         "took": took if took and took > 0 else None})
-    streak, d = 0, today if days.get(today) else today - datetime.timedelta(days=1)
-    while days.get(d):
-        streak, d = streak + 1, d - datetime.timedelta(days=1)
-    view = {"today": mine[-200:], "streak": streak, "best": max((n for k, n in days.items() if k != today), default=0),
+                         "took": took, "kind": kind})
+    replies["streak"] = run
+    view = {"today": mine[-200:], "streak": mission_days_in_a_row(days, today),
+            "best": max((n for k, n in days.items() if k != today), default=0),
             "week": [days.get(today - datetime.timedelta(days=i), 0) for i in range(6, -1, -1)],
-            "total": sum(days.values()), "combo": MISSION_COMBO}
+            "total": sum(days.values()), "combo": MISSION_COMBO, "goal": mission_goal(),
+            "clear_streak": mission_days_in_a_row(clears, today), "replies": replies, "fast": MISSION_FAST,
+            "badges": [{"key": k, "name": n, "about": a, "at": earned.get(k)} for k, n, a in BADGES]}
     _missions.update(stamp=stamp, view=view)
     return view
+
+
+def missions_last_week(today=None):
+    """Monday to Sunday before this week: {n, best: (day, n), replies fast}."""
+    today = today or datetime.date.today()
+    start = today - datetime.timedelta(days=today.weekday() + 7)
+    days, fast = {}, 0
+    try:
+        lines = MISSIONS.read_text().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            r = json.loads(line)
+            d = datetime.date.fromtimestamp(int(r["at"]))
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not start <= d < start + datetime.timedelta(days=7):
+            continue
+        kind = r.get("kind") or "chat"
+        if kind in ("chat", "task"):
+            days[d] = days.get(d, 0) + 1
+        elif kind == "reply" and isinstance(r.get("wait"), (int, float)) and r["wait"] <= MISSION_FAST:
+            fast += 1
+    best = max(days.items(), key=lambda x: x[1], default=None)
+    return {"n": sum(days.values()), "best": best, "fast": fast}
+
+
+def missions_nudge(now=None):
+    """What to tell your phones now about your missions, once a day each, or
+    None: at 8pm, a streak at risk (none completed today yet); on Monday from
+    9, your assistant's recap of last week. Marked sent (MISSION_TOLD)."""
+    now = now or datetime.datetime.now()
+    today = now.date()
+    try:
+        told = json.loads(MISSION_TOLD.read_text())
+    except (OSError, ValueError):
+        told = {}
+    told = told if isinstance(told, dict) else {}
+    payload, which = None, None
+    v = missions_view()
+    if 20 <= now.hour < 23 and told.get("reminder") != today.isoformat() and v["streak"] and not v["today"]:
+        which = "reminder"
+        payload = {"title": f"Your {v['streak']}-day streak", "body": "Complete one mission today to keep it going.",
+                   "tag": "amarchy-streak", "url": "/"}
+    elif now.weekday() == 0 and 9 <= now.hour < 21 and told.get("recap") != today.isoformat():
+        week = missions_last_week(today)
+        which = "recap"
+        if week["n"]:
+            mine = assistant()
+            day, n = week["best"]
+            body = f"{week['n']} mission{'s' if week['n'] != 1 else ''} last week · best day {day.strftime('%A')}, {n}"
+            if week["fast"]:
+                body += f" · {week['fast']} fast repl{'ies' if week['fast'] != 1 else 'y'}"
+            if v["streak"]:
+                body += f" · a {v['streak']}-day streak going"
+            payload = {"title": f"{mine['name']}: your week" if mine else "Your week", "body": body,
+                       "tag": "amarchy-recap", "url": "/"}
+            if mine:
+                payload["icon"] = assistant_icon()
+    if which:
+        told[which] = today.isoformat()
+        try:
+            write_file(MISSION_TOLD, json.dumps(told))
+        except OSError:
+            pass
+    return payload
+
+
+def app_missions(st, ss):
+    """Each second, beside the notifications: a question or permission
+    answered (how long it waited: fast ones count), five chats at work at
+    once (a badge), and the streak's reminder or the week's recap."""
+    now = time.time()
+    since = st.waiting_since
+    live = {s["id"]: s for s in ss}
+    # Waiting already when this server started: since when isn't known (None), not timed.
+    first, st.missions_seen = not st.missions_seen, True
+    for s in ss:
+        if s.get("status") == "waiting":
+            since.setdefault(s["id"], None if first else now)
+    for sid in [k for k in since if (live.get(k) or {}).get("status") != "waiting"]:
+        began = since.pop(sid)
+        if began and sid in live:       # answered; closed, it wasn't
+            mission_log({"kind": "reply", "id": sid, "wait": int(now - began)})
+    if sum(1 for s in ss if s.get("status") in ("working", "running")) >= 5:
+        mission_badge("five")
+    if now - st.nudged_at > 60:
+        st.nudged_at = now
+        payload = missions_nudge()
+        if payload:
+            threading.Thread(target=push_all, args=(payload,), daemon=True).start()
 
 
 def resume_closing():
@@ -4094,6 +4288,33 @@ def alerts():
     except OSError:
         value = ""
     return value if value in ALERTS else ALERTS_DEFAULT
+
+
+def cmd_missions(args):
+    """amarchy missions [--goal <n>]: your score, as the app shows it; or your daily goal set."""
+    if "--goal" in args:
+        i = args.index("--goal")
+        try:
+            g = int(args[i + 1])
+        except (IndexError, ValueError):
+            return fail("--goal takes a number (0: none)")
+        if not 0 <= g <= 50:
+            return fail("a goal from 0 to 50")
+        write_file(MISSION_GOAL, f"{g}\n")
+    v = missions_view()
+    n = len(v["today"])
+    print(f"today        {n}" + (f" of {v['goal']}" if v["goal"] else ""))
+    print(f"streak       {v['streak']} day{'s' if v['streak'] != 1 else ''}" + (" (complete one today to keep it)" if v["streak"] and not n else ""))
+    print(f"best day     {v['best']}")
+    print(f"all time     {v['total']}")
+    print(f"this week    {' '.join(str(x) for x in v['week'])}")
+    r = v["replies"]
+    print(f"replies      {r['n']} today, {r['fast']} fast; {r['streak']} fast in a row (best {r['best']})")
+    got = [b["name"] for b in v["badges"] if b["at"]]
+    print(f"badges       {', '.join(got) if got else 'none yet'}")
+    for m in v["today"]:
+        print(f"  {time.strftime('%H:%M', time.localtime(m['at']))}  {m['task'] or m['id']}")
+    return 0
 
 
 def cmd_alerts(args):
@@ -8568,6 +8789,9 @@ class AppState:
         self.changed = threading.Condition()
         self.view, self.version, self.statuses = {}, 0, None
         self.asked = {}         # session id -> the request it last told the phones about (chat engine)
+        self.waiting_since = {}     # session id -> since when it waits on you (app_missions: how fast you answered)
+        self.nudged_at = 0          # when app_missions last looked at the reminder and the recap
+        self.missions_seen = False  # app_missions has seen the list once
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.projects_stale = threading.Event()     # a project was added: the list of projects is read again now
         self.lock = threading.Lock()
@@ -8639,6 +8863,10 @@ def app_watch(st):
                 st.version += 1
                 st.changed.notify_all()
         app_moments(st, ss)
+        try:
+            app_missions(st, ss)
+        except Exception as e:      # the score never stops the list
+            print(f"amarchy app: missions: {e}", file=sys.stderr)
         time.sleep(1)
 
 
@@ -9002,6 +9230,8 @@ def loop_tell(key, action, text=""):
     r = run_amarchy("send", mine["id"], text, "--no-wait")
     if r.returncode != 0:
         return gist(r.stderr) or f"{mine['name']} didn't take it"
+    if action == "done":
+        mission_log({"kind": "task", "id": f"task:{key}", "task": loop["what"], "repo": ""})
     sent = loops_sent()
     sent[key] = {"action": action, "at": time.time()}
     try:
@@ -9913,6 +10143,15 @@ def app_handler(st, users, address):
                 return self.assistant(None, data)
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
+            if self.path == "/api/missions/goal":     # your daily goal: {goal} (0: none)
+                g = data.get("goal")
+                if not isinstance(g, int) or not 0 <= g <= 50:
+                    return self.error(400, "a goal from 0 to 50")
+                write_file(MISSION_GOAL, f"{g}\n")
+                return self.send(200, {"goal": g})
+            if self.path == "/api/missions/clear":    # all clear: nothing needed you, nothing left to complete
+                mission_log({"kind": "clear"})
+                return self.send(200, {})
             if self.path == "/api/today/loop":      # Done, Chase, Ask or New chat on one of your loops: {key, action, text}, to your assistant
                 why = loop_tell(data.get("key"), data.get("action"), data.get("text") or "")
                 return self.error(409, why) if why else self.send(200, {})
@@ -13025,6 +13264,7 @@ OPTIONS = {
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "alerts": (set(), set(), set()),
+    "missions": ({"--goal"}, {"--goal"}, set()),
     "update": ({"--auto"}, set(), set()),
     "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),
@@ -13181,6 +13421,8 @@ def main(argv):
         return cmd_assistant(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
+    elif cmd == "missions":
+        return cmd_missions(args)
     elif cmd == "update" and not [a for a in args if a != "--auto"]:
         return cmd_update(args)
     elif cmd == "migrate" and not args:

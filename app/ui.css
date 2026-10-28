@@ -38,10 +38,14 @@
   /* The search box (uiSearch). */
   --search-bg: var(--control-bg);
   --search-border: var(--control-border);
-  /* Your score (uiScore), big numbers (uiTiles) and bars (uiChart). */
+  /* Your score (uiScore), badges (uiBadges), big numbers (uiTiles), a chart (uiChart), progress (uiProgress). */
   --score-flame: var(--orange, var(--warn, var(--warning)));
   --score-bg: var(--control-bg);
   --score-border: var(--control-border);
+  --score-cool: var(--cyan, var(--accent));      /* the flame while chats are stalled */
+  --score-ring: var(--accent);
+  --score-flash: var(--warn, var(--warning));
+  --badge-on: var(--yellow, var(--warn, var(--warning)));
   --tile-bg: var(--control-bg);
   --tile-border: var(--border-faint);
   --tile-on: var(--success);
@@ -278,7 +282,8 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .phone-head .head-title .task { font-size: var(--body); }
 .phone-head .tpill.long { max-width: 40%; }
 
-/* Your score (uiScore): the streak's flame and today's missions, a pill you tap. */
+/* Your score (uiScore): the streak's flame and today's missions (a ring to your goal), a pill you tap. */
+.ui-score-box { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .ui-score { display: inline-flex; align-items: center; gap: 10px; height: var(--control-h-small); padding: 0 12px; flex: none;
             border-radius: var(--pill-radius); background: var(--score-bg); border: 1px solid var(--score-border);
             color: var(--text); font: inherit; font-size: var(--caption); font-weight: 700; cursor: pointer; }
@@ -286,17 +291,48 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-score-streak { display: inline-flex; align-items: center; gap: 4px; color: var(--score-flame); }
 .ui-score-streak .glyph svg { width: 15px; height: 15px; display: block; }
 .ui-score.risk .ui-score-streak { animation: score-risk 1.6s ease-in-out infinite; }
+.ui-score.cool .ui-score-streak { color: var(--score-cool); }
 .ui-score.cold .ui-score-streak { color: var(--text-muted); opacity: .6; }
-.ui-score-today { color: var(--text-muted); }
+.ui-score-today { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); }
 .ui-score-today b { color: var(--text); }
+.ui-ring svg { width: 15px; height: 15px; display: block; transform: rotate(-90deg); }
+.ui-ring circle { fill: none; stroke: var(--chart-bg); stroke-width: 2.6; }
+.ui-ring circle.on { stroke: var(--score-ring); stroke-linecap: round; }
+.ui-ring.full circle.on { stroke: var(--chart-on); }
+.ui-score-flash { display: inline-flex; align-items: center; gap: 4px; font-size: var(--caption); font-weight: 700; color: var(--score-flash);
+                  animation: score-flash 2.6s ease-out both; white-space: nowrap; }
+.ui-score-flash .glyph svg { width: 13px; height: 13px; display: block; }
 @keyframes score-risk { 50% { opacity: .4; } }
-@media (prefers-reduced-motion: reduce) { .ui-score.risk .ui-score-streak { animation: none; opacity: .6; } }
+@keyframes score-flash { 0% { opacity: 0; transform: translateY(6px) scale(.8); } 12% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ui-score.risk .ui-score-streak { animation: none; opacity: .6; } .ui-score-flash { animation: none; } }
+
+/* Progress (uiProgress), a number to pick (uiStepper), badges (uiBadges). */
+.ui-progress { display: flex; flex-direction: column; gap: 6px; }
+.ui-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ui-progress-head b { font-size: var(--title); color: var(--text); }
+.ui-progress-head span { font-size: var(--caption); color: var(--text-muted); }
+.ui-progress-track { height: 8px; border-radius: 999px; background: var(--chart-bg); overflow: hidden; }
+.ui-progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--chart-on); }
+.ui-stepper { display: flex; align-items: center; gap: 8px; }
+.ui-stepper-label { flex: 1; color: var(--text); font-weight: 700; }
+.ui-stepper .tbtn { width: var(--control-h); padding: 0; justify-content: center; }
+.ui-stepper-value { min-width: 3.5em; text-align: center; color: var(--text); }
+.ui-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.ui-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px; text-align: center;
+            background: var(--tile-bg); border: var(--card-border-width) dashed var(--tile-border); border-radius: var(--card-radius); color: var(--text-muted); }
+.ui-badge .glyph svg { width: 24px; height: 24px; display: block; opacity: .45; }
+.ui-badge b { font-size: var(--body); }
+.ui-badge span { font-size: var(--caption); }
+.ui-badge.on { border-style: solid; border-color: var(--badge-on); color: var(--text); }
+.ui-badge.on .glyph { color: var(--badge-on); }
+.ui-badge.on .glyph svg { opacity: 1; }
+.ui-badge.on span { color: var(--text-muted); }
 
 /* Big numbers (uiTiles). */
-.ui-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.ui-tiles { display: grid; grid-template-columns: repeat(var(--tiles, 4), minmax(0, 1fr)); gap: 8px; }
 .ui-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px;
            background: var(--tile-bg); border: var(--card-border-width) solid var(--tile-border); border-radius: var(--card-radius); }
-.ui-tile b { font-size: calc(var(--title) * 1.8); font-weight: 800; line-height: 1.1; color: var(--text); }
+.ui-tile b { font-size: calc(var(--title) * 1.6); font-weight: 800; line-height: 1.1; color: var(--text); }
 .ui-tile span { font-size: var(--caption); color: var(--text-muted); text-align: center; }
 .ui-tile.on { border-color: var(--tile-on); }
 .ui-tile.on b { color: var(--tile-on); }

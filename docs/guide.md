@@ -277,16 +277,27 @@ host's chats without anything else installed.
   message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
   about it) and **Done**.
 - **Missions**: completing a chat (closing it, from the board, its head or
-  `amarchy close`) is a mission complete: confetti in your theme's colors, its
-  sound (a step higher for each in a combo: one within 15 minutes of the one
-  before), and what it earned (**Combo ×3**, **New record** for a day,
-  **Day 5 streak**, the **100th mission**); **All clear** when nothing else needs
-  you. By the summary, your score: the streak's flame (dim and pulsing while
-  today has none yet: complete one to keep it) and today's count. A tap opens
-  **Your missions**: today, the streak, the best day and all of them, the week in
-  bars, and what you completed today, with how long each took. They're written
-  down on the server (`~/.local/state/amarchy/missions.jsonl`): the same on the
-  phone and the computer.
+  `amarchy close`) or a task's **Done** is a mission complete: confetti in your
+  theme's colors, its sound (a step higher for each in a combo: one within 15
+  minutes of the one before), and what it earned (**Combo ×3**, **New record**
+  for a day, **Goal 5/5**, **Day 5 streak**, **Promoted · Pilot**, **Rescue** for
+  a stalled chat); **Daily goal** when it gets you to your goal, **All clear**
+  when nothing else needs you or waits to be completed.
+  - **Your score**, by the summary: the streak's flame (dim and pulsing while today
+    has none yet: complete one to keep it; cooled while chats are stalled) and
+    today's missions, a ring filling to your daily goal. Answering a question or
+    permission within 2 minutes is a **fast reply**: a flash by the score.
+  - **Your missions** (a tap on the score): your rank (Cadet, Ensign, Pilot,
+    Lieutenant, Commander, Captain, Admiral, Legend, by all you've completed) and
+    how far to the next; today, the streak, the best day, all of them; the week in
+    bars; your **daily goal** (− and +; `amarchy missions --goal 8`); your replies;
+    your **badges** (Speedrun, Combo ×5, Ten in a day, Night owl, Clean week, Five
+    at once, Quick draw, Century: each has its own moment when earned); and what
+    you completed today, with how long each took.
+  - Your phones are told at **8pm** when your streak is at risk, and on **Monday**
+    morning your assistant sends last week's recap.
+  - It's all written down on the server (`~/.local/state/amarchy/missions.jsonl`):
+    the same on the phone and the computer. `amarchy missions` prints it.
 - **A card** is one surface: it lights as a whole under the pointer, and under the
   keys. A click anywhere on it opens the chat; its buttons do their own thing.
 - **Everything has its key**, the keys on the first card as the board opens: `j` /

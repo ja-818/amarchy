@@ -20,8 +20,11 @@ the change.
 | `uiBrand(act)` | The Ⓐ: the Amarchy menu, as Omarchy's mark opens its own; its dot, an automation that failed. | the board's bar |
 | `uiMenu(title, items)` | A menu: a keyboard's card on a computer (type to find, ↑ ↓ ↵), a sheet on the phone; items `{label, detail, icon, key, act, group, desk}`. | the Amarchy menu |
 | `.ui-bar` | One bar, as Omarchy's: where you are on the left, what you look at in the middle, icons in slots of one size and one outlined action on the right. | the board's bar, an open chat's (both layouts) |
-| `uiScore({streak, today, risk, title, act})` | Your score in a pill: the streak's flame (dim and pulsing while it's at risk), today's missions. A tap opens the rest. | the board's summary line |
-| `uiTiles([{n, label, on}])` | A few big numbers, each its word under it (`on`: lit, a record). | Your missions |
+| `uiScore({streak, today, goal, risk, cool, flash, title, act})` | Your score in a pill: the streak's flame (dim and pulsing while it's at risk, cooled while chats are stalled), today's missions with a ring to your goal; `flash`, a moment's pill by it (a fast reply). A tap opens the rest. | the board's summary line |
+| `uiProgress({label, value, max, note})` | Progress to something: its name, a bar, a note. | Your missions' rank |
+| `uiStepper({label, value, min, max, show, set})` | A number to pick with − and +. | Your missions' daily goal |
+| `uiBadges([{name, about, on, when}])` | Badges: the earned lit, the rest dim with how to earn them. | Your missions |
+| `uiTiles([{n, label, on}])` | A few big numbers in one row, each its word under it (`on`: lit, a record). | Your missions |
 | `uiChart([{n, label}])` | A few days' counts as bars, the last (today) lit. | Your missions |
 
 ## Theming
@@ -40,7 +43,8 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |
-| `--score-flame`, `--score-bg`, `--score-border` | Your score's flame and pill |
+| `--score-flame`, `--score-cool`, `--score-ring`, `--score-flash`, `--score-bg`, `--score-border` | Your score's flame (and cooled), its goal ring, a fast reply's flash, its pill |
+| `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
 | `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
