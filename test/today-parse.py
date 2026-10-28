@@ -1,7 +1,7 @@
 # Today's reading, without a browser: your loops file's lines (due, waiting,
 # someday, a date in MM-DD put in the nearest year), a reply's choices and
-# goal block, a question you answered no longer asking, and the goal block
-# kept out of the list's preview.
+# goal block, a question you answered no longer asking, the goal block kept
+# out of the list's preview, and what a loop's buttons tell your assistant.
 #
 #   python3 test/today-parse.py         exits 0 when every check passed
 
@@ -27,15 +27,18 @@ loops = am.parse_loops("""# Loops
 - [ ] someday · Pick a gym · → projects/gym.md
 - [x] 2026-10-20 · Done already
 - [ ] waiting · adidas · refund · since 12-28 · chase 01-05
+- [ ] 2026-10-29 · ECOS talk (chat jaken-ecos-talk) · nudge 10-27
 not a loop
 """, today)
-check(len(loops) == 4, f"four open loops ({len(loops)})")
-d, w, s, w2 = loops
+check(len(loops) == 5, f"five open loops ({len(loops)})")
+d, w, s, w2, c = loops
+check(c["chat"] == "jaken-ecos-talk" and d["chat"] == "" and c["what"] == "ECOS talk (chat jaken-ecos-talk)", f"a loop naming its chat ({c})")
+check(am.parse_loops("- [ ] someday · x (session jaken-o1-visa; progress in ~/o1)")[0]["chat"] == "jaken-o1-visa", "(session <id>) names it too")
 check(d["kind"] == "due" and d["due"] == "2026-10-30" and d["what"] == "Demo to Felipe" and d["nudge"] == "2026-10-29" and d["ref"] == "log/2026-10-27.md", f"a dated loop ({d})")
 check(w["kind"] == "waiting" and w["who"] == "Felipe" and w["what"] == "the valuation doc" and w["since"] == "2026-10-23" and w["chase"] == "2026-10-27", f"a waiting loop ({w})")
 check(s["kind"] == "someday" and s["what"] == "Pick a gym", "a someday loop")
 check(w2["since"] == "2025-12-28" and w2["chase"] == "2027-01-05", f"MM-DD in the nearest year, a since never ahead ({w2['since']}, {w2['chase']})")
-check(len({l["key"] for l in loops}) == 4, "each its own key")
+check(len({l["key"] for l in loops}) == 5, "each its own key")
 
 reply = '''It's ready for your go
 
@@ -87,6 +90,21 @@ check(len(r) == 1 and r[0]["hits"] == 1 and "**" not in r[0]["lines"][0]["text"]
 check(am.search_chats("today home", [s])[0]["name"] is True, "found by its name")
 check(am.search_chats("pricing nowhere", [s]) == [], "every word, or nothing")
 check(am.search_chats("log", [s]) == [], "a tool's output isn't searched")
+
+# Today's buttons on a loop, told to your assistant: New chat's message, its note optional.
+told = []
+am.read_loops = lambda: (am.parse_loops("- [ ] 2026-10-29 · ECOS talk · nudge 10-27\n- [ ] waiting · adidas · refund · since 10-24"), "/x/loops.md", "")
+am.assistant = lambda: {"id": "me-jaken", "name": "Jaken"}
+am.run_amarchy = lambda *a: told.append(a) or type("R", (), {"returncode": 0, "stderr": ""})()
+ecos, adidas = am.read_loops()[0]
+check(am.loop_tell(ecos["key"], "session") is None and told[-1] == ("send", "me-jaken", "Start a session for this loop: 2026-10-29 · ECOS talk · nudge 10-27", "--no-wait"),
+      f"New chat: a session for the loop, no note ({told[-1:]})")
+check(am.loop_tell(adidas["key"], "session", "  Personal: in jaken  ") is None
+      and told[-1][2] == "Start a session for this loop: waiting · adidas · refund · since 10-24\n\nPersonal: in jaken", f"with a note under it ({told[-1:]})")
+check(am.loop_tell(ecos["key"], "ask", "Draft it") is None and told[-1][2] == "About this loop: 2026-10-29 · ECOS talk · nudge 10-27\n\nDraft it", "Ask's unchanged")
+check(am.loop_tell(ecos["key"], "done") is None and told[-1][2] == "Loop done: 2026-10-29 · ECOS talk · nudge 10-27. Tick it off in /x/loops.md.", "Done's unchanged")
+check(am.loop_tell(ecos["key"], "ask") and am.loop_tell("nope", "session") and am.loop_tell(ecos["key"], "start"), "Ask needs words; a gone loop, an unknown action: refused")
+check(am.loops_sent()[adidas["key"]]["action"] == "session", "the loop shows it was sent")
 
 print(f"\n{len(failed)} failed: {failed}" if failed else "\nAll passed.")
 import shutil

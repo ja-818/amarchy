@@ -133,6 +133,8 @@ const LOOPS = [
   { key: "tom1", kind: "due", what: "Submit the fellowship", who: "", due: iso(1), nudge: "", since: "", chase: "", ref: "", line: "y" },
   { key: "week1", kind: "due", what: "Demo to Felipe", who: "", due: iso(3), nudge: "", since: "", chase: "", ref: "", line: "z" },
   { key: "wait1", kind: "waiting", what: "the valuation doc", who: "Felipe", due: "", nudge: "", since: iso(-4), chase: iso(0), ref: "", line: "w" },
+  // One a chat is at already: its line names it.
+  { key: "chat1", kind: "due", what: "Try json-render (chat proj-quiet)", who: "", due: iso(2), nudge: "", since: "", chase: "", ref: "", chat: "proj-quiet", line: "v" },
 ];
 
 async function page(browser, layout, port) {
@@ -283,6 +285,21 @@ async function common(p, where) {
   await sleep(300);
   const asked = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "ask");
   check(where, !!asked && asked.body.key === "tom1" && asked.body.text === "Draft it for me tonight", `what to do goes to your assistant (${JSON.stringify(asked && asked.body)})`);
+  // New chat…: a chat just for it, its note optional (Enter in an empty box starts it).
+  check(where, await tapIn("Demo to Felipe", "New chat…"), "New chat… tapped");
+  check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard-ask") && /optional/.test(document.activeElement.placeholder)), "its box, the note optional");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-loop-chat.png`) });
+  await p.keyboard.press("Enter");
+  await sleep(300);
+  const started = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "session");
+  check(where, !!started && started.body.key === "week1" && !started.body.text, `a new chat for it goes to your assistant (${JSON.stringify(started && started.body)})`);
+  check(where, /Jaken starts a chat for it/.test(await text(p, ".today:not([hidden])")), "the loop says so");
+  // A loop whose line names its chat: Open chat, no New chat.
+  check(where, !(await tapIn("Try json-render", "New chat…")), "a loop with its chat: no New chat…");
+  check(where, await tapIn("Try json-render", "Open chat"), "Open chat tapped");
+  check(where, await until(p, () => desk.current === "proj-quiet" || here() === "#/s/proj-quiet"), "its chat opens");
+  await p.evaluate(() => { if (desk.current) boardBack(true); else go("#/today"); });
+  await until(p, () => !desk.current && !/^#\/s\//.test(here()) && !!document.querySelector(".today:not([hidden])"));
   await tab(p, "chats");
 
   check(where, await click(p, ".tcard.k-stale .tbtn", "Ask status"), "a stalled chat asked");

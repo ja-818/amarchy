@@ -690,9 +690,13 @@ amarchy today --loops off                # no loops file: Today shows your chats
 amarchy today [--json]                   # Today in a terminal
 ```
 
-Today only reads that file. **Done** on a loop, and **Chase**, go to [your
-assistant](#your-assistant) as a message (`Loop done: …`, `Chase Felipe on: …`),
-and it ticks the line and keeps the file; the loop shows **Sent** until it does.
+Today only reads that file. **Done** on a loop, **Follow up**, **Ask** and
+**New chat** go to [your assistant](#your-assistant) as a message (`Loop done: …`,
+`Chase Felipe on: …`, `About this loop: …`, `Start a session for this loop: …`
+with your note, if you wrote one), and it ticks the line and keeps the file; the
+loop shows **Sent** until it does. **New chat** has your assistant start a chat
+just for that loop, with its brief, and write the chat on the loop's line
+(`(chat jaken-adidas-refund)`): from then on the loop has **Open chat** instead.
 Today adds no notifications of its own.
 
 ## Automations
