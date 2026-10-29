@@ -305,7 +305,9 @@ host's chats without anything else installed.
   unfolds it), `g` / `G` (or `Home` / `End`) to the first and last, `Enter` (or
   `o`) opens, `1`-`9` pick the card's answer, `x` completes its mission (with
   Undo; a task's Done), `r` opens what a done chat made (Review), `s` marks it
-  seen, `Tab` goes through the card's buttons, `h` / `l` (or `←` / `→`) are Chats
+  seen, `Tab` goes into the card and through its buttons (`Enter` presses one,
+  `←` / `→` or `h` / `l` move among them, `Esc` is the card again; Safari's own
+  Tab skips buttons, this one doesn't), `h` / `l` (or `←` / `→`) on a card are Chats
   and Tasks, `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every

@@ -49,6 +49,14 @@ function boardBuild() {
   board.el = h("div", { class: "tasks-board" }, board.head, board.scroll);
   // The card the keys are on, kept: back from a chat, a sheet, a redraw, there again.
   board.box.addEventListener("focusin", (e) => { const t = e.target.closest(".tcard"); if (t) board.last = cardKey(t); });
+  // A click puts the keys where it was, as on any browser: Safari leaves
+  // them where they were (a button clicked isn't focused), even in a box
+  // that's gone, and j / k stopped working until the app was opened again.
+  board.box.addEventListener("click", (e) => {
+    const b = e.target.closest("button, a[href], summary");
+    const go = b && board.box.contains(b) ? b : (e.target.closest(".tcard") || {}).querySelector?.(":scope > .today-go");
+    if (go && document.activeElement !== go && go.isConnected && shown(go)) go.focus({ preventScroll: true });
+  });
   // Its keys wherever the keyboard is (nothing focused, too), while it's up;
   // Esc over an open chat before the chat has it (there it would stop Claude).
   window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
@@ -91,17 +99,43 @@ function boardRefocus() {
   else board.scroll.focus({ preventScroll: true });
 }
 
+// A card's own buttons and links, in order (not its head: that's the card).
+function cardInside(card) {
+  return card ? [...card.querySelectorAll("button, a[href], input, textarea")].filter((b) => !b.matches(".today-go") && !b.disabled && shown(b)) : [];
+}
+
 // The board's keys (none while you type, or a sheet is up).
 function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
-  if (e.target.closest("textarea, input, select, [contenteditable]")) return;
+  // A box you type in, if it's still there to type in: Safari keeps the
+  // keys in the chat's box after it closed (sent, back on the board).
+  const typing = e.target.closest("textarea, input, select, [contenteditable]");
+  if (typing && typing.isConnected && shown(typing)) return;
+  if (typing) typing.blur();
   const stops = boardStops();
   const at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
   const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
   const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
   const k = e.key;
+  // Inside a card: Tab (and → ←, l h) go through its buttons, Enter presses
+  // one, Esc is the card again. Safari's Tab skips buttons; this one doesn't.
+  const inside = cardInside(card);
+  const on = inside.indexOf(document.activeElement);
+  const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); b.scrollIntoView({ block: "nearest" }); };
+  if (k === "Tab" && !e.shiftKey && card && inside.length && on < inside.length - 1) return into(inside[on + 1]);
+  if (k === "Tab" && e.shiftKey && card && on > 0) return into(inside[on - 1]);
+  if (k === "Tab" && e.shiftKey && card && on === 0) return into(stops[at]);
+  if (k === "Tab" && at >= 0) {     // off the card's last (or first) one: the next card, or the one before (on its last button)
+    const next = stops[at + (e.shiftKey ? -1 : 1)];
+    if (!next) return;
+    if (e.shiftKey && next.matches(".today-go")) { const last = cardInside(next.closest(".tcard")).pop(); return into(last || next); }
+    return to(at + (e.shiftKey ? -1 : 1));
+  }
+  if (on >= 0 && (k === "ArrowRight" || k === "l")) return into(inside[Math.min(on + 1, inside.length - 1)]);
+  if (on >= 0 && (k === "ArrowLeft" || k === "h")) return into(on === 0 ? stops[at] : inside[on - 1]);
+  if (on >= 0 && k === "Escape") return into(stops[at]);
   if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
   else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
   else if (k === "g" || k === "Home") to(0);

@@ -272,6 +272,16 @@ async function steady(p, where) {
     return { onCard, onHead, id, now: card && card.dataset.id };
   });
   check(where, f.onCard && f.onHead, `the keys stay on their card, and on a group's head, over a redraw (${JSON.stringify(f)})`);
+  // Into a card with Tab, through its buttons with →, back with Esc.
+  const inCard = await p.evaluate(() => { const c = [...document.querySelectorAll(".board-today .tcard")].find((x) => cardInside(x).length >= 2); if (!c) return "none: " + [...document.querySelectorAll(".board-today .tcard")].map((x) => (x.dataset.id || "?") + ":" + cardInside(x).length + ":" + x.querySelectorAll("button").length).join(" "); c.querySelector(".today-go").focus(); return c.dataset.id || "#task"; });
+  await p.keyboard.press("Tab");
+  const t1 = await p.evaluate(() => [document.activeElement.className, document.activeElement.closest(".tcard")?.dataset.id]);
+  await p.keyboard.press("ArrowRight");
+  const t2 = await p.evaluate(() => [document.activeElement.className, document.activeElement.textContent, document.activeElement === cardInside(document.activeElement.closest(".tcard"))[1]]);
+  await p.keyboard.press("Escape");
+  const t3 = await p.evaluate(() => [document.activeElement.className, document.activeElement.closest(".tcard")?.dataset.id]);
+  check(where, !/today-go/.test(t1[0]) && (t1[1] || "#task") === inCard && t2[2] && /today-go/.test(t3[0]) && (t3[1] || "#task") === inCard,
+        `Tab into a card, → its next button, Esc the card again (${JSON.stringify([inCard, t1, t2, t3])})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }
 
@@ -697,6 +707,26 @@ async function wide(browser, port) {
   await p.evaluate(() => desk.chat.post("send", { text: "Go on" }));
   check(where, await until(p, () => !desk.current), "sent: back on the board");
   check(where, await p.evaluate(() => { const n = document.querySelector(".ticket.next"); return !n || n.contains(document.activeElement); }), "the next one lit, the keys on it");
+  // Typed and sent with Enter, as you do: back on the board, j and k go card to card.
+  await p.evaluate(() => todayOpen(row("proj-quiet")));
+  await until(p, () => desk.current === "proj-quiet");
+  await p.evaluate(() => desk.chat.input.focus());
+  await p.keyboard.type("Keep going");
+  await p.keyboard.press("Enter");
+  check(where, await until(p, () => !desk.current), "typed and sent: back on the board");
+  await sleep(300);
+  const sentKeys = await p.evaluate(() => [document.activeElement.tagName, document.activeElement.className]);
+  const k0 = await p.evaluate(() => (document.activeElement.closest(".tcard") || {}).dataset?.id || document.activeElement.className);
+  await p.keyboard.press("j");
+  const k1 = await p.evaluate(() => (document.activeElement.closest(".tcard") || {}).dataset?.id || document.activeElement.className);
+  check(where, k0 !== k1 && !!(await p.evaluate(() => document.activeElement.closest(".board-today"))), `then j moves to the next card (${JSON.stringify(sentKeys)} ${k0} → ${k1})`);
+  // Safari: the keys left in the chat's box, gone (it doesn't move them off
+  // a box that closed, nor onto a button clicked). j still works.
+  await p.evaluate(() => { const t = document.createElement("textarea"); document.body.append(t); t.focus(); t.style.display = "none"; window.__ghost = t; });
+  const g0 = await p.evaluate(() => document.activeElement === window.__ghost);
+  await p.keyboard.press("j");
+  check(where, await p.evaluate(() => !!document.activeElement.closest(".board-today")), `keys left in a hidden box: j takes them back to the board (${g0})`);
+  await p.evaluate(() => window.__ghost.remove());
 
   // Grouped as the list is: by priority (High first, what asks you first in each), by project.
   await p.evaluate(() => { app.organize = { group: ["priority"], sort: "priority" }; refresh(); });
