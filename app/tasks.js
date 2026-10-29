@@ -176,6 +176,7 @@ function boardEsc(e) {
   if (e.target.closest && e.target.closest(".term-box")) return;
   const c = desk.chat;
   if (c && (c.talk.on() || c.menu)) return;
+  if (c && c.navKey(e)) return;      // out of the box, or of a message, first (chat.js)
   e.preventDefault();
   e.stopPropagation();
   boardBack();

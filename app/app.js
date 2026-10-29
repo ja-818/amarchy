@@ -918,6 +918,7 @@ class SessionView {
         boardSentToast(this.id);
       },
       onUnsent: () => todayUnsent(this.id),     // it didn't go: its card asks again
+      back: () => { if (this.mode === "chat") go("#/"); },       // Esc on its messages: home, as a computer's to its board
     });
     // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
     this.el = h("div", { class: "view" }, bar, this.chat.el);
@@ -939,7 +940,10 @@ class SessionView {
   // What restyleTerminals() wears the look again on.
   get pane() { return this._terminal || null; }
 
-  open() { this.chat.open(); }
+  open() {
+    this.chat.open();
+    if (lastInput.keys) this.chat.navStart();      // opened with the keys: on its latest message
+  }
 
   close() {
     this.chat.close();

@@ -1309,6 +1309,8 @@ class Chat {
     this.es = es;
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
     window.addEventListener("amarchy-ask", this.onAskEvent);
+    this.onNavKey = this.onNavKey || ((e) => this.navKey(e));
+    window.addEventListener("keydown", this.onNavKey, true);
     this.clearNotes();
     const on = {
       session: (e) => {
@@ -1348,6 +1350,7 @@ class Chat {
     if (this.es) this.es.close();
     this.es = null;
     window.removeEventListener("amarchy-ask", this.onAskEvent);
+    window.removeEventListener("keydown", this.onNavKey, true);
     window.removeEventListener("amarchy-chatview", this.onViewChosen);
     clearInterval(this.workingTimer);
     this.workingEl = null;
@@ -1380,6 +1383,108 @@ class Chat {
     card.classList.remove("called");
     void card.offsetWidth;
     card.classList.add("called");
+  }
+
+  // ---- the keys, as on the board: j / k (↓ ↑) from message to message,
+  // l (→) into one, along its buttons and links, h (←) back and out of it,
+  // Enter opens or folds a reply (on a button, presses it), g / G the first
+  // and the latest, d / u half a page, i the box you type in and Esc out of
+  // it again, Tab the view (Brief | Chat). Esc on a message: opts.back.
+  // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
+  // dictate works from anywhere).
+
+  navItems() {
+    const root = this.body();
+    if (!root.isConnected) return [];
+    const all = this.mode === "screen" ? root.querySelectorAll(".turn-you, .turn-reply") : root.querySelectorAll(":scope > :not(.chat-tail)");
+    return [...all].filter((el) => el.childElementCount && el.getClientRects().length);
+  }
+
+  // What's in a message to go to: its buttons and links (not a reply's head: Enter's).
+  navInside(item) {
+    return item ? [...item.querySelectorAll("button, a[href], summary")].filter((b) => !b.matches(".reply-head") && !b.disabled && b.getClientRects().length) : [];
+  }
+
+  navTo(el, start) {
+    if (!el) return;
+    if (!el.matches("button, a[href], summary, input, textarea")) { el.tabIndex = -1; el.classList.add("nav-item"); }
+    el.focus({ preventScroll: true });
+    const r = el.getBoundingClientRect(), v = this.scroller.getBoundingClientRect();
+    // A message taller than the page: its top. Else just in sight.
+    el.scrollIntoView({ block: start || r.height > v.height ? "start" : "nearest" });
+  }
+
+  // The keys on the latest message (Esc out of the box, a chat opened with the keys).
+  navLatest() {
+    const items = this.navItems();
+    if (!items.length) return false;
+    this.navTo(items[items.length - 1]);
+    return true;
+  }
+
+  // Whether the keys are in this chat's messages (not the box, the side, a sheet).
+  navHere() {
+    const a = document.activeElement;
+    return !!a && this.scroller.contains(a);
+  }
+
+  navKey(e) {
+    if (this.closed || !this.el.isConnected || !this.el.getClientRects().length) return false;
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return false;
+    if (document.querySelector(".sheet-back, .picker-back, .mission")) return false;
+    const a = document.activeElement;
+    const k = e.key;
+    const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
+    // In the box: Esc leaves it for the messages (once more: back), unless
+    // it's for something in it (a menu, the dictation, the / list).
+    if (a === this.input) {
+      if (k !== "Escape" || this.menu || this.talk.on()) return false;
+      return this.navLatest() ? done() : false;
+    }
+    if (a && a !== document.body && !this.scroller.contains(a)) return false;      // the box's card, the side, the bar: theirs
+    if (a && a.closest && a.closest("textarea, input, select, [contenteditable]")) return false;
+    const items = this.navItems();
+    const at = items.findIndex((it) => it === a || it.contains(a));
+    const item = items[at];
+    const inside = this.navInside(item);
+    const on = inside.indexOf(a);
+    const go = (i) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))]); return done(); };
+    if (k === "i") {
+      if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
+      this.input.focus({ preventScroll: true });
+      this.toBottom(true);
+      return done();
+    }
+    if (!items.length) return false;
+    if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
+    if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1);
+    if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
+    if (k === "G" || k === "End") { go(items.length - 1); this.toBottom(true); return true; }
+    if (k === "d" || k === "u") { this.scroller.scrollBy({ top: (k === "d" ? 1 : -1) * this.scroller.clientHeight / 2 }); return done(); }
+    if (k === "Tab") {
+      const n = items.length - at;
+      this.showMode(this.mode === "screen" ? "chat" : "screen");
+      const now = this.navItems();
+      this.navTo(now[at < 0 ? now.length - 1 : Math.max(0, now.length - n)]);
+      return done();
+    }
+    if (!item) return false;
+    if (k === "l" || k === "ArrowRight") {
+      // A folded reply opens to go into it.
+      const head = item.querySelector(".reply-head[aria-expanded=false]");
+      if (!inside.length && head) { head.click(); const now = this.navInside(item); if (now.length) this.navTo(now[0]); return done(); }
+      if (inside.length) this.navTo(inside[Math.min(on + 1, inside.length - 1)]);
+      return done();
+    }
+    if (k === "h" || k === "ArrowLeft") { if (on >= 0) this.navTo(on === 0 ? item : inside[on - 1]); return done(); }
+    if (k === "Escape" && on >= 0) { this.navTo(item); return done(); }
+    if (k === "Escape" && this.opts.back) { this.opts.back(); return done(); }      // the phone's; a computer's board has its own Esc
+    if (k === "Enter" && a === item && !item.matches("button, a[href]")) {
+      const head = item.querySelector(".reply-head");
+      if (head) { head.click(); this.navTo(item); }
+      return done();
+    }
+    return false;
   }
 
   // The notifications about this session: seen, now it's open.
@@ -1443,6 +1548,22 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
+    this.conversationDraw(d);
+    // Opened with the keys: on the latest message, once there is one.
+    if (this.navWanted && Date.now() - this.navWanted < 8000 && (document.activeElement === document.body || document.activeElement === this.input)
+        && this.navLatest()) this.navWanted = 0;
+  }
+
+  // The keys on the latest message, now or once the conversation's in (a
+  // chat opened with the keys: Enter on its card). False when they can't be.
+  navStart() {
+    if (this.dock.querySelector(".card")) return false;      // what it asks you: that, first
+    if (this.navLatest()) return true;
+    this.navWanted = Date.now();
+    return true;
+  }
+
+  conversationDraw(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
     // view doesn't jump, nor the brief's answers you started go.

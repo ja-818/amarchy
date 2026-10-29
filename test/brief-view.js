@@ -612,6 +612,41 @@ async function run(browser, base, layout) {
   check(layout, s.replies === 7 && s.titles[3] === "Shipped to main" && s.titles[4] === "Peptides: it depends on the kind" &&
     s.titles[5] === "The demo moved to Friday: here's the message for Felipe." && s.titles[6] === "The deck and the email are drafted; nothing was sent.", "back to the brief view");
 
+  // The keys, as on the board: Esc out of the box onto the latest, k / j
+  // through the messages, l into one (a folded reply opens), h out, Enter
+  // folds it, G the latest, i the box, Tab Brief | Chat.
+  const keys = [];
+  const where = () => page.evaluate(() => {
+    const a = document.activeElement, items = window.__chat.navItems();
+    const at = items.findIndex((it) => it === a || it.contains(a));
+    return { at, n: items.length, on: a === items[at] ? "item" : a === window.__chat.input ? "box" : at >= 0 ? "inside" : a.tagName,
+             kind: at >= 0 ? items[at].className.split(" ")[0] : "", mode: window.__chat.mode };
+  });
+  await page.evaluate(() => { window.__navKeys = (e) => window.__chat.navKey(e); window.addEventListener("keydown", window.__navKeys, true); window.__chat.input.focus(); });
+  for (const k of ["Escape", "k", "k", "l", "h", "j", "G", "i"]) { await page.keyboard.press(k); keys.push([k, await where()]); }
+  const last = keys[0][1].n - 1;
+  const ok = keys[0][1].on === "item" && keys[0][1].at === last && keys[1][1].at === last - 1 && keys[2][1].at === last - 2 && keys[2][1].kind === "turn-reply"
+    && keys[3][1].on === "inside" && keys[3][1].at === last - 2 && keys[4][1].on === "item" && keys[4][1].at === last - 2
+    && keys[5][1].at === last - 1 && keys[6][1].at === last && keys[7][1].on === "box";
+  check(layout, ok, `the keys: Esc out of the box, k / j, l into a reply, h out, G, i (${JSON.stringify(keys.map(([k, w]) => `${k}:${w.at}/${w.on}`))})`);
+  await page.keyboard.press("Escape");
+  const wasOpen = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).classList.contains("open"));
+  await page.keyboard.press("Enter");
+  const nowOpen = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).classList.contains("open"));
+  const stays = await where();
+  check(layout, wasOpen !== nowOpen && stays.on === "item" && stays.at === last, `Enter folds or opens the reply, the keys on it (${wasOpen} → ${nowOpen})`);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  const tabbed = await where();
+  await page.keyboard.press("Tab");
+  const back = await where();
+  check(layout, tabbed.mode === "chat" && tabbed.on === "item" && back.mode === "screen" && back.on === "item" && back.at === back.n - 1,
+    `Tab: Brief | Chat, the keys on a message in each (${JSON.stringify([tabbed, back])})`);
+  const lit = await page.evaluate(() => { const a = document.activeElement, r = a.querySelector(":scope > .reply"); return a.matches(":focus-visible") && (r ? getComputedStyle(r).boxShadow !== "none" : getComputedStyle(a).outlineStyle !== "none"); });
+  check(layout, lit, "the message the keys are on is lit");
+  await shot("keys");
+  await page.evaluate(() => window.removeEventListener("keydown", window.__navKeys, true));
+
   // A reply that asks and lists in its prose, not in blocks (a persona's own
   // style): its question still gets buttons, its open list a to-do list, its link a button.
   const PROSE = [

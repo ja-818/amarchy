@@ -518,7 +518,7 @@ function show(id) {
       board.composing = false;
       boardComposeShow();
       deskLayout();
-      toChat();
+      toChat(true);
       seenNow(id);      // opened: seen
     }
   } else {
@@ -1088,6 +1088,7 @@ function typeToChat(e) {
   const at = document.activeElement;
   if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .card")))
     return;
+  if (c && c.navHere()) return;      // on its messages, the keys are commands (i to write)
   if (e.key === " " && at && at.matches("button, a, summary, [role]")) return;     // Space presses what's focused
   if (fresh) return fresh.focus();
   if (!c.dock.contains(c.input)) return;      // a card's up: its keys are its own
@@ -1116,12 +1117,13 @@ function dropImages() {
 }
 
 // The keyboard to the chat: its card if it asks something, else the box.
-function toChat() {
+function toChat(opened) {
   const c = desk.chat;
   if (!c) return;
   const card = c.dock.querySelector(".card");
   if (card) (menuStart(card) || card).focus({ preventScroll: true });
-  else c.input.focus({ preventScroll: true });
+  // Opened with the keys: on its latest message (i to write); else the box.
+  else if (!(opened && lastInput.keys && c.navStart())) c.input.focus({ preventScroll: true });
   desk.focus = "chat";
   desk.focusPane = null;
   deskPanes();
@@ -1611,7 +1613,10 @@ function showKeys() {
       ["x", "Complete the chat's mission, with Undo"], ["r", "Review: open the link a done chat gave"],
       ["s", "Seen: off Needs you without opening it"],
       ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Group & sort"], ["?", "These keys"]]),
-    ...part("In a chat", [["Esc", "Back to the board"], ["Enter / Shift+Enter", "Send / a new line"],
+    ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
+      ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
+      ["i", "Write: the box"], ["Esc", "Out of the box or the message; again: back to the board"], ["Tab", "Brief / Chat"],
+      ["Enter / Shift+Enter  in the box", "Send / a new line"],
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
       ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],

@@ -593,3 +593,12 @@
 .chat-conv:not(.chat-outbox) > :is(.msg, .fold, .step, details), .screen-stage > .turn {
   content-visibility: auto; contain-intrinsic-size: auto 160px;
 }
+
+/* ---- the keys on a message (j / k, chat.js navKey): lit as the board's card is */
+.chat .nav-item { outline: none; }
+.chat .nav-item:focus-visible { outline: 2px solid var(--card-focus-border); outline-offset: -2px; border-radius: var(--radius-card); }
+.chat .turn-reply.nav-item:focus-visible { outline: none; }
+.chat .turn-reply.nav-item:focus-visible > .reply {
+  background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--surface);
+  border-color: var(--card-focus-border); box-shadow: inset 0 0 0 1px var(--card-focus-border);
+}
