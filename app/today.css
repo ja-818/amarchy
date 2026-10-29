@@ -87,7 +87,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-askbox { display: flex; flex-direction: column; gap: 8px; padding: 2px 14px 0; }
 .tcard-ask { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; padding: 10px 12px; font: inherit; line-height: 1.4; color: var(--text);
              border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); }
-.tcard-ask:focus-visible { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
+.tcard-ask:focus-visible, .keyed .tcard-ask.ui-in { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 .tcard-askbox .tcard-actions { padding: 0 0 12px; }
 
 /* The board's Group & sort (the list's menu), by the search. */
