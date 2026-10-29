@@ -105,7 +105,10 @@ html { touch-action: manipulation; }
   background: linear-gradient(var(--card-press-bg), var(--card-press-bg)), var(--card-bg); border-color: var(--card-hover-border);
   transition: none;
 }
-.tcard:has(> .tcard-head:focus-visible) {
+/* Under the keys: the one the board has lit (.ui-sel, tasks.js), with keys
+   at hand (.keyed), whatever a click did with the browser's focus; and one
+   the browser's keys are on, anywhere else. */
+.tcard:has(> .tcard-head:focus-visible), .keyed .tcard.ui-sel {
   background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--card-bg);
   border-color: var(--card-focus-border); box-shadow: 0 0 0 1px var(--card-focus-border);
 }
@@ -178,6 +181,7 @@ html { touch-action: manipulation; }
 .today-yours > .tsec-head { color: var(--section-head-yours); }
 .tsec-cards { display: flex; flex-direction: column; gap: var(--card-gap); }
 details.tsec > summary { list-style: none; cursor: pointer; border-radius: var(--radius-item); }
+details.tsec > summary:focus-visible, .keyed details.tsec > summary.ui-sel { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 details.tsec > summary::-webkit-details-marker { display: none; }
 details.tsec > summary .tsec-head::before { content: "›"; display: inline-block; width: 10px; font-size: var(--body); transition: transform .15s; }
 details.tsec[open] > summary .tsec-head::before { transform: rotate(90deg); }

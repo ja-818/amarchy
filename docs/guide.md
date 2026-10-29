@@ -299,6 +299,10 @@ host's chats without anything else installed.
     the same on the phone and the computer. `amarchy missions` prints it.
 - **A card** is one surface: it lights as a whole under the pointer, and under the
   keys. A click anywhere on it opens the chat; its buttons do their own thing.
+- **One card is always lit**, the one the keys are on: the first as the board
+  opens, then wherever you left it, Chats and Tasks each their own. A click
+  elsewhere, another window, a card that went: it stays lit (or the one in its
+  place), and the keys go on from it.
 - **Everything has its key**, the keys on the first card as the board opens: `j` /
   `k` (or `↓` / `↑`) from card to card (and to the head of a folded group: `Enter`
   unfolds it), `g` / `G` (or `Home` / `End`) to the first and last, `Enter` (or

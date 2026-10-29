@@ -1662,7 +1662,10 @@ async function addProject(body) {
 function keyedId() {
   if (desk.current) return desk.current;
   const t = document.activeElement && document.activeElement.closest(".ticket, .tcard[data-id]");
-  return t ? t.dataset.id : null;
+  if (t) return t.dataset.id;
+  const lit = boardSel();      // the browser's focus off the board: the card lit there (tasks.js)
+  const card = lit && lit.closest(".tcard[data-id]");
+  return card ? card.dataset.id : null;
 }
 
 // What needs a chat open (Run, its commands): from the board, the card the

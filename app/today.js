@@ -984,12 +984,14 @@ function todayFill(box, force) {
   const was = box.drawn.get(only);
   const cached = !force && was && was.key === key;
   const nodes = cached ? was.nodes : todayNodes({ board, only });
+  if (board) boardMarkIn(nodes);      // the card the keys are on, lit as it will be (tasks.js)
   // The same tab as it shows: only what changed drawn again (todayPatch),
   // the rest kept as it is, under your finger, in focus, a box you write in.
   const patched = !cached && tab && todayPatch(box, nodes);
   if (!patched) keepFocus(box, () => box.replaceChildren(...nodes));
   box.drawn.set(only, { key, nodes: [...box.childNodes] });
   if (scroller) scroller.scrollTop = top;
+  if (board) boardMark();      // (one gone: the one in its place)
 }
 
 // box's children made nodes, by replacing only the parts that differ: a

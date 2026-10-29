@@ -24,7 +24,7 @@ const board = {
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
   from: null,        // where the board was scrolled when a chat opened
-  last: null,        // the card the keys were on: its chat's id, or its place
+  sel: {},           // the card the keys are on, each tab its own (chats, tasks, search): {key, at}
 };
 
 // In sight: not in a folded part (a closed <details> keeps its boxes, hidden).
@@ -48,8 +48,13 @@ function boardBuild() {
   board.startingEl = h("div", { class: "board-starting", hidden: true });
   board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.startingEl, board.box);
   board.el = h("div", { class: "tasks-board" }, board.head, board.scroll);
-  // The card the keys are on, kept: back from a chat, a sheet, a redraw, there again.
-  board.box.addEventListener("focusin", (e) => { const t = e.target.closest(".tcard"); if (t) board.last = cardKey(t); });
+  // Wherever the keys go on the board (j / k, a click, Tab), that card is
+  // the one lit, and kept: back from a chat, a sheet, a redraw, there again.
+  board.box.addEventListener("focusin", (e) => {
+    const t = e.target.closest(".tcard, details.tsec > summary");
+    const stop = t && (t.matches("summary") ? t : t.querySelector(":scope > .today-go"));
+    if (stop) boardSelect(stop);
+  });
   // A click puts the keys where it was, as on any browser: Safari leaves
   // them where they were (a button clicked isn't focused), even in a box
   // that's gone, and j / k stopped working until the app was opened again.
@@ -61,6 +66,12 @@ function boardBuild() {
   // Its keys wherever the keyboard is (nothing focused, too), while it's up;
   // Esc over an open chat before the chat has it (there it would stop Claude).
   window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
+  // The card under the keys lit with keys at hand (a computer's, or once a
+  // key is pressed); on a phone's touch, no ring on a card nobody's keys are on.
+  const keyed = (on) => document.documentElement.classList.toggle("keyed", on);
+  keyed(app.desk || matchMedia("(pointer: fine)").matches);
+  window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) keyed(true); }, true);
+  window.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && !app.desk) keyed(false); }, true);
   // Back in the window (a screenshot, another app): the keys where they were.
   window.addEventListener("focus", () => {
     const a = document.activeElement;
@@ -72,10 +83,86 @@ function boardBuild() {
   return board.el;
 }
 
-// A card, as the keys find it again: its chat's id, else its place among the cards.
-function cardKey(card) {
-  if (card.dataset.id) return card.dataset.id;
-  return `#${[...board.box.querySelectorAll(".tcard")].indexOf(card)}`;
+// ---- the card the keys are on
+//
+// Always one, lit (.ui-sel), whatever the browser does with its focus: a
+// click on nothing, a button Safari doesn't focus, a box that closed, the
+// window left and back, a card gone. It's the board's, not the browser's:
+// j / k go on from the one lit, Enter opens it, x completes it. Each tab
+// has its own (Chats, Tasks, a search), kept by its chat's id (a task, a
+// group's head: by its place, its group), the one in its place once it's
+// gone, the first to begin with.
+
+// Where the keys are: Chats, Tasks, or what a search found.
+function selSlot() { return board.query ? "search" : board.tab; }
+
+// A stop, as the keys find it again: a card by its chat's id, else its
+// place among the cards; a group's head by its group. among: where to count.
+function stopKey(stop, among) {
+  if (stop.matches("summary")) return `@${[...stop.parentElement.classList].find((c) => c.startsWith("today-")) || ""}`;
+  const card = stop.closest(".tcard");
+  return card.dataset.id || `#${among.indexOf(card)}`;
+}
+
+// The stop a key is, in roots (the board, or what it's about to show).
+function stopIn(key, roots) {
+  const all = (sel) => roots.flatMap((r) => (r.nodeType === 1 ? [...(r.matches(sel) ? [r] : []), ...r.querySelectorAll(sel)] : []));
+  if (key[0] === "@") return all("details.tsec > summary").find((x) => x.parentElement.classList.contains(key.slice(1))) || null;
+  const card = key[0] === "#" ? all(".tcard")[Number(key.slice(1))] : all(`.tcard[data-id="${CSS.escape(key)}"]`)[0];
+  return (card && card.querySelector(":scope > .today-go")) || null;
+}
+
+// The keys on this stop now (a card's head, a group's head).
+function boardSelect(stop) {
+  const stops = boardStops();
+  if (!stops.includes(stop)) return;
+  board.sel[selSlot()] = { key: stopKey(stop, [...board.box.querySelectorAll(".tcard")]), at: stops.indexOf(stop) };
+  boardMark();
+}
+
+// The keys on a chat's card, as it's opened or left (the board drawn again then).
+function boardSelectId(id) {
+  board.sel[selSlot()] = { key: id, at: (board.sel[selSlot()] || {}).at || 0 };
+}
+
+// The stop the keys are on: kept; in a folded group, its head; gone, the one
+// in its place; at first, the first card. Null while the board isn't in sight.
+function boardSel() {
+  if (!board.box || !board.box.isConnected || desk.current) return null;
+  const stops = boardStops();
+  if (!stops.length) return null;
+  const s = board.sel[selSlot()];
+  if (!s) return stops.find((x) => x.matches(".today-go")) || stops[0];
+  if (stops[s.at] && stopKey(stops[s.at], [...board.box.querySelectorAll(".tcard")]) === s.key) return stops[s.at];
+  const el = stopIn(s.key, [board.box]);
+  if (el && shown(el)) return el;
+  // In a folded group: that group's head (the outermost folded).
+  let fold = el ? el.closest("details:not([open])") : null;
+  while (fold && fold.parentElement && fold.parentElement.closest("details:not([open])")) fold = fold.parentElement.closest("details:not([open])");
+  const head = fold && fold.querySelector(":scope > summary");
+  if (head && shown(head)) return head;
+  return stops[Math.min(s.at, stops.length - 1)];
+}
+
+// The one the keys are on, lit (and kept as it is now: one in its place
+// is the one then). Its stop.
+function boardMark() {
+  const stop = boardSel();
+  if (!stop) return null;
+  const lit = stop.matches("summary") ? stop : stop.closest(".tcard");
+  for (const x of board.box.querySelectorAll(".ui-sel")) if (x !== lit) x.classList.remove("ui-sel");
+  lit.classList.add("ui-sel");
+  board.sel[selSlot()] = { key: stopKey(stop, [...board.box.querySelectorAll(".tcard")]), at: boardStops().indexOf(stop) };
+  return stop;
+}
+
+// What the board is about to show, lit as it will be: a card drawn again
+// the same is the same (todayPatch keeps it, not swapped for its light).
+function boardMarkIn(nodes) {
+  const s = board.sel[selSlot()];
+  for (const n of nodes) if (n.nodeType === 1) for (const x of [...(n.matches(".ui-sel") ? [n] : []), ...n.querySelectorAll(".ui-sel")]) x.classList.remove("ui-sel");
+  const stop = s && stopIn(s.key, nodes);
+  if (stop) (stop.matches("summary") ? stop : stop.closest(".tcard")).classList.add("ui-sel");
 }
 
 // What j / k go through: each card in sight (its head), and the head of a
@@ -87,26 +174,20 @@ function boardStops() {
 // The keys to a card (its head), in sight.
 function boardFocus(el, smooth) {
   if (!el) return;
+  boardSelect(el);
   el.focus({ preventScroll: true });
   uiReveal(el, { scroller: board.scroll, smooth });
 }
 
-// Back on the board (from a chat, a sheet): the keys on the card they were
-// on, else the first.
+// Back on the board (from a chat, a sheet, another window): the keys on
+// the card lit (boardSel).
 function boardRefocus() {
   if (desk.current || !board.box) return;
-  if (document.activeElement && board.el.contains(document.activeElement) && document.activeElement !== board.scroll) return;
-  const k = board.last;
-  const cards = [...board.box.querySelectorAll(".tcard")];
-  const card = k && (k[0] === "#" ? cards[Number(k.slice(1))] : board.box.querySelector(`.tcard[data-id="${CSS.escape(k)}"]`));
-  // A card in a folded group: that group's head (the outermost folded).
-  let fold = card && !shown(card) ? card.closest("details:not([open])") : null;
-  while (fold && fold.parentElement && fold.parentElement.closest("details:not([open])")) fold = fold.parentElement.closest("details:not([open])");
-  const head = fold && fold.querySelector(":scope > summary");
-  const go = card && shown(card) ? card.querySelector(":scope > .today-go")
-    : head && shown(head) ? head
-    : boardStops().find((x) => x.matches(".today-go")) || boardStops()[0];      // the first card, before a folded group's head
-  if (go) go.focus({ preventScroll: true });
+  const a = document.activeElement;
+  // On something of the board's already (the search, a tab, a card): there.
+  if (a && board.el.contains(a) && a !== board.scroll && shown(a)) return boardMark();
+  const go = boardMark();
+  if (go) boardFocus(go);
   else board.scroll.focus({ preventScroll: true });
 }
 
@@ -126,14 +207,10 @@ function boardKeys(e) {
   if (typing) typing.blur();
   const stops = boardStops();
   let at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
-  // The keys lost (the window left and came back: a screenshot, another
-  // app): from the card they were on, not the top.
-  if (at < 0 && board.last) {
-    const cards = [...board.box.querySelectorAll(".tcard")];
-    const was = board.last[0] === "#" ? cards[Number(board.last.slice(1))] : board.box.querySelector(`.tcard[data-id="${CSS.escape(board.last)}"]`);
-    at = was ? stops.indexOf(was.querySelector(":scope > .today-go")) : -1;
-    if (at >= 0 && ["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) { e.preventDefault(); return boardFocus(stops[at]); }
-  }
+  // The browser's focus elsewhere (a click on nothing, a tab, a box gone,
+  // the window left and back): the keys go on from the card lit.
+  const focused = at >= 0;
+  if (!focused) at = stops.indexOf(boardSel());
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
   const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
   const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
@@ -148,6 +225,13 @@ function boardKeys(e) {
   if (on >= 0 && k === "Escape") return into(stops[at]);
   // Tab: Chats | Tasks, the other one.
   if (k === "Tab") { e.preventDefault(); return boardTab(board.tab === "chats" ? "tasks" : "chats"); }
+  // Enter on the card lit, the focus off it: it opens (on a button, a tab,
+  // the browser presses that).
+  if (k === "Enter" && !focused && at >= 0 && !document.activeElement.closest("button, a[href], summary, input, textarea, select")) {
+    e.preventDefault();
+    boardFocus(stops[at]);
+    return stops[at].click();
+  }
   if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
   else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
   else if (k === "g" || k === "Home") to(0);
@@ -157,10 +241,7 @@ function boardKeys(e) {
   else if (k === "?") { e.preventDefault(); showKeys(); }
   else if (k === "m") { e.preventDefault(); deskMenu(); }
   else if (k === "o") { e.preventDefault(); organizeSheet(); }
-  else if (!card) {
-    // Nothing under the keys yet: Enter takes the first card.
-    if (k === "Enter" && at < 0 && stops.length) to(0);
-  } else if (k === "o") { e.preventDefault(); stops[at].click(); }
+  else if (!card) return;
   else if (/^[1-9]$/.test(k)) {
     const o = card.querySelectorAll(".today-opt")[Number(k) - 1];
     if (o) { e.preventDefault(); o.click(); }
@@ -200,14 +281,15 @@ function boardTab(tab) {
   store.set("board-tab", board.tab);
   if (desk.current) boardBack(true);
   board.scroll.scrollTop = 0;
-  board.last = null;
   // The keys off the card they were on: the other tab's cards aren't the
   // same (keepFocus would put them on whatever is in its place), boardRefocus
-  // puts them on its first.
+  // puts them on the one lit there (where you left that tab, else its first).
   if (board.box.contains(document.activeElement)) board.scroll.focus({ preventScroll: true });
   if (board.query) boardSearchDraw(); else boardFill();      // (the tab is in its key: drawn, or as it was)
   modeButtons();
   boardRefocus();
+  const go = boardMark();
+  if (go) uiReveal(go, { scroller: board.scroll });
 }
 
 // The board drawn: Today's queue, or with no project yet the welcome.
@@ -259,7 +341,7 @@ function boardOpen(id) {
   if (!row(id)) return;
   if (!app.desk) {
     board.from = board.scroll.scrollTop;
-    board.last = id;
+    boardSelectId(id);
     app.fromToday = id;
     return go(`#/s/${encodeURIComponent(id)}`);
   }
@@ -274,6 +356,7 @@ function boardShown() {
   modeButtons();
   if (typeof board.from === "number") board.scroll.scrollTop = board.from;
   board.from = null;
+  boardMark();
 }
 
 // Back to the board, where you were, on the card you opened.
@@ -282,7 +365,8 @@ function boardBack(quiet) {
   const id = desk.current;
   show(null);
   if (/^#\/s\//.test(here())) go("#/today");
-  board.last = id;
+  boardSelectId(id);
+  boardMark();
   if (!quiet) boardRefocus();
 }
 
@@ -373,6 +457,7 @@ function boardSearchBox() {
 // the host answers for what you typed (the one asked before let go).
 let searchTimer = null, searchAsk = null;
 function boardSearch(q) {
+  if (q.trim() !== board.query) board.sel.search = null;      // what it finds now: from its first
   board.query = q.trim();
   clearTimeout(searchTimer);
   if (searchAsk) searchAsk.abort();
@@ -449,7 +534,8 @@ function boardSearchDraw() {
     : board.found.error || `${n || "Nothing"} with “${board.query}”`);
   keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),
     ...(!n && answered && !board.found.error ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
-  board.box.dataset.key = key;      // (not Today's: Today draws itself again when the search is emptied)
+  board.box.dataset.key = key;
+  boardMark();      // (not Today's: Today draws itself again when the search is emptied)
 }
 
 // Ctrl+Alt+J / K: from chat to chat in the board's order, the open one

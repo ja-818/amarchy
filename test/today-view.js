@@ -280,11 +280,42 @@ async function steady(p, where) {
   const tab = await p.evaluate(() => board.tab);
   check(where, JSON.stringify(seen.map((x) => x[0])) === JSON.stringify([0, 1, 0, "head", 0, "head"]) && seen.every((x) => x[1] === inCard) && tab === "chats",
         `l into a card and along it, h back and out, Esc out; the tab stays (${JSON.stringify([inCard, seen, tab])})`);
-  // The keys lost (the window left for a screenshot and came back): j goes on from that card.
+  // The browser's focus lost (the window left for a screenshot and came
+  // back, a click on nothing, a button Safari doesn't focus): the card stays
+  // lit, and j goes on from it to the next, k back to it.
+  const stopAt = () => p.evaluate(() => { const l = document.querySelector(".board-today .ui-sel");
+    return l ? boardStops().indexOf(l.matches("summary") ? l : l.querySelector(":scope > .today-go")) : -1; });
+  const was = await stopAt();
   await p.evaluate(() => document.activeElement.blur());
+  const kept = await p.evaluate(() => { const l = document.querySelector(".board-today .ui-sel"); return !!l && (l.dataset.id || "#task") && getComputedStyle(l).boxShadow !== "none"; });
   await p.keyboard.press("j");
+  const next = await stopAt();
+  await p.evaluate(() => document.activeElement.blur());
+  await p.keyboard.press("k");
   const back = await at();
-  check(where, back[0] === "head" && back[1] === inCard, `keys lost, j: back on that card, not the top (${JSON.stringify(back)})`);
+  check(where, was >= 0 && kept && next === was + 1 && back[0] === "head" && back[1] === inCard,
+        `focus lost: the card still lit, j to the next, k back (${JSON.stringify({ was, kept, next, back, inCard })})`);
+  // Each of the ways the focus goes off the board, with a mouse: j still
+  // moves from the card lit. As Safari: a button clicked isn't focused.
+  const off = await p.evaluate(() => {
+    const safari = (e) => { if (e.target.closest("button")) e.preventDefault(); };
+    addEventListener("mousedown", safari, true);
+    window.__safari = safari;
+    return true;
+  });
+  const ways = { "nothing": () => p.evaluate(() => { board.scroll.focus(); }),
+                 "the bar": () => p.evaluate(() => document.activeElement.blur()),
+                 "a box gone": () => p.evaluate(() => { const t = document.createElement("textarea"); document.body.append(t); t.focus(); t.remove(); }) };
+  const moved = {};
+  for (const [name, go] of Object.entries(ways)) {
+    await p.evaluate(() => boardFocus(boardStops()[1]));
+    await go();
+    const lit = await stopAt();
+    await p.keyboard.press("j");
+    moved[name] = [lit, await stopAt()];
+  }
+  await p.evaluate(() => removeEventListener("mousedown", window.__safari, true));
+  check(where, off && Object.values(moved).every(([a, b]) => a === 1 && b === 2), `focus off the board any way: lit stays, j moves on (${JSON.stringify(moved)})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }
 
@@ -889,7 +920,9 @@ async function wide(browser, port) {
   await p.context().close();
 }
 
-(async () => {
+module.exports = { loadPlaywright, freePort, startServer, findChrome, page, ready, until, sleep, check, failures, CHATS };
+
+if (require.main === module) (async () => {
   const pw = loadPlaywright();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "today-view-home-"));
   const port = await freePort();
