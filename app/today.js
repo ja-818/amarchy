@@ -680,7 +680,7 @@ function missionComplete(ss, title, { task = false } = {}) {
     go: (calm) => {
       const next = document.querySelector(".today:not([hidden]) .today-yours .today-go")
         || document.querySelector(".today:not([hidden]) .tcard.k-done .tbtn.complete");
-      if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); }
+      if (next) { next.focus({ preventScroll: true }); uiReveal(next, { block: "center", smooth: !calm }); }
     },
     bits: clear || goal ? 160 : Math.min(150, 90 + (m.combo - 1) * 15), far: clear || goal ? 60 : 42,
   });

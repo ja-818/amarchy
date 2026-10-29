@@ -99,6 +99,26 @@ function uiStill() {
   for (const fn of fns) fn();
 }
 
+// el into sight in its own list (scroller, else the nearest one it's in),
+// that list only: the browser's scrollIntoView scrolls every box around it
+// too, and Safari the whole page (the chat's box and its last messages went
+// off the bottom). block: nearest (moved only as much as it takes), start,
+// end, center.
+function uiReveal(el, { scroller = null, block = "nearest", smooth = false, pad = 8 } = {}) {
+  let box = scroller || el.parentElement;
+  while (!scroller && box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+  if (!box) return;
+  const r = el.getBoundingClientRect(), v = box.getBoundingClientRect();
+  const top = r.top - v.top - pad, bottom = r.bottom - v.bottom + pad;
+  let by = 0;
+  if (block === "start") by = top;
+  else if (block === "end") by = bottom;
+  else if (block === "center") by = (r.top + r.bottom) / 2 - (v.top + v.bottom) / 2;
+  else if (top < 0) by = top;
+  else if (bottom > 0) by = Math.min(bottom, top);      // taller than the list: its top
+  if (Math.abs(by) >= 1) box.scrollBy({ top: by, behavior: smooth ? "smooth" : "auto" });
+}
+
 // box's children made nodes, unless they'd look the same (then it keeps its
 // own, under your finger and in focus). True when it changed.
 function uiSwap(box, nodes) {

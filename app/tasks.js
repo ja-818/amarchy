@@ -88,7 +88,7 @@ function boardStops() {
 function boardFocus(el, smooth) {
   if (!el) return;
   el.focus({ preventScroll: true });
-  el.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" });
+  uiReveal(el, { scroller: board.scroll, smooth });
 }
 
 // Back on the board (from a chat, a sheet): the keys on the card they were
@@ -137,7 +137,7 @@ function boardKeys(e) {
   // out of it from its first; Esc out at once. Enter presses the one you're on.
   const inside = cardInside(card);
   const on = inside.indexOf(document.activeElement);
-  const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); b.scrollIntoView({ block: "nearest" }); };
+  const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); uiReveal(b, { scroller: board.scroll }); };
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
@@ -284,7 +284,7 @@ function boardSent(id) {
   if (!next) return boardRefocus();
   next.classList.add("next");
   setTimeout(() => next.classList.remove("next"), 2400);
-  next.scrollIntoView({ block: "center", behavior: "smooth" });
+  uiReveal(next, { scroller: board.scroll, block: "center", smooth: true });
   const btn = next.querySelector(".today-go");
   if (btn) btn.focus({ preventScroll: true });
 }

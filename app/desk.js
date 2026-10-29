@@ -866,7 +866,7 @@ class DeskChanges {
 
   reveal(path) {
     const el = Array.from(this.el.querySelectorAll(".change")).find((x) => x.dataset.path === path);
-    if (el) el.scrollIntoView({ block: "start" });
+    if (el) uiReveal(el, { block: "start", pad: 0 });
   }
 
   // One file: its name, what happened to it, and its lines (folded if huge).
@@ -1343,7 +1343,7 @@ function picker(opts) {
     it.group ? h("span", { class: "chev" }, "›") : it.key && i === at ? h("span", { class: "key" }, it.key) : null)));
     if (level.text && !items.length) list.replaceChildren(h("div", { class: "picker-note" }, level.note || "↵ to go on, Esc to cancel"));
     const on = list.querySelector(".on");
-    if (on) on.scrollIntoView({ block: "nearest" });
+    if (on) uiReveal(on, { scroller: list, pad: 0 });
   };
   const pick = async (it) => {
     if (it.group) {

@@ -665,8 +665,19 @@ async function run(browser, base, layout) {
   await page.keyboard.press("k");
   const pagedUp = await page.evaluate(() => ({ top: Math.round(window.__chat.scroller.scrollTop), on: document.activeElement === window.__chat.navItems().at(-1) }));
   await page.evaluate(() => { window.__chat.navItems().at(-1).style.minHeight = ""; });
-  check(layout, paged.top > tall.top && paged.on && pagedUp.top < paged.top && pagedUp.on,
-    `a tall reply: j reads down through it, k back up, the keys on it (${JSON.stringify([tall, paged, pagedUp])})`);
+  const upTo = await page.evaluate(() => document.activeElement === window.__chat.navItems().at(-2));
+  check(layout, paged.top > tall.top && paged.on && upTo,
+    `a tall reply: j reads down through it, the keys on it; k straight to the one before (${JSON.stringify([tall, paged, pagedUp, upTo])})`);
+  // Going up and down moves the messages only: the box you type in stays at
+  // the bottom, nothing around the list scrolls (Safari scrolled the page).
+  const dockAt = await page.evaluate(() => Math.round(window.__chat.dock.getBoundingClientRect().bottom));
+  for (const k of ["G", "k", "k", "k", "k", "j", "k", "k"]) await page.keyboard.press(k);
+  const still = await page.evaluate(() => {
+    let el = window.__chat.scroller.parentElement, moved = [];
+    for (; el; el = el.parentElement) if (el.scrollTop) moved.push(el.className || el.tagName);
+    return { dock: Math.round(window.__chat.dock.getBoundingClientRect().bottom), moved, y: scrollY };
+  });
+  check(layout, still.dock === dockAt && !still.moved.length && still.y === 0, `k and j move the messages only, the box stays put (${JSON.stringify([dockAt, still])})`);
   const lit = await page.evaluate(() => { const a = document.activeElement, r = a.querySelector(":scope > .reply"); return a.matches(":focus-visible") && (r ? getComputedStyle(r).boxShadow !== "none" : getComputedStyle(a).outlineStyle !== "none"); });
   check(layout, lit, "the message the keys are on is lit");
   await shot("keys");

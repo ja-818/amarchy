@@ -2257,8 +2257,8 @@ function themeGrid(cards) {
     const to = cards[at + (e.key === "ArrowDown" ? cols : -cols)];
     if (!to) return;            // off the grid: the menu's own keys take it to the line above or below
     e.preventDefault();
-    to.focus();
-    to.scrollIntoView({ block: "nearest" });
+    to.focus({ preventScroll: true });
+    uiReveal(to);
   });
   return grid;
 }

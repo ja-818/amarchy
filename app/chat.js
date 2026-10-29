@@ -1412,7 +1412,7 @@ class Chat {
     if (!el.matches("button, a[href], summary, input, textarea")) { el.tabIndex = -1; el.classList.add("nav-item"); }
     el.focus({ preventScroll: true });
     const r = el.getBoundingClientRect(), v = this.scroller.getBoundingClientRect();
-    el.scrollIntoView({ block: start ? "start" : r.height > v.height ? (up ? "end" : "start") : "nearest" });
+    uiReveal(el, { scroller: this.scroller, block: start ? "start" : r.height > v.height ? (up ? "end" : "start") : "nearest" });
   }
 
   // The keys on the latest message (Esc out of the box, a chat opened with the keys).
@@ -1457,12 +1457,12 @@ class Chat {
       return done();
     }
     if (!items.length) return false;
-    // A message taller than the page reads as pages: j / k go through it
-    // first, then on to the next (or the one before).
+    // A message taller than the page reads as pages going down: j goes
+    // through it first, then on. k goes straight to the one before (going
+    // up through it, the messages under it slid away under you).
     const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
     const r = item && a === item ? item.getBoundingClientRect() : null;
     if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
-    if ((k === "k" || k === "ArrowUp") && r && r.top < v.top - 8) { this.scroller.scrollBy({ top: -Math.min(step, v.top - r.top + 16) }); return done(); }
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
     if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
@@ -3952,7 +3952,7 @@ class Chat {
     items.forEach((el, n) => el.classList.toggle("lit", n === this.menu.at));
     const lit = items[this.menu.at];
     this.input.setAttribute("aria-activedescendant", lit.id);
-    lit.scrollIntoView({ block: "nearest" });
+    uiReveal(lit, { scroller: lit.parentElement, pad: 0 });
   }
 
   // The keys in the box while the / menu is open: arrows move, Enter or Tab
