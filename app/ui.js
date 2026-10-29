@@ -9,6 +9,8 @@
 // - uiCard: one card for everything (a chat, a task, what a search found):
 //   a head (who or what project, its name, a pill), a body, its actions.
 //   The whole card opens it.
+// - uiDesk: a chat as a person at a desk, in pixels, posed as it stands
+//   (the Office).
 // - uiPill: where something stands ("Done", "Asks you", "Running · …").
 // - uiButton: an action on a card or a section.
 // - uiSection: a small head with a count (an action at its end), its cards;
@@ -374,4 +376,113 @@ function uiMenu(title, items) {
          h("span", { class: "ui-menu-text" }, it.label, it.detail ? h("small", {}, it.detail) : null)),
     it.group ? h("span", { class: "val" }, "›") : null);
   return sheet(sheetHead(title), h("div", { class: "menu ui-menu" }, ...items.map(row)));
+}
+
+// ---- an agent at its desk (the board's Office, office.js)
+//
+// A chat as a person in the office: at a desk, its monitor beside it, drawn
+// in pixels (an SVG, shape-rendering crispEdges) from the theme's colors
+// (ui.css --office-*). What it does is how it sits: pose is
+// work (typing, code on its screen), run (leaning back, a bar filling),
+// ask (up, waving, ?), blocked (up, !), fresh (holding up what it made),
+// done (both arms up, ✓), idle, sleep (head on the desk, z z), stale (dust),
+// arrive (walking in with a box), empty (a free desk: + starts a chat).
+// look: who it is, the same every time (uiLook(id)): skin, hair, its style,
+// glasses, what's on its desk. Its shirt is its project's color (hue).
+// Like a card (uiCard) it's an article.tcard with the chat's id and a head
+// (.today-go) that opens it: the board's keys, its lit one, x and s, work on
+// a desk as on a card.
+
+const UI_POSES = ["work", "run", "ask", "blocked", "fresh", "done", "idle", "sleep", "stale", "arrive", "empty"];
+
+// Who a chat is, from its id: the same person on every screen.
+function uiLook(id) {
+  let n = 2166136261;
+  for (const c of String(id || "")) n = Math.imul(n ^ c.charCodeAt(0), 16777619) >>> 0;
+  const pick = (k) => { const v = n % k; n = Math.floor(n / k) ^ (n >>> 7); return v; };
+  return { skin: pick(5), hair: pick(6), style: pick(5), glasses: pick(4) === 0, desk: ["mug", "plant", "lamp", "mug"][pick(4)] };
+}
+
+// The drawing: 48 × 40 pixels.
+function uiSprite(look, pose, { headset = false } = {}) {
+  const r = (x, y, w, hh, c) => `<rect x="${x}" y="${y}" width="${w}" height="${hh}" class="${c}"/>`;
+  const up = pose === "ask" || pose === "blocked" || pose === "done";      // stood up
+  const out = [];
+  // The chair, behind whoever sits in it (a cobweb on a stalled one's).
+  out.push(`<g class="o-chair">${r(12, 12, 16, 15, "oc")}${r(13, 11, 14, 1, "oc")}${r(14, 13, 12, 1, "oc2")}</g>`);
+  if (pose === "stale") out.push(`<g class="o-web">${r(12, 12, 4, 1, "ow")}${r(12, 12, 1, 4, "ow")}${r(13, 13, 1, 1, "ow")}${r(14, 14, 1, 1, "ow")}</g>`);
+  if (pose !== "empty") {
+    const asleep = pose === "sleep";
+    const hy = asleep ? 14 : 6;       // the head's top: on the desk, asleep
+    const hx = asleep ? 17 : 16;
+    const hair = [];
+    const H = (x, y, w, hh) => hair.push(r(hx - 16 + x, hy - 6 + y, w, hh, "oh"));
+    if (look.style === 0) { H(15, 4, 10, 3); H(15, 7, 1, 3); H(24, 7, 1, 3); }
+    else if (look.style === 1) { H(15, 4, 10, 3); H(14, 6, 2, 10); H(24, 6, 2, 10); }
+    else if (look.style === 2) { H(16, 5, 8, 2); H(18, 2, 4, 3); H(15, 6, 1, 3); H(24, 6, 1, 3); }
+    else if (look.style === 3) { H(15, 4, 10, 2); H(16, 3, 2, 1); H(19, 2, 2, 2); H(22, 3, 2, 1); H(15, 6, 1, 2); H(24, 6, 1, 2); }
+    else { H(15, 5, 10, 2); H(15, 7, 2, 2); H(22, 7, 3, 1); }
+    const shut = asleep || pose === "done" || pose === "stale";
+    const look2 = pose === "work" || pose === "run" ? 1 : 0;       // eyes on the screen
+    const eyes = shut ? r(hx + 2, hy + 5, 2, 1, "oe") + r(hx + 5, hy + 5, 2, 1, "oe")
+                      : `<g class="o-eyes">${r(hx + 2 + look2, hy + 4, 1, 2, "oe")}${r(hx + 5 + look2, hy + 4, 1, 2, "oe")}</g>`;
+    const glasses = look.glasses ? r(hx + 1, hy + 4, 3, 2, "og") + r(hx + 5, hy + 4, 3, 2, "og") + r(hx + 4, hy + 4, 1, 1, "og") : "";
+    const mouth = pose === "ask" || pose === "blocked" ? r(hx + 3, hy + 7, 2, 1, "om") : pose === "done" ? r(hx + 2, hy + 7, 4, 1, "om") : r(hx + 3, hy + 7, 2, 1, "om2");
+    const set = headset ? r(hx - 1, hy + 2, 1, 5, "ohs") + r(hx + 8, hy + 2, 1, 5, "ohs") + r(hx - 1, hy + 1, 10, 1, "ohs") + r(hx + 6, hy + 7, 3, 1, "ohs") : "";
+    const head = `<g class="o-head">${r(hx, hy, 8, 9, "ok")}${eyes}${glasses}${mouth}${hair.join("")}${set}</g>`;
+    const torso = r(18, 15, 4, 2, "ok") + r(14, 17, 12, 10, "os") + r(14, 17, 12, 1, "os2") + r(19, 17, 2, 3, "ok");
+    let arms;
+    if (pose === "done") arms = `<g class="o-arms">${r(11, 8, 3, 10, "os")}${r(26, 8, 3, 10, "os")}${r(10, 5, 4, 3, "ok")}${r(26, 5, 4, 3, "ok")}</g>`;
+    else if (pose === "ask") arms = `${r(11, 18, 3, 8, "os")}${r(12, 25, 3, 2, "ok")}<g class="o-wave">${r(26, 7, 3, 11, "os")}${r(26, 4, 4, 3, "ok")}</g>`;
+    else if (pose === "blocked") arms = `${r(11, 9, 3, 9, "os")}${r(26, 9, 3, 9, "os")}${r(12, 6, 4, 3, "ok")}${r(24, 6, 4, 3, "ok")}`;
+    else if (pose === "fresh") arms = `${r(11, 18, 3, 8, "os")}${r(12, 25, 3, 2, "ok")}${r(26, 12, 3, 9, "os")}<g class="o-paper">${r(25, 3, 8, 10, "op")}${r(26, 5, 6, 1, "op2")}${r(26, 7, 5, 1, "op2")}${r(26, 9, 6, 1, "op2")}</g>${r(26, 11, 3, 2, "ok")}`;
+    else if (pose === "run") arms = `${r(26, 18, 3, 8, "os")}${r(25, 25, 3, 2, "ok")}<g class="o-sip">${r(11, 17, 3, 6, "os")}${r(12, 14, 3, 3, "ok")}${r(10, 11, 4, 4, "omug")}${r(9, 12, 1, 2, "omug")}</g>`;
+    else if (asleep) arms = `${r(10, 24, 20, 3, "os")}${r(10, 24, 3, 3, "ok")}${r(27, 24, 3, 3, "ok")}`;
+    else arms = `${r(11, 18, 3, 8, "os")}${r(26, 18, 3, 8, "os")}<g class="o-hand-l">${r(12, 25, 4, 2, "ok")}</g><g class="o-hand-r">${r(24, 25, 4, 2, "ok")}</g>`;
+    const box = pose === "arrive" ? `<g class="o-box">${r(13, 19, 14, 9, "obox")}${r(13, 21, 14, 1, "obox2")}${r(19, 19, 2, 2, "obox2")}</g>` : "";
+    out.push(`<g class="o-body${up ? " up" : ""}">${torso}${asleep ? "" : head}${arms}${asleep ? head : ""}${box}</g>`);
+  }
+  // The desk, and what's on it.
+  out.push(`<g class="o-desk">${r(2, 27, 44, 2, "odt")}${r(2, 27, 44, 1, "odh")}${r(4, 29, 40, 10, "odf")}${r(7, 32, 10, 1, "odl")}${r(11, 34, 2, 1, "odl")}${r(31, 32, 10, 1, "odl")}${r(35, 34, 2, 1, "odl")}</g>`);
+  if (pose !== "run" && pose !== "empty") {
+    if (look.desk === "plant") out.push(`<g class="o-thing">${r(4, 22, 5, 5, "opot")}${r(5, 18, 1, 4, "olf")}${r(3, 17, 2, 2, "olf")}${r(7, 17, 2, 3, "olf")}${r(6, 15, 1, 3, "olf")}</g>`);
+    else if (look.desk === "lamp") out.push(`<g class="o-thing">${r(4, 25, 6, 2, "omf")}${r(6, 18, 1, 7, "omf")}${r(5, 16, 5, 3, "olamp")}</g>`);
+    else out.push(`<g class="o-thing">${r(5, 23, 4, 4, "omug")}${r(9, 24, 1, 2, "omug")}<g class="o-steam">${r(6, 19, 1, 2, "ost")}${r(7, 17, 1, 2, "ost")}</g></g>`);
+  }
+  // The monitor: what's on it says what it does.
+  const sc = [];
+  if (pose === "work") for (let i = 0; i < 5; i++) sc.push(r(31 + (i % 2) * 2, 13 + i * 2, [9, 6, 11, 7, 8][i], 1, `oln c${i % 4} l${i}`));
+  else if (pose === "run") sc.push(r(32, 16, 11, 3, "obar"), r(32, 16, 11, 3, "obar-on"), r(34, 13, 7, 1, "oln c0"));
+  else if (pose === "ask") sc.push(r(36, 13, 3, 1, "oq"), r(38, 14, 1, 2, "oq"), r(37, 16, 1, 2, "oq"), r(37, 19, 1, 1, "oq"));
+  else if (pose === "blocked") sc.push(r(37, 13, 1, 5, "obad"), r(37, 19, 1, 1, "obad"));
+  else if (pose === "done") sc.push(r(33, 17, 2, 1, "ook"), r(34, 18, 2, 1, "ook"), r(35, 19, 2, 1, "ook"), r(36, 18, 2, 1, "ook"), r(37, 17, 2, 1, "ook"), r(38, 16, 2, 1, "ook"), r(39, 15, 2, 1, "ook"), r(40, 14, 2, 1, "ook"));
+  else if (pose === "fresh") sc.push(r(34, 13, 7, 8, "op"), r(35, 15, 5, 1, "op2"), r(35, 17, 4, 1, "op2"), r(35, 19, 5, 1, "op2"));
+  else if (pose === "idle" || pose === "arrive") sc.push(r(32, 20, 2, 1, "ocur"));
+  const lit = { work: "on", run: "on", ask: "ask", blocked: "bad", done: "good", fresh: "on", idle: "dim", arrive: "dim" }[pose] || "off";
+  out.push(`<g class="o-mon">${r(29, 11, 17, 12, "omf")}${r(30, 12, 15, 10, `osc ${lit}`)}${sc.join("")}${r(36, 23, 3, 3, "omf")}${r(33, 26, 9, 1, "omf")}${lit === "off" && pose !== "empty" ? r(44, 21, 1, 1, "oled") : ""}</g>`);
+  return `<svg class="ui-sprite p-${pose} sk-${look.skin} hr-${look.hair}" viewBox="0 0 48 40" shape-rendering="crispEdges" aria-hidden="true">${out.join("")}</svg>`;
+}
+
+// What floats over its head: a mark (? ! ✓ z…), and what it says, in a
+// bubble (always for what asks you; for the rest under the pointer or the
+// keys). cheer: it just got done, confetti.
+function uiDesk({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "", say = "", title, pill = null, lead = null,
+                  actions = [], open, label = "", headset = false, cheer = false, vacant = false }) {
+  const art = h("span", { class: "ui-desk-art", html: uiSprite(look, pose, { headset }) });
+  const bubble = mark ? h("span", { class: `ui-desk-mark t-${tone || pose}`, "aria-hidden": "true" }, mark) : null;
+  const talk = say ? h("span", { class: `ui-desk-say${pose === "ask" || pose === "blocked" ? " pinned" : ""}` }, say) : null;
+  const confetti = cheer ? h("span", { class: "ui-confetti", "aria-hidden": "true" }, ...Array.from({ length: 14 }, () => h("i", {}))) : null;
+  if (vacant) return h("div", { class: `ui-desk vacant ph-${hue}`, "aria-hidden": "true" }, h("span", { class: "ui-desk-scene" }, art));
+  const s = id && typeof rowOf === "function" ? rowOf(id) : null;
+  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
+  // What asks you is under the scene, over the name, always; the rest over the head, a moment.
+  const pinned = talk && talk.classList.contains("pinned");
+  const head = h("button", { class: "ui-desk-go today-go", type: "button", onclick: open, "aria-label": label || null },
+    h("span", { class: "ui-desk-scene" }, art, bubble, pinned ? null : talk, confetti), pinned ? talk : null,
+    h("span", { class: "ui-desk-plate" }, lead, prio, h("span", { class: "ui-desk-name" }, typeof title === "string" ? taskText(title) : title), pill));
+  const desk = h("article", { class: `tcard ui-desk p-${pose} ph-${hue}${cheer ? " cheer" : ""}`, "data-id": id || null,
+                              onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } },
+    head, actions.filter(Boolean).length ? h("div", { class: "ui-desk-actions" }, ...actions.filter(Boolean)) : null);
+  if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
+  return desk;
 }

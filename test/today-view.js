@@ -578,7 +578,7 @@ async function phone(browser, port) {
   check(where, await p.evaluate(() => !document.querySelector(".list-view, .home-tabs, .hero, .session-row")), "no list of its own: the board is the home");
   shapes.phone = await p.evaluate(SHAPE);
   await shotTasks(p, where);
-  check(where, /^Chats\s*3\s*Tasks\s*3$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) (${JSON.stringify(await text(p, ".board-switch"))})`);
+  check(where, /^Chats\s*3\s*Tasks\s*3\s*Office$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) | Office (${JSON.stringify(await text(p, ".board-switch"))})`);
   check(where, await p.evaluate(() => { const r = document.querySelector(".board-switch").getBoundingClientRect(), s = document.querySelector(".board-search").getBoundingClientRect();
                                         return s.top >= r.bottom - 1 && s.width > 300 && document.documentElement.scrollWidth <= innerWidth; }),
         "its bar fits the phone: the search on a row of its own, nothing wider than the screen");
@@ -668,7 +668,7 @@ async function wide(browser, port) {
              headBg: getComputedStyle(hd).backgroundColor };
   });
   check(where, look.left === look.right && look.leftColor === look.rightColor && /rgba\(0, 0, 0, 0\)|transparent/.test(look.headBg), `no stripe, no box in the card (${JSON.stringify(look)})`);
-  check(where, /^Chats\s*3\s*Tasks\s*3$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) (${JSON.stringify(await text(p, ".board-switch"))})`);
+  check(where, /^Chats\s*3\s*Tasks\s*3\s*Office$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) | Office (${JSON.stringify(await text(p, ".board-switch"))})`);
   check(where, /Try json-render/.test(await text(p, ".board-today")), "a ticket says its goal");
   shapes.wide = await p.evaluate(SHAPE);
   await shotTasks(p, where);
@@ -864,7 +864,12 @@ async function wide(browser, port) {
   await p.keyboard.press("j");
   check(where, await p.evaluate(() => !!document.activeElement.closest(".tcard.k-due, .tcard.k-chase, .tsec")), "j on Tasks: from task to task");
   await p.keyboard.press("Tab");
-  check(where, await until(p, () => board.tab === "chats"), "Tab again: Chats");
+  check(where, await until(p, () => board.tab === "office" && !!document.querySelector(".office-floor .ui-desk")), "Tab again: the Office (test/office-view.js)");
+  await p.keyboard.press("Shift+Tab");
+  check(where, await until(p, () => board.tab === "tasks"), "Shift+Tab: back to Tasks");
+  await p.keyboard.press("Tab");
+  await p.keyboard.press("Tab");
+  check(where, await until(p, () => board.tab === "chats"), "Tab again: round to Chats");
   await p.keyboard.press("?");
   check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "")), "?: the keys");
   await p.keyboard.press("Escape");
