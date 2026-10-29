@@ -18,7 +18,9 @@ const desk = {
   sideTab: null,        // the side panel's tab you left open: term, changes, details, none (closed)
   sideWide: false,      // the side panel over the whole width (Ctrl+Alt+F)
   sideWidth: 0,
+  sideOn: null,         // the tab and the chat the side panel's view was opened on
   revealed: false,      // a terminal asked for with Show terminals off: shown, for this session
+  stepping: null,       // the chat Ctrl+Alt+J / K, held, is on: opened when let go
   terminal: null,       // the side panel's views
   changes: null,
   details: null,
@@ -50,26 +52,39 @@ const WEBGL = "vendor/xterm-addon-webgl-0.19.0.js";
 const webgl = () => store.get("renderer") === "webgl";
 let xtermLoading = null;
 
+// All at once, run in their order (async off: the addons after xterm.js).
 function loadXterm() {
   if (xtermLoading) return xtermLoading;
   const css = h("link", { rel: "stylesheet", href: "vendor/xterm-6.0.0.css" });
   document.head.prepend(css);
   const one = (src) => new Promise((ok, fail) => {
     const s = h("script", { src });
+    s.async = false;
     s.addEventListener("load", ok);
     s.addEventListener("error", () => fail(new Error(`couldn't load ${src}`)));
     document.head.append(s);
   });
   xtermLoading = (async () => {
-    for (const src of webgl() ? [...XTERM, WEBGL] : XTERM) await one(src);
-    // The look's monospace font (with its Nerd Font icons), before the
-    // terminals measure it.
+    await Promise.all((webgl() ? [...XTERM, WEBGL] : XTERM).map(one));
+    // The look's monospace font, before the terminals measure it. Its Nerd
+    // Font icons are a file of their own (theme.css), fetched when one is
+    // drawn; WebGL draws each glyph once, so it has them first.
     const family = termFont();
+    const icons = webgl() ? [""] : [];
     try {
-      await Promise.all([document.fonts.load(`16px ${family}`), document.fonts.load(`bold 16px ${family}`)]);
+      await Promise.all(["", "bold "].flatMap((b) => [document.fonts.load(`${b}16px ${family}`),
+                                                     ...icons.map((c) => document.fonts.load(`${b}16px ${family}`, c))]));
     } catch (e) { /* its fallback, then */ }
   })();
   return xtermLoading;
+}
+
+// On the way while the board is up: a chat's terminal opens without
+// waiting for them (fetched only, not run until one is shown).
+function preloadXterm() {
+  if (xtermLoading) return;
+  document.head.append(h("link", { rel: "preload", as: "style", href: "vendor/xterm-6.0.0.css" }),
+    ...(webgl() ? [...XTERM, WEBGL] : XTERM).map((href) => h("link", { rel: "preload", as: "script", href })));
 }
 
 function cssVar(name) {
@@ -216,6 +231,11 @@ class TermPane {
     this.sid = sid;
     this.exited = null;
     await this.build();
+    // Another session's: its screen goes, not shown until this one's comes.
+    if (this.sid === sid && this.drawn !== sid) {
+      this.term.reset();
+      this.drawn = sid;
+    }
     if (this.sid === sid && !this.ws) this.connect();
   }
 
@@ -411,6 +431,7 @@ function deskStart() {
   document.body.classList.add("desk");
   desk.sideTab = store.get("desk-side") || null;
   desk.sideWidth = parseInt(store.get("desk-side-width"), 10) || SIDE_START;
+  if (desk.sideTab === null || desk.sideTab === "term") preloadXterm();
   desk.terminal = makeTerminal();
   desk.changes = new DeskChanges();
   desk.details = new DeskDetails();
@@ -449,22 +470,25 @@ function deskStart() {
 // the rest. Short of room, the panel goes over the chat.
 function deskLayout() {
   if (!desk.el) return;
-  const W = window.innerWidth, tab = desk.current ? sideTab() : null;
+  const tab = desk.current ? sideTab() : null;
   const wide = !!tab && desk.sideWide;
-  let side = 0, over = false;
-  if (tab) {
-    const room = W - MIN_CHAT;
-    if (wide) side = W;
-    else if (room >= SIDE_MIN) side = Math.max(SIDE_MIN, Math.min(desk.sideWidth, room));
-    else { over = true; side = Math.min(Math.max(desk.sideWidth, SIDE_MIN), W - 48); }
-  }
+  const { side, over } = sideRoom(tab, wide);
   desk.el.classList.toggle("side-open", !!tab);
   desk.el.classList.toggle("side-over", over);
   desk.el.classList.toggle("side-wide", wide);
   desk.el.style.setProperty("--side", `${side}px`);
   renderSide();
   deskHead();
-  requestAnimationFrame(() => { desk.terminal.fit(); if (desk.chat) desk.chat.grow(); });
+  requestAnimationFrame(() => { desk.terminal.fit(); if (desk.chat) { desk.chat.grownFor = null; desk.chat.grow(); } });      // (its width changed: measured again)
+}
+
+// The side panel's width (0: closed), and whether it goes over the chat.
+function sideRoom(tab, wide) {
+  const W = window.innerWidth, room = W - MIN_CHAT;
+  if (!tab) return { side: 0, over: false };
+  if (wide) return { side: W, over: false };
+  if (room >= SIDE_MIN) return { side: Math.max(SIDE_MIN, Math.min(desk.sideWidth, room)), over: false };
+  return { side: Math.min(Math.max(desk.sideWidth, SIDE_MIN), W - 48), over: true };
 }
 
 // The panes' outlines: which one has the keyboard.
@@ -502,6 +526,11 @@ function deskRoute() {
 // The chat over the board (id), or the board (null).
 function show(id) {
   if (id && app.view && !row(id)) id = null;
+  if (desk.stepping) {      // somewhere else meanwhile: not where Ctrl+Alt+J was held
+    clearTimeout(desk.stepTimer);
+    desk.stepping = null;
+    desk.column.classList.remove("stepping");
+  }
   const changed = id !== desk.current;
   if (changed && id && !desk.current) board.from = board.scroll.scrollTop;      // where the board was
   desk.current = id;
@@ -577,7 +606,7 @@ function markSeen() {
 
 function deskHead() {
   if (!desk.head) return;
-  const s = row(desk.current);
+  const s = row(desk.stepping || desk.current);      // (Ctrl+Alt+J held: the one it's on)
   if (!s) { desk.head.replaceChildren(); return; }
   // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
   uiSwap(desk.head, uiChatHead(s, {
@@ -617,20 +646,29 @@ function buildSide() {
       h("button", { class: "side-btn", type: "button", title: "Close the panel (Ctrl+Alt+B)", "aria-label": "Close the panel",
                     onclick: () => sideToggle(null) }, glyph("close"))),
     side.body);
-  // Its edge, dragged: its width (kept in this browser).
+  // Its edge, dragged: its width (kept in this browser). While it moves,
+  // only the width, once a frame; let go, the rest follows (deskLayout).
   side.grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     side.grip.setPointerCapture(e.pointerId);
     desk.el.classList.add("resizing");
+    if (desk.sideWide) { desk.sideWide = false; deskLayout(); }
+    let frame = 0;
     const move = (ev) => {
-      desk.sideWide = false;
       desk.sideWidth = Math.max(SIDE_MIN, Math.round(window.innerWidth - ev.clientX));
-      deskLayout();
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        desk.el.style.setProperty("--side", `${sideRoom(desk.current && sideTab(), false).side}px`);
+      });
     };
     const up = () => {
       side.grip.removeEventListener("pointermove", move);
+      side.grip.removeEventListener("pointerup", up);
+      side.grip.removeEventListener("pointercancel", up);
+      cancelAnimationFrame(frame);
       desk.el.classList.remove("resizing");
       store.set("desk-side-width", String(desk.sideWidth));
+      deskLayout();
     };
     side.grip.addEventListener("pointermove", move);
     side.grip.addEventListener("pointerup", up, { once: true });
@@ -666,7 +704,9 @@ function sideWide(on) {
 }
 
 // What the panel shows: its tabs, and the open one's view (a view not shown
-// lets go of its terminal, or stops reading).
+// lets go of its terminal, or stops reading). The view is opened only when
+// it's another tab or another chat: a new width (the window, its edge,
+// Ctrl+Alt+F) leaves it as it is, the keyboard in its terminal.
 function renderSide() {
   const side = desk.side, tab = desk.current ? sideTab() : null;
   side.tabs.replaceChildren(...SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) =>
@@ -676,14 +716,16 @@ function renderSide() {
   side.wideBtn.setAttribute("aria-label", side.wideBtn.title);
   side.wideBtn.replaceChildren(deskIcon(desk.sideWide ? "narrow" : "wide"));
   const views = { term: desk.terminal, changes: desk.changes, details: desk.details };
+  const on = tab && desk.current ? `${tab} ${desk.current}` : null;
   for (const [key, view] of Object.entries(views)) {
     if (key === tab && desk.current) {
       if (view.el.parentNode !== side.body) side.body.replaceChildren(view.el);
-      view.open(desk.current);
-    } else {
+      if (on !== desk.sideOn) view.open(desk.current);
+    } else if (on !== desk.sideOn) {
       view.close();
     }
   }
+  desk.sideOn = on;
   if (!tab) side.body.replaceChildren();
   side.body.classList.toggle("fill", tab === "term");
 }
@@ -765,29 +807,48 @@ class DeskTerminal {
 
 // ---- the Changes tab: everything the session changed (its worktree
 // against where its branch left its base), file by file, side by side
-// where it's wide enough
+// where it's wide enough. A big one (a hundred files, thousands of lines)
+// mustn't hold the window: a file's lines are drawn as it comes near sight
+// (the rest keep their room), the browser lays out only what's in sight
+// (desk.css .change), and a file folds or unfolds on its own.
 
 const SPLIT_AT = 760;       // the panel's width from which a diff goes side by side
 const BIG_FILE = 1500;      // lines: a file this big starts folded
+const ROW_PX = 18;          // a diff's line, about: the room a file not drawn yet keeps
+const HEAD_PX = 31;         // a file's head
+const DRAW_NOW = 600;       // lines drawn with the panel, those in sight; the rest as they come near
+const NEAR = 800;           // px: how near sight a file's lines are drawn
+const KEPT_CHANGES = 6;     // the last few chats' changes, kept: back on one, there at once
 
 class DeskChanges {
   constructor() {
     this.el = h("div", { class: "changes" });
     this.id = null;
     this.data = null;
+    this.kept = new Map();      // id: {data, folded, opened}, the latest last
+    this.boxes = new Map();     // path: {key, box}, the files drawn (one that didn't change is kept as it is)
+    this.heights = new Map();   // path: its height last time it was drawn
     this.layout = store.get("diff-layout") || "auto";      // auto, split, stacked
     new ResizeObserver(() => { if (this.data && this.split() !== this.drawnSplit) this.draw(); }).observe(this.el);
   }
 
   open(id) {
     if (id !== this.id) {
+      // Another chat: what was being read for the last one, let go of.
+      if (this.ctl) this.ctl.abort();
+      this.ctl = null;
+      if (this.io) this.io.disconnect();
+      this.io = null;
       this.id = id;
-      this.data = null;
-      this.sig = null;
-      this.folded = new Set();
-      this.opened = new Set();
-      this.el.replaceChildren(h("div", { class: "side-note" }, "Reading the changes…"));
-    }
+      const k = this.kept.get(id);
+      this.data = k ? k.data : null;
+      this.folded = k ? k.folded : new Set();
+      this.opened = k ? k.opened : new Set();
+      this.boxes.clear();
+      this.heights.clear();
+      if (this.data) this.draw();       // as it was a moment ago, read again at once
+      else this.el.replaceChildren(h("div", { class: "side-note" }, "Reading the changes…"));
+    } else if (this.data) this.near();      // back on the tab: what's in sight, drawn
     if (!this.timer) { this.load(); this.tick(); }
   }
 
@@ -806,24 +867,53 @@ class DeskChanges {
     }, s && s.status === "working" ? 4000 : 15000);
   }
 
+  // The changes, unless they're the same as those on screen (the server
+  // says so for the sig it's given, without them).
   async load() {
-    const id = this.id;
+    if (this.ctl) return;       // still reading
+    const id = this.id, ctl = this.ctl = new AbortController();
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(id)}/changes`);
+      const sig = this.data && this.data.sig;
+      const r = await fetch(`/api/session/${encodeURIComponent(id)}/changes${sig ? `?sig=${encodeURIComponent(sig)}` : ""}`,
+                            { signal: ctl.signal });
       const d = await r.json();
       if (id !== this.id) return;
       if (!r.ok) throw new Error(d.error || "Couldn't read the changes");
-      if (this.data && d.sig === this.data.sig) return;
+      if (this.data && (d.same || d.sig === this.data.sig)) return;
       this.data = d;
+      this.keep();
       this.draw();
     } catch (e) {
-      if (id === this.id && !this.data)
+      if (!ctl.signal.aborted && id === this.id && !this.data)
         this.el.replaceChildren(h("div", { class: "side-note" }, e instanceof TypeError ? "Can't reach Amarchy" : e.message));
+    } finally {
+      if (this.ctl === ctl) this.ctl = null;
     }
+  }
+
+  // This chat's changes kept, the oldest kept let go of.
+  keep() {
+    this.kept.delete(this.id);
+    this.kept.set(this.id, { data: this.data, folded: this.folded, opened: this.opened });
+    while (this.kept.size > KEPT_CHANGES) this.kept.delete(this.kept.keys().next().value);
   }
 
   split() {
     return this.layout === "split" || (this.layout === "auto" && this.el.clientWidth >= SPLIT_AT);
+  }
+
+  // The panel's scroller (its body), and what draws a file's lines as it
+  // comes near sight in it.
+  scroller() { return (desk.side && desk.side.body) || this.el.parentNode; }
+
+  watch() {
+    const root = this.scroller();
+    if (this.io && this.ioRoot === root) return;
+    if (this.io) this.io.disconnect();
+    this.ioRoot = root;
+    this.io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) this.fill(e.target); },
+                                       { root, rootMargin: `${NEAR}px 0px` });
+    for (const { box } of this.boxes.values()) if (!box.drawn && !box.classList.contains("folded")) this.io.observe(box);
   }
 
   draw() {
@@ -831,6 +921,9 @@ class DeskChanges {
     const scroller = this.el.parentNode;
     const top = scroller ? scroller.scrollTop : 0;
     this.drawnSplit = this.split();
+    this.watch();
+    // How tall each file was: drawn again, it keeps its room until its lines are.
+    for (const [path, { box }] of this.boxes) if (box.isConnected && box.drawn) this.heights.set(path, box.offsetHeight);
     const files = d.files || [];
     const kids = [];
     const summary = files.length
@@ -851,41 +944,114 @@ class DeskChanges {
         h("summary", {}, `${d.commits.length} commit${d.commits.length === 1 ? "" : "s"} on its branch`),
         ...d.commits.map((c) => h("div", { class: "commit" }, h("code", {}, c.sha), h("span", {}, c.subject),
                                   h("span", { class: "age" }, ago(c.at))))));
+    const boxes = new Map();
     if (files.length) {
       const index = h("div", { class: "changes-index" });
       for (const f of files) index.append(h("button", { class: "file-row", type: "button", title: f.path,
-          onclick: () => { this.folded.delete(f.path); this.opened.add(f.path); this.draw(); this.reveal(f.path); } },
+          onclick: () => this.reveal(f.path) },
         h("span", { class: `badge ${f.status}` }, STATUS_WORD[f.status] || f.status),
         h("span", { class: "name" }, baseName(f.path)), h("span", { class: "dir" }, dirOf(f.path)), diffChip([f])));
       kids.push(index);
-      for (const f of files) kids.push(this.file(f));
+      // A file that's the same as it was, drawn the same way: kept as it is
+      // (its lines, its Show more); the others anew.
+      for (const f of files) {
+        const key = `${this.drawnSplit}|${JSON.stringify(f)}`;
+        const was = this.boxes.get(f.path);
+        const box = was && was.key === key ? was.box : this.file(f);
+        boxes.set(f.path, { key, box });
+        kids.push(box);
+      }
     }
+    for (const [path, { box }] of this.boxes) if (!boxes.has(path) || boxes.get(path).box !== box) this.io.unobserve(box);
+    this.boxes = boxes;
     this.el.replaceChildren(...kids);
     if (scroller) scroller.scrollTop = top;
+    this.near();
   }
 
+  // The lines of the files in sight (or nearly), drawn now: no blank
+  // before they're there. The rest as they come near (watch).
+  near() {
+    const scroller = this.scroller();
+    if (!scroller || !this.el.isConnected || !scroller.clientHeight) return;
+    const view = scroller.getBoundingClientRect();
+    const todo = [...this.boxes.values()].map(({ box }) => box).filter((box) => !box.drawn && !box.classList.contains("folded"))
+      .filter((box) => { const r = box.getBoundingClientRect(); return r.bottom > view.top - 200 && r.top < view.bottom + 200; });
+    let lines = 0;
+    for (const box of todo) {
+      if (lines > DRAW_NOW) break;
+      lines += box.lines;
+      this.fill(box);
+    }
+  }
+
+  // A file, from the list at the top: unfolded, drawn, at the top.
   reveal(path) {
-    const el = Array.from(this.el.querySelectorAll(".change")).find((x) => x.dataset.path === path);
-    if (el) el.scrollIntoView({ block: "start" });
+    const k = this.boxes.get(path);
+    if (!k) return;
+    this.fold(k.box, false);
+    k.box.scrollIntoView({ block: "start" });
+    // What's drawn above it as it comes near (watch) mustn't push it away.
+    const scroller = this.scroller(), at = scroller && scroller.scrollTop;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (scroller && scroller.scrollTop === at && k.box.isConnected) k.box.scrollIntoView({ block: "start" });
+    }));
   }
 
-  // One file: its name, what happened to it, and its lines (folded if huge).
+  // One file: its name, what happened to it, and its lines (folded if huge),
+  // drawn when it's near sight.
   file(f) {
     const lines = (f.hunks || []).reduce((n, hk) => n + hk.lines.length, 0);
     const folded = this.folded.has(f.path) || (lines > BIG_FILE && !this.opened.has(f.path));
-    const head = h("button", { class: "change-head", type: "button", "aria-expanded": String(!folded), onclick: () => {
-      if (folded) { this.folded.delete(f.path); this.opened.add(f.path); } else { this.folded.add(f.path); this.opened.delete(f.path); }
-      this.draw();
-    } }, icon("chevron", "chev"), h("span", { class: `badge ${f.status}` }, STATUS_WORD[f.status] || f.status),
+    const head = h("button", { class: "change-head", type: "button", onclick: () => this.fold(box, !box.classList.contains("folded")) },
+      icon("chevron", "chev"), h("span", { class: `badge ${f.status}` }, STATUS_WORD[f.status] || f.status),
       h("span", { class: "name" }, baseName(f.path)),
       h("span", { class: "dir" }, f.old_path ? `from ${f.old_path}` : dirOf(f.path)), diffChip([f]));
-    const box = h("section", { class: `change${folded ? " folded" : ""}`, "data-path": f.path }, head);
-    if (folded) return box;
-    if (f.binary) box.append(h("div", { class: "side-note" }, "A binary file: not shown"));
-    else if (!lines) box.append(h("div", { class: "side-note" }, f.status === "renamed" ? "Moved, unchanged" : "An empty file"));
-    else box.append(this.split() ? splitDiff(f) : stackedDiff(f));
-    if (f.cut) box.append(h("div", { class: "side-note" }, "The rest of this file's changes isn't shown here"));
+    const box = h("section", { class: "change", "data-path": f.path }, head);
+    box.file = f;
+    box.lines = lines;
+    this.shape(box, folded);
     return box;
+  }
+
+  // A file folded or unfolded (you asked: kept for it), where it is.
+  fold(box, folded) {
+    const p = box.file.path;
+    if (folded) { this.folded.add(p); this.opened.delete(p); } else { this.folded.delete(p); this.opened.add(p); }
+    if (folded !== box.classList.contains("folded")) this.shape(box, folded);
+    if (!folded) this.fill(box);
+  }
+
+  // Folded: its head. Unfolded: the room its lines take, until they're drawn.
+  shape(box, folded) {
+    const head = box.firstChild, f = box.file;
+    box.classList.toggle("folded", folded);
+    head.setAttribute("aria-expanded", String(!folded));
+    box.replaceChildren(head);
+    box.drawn = false;
+    if (folded) {
+      if (this.io) this.io.unobserve(box);
+      box.style.setProperty("--change-h", `${HEAD_PX}px`);
+      return;
+    }
+    const tall = this.heights.get(f.path) || HEAD_PX + ROW_PX * Math.max(1, Math.min(box.lines, DIFF_SHOWN + 2));
+    box.style.setProperty("--change-h", `${tall}px`);
+    box.append(h("div", { class: "change-room", style: `height: ${tall - HEAD_PX}px` }));
+    if (this.io) this.io.observe(box);
+  }
+
+  // Its lines, drawn.
+  fill(box) {
+    if (box.drawn || box.classList.contains("folded")) return;
+    box.drawn = true;
+    if (this.io) this.io.unobserve(box);
+    const f = box.file;
+    const kids = [];
+    if (f.binary) kids.push(h("div", { class: "side-note" }, "A binary file: not shown"));
+    else if (!box.lines) kids.push(h("div", { class: "side-note" }, f.status === "renamed" ? "Moved, unchanged" : "An empty file"));
+    else kids.push(this.drawnSplit ? splitDiff(f) : stackedDiff(f));
+    if (f.cut) kids.push(h("div", { class: "side-note" }, "The rest of this file's changes isn't shown here"));
+    box.replaceChildren(box.firstChild, ...kids);
   }
 }
 
@@ -904,29 +1070,60 @@ function ago(t) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-// A file's lines one under the other (the chat's diff, chat.js).
+// A file's lines one under the other (the chat's diff, chat.js): its first
+// DIFF_SHOWN drawn, the rest only once asked for.
 function stackedDiff(f) {
-  const view = diffView([{ ...f, created: false }]);
-  return view.querySelector(".diff-lines");
+  const total = (f.hunks || []).reduce((n, hk) => n + hk.lines.length, 0);
+  const part = (from, to) => diffView([{ ...f, hunks: diffPart(f, from, to), cut: to >= total && f.cut, created: false }])
+    .querySelector(".diff-lines");
+  const body = part(0, DIFF_SHOWN);
+  if (total > DIFF_SHOWN) {
+    const btn = h("button", { class: "diff-more", type: "button", onclick: () => {
+      const rest = [];
+      for (let at = DIFF_SHOWN; at < total; at += DIFF_SHOWN) rest.push(...part(at, at + DIFF_SHOWN).childNodes);
+      btn.replaceWith(...rest);
+    } }, `Show ${total - DIFF_SHOWN} more lines`);
+    body.append(btn);
+  }
+  return body;
+}
+
+// f's hunks, only its lines from `from` up to `to` (counted across them),
+// each part with its line numbers; a part starting a hunk after another keeps
+// the ⋯ between them (diffView draws it before every hunk but the first).
+function diffPart(f, from, to) {
+  const out = [];
+  let at = 0;
+  (f.hunks || []).forEach((hk, n) => {
+    const ls = hk.lines || [];
+    const a = Math.max(0, from - at), b = Math.min(ls.length, to - at);
+    at += ls.length;
+    if (a >= b) return;
+    let o = typeof hk.old === "number" ? hk.old : null, w = typeof hk.new === "number" ? hk.new : null;
+    for (const raw of ls.slice(0, a)) {
+      if (raw[0] !== "+" && o !== null) o++;
+      if (raw[0] !== "-" && w !== null) w++;
+    }
+    if (!out.length && !a && n) out.push({ old: null, new: null, lines: [] });
+    out.push({ old: o, new: w, lines: ls.slice(a, b) });
+  });
+  return out;
 }
 
 // A file's lines side by side: what it was on the left, what it is on the
 // right, each change's removed lines beside the lines that replaced them.
+// Its first DIFF_SHOWN rows drawn, the rest only once asked for.
 function splitDiff(f) {
   const body = h("div", { class: "diff-lines split" });
-  const cell = (cls, n, sg, text) => [h("span", { class: `ln ${cls}` }, n === null ? "" : String(n)),
-                                      h("span", { class: `tx ${cls}` }, sg ? h("span", { class: "sg" }, sg) : null, text)];
-  let drawn = 0;
-  const more = [];
-  const put = (els) => { if (drawn++ < DIFF_SHOWN) body.append(...els); else more.push(...els); };
+  const rows = [];      // [left, right] (each [cls, n, sign, text]), or null: the ⋯ between two hunks
   (f.hunks || []).forEach((hk, n) => {
-    if (n) put([h("span", { class: "gap" }, "⋯")]);
+    if (n) rows.push(null);
     let o = typeof hk.old === "number" ? hk.old : null, w = typeof hk.new === "number" ? hk.new : null;
     const ls = hk.lines || [];
     for (let i = 0; i < ls.length;) {
       if (ls[i][0] !== "-" && ls[i][0] !== "+") {
         const t = ls[i].slice(1) || " ";
-        put([...cell("ctx", o, "", t), ...cell("ctx", w, "", t)]);
+        rows.push([["ctx", o, "", t], ["ctx", w, "", t]]);
         if (o !== null) o++;
         if (w !== null) w++;
         i++;
@@ -935,16 +1132,19 @@ function splitDiff(f) {
       const dels = [], adds = [];
       while (i < ls.length && ls[i][0] === "-") dels.push(ls[i++].slice(1));
       while (i < ls.length && ls[i][0] === "+") adds.push(ls[i++].slice(1));
-      for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
-        const left = k < dels.length ? cell("del", o === null ? null : o++, "−", dels[k] || " ") : cell("none", null, "", "");
-        const right = k < adds.length ? cell("add", w === null ? null : w++, "+", adds[k] || " ") : cell("none", null, "", "");
-        put([...left, ...right]);
-      }
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++)
+        rows.push([k < dels.length ? ["del", o === null ? null : o++, "−", dels[k] || " "] : ["none", null, "", ""],
+                   k < adds.length ? ["add", w === null ? null : w++, "+", adds[k] || " "] : ["none", null, "", ""]]);
     }
   });
+  const cell = ([cls, n, sg, text]) => [h("span", { class: `ln ${cls}` }, n === null ? "" : String(n)),
+                                        h("span", { class: `tx ${cls}` }, sg ? h("span", { class: "sg" }, sg) : null, text)];
+  const draw = (part) => part.flatMap((r) => (r ? [...cell(r[0]), ...cell(r[1])] : [h("span", { class: "gap" }, "⋯")]));
+  body.append(...draw(rows.slice(0, DIFF_SHOWN)));
+  const more = rows.slice(DIFF_SHOWN);
   if (more.length) {
-    const btn = h("button", { class: "diff-more", type: "button", onclick: () => btn.replaceWith(...more) },
-                  `Show ${Math.ceil(more.length / 4)} more lines`);
+    const btn = h("button", { class: "diff-more", type: "button", onclick: () => btn.replaceWith(...draw(more)) },
+                  `Show ${more.filter(Boolean).length} more lines`);
     body.append(btn);
   }
   return body;
@@ -1120,6 +1320,9 @@ function dropImages() {
 function toChat(opened) {
   const c = desk.chat;
   if (!c) return;
+  // Out of the side panel first (its terminal kept the keyboard: it stays put
+  // as the chat changes), so the chat can take them once it's in.
+  if (desk.side.el.contains(document.activeElement)) document.activeElement.blur();
   const card = c.dock.querySelector(".card");
   if (card) (menuStart(card) || card).focus({ preventScroll: true });
   // Opened with the keys: on its latest message (i to write); else the box.
@@ -1149,8 +1352,7 @@ function deskList() {
   const v = app.view;
   if (v && desk.current && !row(desk.current)) return boardBack(true);     // closed
   chime(v);
-  const waiting = !v ? 0 : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
-  document.title = waiting ? `(${waiting}) Amarchy` : "Amarchy";
+  // (The window's title is the home's count: manage.js markWaiting.)
   // Show terminals turned on or off: the panel and the header follow.
   const shows = showTerminals();
   if (shows !== desk.shows) { desk.shows = shows; deskLayout(); } else deskHead();
@@ -1198,7 +1400,7 @@ function chatPicker() {
 // ---- the keys: amarchy's, Ctrl+Alt+… (Super is the browser's or the Mac's)
 
 const DESK_KEYS = {
-  KeyJ: () => step(1), KeyK: () => step(-1),
+  KeyJ: (e) => step(1, e.repeat), KeyK: (e) => step(-1, e.repeat),
   KeyS: () => deskSearch(), KeyA: () => chatPicker(),
   ArrowLeft: () => toChat(), ArrowRight: () => toTerminal(),
   KeyG: () => desk.current && sideToggle("changes"), KeyI: () => desk.current && sideToggle("details"),
@@ -1220,7 +1422,7 @@ function deskKeys(e) {
   e.stopPropagation();
   if (e.repeat && !["KeyJ", "KeyK"].includes(e.code)) return;
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
-  act();
+  act(e);
 }
 
 // Ctrl+Alt+Space or Ctrl+Alt+Enter: dictate into the chat's box, held as its
@@ -1244,6 +1446,7 @@ function talkKey(e) {
 }
 
 function deskKeysUp(e) {
+  if (desk.stepping && ["KeyJ", "KeyK", "ControlLeft", "ControlRight", "AltLeft", "AltRight"].includes(e.code)) stepDone();
   if (e.code !== desk.talkCode || desk.talkDown === undefined || desk.talkDown === null) return;
   const c = desk.chat, fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
   const t = fresh ? fresh.dictate : c && c.talk;
@@ -1260,8 +1463,31 @@ function deskKeysUp(e) {
   t.stop();
 }
 
-// Ctrl+Alt+J / K: the next chat, in the board's order (tasks.js).
-function step(n) { boardStep(n); }
+// Ctrl+Alt+J / K: the next chat, in the board's order (tasks.js). Held
+// down (the key repeating), only the head says which it's on: the chat it
+// stops on opens when you let go (or it stops a moment), not every one it
+// went by (each its stream, its terminals).
+const STEP_SETTLE = 150;      // ms with no key: there
+
+function step(n, repeat) {
+  if (!desk.current || (!repeat && !desk.stepping)) return boardStep(n);
+  const id = boardStep(n, desk.stepping || desk.current);
+  if (!id) return;
+  desk.stepping = id;
+  desk.column.classList.add("stepping");
+  deskHead();
+  clearTimeout(desk.stepTimer);
+  desk.stepTimer = setTimeout(stepDone, STEP_SETTLE);
+}
+
+function stepDone() {
+  clearTimeout(desk.stepTimer);
+  const id = desk.stepping;
+  desk.stepping = null;
+  desk.column.classList.remove("stepping");
+  if (id && id !== desk.current && row(id)) boardOpen(id);
+  else deskHead();
+}
 
 // Ctrl+Alt+S: the board's search.
 function deskSearch() {

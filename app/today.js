@@ -204,11 +204,22 @@ async function todayClose(s, said = "", asked = null) {
   try {
     c = await (asked || todayClosing(s));
   } catch (e) {
+    // Not closed: its card as it was, not Mission complete over it.
+    todayUncomplete(s);
     return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
   }
   // Uncommitted work, amarchy running from it, or a run that hasn't ended (it would stop halfway): asked first.
-  if (c.changes || c.amarchy || (c.running || []).length) { todayRedraw(); return confirmClose(s, c); }
+  if (c.changes || c.amarchy || (c.running || []).length) { todayUncomplete(s); return confirmClose(s, c); }
   todayCloseNow([s], said);
+}
+
+// Its card's Mission complete taken off (todayComplete), and Today drawn again.
+function todayUncomplete(s) {
+  for (const card of document.querySelectorAll(`.tcard.completing[data-id="${CSS.escape(s.id)}"]`)) {
+    card.classList.remove("completing");
+    card.querySelectorAll(".tcard-complete").forEach((x) => x.remove());
+  }
+  todayRedraw();
 }
 
 // What closing it would lose (uncommitted work, a run that hasn't ended), from the server.
@@ -420,7 +431,13 @@ function todayLoop(l, v) {
   const session = asking === "session";
   const chat = l.chat && rowOf(l.chat);
   const said = { done: `Sent to ${name}: done`, chase: `${name} drafts the follow-up`, ask: `Sent to ${name}`, session: `${name} starts a chat for it` };
-  const ask = (mode) => { todayUI.asking.set(l.key, mode); todayRedraw(); };
+  // Its box focused at once, in the tap itself: on the phone that's what opens the keyboard.
+  const ask = (mode) => {
+    todayUI.asking.set(l.key, mode);
+    todayRedraw();
+    const field = document.querySelector(`.today .tcard-ask[data-loop="${CSS.escape(l.key)}"]`);
+    if (field) field.focus({ preventScroll: true });
+  };
   // Ask needs words; a new chat's note is optional (your assistant writes its brief from the loop).
   const go = (value) => { if (session || value) act(asking, value); };
   // Its head: who, what (a tap shows all of it). Under it, one line: when (and
@@ -431,7 +448,7 @@ function todayLoop(l, v) {
     : h("span", { class: `tcard-meta${late ? " late" : ""}` }, [when, chase && l.since && l.chase ? `asked ${todayAgo(l.since)}` : ""].filter(Boolean).join(" · "));
   const openChat = chat ? h("button", { class: "tbtn loop-chat", type: "button", title: `Open ${chat.task || chat.id}, the chat for it`, onclick: () => todayOpen(chat) }, "Open chat") : null;
   const box = asking ? (() => {
-    const field = h("textarea", { class: "tcard-ask", rows: 2,
+    const field = h("textarea", { class: "tcard-ask", rows: 2, "data-loop": l.key,
                                   placeholder: session ? `Anything for the new chat? (optional: ${name} writes its brief)` : `What should ${name} do about it?`,
                                   oninput: () => todayUI.askText.set(l.key, field.value),
                                   onkeydown: (e) => {
@@ -439,7 +456,6 @@ function todayLoop(l, v) {
                                     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); todayUI.asking.delete(l.key); todayRedraw(); }
                                   } });
     field.value = todayUI.askText.get(l.key) || "";
-    requestAnimationFrame(() => { if (field.isConnected && document.activeElement !== field) field.focus({ preventScroll: true }); });
     return h("div", { class: "tcard-askbox" }, field, h("div", { class: "tcard-actions" },
       uiButton("Cancel", () => { todayUI.asking.delete(l.key); todayRedraw(); }, false, "quiet"),
       uiButton(session ? "Start a chat for this" : `Send to ${name}`, () => go(field.value.trim()), true)));
@@ -598,6 +614,28 @@ function missionSound(rate = 1) {
   if ((app.view || {}).sound === "off") return;
   playSound("/sound/mission", { rate, volume: 0.8 });
 }
+
+// Its sound fetched and decoded after your first tap or key, off it (into
+// app.js sounds.buffers, where playSound looks): the first mission's chime
+// on time, not after its 100 KB came. Decoded offline: a buffer plays in any
+// context, and no audio is started here (the page's own starts at its first sound).
+function missionSoundWarm() {
+  for (const ev of ["pointerdown", "keydown"]) removeEventListener(ev, missionSoundWarm, true);
+  const src = "/sound/mission";
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if ((app.view || {}).sound === "off" || !Offline || typeof sounds === "undefined" || sounds.buffers.has(src)) return;
+  setTimeout(async () => {
+    try {
+      const res = await fetch(src);
+      if (!res.ok) return;
+      const data = await res.arrayBuffer();
+      const ctx = new Offline(1, 1, 44100);
+      const buf = await new Promise((ok, no) => { const p = ctx.decodeAudioData(data, ok, no); if (p && p.catch) p.catch(no); });
+      if (!sounds.buffers.has(src)) sounds.buffers.set(src, buf);
+    } catch (e) { /* played as before: fetched at its first time */ }
+  }, 0);
+}
+for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, missionSoundWarm, { capture: true, passive: true });
 
 // The moment itself, over everything: confetti (bits of it, flying far),
 // a mark, the kicker in big letters, a title, pills, a line under them, a
@@ -787,8 +825,10 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
   const p = todayParts(v);
-  const tk = (draw, ...more) => (s) => (board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more));
-  const loop = (l) => todayLoop(l, v);
+  // Each card with what it shows of its chat or task (todayData): drawn
+  // again, the same one is kept (todayPatch).
+  const tk = (draw, ...more) => (s) => { const n = board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more); n.todayData = todayRowKey(s); return n; };
+  const loop = (l) => { const n = todayLoop(l, v); n.todayData = JSON.stringify([l, (v.today.sent || {})[l.key] || null, (v.today.assistant || {}).name]); return n; };
   const hasLoops = !!(v.today && v.today.source);
   const chats = only !== "tasks", tasks = only !== "chats";
   const close = p.done.length;
@@ -808,9 +848,8 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     const cardOf = (x) => p.asks.includes(x) ? tk(todayAsk)(x) : p.blocked.includes(x) ? tk(todayBlocked)(x) : tk(todayChat, "fresh")(x);
     nodes.push(uiSection("yours", "Needs you", { count: needs.length }, needs.map(cardOf)));
     if (!needs.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
-    const all = p.done.length >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${p.done.length}`) : null;
-    nodes.push(uiSection("finish", "Done", { count: p.done.length, extra: all }, p.done.map(tk(todayChat, "done"))));
-    return [...nodes, ...todayGrouped(v, p, groups, tk, new Set([...needs, ...p.done].map((x) => x.id)))];
+    nodes.push(uiSection("finish", "Done", { count: p.done.length, extra: todayAll(p.done) }, p.done.map(tk(todayChat, "done"))));
+    return [...nodes, ...todayGrouped(v, p, groups, tk, new Set([...needs, ...p.done].map((x) => x.id)))].filter(Boolean);
   }
   // At work on top, folded, its count in sight; then what needs you (asks,
   // blocked, finished and not seen yet, your tasks due); then what's done
@@ -825,8 +864,7 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
   if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), chats && close ? ` Nothing needs you. ${close} done, below.` : " Nothing needs you."));
   if (chats) {
-    const all = close >= 2 ? h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(p.done) }, `Complete all ${close}`) : null;
-    nodes.push(uiSection("finish", "Done", { count: close, extra: all }, p.done.map(tk(todayChat, "done"))));
+    nodes.push(uiSection("finish", "Done", { count: close, extra: todayAll(p.done) }, p.done.map(tk(todayChat, "done"))));
     nodes.push(uiSection("idle", "Ready", { count: p.ready.length }, p.ready.map(tk(todayChat, "ready"))));
   }
   if (tasks) {
@@ -842,6 +880,14 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark tasks done from here."));
   }
   return nodes.filter(Boolean);
+}
+
+// Complete all the done ones (two or more), the chats it closes its todayData.
+function todayAll(done) {
+  if (done.length < 2) return null;
+  const b = h("button", { class: "tbtn quiet today-all", type: "button", onclick: () => todayCloseDone(done) }, `Complete all ${done.length}`);
+  b.todayData = done.map((s) => s.id).join();
+  return b;
 }
 
 // The board's chats in the list's groups and order (app.js groupLabel):
@@ -888,16 +934,29 @@ function todayGrouped(v, p, groups, tk, shown = new Set()) {
 
 // What Today shows of the view: drawn again only when it changes (each
 // second the list may change for something Today doesn't show, and a page
-// drawn again under your finger stops its scroll), or every minute (its
-// times: "since yesterday", "Stalled 3 days").
+// drawn again under your finger stops its scroll), or when a time it says
+// does ("5 min ago", "Stalled 3d", a task's "tomorrow", your score's day).
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
-  const said = boardOn();
-  return JSON.stringify([todayUI.version, Math.floor(Date.now() / 60000), v.today, v.needs, (app.organize || v).group, v.sort,
-    (v.sessions || []).map((s) => s.id).join(),
-    (v.sessions || []).map((s) => [s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks,
-                                   { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission,
-                                   (s.secret_asks || []).length, s.assistant, s.assistant_name, s.picture, s.priority, said ? s.said : ""])]);
+  const m = missionsNow();
+  return JSON.stringify([todayUI.version, new Date().toDateString(), v.today, v.needs, (app.organize || v).group, v.sort,
+    [m.n, m.streak, m.goal, m.total], (v.sessions || []).map((s) => s.id).join(), (v.sessions || []).map((s) => [todayRowKey(s), todayTimes(s)])]);
+}
+
+// What a chat's card says, and what its buttons act on (a permission's
+// request, its questions' answers): the same, the same card (todayFill
+// keeps it, but for what it shows that changed).
+function todayRowKey(s) {
+  return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks,
+    { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission, (s.secret_asks || []).length, s.assistant,
+    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : ""]);
+}
+
+// The times a chat's card says ("5 min ago", "Stalled 3d") and where they
+// put it (stalled; answered here, for two minutes).
+function todayTimes(s) {
+  const t = s.today || {}, quiet = t.at ? Date.now() / 1000 - t.at : 0;
+  return [t.at ? autoPast(t.at) : "", Math.floor(quiet / 86400), quiet > TODAY_STALE, todayIsAnswered(s)];
 }
 
 function boardTabNow() { return typeof board !== "undefined" && board.tab === "tasks" ? "tasks" : "chats"; }
@@ -915,6 +974,7 @@ function todayFill(box, force) {
   const only = board ? boardTabNow() : null;
   const key = `${only}|${todayKey(app.view)}`;
   if (!force && box.dataset.key === key) return;
+  const tab = (box.dataset.key || "").startsWith(`${only}|`);      // it shows this tab now (not another, a search, the welcome)
   box.dataset.key = key;
   const scroller = box.closest(".scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
@@ -922,10 +982,48 @@ function todayFill(box, force) {
   // Chats again): its cards as they were, not drawn again.
   box.drawn = box.drawn || new Map();
   const was = box.drawn.get(only);
-  const nodes = !force && was && was.key === key ? was.nodes : todayNodes({ board, only });
-  box.drawn.set(only, { key, nodes });
-  keepFocus(box, () => box.replaceChildren(...nodes));
+  const cached = !force && was && was.key === key;
+  const nodes = cached ? was.nodes : todayNodes({ board, only });
+  // The same tab as it shows: only what changed drawn again (todayPatch),
+  // the rest kept as it is, under your finger, in focus, a box you write in.
+  const patched = !cached && tab && todayPatch(box, nodes);
+  if (!patched) keepFocus(box, () => box.replaceChildren(...nodes));
+  box.drawn.set(only, { key, nodes: [...box.childNodes] });
   if (scroller) scroller.scrollTop = top;
+}
+
+// box's children made nodes, by replacing only the parts that differ: a
+// card whose words, state and what its buttons act on (its todayData) are
+// the same is kept; a section or line the same but for some cards, those
+// cards. False when the parts aren't the same ones (a section came or went):
+// then nothing is changed here.
+function todayPatch(box, nodes) {
+  if (box.childNodes.length !== nodes.length) return false;
+  const swaps = [];
+  const walk = (old, next) => {
+    if (old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) return swaps.push([old, next]);
+    if (old.nodeType !== 1) { if (old.data !== next.data) swaps.push([old, next]); return; }
+    if (old.todayData !== undefined || next.todayData !== undefined) {
+      if (old.todayData !== next.todayData || todayShape(old) !== todayShape(next)) swaps.push([old, next]);
+      return;
+    }
+    const a = old.attributes, b = next.attributes;
+    if (a.length !== b.length || [...a].some((x) => next.getAttribute(x.name) !== x.value) || old.childNodes.length !== next.childNodes.length) return swaps.push([old, next]);
+    old.childNodes.forEach((c, i) => walk(c, next.childNodes[i]));
+  };
+  const was = [...box.childNodes];
+  if (was.some((n, i) => n.nodeType !== 1 || n.nodeName !== nodes[i].nodeName || n.className !== nodes[i].className)) return false;
+  was.forEach((n, i) => walk(n, nodes[i]));
+  const apply = () => { for (const [old, next] of swaps) old.replaceWith(next); };
+  // The keys on what goes: put back on what takes its place (keepFocus).
+  const a = document.activeElement;
+  if (a && swaps.some(([old]) => old.contains(a))) keepFocus(box, apply); else apply();
+  return true;
+}
+
+// A part as it looks: its markup, but for a spinner's turn.
+function todayShape(el) {
+  return el.outerHTML.replace(/(<span class="spinner spin">)[^<]*/g, "$1");
 }
 
 // Drawn again where it shows: something was done here.
@@ -933,6 +1031,7 @@ function todayRedraw() {
   todayUI.version++;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
   if (typeof modeButtons === "function") modeButtons();      // the tabs' counts
+  if (typeof markWaiting === "function") markWaiting();      // the tab's title, the icon's badge (manage.js)
 }
 
 // Settings → Today: the loops file.

@@ -84,17 +84,21 @@ function glyph(name, cls) {
 // check in the accent when it finished and you haven't opened it yet.
 function stateIcon(s) {
   const st = doneOf(s);
-  if (st === "working" || st === "running") return h("span", { class: `state working${st === "running" ? " running" : ""}`, title: STATUS[st] }, SPINNER[spin.frame]);
+  if (st === "working" || st === "running") return h("span", { class: `state working spin${st === "running" ? " running" : ""}`, title: STATUS[st] }, SPINNER[spin.frame]);
   const el = glyph(st, `state ${st}`);
   el.title = STATUS[st];
   return el;
 }
 
-const spin = { frame: 0 };
+// Every spinner (class spin) turns together. They're found as the page has
+// them (a live list, not a search of the page every tick), and each turns in
+// a box of its own size, so a tick lays out nothing around it.
+const spin = { frame: 0, all: document.getElementsByClassName("spin") };
 setInterval(() => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible" || !spin.all.length) return;
   spin.frame = (spin.frame + 1) % SPINNER.length;
-  document.querySelectorAll(".state.working, .spinner").forEach((el) => { el.textContent = SPINNER[spin.frame]; });
+  const glyph = SPINNER[spin.frame];
+  for (const el of spin.all) if (el.firstChild && el.firstChild.nodeType === 3) el.firstChild.data = glyph; else el.textContent = glyph;
 }, 90);
 
 // What a session is about, the keyword before ": " in bold.
@@ -182,19 +186,29 @@ async function api(path, body) {
 const AHEAD_FOR = 15000;
 const ahead = new Map();        // session id -> [{patch, settled(row), until}]
 
-function aheadOf(id, patch, settled, done) {
+// quiet: a failure isn't said (seen: nothing you asked for).
+function aheadOf(id, patch, settled, done, { quiet = false } = {}) {
   const mine = { patch, settled, until: Date.now() + AHEAD_FOR, server: null };
-  ahead.set(id, [...(ahead.get(id) || []).filter((a) => !Object.keys(a.patch).some((k) => k in patch)), mine]);
-  if (app.view) aheadOn(app.view);
+  const was = ahead.get(id) || [];
+  const over = was.filter((a) => Object.keys(a.patch).some((k) => k in patch));
+  ahead.set(id, [...was.filter((a) => !over.includes(a)), mine]);
+  // On its row now (only this one: the others' rows carry theirs already,
+  // and only a list from the server can say one is settled), and the row as
+  // the server has it kept, for a failure (not one of yours it replaced).
+  const s = app.view && app.view.sessions.find((x) => x.id === id);
+  if (s) {
+    mine.server = Object.assign(Object.fromEntries(Object.keys(patch).map((k) => [k, s[k]])), ...over.map((a) => a.server || {}));
+    Object.assign(s, patch);
+  }
   // Drawn before the next frame, once what called is done (a chat's screen
   // being made marks it seen: the home isn't drawn over it).
   queueMicrotask(aheadDrawn);
   return done.catch((e) => {
     const left = (ahead.get(id) || []).filter((a) => a !== mine);
     if (left.length) ahead.set(id, left); else ahead.delete(id);
-    const s = app.view && app.view.sessions.find((x) => x.id === id);
-    if (s && mine.server) Object.assign(s, mine.server);
-    toast(e.message);
+    const row = app.view && app.view.sessions.find((x) => x.id === id);
+    if (row && mine.server) Object.assign(row, mine.server);
+    if (!quiet) toast(e.message);
     aheadDrawn();
     throw e;
   });
@@ -224,7 +238,7 @@ function aheadOn(v) {
 function seenNow(id) {
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   const done = api(`/api/session/${encodeURIComponent(id)}/seen`);
-  if (s && s.unseen) aheadOf(id, { unseen: false }, (r) => !r.unseen, done).catch(() => {});
+  if (s && s.unseen) aheadOf(id, { unseen: false }, (r) => !r.unseen, done, { quiet: true }).catch(() => {});
   else done.catch(() => {});
 }
 
@@ -490,8 +504,18 @@ function updated() {
   loadWhenSafe();
 }
 
+// Not while you're using it, either (the page would go from under you, as
+// you come back to the app above all): out of sight, or a while after you
+// last touched it, or two minutes on at most.
+const IN_USE = 15000;
+const lastUse = { at: Date.now() };
+for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, () => { lastUse.at = Date.now(); }, { capture: true, passive: true });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") lastUse.at = Date.now(); });
+
 function loadWhenSafe() {
-  if (reloadWait()) return setTimeout(loadWhenSafe, RELOAD_WAIT);
+  app.updateSince = app.updateSince || Date.now();
+  const using = document.visibilityState === "visible" && Date.now() - lastUse.at < IN_USE && Date.now() - app.updateSince < 120000;
+  if (reloadWait() || using) return setTimeout(loadWhenSafe, RELOAD_WAIT);
   keepForReload();
   // From the server, not as the service worker kept it (sw.js): the new build.
   location.replace(`${location.pathname}?fresh=${encodeURIComponent((app.view && app.view.build) || "1")}${location.hash}`);
@@ -505,7 +529,8 @@ function reloadWait() {
   if (dictationUnderWay()) return true;
   if ([app.session && app.session.chat, desk.chat].some((c) => c && c.tray.length)) return true;
   if (desk.newChat && desk.newChat.tray().length) return true;      // pictures for a new chat
-  if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done")) return true;     // an answer picked, not sent
+  if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done, .tcard .today-opt.chosen")) return true;     // an answer picked, not sent
+  if (document.querySelector(".sheet-back:not(.share)")) return true;      // a sheet open: you're in it
   return [...document.querySelectorAll("textarea, input")].some((f) =>
     !NOT_WORDS.includes(f.type) && f.value.trim() && !f.closest(".composer-wrap, .start-chat"));
 }
@@ -551,10 +576,43 @@ function keptChatScroll(id) {
   return top;
 }
 
+// ---- streams: the list's, a chat's
+//
+// The server gzips them (a list's news is a few hundred bytes so, not 30 KB).
+// Should this browser hold gzipped news back instead of giving each as it
+// comes (connected, and nothing a while on), this device asks for them plain
+// from then on (plain=1). A stream the host closed (it restarted, a 502 on
+// the way) is opened again, a moment on, longer each time.
+
+const STREAM_FIRST = 4000;      // ms a connected stream may take to say anything
+const STREAM_PLAIN_FOR = 24 * 3600 * 1000;      // ms plain is kept to, before gzip is tried again
+function streamURL(path) {
+  return streamsPlain() ? `${path}${path.includes("?") ? "&" : "?"}plain=1` : path;
+}
+function streamsPlain() { return Date.now() - Number(store.get("streams-plain") || 0) < STREAM_PLAIN_FOR; }
+
+// es: a stream just made; again(): makes it anew (plain, now). Its first word, or plain from now on.
+function streamWatch(es, again) {
+  let heard = false, timer = 0;
+  const said = () => { heard = true; clearTimeout(timer); };
+  for (const type of ["list", ...(typeof STREAM_EVENTS !== "undefined" ? STREAM_EVENTS : [])]) es.addEventListener(type, said, { once: true });
+  es.addEventListener("open", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (heard || es.readyState !== EventSource.OPEN || streamsPlain()) return;
+      store.set("streams-plain", String(Date.now()));
+      es.close();
+      again();
+    }, STREAM_FIRST);
+  });
+}
+
+let listTries = 0;
 function openList() {
   if (app.list) return;
-  const es = new EventSource("/api/events");
+  const es = new EventSource(streamURL("/api/events"));
   app.list = es;
+  streamWatch(es, () => { app.list = null; openList(); });
   es.addEventListener("list", (e) => {
     app.view = JSON.parse(e.data);
     aheadOn(app.view);
@@ -575,10 +633,17 @@ function openList() {
     });
     shareCheck();
   });
-  es.addEventListener("open", () => { if (!app.online) { app.online = true; refresh(); } });
+  es.addEventListener("open", () => { listTries = 0; if (!app.online) { app.online = true; refresh(); } });
   es.addEventListener("error", () => {
     app.online = false;
-    refresh();
+    // "Reconnecting…" only once it's been a moment: a restart of the host is over in one.
+    clearTimeout(app.offlineTimer);
+    app.offlineTimer = setTimeout(() => { if (!app.online) refresh(); }, 1500);
+    // Closed for good by the browser (an error page on the way): opened again.
+    if (es.readyState === EventSource.CLOSED && app.list === es) {
+      app.list = null;
+      setTimeout(() => { if (!app.list && document.visibilityState === "visible") openList(); }, [1000, 2000, 5000][Math.min(listTries++, 2)]);
+    }
   });
 }
 
@@ -904,6 +969,9 @@ class SessionView {
       onGoal: () => this.renderHeader(),              // what the chat is for, under its name
       onSession: (row) => { this.row = row; uiWhenStill(`head-${this.id}`, () => this.renderHeader()); },
       onGone: (why) => {
+        // Not reachable (the host restarted): again in a moment, as on a computer.
+        // Not reachable (the host restarted), while the list still has it: again in a moment, as on a computer.
+        if (why && rowOf(this.id)) return setTimeout(() => { if (app.session === this && !this.chat.closed) this.chat.reopen(); }, 2000);
         toast(why ? "Can't open that chat." : "That chat was closed.");
         go("#/");
       },
@@ -1526,7 +1594,8 @@ function swipeToClose(back, card) {
 // what else to do then.
 // started(job): it's on its way (the box empties at once); starting(job,
 // on): its card while the server sets it up, off once it's up or it
-// failed; failed(): it didn't start, its words are back in the box.
+// failed; failed(): it didn't start, called while you're still on the
+// board (else its words wait in New chat's draft, and a toast says so).
 function newChat({ wide = false, started = null, starting = null, failed = null } = {}) {
   let repo = store.get("last-project");
   let picked = false;       // you picked the project for this one: no guessing
@@ -1731,12 +1800,10 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     field.blur();
     if (starting) starting(job, true);
     if (started) started(job);
-    try {
-      await api("/api/new", { repo: job.repo, prompt: job.text, model: job.model, ...(images.length ? { images } : {}) });
-      for (const a of job.pics) if (a.url) URL.revokeObjectURL(a.url);
-      if (starting) starting(job, false);
-      toast(`Started in ${projectName(job.repo)}: it shows under Needs you once it's done`);
-    } catch (e) {
+    // It didn't start: your words (and pictures) back in the box, with what
+    // you wrote there since; the box open again if you're still on the board
+    // (not over a chat you opened meanwhile: kept for your next New chat).
+    const back = (why) => {
       if (starting) starting(job, false);
       const now = field.value.trim();
       field.value = now ? `${job.text}\n${now}` : job.text;
@@ -1746,9 +1813,37 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       drawTray();
       grow();
       update();
-      if (failed) failed(job);
-      toast(`Didn't start: ${e.message}`);
+      const home = !app.session && !(typeof desk !== "undefined" && desk.current);
+      if (home && failed) failed(job);
+      toast(`${why}. ${home ? "Your words are back in the box" : "Your words wait in New chat"}`);
+    };
+    // Up: its row in the list, set up (its worktree made). False: gone from
+    // the list instead (it couldn't be set up: the server let it go), or not
+    // in it within a minute of being online.
+    const up = (id) => new Promise((done) => {
+      let seen = false, until = Date.now() + 60000;
+      const look = () => {
+        const s = app.view && app.view.sessions.find((x) => x.id === id);
+        if (s && !s.setup) return done(true);
+        if (s) seen = true;
+        if (!app.online) until = Date.now() + 60000;
+        if (!s && (seen || Date.now() > until)) return done(false);
+        setTimeout(look, 200);
+      };
+      look();
+    });
+    let d;
+    try {
+      d = await api("/api/new", { repo: job.repo, prompt: job.text, model: job.model, ...(images.length ? { images } : {}) });
+    } catch (e) {
+      return back(`Didn't start: ${e.message}`);
     }
+    // Its card says Starting… until the chat's own is there (board: boardStarting).
+    job.id = d.id;
+    toast(`Started in ${projectName(job.repo)}: it shows under At work`);
+    if (job.id && !(await up(job.id))) return back(`Didn't start in ${projectName(job.repo)}: it couldn't be set up`);
+    for (const a of job.pics) if (a.url) URL.revokeObjectURL(a.url);
+    if (starting) starting(job, false);
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
   return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field, addFiles, tray: () => tray };
@@ -2168,6 +2263,8 @@ async function openLook() {
     // The wallpapers: Omarchy's for the theme worn (a theme of yours, its
     // own), your own picture, none. Each a little picture of itself.
     const worn = info.themes.find((t) => t.key === info.theme) || { colors: [], backgrounds: [] };
+    // (As the host has it when tapped: a tile kept from an earlier draw asks it then, uiPatch.)
+    const wornNow = () => info.themes.find((t) => t.key === info.theme) || worn;
     const tile = (label, isOn, thumb, act, note) => {
       const on = isOn();
       const el = h("button", { class: `theme-card wall-card${on ? " on" : ""}${note ? " pending" : ""}`,
@@ -2184,7 +2281,7 @@ async function openLook() {
     // (A background picked is the theme's wallpaper, that one.)
     const wall = () => ("background" in want && !("wallpaper" in want) ? "theme" : now("wallpaper"));
     const walls = (worn.backgrounds || []).length
-      ? worn.backgrounds.map((b) => tile(b.name, () => wall() === "theme" && b.key === ("background" in want ? want.background : worn.background),
+      ? worn.backgrounds.map((b) => tile(b.name, () => wall() === "theme" && b.key === ("background" in want ? want.background : wornNow().background),
           b.thumb || worn.drawn, (el) => pick({ background: b.key }, el), b.state === "here" ? "" : notes[b.state]))
       : [tile("The theme's", () => wall() === "theme", worn.wallpaper, (el) => pick({ wallpaper: "theme" }, el))];
     walls.push(tile("Your own", () => wall() === "own", info.own,
@@ -2354,6 +2451,8 @@ document.addEventListener("visibilitychange", () => {
   if (app.desk) return;       // a computer's: its terminals stay as they are
   if (document.visibilityState === "hidden") {
     away.since = Date.now();
+    keepPlace();
+    if (app.updating) loadWhenSafe();      // a new build waiting: loaded now, out of sight
     closeList();
     if (app.session) app.session.close();
   } else {
@@ -2365,7 +2464,28 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function backFromAway() {
-  return away.since && Date.now() - away.since >= AWAY && away.told < away.since && !reloadWait();
+  return away.since && Date.now() - away.since >= AWAY && away.told < away.since && !reloadWait() && !unsent();
+}
+
+// Words written in the open chat's box and not sent, a message on its way,
+// pictures for it: the chat stays (its draft is kept anyway, but you were
+// in the middle of it).
+function unsent() {
+  const c = (app.session && app.session.chat) || desk.chat;
+  return !!c && (!!c.input.value.trim() || c.tray.length > 0 || c.outbox.length > 0);
+}
+
+// Where the phone was, kept as it goes to the background: iOS may end the
+// app there, and launched again a moment on, it's where you left it (AWAY).
+const PLACE = "amarchy-place";
+function keepPlace() {
+  try { localStorage.setItem(PLACE, JSON.stringify({ at: Date.now(), hash: here() })); } catch (e) { /* private mode */ }
+}
+function placeLeft() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PLACE) || "null");
+    return p && Date.now() - p.at < AWAY && /^#\/s\//.test(p.hash || "") ? p.hash : null;
+  } catch (e) { return null; }
 }
 
 // Launched, not reloaded: a reload (or the page after an update, kept)
@@ -2428,6 +2548,8 @@ async function start() {
   // address never shows it, so it's kept), and the build it is.
   takeKept();
   if (kept && standalone && kept.hash) routed.hash = kept.hash;
+  // Ended by iOS in the background a moment ago (not a notification's): back in the chat you were in.
+  else if (standalone && !app.desk && !asked && !/^#\/s\//.test(routed.hash || "") && placeLeft()) routed.hash = placeLeft();
   // A computer's, launched with no chat (or new chat) asked for: the board,
   // not the last chat.
   if (app.desk && launched() && !asked && !/^#\/(s\/|new$)/.test(here())) {

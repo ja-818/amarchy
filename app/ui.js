@@ -54,8 +54,9 @@ const uiState = {
 // time, what you're about to tap is a new button, or moved: the tap lands
 // on the one next to it, or under it. So a box's children are replaced
 // only when they'd look different (uiSwap), and what the list's news
-// redraws waits while a finger is down and the moment its tap takes
-// (uiWhenStill). What you do yourself is drawn at once.
+// redraws waits while a finger is down and the moment its tap takes, and
+// while you write in a card's box (uiWhenStill). What you do yourself is
+// drawn at once.
 
 const UI_TAP = 450;     // a finger lifted: its click (and a double tap's second) still to come
 const UI_HOLD = 5000;   // a finger down longer (or a lift the page never heard of): drawn anyway
@@ -70,10 +71,23 @@ for (const type of ["pointerup", "pointercancel"]) {
 // A list still gliding after the finger's gone counts too: drawn again, it
 // would stop under you.
 addEventListener("scroll", () => { uiState.up = Date.now(); uiStillSoon(); }, { capture: true, passive: true });
+// Out of a box you were writing in: what waited for it, drawn now (once the
+// keys have landed where they go).
+addEventListener("focusout", () => setTimeout(uiStillSoon), true);
+
+// Writing in a box on a card (a task's Ask Jaken…) counts too: drawn again,
+// it would be a new box, the cursor at its end, the phone's keyboard closed.
+function uiTyping() {
+  const a = document.activeElement;
+  // (A box left with the keys in it, nothing typed a while: not typing.)
+  return !!a && a.matches("textarea, input") && !!a.closest(".today") && Date.now() - uiState.typed < 30000;
+}
+addEventListener("input", () => { uiState.typed = Date.now(); }, true);
+addEventListener("focusin", () => { uiState.typed = Date.now(); }, true);
 
 function uiTouching() {
   const now = Date.now();
-  return (uiState.down && now - uiState.down < UI_HOLD) || now - uiState.up < UI_TAP;
+  return (uiState.down && now - uiState.down < UI_HOLD) || now - uiState.up < UI_TAP || uiTyping();
 }
 
 // fn now, or once the finger's gone (the last one under key, if more come).
@@ -85,7 +99,7 @@ function uiWhenStill(key, fn) {
 
 let uiStillTimer = 0;
 function uiStillSoon() {
-  if (!uiState.later.size) return;
+  if (!uiState.later.size || uiTyping()) return;      // (out of the box: focusout)
   const now = Date.now();
   const at = Math.max(uiState.up + UI_TAP, uiState.down ? uiState.down + UI_HOLD : 0, now) + 10;
   clearTimeout(uiStillTimer);
@@ -176,7 +190,7 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
 // accent, warn, quiet). working and running spin. long: words that may not fit, cut
 // short with "…" (all of them on hover).
 function uiPill(text, tone, { long = false, title = null } = {}) {
-  const wheel = tone === "working" || tone === "running" ? h("span", { class: "spinner" }, SPINNER[spin.frame]) : null;
+  const wheel = tone === "working" || tone === "running" ? h("span", { class: "spinner spin" }, SPINNER[spin.frame]) : null;
   return h("span", { class: `tpill t-${tone}${long ? " long" : ""}`, title: title || (long ? text : null) },
     wheel, long ? h("span", { class: "tpill-text" }, text) : text);
 }

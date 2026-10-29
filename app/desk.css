@@ -67,6 +67,10 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 .desk-chat > .chat { flex: 1; }
 .desk-chat .chat-dock { padding-bottom: 14px; }
 .desk-chat .chat-conv { padding-top: 22px; }
+/* Ctrl+Alt+J held: the head says which chat it's on, the one under it
+   waits until you let go. */
+.column.stepping .desk-chat { opacity: 0.45; transition: opacity 0.1s ease; }
+.column.stepping .desk-head { pointer-events: none; }
 /* Over the chat: Back to the board, its project and name (click: rename),
    where it stands and what it's for; the side panel's tabs, Complete, ⋯. */
 .desk-head {
@@ -172,7 +176,11 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 .badge.added, .badge.untracked { color: var(--success); }
 .badge.deleted { color: var(--danger); }
 .badge.renamed { color: var(--warning); }
-.change { border: 1px solid var(--code-border); border-radius: var(--radius-item); overflow: hidden; background: var(--code-bg); }
+/* Only the files in sight are laid out and painted (a big diff: thousands
+   of lines); the others keep their room, as tall as they were (or about,
+   desk.js --change-h). */
+.change { border: 1px solid var(--code-border); border-radius: var(--radius-item); overflow: hidden; background: var(--code-bg);
+          content-visibility: auto; contain-intrinsic-size: auto var(--change-h, 600px); }
 .change-head { position: sticky; top: 0; z-index: 1; border-radius: 0; background: var(--surface); border-bottom: 1px solid var(--code-border); }
 .change.folded .change-head { border-bottom: 0; }
 .change-head .chev { width: 14px; height: 14px; flex: none; color: var(--text-muted); transform: rotate(90deg); transition: transform 0.15s ease; }

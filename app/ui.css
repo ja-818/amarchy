@@ -95,9 +95,9 @@ html { touch-action: manipulation; }
 }
 .tcard-head .avatar { width: 26px; height: 26px; flex: none; }
 /* Under the pointer, and under the keys: the card, the whole of it. */
-.tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover {
+@media (hover: hover) { .tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover {
   background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--card-bg); border-color: var(--card-hover-border);
-}
+} }
 .tcard-head:focus-visible { outline: none; }
 /* Pressed: lit the moment the finger lands (no fade in), so a tap is felt
    before what it opens is drawn. */
@@ -158,14 +158,14 @@ html { touch-action: manipulation; }
 .tcard.k-due .tcard-actions, .tcard.k-chase .tcard-actions { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 @media (max-width: 559px) { .tcard.k-due .tcard-meta, .tcard.k-chase .tcard-meta { flex-basis: 100%; } }
 .tcard.k-due .tbtn, .tcard.k-chase .tbtn { padding: 5px 14px; }
-.tbtn:hover { background: var(--button-hover-bg); }
+@media (hover: hover) { .tbtn:hover { background: var(--button-hover-bg); } }
 .tbtn:active { background: var(--button-press-bg); }
 .tbtn.primary:active { background: color-mix(in srgb, var(--button-primary-bg) 82%, var(--text)); }
 .tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .tbtn.primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
 .tbtn.chosen { color: var(--primary-text); background: var(--success); border-color: var(--success); }
 .tbtn.quiet { background: none; border-color: transparent; color: var(--link); }
-.tbtn.quiet:hover { background: var(--control-hover); }
+@media (hover: hover) { .tbtn.quiet:hover { background: var(--control-hover); } }
 .today-more { align-self: flex-start; }
 
 /* ---- a section: a small head and its count, folded (a chevron) or not */
@@ -181,7 +181,7 @@ details.tsec > summary { list-style: none; cursor: pointer; border-radius: var(-
 details.tsec > summary::-webkit-details-marker { display: none; }
 details.tsec > summary .tsec-head::before { content: "›"; display: inline-block; width: 10px; font-size: var(--body); transition: transform .15s; }
 details.tsec[open] > summary .tsec-head::before { transform: rotate(90deg); }
-details.tsec > summary:hover .tsec-head { color: var(--text); }
+@media (hover: hover) { details.tsec > summary:hover .tsec-head { color: var(--text); } }
 
 
 /* The whole card opens it. */
@@ -241,7 +241,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
   color: var(--text-muted); font-size: var(--caption); font-weight: 700; white-space: nowrap;
 }
 .ui-tool { padding: 0; font-size: 16px; }
-.ui-tool:hover, .head-btn:hover, .ui-tabs .control:hover { color: var(--text); background: var(--control-hover); }
+@media (hover: hover) { .ui-tool:hover, .head-btn:hover, .ui-tabs .control:hover { color: var(--text); background: var(--control-hover); } }
 .head-btn.on, .ui-tabs .control.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
 .ui-tool .glyph svg, .head-btn .glyph svg, .ui-action .glyph svg { width: 18px; height: 18px; }
 .head-btn .ic { width: 18px; height: 18px; }
@@ -251,7 +251,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 /* A menu on the phone (uiMenu): its icon, its words and under them what it does. */
 .ui-menu .menu-item .label { flex-direction: row; align-items: center; gap: 10px; }
 .ui-menu-text { display: flex; flex-direction: column; min-width: 0; }
-.ui-brand.ui-action:hover { color: var(--accent); }
+@media (hover: hover) { .ui-brand.ui-action:hover { color: var(--accent); } }
 /* The bar's one thing to do: outlined, its key beside its words. */
 .ui-action {
   flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -259,7 +259,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
   border: 1px solid var(--button-border); border-radius: var(--button-radius); background: var(--button-bg);
   color: var(--text); font-weight: 700; white-space: nowrap;
 }
-.ui-action:hover { background: var(--button-hover-bg); }
+@media (hover: hover) { .ui-action:hover { background: var(--button-hover-bg); } }
 .ui-key { font: inherit; font-size: var(--caption); padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; line-height: 16px; color: var(--text-muted); }
 /* A square of one (‹, Ⓐ, ⋯): its icon alone. */
 .ui-action.square, .ui-action.board-back, .ui-action.more, .ui-action.ui-brand { width: var(--control-h); padding: 0; }
@@ -281,7 +281,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
   border-radius: var(--radius-control);
   text-align: left; white-space: nowrap; overflow: hidden;
 }
-.head-title:hover { background: var(--control-hover); }
+@media (hover: hover) { .head-title:hover { background: var(--control-hover); } }
 .head-title .task { flex: 0 1 auto; min-width: 0; font-size: var(--title); overflow: hidden; text-overflow: ellipsis; }
 .head-title .avatar.small { width: 22px; height: 22px; flex: none; }
 .head-title .tcard-chip { max-width: 22%; }
@@ -308,7 +308,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-score { display: inline-flex; align-items: center; gap: 10px; height: var(--control-h); padding: 0 12px; flex: none;
             border-radius: var(--score-radius); background: var(--score-bg); border: 1px solid var(--score-border);
             color: var(--text); font: inherit; font-size: var(--caption); font-weight: 700; cursor: pointer; }
-.ui-score:hover { background: var(--button-hover-bg); }
+@media (hover: hover) { .ui-score:hover { background: var(--button-hover-bg); } }
 .ui-score-streak { display: inline-flex; align-items: center; gap: 4px; color: var(--score-flame); }
 .ui-score-streak .glyph svg { width: 15px; height: 15px; display: block; }
 .ui-score.risk .ui-score-streak { animation: score-risk 1.6s ease-in-out infinite; }

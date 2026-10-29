@@ -188,13 +188,14 @@ class SessionTerminal {
   // Claude's classic terminal lets go of the session (back to the chat).
   async show(which, { quiet } = {}) {
     this.shown = which === "claude" ? "claude" : "term";
-    if (this.id) store.set(`term-shown:${this.id}`, this.shown);
+    if (this.id && store.get(`term-shown:${this.id}`) !== this.shown) store.set(`term-shown:${this.id}`, this.shown);
     if (this.shown !== "claude") releaseClassic(this.id);
     this.setCtrl(false);
     const p = this.pane(this.shown);
     const other = this.panes[this.shown === "claude" ? "term" : "claude"];
     if (other) other.disconnect();
-    this.body.replaceChildren(p.box);
+    // Already there: left as it is (taken out and back, its terminal would lose the keyboard).
+    if (p.box.parentNode !== this.body) this.body.replaceChildren(p.box);
     const classic = this.shown === "claude";
     this.banner.hidden = !classic;
     this.runBtn.hidden = this.cmdsBtn.hidden = this.classicBtn.hidden = classic;

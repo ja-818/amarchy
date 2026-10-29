@@ -16,7 +16,9 @@
 #     a speech model, not fetched by itself: 670 MB)
 #   - fetches Omarchy's wallpapers for the themes from Omarchy's repository,
 #     in the background (amarchy theme --refresh-wallpapers: 60 MB, kept in
-#     ~/.local/state/amarchy/wallpapers)
+#     ~/.local/state/amarchy/wallpapers), and cuts the fonts and your own
+#     wallpapers smaller for the app (amarchy theme --cut: kept in
+#     ~/.local/state/amarchy/cuts)
 #   - takes away what an amarchy from before left on an Omarchy desktop (its
 #     Hyprland keys, shell plugin, menu entries and theme hook), and brings
 #     its state up to date (amarchy migrate)
@@ -26,8 +28,8 @@
 #   ./install.sh --uninstall remove all of the above, an Omarchy desktop's
 #                            amarchy from before too (sessions and worktrees
 #                            untouched, and the secrets you gave in the app;
-#                            the dictation model and Omarchy's wallpapers,
-#                            only downloads, go)
+#                            the dictation model, Omarchy's wallpapers and
+#                            the look's cuts, only downloads, go)
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
 #                            asks in a terminal, and stops without one)
@@ -246,6 +248,9 @@ if ((uninstall)); then
   # --refresh-wallpapers): a fetch under way stops once they're gone.
   systemctl --user stop 'amarchy-wallpapers-*.service' >/dev/null 2>&1 || true
   rm -rf "$state/wallpapers"
+  # The look's files cut smaller (amarchy theme --cut): made again when wanted.
+  systemctl --user stop 'amarchy-cuts-*.service' >/dev/null 2>&1 || true
+  rm -rf "$state/cuts"
   say "amarchy removed. Worktrees and ~/.local/state/amarchy were left alone (but for the dictation model and Omarchy's wallpapers)."
   # Your secrets (amarchy secret) are yours, not a download: kept, and said where.
   secrets="${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/secrets"
@@ -381,6 +386,10 @@ systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
 # GitHub, not carried by amarchy (themes/CREDITS), in the background. Those
 # already here stay; until one is, its theme wears a drawn one.
 "$bin_dir/amarchy" theme --refresh-wallpapers --in-background --quiet >/dev/null 2>&1 || true
+# The fonts cut in two (their text, and their icons fetched only when drawn)
+# and your own wallpapers cut for a phone, in the background: until they
+# are, the app is sent them whole.
+"$bin_dir/amarchy" theme --cut --in-background --quiet >/dev/null 2>&1 || true
 
 say "amarchy installed."
 if [[ -f $units/amarchy-app.service ]]; then
