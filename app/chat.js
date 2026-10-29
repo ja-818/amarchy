@@ -1221,7 +1221,11 @@ class Chat {
     // the browser does with its focus: wherever the keys or a click go in the
     // messages, that one; drawn again, the one in its place.
     this.navSel = null;
-    this.scroller.addEventListener("focusin", (e) => { const it = this.navItemOf(e.target); if (it) this.navPick(it); });
+    this.scroller.addEventListener("focusin", (e) => {
+      const it = this.navItemOf(e.target);
+      if (it) this.navPick(it);
+      uiInner(this.scroller, it && this.navInside(it).includes(e.target) ? e.target : null);
+    });
     this.scroller.addEventListener("click", (e) => { const it = this.navItemOf(e.target); if (it) this.navPick(it); });
     // Writing (the box, what's asked in the dock): no message lit.
     this.dock.addEventListener("focusin", () => this.el.classList.add("writing"));
@@ -1497,6 +1501,7 @@ class Chat {
     el.focus({ preventScroll: true });
     const it = this.navItemOf(el);
     if (it) this.navPick(it);
+    uiInner(this.scroller, it && it !== el ? el : null);
     const r = el.getBoundingClientRect(), v = this.scroller.getBoundingClientRect();
     uiReveal(el, { scroller: this.scroller, block: start ? "start" : r.height > v.height ? (up ? "end" : "start") : "nearest" });
   }
@@ -1541,7 +1546,9 @@ class Chat {
     if (!focused) at = items.indexOf(this.navLit(items));
     const item = items[at];
     const inside = this.navInside(item);
-    const on = inside.indexOf(a);
+    // On a button in it, or the focus off it: the one lit in it (uiInner).
+    let on = inside.indexOf(a);
+    if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(item, inside));
     const go = (i, up) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))], false, up); return done(); };
     if (k === "i") {
       if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
@@ -1579,6 +1586,8 @@ class Chat {
     if (k === "h" || k === "ArrowLeft") { if (on >= 0) this.navTo(on === 0 ? item : inside[on - 1]); return done(); }
     if (k === "Escape" && on >= 0) { this.navTo(item); return done(); }
     if (k === "Escape" && this.opts.back) { this.opts.back(); return done(); }      // the phone's; a computer's board has its own Esc
+    // Enter, the focus off the message: the button lit in it, pressed.
+    if (k === "Enter" && !focused && on >= 0 && !(a && a.closest && a.closest("button, a[href], summary"))) { this.navTo(inside[on]); inside[on].click(); return done(); }
     if (k === "Enter" && (a === item || (!focused && !(a && a.closest && a.closest("button, a[href], summary")))) && !item.matches("button, a[href]")) {
       const head = item.querySelector(".reply-head");
       if (head) { head.click(); this.navTo(item); }

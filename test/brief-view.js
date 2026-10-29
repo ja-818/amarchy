@@ -708,6 +708,23 @@ async function run(browser, base, layout) {
   }
   check(layout, from >= 1 && Object.values(moved).every(([b, sh, u, d]) => b === from && sh && u === from - 1 && d === from),
         `focus off the messages any way: the message stays lit, k / j go on from it (${JSON.stringify({ from, moved })})`);
+  // Into a message (l): the button the keys are on lit, whatever the
+  // browser's focus does (Safari rings none); the focus lost, l goes on
+  // from it and Enter presses it (a fold opens), not the whole reply.
+  await page.evaluate(() => window.__chat.navLatest());
+  await page.keyboard.press("l");
+  const inner = () => page.evaluate(() => { const l = document.querySelector(".chat .ui-in"); return l ? { cls: l.className.split(" ")[0], ring: getComputedStyle(l).outlineStyle !== "none", exp: l.getAttribute("aria-expanded") } : null; });
+  const in1 = await inner();
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press("l");
+  const in2 = await inner();
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press("Enter");
+  const in3 = await inner();
+  const replyOpen = await page.evaluate(() => window.__chat.navItems().at(-1).querySelector(".reply").classList.contains("open"));
+  check(layout, in1 && in1.ring && in2 && in2.ring && in2.cls !== in1.cls + "x" && in3 && in3.exp !== null && replyOpen,
+        `into a message: the button lit, l goes on from it with the focus lost, Enter presses it (${JSON.stringify([in1, in2, in3, replyOpen])})`);
+  await page.keyboard.press("Escape");
   // Writing: nothing lit; written, the latest again.
   await page.evaluate(() => window.__chat.input.focus());
   const unlit = await page.evaluate(() => { const l = document.querySelector(".chat .nav-sel"), r = l && (l.querySelector(":scope > .reply") || l);

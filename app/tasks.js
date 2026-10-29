@@ -55,6 +55,7 @@ function boardBuild() {
     const t = e.target.closest(".tcard, details.tsec > summary");
     const stop = t && (t.matches("summary") ? t : t.querySelector(":scope > .today-go"));
     if (stop) boardSelect(stop);
+    uiInner(board.box, t && t.matches(".tcard") && cardInside(t).includes(e.target) ? e.target : null);
   });
   // A click puts the keys where it was, as on any browser: Safari leaves
   // them where they were (a button clicked isn't focused), even in a box
@@ -213,8 +214,18 @@ function boardKeys(e) {
   // A card is a row: l (→) goes into it, along its buttons; h (←) back,
   // out of it from its first; Esc out at once. Enter presses the one you're on.
   const inside = cardInside(card);
-  const on = inside.indexOf(document.activeElement);
-  const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); uiReveal(b, { scroller: board.scroll }); };
+  // On a button in it, or the focus off it: the one lit in it (uiInner).
+  let on = inside.indexOf(document.activeElement);
+  if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(card, inside));
+  const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); uiInner(board.box, inside.includes(b) ? b : null); uiReveal(b, { scroller: board.scroll }); };
+  // Enter, the focus off the card: the button lit in it pressed, else the card opens
+  // (on a button, a tab, the browser presses that).
+  if (k === "Enter" && !focused && at >= 0 && !document.activeElement.closest("button, a[href], summary, input, textarea, select")) {
+    e.preventDefault();
+    const b = on >= 0 ? inside[on] : stops[at];
+    if (on >= 0) b.focus({ preventScroll: true }); else boardFocus(b);
+    return b.click();
+  }
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
@@ -222,11 +233,7 @@ function boardKeys(e) {
   if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
   // Enter on the card lit, the focus off it: it opens (on a button, a tab,
   // the browser presses that).
-  if (k === "Enter" && !focused && at >= 0 && !document.activeElement.closest("button, a[href], summary, input, textarea, select")) {
-    e.preventDefault();
-    boardFocus(stops[at]);
-    return stops[at].click();
-  }
+
   if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
   else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
   else if (k === "g" || k === "Home") to(0);

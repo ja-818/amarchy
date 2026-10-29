@@ -315,6 +315,16 @@ async function steady(p, where) {
     moved[name] = [lit, await stopAt()];
   }
   await p.evaluate(() => removeEventListener("mousedown", window.__safari, true));
+  // Into a card (l): its button lit whatever the focus does; lost, l goes
+  // on from it, h back.
+  await p.evaluate((id) => { const c = [...document.querySelectorAll(".board-today .tcard")].find((x) => (x.dataset.id || "#task") === id); boardFocus(c.querySelector(".today-go")); }, inCard);
+  await p.keyboard.press("l");
+  const lit1 = await p.evaluate(() => { const l = document.querySelector(".board-today .ui-in"); return l ? [cardInside(l.closest(".tcard")).indexOf(l), getComputedStyle(l).outlineStyle !== "none"] : null; });
+  await p.evaluate(() => document.activeElement.blur());
+  await p.keyboard.press("l");
+  const lit2 = await p.evaluate(() => { const l = document.querySelector(".board-today .ui-in"); return l ? cardInside(l.closest(".tcard")).indexOf(l) : -1; });
+  await p.keyboard.press("Escape");
+  check(where, lit1 && lit1[0] === 0 && lit1[1] && lit2 === 1, `into a card: its button lit, l goes on from it with the focus lost (${JSON.stringify([lit1, lit2])})`);
   check(where, off && Object.values(moved).every(([a, b]) => a === 1 && b === 2), `focus off the board any way: lit stays, j moves on (${JSON.stringify(moved)})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }

@@ -181,6 +181,11 @@ html { touch-action: manipulation; }
 .tbtn:active { background: var(--button-press-bg); }
 .tbtn.primary:active { background: color-mix(in srgb, var(--button-primary-bg) 82%, var(--text)); }
 .tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* The button the keys are on in a card or a message (l / h: uiInner), lit
+   with keys at hand whatever the browser makes of its focus (Safari doesn't
+   ring one focused by the keys); not while you write in the chat. */
+.keyed .ui-in { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.keyed .chat.writing .ui-in { outline: none; }
 .tbtn.primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
 .tbtn.chosen { color: var(--primary-text); background: var(--success); border-color: var(--success); }
 .tbtn.quiet { background: none; border-color: transparent; color: var(--link); }

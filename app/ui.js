@@ -120,6 +120,20 @@ function uiStill() {
 // too, and Safari the whole page (the chat's box and its last messages went
 // off the bottom). block: nearest (moved only as much as it takes), start,
 // end, center.
+// The button the keys are on inside a card or a message (l / h), lit
+// (.ui-in, with keys at hand) whatever the browser makes of its focus:
+// Safari doesn't ring one focused by the keys. el null: none, in box.
+function uiInner(box, el) {
+  for (const x of box.querySelectorAll(".ui-in")) if (x !== el) x.classList.remove("ui-in");
+  if (el) el.classList.add("ui-in");
+}
+
+// The one lit inside box (.ui-in), if it's still there to go to.
+function uiInnerOf(box, among) {
+  const el = box && box.querySelector(".ui-in");
+  return el && among.includes(el) ? el : null;
+}
+
 function uiReveal(el, { scroller = null, block = "nearest", smooth = false, pad = 8 } = {}) {
   let box = scroller || el.parentElement;
   while (!scroller && box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;

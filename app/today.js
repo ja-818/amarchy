@@ -1026,7 +1026,7 @@ function todayPatch(box, nodes) {
 
 // A part as it looks: its markup, but for a spinner's turn.
 function todayShape(el) {
-  return el.outerHTML.replace(/(<span class="spinner spin">)[^<]*/g, "$1");
+  return el.outerHTML.replace(/(<span class="spinner spin">)[^<]*/g, "$1").replace(/ ui-in(?=")/g, "");      // (the button the keys are on in it: not a change)
 }
 
 // Drawn again where it shows: something was done here.
