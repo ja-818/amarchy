@@ -156,7 +156,7 @@ function icon(name, cls) {
 
 // The spinner app.js turns (with the sessions' own): Claude at work.
 function spinner() {
-  return h("span", { class: "spinner", "aria-hidden": "true" }, SPINNER[spin.frame]);
+  return h("span", { class: "spinner spin", "aria-hidden": "true" }, SPINNER[spin.frame]);
 }
 
 // ---- Claude's steps, in words
@@ -204,7 +204,8 @@ function peerName(to) {
 const BRIEF_TOOL_NAME = "mcp__amarchy__update_brief";      // bin/amarchy BRIEF_TOOL: the brief view draws it
 const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet", BRIEF_TOOL_NAME]);
 const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at once when opened again
-const chatsSeen = new Map();      // their id -> {items, start, facts}, the last left last (Chat.close)
+const chatsSeen = new Map();
+const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)      // their id -> {items, start, facts}, the last left last (Chat.close)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
@@ -1084,7 +1085,7 @@ let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: lis
 function chatStreamEarly(id) {
   if (streamEarly && streamEarly.id === id && streamEarly.es.readyState !== EventSource.CLOSED) return;
   chatStreamDrop();
-  const es = new EventSource(`/api/session/${encodeURIComponent(id)}/stream`);
+  const es = new EventSource(streamURL(`/api/session/${encodeURIComponent(id)}/stream`));
   const early = { id, es, got: [], keep: {} };
   for (const type of STREAM_EVENTS) {
     early.keep[type] = (e) => early.got.push([type, e]);
@@ -1111,17 +1112,39 @@ function chatStreamTake(id) {
   return early;
 }
 
-// A finger (or the mouse) down on a chat's card, not on one of its buttons:
-// its stream, now. A scroll that began there lets it go.
+// A finger (or the mouse) still on a chat's card a moment (not on one of its
+// buttons), or lifted from it: its stream, now. A finger that moves (a
+// scroll) or is taken by the browser lets it go: flicking the board
+// doesn't download conversations.
+const EARLY_STILL = 80;      // ms a finger rests before its chat is asked for
+const earlyTouch = { id: null, x: 0, y: 0, timer: 0 };
 addEventListener("pointerdown", (e) => {
+  clearTimeout(earlyTouch.timer);
+  earlyTouch.id = null;
   if (e.button !== 0) return;
   const card = e.target.closest && e.target.closest(".tcard[data-id]");
   if (!card) return;
   const control = e.target.closest("button, a, input, textarea, select, summary");
   if (control && !control.matches(".today-go")) return;      // its own buttons do their own thing
-  chatStreamEarly(card.dataset.id);
+  Object.assign(earlyTouch, { id: card.dataset.id, x: e.clientX, y: e.clientY });
+  earlyTouch.timer = setTimeout(() => chatStreamEarly(earlyTouch.id), EARLY_STILL);
 }, true);
-addEventListener("pointercancel", () => { if (streamEarly && !streamEarly.got.length) chatStreamDrop(); }, true);
+addEventListener("pointermove", (e) => {
+  if (!earlyTouch.id || Math.hypot(e.clientX - earlyTouch.x, e.clientY - earlyTouch.y) < 10) return;
+  clearTimeout(earlyTouch.timer);
+  if (streamEarly && streamEarly.id === earlyTouch.id) chatStreamDrop();
+  earlyTouch.id = null;
+}, { capture: true, passive: true });
+addEventListener("pointerup", () => {
+  clearTimeout(earlyTouch.timer);
+  if (earlyTouch.id) chatStreamEarly(earlyTouch.id);      // a quick tap: its click comes now
+  earlyTouch.id = null;
+}, true);
+addEventListener("pointercancel", () => {
+  clearTimeout(earlyTouch.timer);
+  earlyTouch.id = null;
+  chatStreamDrop();
+}, true);
 
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
@@ -1185,7 +1208,13 @@ class Chat {
     this.scroller = h("div", { class: "scroll chat-scroll" }, this.body(), this.outboxEl);
     this.latest = h("button", { class: "to-latest", type: "button", hidden: true, "aria-label": "Go to the latest",
                                 onclick: () => this.toBottom(true) }, icon("down"));
-    this.scroller.addEventListener("scroll", () => { if (this.atBottom()) this.latest.hidden = true; }, { passive: true });
+    // At the bottom, it stays there as what's under grows (a reply coming in,
+    // a picture loading, the box growing): read once per scroll you make, not
+    // again by everything that draws (atBottom).
+    this.stuck = true;
+    this.scroller.addEventListener("scroll", () => { this.stuck = this.measureBottom(); if (this.stuck) this.latest.hidden = true; }, { passive: true });
+    this.sizes = new ResizeObserver(() => { if (this.stuck) this.scroller.scrollTop = this.scroller.scrollHeight; });
+    for (const el of [this.scroller, this.conv, this.stage, this.outboxEl]) this.sizes.observe(el);
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     // The switch between the two views, over the chat (hidden over the terminal and the other views).
@@ -1197,8 +1226,7 @@ class Chat {
     this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl,
                 h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     // Chosen in Settings (setChatView): every chat open takes it.
-    this.onViewChosen = (e) => this.showMode(e.detail);
-    window.addEventListener("amarchy-chatview", this.onViewChosen);
+    this.onViewChosen = (e) => this.showMode(e.detail);      // (listened for while it's open: open)
     this.listenDrops();
     this.renderDock();
   }
@@ -1303,14 +1331,18 @@ class Chat {
       this.facts = was.facts;
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
+    chatsOpen.set(this.id, this);
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
-    const es = early ? early.es : new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
+    const es = early ? early.es : new EventSource(streamURL(`/api/session/${encodeURIComponent(this.id)}/stream`));
     this.es = es;
+    if (!early || !early.got.length) streamWatch(es, () => { if (this.es === es && !this.closed) this.reopen(); });
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
     window.addEventListener("amarchy-ask", this.onAskEvent);
     this.onNavKey = this.onNavKey || ((e) => this.navKey(e));
     window.addEventListener("keydown", this.onNavKey, true);
+    // (Taken off on close: on again each time it opens, a phone's coming back too.)
+    window.addEventListener("amarchy-chatview", this.onViewChosen);
     this.clearNotes();
     const on = {
       session: (e) => {
@@ -1354,6 +1386,10 @@ class Chat {
     window.removeEventListener("amarchy-chatview", this.onViewChosen);
     clearInterval(this.workingTimer);
     this.workingEl = null;
+    this.closeMenu();       // (its listener on the page held the chat after it closed)
+    this.endStream();
+    this.bgSig = this.pillsSig = null;
+    if (chatsOpen.get(this.id) === this) chatsOpen.delete(this.id);
     this.closed = true;
     this.talk.cancel();
   }
@@ -1541,12 +1577,15 @@ class Chat {
     this.scroller.replaceChildren(...(content ? [content] : [this.body(), this.outboxEl]));
   }
 
-  atBottom() {
+  atBottom() { return this.stuck; }
+
+  measureBottom() {
     const s = this.scroller;
     return s.scrollTop + s.clientHeight >= s.scrollHeight - 120;
   }
 
   toBottom(now) {
+    this.stuck = true;
     const go = () => { this.scroller.scrollTop = this.scroller.scrollHeight; this.latest.hidden = true; };
     if (now) go();
     else requestAnimationFrame(go);
@@ -1582,11 +1621,19 @@ class Chat {
       this.items = [];
       this.itemKeys = new Set();
       this.start = d.start;
+      // What you sent, looked for again in all of it: by its words only (the
+      // conversation came again, its places aren't the ones before).
+      this.claimed = new WeakSet();
+      for (const out of this.outbox) { out.mark = 0; out.redrawn = true; }
     }
     this.keepItems(d.items);
-    if (this.mode === "screen") return this.screenConversation(d);
-    // The page after an update: its scroll, as it was (app.js keptChatScroll).
+    // The page after an update: its scroll, as it was (app.js keptChatScroll), in either view.
     const back = d.reset ? keptChatScroll(this.id) : null;
+    if (this.mode === "screen") {
+      this.screenConversation(d);
+      if (back !== null) requestAnimationFrame(() => { this.scroller.scrollTop = back; this.stuck = this.measureBottom(); this.latest.hidden = this.stuck; });
+      return;
+    }
     const stick = back === null && (d.reset || this.atBottom());
     if (d.reset) {
       this.reset();
@@ -1618,7 +1665,7 @@ class Chat {
     if (back !== null) {
       // Now, and after the frame: a bottom asked for while the conversation was
       // still empty (renderTail's toBottom) lands on the frame, over this.
-      const to = () => { this.scroller.scrollTop = back; this.latest.hidden = this.atBottom(); };
+      const to = () => { this.scroller.scrollTop = back; this.stuck = this.measureBottom(); this.latest.hidden = this.stuck; };
       to();
       requestAnimationFrame(to);
     }
@@ -1630,6 +1677,8 @@ class Chat {
       const res = await fetch(`/api/session/${encodeURIComponent(this.id)}/earlier?before=${this.start}`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "couldn't load it");
+      // Nothing before it after all: the button goes, nothing drawn again.
+      if (!(d.items || []).length) { this.start = d.start || 0; if (this.start <= 0) this.earlierBtn.remove(); return; }
       this.keepItems(d.items, true);
       if (this.mode === "screen") { this.start = d.start; return this.rebuildScreen(true); }
       // Its own folds: what came before doesn't join the ones after it.
@@ -1642,9 +1691,13 @@ class Chat {
       for (const item of d.items) this.add(item, frag, true);
       if (kept.todo) frag.querySelectorAll(".todo").forEach((t) => t.classList.remove("open"));
       Object.assign(this, kept);
-      const before = this.scroller.scrollHeight;
+      // What you're reading stays put: moved down by what came above it, once
+      // (the browser's own scroll anchoring off meanwhile, so it isn't twice).
+      const sc = this.scroller, top = sc.scrollTop, before = sc.scrollHeight;
+      sc.style.overflowAnchor = "none";
       this.earlierBtn.after(frag);
-      this.scroller.scrollTop += this.scroller.scrollHeight - before;
+      sc.scrollTop = top + (sc.scrollHeight - before);
+      sc.style.overflowAnchor = "";
       this.start = d.start;
       if (this.start <= 0) this.earlierBtn.remove();
     } catch (e) {
@@ -2278,10 +2331,14 @@ class Chat {
       const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
       const diffs = steps.flatMap((x) => (x.words.kind === "edit" || x.words.kind === "create" ? stepDiff(x.name, x.input, x.result) || [] : []));
       const title = going && !done.length ? `${steps[0].words.now}…` : steps.length === 1 ? steps[0].words.past : stepsSummary(done.length ? done : steps);
-      const open = h("ol", { class: "act-steps", hidden: true }, ...steps.map((x) => this.activityStep(x)));
+      // Opened, it stays open as the reply is drawn again (its next step came): kept by its first step.
+      const key = `act|${steps[0].id}`;
+      const was = this.isOpen(key, false);
+      const open = h("ol", { class: "act-steps", hidden: !was }, ...steps.map((x) => this.activityStep(x)));
       const one = steps.length === 1 && !steps[0].input.command && !diffs.length && !(steps[0].result && steps[0].result.error);
-      const row = h(one ? "div" : "button", { class: "act-row", ...(one ? {} : { type: "button", "aria-expanded": "false", onclick: () => {
+      const row = h(one ? "div" : "button", { class: "act-row", ...(one ? {} : { type: "button", "aria-expanded": String(was), onclick: () => {
           open.hidden = !open.hidden;
+          this.opened.set(key, !open.hidden);
           row.setAttribute("aria-expanded", String(!open.hidden));
           li.classList.toggle("open", !open.hidden);
         } }) },
@@ -2291,7 +2348,7 @@ class Chat {
           refused ? h("span", { class: "chip" }, `you said no to ${refused}`) : null,
           took >= 5000 ? h("span", { class: "chip took" }, duration(took)) : null].filter(Boolean)),
         one ? null : icon("chevron", "chev"));
-      const li = h("li", { class: `act act-fold${failed ? " failed" : ""}${going ? " going" : ""}` },
+      const li = h("li", { class: `act act-fold${failed ? " failed" : ""}${going ? " going" : ""}${was && !one ? " open" : ""}` },
         h("span", { class: "act-node" }, going ? spinner() : icon(failed ? "failed" : CHAT_ICONS[steps[0].words.kind] && steps.every((x) => x.words.kind === steps[0].words.kind) ? steps[0].words.kind : "check")),
         h("div", { class: "act-main" }, row, open));
       list.append(li);
@@ -2809,9 +2866,7 @@ class Chat {
         const dt = Math.min(100, t - last);
         s.shown = reduce ? s.text.length : Math.min(s.text.length, s.shown + Math.max(1, Math.ceil(dt * Math.max(0.08, behind / 250))));
         last = t;
-        const stick = this.atBottom();
-        this.drawStream();
-        if (stick) this.toBottom(true);
+        this.drawStream();      // (at the bottom, it stays there as it grows: build's ResizeObserver)
       }
       if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
     };
@@ -2824,22 +2879,38 @@ class Chat {
     let shown = s.text.slice(0, s.shown);
     // Half a word, or the ** of bold not closed yet, would flash: up to the last space.
     if (!s.done && s.shown < s.text.length) shown = shown.replace(/\S*$/, "");
+    // The goal block a reply ends with isn't shown (as in the conversation), nor half of one.
+    shown = withoutGoal(shown).replace(/\n?```[ \t]*goal\b[\s\S]*$/, "");
+    // The paragraphs written whole are drawn once; only the one being written
+    // is drawn again each frame (a long reply drew all of it sixty times a second).
+    let cut = -1;
+    for (let i = shown.lastIndexOf("\n\n"); i > 0; i = shown.lastIndexOf("\n\n", i - 1)) {
+      if ((shown.slice(0, i).match(/```/g) || []).length % 2 === 0) { cut = i; break; }      // not inside a code block
+    }
+    const head = cut > 0 ? shown.slice(0, cut) : "";
+    let tail = cut > 0 ? shown.slice(cut + 2) : shown;
     if (!s.done) {
       // (A code fence's ``` aren't inline code's marks.)
       for (const re of [/\*\*/g, /(?<!`)`(?!`)/g]) {
-        const marks = [...shown.matchAll(re)];
+        const marks = [...tail.matchAll(re)];
         if (marks.length % 2) {
           const at = marks[marks.length - 1].index;
-          shown = shown.slice(0, at) + shown.slice(at + marks[marks.length - 1][0].length);
+          tail = tail.slice(0, at) + tail.slice(at + marks[marks.length - 1][0].length);
         }
       }
     }
-    this.streamEl.innerHTML = md(shown || " ");
+    if (!s.parts || !this.streamEl.contains(s.parts[0])) {
+      s.parts = [h("div", { class: "stream-part" }), h("div", { class: "stream-part" })];
+      s.head = null;
+      this.streamEl.replaceChildren(...s.parts);
+    }
+    if (head !== s.head) { s.head = head; s.parts[0].innerHTML = head ? md(head) : ""; }
+    s.parts[1].innerHTML = md(tail || " ");
     this.streamEl.classList.toggle("done", s.done);
     // The caret, at the end of the last line written (in a list's last item, not under it).
     if (!s.done) {
-      const lines = this.streamEl.querySelectorAll("p, li, h2, h3, h4, td, th, pre code");
-      (lines[lines.length - 1] || this.streamEl).append(h("span", { class: "caret", "aria-hidden": "true" }));
+      const lines = s.parts[1].querySelectorAll("p, li, h2, h3, h4, td, th, pre code");
+      (lines[lines.length - 1] || s.parts[1]).append(h("span", { class: "caret", "aria-hidden": "true" }));
     }
   }
 
@@ -2986,6 +3057,10 @@ class Chat {
   renderBackground() {
     const live = this.engine === "chat" ? this.live : null;
     const tasks = live && Array.isArray(live.tasks) ? live.tasks : [];
+    // The same tasks, open or not as they were: left as drawn, its clock going.
+    const sig = JSON.stringify([tasks.map((t) => [t.task_type, t.started, t.description, t.summary, t.command, t.subagent_type]), this.bgOpen === true]);
+    if (sig === this.bgSig && this.bgEl.isConnected) return;
+    this.bgSig = sig;
     clearInterval(this.bgTimer);
     this.bgEl.hidden = !tasks.length;
     if (!tasks.length) return this.bgEl.replaceChildren();
@@ -3098,7 +3173,15 @@ class Chat {
       setTimeout(() => { if (card.isConnected) redraw(); }, 120);
     }
     Promise.resolve().then(fn).then(() => {
-      setTimeout(() => { if (ask) this.answeredAsks.delete(ask); if (card.isConnected || ask) redraw(); }, ASK_HELD);
+      // A while on: should Claude still ask it, the card's back to answer
+      // again; else nothing's drawn again (the box you're writing in stays).
+      setTimeout(() => {
+        if (!ask) { if (card.isConnected) redraw(); return; }
+        this.answeredAsks.delete(ask);
+        const still = (this.live && (this.live.pending || []).some((p) => p.request_id === ask)) ||
+                      (this.screen && this.screen.dialog && this.screen.dialog.id === ask);
+        if (still && !this.closed) redraw();
+      }, ASK_HELD);
     }, (e) => {
       toast(e.message);
       if (ask) this.answeredAsks.delete(ask);
@@ -3446,9 +3529,15 @@ class Chat {
     this.slashCheck();
   }
 
+  // Its height to what's in it: measured again only when what's in it (or
+  // the window) changed, not by every update of Claude's that draws the dock.
   grow() {
+    const now = `${this.input.value}\u0000${window.innerWidth}x${window.innerHeight}`;
+    if (now === this.grownFor) return;
     this.input.style.height = "auto";
-    this.input.style.height = `${Math.min(this.input.scrollHeight, window.innerHeight * 0.4)}px`;
+    const tall = this.input.scrollHeight;
+    this.input.style.height = `${Math.min(tall, window.innerHeight * 0.4)}px`;
+    this.grownFor = this.input.isConnected && tall ? now : null;      // (not in the page yet: measured again once it is)
   }
 
   sendButtons() {
@@ -3513,7 +3602,7 @@ class Chat {
     if (this.opts.onSent) this.opts.onSent("send");
     // One after the other, in the order you sent them.
     const prev = this.sendQueue || Promise.resolve();
-    const done = this.sendQueue = prev.then(() => this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true }));
+    const done = this.sendQueue = prev.catch(() => {}).then(() => this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true }));
     try {
       const r = await done;
       out.sent = true;
@@ -3536,6 +3625,7 @@ class Chat {
   // What was sent is off the box: its words, its draft, the tray's.
   sentOff(tray, keepPictures = false) {
     this.input.value = "";
+    this.takenBack = "";
     store.set(`draft:${this.id}`, "");
     if (!keepPictures) for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
     this.tray = this.tray.filter((a) => !tray.includes(a));
@@ -3555,7 +3645,8 @@ class Chat {
       shots.length ? h("div", { class: "shots" }, ...shots.map((a) => h("span", { class: "shot" }, h("img", { src: a.url, alt: "" })))) : null,
       ...(said.parts || [said.note || said.summary || ""]));
     tray.forEach((a) => { a.taken = false; });
-    const out = { text: text.trim(), key: outKey(message), shots, tray, mark: this.items.length, queued: this.engine === "chat" && this.working(),
+    // (What the conversation had then: after it comes again in full, not one of those.)
+    const out = { text: text.trim(), key: outKey(message), shots, tray, mark: this.items.length, known: new Set(this.itemKeys), queued: this.engine === "chat" && this.working(),
                   sent: false, el: h("div", { class: "msg user sending" }, bubble) };
     this.outbox.push(out);
     if (out.queued) this.renderQueue();
@@ -3570,8 +3661,14 @@ class Chat {
     if (!this.outbox.length) return;
     this.claimed = this.claimed || new WeakSet();
     for (const out of [...this.outbox]) {
-      const mine = this.items.slice(out.mark).filter((it) => it.kind === "user" && !this.claimed.has(it) && !/^\s*</.test(it.text || ""));
-      const it = mine.find((x) => outKey(x.text || "") === out.key) || (out.sent ? mine[0] : null);
+      // Yours since you sent it: a message, or a command (/compact) as the conversation shows it.
+      const since = this.items.slice(out.mark).filter((it) => (it.kind === "user" || it.kind === "command") && !this.claimed.has(it) &&
+        !(out.redrawn && it.key && out.known.has(it.key)));
+      const same = since.find((x) => outKey(x.text || "") === out.key);
+      // Else (taken by the server, its words not the same), the next of yours: not
+      // one Claude Code put in your name (a task's note), nor one from before a redraw.
+      const next = out.sent && !out.redrawn ? since.find((x) => x.kind === "user" && !/^\s*</.test(x.text || "")) : null;
+      const it = same || next;
       if (!it) continue;
       this.claimed.add(it);
       this.outDone(out);
@@ -3591,13 +3688,19 @@ class Chat {
   // there now, and its files and pictures back on the tray.
   takeBack(text, tray) {
     tray.forEach((a) => { a.taken = true; });
+    // Opened again meanwhile: back in that one's box (its draft read already).
+    const open = chatsOpen.get(this.id);
+    if (this.closed && open && open !== this && !open.closed) return open.takeBack(text, tray);
     if (this.closed) {
       const was = store.get(`draft:${this.id}`) || "";
       store.set(`draft:${this.id}`, was ? `${text}\n${was}` : text);
       return;
     }
-    const now = this.input.value.trim();
-    this.input.value = now ? `${text}\n${now}` : text;
+    // Several that didn't go: back in the order they were sent, before what you wrote since.
+    const kept = this.takenBack && this.input.value.startsWith(this.takenBack) ? this.takenBack : "";
+    const rest = this.input.value.slice(kept.length).trim();
+    this.takenBack = kept ? `${kept}\n${text}` : text;
+    this.input.value = rest ? `${this.takenBack}\n${rest}` : this.takenBack;
     this.tray = [...tray, ...this.tray];
     this.drawTray();
     this.typed();
@@ -3776,6 +3879,11 @@ class Chat {
     }
     const s = this.settings();
     const mode = s.mode ? modeWords(s.mode).label : "";
+    // The same as drawn: left as it is (each update of Claude's state would
+    // take the pill from under a finger on its way to tap it).
+    const sig = JSON.stringify([s.model, mode, s.mode, this.engine, this.menu && this.menu.name]);
+    if (sig === this.pillsSig) return;
+    this.pillsSig = sig;
     this.modelPill.replaceChildren(h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
     this.modelPill.title = "Which Claude answers";
     this.modePill.replaceChildren(icon("shield"), h("span", { class: "k" }, mode || "How Claude asks"), icon("chevron", "chev"));

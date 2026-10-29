@@ -17,6 +17,12 @@
 const BUILD = "{{build}}";
 const SHELL = `amarchy-shell-${BUILD}`;
 const PICTURES = "amarchy-pictures";     // not a build's: kept until a newer one of yours replaces it
+// The look's files (its fonts and wallpapers): not a build's either, each
+// address the one file (?v=<its hash>, or named after it). Kept, as iOS
+// soon forgets what a home-screen app fetched: the last few looks worn.
+const LOOKS = "amarchy-looks";
+const LOOK_FILES = /^\/(fonts|cuts|wallpapers|themes|custom|own)\//;
+const LOOKS_KEPT = 24;
 // The page, the look and the icons aren't a build's own address (no ?b=).
 const UNSTAMPED = ["/", "/theme.css", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/screen.css", "/terminal.css", "/secrets.css", "/automations.css", "/ui.css", "/today.css", "/theme.css", "/ui.js", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/automations.js", "/today.js", "/tasks.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
@@ -45,7 +51,7 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
-    for (const key of await caches.keys()) if (key !== SHELL && key !== PICTURES) await caches.delete(key);
+    for (const key of await caches.keys()) if (![SHELL, PICTURES, LOOKS].includes(key)) await caches.delete(key);
     await self.clients.claim();
   })());
 });
@@ -57,6 +63,13 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   const path = url.pathname === "/index.html" ? "/" : url.pathname;
   const picture = path.startsWith("/picture/");     // your assistant's picture
+  // A look's file: as kept, else from the server and kept (not the picker's
+  // thumbnails, which are many).
+  const named = url.searchParams.has("v") || path.startsWith("/cuts/") || path.startsWith("/own/");
+  if (LOOK_FILES.test(path) && named && !/\.thumb\d+\./.test(path)) {
+    e.respondWith(lookFile(e.request, path + url.search));
+    return;
+  }
   if (!FILES.includes(path) && !picture) return;
   // The look (theme.css?v=<its stamp>) is kept as the URL it was asked for:
   // one at a time, the last look you picked.
@@ -113,6 +126,31 @@ self.addEventListener("fetch", (e) => {
     }
   })());
 });
+
+// A look's file: the kept copy, at once; else the server's, kept. A newer
+// one at the same path takes the older's place, and only the last
+// LOOKS_KEPT stay (the oldest go first).
+async function lookFile(request, key) {
+  const cache = await caches.open(LOOKS);
+  const kept = await cache.match(key);
+  if (kept) return kept;
+  const res = await fetch(request);
+  if (res.ok && res.status === 200) {
+    const copy = res.clone();
+    (async () => {
+      await cache.put(key, copy);
+      const path = new URL(key, location.origin).pathname;
+      const keys = await cache.keys();
+      for (const req of keys) {
+        const u = new URL(req.url);
+        if (u.pathname === path && u.pathname + u.search !== key) await cache.delete(req);
+      }
+      const left = await cache.keys();
+      for (const req of left.slice(0, Math.max(0, left.length - LOOKS_KEPT))) await cache.delete(req);
+    })().catch(() => {});
+  }
+  return res;
+}
 
 self.addEventListener("push", (e) => {
   let d = {};

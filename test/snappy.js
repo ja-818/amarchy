@@ -492,6 +492,36 @@ async function server(port) {
   check(where, all.every((r) => r.status === 200) && took < 800, `40 connections at once: all answered in ${took} ms`);
 }
 
+// The list's stream, as far as its first event: {headers, text (decoded),
+// took}, read as it comes (gzipped, each write flushed), the stream left open.
+function firstEvent(port, p, headers = {}) {
+  return new Promise((ok, no) => {
+    const t = Date.now();
+    const req = http.get({ host: "127.0.0.1", port, path: p, headers }, (res) => {
+      const body = res.headers["content-encoding"] === "gzip" ? res.pipe(zlib.createGunzip()) : res;
+      let text = "";
+      body.on("data", (d) => {
+        text += d.toString();
+        if (/event: list\ndata: .*\n\n/.test(text)) { req.destroy(); ok({ headers: res.headers, text, took: Date.now() - t }); }
+      });
+      body.on("error", () => {});
+    });
+    req.on("error", () => {});
+    setTimeout(() => { req.destroy(); no(new Error(`no first event on ${p} in 4 s`)); }, 4000);
+  });
+}
+
+// A stream gzipped as it goes, for who takes it, each event there at once;
+// ?plain=1 not; and back a second after the server restarts.
+async function streamed(port) {
+  const where = "server";
+  const zipped = await firstEvent(port, "/api/events", { "Accept-Encoding": "gzip" });
+  check(where, zipped.headers["content-encoding"] === "gzip" && zipped.text.startsWith("retry: 1000\n\n") && zipped.took < 1500,
+        `the list's stream: gzipped, its first event there at once (${zipped.took} ms), retry: 1000 first`);
+  const plain = await firstEvent(port, "/api/events?plain=1", { "Accept-Encoding": "gzip" });
+  check(where, !plain.headers["content-encoding"] && plain.text.startsWith("retry: 1000\n\n"), "?plain=1: the same, not gzipped");
+}
+
 // What a page did is in the list at once (app_watch is poked), not a second on.
 async function pushed(browser, port) {
   const where = "server";
@@ -531,6 +561,7 @@ async function pushed(browser, port) {
       console.log("server");
       await server(port).catch((e) => check("server", false, `crashed: ${e.stack}`));
       await pushed(browser, port).catch((e) => check("server", false, `crashed: ${e.stack}`));
+      await streamed(port).catch((e) => check("server", false, `crashed: ${e.stack}`));
     }
     for (const layout of ["phone", "wide"]) {
       if (ONLY && ONLY !== layout) continue;

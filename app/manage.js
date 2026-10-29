@@ -401,18 +401,21 @@ function clipText(text) {
 // ---- what needs you: on the tab and the app's icon, as the Ⓐ in your bar
 //
 // The number that need you, in the tab's title and on the icon (the
-// home-screen app's badge, a Mac's Dock); a dot when only finished ones
-// you haven't opened are waiting for you.
+// home-screen app's badge, a Mac's Dock): the home's own ("3 need you",
+// Chats' count: today.js todayCount), as you act there too (todayRedraw);
+// a dot when only finished ones you haven't opened are waiting for you.
 
-let titleWas = "";
+let titleWas = "", badgeWas = null;
 function markWaiting() {
   const v = app.view;
   if (!v) return;
-  // What needs you (bin/amarchy needs_you): a chat asking, or one whose last reply asks you something.
-  const waiting = typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
+  const waiting = typeof todayCount === "function" ? todayCount(v, "chats")
+    : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
   const done = v.sessions.filter((s) => s.status === "idle" && s.unseen).length;
   const t = waiting ? `(${waiting}) Amarchy` : done ? "• Amarchy" : "Amarchy";
   if (t !== titleWas) { document.title = titleWas = t; markIcon(waiting ? "waiting" : done ? "done" : ""); }
+  if (waiting === badgeWas) return;
+  badgeWas = waiting;
   if (navigator.setAppBadge) (waiting ? navigator.setAppBadge(waiting) : navigator.clearAppBadge()).catch(() => {});
 }
 

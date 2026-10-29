@@ -109,6 +109,8 @@ Theme (the app's look, on every phone and browser; Settings, Look in the app):
                                         fetch Omarchy's wallpapers that aren't here yet from its repository on
                                         GitHub (install.sh and the app start it; until one is here, its theme
                                         wears a wallpaper drawn for it)
+  amarchy theme --cut [--in-background] cut the fonts (text and icons apart, with fontTools) and your own
+                                        wallpapers smaller for the app (install.sh and the app start it)
 
 Sound (the chime the app plays in a browser when a session needs you or is done):
   amarchy sound [--show]                print it
@@ -272,6 +274,7 @@ State: ~/.local/state/amarchy/.
 
 import base64
 import calendar
+import copy
 import datetime
 import fcntl
 import fnmatch
@@ -436,16 +439,18 @@ def github_slug(url):
     return m.group(1).lower() if m else None
 
 
-def projects():
-    """Your projects: the git repos in AMARCHY_WORK, with their session counts."""
+def projects(remotes=True):
+    """Your projects: the git repos in AMARCHY_WORK, with their session counts
+    (remotes=False: without their remote, a git each, the list's every few seconds)."""
     counts = {}
     for s in sessions():
         counts[s["repo"]] = counts.get(s["repo"], 0) + 1
     out = []
     for name in repos():
-        remote = sh("git", "remote", "get-url", "origin", cwd=WORK / name).stdout.strip()
-        out.append({"name": name, "path": str(WORK / name), "remote": remote,
-                    "sessions": counts.get(name, 0)})
+        p = {"name": name, "path": str(WORK / name), "sessions": counts.get(name, 0)}
+        if remotes:
+            p["remote"] = sh("git", "remote", "get-url", "origin", cwd=WORK / name).stdout.strip()
+        out.append(p)
     return out
 
 
@@ -481,7 +486,7 @@ def ordered_projects(ps, order=None):
 
 def project_names():
     """Every project there is, in your order: yours, and any a session is in."""
-    names = {p["name"] for p in projects()} | {s["repo"] for s in sessions()}
+    names = {p["name"] for p in projects(remotes=False)} | {s["repo"] for s in sessions()}
     return sorted(names, key=project_rank(project_order()))
 
 
@@ -5912,8 +5917,12 @@ LOOK_FONTS = {"jetbrains-mono": ("JetBrains Mono", "JetBrainsMono Nerd Font"),
 LOOK_FONT = "jetbrains-mono"                # Omarchy's
 LOOK_WALLPAPERS = {"theme": "The theme's", "own": "Your own", "none": "None"}
 LOOK_TERMINAL = {"size": 12.0, "alpha": 0.92}   # the terminals' points and opacity (a theme may say its own)
-LOOK_PHONE = "1290x2796"    # an iPhone's screen in pixels, upright: your own wallpaper is cut to it
+# A phone's screen at 2x, upright (the biggest iPhone's 430x932 points): the
+# wallpapers are cut to it. At 3x (the screen's own pixels) it was three
+# times the bytes, behind the glass for no difference you see.
+LOOK_PHONE = "860x1864"
 LOOK_WIDE = "2880x1800"     # a laptop's screen in pixels: and at most this, for a computer's browser
+LOOK_QUALITY = "60"         # a wallpaper's WebP quality (a thumbnail's: 78)
 OWN_WALLPAPER = re.compile(r"own-([0-9a-f]{12})-(phone|wide)\.(jpg|png|webp)")
 
 
@@ -6037,13 +6046,13 @@ def file_sig(path):
 
 
 def look_own():
-    """Your own wallpaper: {"phone": url, "wide": url}, the picture you
-    chose, or None."""
-    own = look_choice().get("own")
-    if isinstance(own, dict) and all(isinstance(own.get(k), str) and OWN_WALLPAPER.fullmatch(own[k])
-                                     and (APP_PICK / own[k]).is_file() for k in ("phone", "wide")):
-        return {k: f"/own/{own[k]}" for k in ("phone", "wide")}
-    return None
+    """Your own wallpaper: {"phone": url, "wide": url, "thumb": url}, the
+    picture you chose (its cuts, once they're made: look_cut), or None."""
+    own = own_files()
+    if not own:
+        return None
+    urls = {k: cut_url(f, k) or f"/own/{f.name}" for k, f in own.items()}
+    return {**urls, "thumb": cut_url(own["wide"], "thumb") or urls["phone"]}
 
 
 def look_shell(colors, meta):
@@ -6093,31 +6102,62 @@ def custom_themes():
     return out
 
 
-def custom_url(key, f):
-    return f"/custom/{key}/{f}?v={file_sig(CUSTOM / key / f)}"
+def custom_url(key, f, which=None):
+    """A file of a theme of yours; a wallpaper (which: "phone", "wide" or
+    "thumb") as its cut once that's made."""
+    return (which and cut_url(CUSTOM / key / f, which)) or f"/custom/{key}/{f}?v={file_sig(CUSTOM / key / f)}"
 
 
 def look_fonts(custom=None):
-    """Every font to pick, by key: {"name", "nerd", "files": {weight: url}}:
-    amarchy's (fonts/), then those of your own themes ("custom-<theme>")."""
+    """Every font to pick, by key: {"name", "nerd", "files": {weight: url},
+    "parts": {weight: {"text": url, "icons": url or None}} (those cut in two
+    yet, see font_parts)}: amarchy's (fonts/), then those of your own themes
+    ("custom-<theme>")."""
     out = {}
     for key, (name, family) in LOOK_FONTS.items():
-        files = {w: f"/fonts/{key}/{w}.woff2?v={file_sig(FONTS / key / f'{w}.woff2')}"
-                 for w in ("regular", "bold") if (FONTS / key / f"{w}.woff2").is_file()}
-        out[key] = {"name": name, "nerd": bool(family) and bool(files), "files": files}
+        paths = {w: FONTS / key / f"{w}.woff2" for w in ("regular", "bold") if (FONTS / key / f"{w}.woff2").is_file()}
+        files = {w: f"/fonts/{key}/{w}.woff2?v={file_sig(f)}" for w, f in paths.items()}
+        out[key] = {"name": name, "nerd": bool(family) and bool(files), "files": files, "paths": paths}
     for key, t in (custom_themes() if custom is None else custom).items():
         if t["font"]:
             out[f"custom-{key}"] = {"name": t["font"]["family"], "nerd": t["font"]["nerd"],
-                                    "files": {w: custom_url(key, f) for w, f in t["font"]["files"].items()}}
+                                    "files": {w: custom_url(key, f) for w, f in t["font"]["files"].items()},
+                                    "paths": {w: CUSTOM / key / f for w, f in t["font"]["files"].items()}}
+    for font in out.values():
+        parts = {w: font_parts(f) for w, f in font.pop("paths").items()}
+        font["parts"] = {w: p for w, p in parts.items() if p}
     return out
+
+
+_worn = {}
+LOOK_WORN_FOR = 10      # seconds look_worn's answer is kept while none of its folders changed
 
 
 def look_worn():
     """The look the app wears now: the theme picked (else Tokyo Night), its
     font and its wallpaper ("wallpapers": the theme's, your own or none;
     "background": which of Omarchy's is the theme's). "sig" changes with any
-    of it, a wallpaper of Omarchy's coming in too."""
-    choice, themes, custom = look_choice(), look_themes(), custom_themes()
+    of it, a wallpaper of Omarchy's coming in too. The list reads it every
+    pass: it's made again when a folder it's read from changes (a theme
+    picked, one of your own, a wallpaper in, a cut made), else every LOOK_WORN_FOR."""
+    choice = look_choice()
+    stamp = []
+    for f in (APP_PICK / "choice.json", APP_PICK, THEMES, CUSTOM, FONTS, CUTS,
+              WALLS / str(choice.get("theme") or LOOK_DEFAULT), *(sorted(CUSTOM.iterdir()) if CUSTOM.is_dir() else ())):
+        try:
+            stamp.append((str(f), f.stat().st_mtime_ns))
+        except OSError:
+            stamp.append((str(f), None))
+    if _worn.get("stamp") == stamp and time.time() - _worn["at"] < LOOK_WORN_FOR:
+        return copy.deepcopy(_worn["look"])
+    look = look_made(choice)
+    _worn.update(stamp=stamp, at=time.time(), look=copy.deepcopy(look))
+    return look
+
+
+def look_made(choice):
+    """look_worn's answer, made."""
+    themes, custom = look_themes(), custom_themes()
     key = choice.get("theme") if choice.get("theme") in themes or choice.get("theme") in custom else LOOK_DEFAULT
     terminal = dict(LOOK_TERMINAL)
     t = themes.get(key)
@@ -6125,7 +6165,7 @@ def look_worn():
         c = custom[key]
         look = {"name": c["name"], "mode": c["mode"], "vars": c["vars"], "claude": None}
         terminal.update(c["terminal"])
-        wallpaper = {w: custom_url(key, f) for w, f in c["wallpaper"].items()} if c["wallpaper"] else None
+        wallpaper = {w: custom_url(key, f, w) for w, f in c["wallpaper"].items()} if c["wallpaper"] else None
         background = None
     elif not t:     # no themes/ (an amarchy from before them): app.css's own Tokyo Night
         return {"theme": key, "name": "Tokyo Night", "mode": "dark", "vars": {}, "claude": None, "terminal": terminal,
@@ -6152,6 +6192,8 @@ def look_worn():
         wallpaper = look_own()
     elif walls == "none":
         wallpaper = None
+    if wallpaper:
+        wallpaper = {w: wallpaper[w] for w in ("phone", "wide")}
     look.update(theme=key, terminal=terminal, font=font, wallpaper=wallpaper, wallpapers=walls, background=background)
     look["sig"] = hashlib.sha1(json.dumps(look, sort_keys=True).encode()).hexdigest()
     return look
@@ -6166,8 +6208,10 @@ def look_stamp(look=None):
 
 def app_theme_css():
     """/theme.css: the look over app.css's own (Tokyo Night), and the font.
-    Omarchy's wallpapers are fetched first thing, if they aren't here."""
+    Omarchy's wallpapers are fetched first thing, if they aren't here, and
+    the look's files cut smaller (cuts_kick)."""
     walls_kick()
+    cuts_kick()
     look = look_worn()
     out = [f"/* {look['name']}, as picked in the app (amarchy theme). */", ":root {"]
     out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
@@ -6187,13 +6231,22 @@ def app_theme_css():
     out.append(f'  --font: "{family}", ui-monospace, Menlo, monospace;' if files
                else '  --font: ui-monospace, Menlo, "SF Mono", monospace;')
     out.append("}")
+    # One file: the browser makes the bold.
+    weights = {"regular": "100 900" if "bold" not in files else "400", "bold": "700"}
+    text, icons = font_ranges()
     for weight, url in files.items():
         kind = url.partition("?")[0].rsplit(".", 1)[-1]
         fmt = {"ttf": "truetype", "otf": "opentype"}.get(kind, kind)
-        out.append(f'@font-face {{ font-family: "{family}"; src: url("{url}") format("{fmt}"); '
-                   f'font-weight: {700 if weight == "bold" else 400}; font-display: swap; }}')
-    if "regular" in files and "bold" not in files:      # one file: the browser makes the bold
-        out[-1] = out[-1].replace("font-weight: 400", "font-weight: 100 900")
+        face = f'font-family: "{family}"; font-weight: {weights[weight]}; font-display: swap;'
+        parts = look["font"]["parts"].get(weight)
+        if not parts:
+            out.append(f'@font-face {{ {face} src: url("{url}") format("{fmt}"); }}')
+            continue
+        # Cut in two: the text, and the icons, which the browser fetches
+        # only once it draws one (their ranges don't meet).
+        out.append(f'@font-face {{ {face} src: url("{parts["text"]}") format("woff2"); unicode-range: {text}; }}')
+        if parts["icons"]:
+            out.append(f'@font-face {{ {face} src: url("{parts["icons"]}") format("woff2"); unicode-range: {icons}; }}')
     return "\n".join(out) + "\n"
 
 
@@ -6297,6 +6350,7 @@ def look_info(kick=True):
     those that aren't here yet (unless not kick)."""
     if kick:
         walls_kick()
+        cuts_kick()
     look, custom = look_worn(), custom_themes()
     fetch = walls_status()
     choice = look_choice()
@@ -6318,7 +6372,7 @@ def look_info(kick=True):
     themes = [{"key": k, "name": t["name"], "mode": t["mode"], "custom": True,
                "colors": [t["vars"].get(c, "") for c in ("surface", "text", "accent", "red", "yellow", "green", "blue",
                                                          "magenta")],
-               "wallpaper": custom_url(k, t["wallpaper"]["wide"]) if t["wallpaper"] else ""}
+               "wallpaper": custom_url(k, t["wallpaper"]["wide"], "thumb") if t["wallpaper"] else ""}
               for k, t in custom.items()]
     for k, t in look_themes().items():
         bgs = omarchy_backgrounds().get(k) or []
@@ -6335,8 +6389,10 @@ def look_info(kick=True):
     return {"theme": look["theme"], "font": look["font"]["key"], "wallpaper": look["wallpapers"], "look": look_stamp(look),
             "nerd": look["font"]["nerd"], "themes": themes,
             "fonts": [{"key": k, "name": f["name"], "nerd": f["nerd"]} for k, f in look_fonts(custom).items()],
-            "own": own["phone"] if own else "",
-            "fetch": {**{k: fetch[k] for k in ("total", "have", "size", "got", "running", "error")},
+            "own": own["thumb"] if own else "",
+            # (Cutting those here again isn't downloading: not running, for the app.)
+            "fetch": {**{k: fetch[k] for k in ("total", "have", "size", "got", "error")},
+                      "running": fetch["running"] and fetch["have"] < fetch["total"],
                       "failed": len(fetch["errors"]), "why": next(iter(fetch["errors"].values()), None),
                       "source": f"{repo}@{commit[:7]}" if repo else ""}}
 
@@ -6345,10 +6401,11 @@ def wallpaper_cut(path, wide=False, thumb=False, webp=False):
     """A picture as the app shows it: cut to a phone's screen (its middle),
     or the whole of it at most a laptop's screen in size (wide), or a little
     one for the picker (thumb, its middle at WALL_THUMB), as a JPEG (or a
-    WebP, smaller, if webp and it can). With ImageMagick, else ffmpeg;
-    without either, the picture as it is if it isn't too big. None if it
-    can't be read."""
+    WebP, smaller, if webp and it can: at LOOK_QUALITY). With ImageMagick,
+    else ffmpeg; without either, the picture as it is if it isn't too big.
+    None if it can't be read."""
     box = WALL_THUMB if thumb else LOOK_PHONE
+    quality = "78" if thumb else LOOK_QUALITY
     cut = ["-resize", LOOK_WIDE + ">"] if wide else ["-resize", box + "^", "-gravity", "center", "-extent", box]
     pw, ph = box.split("x")
     dw, dh = LOOK_WIDE.split("x")
@@ -6358,10 +6415,10 @@ def wallpaper_cut(path, wide=False, thumb=False, webp=False):
         for kind in ("webp", "jpg") if webp else ("jpg",):
             out = Path(tmp) / f"wallpaper.{kind}"
             if shutil.which("magick"):
-                r = sh("magick", f"{path}[0]", *cut, "-quality", "78" if kind == "webp" else "82", "-strip", str(out))
+                r = sh("magick", f"{path}[0]", *cut, "-quality", quality if kind == "webp" else "82", "-strip", str(out))
             elif shutil.which("ffmpeg"):
                 r = sh("ffmpeg", "-loglevel", "error", "-y", "-i", str(path), "-frames:v", "1", "-vf", scale,
-                       *(("-c:v", "libwebp", "-quality", "78") if kind == "webp" else ("-q:v", "3")), str(out))
+                       *(("-c:v", "libwebp", "-quality", quality) if kind == "webp" else ("-q:v", "3")), str(out))
             else:
                 try:
                     raw = Path(path).read_bytes() if os.path.getsize(path) <= APP_WALLPAPER_MAX else b""
@@ -6377,15 +6434,321 @@ def wallpaper_cut(path, wide=False, thumb=False, webp=False):
         return None
 
 
+def wallpaper_small(path, which):
+    """A wallpaper cut for the app (which: "phone", "wide" or "thumb", see
+    wallpaper_cut), a WebP if it can: or the picture itself, when the cut
+    isn't smaller. None if it can't be read."""
+    raw = wallpaper_cut(path, wide=which == "wide", thumb=which == "thumb", webp=True)
+    try:
+        if raw and os.path.getsize(path) <= len(raw):
+            whole = Path(path).read_bytes()
+            return whole if image_kind(whole) else raw
+    except OSError:
+        pass
+    return raw
+
+
+# The look's own files cut smaller for the app, in CUTS: your own wallpaper
+# and your themes' (a phone's cut, a computer's and the picker's thumbnail,
+# as Omarchy's get theirs in WALLS), and each font in two (font_parts): its
+# text, a twentieth of it, and its Nerd Font icons, which the browser
+# fetches only once it draws one. Each is named after its file's hash, so a
+# new file is cut again. They're cut in the background (amarchy theme
+# --cut: install.sh and the app start it), and until one is, the app is
+# sent the file itself. The fonts are cut with fontTools: this Python's, or
+# one uv makes (font_python); without either they're sent whole.
+
+CUTS = STATE / "cuts"
+CUTS_LOCK = CUTS / "cut.lock"               # held by the cutting under way; gone, it stops
+CUTS_FAILED = CUTS / "failed.json"          # {cut: why} of those that couldn't be: not tried again
+CUTS_UNIT = "amarchy-cuts"                  # the cutting, in the background (systemctl --user status ...)
+CUTS_RETRY = 600            # seconds before the app starts again what didn't cut it all
+FONT_CUTS = "1"             # how the fonts are cut: another number, and they're cut again
+# The private use areas: a Nerd Font's icons there, its text the rest.
+FONT_ICONS = ((0xE000, 0xF8FF), (0xF0000, 0x10FFFF))
+CUT_NAME = re.compile(r"[0-9a-f]{12}\.(?:(?:phone|wide|thumb)\d+\.(?:webp|jpg|png)|[0-9a-f]{12}\.(?:text|icons)\.woff2)")
+
+_app_icons = {}
+
+
+def app_icons():
+    """The Nerd Font icons the app draws (app.js's NERD), as code points: a
+    font's text has them too, so the list never waits on its icons."""
+    f = APP_PAGES / "app.js"
+    try:
+        stamp = f.stat().st_mtime_ns
+        if _app_icons.get("stamp") != stamp:
+            points = {int(c, 16) for c in re.findall(r"\\u\{([0-9A-Fa-f]{4,6})\}", f.read_text())}
+            _app_icons.update(stamp=stamp, found=frozenset(c for c in points
+                                                           if any(lo <= c <= hi for lo, hi in FONT_ICONS)))
+    except OSError:
+        return frozenset()
+    return _app_icons["found"]
+
+
+def font_ranges():
+    """(text, icons): the unicode-range of a font's two parts, as CSS. They
+    don't meet, so a character is the one part's or the other's: the icons
+    are the private use areas, but for the app's own."""
+    icons = []
+    for lo, hi in FONT_ICONS:
+        for c in sorted(c for c in app_icons() if lo <= c <= hi):
+            if c > lo:
+                icons.append((lo, c - 1))
+            lo = c + 1
+        if lo <= hi:
+            icons.append((lo, hi))
+    text, at = [], 0
+    for lo, hi in icons:
+        if lo > at:
+            text.append((at, lo - 1))
+        at = hi + 1
+    if at <= 0x10FFFF:
+        text.append((at, 0x10FFFF))
+    return tuple(", ".join(f"U+{lo:X}" if lo == hi else f"U+{lo:X}-{hi:X}" for lo, hi in r) for r in (text, icons))
+
+
+def cut_key(path, which):
+    """What a file's cut is named after: its hash, and how it's cut (which:
+    "phone", "wide", "thumb", or "font"). "" for a file that isn't here."""
+    sig = file_sig(path)
+    if not sig:
+        return ""
+    if which == "font":
+        return f"{sig}.{hashlib.sha1(f'{FONT_CUTS} {sorted(app_icons())}'.encode()).hexdigest()[:12]}"
+    return f"{sig}.{which}{WALL_CUTS}"
+
+
+def cut_file(path, which):
+    """A picture's cut (which: "phone", "wide", "thumb") if it's been made, else None."""
+    key = cut_key(path, which)
+    return next((f for f in (CUTS / f"{key}.{kind}" for kind in ("webp", "jpg", "png")) if key and f.is_file()), None)
+
+
+def cut_url(path, which):
+    f = cut_file(path, which)
+    return f"/cuts/{f.name}" if f else None
+
+
+def font_parts(path):
+    """A font cut in two, if it's been: {"text": url, "icons": url, or None
+    for a font without icons}; else None."""
+    key = cut_key(path, "font")
+    if not key or not (CUTS / f"{key}.text.woff2").is_file():
+        return None
+    return {"text": f"/cuts/{key}.text.woff2",
+            "icons": f"/cuts/{key}.icons.woff2" if (CUTS / f"{key}.icons.woff2").is_file() else None}
+
+
+def own_files():
+    """Your own wallpaper's files: {"phone": path, "wide": path}, or None."""
+    own = look_choice().get("own")
+    if isinstance(own, dict) and all(isinstance(own.get(k), str) and OWN_WALLPAPER.fullmatch(own[k])
+                                     and (APP_PICK / own[k]).is_file() for k in ("phone", "wide")):
+        return {k: APP_PICK / own[k] for k in ("phone", "wide")}
+    return None
+
+
+_font_python = {}
+
+
+def font_python():
+    """How to run a Python with fontTools (and brotli, for WOFF2), which cuts
+    the fonts: this one if it has them, else one uv makes; None without
+    either."""
+    import importlib.util
+    if "found" not in _font_python:
+        uv = shutil.which("uv") or next((str(f) for f in (HOME / ".local/bin/uv", HOME / ".cargo/bin/uv")
+                                         if f.is_file()), None)
+        _font_python["found"] = (
+            [sys.executable] if all(importlib.util.find_spec(m) for m in ("fontTools", "brotli")) else
+            [uv, "run", "--quiet", "--no-project", "--with", "fonttools", "--with", "brotli", "python3"] if uv else None)
+    return _font_python["found"]
+
+
+def cuts_wanted():
+    """The look's files to cut: [(path, which)], which "phone", "wide",
+    "thumb" (a picture) or "font", those of the look worn first."""
+    choice, custom = look_choice(), custom_themes()
+    fonts = {k: [FONTS / k / f"{w}.woff2" for w in ("regular", "bold")] for k in LOOK_FONTS}
+    fonts.update({f"custom-{k}": [CUSTOM / k / f for f in t["font"]["files"].values()]
+                  for k, t in custom.items() if t["font"]})
+    worn = choice.get("font") if choice.get("font") in fonts else LOOK_FONT
+    out = [(k == worn, f, "font") for k, files in fonts.items() for f in files if f.is_file()]
+    walls = choice.get("wallpaper") if choice.get("wallpaper") in LOOK_WALLPAPERS else "theme"
+    own = own_files()
+    if own:
+        out += [(walls == "own", own["phone"], "phone"), (walls == "own", own["wide"], "wide"),
+                (False, own["wide"], "thumb")]
+    for k, t in custom.items():
+        if t["wallpaper"]:
+            on = walls == "theme" and choice.get("theme") == k
+            phone, wide = (CUSTOM / k / t["wallpaper"][w] for w in ("phone", "wide"))
+            out += [(on, phone, "phone"), (on, wide, "wide"), (False, wide, "thumb")]
+    return [(f, which) for on, f, which in sorted(out, key=lambda o: not o[0])]
+
+
+def cuts_failed():
+    try:
+        failed = json.loads(CUTS_FAILED.read_text())
+    except (OSError, ValueError):
+        return {}
+    return failed if isinstance(failed, dict) else {}
+
+
+def cuts_todo(fonts=None):
+    """What of cuts_wanted() isn't cut yet and can be (fonts: whether the
+    fonts can be, font_python() by default), and hasn't failed."""
+    failed = cuts_failed()
+    pictures = bool(shutil.which("magick") or shutil.which("ffmpeg"))
+    fonts = bool(font_python()) if fonts is None else fonts
+    return [(f, which) for f, which in cuts_wanted()
+            if (fonts if which == "font" else pictures) and cut_key(f, which)
+            and cut_key(f, which) not in failed and not (font_parts(f) if which == "font" else cut_file(f, which))]
+
+
+def font_cut(path):
+    """A font in two, as WOFF2: (its text, its icons or None), with fontTools."""
+    import io
+    import logging
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+    logging.getLogger("fontTools").setLevel(logging.ERROR)
+    cmap = set(TTFont(str(path)).getBestCmap() or {})
+    icons = {c for c in cmap if any(lo <= c <= hi for lo, hi in FONT_ICONS)} - app_icons()
+    out = []
+    for unicodes in (cmap - icons, icons):
+        if not unicodes:
+            out.append(None)
+            continue
+        # As it is but for the characters: its ligatures, names and hinting too.
+        options = subset.Options(layout_features=["*"], name_IDs=["*"], name_languages=["*"], notdef_outline=True,
+                                 flavor="woff2")
+        font = subset.load_font(str(path), options)
+        cutter = subset.Subsetter(options)
+        cutter.populate(unicodes=unicodes)
+        cutter.subset(font)
+        buf = io.BytesIO()
+        subset.save_font(font, buf, options)
+        out.append(buf.getvalue())
+    if not out[0]:
+        raise ValueError("it has no text")
+    return out[0], out[1]
+
+
+def cuts_make(quiet=False):
+    """Cut the look's files that aren't yet (amarchy theme --cut), then let
+    go of those no longer wanted. The fonts, by a Python with fontTools
+    (font_python) if this one hasn't it. None, or what went wrong."""
+    import importlib.util
+    CUTS.mkdir(parents=True, exist_ok=True)
+    lock = open(CUTS_LOCK, "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return "the look's files are being cut already"
+    fonts = all(importlib.util.find_spec(m) for m in ("fontTools", "brotli"))
+    made = 0
+    try:
+        for f, which in cuts_todo(fonts=fonts):
+            if not CUTS_LOCK.exists():      # gone (--uninstall, a test's home): stop
+                break
+            key, failed = cut_key(f, which), cuts_failed()
+            try:
+                if which == "font":
+                    text, icons = font_cut(f)
+                    if icons:
+                        write_file(CUTS / f"{key}.icons.woff2", icons)
+                    write_file(CUTS / f"{key}.text.woff2", text)      # the last: it says the cut's made
+                else:
+                    raw = wallpaper_small(f, which)
+                    if not raw:
+                        raise ValueError("it doesn't read as a picture")
+                    write_file(CUTS / f"{key}.{image_kind(raw)}", raw)
+                made += 1
+            except Exception as e:      # a file fontTools or ffmpeg can't read, however it says so
+                failed[key] = str(e) or type(e).__name__
+                write_file(CUTS_FAILED, json.dumps(failed) + "\n")
+        # What's no longer wanted (another picture of yours, a theme gone, an older cut) goes.
+        keep = {cut_key(f, which) + "." for f, which in cuts_wanted()} - {"."}
+        for c in CUTS.iterdir() if CUTS_LOCK.exists() else ():
+            if CUT_NAME.fullmatch(c.name) and not c.name.startswith(tuple(keep)):
+                c.unlink(missing_ok=True)
+        failed = cuts_failed()
+        if any(k + "." not in keep for k in failed):
+            write_file(CUTS_FAILED, json.dumps({k: v for k, v in failed.items() if k + "." in keep}) + "\n")
+    finally:
+        lock.close()
+    if not quiet and made:
+        print(f"Cut {made} of the look's files for the app.", file=sys.stderr)
+    # The fonts by a Python that has fontTools, once the pictures are cut.
+    python = font_python()
+    if not fonts and python and python[0] != sys.executable and not os.environ.get("AMARCHY_CUT_FONTS") \
+            and CUTS_LOCK.exists() and cuts_todo(fonts=True):
+        try:
+            r = subprocess.run([*python, SELF, "theme", "--cut", *(["--quiet"] if quiet else [])], timeout=1800,
+                               env={**clean_env(), "AMARCHY_CUT_FONTS": "1"}, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"couldn't cut the fonts ({e})"
+        if r.returncode:
+            return "couldn't cut the fonts (uv couldn't give a Python with fontTools)"
+    return None
+
+
+_cuts_kicked = {"at": 0.0, "todo": set()}
+
+
+def cuts_running():
+    try:
+        with open(CUTS_LOCK, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return CUTS_LOCK.exists()
+    return False
+
+
+def cuts_kick(force=False):
+    """Start cutting the look's files in the background, if some aren't and
+    it isn't under way: by itself (not force) again only once CUTS_RETRY has
+    gone by, or there's a new file to cut. True if it started."""
+    todo = {cut_key(f, which) for f, which in cuts_todo()}
+    if not todo or cuts_running() or (not force and todo <= _cuts_kicked["todo"]
+                                      and time.time() - _cuts_kicked["at"] < CUTS_RETRY):
+        return False
+    _cuts_kicked.update(at=time.time(), todo=todo)
+    if not apart(CUTS_UNIT, [sys.executable, SELF, "theme", "--cut", "--quiet"]):
+        _cuts_kicked["at"] = 0.0
+        return False
+    return True
+
+
+def apart(unit, argv):
+    """Run a command in the background, in a unit of its own where there's
+    systemd (so restarting the app, which started it, doesn't stop it).
+    Whether it started."""
+    if shutil.which("systemd-run"):
+        env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
+        if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}-{int(time.time())}",
+              *env, *argv).returncode == 0:
+            return True
+    try:
+        detach(argv)
+    except OSError:
+        return False
+    return True
+
+
 # Omarchy's own wallpapers for each theme, as themes/backgrounds.json lists
 # them (themes/<name>/backgrounds/ in basecamp/omarchy, at one commit). They
 # come without a word on who made them or under what license, so amarchy
 # doesn't carry them: each host fetches them from Omarchy's repository itself
 # (amarchy theme --refresh-wallpapers; install.sh starts it, and so does the
 # app when one is missing), checks each against its git hash and keeps it in
-# WALLS, with a phone's cut of it and a thumbnail for the picker. The wide
-# layout wears the original. Until one is here, or if it can't be fetched,
-# its theme wears the wallpaper drawn for it (themes/<name>/wallpaper*.svg).
+# WALLS, with a phone's cut of it, a computer's (the whole of it, at most a
+# laptop's screen) and a thumbnail for the picker. Until one is here, or if
+# it can't be fetched, its theme wears the wallpaper drawn for it
+# (themes/<name>/wallpaper*.svg).
 
 BACKGROUNDS = THEMES / "backgrounds.json"
 WALLS = STATE / "wallpapers"                # <theme>/<file> and its cuts, status.json (the last fetch)
@@ -6393,7 +6756,7 @@ WALLS_STATUS = WALLS / "status.json"
 WALLS_LOCK = WALLS / "fetch.lock"           # held by the fetch under way; gone (--uninstall), it stops
 WALLS_UNIT = "amarchy-wallpapers"           # the fetch, run in the background (systemctl --user status ...)
 WALL_THUMB = "480x300"      # the picker's thumbnails, in pixels (16:10)
-WALL_CUTS = "1"             # how they're cut: another number, and they're cut again
+WALL_CUTS = "2"             # how they're cut: another number, and they're cut again
 WALLS_RETRY = 600           # seconds after a fetch that failed before the app tries again by itself
 WALL_FILE = re.compile(r"[\w-]+\.(?:jpe?g|png|webp)")
 
@@ -6442,13 +6805,21 @@ def walls_source():
     return _backgrounds["source"]
 
 
-def wall_cut(theme, bg, which):
-    """A wallpaper's cut ("phone" or "thumb") if it's been made, else None."""
-    for kind in ("webp", "jpg"):
+def wall_cut(theme, bg, which, older=True):
+    """A wallpaper's cut ("phone", "wide" or "thumb") if it's been made; else
+    (older) one cut before WALL_CUTS last changed, worn till it's cut again;
+    else None."""
+    for kind in ("webp", "jpg", "png"):
         f = WALLS / theme / f"{bg['key']}.{which}{WALL_CUTS}.{kind}"
         if f.is_file():
             return f
-    return None
+    if not older:
+        return None
+    cut = re.compile(re.escape(bg["key"]) + rf"\.{which}\d+\.(?:webp|jpg|png)")
+    try:
+        return max((f for f in (WALLS / theme).iterdir() if cut.fullmatch(f.name)), default=None)
+    except OSError:
+        return None
 
 
 def wall_here(theme, bg):
@@ -6475,19 +6846,18 @@ def wall_pick(theme, choice=None):
 
 def wall_look(theme, bg):
     """{"phone": url, "wide": url} of one of Omarchy's wallpapers, if it's
-    here: the phone's cut (the original until it's made) and the original."""
+    here: its cuts (the original until they're made)."""
     if not bg or not wall_here(theme, bg):
         return None
     original = WALLS / theme / bg["file"]
-    return {"phone": wall_url(theme, bg, wall_cut(theme, bg, "phone") or original),
-            "wide": wall_url(theme, bg, original)}
+    return {w: wall_url(theme, bg, wall_cut(theme, bg, w) or original) for w in ("phone", "wide")}
 
 
 def wall_served(theme, name):
     """The file of WALLS that /wallpapers/<theme>/<name> is, if it's one of
     Omarchy's wallpapers or their cuts: else None."""
     for bg in omarchy_backgrounds().get(theme) or ():
-        if name == bg["file"] or re.fullmatch(re.escape(bg["key"]) + rf"\.(phone|thumb){WALL_CUTS}\.(webp|jpg)", name):
+        if name == bg["file"] or re.fullmatch(re.escape(bg["key"]) + r"\.(phone|wide|thumb)\d+\.(webp|jpg|png)", name):
             f = WALLS / theme / name
             return f if f.is_file() else None
     return None
@@ -6566,15 +6936,22 @@ def walls_fetch(quiet=False):
                   f"{s['size'] // 1_000_000} MB)", end="\n" if final else "", file=sys.stderr, flush=True)
 
     def cut(theme, bg):
-        for which in ("phone", "thumb"):
-            if cutter and not wall_cut(theme, bg, which):
-                raw = wallpaper_cut(WALLS / theme / bg["file"], thumb=which == "thumb", webp=True)
+        for which in ("phone", "wide", "thumb"):
+            if cutter and not wall_cut(theme, bg, which, older=False):
+                raw = wallpaper_small(WALLS / theme / bg["file"], which)
                 if raw:
-                    write_file(WALLS / theme / f"{bg['key']}.{which}{WALL_CUTS}.{image_kind(raw)}", raw)
+                    name = f"{bg['key']}.{which}{WALL_CUTS}.{image_kind(raw)}"
+                    write_file(WALLS / theme / name, raw)
+                    # The one cut before goes, now that this one's here.
+                    older = re.compile(re.escape(bg["key"]) + rf"\.{which}\d+\.(?:webp|jpg|png)")
+                    for f in (WALLS / theme).iterdir():
+                        if older.fullmatch(f.name) and f.name != name:
+                            f.unlink(missing_ok=True)
 
     try:
         note()
-        # What's no longer listed (a newer Omarchy, a theme gone, an older cut) goes.
+        # What's no longer listed (a newer Omarchy, a theme gone) goes; an
+        # older cut once it's cut again (worn till then).
         for d in WALLS.iterdir():
             if not d.is_dir():
                 continue
@@ -6584,15 +6961,18 @@ def walls_fetch(quiet=False):
             # One that isn't whole (not the size listed) is fetched again, and cut again.
             whole = [b for b in bgs[d.name] if wall_here(d.name, b)]
             keep = {b["file"] for b in whole}
-            keep |= {f"{b['key']}.{w}{WALL_CUTS}.{k}" for b in whole for w in ("phone", "thumb") for k in ("webp", "jpg")}
+            cuts = [re.compile(re.escape(b["key"]) + r"\.(?:phone|wide|thumb)\d+\.(?:webp|jpg|png)") for b in whole]
             for f in d.iterdir():
-                if f.name not in keep:
+                if f.name not in keep and not any(c.fullmatch(f.name) for c in cuts):
                     f.unlink(missing_ok=True)
-        # Those here already but not cut yet (no ffmpeg then, say).
-        for theme, walls in bgs.items():
-            for bg in walls:
-                if wall_here(theme, bg):
-                    cut(theme, bg)
+        # Those here already but not cut yet (no ffmpeg then, say, or cut
+        # another way before): the one worn first.
+        choice = look_choice()
+        worn = choice.get("theme") if choice.get("theme") in bgs else LOOK_DEFAULT
+        here = [(t, b) for t, walls in bgs.items() for b in walls if wall_here(t, b)]
+        for theme, bg in sorted(here, key=lambda tb: (tb[0] != worn,
+                                                      tb[1]["key"] != (wall_pick(tb[0], choice) or {}).get("key"))):
+            cut(theme, bg)
         unreachable = 0
         while WALLS_LOCK.exists():
             choice = look_choice()
@@ -6663,29 +7043,31 @@ def walls_fetch(quiet=False):
 
 def walls_kick(force=False):
     """Start fetching Omarchy's wallpapers in the background, if some aren't
-    here and none is under way: by itself (not force) only when the last
+    here (or aren't cut as WALL_CUTS says yet, once a while after the last
+    fetch) and none is under way: by itself (not force) only when the last
     fetch didn't fail a moment ago (WALLS_RETRY). True if it started one."""
     if not omarchy_backgrounds():
         return False
     s = walls_status()
     failed = (s["errors"] or s["error"]) and not s["stopped"]
-    if s["running"] or (not force and (s["have"] == s["total"] or time.time() - _walls_kicked["at"] < 30
+    done = s["have"] == s["total"] and (time.time() - s["at"] < WALLS_RETRY or not walls_uncut())
+    if s["running"] or (not force and (done or time.time() - _walls_kicked["at"] < 30
                                        or failed and time.time() - s["at"] < WALLS_RETRY)):
         return False
     _walls_kicked["at"] = time.time()
-    argv = [sys.executable, SELF, "theme", "--refresh-wallpapers", "--quiet"]
-    # Its own unit, so restarting the app (which started it) doesn't stop it.
-    if shutil.which("systemd-run"):
-        env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
-        if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={WALLS_UNIT}-{int(time.time())}",
-              *env, *argv).returncode == 0:
-            return True
-    try:
-        detach(argv)
-    except OSError:
+    if not apart(WALLS_UNIT, [sys.executable, SELF, "theme", "--refresh-wallpapers", "--quiet"]):
         _walls_kicked["at"] = 0.0
         return False
     return True
+
+
+def walls_uncut():
+    """Whether one of Omarchy's wallpapers here isn't cut as WALL_CUTS says
+    yet, and could be."""
+    if not (shutil.which("magick") or shutil.which("ffmpeg")):
+        return False
+    return any(wall_here(t, b) and not wall_cut(t, b, w, older=False)
+               for t, walls in omarchy_backgrounds().items() for b in walls for w in ("phone", "wide", "thumb"))
 
 
 def look_find(name, table):
@@ -6722,7 +7104,7 @@ def walls_said(fetch):
 def cmd_theme(args):
     """`amarchy theme`: the app's theme, font and wallpaper."""
     theme = font = wallpaper = wall_arg = None
-    own, listing, as_json, refresh, later, quiet = None, False, False, False, False, False
+    own, listing, as_json, refresh, later, quiet, cut = None, False, False, False, False, False, False
     it = iter(args)
     for a in it:
         if a in ("--font", "--wallpaper"):
@@ -6744,6 +7126,8 @@ def cmd_theme(args):
             as_json = True
         elif a == "--refresh-wallpapers":
             refresh = True
+        elif a == "--cut":
+            cut = True
         elif a == "--in-background":
             later = True
         elif a == "--quiet":
@@ -6770,6 +7154,15 @@ def cmd_theme(args):
         if not quiet:
             print(walls_said(walls_status()))
         return 0
+    if cut:
+        if later:
+            started = cuts_kick(force=True)
+            if not quiet:
+                print("Cutting the look's files for the app in the background." if started else
+                      "The look's files are cut for the app (or being cut).")
+            return 0
+        why = cuts_make(quiet=quiet)
+        return fail(why) if why else 0
     background = None
     if wall_arg is not None:
         target = theme if theme is not None else look_worn()["theme"]
@@ -7270,23 +7663,59 @@ def parse_diff(text, total=0):
     return files
 
 
+CHANGES_SEEN = {}        # session id -> (changes_sig, app_changes's answer for it), the last one
+
+
+def changes_sig(path, base, mb, new):
+    """What app_changes's answer is made of, cheaply: where the branch left
+    its base, HEAD, which files differ from it (git diff --raw: a file changed
+    again since shows the same, so its size and time too), the new files'."""
+    sig = hashlib.sha1(f"{base}\0{mb}\0".encode())
+    sig.update(sh("git", "rev-parse", "HEAD", cwd=path).stdout.encode())
+    raw = sh("git", "-c", "core.quotepath=off", "diff", "--raw", "-z", "--no-renames", mb, "--", cwd=path).stdout
+    sig.update(raw.encode(errors="replace"))
+    for name in [n for n in raw.split("\0") if n and not n.startswith(":")] + new:
+        try:
+            st_ = (path / name).stat()
+            sig.update(f"{name}\0{st_.st_size}\0{st_.st_mtime_ns}\0".encode())
+        except OSError:
+            sig.update(f"{name}\0gone\0".encode())
+    return sig.hexdigest()
+
+
 def app_changes(s):
     """Everything a session changed, for the side panel's Changes: its
     worktree (committed or not, new files too) against where its branch left
-    its base, file by file; and its own commits."""
+    its base, file by file; and its own commits. The same answer as last
+    time, while nothing it's made of changed (changes_sig), isn't made again:
+    the side panel asks every few seconds while Claude works."""
     path = Path(s["path"])
     if not path.is_dir():
         return {"error": "Its worktree isn't there"}
     base, mb = git_base(s)
     if not mb:
         return {"base": base, "files": [], "commits": [], "add": 0, "del": 0, "sig": ""}
+    # Files git doesn't know yet: new, shown whole (if text, and not huge).
+    new = [n for n in sh("git", "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
+                         cwd=path).stdout.split("\0") if n]
+    cheap = changes_sig(path, base, mb, new)
+    seen = CHANGES_SEEN.get(s["id"])
+    if seen and seen[0] == cheap:
+        return seen[1]
+    out = changes_made(path, base, mb, new)
+    CHANGES_SEEN.pop(s["id"], None)
+    CHANGES_SEEN[s["id"]] = (cheap, out)
+    while len(CHANGES_SEEN) > 12:       # the chats looked at last: a big diff each is plenty
+        CHANGES_SEEN.pop(next(iter(CHANGES_SEEN)))
+    return out
+
+
+def changes_made(path, base, mb, new):
+    """app_changes's answer, made: the diff, the new files, the commits."""
     diff = sh("git", "-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff", "-M", "-U3", mb, "--",
               cwd=path).stdout
     files = parse_diff(diff)
     total = sum(len(h["lines"]) for f in files for h in f["hunks"])
-    # Files git doesn't know yet: new, shown whole (if text, and not huge).
-    new = [n for n in sh("git", "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
-                         cwd=path).stdout.split("\0") if n]
     sig = hashlib.sha1(diff.encode(errors="replace"))
     for name in new[:CHANGES_FILES]:
         p = path / name
@@ -7398,6 +7827,18 @@ def app_screen(s):
     dialog = None if exited or asleep or waking or engine(s) != "chat" else chat_dialog(s)
     return {"live": True, "text": "\n".join(lines), "exited": exited, "asleep": asleep, "waking": waking,
             "dialog": dialog}
+
+
+def chat_screen(s):
+    """app_screen for a session on the chat engine whose broker is running,
+    without reading its pane: Claude is there (live), it hasn't exited, and
+    what it asks is live.json's. None when its broker isn't running."""
+    live = agent_live(s["id"])
+    if not agent_up(s["id"], live):
+        return None
+    asleep, waking = asleep_since(s["id"]) is not None, waking_now(s["id"])
+    return {"live": True, "text": "", "exited": False, "asleep": asleep, "waking": waking,
+            "dialog": None if asleep or waking else chat_dialog(s, live)}
 
 
 # ---- what a session on the chat engine asks, as today's cards
@@ -7602,7 +8043,7 @@ def chat_attach(s, images):
 
 def chat_live(live):
     """live.json as the app gets it (the stream's live event)."""
-    return {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket")} if live else None
+    return {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket", "updated")} if live else None
 
 
 # ---- the composer (phase C2 of docs/plan-chat-app.md): the / menu, the
@@ -8655,7 +9096,13 @@ TTY_PING = 25                                   # seconds between pings on a ter
 
 def peer_uid(sock):
     """Who's at the other end of a connection to the app's server on
-    localhost: the uid owning that socket (from /proc/net/tcp), or None."""
+    localhost: the uid owning that socket, or None. The kernel's asked for
+    that one socket (sock_diag_uid); /proc/net/tcp, every socket there is
+    (a few ms on each request), if it can't say."""
+    try:
+        return sock_diag_uid(sock)
+    except (OSError, ValueError, struct.error):
+        pass
     try:
         port = sock.getpeername()[1]
         mine = sock.getsockname()[1]
@@ -8671,6 +9118,34 @@ def peer_uid(sock):
     except (OSError, ValueError, IndexError):
         pass
     return None
+
+
+def sock_diag_uid(sock):
+    """The uid owning the other end of a TCP connection on this machine, as
+    the kernel's sock_diag says (netlink: one inet_diag_req_v2 for the peer's
+    socket, by its addresses and ports). Raises ValueError if it doesn't say."""
+    peer, mine = sock.getpeername(), sock.getsockname()
+    family = sock.family
+    if family == socket.AF_INET6 and peer[0].startswith("::ffff:") and mine[0].startswith("::ffff:"):
+        family, peer, mine = socket.AF_INET, (peer[0][7:], peer[1]), (mine[0][7:], mine[1])     # IPv4, mapped
+
+    def address(a):
+        b = socket.inet_pton(family, a)
+        return b + bytes(16 - len(b))
+    # The peer's socket: its port and address first (big-endian ports), any state, no cookie.
+    request = struct.pack("=BBBBI", family, socket.IPPROTO_TCP, 0, 0, 0xffffffff) + \
+        struct.pack("!HH", peer[1], mine[1]) + address(peer[0]) + address(mine[0]) + \
+        struct.pack("=III", 0, 0xffffffff, 0xffffffff)
+    SOCK_DIAG_BY_FAMILY, NLM_F_REQUEST, NETLINK_SOCK_DIAG = 20, 1, 4
+    with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_SOCK_DIAG) as nl:
+        nl.settimeout(0.5)
+        nl.send(struct.pack("=IHHII", 16 + len(request), SOCK_DIAG_BY_FAMILY, NLM_F_REQUEST, 1, 0) + request)
+        answer = nl.recv(65536)
+    length, kind = struct.unpack_from("=IH", answer)
+    # An inet_diag_msg: family, state, timer, retrans, its id (48 bytes), expires, rqueue, wqueue, uid.
+    if kind != SOCK_DIAG_BY_FAMILY or length < 16 + 72 or struct.unpack_from("!HH", answer, 20) != (peer[1], mine[1]):
+        raise ValueError("sock_diag didn't say")
+    return struct.unpack_from("=I", answer, 16 + 64)[0]
 
 
 def tailscale_uids():
@@ -8863,7 +9338,8 @@ def app_watch(st):
         try:
             if st.projects_stale.is_set() or time.time() - projects_at > 10:     # a project added: now, not in ten seconds
                 st.projects_stale.clear()
-                ps, projects_at = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects()], time.time()
+                ps = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects(remotes=False)]
+                projects_at = time.time()
             ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
             app_words(st, ss)
@@ -9960,7 +10436,12 @@ def app_handler(st, users, address):
                 if not s:
                     return
                 d = app_changes(s) if m.group(2) == "changes" else app_details(s)
-                return self.error(410, d["error"]) if d.get("error") else self.send(200, d)
+                if d.get("error"):
+                    return self.error(410, d["error"])
+                # ?sig=: the side panel has this one already (the same diff), so not again.
+                if m.group(2) == "changes" and d.get("sig") and args.get("sig") == [d["sig"]]:
+                    return self.send(200, {"same": True, "sig": d["sig"]})
+                return self.send(200, d)
             if path == "/api/secrets":      # the secrets' names (never a value): Settings → Secrets
                 return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
                                        "projects_known": project_names()})
@@ -10014,11 +10495,13 @@ def app_handler(st, users, address):
                 return
             if path == "/api/look":       # the themes, fonts and wallpapers to pick from
                 return self.send(200, look_info())
-            # Omarchy's wallpapers fetched here, and their cuts.
-            m = re.fullmatch(r"/wallpapers/([\w-]+)/([\w.-]+)", path)
+            # Omarchy's wallpapers fetched here, and their cuts; the look's
+            # own files cut (named after their hash).
+            m = re.fullmatch(r"/wallpapers/([\w-]+)/([\w.-]+)", path) or re.fullmatch(r"/cuts/([\w.-]+)", path)
             if m:
-                f = wall_served(m.group(1), m.group(2))
-                if not f:
+                f = (CUTS / m.group(1) if CUT_NAME.fullmatch(m.group(1)) else None) if path.startswith("/cuts/") else \
+                    wall_served(m.group(1), m.group(2))
+                if not f or not f.is_file():
                     return self.error(404, "not found")
                 data = f.read_bytes()
                 kind = APP_LOOK_TYPES.get(f.suffix[1:].lower(), "image/jpeg")
@@ -10092,13 +10575,28 @@ def app_handler(st, users, address):
             self.wfile.write(data)
 
         def stream_start(self):
-            self.head(200, "text/event-stream", [("X-Accel-Buffering", "no")])
+            # Gzipped as it goes, each write flushed through (a list goes from
+            # tens of KB to a few hundred bytes), when the browser takes it;
+            # ?plain=1 if gzip held it back on the way (the client asks so
+            # when its first event doesn't come).
+            plain = urllib.parse.parse_qs(self.path.partition("?")[2]).get("plain") == ["1"]
+            self.zip = zlib.compressobj(6, zlib.DEFLATED, 31) \
+                if not plain and "gzip" in self.headers.get("Accept-Encoding", "") else None
+            self.head(200, "text/event-stream", [("X-Accel-Buffering", "no"), ("Vary", "Accept-Encoding"),
+                                                 *([("Content-Encoding", "gzip")] if self.zip else [])])
             self.end_headers()
             self.close_connection = True
+            self.out(b"retry: 1000\n\n")      # back a second after the server restarts (a ship), not three
+
+        def out(self, data):
+            """A stream's bytes, sent now."""
+            if self.zip:
+                data = self.zip.compress(data) + self.zip.flush(zlib.Z_SYNC_FLUSH)
+            self.wfile.write(data)
+            self.wfile.flush()
 
         def event(self, name, data):
-            self.wfile.write(f"event: {name}\ndata: {mask_secrets(json.dumps(data))}\n\n".encode())
-            self.wfile.flush()
+            self.out(f"event: {name}\ndata: {mask_secrets(json.dumps(data))}\n\n".encode())
 
         def list_stream(self):
             """The list, and again on every change."""
@@ -10115,8 +10613,7 @@ def app_handler(st, users, address):
                     if changed:
                         self.event("list", view)
                     else:
-                        self.wfile.write(b": still here\n\n")
-                        self.wfile.flush()
+                        self.out(b": still here\n\n")
             except OSError:
                 pass
 
@@ -10127,6 +10624,7 @@ def app_handler(st, users, address):
                 host_start(s)       # after a reboot, before anyone attached: asleep, until you send it something
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
+            screen_at = 0       # when its pane was last read (app_screen)
             facts, facts_at, facts_status = None, 0, None     # git's facts for the brief (brief_facts), as last sent
             # On the chat engine, its live state too (live.json, chat_live) as
             # it changes: what Claude is writing, doing and asking.
@@ -10145,7 +10643,8 @@ def app_handler(st, users, address):
                             live = chat_live(agent_live(s["id"]))
                             if live != was:
                                 self.event("live", live)
-                                tick = 0        # what it asks: on the screen's dialog now
+                                if any((live or {}).get(k) != (was or {}).get(k) for k in ("pending", "state")):
+                                    tick = 0        # what it asks: on the screen's dialog now
                     elif live is not None or live_sig is not None:
                         live, live_sig = None, None
                         self.event("live", None)    # back on the terminal engine
@@ -10163,6 +10662,19 @@ def app_handler(st, users, address):
                     if now is not None and now != row:
                         row = now
                         self.event("session", row)
+                    # Its screen (the question on it) before its conversation: the
+                    # card isn't held up by hundreds of KB of it, or by git.
+                    # On the chat engine, with its broker running, the screen's
+                    # facts are live.json's (chat_screen): its pane isn't read.
+                    # Without it (asleep, exited), the pane says, every few seconds.
+                    seen = chat_screen(s) if chat else None
+                    if seen is not None:
+                        screen_at = 0
+                    elif not chat or time.time() - screen_at > 2:
+                        seen, screen_at = app_screen(s), time.time()
+                    if seen is not None and seen != screen:
+                        screen = seen
+                        self.event("screen", screen)
                     items, reset = conv.poll()
                     if reset:
                         self.event("conversation", {"reset": True, "items": items, "start": conv.start})
@@ -10176,13 +10688,8 @@ def app_handler(st, users, address):
                         if seen_facts != facts:
                             facts = seen_facts
                             self.event("facts", facts)
-                    seen = app_screen(s)
-                    if seen != screen:
-                        screen = seen
-                        self.event("screen", screen)
                     if time.time() - beat > KEEPALIVE:
-                        self.wfile.write(b": still here\n\n")
-                        self.wfile.flush()
+                        self.out(b": still here\n\n")
                         beat = time.time()
                     time.sleep(0.12 if chat else 0.5)
             except OSError:
@@ -10193,13 +10700,16 @@ def app_handler(st, users, address):
         def do_POST(self):
             # What it did is on every screen at once (app_watch reads the list
             # now), and again a moment on, as Claude takes it up.
+            # (Not when it changed nothing: a chat that was seen already, seen.)
+            self.changed_nothing = False
             try:
                 self.post_request()
             finally:
-                st.poke.set()
-                later = threading.Timer(0.4, st.poke.set)
-                later.daemon = True
-                later.start()
+                if not self.changed_nothing:
+                    st.poke.set()
+                    later = threading.Timer(0.4, st.poke.set)
+                    later.daemon = True
+                    later.start()
 
         def post_request(self):
             if self.path.partition("?")[0] == "/api/share":     # from the phone's share sheet: not a page's
@@ -10339,6 +10849,7 @@ def app_handler(st, users, address):
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 st.looking(s["id"])
+                self.changed_nothing = not (UNSEEN / s["id"]).exists()     # seen already: no list to read again
                 mark_seen(s["id"])
                 return self.send(200, {})
             if what == "wake":
@@ -11595,9 +12106,9 @@ def agent_live(sid):
         return {}
 
 
-def agent_up(sid):
+def agent_up(sid, live=None):
     """Whether the session's broker is running (its live state says its pid, and that's it)."""
-    live = agent_live(sid)
+    live = agent_live(sid) if live is None else live
     pid = live.get("pid")
     return bool(isinstance(pid, int) and live.get("state") != "exited" and Path(f"/proc/{pid}").exists()
                 and sid in cmdline(pid))
@@ -12275,6 +12786,7 @@ class Agent:
                      "working_since": None,     # when the turn under way started (a question's wait included)
                      "before_plan": None}       # the mode plan mode came from: approving a plan goes back to it
         self.version = self.written = 0     # of live, as changed and as written to live.json
+        self.last_written = None    # live.json's text, as last written
         self.queue = []             # our messages waiting for Claude to be free (live["queue"] says what they are)
         self.attached = self.load_attached()    # images for the next message (attach)
         self.live["attachments"] = len(self.attached)
@@ -12311,9 +12823,14 @@ class Agent:
     def flush_live(self):
         # Taken in this order only (never live_lock, then lock: a caller may
         # hold lock), and an older state never written over a newer one.
+        # The same state as last written isn't written again: each write is
+        # a live event to every open chat, and a redraw of its dock.
         with self.lock:
-            self.live["updated"] = time.time()
+            self.live.pop("updated", None)      # once a stamp of each write; nothing read it
             data = json.dumps(self.live)
+            if data == self.last_written:
+                return
+            self.last_written = data
             self.version += 1
             version = self.version
         with self.live_lock:
@@ -12694,9 +13211,10 @@ class Agent:
             steps = [b for b in o["message"].get("content") or [] if b.get("type") == "tool_use"]
             with self.lock:
                 act = self.live["activity"]
-                if steps and act and act.get("id") == o["parent_tool_use_id"]:
+                stepped = bool(steps and act and act.get("id") == o["parent_tool_use_id"])
+                if stepped:
                     act["step"] = {"tool": steps[-1].get("name"), "input": steps[-1].get("input")}
-            if steps:
+            if stepped:         # a helper's under an activity that's over: nothing new to say
                 self.changed()
             return
         for block in o["message"].get("content") or []:
@@ -13354,8 +13872,8 @@ OPTIONS = {
     "order": (set(), set(), set()),
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
-    "theme": ({"--show", "--list", "--json", "--font", "--wallpaper", "--refresh-wallpapers", "--in-background",
-               "--quiet"}, {"--font", "--wallpaper"}, set()),
+    "theme": ({"--show", "--list", "--json", "--font", "--wallpaper", "--refresh-wallpapers", "--cut",
+               "--in-background", "--quiet"}, {"--font", "--wallpaper"}, set()),
     "sound": ({"--show", "--list", "--json", "--assistant"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),

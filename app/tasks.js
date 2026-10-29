@@ -99,7 +99,12 @@ function boardRefocus() {
   const k = board.last;
   const cards = [...board.box.querySelectorAll(".tcard")];
   const card = k && (k[0] === "#" ? cards[Number(k.slice(1))] : board.box.querySelector(`.tcard[data-id="${CSS.escape(k)}"]`));
+  // A card in a folded group: that group's head (the outermost folded).
+  let fold = card && !shown(card) ? card.closest("details:not([open])") : null;
+  while (fold && fold.parentElement && fold.parentElement.closest("details:not([open])")) fold = fold.parentElement.closest("details:not([open])");
+  const head = fold && fold.querySelector(":scope > summary");
   const go = card && shown(card) ? card.querySelector(":scope > .today-go")
+    : head && shown(head) ? head
     : boardStops().find((x) => x.matches(".today-go")) || boardStops()[0];      // the first card, before a folded group's head
   if (go) go.focus({ preventScroll: true });
   else board.scroll.focus({ preventScroll: true });
@@ -196,6 +201,10 @@ function boardTab(tab) {
   if (desk.current) boardBack(true);
   board.scroll.scrollTop = 0;
   board.last = null;
+  // The keys off the card they were on: the other tab's cards aren't the
+  // same (keepFocus would put them on whatever is in its place), boardRefocus
+  // puts them on its first.
+  if (board.box.contains(document.activeElement)) board.scroll.focus({ preventScroll: true });
   if (board.query) boardSearchDraw(); else boardFill();      // (the tab is in its key: drawn, or as it was)
   modeButtons();
   boardRefocus();
@@ -226,10 +235,14 @@ function boardRefresh(force) {
   else if (board.composing && desk.newChat) desk.newChat.update();      // its projects, its model, as the list has them now
   if (board.query) boardSearchDraw();
   else boardFill(force);
-  // The first time it's drawn, the keys on its first card: they work at once.
+  if (board.starting && board.starting.length) boardStarting();      // a chat you started, up: its own card now
+  // The first time it's drawn, the keys on its first card: they work at
+  // once. With keys (a computer): on a phone, a ring on a card nobody's
+  // keys are on.
   if (!board.keyed && v && !desk.current && !board.composing && boardStops().length) {
     board.keyed = true;
-    if (!document.activeElement || document.activeElement === document.body || document.activeElement === board.scroll) boardRefocus();
+    const keys = app.desk || matchMedia("(pointer: fine)").matches;
+    if (keys && (!document.activeElement || document.activeElement === document.body || document.activeElement === board.scroll)) boardRefocus();
   }
   modeButtons();
 }
@@ -322,11 +335,15 @@ function boardComposeShow() {
 }
 
 // A chat you started, while the server sets it up: its card at the top of
-// the board, "Starting…", until the chat's own is in the list.
+// the board, "Starting…", until the chat's own is there (its row in the
+// list, set up: Today leaves out one still being set up), in the same
+// redraw. With no job: the list changed (boardRefresh), the ones up go.
 function boardStarting(job, on) {
-  board.starting = (board.starting || []).filter((j) => j !== job);
-  if (on) board.starting.unshift(job);
-  if (!board.startingEl) return;
+  const was = board.starting || [];
+  board.starting = was.filter((j) => j !== job);
+  if (job && on) board.starting.unshift(job);
+  board.starting = board.starting.filter((j) => { const s = j.id && row(j.id); return !s || s.setup; });
+  if (!board.startingEl || (board.starting.length === was.length && board.starting.every((j, i) => j === was[i]))) return;
   board.startingEl.replaceChildren(...board.starting.map((j) => uiCard({ kind: "fresh", hue: todayHue(j.repo), chip: projectName(j.repo),
     title: cut(j.text.trim().split("\n")[0], 90), pill: uiPill("Starting…", "working"),
     open: () => toast("Starting: its worktree is being made, a moment") })));
@@ -352,25 +369,31 @@ function boardSearchBox() {
   return box;
 }
 
-let searchTimer = null, searchSeq = 0;
+// What it found stays drawn while you type on, "Searching…" over it until
+// the host answers for what you typed (the one asked before let go).
+let searchTimer = null, searchAsk = null;
 function boardSearch(q) {
   board.query = q.trim();
   clearTimeout(searchTimer);
+  if (searchAsk) searchAsk.abort();
+  searchAsk = null;
   board.el.classList.toggle("searching", !!board.query);
   if (!board.query) { board.found = null; boardFill(true); return; }
   boardSearchDraw();
   searchTimer = setTimeout(async () => {
-    const seq = ++searchSeq, asked = board.query;
+    const ask = searchAsk = new AbortController(), asked = board.query;
     try {
-      const r = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { headers: { Accept: "application/json" } });
+      const r = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { headers: { Accept: "application/json" }, signal: ask.signal });
       const d = await r.json();
-      if (seq !== searchSeq || asked !== board.query) return;      // you typed on
-      board.found = d;
+      if (ask.signal.aborted || asked !== board.query) return;      // you typed on
+      board.found = r.ok ? { q: asked, results: d.results || [] } : { q: asked, results: [], error: d.error || "Amarchy didn't answer" };
     } catch (e) {
+      if (ask.signal.aborted) return;
       board.found = { q: asked, results: [], error: "Can't reach Amarchy" };
     }
+    if (searchAsk === ask) searchAsk = null;
     boardSearchDraw();
-  }, 160);
+  }, 60);
 }
 
 // A text with the words lit.
@@ -391,11 +414,21 @@ function boardSearchDraw() {
   if (!v || !board.query) return;
   const words = board.query.toLowerCase().split(/\s+/).filter(Boolean);
   const named = (s) => { const n = [s.task, s.claude_title, s.repo, s.name, s.assistant_name].join(" ").toLowerCase(); return words.every((w) => n.includes(w)); };
-  const found = board.found && board.found.q === board.query ? board.found.results : null;
+  // The host's answer for what you typed, else the one before (still in
+  // sight, not a page gone blank at each key) until it comes.
+  const answered = !!board.found && board.found.q === board.query;
+  const found = board.found ? board.found.results : null;
   // Its name has them now; what was said, once the host answers.
   const byId = new Map((found || []).map((r) => [r.id, r]));
   const rows = [...(found || []).map((r) => r.id), ...v.sessions.filter((s) => named(s) && !byId.has(s.id)).map((s) => s.id)]
     .map((id) => row(id)).filter(Boolean);
+  // Your tasks that have them too (who and what), first on the Tasks tab.
+  const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
+  // Drawn again only when what it shows changed: the list comes every
+  // second while chats work, and the same cards stay as they are.
+  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops,
+    ((v.today || {}).assistant || {}).name, (v.today || {}).sent, (found || []).map((r) => (r.at ? autoPast(r.at) : ""))])}`;
+  if (board.box.dataset.key === key) return;
   const cards = rows.map((s) => {
     const r = byId.get(s.id);
     const lines = (r && r.lines) || [];
@@ -407,27 +440,32 @@ function boardSearchDraw() {
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
                h("span", { html: lit(l.text, words) })))] }));
   });
-  // Your tasks that have them too (who and what), first on the Tasks tab.
-  const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
   const taskCards = loops.map((l) => todayLoop(l, v));
   const chatsSec = cards.length ? uiSection("found-chats", "Chats", { count: cards.length }, cards) : null;
   const tasksSec = taskCards.length ? uiSection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
   const n = rows.length + loops.length;
-  const head = h("div", { class: "today-summary" }, found || loops.length ? `${n || "Nothing"} with “${board.query}”` : `Searching “${board.query}”…`);
+  // A count once it's the host's for what you typed: before, it isn't one yet.
+  const head = h("div", { class: "today-summary" }, !answered ? `Searching “${board.query}”…`
+    : board.found.error || `${n || "Nothing"} with “${board.query}”`);
   keepFocus(board.box, () => board.box.replaceChildren(head, ...(board.tab === "tasks" ? [tasksSec, chatsSec] : [chatsSec, tasksSec]).filter(Boolean),
-    ...(!n && found ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
-  board.box.dataset.key = "";      // Today draws itself again when the search is emptied
+    ...(!n && answered && !board.found.error ? [h("p", { class: "today-clear" }, "Nothing has that, in a name, in what was said or in your tasks. Fewer words find more.")] : [])));
+  board.box.dataset.key = key;      // (not Today's: Today draws itself again when the search is emptied)
 }
 
 // Ctrl+Alt+J / K: from chat to chat in the board's order, the open one
-// opening the next, else the keys going to the next card.
-function boardStep(n) {
-  // (Under an open chat the board isn't in sight: then not in a folded group.)
+// opening the next, else the keys going to the next card. With from (the
+// key held, desk.js step): only which chat comes after that one.
+function boardStep(n, from) {
+  // (Under an open chat the board isn't in sight: then not in a folded group.
+  // Nor drawn again: a chat closed meanwhile is still there, and skipped.)
   const inSight = (t) => (desk.current ? !t.closest("details:not([open])") : shown(t));
-  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(inSight).map((t) => t.dataset.id))];
-  if (!ids.length) return;
-  const at = ids.indexOf(keyedId());
+  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(inSight).map((t) => t.dataset.id))]
+    .filter((id) => row(id));
+  if (!ids.length) return null;
+  const at = ids.indexOf(from || keyedId());
   const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];
-  if (desk.current) return boardOpen(id);
-  boardFocus(board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`));
+  if (from) return id;
+  if (desk.current) boardOpen(id);
+  else boardFocus(board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`));
+  return id;
 }

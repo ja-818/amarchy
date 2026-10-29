@@ -190,6 +190,11 @@ body::before {
   background-size: cover;
   background-position: center;
 }
+/* A computer's screen: the wide one from the first paint (before the page
+   knows its layout, the phone's would be fetched for nothing). */
+@media (min-width: 1000px) and (hover: hover) and (pointer: fine) {
+  body::before { background-image: var(--wallpaper-wide, var(--wallpaper, none)); }
+}
 
 /* The visible part of the screen (above the keyboard, when it's up), the
    app's glass over all of it: under the status bar and the home bar too. */
@@ -448,7 +453,8 @@ th { font-weight: 700; }
   border-radius: var(--radius-control);
   color: var(--text-muted);
 }
-.new-under .pick:hover, .new-under .pick:active { background: var(--control-hover); }
+.new-under .pick:active { background: var(--control-hover); }
+@media (hover: hover) { .new-under .pick:hover { background: var(--control-hover); } }
 .new-under .pick .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link); font-weight: 700; }
 .new-under .pick .glyph { font-size: 14px; }
 .new-under .why { font-style: italic; }
@@ -471,7 +477,8 @@ th { font-weight: 700; }
   flex: 1; min-width: 0; min-height: 52px; padding: 6px 8px; text-align: left;
   border-radius: var(--radius-control); display: flex; flex-direction: column; justify-content: center; gap: 2px;
 }
-.share-open:hover, .share-open:active { background: var(--control-hover); }
+.share-open:active { background: var(--control-hover); }
+@media (hover: hover) { .share-open:hover { background: var(--control-hover); } }
 .share-open small { font-size: var(--caption); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .share-row .share-send { flex: none; min-height: 40px; padding: 4px 16px; font-weight: 700; }
 .share-steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 8px; }
@@ -487,7 +494,7 @@ th { font-weight: 700; }
 .start-chat .tray { padding: 2px 0 0; }
 .start-chat.dropping .prompt { border-color: var(--accent); border-style: dashed; }
 .start-chat .mic.pic { color: var(--text-muted); }
-.start-chat .mic.pic:hover { color: var(--text); }
+@media (hover: hover) { .start-chat .mic.pic:hover { color: var(--text); } }
 
 .keys { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .keys .control { min-height: 34px; padding: 4px 10px; font-size: var(--caption); font-weight: 700; }
@@ -559,7 +566,8 @@ body.desk .sheet .head::before { display: none; }
   border-radius: 50%;
   color: var(--text-muted); font-size: 18px;
 }
-.sheet-close:active, .sheet-close:hover { color: var(--text); background: var(--selected-bg); }
+.sheet-close:active { color: var(--text); background: var(--selected-bg); }
+@media (hover: hover) { .sheet-close:hover { color: var(--text); background: var(--selected-bg); } }
 .sheet h2 { font-size: var(--title); font-weight: 700; margin: 0; overflow-wrap: anywhere; }
 .sheet p { margin: 6px 0; color: var(--text-muted); }
 .sheet p.close-stops { color: var(--warn, var(--warning)); margin: 0 0 12px; overflow-wrap: anywhere; }
