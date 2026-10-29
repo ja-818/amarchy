@@ -959,7 +959,7 @@ function todayTimes(s) {
   return [t.at ? autoPast(t.at) : "", Math.floor(quiet / 86400), quiet > TODAY_STALE, todayIsAnswered(s)];
 }
 
-function boardTabNow() { return typeof board !== "undefined" && board.tab === "tasks" ? "tasks" : "chats"; }
+function boardTabNow() { return typeof board !== "undefined" && ["tasks", "office"].includes(board.tab) ? board.tab : "chats"; }
 
 // A computer's: the board (tasks.js) is the home, each chat a card.
 // The board (tasks.js) is the home, on the phone as on a computer.
@@ -972,7 +972,7 @@ function todayFill(box, force) {
   // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
   if (board && !force && typeof desk !== "undefined" && desk.current) return;
   const only = board ? boardTabNow() : null;
-  const key = `${only}|${todayKey(app.view)}`;
+  const key = `${only}|${only === "office" ? `office:${officeKey()}|` : ""}${todayKey(app.view)}`;
   if (!force && box.dataset.key === key) return;
   const tab = (box.dataset.key || "").startsWith(`${only}|`);      // it shows this tab now (not another, a search, the welcome)
   box.dataset.key = key;
@@ -983,7 +983,8 @@ function todayFill(box, force) {
   box.drawn = box.drawn || new Map();
   const was = box.drawn.get(only);
   const cached = !force && was && was.key === key;
-  const nodes = cached ? was.nodes : todayNodes({ board, only });
+  const nodes = cached ? was.nodes : only === "office" ? officeNodes() : todayNodes({ board, only });      // the Office: office.js
+  box.classList.toggle("office", only === "office");
   if (board) boardMarkIn(nodes);      // the card the keys are on, lit as it will be (tasks.js)
   // The same tab as it shows: only what changed drawn again (todayPatch),
   // the rest kept as it is, under your finger, in focus, a box you write in.

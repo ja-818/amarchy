@@ -8,19 +8,20 @@
 // works on that, and the next that's your move is lit, Enter to open it.
 //
 // The bar: the Ⓐ (the Amarchy menu: Group & sort, Automations, the look,
-// Settings, Keys), Chats | Tasks (what's your move on each), the search,
+// Settings, Keys), Chats | Tasks | Office (what's your move on Chats and Tasks), the search,
 // New chat.
 //
 // Everything has its key (? shows them): j / k (or the arrows) from card
 // to card, l / h into a card along its buttons and back out, Enter opens
 // (or presses), 1-4 picks an answer, x completes its mission (with Undo), r
-// opens what a done chat made, s marks one seen, Tab Chats or Tasks, / searches, n starts a new chat, m the menu, o Group & sort.
+// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Office, / searches, n starts a new chat, m the menu, o Group & sort.
 
+const BOARD_TABS = ["chats", "tasks", "office"];
 const board = {
   el: null, box: null, head: null, slot: null, scroll: null,
   composing: false,  // the new chat's box at the top
   waitFor: null,     // a chat its address asks for that the list hasn't yet: opened once it has
-  tab: "chats",      // Chats (your chats) or Tasks (your loops): the one you were on (boardBuild)
+  tab: "chats",      // Chats (your chats), Tasks (your loops) or the Office (your chats at their desks): the one you were on (boardBuild)
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
   from: null,        // where the board was scrolled when a chat opened
@@ -32,8 +33,8 @@ function shown(el) { return el.checkVisibility ? el.checkVisibility() : !el.clos
 
 function boardBuild() {
   if (board.el) return board.el;
-  board.tab = store.get("board-tab") === "tasks" ? "tasks" : "chats";
-  board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats or tasks" });
+  board.tab = BOARD_TABS.includes(store.get("board-tab")) ? store.get("board-tab") : "chats";
+  board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats, tasks or the office" });
   // The bar (ui.css .ui-bar), as an open chat's: where you are (the Ⓐ, its
   // menu: Group & sort, Automations, the look, Settings, Keys…; Chats |
   // Tasks), what you look for (the search), and the one thing to start.
@@ -223,8 +224,8 @@ function boardKeys(e) {
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
-  // Tab: Chats | Tasks, the other one.
-  if (k === "Tab") { e.preventDefault(); return boardTab(board.tab === "chats" ? "tasks" : "chats"); }
+  // Tab: Chats | Tasks | Office, the next one (Shift+Tab, the one before).
+  if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
   // Enter on the card lit, the focus off it: it opens (on a button, a tab,
   // the browser presses that).
   if (k === "Enter" && !focused && at >= 0 && !document.activeElement.closest("button, a[href], summary, input, textarea, select")) {
@@ -268,16 +269,18 @@ function boardEsc(e) {
   boardBack();
 }
 
-// The board's tabs, Chats and Tasks, each with what's your move.
+// The board's tabs, Chats and Tasks, each with what's your move; and the
+// Office, your chats as people at their desks (office.js).
 function modeButtons() {
   if (!app.view || !board.switchEl) return;
   uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (Tab)" },
-          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" }], board.tab, boardTab, board.switchEl);
+          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" },
+          { key: "office", label: "Office", title: "Office: your chats at their desks (Tab)" }], board.tab, boardTab, board.switchEl);
 }
 
-// Chats or Tasks on the board, kept for the next time.
+// Chats, Tasks or the Office on the board, kept for the next time.
 function boardTab(tab) {
-  board.tab = tab === "tasks" ? "tasks" : "chats";
+  board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   store.set("board-tab", board.tab);
   if (desk.current) boardBack(true);
   board.scroll.scrollTop = 0;

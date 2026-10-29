@@ -2457,7 +2457,7 @@ document.addEventListener("visibilitychange", () => {
     if (app.session) app.session.close();
   } else {
     openList();
-    if (backFromAway() && board.tab !== "chats") boardTab("chats");       // home again: your chats first
+    if (backFromAway() && board.tab === "tasks") boardTab("chats");       // home again: your chats first (the Office is your chats too)
     if (app.session && backFromAway()) go("#/");
     else if (app.session) app.session.reopen();
   }
