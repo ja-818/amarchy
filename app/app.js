@@ -171,6 +171,63 @@ async function api(path, body) {
   return data;
 }
 
+// ---- ahead of the server: what you just did, on screen at once
+//
+// A change to a chat (its priority, its name, asleep or awake, seen) is
+// drawn the moment you make it: its row in the list as it will be, kept
+// so over each list that comes until the server's says it too (settled),
+// or 15 seconds. Should the server not take it: the row as the server
+// last had it (no list may come: nothing changed there), and why.
+
+const AHEAD_FOR = 15000;
+const ahead = new Map();        // session id -> [{patch, settled(row), until}]
+
+function aheadOf(id, patch, settled, done) {
+  const mine = { patch, settled, until: Date.now() + AHEAD_FOR, server: null };
+  ahead.set(id, [...(ahead.get(id) || []).filter((a) => !Object.keys(a.patch).some((k) => k in patch)), mine]);
+  if (app.view) aheadOn(app.view);
+  // Drawn before the next frame, once what called is done (a chat's screen
+  // being made marks it seen: the home isn't drawn over it).
+  queueMicrotask(aheadDrawn);
+  return done.catch((e) => {
+    const left = (ahead.get(id) || []).filter((a) => a !== mine);
+    if (left.length) ahead.set(id, left); else ahead.delete(id);
+    const s = app.view && app.view.sessions.find((x) => x.id === id);
+    if (s && mine.server) Object.assign(s, mine.server);
+    toast(e.message);
+    aheadDrawn();
+    throw e;
+  });
+}
+
+function aheadDrawn() {
+  if (typeof todayRedraw === "function") todayRedraw();
+  refresh();
+}
+
+// The list as the server sent it, with what you did that it doesn't say yet.
+function aheadOn(v) {
+  const now = Date.now();
+  for (const [id, list] of [...ahead]) {
+    const s = (v.sessions || []).find((x) => x.id === id);
+    const left = s ? list.filter((a) => a.until > now && !a.settled(s)) : [];
+    if (!left.length) { ahead.delete(id); continue; }
+    ahead.set(id, left);
+    for (const a of left) {
+      a.server = Object.fromEntries(Object.keys(a.patch).map((k) => [k, s[k]]));      // as the server has it, for a failure
+      Object.assign(s, a.patch);
+    }
+  }
+}
+
+// Seen: off what's new at once.
+function seenNow(id) {
+  const s = app.view && app.view.sessions.find((x) => x.id === id);
+  const done = api(`/api/session/${encodeURIComponent(id)}/seen`);
+  if (s && s.unseen) aheadOf(id, { unseen: false }, (r) => !r.unseen, done).catch(() => {});
+  else done.catch(() => {});
+}
+
 // ---- sounds: the chimes, Mission complete's, a chime's preview
 //
 // Played with Web Audio, never an <audio> element: a page that played one is
@@ -376,14 +433,16 @@ function statusLine(s) {
 }
 
 async function wakeSession(s) {
-  try { await api(`/api/session/${encodeURIComponent(s.id)}/wake`); } catch (e) { toast(e.message); }
+  try {
+    await aheadOf(s.id, { waking: true }, (r) => r.waking || !r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/wake`));
+  } catch (e) { /* said */ }
 }
 
 async function sleepSession(s) {
   try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/sleep`);
+    await aheadOf(s.id, { sleeping: true, waking: false }, (r) => r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/sleep`));
     toast("Asleep: its memory is freed until you send it something.");
-  } catch (e) { toast(e.message); }
+  } catch (e) { /* said */ }
 }
 
 
@@ -434,7 +493,8 @@ function updated() {
 function loadWhenSafe() {
   if (reloadWait()) return setTimeout(loadWhenSafe, RELOAD_WAIT);
   keepForReload();
-  location.reload();
+  // From the server, not as the service worker kept it (sw.js): the new build.
+  location.replace(`${location.pathname}?fresh=${encodeURIComponent((app.view && app.view.build) || "1")}${location.hash}`);
 }
 
 // Waits while a dictation is under way, a picture or a file is on its way to a
@@ -497,6 +557,7 @@ function openList() {
   app.list = es;
   es.addEventListener("list", (e) => {
     app.view = JSON.parse(e.data);
+    aheadOn(app.view);
     const o = app.organize;
     if (o && o.done && same(o.group, app.view.group) && o.sort === app.view.sort) app.organize = null;
     app.online = true;
@@ -728,12 +789,19 @@ function holdable(el, onHold) {
 function prioritySeg(s) {
   return h("div", { class: "seg" }, ...["high", "normal", "low"].map((p) =>
     h("button", { class: `control${(s.priority || "normal") === p ? " on" : ""}`,
-                  onclick: async () => {
-                    try {
-                      await api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p });
-                      closeSheets();
-                    } catch (e) { toast(e.message); }
-                  } }, PRIORITY[p])));
+                  onclick: () => { closeSheets(); priorityNow(s, p).catch(() => {}); } }, PRIORITY[p])));
+}
+
+// Its priority, its name: drawn now (aheadOf), told to the server.
+function priorityNow(s, level) {
+  return aheadOf(s.id, { priority: level }, (r) => (r.priority || "normal") === level,
+                 api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level }));
+}
+
+function renameNow(s, t) {
+  const title = String(t || "").trim();
+  return aheadOf(s.id, { title, task: title || s.claude_title || s.task }, (r) => (r.title || "") === title,
+                 api(`/api/session/${encodeURIComponent(s.id)}/rename`, title ? { title } : { reset: true }));
 }
 
 function rowMenu(s) {
@@ -849,6 +917,7 @@ class SessionView {
         go("#/");
         boardSentToast(this.id);
       },
+      onUnsent: () => todayUnsent(this.id),     // it didn't go: its card asks again
     });
     // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
     this.el = h("div", { class: "view" }, bar, this.chat.el);
@@ -889,8 +958,7 @@ class SessionView {
   }
 
   markSeen() {
-    if (document.visibilityState === "visible")
-      api(`/api/session/${encodeURIComponent(this.id)}/seen`).catch(() => {});
+    if (document.visibilityState === "visible") seenNow(this.id);
   }
 
   // Over the chat: its head (ui.js uiChatHead), as a computer's. Back: from a
@@ -1278,12 +1346,16 @@ function menuFocus(box) {
 // Draws a menu anew with the cursor kept where it was: on the same thing
 // (the same chat's card and the same button on it, the same group's head),
 // or the same words, or else the same place.
+// Only the one it lands on is measured (in sight?): a redraw doesn't lay
+// out the whole page (the board's, every second while chats work).
+const FOCUSABLE = "button, [tabindex='0'], textarea, input, summary, a[href]";
 function keepFocus(box, fill) {
-  const items = () => Array.from(box.querySelectorAll("button, [tabindex='0'], textarea, input, summary, a[href]"))
-    .filter((el) => !el.disabled && el.getClientRects().length);
+  const el = document.activeElement;
+  // The keys aren't in it: nothing to keep.
+  if (!el || el === box || !box.contains(el) || !el.matches(FOCUSABLE)) return fill();
+  const items = () => Array.from(box.querySelectorAll(FOCUSABLE)).filter((x) => !x.disabled);
   const was = items();
-  const at = was.indexOf(document.activeElement);
-  const el = was[at];
+  const at = was.indexOf(el);
   const where = (x) => {
     // What it's on (a chat's card, a group), and which of its kind there:
     // a card's pill says "5m ago" now and "Working" later, its place moves.
@@ -1292,14 +1364,14 @@ function keepFocus(box, fill) {
     const same = [...scope.querySelectorAll(x.tagName)].filter((y) => y.className === x.className);
     return `${scope === box ? "" : scope.dataset.id ? `#${scope.dataset.id}` : scope.className}|${x.tagName}|${x.className}|${same.indexOf(x)}`;
   };
-  const key = el && where(el);
+  const key = where(el);
   fill();
-  if (at < 0) return;
+  const can = (x) => x.getClientRects().length;
   const now = items();
   const text = (x) => x.getAttribute("aria-label") || x.textContent;
-  const to = now.find((x) => where(x) === key)
-    || now.find((x) => x.className === el.className && text(x) === text(el))
-    || now[Math.min(at, now.length - 1)];
+  const to = [now.find((x) => where(x) === key),
+              now.find((x) => x.className === el.className && text(x) === text(el)),
+              now[Math.min(at, now.length - 1)]].find((x) => x && can(x)) || now.find(can);
   if (to) to.focus({ preventScroll: true });
   else if (box.tabIndex === -1) box.focus({ preventScroll: true });
 }
@@ -1448,7 +1520,10 @@ function swipeToClose(back, card) {
 // newSession, Ctrl+Alt+N), where Enter starts it. Started, it isn't opened:
 // you stay where you were, as after sending any chat something. started(id):
 // what else to do then.
-function newChat({ wide = false, started = null } = {}) {
+// started(job): it's on its way (the box empties at once); starting(job,
+// on): its card while the server sets it up, off once it's up or it
+// failed; failed(): it didn't start, its words are back in the box.
+function newChat({ wide = false, started = null, starting = null, failed = null } = {}) {
   let repo = store.get("last-project");
   let picked = false;       // you picked the project for this one: no guessing
   let guessed = false;      // what you wrote named it
@@ -1631,8 +1706,16 @@ function newChat({ wide = false, started = null } = {}) {
     update();
     field.focus();
   };
-  const reset = () => {
-    for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
+  // Started the moment you start it: the box empties and goes, its card
+  // ("Starting…") is on the board while the server makes its worktree, and
+  // the chat's own card takes its place once it's up. You stay where you
+  // were, on with the rest. Should it not start: why, and your words (and
+  // pictures) back in the box.
+  const start = async () => {
+    if (!field.value.trim() || !repo) return;
+    if (tray.some((a) => !a.data)) return toast("A picture is still on its way: a moment");
+    const job = { repo, text: field.value, pics: tray.slice(), model: model() };
+    const images = job.pics.map((a) => ({ type: a.type, data: a.data }));
     tray = [];
     drawTray();
     field.value = "";
@@ -1641,27 +1724,27 @@ function newChat({ wide = false, started = null } = {}) {
     picked = guessed = false;
     grow();
     update();
-  };
-  const start = async () => {
-    if (!field.value.trim() || !repo) return;
-    if (tray.some((a) => !a.data)) return toast("A picture is still on its way: a moment");
-    send.disabled = true;
-    el.classList.add("busy");
+    field.blur();
+    if (starting) starting(job, true);
+    if (started) started(job);
     try {
-      const images = tray.map((a) => ({ type: a.type, data: a.data }));
-      const { id } = await api("/api/new", { repo, prompt: field.value, model: model(), ...(images.length ? { images } : {}) });
-      // It works on it; you stay where you were, on with the rest. It's
-      // under At work, and asks you (Needs you) once it's done.
-      const where = projectName(repo);
-      reset();
-      field.blur();
-      toast(`Started in ${where}: it shows under Needs you once it's done`);
-      if (started) started(id);
+      await api("/api/new", { repo: job.repo, prompt: job.text, model: job.model, ...(images.length ? { images } : {}) });
+      for (const a of job.pics) if (a.url) URL.revokeObjectURL(a.url);
+      if (starting) starting(job, false);
+      toast(`Started in ${projectName(job.repo)}: it shows under Needs you once it's done`);
     } catch (e) {
-      toast(e.message);
+      if (starting) starting(job, false);
+      const now = field.value.trim();
+      field.value = now ? `${job.text}\n${now}` : job.text;
+      store.set("draft:new", field.value);
+      tray = [...job.pics, ...tray];
+      repo = job.repo;
+      drawTray();
+      grow();
+      update();
+      if (failed) failed(job);
+      toast(`Didn't start: ${e.message}`);
     }
-    el.classList.remove("busy");
-    buttons();
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
   return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field, addFiles, tray: () => tray };
@@ -1685,6 +1768,12 @@ function shareCheck() {
     open.taken = true;
     if (open === Array.from(document.querySelectorAll(".sheet-back")).pop()) closeSheet();
     else open.remove();
+  }
+  // More of the same share came (a second picture, the words with them): its sheet again, with all of it.
+  if (s && open && open.shareId === s.id && !open.taken && !open.classList.contains("busy") && (open.sharePictures !== s.pictures || open.shareText !== (s.text || "")) && app.view.sessions) {
+    open.taken = true;      // (not let go on the host: it's the same share)
+    open.remove();
+    shareShown = null;
   }
   if (s && s.id !== shareShown && app.view.sessions) shareSheet(s);
 }
@@ -1745,6 +1834,8 @@ function shareSheet(s) {
     h("button", { class: "control wide", onclick: () => closeSheet() }, "Don't send it"));
   back.classList.add("share");
   back.shareId = s.id;
+  back.sharePictures = s.pictures;
+  back.shareText = s.text || "";
   // Gone without a chat taking it (closed, swiped away): let go on the host.
   new MutationObserver((_, obs) => {
     if (back.isConnected) return;
@@ -2010,9 +2101,13 @@ async function openLook() {
   };
   // The picks go to the host one after another, so the last one tapped is
   // the one kept (and worn), however quickly they're tapped.
-  let picks = 0, picking = Promise.resolve();
+  // What you tapped is lit at once (want), before the host has it.
+  let picks = 0, picking = Promise.resolve(), want = {}, waiting = 0;
   const pick = (change, el) => {
     if (el) el.classList.add("busy");
+    want = { ...want, ...change };
+    waiting++;
+    draw();
     picking = picking.then(async () => {
       try {
         info = await api("/api/look", change);
@@ -2020,9 +2115,26 @@ async function openLook() {
         wearIt();
       } catch (err) { toast(err.message); }
       if (el) el.classList.remove("busy");
+      if (!--waiting) want = {};
       draw();
     }).catch((err) => console.error(err));     // one that failed doesn't hold up the next
   };
+  // As it will be: what you tapped, else as the host has it.
+  const now = (k) => (k in want ? want[k] : info[k]);
+  // Your own picture, picked: one input for the sheet (its parts are drawn again on their own: uiPatch).
+  const file = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => {
+    const f = file.files[0];
+    if (!f) return;
+    toast("Cutting it to size…");
+    try {
+      const [phone, wide] = await Promise.all([cutPicture(f, false), cutPicture(f, true)]);
+      info = await api("/api/look/wallpaper", { phone, wide });
+      wearIt();
+      toast("Your wallpaper is on.");
+    } catch (err) { toast(err.message); }
+    file.value = "";
+    draw();
+  } });
   // Worn here at once; every other device takes it from the list in a moment.
   const wearIt = () => {
     if (app.view) app.view.look = info.look;
@@ -2032,9 +2144,9 @@ async function openLook() {
   };
   const draw = () => {
     const card = (t) => {
-      const el = h("button", { class: `theme-card${t.key === info.theme ? " on" : ""}`, "aria-label": t.name,
-                               "aria-pressed": t.key === info.theme ? "true" : "false",
-                               onclick: (e) => { if (t.key !== info.theme) pick({ theme: t.key }, e.currentTarget); } },
+      const el = h("button", { class: `theme-card${t.key === now("theme") ? " on" : ""}`, "aria-label": t.name,
+                               "aria-pressed": t.key === now("theme") ? "true" : "false",
+                               onclick: (e) => { if (t.key !== now("theme")) pick({ theme: t.key }, e.currentTarget); } },
         h("span", { class: "thumb" }),
         h("span", { class: "dots" }, ...t.colors.slice(2).map((c) => {
           const d = h("i", {});
@@ -2047,15 +2159,16 @@ async function openLook() {
       if (t.wallpaper) el.style.setProperty("--thumb", `url("${t.wallpaper}")`);
       return el;
     };
-    const fonts = info.fonts.map((f) => h("button", { class: `control${f.key === info.font ? " on" : ""}`,
+    const fonts = info.fonts.map((f) => h("button", { class: `control${f.key === now("font") ? " on" : ""}`,
       onclick: (e) => pick({ font: f.key }, e.currentTarget) }, f.name));
     // The wallpapers: Omarchy's for the theme worn (a theme of yours, its
     // own), your own picture, none. Each a little picture of itself.
     const worn = info.themes.find((t) => t.key === info.theme) || { colors: [], backgrounds: [] };
-    const tile = (label, on, thumb, act, note) => {
+    const tile = (label, isOn, thumb, act, note) => {
+      const on = isOn();
       const el = h("button", { class: `theme-card wall-card${on ? " on" : ""}${note ? " pending" : ""}`,
                                "aria-pressed": on ? "true" : "false", "aria-label": note ? `${label}, ${note}` : label,
-                               onclick: (e) => { if (!on) act(e.currentTarget); } },
+                               onclick: (e) => { if (!isOn()) act(e.currentTarget); } },
         h("span", { class: "thumb" }, note ? h("small", {}, note) : null),
         h("span", { class: "name" }, label));
       el.style.setProperty("--card-bg", worn.colors[0] || "var(--surface)");
@@ -2064,13 +2177,15 @@ async function openLook() {
       return el;
     };
     const notes = { fetching: "Downloading…", waiting: "Waiting to download", failed: "Not downloaded", missing: "Not downloaded" };
+    // (A background picked is the theme's wallpaper, that one.)
+    const wall = () => ("background" in want && !("wallpaper" in want) ? "theme" : now("wallpaper"));
     const walls = (worn.backgrounds || []).length
-      ? worn.backgrounds.map((b) => tile(b.name, info.wallpaper === "theme" && b.key === worn.background,
+      ? worn.backgrounds.map((b) => tile(b.name, () => wall() === "theme" && b.key === ("background" in want ? want.background : worn.background),
           b.thumb || worn.drawn, (el) => pick({ background: b.key }, el), b.state === "here" ? "" : notes[b.state]))
-      : [tile("The theme's", info.wallpaper === "theme", worn.wallpaper, (el) => pick({ wallpaper: "theme" }, el))];
-    walls.push(tile("Your own", info.wallpaper === "own", info.own,
+      : [tile("The theme's", () => wall() === "theme", worn.wallpaper, (el) => pick({ wallpaper: "theme" }, el))];
+    walls.push(tile("Your own", () => wall() === "own", info.own,
                     (el) => (info.own ? pick({ wallpaper: "own" }, el) : file.click()), info.own ? "" : "Choose a picture"),
-               tile("None", info.wallpaper === "none", "", (el) => pick({ wallpaper: "none" }, el)));
+               tile("None", () => wall() === "none", "", (el) => pick({ wallpaper: "none" }, el)));
     // How far the host is with Omarchy's wallpapers, when they aren't all there.
     const f = info.fetch || {};
     const mb = (n) => Math.round((n || 0) / 1e6);
@@ -2092,19 +2207,7 @@ async function openLook() {
           draw();
         } }, "Download them again"));
     }
-    const file = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => {
-      const f = file.files[0];
-      if (!f) return;
-      toast("Cutting it to size…");
-      try {
-        const [phone, wide] = await Promise.all([cutPicture(f, false), cutPicture(f, true)]);
-        info = await api("/api/look/wallpaper", { phone, wide });
-        wearIt();
-        toast("Your wallpaper is on.");
-      } catch (err) { toast(err.message); }
-      draw();
-    } });
-    keepFocus(back.firstChild, () => body.replaceChildren(...[
+    uiPatch(body, [
       h("div", { class: "section" }, "Theme"),
       themeGrid(info.themes.map(card)),
       h("div", { class: "section" }, "Font"),
@@ -2117,7 +2220,7 @@ async function openLook() {
           (info.own ? "the picture you chose." : "choose a picture.")
         : info.own ? "Your own: the picture you chose." : "Choose a picture to have one of your own."),
       h("button", { class: "control wide", onclick: () => file.click() }, info.own ? "Choose another picture…" : "Choose a picture…"),
-      file].filter(Boolean)));
+      file]);
     poll();
   };
   try {
@@ -2315,7 +2418,8 @@ async function start() {
   const asked = new URLSearchParams(location.search).get("ask");
   // Android's share sheet brought something the host didn't take (bin/amarchy's share_in).
   const shareError = new URLSearchParams(location.search).get("share-error");
-  if (asked || shareError) history.replaceState(null, "", location.pathname + location.hash);
+  const fresh = new URLSearchParams(location.search).has("fresh");     // the page after an update (loadWhenSafe)
+  if (asked || shareError || fresh) history.replaceState(null, "", location.pathname + location.hash);
   // The page after an update: the view it had (on a phone's home screen the
   // address never shows it, so it's kept), and the build it is.
   takeKept();

@@ -34,6 +34,11 @@
 /* ---- you: a bubble on the right */
 
 .chat .msg.user { display: flex; justify-content: flex-end; padding-left: 12%; }
+/* What you sent, there the moment you send it (chat.js outgo), a shade
+   lighter until the server has it; the conversation's own then takes its place. */
+.chat-scroll > .chat-outbox { padding-top: 0; }
+.chat-outbox:empty { display: none; }
+.chat .msg.user.sending .bubble, .queued.sending { opacity: 0.6; }
 .chat .msg.user .bubble {
   padding: 9px 13px;
   color: var(--bubble-user-text);
@@ -581,3 +586,10 @@
 .done-strip .done-words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .done-strip .done-words b { color: var(--text); font-weight: 600; }
 .done-strip .text-btn { flex: none; }
+
+/* A long conversation opens at once: what's out of sight (above the
+   screen) isn't laid out or painted until it's scrolled to, each part
+   keeping its size once seen, so the page doesn't jump. */
+.chat-conv:not(.chat-outbox) > :is(.msg, .fold, .step, details), .screen-stage > .turn {
+  content-visibility: auto; contain-intrinsic-size: auto 160px;
+}

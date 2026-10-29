@@ -296,6 +296,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import zlib
 from pathlib import Path
 
 HOME = Path.home()
@@ -8757,6 +8758,28 @@ def app_add_sound(name, raw):
 
 APP_BUILD_MEMO = {"seen": None, "build": None}
 
+def gzip_bytes(data):
+    """data gzipped (as a browser takes it: Content-Encoding: gzip)."""
+    z = zlib.compressobj(6, zlib.DEFLATED, 31)
+    return z.compress(data) + z.flush()
+
+
+APP_FILES = {}      # an app file's path -> (its stat, its bytes, gzipped)
+
+
+def app_file(f):
+    """An app file's bytes and the same gzipped, read and squeezed once for
+    as long as it doesn't change (every page asks for them all)."""
+    st = f.stat()
+    sig = (st.st_mtime_ns, st.st_size)
+    kept = APP_FILES.get(str(f))
+    if kept and kept[0] == sig:
+        return kept[1], kept[2]
+    data = f.read_bytes()
+    APP_FILES[str(f)] = (sig, data, gzip_bytes(data))
+    return data, APP_FILES[str(f)][2]
+
+
 def app_build():
     """The app's build: a hash of its files as they are on disk now, so an
     open page that loaded others reloads once they differ (app.js). It's read
@@ -8796,6 +8819,7 @@ class AppState:
         self.missions_seen = False  # app_missions has seen the list once
         self.seen = {}          # session id -> when the phone last said it's on screen
         self.projects_stale = threading.Event()     # a project was added: the list of projects is read again now
+        self.poke = threading.Event()   # something was done from a page: the list read again now, not in a second
         self.lock = threading.Lock()
         # Which sessions are open on a device (a phone's conversation, a
         # browser's terminals: id -> how many), and when each last was, for
@@ -8829,10 +8853,13 @@ class AppState:
 
 
 def app_watch(st):
-    """Read the list every second; on a change wake the streams, and tell the
-    phones about a session that went on to need you or be done."""
+    """Read the list every second, and at once when a page did something
+    (st.poke: what you did is on every screen in a moment, not a second); on
+    a change wake the streams, and tell the phones about a session that went
+    on to need you or be done."""
     ps, projects_at = [], 0
     while True:
+        began = time.time()
         try:
             if st.projects_stale.is_set() or time.time() - projects_at > 10:     # a project added: now, not in ten seconds
                 st.projects_stale.clear()
@@ -8869,7 +8896,9 @@ def app_watch(st):
             app_missions(st, ss)
         except Exception as e:      # the score never stops the list
             print(f"amarchy app: missions: {e}", file=sys.stderr)
-        time.sleep(1)
+        st.poke.wait(1)
+        st.poke.clear()
+        time.sleep(max(0.0, began + 0.1 - time.time()))      # ten times a second at most, however much is done
 
 
 def app_asking(s):
@@ -9522,9 +9551,21 @@ def app_handler(st, users, address):
         def send(self, code, body, ctype="application/json"):
             # A secret's value never goes out (see "secrets"), whatever said it.
             data = mask_secrets(json.dumps(body)).encode() if ctype == "application/json" else body
-            self.head(code, ctype, [("Content-Length", str(len(data)))])
+            data, extra = self.squeezed(data, ctype)
+            self.head(code, ctype, [("Content-Length", str(len(data))), *extra])
             self.end_headers()
             self.wfile.write(data)
+
+        def squeezed(self, data, ctype, packed=None):
+            """data gzipped, when it's text worth it and the browser takes it
+            (a phone's network: the list, a chat's files, a third the size or
+            less), with the headers that say so. packed: it gzipped already."""
+            if not (ctype.startswith(("text/", "application/json", "application/manifest", "image/svg"))
+                    and len(data) >= 1024):
+                return data, []
+            if "gzip" not in self.headers.get("Accept-Encoding", ""):
+                return data, [("Vary", "Accept-Encoding")]
+            return packed or gzip_bytes(data), [("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding")]
 
         def error(self, code, why):
             self.send(code, {"error": why})
@@ -10019,14 +10060,34 @@ def app_handler(st, users, address):
             build = app_build()
             extra = [("Service-Worker-Allowed", "/")] if name == "sw.js" else []
             extra.append(("X-Amarchy-Build", build))
-            data, nonce = f.read_bytes(), None
-            if name in ("index.html", "sw.js"):
-                data = data.replace(b"{{build}}", build.encode())
-            if name == "index.html":
-                nonce = b64u(os.urandom(16))
-                data = data.replace(b"{{nonce}}", nonce.encode())
-            self.head(200, APP_TYPES[Path(name).suffix], [("Content-Length", str(len(data))), *extra],
-                      cache="max-age=31536000, immutable" if folder else "no-cache", nonce=nonce)
+            ctype = APP_TYPES[Path(name).suffix]
+            # index.html and sw.js are made for each asking (the build, a
+            # nonce in them): always sent. Every other file is the build's,
+            # asked for as name?b=<build> (index.html's links, sw.js): that
+            # address is that file for good, kept by the browser without
+            # asking again. Asked for otherwise, it's checked (its ETag, the
+            # build) and comes again only when it changed.
+            made = name in ("index.html", "sw.js")
+            stamped = not made and urllib.parse.parse_qs(self.path.partition("?")[2]).get("b") == [build]
+            cache = "max-age=31536000, immutable" if folder or stamped else "no-cache"
+            if not made:
+                tag = f'"{build}"'
+                extra.append(("ETag", tag))
+                if tag in self.headers.get("If-None-Match", ""):
+                    self.head(304, ctype, extra, cache=cache)
+                    self.end_headers()
+                    return
+            nonce = None
+            if made:
+                data = f.read_bytes().replace(b"{{build}}", build.encode())
+                if name == "index.html":
+                    nonce = b64u(os.urandom(16))
+                    data = data.replace(b"{{nonce}}", nonce.encode())
+                data, more = self.squeezed(data, ctype)
+            else:
+                data, packed = app_file(f)
+                data, more = self.squeezed(data, ctype, packed)
+            self.head(200, ctype, [("Content-Length", str(len(data))), *extra, *more], cache=cache, nonce=nonce)
             self.end_headers()
             self.wfile.write(data)
 
@@ -10130,6 +10191,17 @@ def app_handler(st, users, address):
                 st.looking(s["id"], False)
 
         def do_POST(self):
+            # What it did is on every screen at once (app_watch reads the list
+            # now), and again a moment on, as Claude takes it up.
+            try:
+                self.post_request()
+            finally:
+                st.poke.set()
+                later = threading.Timer(0.4, st.poke.set)
+                later.daemon = True
+                later.start()
+
+        def post_request(self):
             if self.path.partition("?")[0] == "/api/share":     # from the phone's share sheet: not a page's
                 return self.share_in()
             if not self.allowed(write=True):
@@ -10704,8 +10776,9 @@ def app_handler(st, users, address):
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
-            # Once the list has it (app_watch reads it every second), so the
-            # page that asked can go straight to it.
+            # Once the list has it (app_watch reads it now), so the page that
+            # asked has its card as it hears back.
+            st.poke.set()
             until = time.time() + 5
             with st.changed:
                 while st.row(sid) is None and time.time() < until:
@@ -10802,6 +10875,20 @@ def run_amarchy(*args, input=None, timeout=60, env=None):
         return subprocess.CompletedProcess(args, 1, "", str(e))
 
 
+def app_server_class():
+    """The app's server: a thread for each connection, and room for a page's
+    burst of them. A page asks for its ~25 files at once, and each is a
+    connection of its own (tailscale serve to here): with the default five
+    waiting at most, the rest were refused and asked again a second later,
+    a page that took a second and a half to come, a chat to open."""
+    import http.server
+
+    class AppServer(http.server.ThreadingHTTPServer):
+        request_queue_size = 256
+        daemon_threads = True
+    return AppServer
+
+
 def app_serve():
     """Run the app's server (what amarchy-app.service runs) until amarchy is
     updated, when systemd starts the new one."""
@@ -10817,8 +10904,7 @@ def app_serve():
     migrate()
     st = AppState()
     st.transcriber = Transcriber()      # dictation on the host
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", app_port()), app_handler(st, users, address))
-    server.daemon_threads = True
+    server = app_server_class()(("127.0.0.1", app_port()), app_handler(st, users, address))
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     version = os.stat(SELF).st_mtime_ns

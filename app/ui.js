@@ -61,6 +61,9 @@ const UI_TAP = 450;     // a finger lifted: its click (and a double tap's second
 const UI_HOLD = 5000;   // a finger down longer (or a lift the page never heard of): drawn anyway
 
 addEventListener("pointerdown", () => { uiState.down = Date.now(); }, true);
+// Safari lights :active (a card, a button, pressed) only on a page that
+// listens for touches: lit the moment the finger lands.
+addEventListener("touchstart", () => {}, { passive: true });
 for (const type of ["pointerup", "pointercancel"]) {
   addEventListener(type, () => { uiState.down = 0; uiState.up = Date.now(); uiStillSoon(); }, true);
 }
@@ -105,6 +108,46 @@ function uiSwap(box, nodes) {
   const fill = () => box.replaceChildren(...next.childNodes);
   if (typeof keepFocus === "function") keepFocus(box, fill); else fill();
   return true;
+}
+
+// box's children made nodes, changing the page no more than it must: a part
+// that's the same but for which is on (its classes, aria-pressed) changed
+// in place, its buttons kept, so a tap already on one isn't lost to a
+// redraw; a part that's different, that part again. (uiSwap: the whole box,
+// when anything differs.)
+function uiPatch(box, nodes) {
+  nodes = nodes.filter((n) => n !== null && n !== undefined && n !== false).map((n) => (n instanceof Node ? n : document.createTextNode(String(n))));
+  const was = [...box.childNodes];
+  if (was.length !== nodes.length || was.some((n, i) => n.nodeName !== nodes[i].nodeName)) {
+    const fill = () => box.replaceChildren(...nodes);
+    if (typeof keepFocus === "function") keepFocus(box, fill); else fill();
+    return;
+  }
+  was.forEach((old, i) => uiPatchPart(old, nodes[i]));
+}
+
+function uiShape(n) {
+  return n.nodeType === 1 ? n.outerHTML.replace(/ (class|aria-pressed)="[^"]*"/g, "") : n.textContent;
+}
+
+function uiPatchPart(old, next) {
+  if (uiShape(old) === uiShape(next)) {
+    if (old.nodeType !== 1) return;
+    const olds = [old, ...old.querySelectorAll("*")], nexts = [next, ...next.querySelectorAll("*")];
+    olds.forEach((el, i) => {
+      const to = nexts[i];
+      if (el.className !== to.className && typeof el.className === "string") el.className = to.className;
+      const p = to.getAttribute("aria-pressed");
+      if (p !== el.getAttribute("aria-pressed")) { if (p === null) el.removeAttribute("aria-pressed"); else el.setAttribute("aria-pressed", p); }
+    });
+    return;
+  }
+  const had = old.nodeType === 1 && old.contains(document.activeElement) ? document.activeElement : null;
+  old.replaceWith(next);
+  if (!had || next.nodeType !== 1) return;
+  const name = (x) => x.getAttribute("aria-label") || x.textContent;
+  const to = [...next.querySelectorAll("button, input, [tabindex]")].find((x) => name(x) === name(had));
+  if (to) to.focus({ preventScroll: true });
 }
 
 // A card. head: what opens it (a chat) or opens its text (a task). kind: what

@@ -225,6 +225,9 @@ async function run(browser, layout, port, home) {
   const android = await post(port, "/api/share", form, { "Content-Type": "multipart/form-data; boundary=B", "Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate" });
   check(where, android.status === 303 && android.headers.location === "/", `Android's share sheet: back to the app (${android.status} ${android.headers.location})`);
   check(where, await until(page, () => document.querySelector(".sheet-back.share")), "the share sheet shows");
+  // (The list comes the moment each part does: the sheet may show the first
+  // picture a moment before the second joins it.)
+  await until(page, () => document.querySelectorAll(".sheet-back.share .share-preview img").length === 2, null, 3000);
   const sheet = await page.evaluate(() => ({
     title: document.querySelector(".sheet-back.share h2").textContent,
     pics: document.querySelectorAll(".share-preview img").length,

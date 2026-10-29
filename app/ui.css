@@ -14,6 +14,7 @@
   --card-hover-border: var(--selected-border);
   --card-focus-bg: var(--selected-bg);
   --card-focus-border: var(--focus-ring);
+  --card-press-bg: var(--control-pressed);   /* under a finger, the moment it lands */
   --card-pad-x: 14px;
   --card-gap: 8px;            /* between cards */
   /* A pill (uiPill): where something stands. */
@@ -24,6 +25,7 @@
   --button-bg: var(--control-bg);
   --button-border: var(--control-border);
   --button-hover-bg: var(--control-hover);
+  --button-press-bg: var(--control-pressed);
   --button-radius: var(--radius-control);
   --button-primary-bg: var(--primary-bg);
   --button-primary-text: var(--primary-text);
@@ -64,12 +66,15 @@
   --chat-column: var(--page-width);
 }
 @media (pointer: coarse) { :root { --control-h: 44px; } }
+
+/* A tap is a tap at once: no wait for a double tap's zoom, anywhere. */
+html { touch-action: manipulation; }
 @media (max-width: 719px) { :root { --page-pad: 12px; } }
 
 /* A page's column (the board's bar and cards, an open chat's head, its
    conversation and its box): as wide as --page-width, centered, --page-pad
    in from its edges, so everything lines up from screen to screen. */
-.board-head-in, .board-scroll .today, .board-new, .desk-head, .chat-conv, .chat-dock {
+.board-head-in, .board-scroll .today, .board-new, .board-starting, .desk-head, .chat-conv, .chat-dock {
   width: 100%; max-width: var(--page-width); margin-left: auto; margin-right: auto; box-sizing: border-box;
   padding-left: var(--page-pad); padding-right: var(--page-pad);
 }
@@ -94,6 +99,12 @@
   background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--card-bg); border-color: var(--card-hover-border);
 }
 .tcard-head:focus-visible { outline: none; }
+/* Pressed: lit the moment the finger lands (no fade in), so a tap is felt
+   before what it opens is drawn. */
+.tcard:has(> .tcard-head:active) {
+  background: linear-gradient(var(--card-press-bg), var(--card-press-bg)), var(--card-bg); border-color: var(--card-hover-border);
+  transition: none;
+}
 .tcard:has(> .tcard-head:focus-visible) {
   background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--card-bg);
   border-color: var(--card-focus-border); box-shadow: 0 0 0 1px var(--card-focus-border);
@@ -148,6 +159,8 @@
 @media (max-width: 559px) { .tcard.k-due .tcard-meta, .tcard.k-chase .tcard-meta { flex-basis: 100%; } }
 .tcard.k-due .tbtn, .tcard.k-chase .tbtn { padding: 5px 14px; }
 .tbtn:hover { background: var(--button-hover-bg); }
+.tbtn:active { background: var(--button-press-bg); }
+.tbtn.primary:active { background: color-mix(in srgb, var(--button-primary-bg) 82%, var(--text)); }
 .tbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .tbtn.primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
 .tbtn.chosen { color: var(--primary-text); background: var(--success); border-color: var(--success); }

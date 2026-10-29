@@ -45,7 +45,8 @@ function boardBuild() {
       uiAction("plus", "New chat", () => boardCompose(), { title: "New chat (n, Ctrl+Alt+N)", key: "N", cls: "board-new-btn" })));
   board.slot = h("div", { class: "board-new", hidden: true });
   board.box = h("div", { class: "today board-today" });
-  board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.box);
+  board.startingEl = h("div", { class: "board-starting", hidden: true });
+  board.scroll = h("div", { class: "board-scroll", tabindex: "-1" }, board.slot, board.startingEl, board.box);
   board.el = h("div", { class: "tasks-board" }, board.head, board.scroll);
   // The card the keys are on, kept: back from a chat, a sheet, a redraw, there again.
   board.box.addEventListener("focusin", (e) => { const t = e.target.closest(".tcard"); if (t) board.last = cardKey(t); });
@@ -190,7 +191,7 @@ function boardTab(tab) {
   if (desk.current) boardBack(true);
   board.scroll.scrollTop = 0;
   board.last = null;
-  if (board.query) boardSearchDraw(); else boardFill(true);
+  if (board.query) boardSearchDraw(); else boardFill();      // (the tab is in its key: drawn, or as it was)
   modeButtons();
   boardRefocus();
 }
@@ -251,7 +252,7 @@ function boardOpen(id) {
 // The board again (desk.js show(null), the phone back from a chat): drawn,
 // where it was scrolled.
 function boardShown() {
-  if (board.query) boardSearchDraw(); else boardFill(true);
+  if (board.query) boardSearchDraw(); else boardFill();      // as it was, unless something changed meanwhile
   modeButtons();
   if (typeof board.from === "number") board.scroll.scrollTop = board.from;
   board.from = null;
@@ -302,17 +303,29 @@ function boardCompose() {
 function boardComposeShow() {
   if (!board.slot) return;
   // Started: the box goes, the board stays (the chat is at work on it).
-  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: !!app.desk, started: () => {
+  if (board.composing && !desk.newChat) desk.newChat = newChat({ wide: !!app.desk, starting: boardStarting, started: () => {
     board.composing = false;
     boardComposeShow();
     boardRefocus();
-  } });
+  }, failed: () => boardCompose() });
   board.slot.hidden = !board.composing;
   if (board.composing) {
     if (!board.slot.contains(desk.newChat.el)) board.slot.replaceChildren(desk.newChat.el, h("button", { class: "text-btn board-new-close", type: "button",
       title: "Esc", onclick: () => leaveNewChat() }, "Not now"));
     desk.newChat.update();
   } else if (desk.newChat && board.slot.contains(desk.newChat.el)) board.slot.replaceChildren();
+}
+
+// A chat you started, while the server sets it up: its card at the top of
+// the board, "Starting…", until the chat's own is in the list.
+function boardStarting(job, on) {
+  board.starting = (board.starting || []).filter((j) => j !== job);
+  if (on) board.starting.unshift(job);
+  if (!board.startingEl) return;
+  board.startingEl.replaceChildren(...board.starting.map((j) => uiCard({ kind: "fresh", hue: todayHue(j.repo), chip: projectName(j.repo),
+    title: cut(j.text.trim().split("\n")[0], 90), pill: uiPill("Starting…", "working"),
+    open: () => toast("Starting: its worktree is being made, a moment") })));
+  board.startingEl.hidden = !board.starting.length;
 }
 
 // ---- search: a chat by its name, or by anything said in it

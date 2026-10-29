@@ -26,6 +26,20 @@ the change.
 | `uiBadges([{name, about, on, when}])` | Badges: the earned lit, the rest dim with how to earn them. | Your missions |
 | `uiTiles([{n, label, on}])` | A few big numbers in one row, each its word under it (`on`: lit, a record). | Your missions |
 | `uiChart([{n, label}])` | A few days' counts as bars, the last (today) lit. | Your missions |
+| `uiSwap(box, nodes)`, `uiPatch(box, nodes)` | Drawing a box again without disturbing what's under a finger: `uiSwap` keeps all of it when nothing would change; `uiPatch` changes only the parts that differ, a part that differs only in which is on (its classes, `aria-pressed`) in place, so a tap already on it isn't lost to a redraw. | the queue over a chat's box, the Look sheet |
+
+## Snappy
+
+What you do is on screen the moment you do it, never after the server
+answers: a message sent is in the conversation (or the queue) at once, a
+card answered leaves the dock, a priority or a name is on its card
+(`aheadOf` in app.js keeps it there over lists that don't say it yet), a new
+chat's card says Starting…; refused, it goes back as it was and says why.
+A card or button is lit the moment it's pressed (`--card-press-bg`,
+`--button-press-bg`). A chat's stream is asked for as the finger lands on
+its card, and a chat opened before is drawn from what was kept. The server
+reads the list at once after anything a page does. `test/snappy.js` checks
+all of it, in both layouts.
 
 ## Theming
 
@@ -36,10 +50,10 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | Token | What |
 | --- | --- |
 | `--card-bg`, `--card-border`, `--card-border-width`, `--card-radius` | A card's surface, its rule, its corners |
-| `--card-hover-bg`, `--card-hover-border`, `--card-focus-bg`, `--card-focus-border` | A card under the pointer, under the keys |
+| `--card-hover-bg`, `--card-hover-border`, `--card-focus-bg`, `--card-focus-border`, `--card-press-bg` | A card under the pointer, under the keys, pressed |
 | `--card-pad-x`, `--card-gap` | Inside a card, between cards |
 | `--pill-radius`, `--pill-border-width`, `--pill-border-mix` | A pill's corners and rule (square as the buttons: `--button-radius`) (how much of its tone the rule has) |
-| `--button-bg`, `--button-border`, `--button-hover-bg`, `--button-radius`, `--button-primary-bg`, `--button-primary-text` | A button at rest, hovered, the primary one |
+| `--button-bg`, `--button-border`, `--button-hover-bg`, `--button-press-bg`, `--button-radius`, `--button-primary-bg`, `--button-primary-text` | A button at rest, hovered, pressed, the primary one |
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |

@@ -1,18 +1,24 @@
 // amarchy's service worker: the notifications (Web Push, sent by `amarchy
-// app` when a session needs you or is done), and the app's own files kept for
-// when the server can't be reached (it then says so, rather than Safari's
-// error page), your assistant's picture too. Everything else always comes
-// from the server.
+// app` when a session needs you or is done), and the app's own files kept,
+// so the app opens at once (from here, not the network) and says so when the
+// server can't be reached, rather than Safari's error page; your
+// assistant's picture too. Everything else always comes from the server.
 //
 // The app's files are kept by build: the server writes its build into this
 // file (bin/amarchy's page) and sends it with each app file (X-Amarchy-Build).
-// A cache keeps only files of this build, so an offline page never gets old
-// and new files mixed. A new build is a new worker: it takes over at once
-// (skipWaiting), the old one's files go, and the page reloads (app.js).
+// A cache keeps only files of this build, so a page never gets old and new
+// files mixed: the page (index.html) asks for each as name?b=<its build>,
+// given from here when that's this worker's build, from the server when it
+// isn't. The page comes from here too; the list says when the server has a
+// newer build (app.js updated), and the page loads again as ?fresh, from the
+// server, and with it the new files. A new build is a new worker: it takes
+// over at once (skipWaiting), and the old one's files go.
 
 const BUILD = "{{build}}";
 const SHELL = `amarchy-shell-${BUILD}`;
 const PICTURES = "amarchy-pictures";     // not a build's: kept until a newer one of yours replaces it
+// The page, the look and the icons aren't a build's own address (no ?b=).
+const UNSTAMPED = ["/", "/theme.css", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/screen.css", "/terminal.css", "/secrets.css", "/automations.css", "/ui.css", "/today.css", "/theme.css", "/ui.js", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/chat.js", "/terminal.js", "/secrets.js", "/automations.js", "/today.js", "/tasks.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 // A response that may be kept: it worked, and it's this build's (a file with
@@ -29,7 +35,7 @@ self.addEventListener("install", (e) => {
     const cache = await caches.open(SHELL);
     await Promise.all(FILES.map(async (f) => {
       try {
-        const res = await fetch(f, { cache: "no-cache" });
+        const res = await fetch(UNSTAMPED.includes(f) ? f : `${f}?b=${BUILD}`, { cache: "no-cache" });
         if (ofBuild(res)) await cache.put(f, res);
       } catch (err) { /* offline: kept the next time */ }
     }));
@@ -56,6 +62,12 @@ self.addEventListener("fetch", (e) => {
   // one at a time, the last look you picked.
   const look = path === "/theme.css";
   const key = look ? path + url.search : path;
+  // A file of another build than this worker's: the server's, never kept here.
+  const stamp = url.searchParams.get("b");
+  if (stamp && stamp !== BUILD) return;
+  // The page and this build's files: as kept, at once. The page again from
+  // the server when it asks to be (?fresh: the list said there's a newer build).
+  const first = path === "/" ? !url.searchParams.has("fresh") : stamp === BUILD;
   e.respondWith((async () => {
     // A picture's address is its hash: the one kept is the one, so it's
     // served from the kept copy (not the network), as each list row's picture
@@ -64,9 +76,13 @@ self.addEventListener("fetch", (e) => {
       const kept = await (await caches.open(PICTURES)).match(path);
       if (kept) return kept;
     }
+    if (first) {
+      const kept = await (await caches.open(SHELL)).match(path);
+      if (kept) return kept;
+    }
     try {
       const res = await fetch(e.request);
-      if (ofBuild(res)) {
+      if (ofBuild(res) && (path !== "/" || res.status === 200)) {
         const copy = res.clone();
         caches.open(picture ? PICTURES : SHELL).then(async (c) => {
           await c.put(key, copy);

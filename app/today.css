@@ -39,6 +39,10 @@
 .board-new { padding-top: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .board-new[hidden] { display: none; }
 .board-new .start-chat { width: 100%; max-width: none; }
+/* A chat you started, its card while it's set up (tasks.js boardStarting). */
+.board-starting { padding-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.board-starting[hidden] { display: none; }
+.board-starting:not([hidden]) + .today { padding-top: 10px; }
 
 /* The phone: the same board (app.js homeView), in its screen rather than
    over a computer's window; its bar in two rows, where you are and the
@@ -52,6 +56,7 @@
   .board-head-in .board-new-btn { margin-left: auto; }
   .board-scroll .today { padding-top: 10px; padding-bottom: 40px; }
   .board-new { padding-top: 10px; }
+  .board-starting { padding-top: 10px; }
 }
 /* The phone's (no keys to show; the search at 16px: less, and iOS zooms in on it). */
 body:not(.desk) .board-search input { font-size: 16px; }
