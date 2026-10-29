@@ -56,6 +56,12 @@ function todayAnswered(id) {
   todayUI.version++;
 }
 
+// It didn't go after all (the server refused it): its card asks again.
+function todayUnsent(id) {
+  if (!todayUI.sent.delete(id)) return;
+  todayRedraw();
+}
+
 function todayIsAnswered(s) {
   const t = todayUI.sent.get(s.id);
   if (!t) return false;
@@ -193,18 +199,24 @@ function todayOpen(s) {
 
 // Close it: at once, with Undo, when nothing would be lost; else asked, as
 // any close is (app.js confirmClose says what would go).
-async function todayClose(s, said = "") {
+async function todayClose(s, said = "", asked = null) {
   let c;
   try {
-    const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
-    c = await res.json();
-    if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
+    c = await (asked || todayClosing(s));
   } catch (e) {
     return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
   }
   // Uncommitted work, amarchy running from it, or a run that hasn't ended (it would stop halfway): asked first.
   if (c.changes || c.amarchy || (c.running || []).length) { todayRedraw(); return confirmClose(s, c); }
   todayCloseNow([s], said);
+}
+
+// What closing it would lose (uncommitted work, a run that hasn't ended), from the server.
+async function todayClosing(s) {
+  const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
+  const c = await res.json();
+  if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
+  return c;
 }
 
 // These close, after their Undo (off the page meanwhile).
@@ -244,14 +256,13 @@ function todayLeave(id) {
 // the first of the rest asked.
 async function todayCloseDone(ss) {
   const quick = [], ask = [];
-  for (const s of ss) {
-    try {
-      const c = await (await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`)).json();
-      (c.changes || c.amarchy || (c.running || []).length ? ask : quick).push([s, c]);
-    } catch (e) {
-      return toast("Can't reach Amarchy");
-    }
+  let all;
+  try {
+    all = await Promise.all(ss.map((s) => todayClosing(s)));      // all asked at once
+  } catch (e) {
+    return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
   }
+  ss.forEach((s, i) => { const c = all[i]; (c.changes || c.amarchy || (c.running || []).length ? ask : quick).push([s, c]); });
   if (quick.length) todayCloseNow(quick.map(([s]) => s), quick.length === 1 ? `Mission complete: ${quick[0][0].task || "the chat"}` : `Mission complete: ${quick.length} chats`);
   if (ask.length) confirmClose(ask[0][0], ask[0][1]);
 }
@@ -483,7 +494,7 @@ function todayChat(s, kind) {
 function todaySeen(s) {
   todayUI.seen.add(s.id);
   todayRedraw();
-  api(`/api/session/${encodeURIComponent(s.id)}/seen`).catch(() => {});
+  seenNow(s.id);
   setTimeout(() => { todayUI.seen.delete(s.id); }, 30000);
 }
 
@@ -493,6 +504,9 @@ function todaySeen(s) {
 async function todayComplete(s) {
   // Still running something: asked first (todayClose), not celebrated yet.
   if ((rowOf(s.id) || s).status === "running") return todayClose(s, `Mission complete: ${s.task || "the chat"}`);
+  // What closing it would lose, asked now: the server answers while its card celebrates.
+  const asked = todayClosing(s);
+  asked.catch(() => {});
   // Its card says so a moment, when it's in sight (not from the open chat).
   const card = [...document.querySelectorAll(`.tcard[data-id="${CSS.escape(s.id)}"]`)].find((c) => c.offsetParent);
   if (card) {
@@ -500,7 +514,7 @@ async function todayComplete(s) {
     card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, "Mission complete")));
     await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 650));
   }
-  todayClose(s, `Mission complete: ${s.task || "the chat"}`);
+  todayClose(s, `Mission complete: ${s.task || "the chat"}`, asked);
 }
 
 // ---- mission complete: what closing a chat feels like
@@ -894,13 +908,23 @@ function boardOn() { return typeof board !== "undefined" && !!board.el; }
 
 // Today into its box, if what it shows changed, keeping where it's scrolled to.
 function todayFill(box, force) {
-  const key = todayKey(app.view);
+  const board = box.classList.contains("board-today");
+  // Under a computer's open chat the board isn't in sight: drawn once it's
+  // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
+  if (board && !force && typeof desk !== "undefined" && desk.current) return;
+  const only = board ? boardTabNow() : null;
+  const key = `${only}|${todayKey(app.view)}`;
   if (!force && box.dataset.key === key) return;
   box.dataset.key = key;
-  const board = box.classList.contains("board-today");
   const scroller = box.closest(".scroll, .board-scroll");
   const top = scroller ? scroller.scrollTop : 0;
-  keepFocus(box, () => box.replaceChildren(...todayNodes({ board, only: board ? boardTabNow() : null })));
+  // A tab as it was last drawn, when nothing changed since (Chats, Tasks,
+  // Chats again): its cards as they were, not drawn again.
+  box.drawn = box.drawn || new Map();
+  const was = box.drawn.get(only);
+  const nodes = !force && was && was.key === key ? was.nodes : todayNodes({ board, only });
+  box.drawn.set(only, { key, nodes });
+  keepFocus(box, () => box.replaceChildren(...nodes));
   if (scroller) scroller.scrollTop = top;
 }
 

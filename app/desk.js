@@ -519,7 +519,7 @@ function show(id) {
       boardComposeShow();
       deskLayout();
       toChat();
-      api(`/api/session/${encodeURIComponent(id)}/seen`).catch(() => {});      // opened: seen
+      seenNow(id);      // opened: seen
     }
   } else {
     desk.terminal.close();
@@ -551,6 +551,7 @@ function deskChat(id) {
     onSession: (r) => { if (chat === desk.chat) { uiWhenStill("desk-head", deskHead); desk.details.sessionChanged(r); } },
     onGoal: () => { if (chat === desk.chat) deskHead(); },        // what the chat is for, under its name
     onSent: () => { if (chat === desk.chat) boardSent(id); },     // it works on it: back to the board (tasks.js)
+    onUnsent: () => todayUnsent(id),                              // it didn't go: its card asks again
     onGone: (why) => {
       // Closed: back to the board. Not reachable (the host restarted): again in a moment.
       if (!why) { if (chat === desk.chat) boardBack(true); return; }
@@ -567,7 +568,7 @@ function go2(id) {
 
 function markSeen() {
   if (desk.current && document.visibilityState === "visible" && document.hasFocus())
-    api(`/api/session/${encodeURIComponent(desk.current)}/seen`).catch(() => {});
+    seenNow(desk.current);
 }
 
 // ---- over the chat: Back to the board, its project, its name (a click:
@@ -1453,9 +1454,7 @@ function renameSession() {
   picker({ title: `Name for ${s.task || where(s)}`, text: true, value: s.title || "",
            note: "↵ names it; empty, it goes back to Claude's title",
            act: async (t) => {
-             try {
-               await api(`/api/session/${encodeURIComponent(s.id)}/rename`, t.trim() ? { title: t.trim() } : { reset: true });
-             } catch (e) { toast(e.message); }
+             try { await renameNow(s, t); } catch (e) { /* said */ }
            } });
 }
 
@@ -1466,9 +1465,9 @@ async function setPriority(s, dir) {
   const level = LEVELS[Math.max(0, Math.min(2, at + (dir === "up" ? 1 : -1)))];
   if (level === (s.priority || "normal")) return toast(`${PRIORITY[level]} priority already`);
   try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level });
+    await priorityNow(s, level);
     toast(`${s.task || s.name}: ${PRIORITY[level]} priority`);
-  } catch (e) { toast(e.message); }
+  } catch (e) { /* said */ }
 }
 
 async function closeCurrent() {
@@ -1582,7 +1581,7 @@ function sessionItems(s) {
       act: () => assistantSheet(s) },
     ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
-                                                act: () => api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level: p }).catch((e) => toast(e.message)) })),
+                                                act: () => priorityNow(s, p).catch(() => {}) })),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
       { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),

@@ -203,6 +203,12 @@ function peerName(to) {
 // Tools that are Claude's bookkeeping: not shown.
 const BRIEF_TOOL_NAME = "mcp__amarchy__update_brief";      // bin/amarchy BRIEF_TOOL: the brief view draws it
 const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet", BRIEF_TOOL_NAME]);
+const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at once when opened again
+const chatsSeen = new Map();      // their id -> {items, start, facts}, the last left last (Chat.close)
+const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
+
+// A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
+function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
 
 // A step in words: {kind (its icon, and what it counts as), past, now (while
 // it's under way), path (a file it's about)}.
@@ -1064,6 +1070,59 @@ function chatViewSeg(then) {
                   onclick: () => { setChatView(mode); if (then) then(); } }, label)));
 }
 
+// ---- a chat's stream, asked for as your finger lands on its card
+//
+// A tap's click comes when the finger lifts, a tenth of a second or more
+// after it landed: the chat's stream (its conversation, its state) is on
+// its way from then, so the chat has it when it opens. What comes before
+// it's open is kept, and given to it in order (Chat.open). Not opened (the
+// finger scrolled, or went elsewhere): closed.
+
+const STREAM_EVENTS = ["session", "conversation", "facts", "screen", "live", "gone"];
+let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: listener}, timer}
+
+function chatStreamEarly(id) {
+  if (streamEarly && streamEarly.id === id && streamEarly.es.readyState !== EventSource.CLOSED) return;
+  chatStreamDrop();
+  const es = new EventSource(`/api/session/${encodeURIComponent(id)}/stream`);
+  const early = { id, es, got: [], keep: {} };
+  for (const type of STREAM_EVENTS) {
+    early.keep[type] = (e) => early.got.push([type, e]);
+    es.addEventListener(type, early.keep[type]);
+  }
+  early.timer = setTimeout(() => { if (streamEarly === early) chatStreamDrop(); }, 5000);
+  streamEarly = early;
+}
+
+function chatStreamDrop() {
+  if (!streamEarly) return;
+  clearTimeout(streamEarly.timer);
+  streamEarly.es.close();
+  streamEarly = null;
+}
+
+// The one asked for early, for the chat opening now: its stream and what came on it.
+function chatStreamTake(id) {
+  const early = streamEarly;
+  if (!early || early.id !== id || early.es.readyState === EventSource.CLOSED) { chatStreamDrop(); return null; }
+  clearTimeout(early.timer);
+  streamEarly = null;
+  for (const type of STREAM_EVENTS) early.es.removeEventListener(type, early.keep[type]);
+  return early;
+}
+
+// A finger (or the mouse) down on a chat's card, not on one of its buttons:
+// its stream, now. A scroll that began there lets it go.
+addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  const card = e.target.closest && e.target.closest(".tcard[data-id]");
+  if (!card) return;
+  const control = e.target.closest("button, a, input, textarea, select, summary");
+  if (control && !control.matches(".today-go")) return;      // its own buttons do their own thing
+  chatStreamEarly(card.dataset.id);
+}, true);
+addEventListener("pointercancel", () => { if (streamEarly && !streamEarly.got.length) chatStreamDrop(); }, true);
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views).
@@ -1087,6 +1146,8 @@ class Chat {
     this.facts = null;          // what git says (the stream's "facts": bin/amarchy brief_facts)
     this.answers = new Map();   // your answers to a brief's questions, by its key: {picks, sent}
     this.opened = new Map();    // replies and their sections you opened or closed: "<reply>" / "<reply>|<section>" -> open
+    this.outbox = [];           // what you sent, shown at once, until the conversation (or the queue) has it (send)
+    this.answeredAsks = new Map();      // the cards you answered, off the dock at once: their id -> when (act)
     this.reset();
     this.build();
   }
@@ -1120,7 +1181,8 @@ class Chat {
     this.stage = h("div", { class: "screen-stage" });
     this.stage.addEventListener("click", copy);
     this.stageWork = h("div", { class: "working screen-work", role: "status", hidden: true }, spinner(), h("span", { class: "now" }));
-    this.scroller = h("div", { class: "scroll chat-scroll" }, this.body());
+    this.outboxEl = h("div", { class: "chat-conv chat-outbox" });
+    this.scroller = h("div", { class: "scroll chat-scroll" }, this.body(), this.outboxEl);
     this.latest = h("button", { class: "to-latest", type: "button", hidden: true, "aria-label": "Go to the latest",
                                 onclick: () => this.toBottom(true) }, icon("down"));
     this.scroller.addEventListener("scroll", () => { if (this.atBottom()) this.latest.hidden = true; }, { passive: true });
@@ -1234,30 +1296,43 @@ class Chat {
 
   open() {
     this.loadInfo();
-    const es = new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
+    // Opened before: drawn at once as it was when you left it, the stream's
+    // own then adding only what came since (conversation).
+    const was = chatsSeen.get(this.id);
+    if (was && !this.items.length) {
+      this.facts = was.facts;
+      this.conversation({ reset: true, items: was.items, start: was.start });
+    }
+    // Asked for already, as your finger landed on its card: that one, and what came on it.
+    const early = chatStreamTake(this.id);
+    const es = early ? early.es : new EventSource(`/api/session/${encodeURIComponent(this.id)}/stream`);
     this.es = es;
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
     window.addEventListener("amarchy-ask", this.onAskEvent);
     this.clearNotes();
-    es.addEventListener("session", (e) => {
-      this.row = JSON.parse(e.data);
-      if (this.opts.onSession) this.opts.onSession(this.row);
-      this.renderDock();
-      this.renderTail();
-    });
-    es.addEventListener("conversation", (e) => this.conversation(JSON.parse(e.data)));
-    es.addEventListener("facts", (e) => { this.facts = JSON.parse(e.data); this.drawBrief(); });
-    es.addEventListener("screen", (e) => {
-      this.screen = JSON.parse(e.data);
-      if (this.opts.onScreen) this.opts.onScreen(this.screen);
-      this.renderDock();
-    });
-    es.addEventListener("live", (e) => {
-      this.live = JSON.parse(e.data);
-      this.renderDock();
-      this.renderTail();
-    });
-    es.addEventListener("gone", () => { if (this.opts.onGone) this.opts.onGone(); });
+    const on = {
+      session: (e) => {
+        this.row = JSON.parse(e.data);
+        if (this.opts.onSession) this.opts.onSession(this.row);
+        this.renderDock();
+        this.renderTail();
+      },
+      conversation: (e) => this.conversation(JSON.parse(e.data)),
+      facts: (e) => { this.facts = JSON.parse(e.data); this.drawBrief(); },
+      screen: (e) => {
+        this.screen = JSON.parse(e.data);
+        if (this.opts.onScreen) this.opts.onScreen(this.screen);
+        this.renderDock();
+      },
+      live: (e) => {
+        this.live = JSON.parse(e.data);
+        this.renderDock();
+        this.renderTail();
+      },
+      gone: () => { if (this.opts.onGone) this.opts.onGone(); },
+    };
+    for (const type of STREAM_EVENTS) es.addEventListener(type, on[type]);
+    if (early) for (const [type, e] of early.got) { if (this.es !== es) break; on[type](e); }
     es.addEventListener("error", () => {
       if (es.readyState === EventSource.CLOSED && this.opts.onGone) this.opts.onGone("error");
     });
@@ -1265,6 +1340,11 @@ class Chat {
 
   close() {
     clearInterval(this.bgTimer);
+    if (this.items.length) {
+      chatsSeen.delete(this.id);
+      chatsSeen.set(this.id, { items: this.items.slice(), start: this.start, facts: this.facts });
+      while (chatsSeen.size > CHATS_SEEN) chatsSeen.delete(chatsSeen.keys().next().value);
+    }
     if (this.es) this.es.close();
     this.es = null;
     window.removeEventListener("amarchy-ask", this.onAskEvent);
@@ -1313,14 +1393,22 @@ class Chat {
   }
 
   // A request to the session's routes ("keys", "send", "answer", "interrupt"...).
-  // What you send or answer goes; once it's gone, whoever holds the chat is
-  // told (opts.onSent: Tasks folds its ticket, tasks.js). Not Esc's stop.
-  post(route, body) {
+  // What you send or answer goes, and whoever holds the chat is told at
+  // once, not when the server answers (opts.onSent: back to the board, its
+  // card answered); should the server not take it, told that too
+  // (opts.onUnsent: its card asks again). Not Esc's stop. told: the caller
+  // tells them itself (send).
+  post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
     const done = api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
-    if (sent && this.opts.onSent) done.then(() => this.opts.onSent(route), () => {});
+    if (sent && !told && this.opts.onSent) {
+      this.opts.onSent(route);
+      done.catch(() => this.unsent());
+    }
     return done;
   }
+
+  unsent() { if (this.opts.onUnsent) this.opts.onUnsent(); }
 
   // ---- what shows: the conversation, or another view of the session's
   // (its terminal, its screen) with rows of keys above the dock and maybe
@@ -1328,11 +1416,17 @@ class Chat {
 
   setView({ content = null, above = [], composer = true } = {}) {
     this.view = { content, above, composer };
-    this.scroller.replaceChildren(content || this.body());
+    this.showBody(content);
     this.el.classList.toggle("other", !!content);
     this.cardKey = null;
     this.renderDock();
     if (!content) this.toBottom(true);
+  }
+
+  // What the scroller shows: another view's content, or the conversation
+  // (the brief or the chat) with what you sent under it, on its way.
+  showBody(content = null) {
+    this.scroller.replaceChildren(...(content ? [content] : [this.body(), this.outboxEl]));
   }
 
   atBottom() {
@@ -1439,8 +1533,10 @@ class Chat {
   keepItems(items, front) {
     const fresh = items.filter((it) => !it.key || !this.itemKeys.has(it.key));
     for (const it of fresh) if (it.key) this.itemKeys.add(it.key);
-    if (front) this.items.unshift(...fresh);
-    else this.items.push(...fresh);
+    if (front) {
+      this.items.unshift(...fresh);
+      for (const out of this.outbox) out.mark += fresh.length;
+    } else this.items.push(...fresh);
     // What the chat is for: the goal in the newest reply that says one (shown
     // under its name, opts.onGoal; not on each reply).
     // Its state with it (the goal block's): a done chat offers to close (renderDone).
@@ -1453,6 +1549,7 @@ class Chat {
         if (g && g.goal) { goal = g.goal; state = g.state; }
       }
     }
+    if (!front) this.settleOutbox();
     if (state !== this.goalState) {
       this.goalState = state;
       this.renderDone();
@@ -1472,7 +1569,7 @@ class Chat {
     this.drawSwitch();
     if (mode === "chat") this.conversation({ reset: true, redraw: true, items: this.items.slice(), start: this.start });
     else this.rebuildScreen();
-    if (!this.view.content) this.scroller.replaceChildren(this.body());
+    if (!this.view.content) this.showBody();
     this.toBottom(true);
   }
 
@@ -1502,7 +1599,7 @@ class Chat {
     this.drawEmpty();
     for (const t of this.sturns) this.drawReply(t);
     this.drawLive();
-    if (!this.view.content && this.scroller.firstChild !== this.stage) this.scroller.replaceChildren(this.stage);
+    if (!this.view.content && this.scroller.firstChild !== this.stage) this.showBody();
     if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
   }
 
@@ -2635,7 +2732,7 @@ class Chat {
     const secret = typeof secretDock === "function" ? secretDock(this) : null;
     if (secret) return secret;
     if (this.engine === "chat") {
-      const pending = this.live && Array.isArray(this.live.pending) ? this.live.pending : [];
+      const pending = this.live && Array.isArray(this.live.pending) ? this.live.pending.filter((q) => !this.answeredAsk(q.request_id)) : [];
       const p = pending[0];
       if (p) return { card: requestCard(this, p, 0, pending.length),
                       key: `req:${p.request_id}:${JSON.stringify(p.answered || {})}:${pending.length}:${p.tool === "ExitPlanMode" ? this.live.before_plan : ""}` };
@@ -2645,7 +2742,7 @@ class Chat {
       return null;
     }
     if (sc && sc.exited) return { exited: true, key: "exited" };
-    if (sc && sc.dialog) {
+    if (sc && sc.dialog && !this.answeredAsk(sc.dialog.id)) {
       const step = this.lastStep && !this.lastStep.result && !HIDDEN_TOOLS.has(this.lastStep.name) ? this.lastStep : null;
       return { card: screenCard(this, sc.dialog, step), key: `dialog:${sc.dialog.id}:${step ? step.id : ""}` };
     }
@@ -2709,6 +2806,8 @@ class Chat {
   renderQueue() {
     const live = this.engine === "chat" ? this.live : null;
     const queue = live && Array.isArray(live.queue) ? live.queue : [];
+    // Queued now: the broker has it, so it's no longer only ours.
+    for (const q of queue) { const out = this.outbox.find((o) => o.key === outKey(q.text || "")); if (out) this.outDone(out); }
     const kids = queue.map((q) => {
       const pics = q.images ? (q.images === 1 ? "an image" : `${q.images} images`) : "";
       const btn = (label, fn, aria) => h("button", { class: "text-btn", type: "button", "aria-label": aria, onclick: fn }, label);
@@ -2720,6 +2819,10 @@ class Chat {
         h("button", { class: "cbtn small", type: "button", "aria-label": "Don't send it", title: "Don't send it",
                       onclick: () => this.removeQueued(q) }, icon("failed")));
     });
+    // Sent while it works, not in the broker's queue yet: there already.
+    for (const o of this.outbox) if (o.queued) kids.push(h("div", { class: "queued sending" }, icon("clock"),
+      h("div", { class: "text" }, h("div", { class: "what" }, o.text || (o.shots.length === 1 ? "An image" : `${o.shots.length} images`)),
+        h("div", { class: "when" }, "Will send when Claude finishes"))));
     const n = live && live.attachments;
     if (n) kids.push(h("div", { class: "queued images" }, icon("image"),
       h("div", { class: "text" }, h("div", { class: "what" }, n === 1 ? "An image goes with your next message" : `${n} images go with your next message`))));
@@ -2851,19 +2954,33 @@ class Chat {
     return el;
   }
 
-  // Run a card's action: its buttons off while it goes; on a failure, why, and the card back.
+  // Run a card's action: what you picked lit, and the card off the dock a
+  // blink later, the next thing (another question, the box you type in) in
+  // its place, without waiting on Claude to say it heard. On a failure, why,
+  // and the card back. Should Claude still ask it a while on, it's back too,
+  // to answer again.
   act(card, fn, btn) {
     card.querySelectorAll("button, textarea").forEach((b) => { b.disabled = true; });
     if (btn) btn.classList.add("chosen");
+    const ask = card.dataset.ask;
+    const redraw = () => { this.cardKey = null; this.renderDock(); };
+    if (ask) {
+      this.answeredAsks.set(ask, Date.now());
+      setTimeout(() => { if (card.isConnected) redraw(); }, 120);
+    }
     Promise.resolve().then(fn).then(() => {
-      // Answered: the next state takes the card's place. Should none come,
-      // the card is back, to answer again.
-      setTimeout(() => { if (card.isConnected) { this.cardKey = null; this.renderDock(); } }, 10000);
+      setTimeout(() => { if (ask) this.answeredAsks.delete(ask); if (card.isConnected || ask) redraw(); }, ASK_HELD);
     }, (e) => {
       toast(e.message);
-      this.cardKey = null;
-      this.renderDock();
+      if (ask) this.answeredAsks.delete(ask);
+      redraw();
     });
+  }
+
+  // A card you answered, held off the dock until Claude moves on (act).
+  answeredAsk(id) {
+    const at = id && this.answeredAsks.get(id);
+    return !!at && Date.now() - at < ASK_HELD;
   }
 
   // A field to say something with (why not, what to change, your own
@@ -2888,6 +3005,7 @@ class Chat {
     const card = m.kind === "secret" ? secretCard(this, m)      // secrets.js
                : m.kind === "question" ? this.questionCard(m) : m.kind === "permission" ? this.permissionCard(m)
                : m.kind === "plan" ? this.planAsk(m) : this.choiceCard(m);
+    if (m.id && m.kind !== "secret") card.dataset.ask = String(m.id);
     menuKeys(card, { close: m.kind === "choice" && m.escape ? () => this.act(card, m.escape) : null });
     // A choice's number picks it, as on Claude's own menu.
     card.addEventListener("keydown", (e) => {
@@ -3240,25 +3358,121 @@ class Chat {
     const files = tray.filter((a) => a.kind === "file").map((a) => `[File: ${a.path}]`);
     const message = files.length ? `${text.replace(/\s+$/, "")}${text.trim() ? "\n\n" : ""}${files.join("\n")}` : text;
     const images = tray.filter((a) => a.kind === "image").map((a) => ({ type: a.type, data: a.data }));
-    this.sending = true;
-    this.sendButtons();
-    try {
-      const r = images.length && this.engine !== "chat" ? await this.pasteIntoTerminal(images, message)
-        : await this.post("send", { text: message, ...(images.length ? { images } : {}) });
-      if (r.waking) toast("Waking Claude with it…");
-      this.input.value = "";
-      store.set(`draft:${this.id}`, "");
-      for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
-      this.tray = this.tray.filter((a) => !tray.includes(a));
-      this.drawTray();
-      this.closeMenu();
-      this.grow();
-      this.toBottom();
-    } catch (e) {
-      toast(e.message);
+    // Pictures into Claude's classic terminal: pasted one by one, and only
+    // then the words (it may have to wake first): sent as before, the box
+    // kept until they're in.
+    if (images.length && this.engine !== "chat") {
+      this.sending = true;
+      this.sendButtons();
+      try {
+        await this.pasteIntoTerminal(images, message);
+        this.sentOff(tray);
+      } catch (e) {
+        toast(e.message);
+      }
+      this.sending = false;
+      this.sendButtons();
+      return;
     }
-    this.sending = false;
-    this.sendButtons();
+    // Everything else: it's sent the moment you send it. The box empties, what
+    // you said is in the conversation (or in the queue, while Claude works),
+    // and whoever holds the chat moves on (back to the board); the server's
+    // answer comes after. Should it not take it: why, and your words back in
+    // the box (its draft, if the chat's closed by then).
+    const out = this.outgo(message, text, tray);
+    this.sentOff(tray, true);
+    if (this.opts.onSent) this.opts.onSent("send");
+    // One after the other, in the order you sent them.
+    const prev = this.sendQueue || Promise.resolve();
+    const done = this.sendQueue = prev.then(() => this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true }));
+    try {
+      const r = await done;
+      out.sent = true;
+      out.el.classList.remove("sending");
+      this.settleOutbox();      // (the conversation may have it already)
+      if (r && r.waking) toast("Waking Claude with it…");
+      if (r && r.queued) this.outDone(out);       // in the broker's queue now: the queue shows it
+      // Should the conversation never say it (a classic terminal's answer to a dialog), it goes anyway.
+      setTimeout(() => this.outDone(out), 30000);
+    } catch (e) {
+      this.takeBack(text, tray);
+      this.outDone(out);
+      this.unsent();
+      toast(`Didn't send: ${e.message}`);
+    } finally {
+      if (this.sendQueue === done) this.sendQueue = null;
+    }
+  }
+
+  // What was sent is off the box: its words, its draft, the tray's.
+  sentOff(tray, keepPictures = false) {
+    this.input.value = "";
+    store.set(`draft:${this.id}`, "");
+    if (!keepPictures) for (const a of tray) if (a.url) URL.revokeObjectURL(a.url);
+    this.tray = this.tray.filter((a) => !tray.includes(a));
+    this.drawTray();
+    this.closeMenu();
+    this.grow();
+    this.typed();
+    this.toBottom(true);
+  }
+
+  // A message on its way, shown now: a bubble under the conversation, or
+  // (Claude at work, so it waits for it) in the queue over the box.
+  outgo(message, text, tray) {
+    const shots = tray.filter((a) => a.kind === "image" && a.url);
+    const said = this.userView(message);
+    const bubble = h("div", { class: "bubble" },
+      shots.length ? h("div", { class: "shots" }, ...shots.map((a) => h("span", { class: "shot" }, h("img", { src: a.url, alt: "" })))) : null,
+      ...(said.parts || [said.note || said.summary || ""]));
+    tray.forEach((a) => { a.taken = false; });
+    const out = { text: text.trim(), key: outKey(message), shots, tray, mark: this.items.length, queued: this.engine === "chat" && this.working(),
+                  sent: false, el: h("div", { class: "msg user sending" }, bubble) };
+    this.outbox.push(out);
+    if (out.queued) this.renderQueue();
+    else this.outboxEl.append(out.el);
+    return out;
+  }
+
+  // The conversation has what you sent (a message of yours since you sent
+  // it, the same words; or, once the server took it, the next one of yours
+  // whatever its words): its bubble here goes, the conversation's in its place.
+  settleOutbox() {
+    if (!this.outbox.length) return;
+    this.claimed = this.claimed || new WeakSet();
+    for (const out of [...this.outbox]) {
+      const mine = this.items.slice(out.mark).filter((it) => it.kind === "user" && !this.claimed.has(it) && !/^\s*</.test(it.text || ""));
+      const it = mine.find((x) => outKey(x.text || "") === out.key) || (out.sent ? mine[0] : null);
+      if (!it) continue;
+      this.claimed.add(it);
+      this.outDone(out);
+    }
+  }
+
+  outDone(out) {
+    const at = this.outbox.indexOf(out);
+    if (at < 0) return;
+    this.outbox.splice(at, 1);
+    out.el.remove();
+    if (out.queued) this.renderQueue();
+    for (const a of out.shots) if (a.url && !a.taken) URL.revokeObjectURL(a.url);
+  }
+
+  // A message that didn't go: its words back in the box, before what's
+  // there now, and its files and pictures back on the tray.
+  takeBack(text, tray) {
+    tray.forEach((a) => { a.taken = true; });
+    if (this.closed) {
+      const was = store.get(`draft:${this.id}`) || "";
+      store.set(`draft:${this.id}`, was ? `${text}\n${was}` : text);
+      return;
+    }
+    const now = this.input.value.trim();
+    this.input.value = now ? `${text}\n${now}` : text;
+    this.tray = [...tray, ...this.tray];
+    this.drawTray();
+    this.typed();
+    this.grow();
   }
 
   // Images into Claude's classic terminal: each pasted into its prompt (it

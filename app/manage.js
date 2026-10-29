@@ -47,10 +47,8 @@ function renameSheet(s) {
   const input = field({ value: s.title || "", placeholder: s.claude_title || s.task || "What it's about", maxlength: "200" }, () => save());
   const save = async () => {
     const t = input.value.trim();
-    try {
-      await api(`/api/session/${sid(s)}/rename`, t ? { title: t } : { reset: true });
-      closeSheets();
-    } catch (e) { toast(e.message); }
+    closeSheets();      // named at once (app.js aheadOf)
+    try { await renameNow(s, t); } catch (e) { /* said */ }
   };
   sheet(sheetHead("Rename", where(s)), input,
     h("button", { class: "control wide accent", onclick: save }, "Save"),
