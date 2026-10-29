@@ -1405,13 +1405,14 @@ class Chat {
     return item ? [...item.querySelectorAll("button, a[href], summary")].filter((b) => !b.matches(".reply-head") && !b.disabled && b.getClientRects().length) : [];
   }
 
-  navTo(el, start) {
+  // up: come to from below (k), so a message taller than the page shows its
+  // end, to read up through it; else its top. One that fits: just in sight.
+  navTo(el, start, up) {
     if (!el) return;
     if (!el.matches("button, a[href], summary, input, textarea")) { el.tabIndex = -1; el.classList.add("nav-item"); }
     el.focus({ preventScroll: true });
     const r = el.getBoundingClientRect(), v = this.scroller.getBoundingClientRect();
-    // A message taller than the page: its top. Else just in sight.
-    el.scrollIntoView({ block: start || r.height > v.height ? "start" : "nearest" });
+    el.scrollIntoView({ block: start ? "start" : r.height > v.height ? (up ? "end" : "start") : "nearest" });
   }
 
   // The keys on the latest message (Esc out of the box, a chat opened with the keys).
@@ -1448,7 +1449,7 @@ class Chat {
     const item = items[at];
     const inside = this.navInside(item);
     const on = inside.indexOf(a);
-    const go = (i) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))]); return done(); };
+    const go = (i, up) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))], false, up); return done(); };
     if (k === "i") {
       if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
       this.input.focus({ preventScroll: true });
@@ -1456,8 +1457,14 @@ class Chat {
       return done();
     }
     if (!items.length) return false;
+    // A message taller than the page reads as pages: j / k go through it
+    // first, then on to the next (or the one before).
+    const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
+    const r = item && a === item ? item.getBoundingClientRect() : null;
+    if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
+    if ((k === "k" || k === "ArrowUp") && r && r.top < v.top - 8) { this.scroller.scrollBy({ top: -Math.min(step, v.top - r.top + 16) }); return done(); }
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
-    if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1);
+    if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
     if (k === "G" || k === "End") { go(items.length - 1); this.toBottom(true); return true; }
     if (k === "d" || k === "u") { this.scroller.scrollBy({ top: (k === "d" ? 1 : -1) * this.scroller.clientHeight / 2 }); return done(); }
@@ -1808,7 +1815,8 @@ class Chat {
     if (sig === t.sig) return;
     t.sig = sig;
     if (!t.items.length && !live) return t.reply.replaceChildren();
-    t.reply.replaceChildren(this.replyCard(t, key, last, live));
+    // The keys stay on what they were on in it (a section opened with Enter, the live card's every second).
+    keepFocus(t.reply, () => t.reply.replaceChildren(this.replyCard(t, key, last, live)));
   }
 
   // The sections opened or closed in a reply, for its sig.

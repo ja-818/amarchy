@@ -627,7 +627,7 @@ async function run(browser, base, layout) {
   const last = keys[0][1].n - 1;
   const ok = keys[0][1].on === "item" && keys[0][1].at === last && keys[1][1].at === last - 1 && keys[2][1].at === last - 2 && keys[2][1].kind === "turn-reply"
     && keys[3][1].on === "inside" && keys[3][1].at === last - 2 && keys[4][1].on === "item" && keys[4][1].at === last - 2
-    && keys[5][1].at === last - 1 && keys[6][1].at === last && keys[7][1].on === "box";
+    && (keys[5][1].at === last - 1 || keys[5][1].at === last - 2 /* a tall one: j reads down it first */) && keys[6][1].at === last && keys[7][1].on === "box";
   check(layout, ok, `the keys: Esc out of the box, k / j, l into a reply, h out, G, i (${JSON.stringify(keys.map(([k, w]) => `${k}:${w.at}/${w.on}`))})`);
   await page.keyboard.press("Escape");
   const wasOpen = await page.evaluate(() => [...document.querySelectorAll(".reply")].at(-1).classList.contains("open"));
@@ -642,6 +642,31 @@ async function run(browser, base, layout) {
   const back = await where();
   check(layout, tabbed.mode === "chat" && tabbed.on === "item" && back.mode === "screen" && back.on === "item" && back.at === back.n - 1,
     `Tab: Brief | Chat, the keys on a message in each (${JSON.stringify([tabbed, back])})`);
+  // A button in a reply pressed (a section opened): the reply's drawn again,
+  // the keys stay on that button, not lost.
+  const pressed = await page.evaluate(() => {
+    const items = window.__chat.navItems(), item = items[items.length - 1];
+    const head = item.querySelector(".rsec-head");
+    window.__chat.navTo(head);
+    return !!head;
+  });
+  await page.keyboard.press("Enter");
+  const kept = await page.evaluate(() => { const a = document.activeElement; const items = window.__chat.navItems(); return items[items.length - 1].contains(a) && a.matches(".rsec-head"); });
+  check(layout, pressed && kept, "Enter on a reply's section: it opens, the keys stay on it");
+  // A reply taller than the page: j reads down through it, then goes on; k reads back up.
+  const tall = await page.evaluate(() => {
+    const c = window.__chat, items = c.navItems(), item = items[items.length - 2 >= 0 ? items.length - 1 : 0];
+    item.style.minHeight = `${c.scroller.clientHeight * 2}px`;
+    c.navTo(item, true);
+    return { top: Math.round(c.scroller.scrollTop) };
+  });
+  await page.keyboard.press("j");
+  const paged = await page.evaluate(() => ({ top: Math.round(window.__chat.scroller.scrollTop), on: document.activeElement === window.__chat.navItems().at(-1) }));
+  await page.keyboard.press("k");
+  const pagedUp = await page.evaluate(() => ({ top: Math.round(window.__chat.scroller.scrollTop), on: document.activeElement === window.__chat.navItems().at(-1) }));
+  await page.evaluate(() => { window.__chat.navItems().at(-1).style.minHeight = ""; });
+  check(layout, paged.top > tall.top && paged.on && pagedUp.top < paged.top && pagedUp.on,
+    `a tall reply: j reads down through it, k back up, the keys on it (${JSON.stringify([tall, paged, pagedUp])})`);
   const lit = await page.evaluate(() => { const a = document.activeElement, r = a.querySelector(":scope > .reply"); return a.matches(":focus-visible") && (r ? getComputedStyle(r).boxShadow !== "none" : getComputedStyle(a).outlineStyle !== "none"); });
   check(layout, lit, "the message the keys are on is lit");
   await shot("keys");
