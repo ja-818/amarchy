@@ -66,12 +66,6 @@ function boardBuild() {
   // Its keys wherever the keyboard is (nothing focused, too), while it's up;
   // Esc over an open chat before the chat has it (there it would stop Claude).
   window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
-  // The card under the keys lit with keys at hand (a computer's, or once a
-  // key is pressed); on a phone's touch, no ring on a card nobody's keys are on.
-  const keyed = (on) => document.documentElement.classList.toggle("keyed", on);
-  keyed(app.desk || matchMedia("(pointer: fine)").matches);
-  window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) keyed(true); }, true);
-  window.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && !app.desk) keyed(false); }, true);
   // Back in the window (a screenshot, another app): the keys where they were.
   window.addEventListener("focus", () => {
     const a = document.activeElement;

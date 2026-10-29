@@ -1217,6 +1217,19 @@ class Chat {
     for (const el of [this.scroller, this.conv, this.stage, this.outboxEl]) this.sizes.observe(el);
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
+    // The message the keys are on, lit (navMark), kept by the chat whatever
+    // the browser does with its focus: wherever the keys or a click go in the
+    // messages, that one; drawn again, the one in its place.
+    this.navSel = null;
+    this.scroller.addEventListener("focusin", (e) => { const it = this.navItemOf(e.target); if (it) this.navPick(it); });
+    this.scroller.addEventListener("click", (e) => { const it = this.navItemOf(e.target); if (it) this.navPick(it); });
+    // Writing (the box, what's asked in the dock): no message lit.
+    this.dock.addEventListener("focusin", () => this.el.classList.add("writing"));
+    this.dock.addEventListener("focusout", (e) => { if (!this.dock.contains(e.relatedTarget)) this.el.classList.remove("writing"); });
+    this.input.addEventListener("focus", () => { this.navSel = null; });      // written to: the latest one, after
+    let marking = 0;
+    new MutationObserver(() => { if (!marking) marking = requestAnimationFrame(() => { marking = 0; this.navMark(); }); })
+      .observe(this.scroller, { childList: true, subtree: true });
     // The switch between the two views, over the chat (hidden over the terminal and the other views).
     this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Brief");
     this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
@@ -1436,6 +1449,41 @@ class Chat {
     return [...all].filter((el) => el.childElementCount && el.getClientRects().length);
   }
 
+  // The message el is in, if it's one the keys go through.
+  navItemOf(el) {
+    return this.navItems().find((it) => it === el || it.contains(el)) || null;
+  }
+
+  // The keys on this message now.
+  navPick(item) {
+    const items = this.navItems();
+    if (!items.includes(item)) return;
+    this.navSel = { el: item, fromEnd: items.length - 1 - items.indexOf(item) };
+    this.navMark();
+  }
+
+  // The message the keys are on: kept; drawn again, the one in its place;
+  // none picked yet (or written since), the latest.
+  navLit(items = this.navItems()) {
+    if (!items.length) return null;
+    const s = this.navSel;
+    if (!s) return items[items.length - 1];
+    if (items.includes(s.el)) return s.el;
+    return items[Math.max(0, items.length - 1 - s.fromEnd)];
+  }
+
+  // The one lit (.nav-sel).
+  navMark() {
+    if (this.closed) return null;
+    const items = this.navItems();
+    const lit = this.navLit(items);
+    for (const x of this.scroller.querySelectorAll(".nav-sel")) if (x !== lit) x.classList.remove("nav-sel");
+    if (!lit) return null;
+    lit.classList.add("nav-sel");
+    if (this.navSel) this.navSel = { el: lit, fromEnd: items.length - 1 - items.indexOf(lit) };
+    return lit;
+  }
+
   // What's in a message to go to: its buttons and links (not a reply's head: Enter's).
   navInside(item) {
     return item ? [...item.querySelectorAll("button, a[href], summary")].filter((b) => !b.matches(".reply-head") && !b.disabled && b.getClientRects().length) : [];
@@ -1447,6 +1495,8 @@ class Chat {
     if (!el) return;
     if (!el.matches("button, a[href], summary, input, textarea")) { el.tabIndex = -1; el.classList.add("nav-item"); }
     el.focus({ preventScroll: true });
+    const it = this.navItemOf(el);
+    if (it) this.navPick(it);
     const r = el.getBoundingClientRect(), v = this.scroller.getBoundingClientRect();
     uiReveal(el, { scroller: this.scroller, block: start ? "start" : r.height > v.height ? (up ? "end" : "start") : "nearest" });
   }
@@ -1478,10 +1528,17 @@ class Chat {
       if (k !== "Escape" || this.menu || this.talk.on()) return false;
       return this.navLatest() ? done() : false;
     }
-    if (a && a !== document.body && !this.scroller.contains(a)) return false;      // the box's card, the side, the bar: theirs
+    // The box's card, the side panel, the terminal: theirs. A button of the
+    // bar clicked (one Safari didn't focus, too): the messages' still.
+    const ours = !a || a === document.body || this.scroller.contains(a) || (a.closest && a.closest(".ui-bar") && !this.dock.contains(a));
+    if (!ours) return false;
     if (a && a.closest && a.closest("textarea, input, select, [contenteditable]")) return false;
     const items = this.navItems();
-    const at = items.findIndex((it) => it === a || it.contains(a));
+    let at = items.findIndex((it) => it === a || it.contains(a));
+    // The browser's focus off the messages (a click on nothing, on the bar,
+    // the window left and back): the keys go on from the one lit.
+    const focused = at >= 0;
+    if (!focused) at = items.indexOf(this.navLit(items));
     const item = items[at];
     const inside = this.navInside(item);
     const on = inside.indexOf(a);
@@ -1497,7 +1554,7 @@ class Chat {
     // through it first, then on. k goes straight to the one before (going
     // up through it, the messages under it slid away under you).
     const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
-    const r = item && a === item ? item.getBoundingClientRect() : null;
+    const r = item && (a === item || !focused) ? item.getBoundingClientRect() : null;
     if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
     if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
@@ -1522,7 +1579,7 @@ class Chat {
     if (k === "h" || k === "ArrowLeft") { if (on >= 0) this.navTo(on === 0 ? item : inside[on - 1]); return done(); }
     if (k === "Escape" && on >= 0) { this.navTo(item); return done(); }
     if (k === "Escape" && this.opts.back) { this.opts.back(); return done(); }      // the phone's; a computer's board has its own Esc
-    if (k === "Enter" && a === item && !item.matches("button, a[href]")) {
+    if (k === "Enter" && (a === item || (!focused && !(a && a.closest && a.closest("button, a[href], summary")))) && !item.matches("button, a[href]")) {
       const head = item.querySelector(".reply-head");
       if (head) { head.click(); this.navTo(item); }
       return done();

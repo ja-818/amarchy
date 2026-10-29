@@ -678,9 +678,43 @@ async function run(browser, base, layout) {
     return { dock: Math.round(window.__chat.dock.getBoundingClientRect().bottom), moved, y: scrollY };
   });
   check(layout, still.dock === dockAt && !still.moved.length && still.y === 0, `k and j move the messages only, the box stays put (${JSON.stringify([dockAt, still])})`);
-  const lit = await page.evaluate(() => { const a = document.activeElement, r = a.querySelector(":scope > .reply"); return a.matches(":focus-visible") && (r ? getComputedStyle(r).boxShadow !== "none" : getComputedStyle(a).outlineStyle !== "none"); });
+  const lit = await page.evaluate(() => { const a = document.activeElement, r = a.querySelector(":scope > .reply"), b = a.querySelector(".msg.user .bubble");
+    return a.matches(":focus-visible") && (r ? getComputedStyle(r).boxShadow !== "none" : b ? getComputedStyle(b).boxShadow !== "none" : getComputedStyle(a).outlineStyle !== "none"); });
   check(layout, lit, "the message the keys are on is lit");
   await shot("keys");
+  // The browser's focus off the messages (a click on nothing, a button of
+  // the bar Safari doesn't focus, the window left and back): the message
+  // stays lit, and j / k go on from it, not from the latest.
+  const sel = () => page.evaluate(() => { const items = window.__chat.navItems(), l = document.querySelector(".chat .nav-sel"); return l ? items.indexOf(l) : -1; });
+  await page.evaluate(() => { const items = window.__chat.navItems(); window.__chat.navTo(items[Math.max(0, items.length - 3)]); });
+  const from = await sel();
+  const ways = {
+    "nothing": () => page.evaluate(() => document.activeElement.blur()),
+    "the window back": () => page.evaluate(() => { document.activeElement.blur(); window.dispatchEvent(new Event("focus")); }),
+    "a click on its text": () => page.evaluate(() => { document.activeElement.blur(); const it = window.__chat.navItems().at(-3); it.dispatchEvent(new MouseEvent("click", { bubbles: true })); }),
+  };
+  const moved = {};
+  for (const [name, go] of Object.entries(ways)) {
+    await page.evaluate((n) => { const items = window.__chat.navItems(); window.__chat.navTo(items[n]); }, from);
+    await go();
+    const before = await sel();
+    const shown = await page.evaluate(() => { const l = document.querySelector(".chat .nav-sel"), r = l && l.querySelector(":scope > .reply"), b = l && l.querySelector(".msg.user .bubble");
+      return !!l && (r ? getComputedStyle(r).boxShadow !== "none" : b ? getComputedStyle(b).boxShadow !== "none" : getComputedStyle(l).outlineStyle !== "none"); });
+    await page.keyboard.press("k");
+    const up = await sel();
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press("j");
+    moved[name] = [before, shown, up, await sel()];
+  }
+  check(layout, from >= 1 && Object.values(moved).every(([b, sh, u, d]) => b === from && sh && u === from - 1 && d === from),
+        `focus off the messages any way: the message stays lit, k / j go on from it (${JSON.stringify({ from, moved })})`);
+  // Writing: nothing lit; written, the latest again.
+  await page.evaluate(() => window.__chat.input.focus());
+  const unlit = await page.evaluate(() => { const l = document.querySelector(".chat .nav-sel"), r = l && (l.querySelector(":scope > .reply") || l);
+    return !l || (getComputedStyle(r).boxShadow === "none" && getComputedStyle(r).outlineStyle === "none") || !r.matches(".keyed .chat:not(.writing) *"); });
+  await page.keyboard.press("Escape");
+  const after = await sel();
+  check(layout, unlit && after === (await page.evaluate(() => window.__chat.navItems().length)) - 1, `writing: no message lit; Esc, the latest (${JSON.stringify([unlit, after])})`);
   await page.evaluate(() => window.removeEventListener("keydown", window.__navKeys, true));
 
   // A reply that asks and lists in its prose, not in blocks (a persona's own

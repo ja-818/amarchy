@@ -597,10 +597,18 @@
 .done-strip .text-btn { flex: none; }
 
 /* ---- the keys on a message (j / k, chat.js navKey): lit as the board's card is */
+/* The one lit (.nav-sel): with keys at hand (.keyed), and not while you
+   write; whatever a click did with the browser's focus. */
 .chat .nav-item { outline: none; }
-.chat .nav-item:focus-visible { outline: 2px solid var(--card-focus-border); outline-offset: -2px; border-radius: var(--radius-card); }
+.chat .nav-item:focus-visible, .keyed .chat:not(.writing) .nav-sel:not(.turn-reply) {
+  outline: 2px solid var(--card-focus-border); outline-offset: -2px; border-radius: var(--radius-card); }
 .chat .turn-reply.nav-item:focus-visible { outline: none; }
-.chat .turn-reply.nav-item:focus-visible > .reply {
+/* A message of yours: its bubble lit, not the row it sits on the right of. */
+.chat .nav-item:focus-visible:is(.msg.user, :has(.msg.user .bubble)), .keyed .chat:not(.writing) .nav-sel:is(.msg.user, :has(.msg.user .bubble)) { outline: none; }
+.chat .nav-item:focus-visible:is(.msg.user, .turn-you) .bubble, .keyed .chat:not(.writing) .nav-sel:is(.msg.user, .turn-you) .bubble {
+  border-color: var(--card-focus-border); box-shadow: 0 0 0 1px var(--card-focus-border);
+}
+.chat .turn-reply.nav-item:focus-visible > .reply, .keyed .chat:not(.writing) .turn-reply.nav-sel > .reply {
   background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--surface);
   border-color: var(--card-focus-border); box-shadow: inset 0 0 0 1px var(--card-focus-border);
 }

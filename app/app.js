@@ -1328,6 +1328,13 @@ const lastInput = { keys: false };
 window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) lastInput.keys = true; }, true);
 window.addEventListener("pointerdown", () => { lastInput.keys = false; }, true);
 
+// Keys at hand (a computer's, or once a key is pressed): the board's card
+// and the chat's message they're on lit (.keyed: ui.css, chat.css). On a
+// phone's touch, no ring on what nobody's keys are on.
+function keyedOn(on) { document.documentElement.classList.toggle("keyed", on); }
+window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) keyedOn(true); }, true);
+window.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && !app.desk) keyedOn(false); }, true);
+
 // What the cursor can be on in a menu (fields too: Tab goes to them).
 function menuItems(box, fields) {
   const sel = fields ? "button, [tabindex='0'], textarea, input" : "button, [tabindex='0']";
@@ -2506,6 +2513,7 @@ function wantsDesk() {
 
 async function start() {
   app.desk = wantsDesk();
+  keyedOn(app.desk || matchMedia("(pointer: fine)").matches);
   wearPhoneSize();
   fitViewport();
   if ("serviceWorker" in navigator) {
