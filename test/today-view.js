@@ -272,16 +272,19 @@ async function steady(p, where) {
     return { onCard, onHead, id, now: card && card.dataset.id };
   });
   check(where, f.onCard && f.onHead, `the keys stay on their card, and on a group's head, over a redraw (${JSON.stringify(f)})`);
-  // Into a card with Tab, through its buttons with →, back with Esc.
-  const inCard = await p.evaluate(() => { const c = [...document.querySelectorAll(".board-today .tcard")].find((x) => cardInside(x).length >= 2); if (!c) return "none: " + [...document.querySelectorAll(".board-today .tcard")].map((x) => (x.dataset.id || "?") + ":" + cardInside(x).length + ":" + x.querySelectorAll("button").length).join(" "); c.querySelector(".today-go").focus(); return c.dataset.id || "#task"; });
-  await p.keyboard.press("Tab");
-  const t1 = await p.evaluate(() => [document.activeElement.className, document.activeElement.closest(".tcard")?.dataset.id]);
-  await p.keyboard.press("ArrowRight");
-  const t2 = await p.evaluate(() => [document.activeElement.className, document.activeElement.textContent, document.activeElement === cardInside(document.activeElement.closest(".tcard"))[1]]);
-  await p.keyboard.press("Escape");
-  const t3 = await p.evaluate(() => [document.activeElement.className, document.activeElement.closest(".tcard")?.dataset.id]);
-  check(where, !/today-go/.test(t1[0]) && (t1[1] || "#task") === inCard && t2[2] && /today-go/.test(t3[0]) && (t3[1] || "#task") === inCard,
-        `Tab into a card, → its next button, Esc the card again (${JSON.stringify([inCard, t1, t2, t3])})`);
+  // l into a card, l along its buttons, h back, h out; l again, Esc out.
+  const inCard = await p.evaluate(() => { const c = [...document.querySelectorAll(".board-today .tcard")].find((x) => cardInside(x).length >= 2); c.querySelector(".today-go").focus(); return c.dataset.id || "#task"; });
+  const at = () => p.evaluate(() => { const a = document.activeElement, c = a.closest(".tcard"); return [a.matches(".today-go") ? "head" : cardInside(c).indexOf(a), (c && c.dataset.id) || "#task"]; });
+  const seen = [];
+  for (const k of ["l", "l", "h", "h", "l", "Escape"]) { await p.keyboard.press(k); seen.push(await at()); }
+  const tab = await p.evaluate(() => board.tab);
+  check(where, JSON.stringify(seen.map((x) => x[0])) === JSON.stringify([0, 1, 0, "head", 0, "head"]) && seen.every((x) => x[1] === inCard) && tab === "chats",
+        `l into a card and along it, h back and out, Esc out; the tab stays (${JSON.stringify([inCard, seen, tab])})`);
+  // The keys lost (the window left for a screenshot and came back): j goes on from that card.
+  await p.evaluate(() => document.activeElement.blur());
+  await p.keyboard.press("j");
+  const back = await at();
+  check(where, back[0] === "head" && back[1] === inCard, `keys lost, j: back on that card, not the top (${JSON.stringify(back)})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }
 
@@ -825,12 +828,12 @@ async function wide(browser, port) {
   const top = await p.evaluate(() => document.activeElement.closest(".tcard") && document.activeElement.closest(".tcard").dataset.id);
   check(where, !!last && top === "me-jaken" && last !== top, `End / g: the last card and the first (${last}, ${top})`);
   // On Tasks too: your tasks are cards the keys go through.
-  await p.keyboard.press("l");
-  check(where, await until(p, () => board.tab === "tasks"), "l: Tasks");
+  await p.keyboard.press("Tab");
+  check(where, await until(p, () => board.tab === "tasks"), "Tab: Tasks");
   await p.keyboard.press("j");
   check(where, await p.evaluate(() => !!document.activeElement.closest(".tcard.k-due, .tcard.k-chase, .tsec")), "j on Tasks: from task to task");
-  await p.keyboard.press("h");
-  check(where, await until(p, () => board.tab === "chats"), "h: Chats");
+  await p.keyboard.press("Tab");
+  check(where, await until(p, () => board.tab === "chats"), "Tab again: Chats");
   await p.keyboard.press("?");
   check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "")), "?: the keys");
   await p.keyboard.press("Escape");

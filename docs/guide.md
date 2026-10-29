@@ -303,12 +303,11 @@ host's chats without anything else installed.
 - **Everything has its key**, the keys on the first card as the board opens: `j` /
   `k` (or `↓` / `↑`) from card to card (and to the head of a folded group: `Enter`
   unfolds it), `g` / `G` (or `Home` / `End`) to the first and last, `Enter` (or
-  `o`) opens, `1`-`9` pick the card's answer, `x` completes its mission (with
-  Undo; a task's Done), `r` opens what a done chat made (Review), `s` marks it
-  seen, `Tab` goes into the card and through its buttons (`Enter` presses one,
-  `←` / `→` or `h` / `l` move among them, `Esc` is the card again; Safari's own
-  Tab skips buttons, this one doesn't), `h` / `l` (or `←` / `→`) on a card are Chats
-  and Tasks, `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
+  `o`) opens, `l` (or `→`) goes into the card and along its buttons, `h` (or
+  `←`) back and out of it, `Esc` out at once, `Enter` presses the button you're on,
+  `1`-`9` pick the card's answer, `x` completes its mission (with Undo; a task's
+  Done), `r` opens what a done chat made (Review), `s` marks it seen, `Tab` is
+  Chats or Tasks, `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot

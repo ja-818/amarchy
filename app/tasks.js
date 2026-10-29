@@ -12,9 +12,9 @@
 // New chat.
 //
 // Everything has its key (? shows them): j / k (or the arrows) from card
-// to card, Enter opens, 1-4 picks an answer, x completes its mission (with
-// Undo), r opens what a done chat made, s marks one seen, h / l (or ← / →)
-// Chats or Tasks, / searches, n starts a new chat, m the menu, o Group & sort.
+// to card, l / h into a card along its buttons and back out, Enter opens
+// (or presses), 1-4 picks an answer, x completes its mission (with Undo), r
+// opens what a done chat made, s marks one seen, Tab Chats or Tasks, / searches, n starts a new chat, m the menu, o Group & sort.
 
 const board = {
   el: null, box: null, head: null, slot: null, scroll: null,
@@ -61,6 +61,11 @@ function boardBuild() {
   // Its keys wherever the keyboard is (nothing focused, too), while it's up;
   // Esc over an open chat before the chat has it (there it would stop Claude).
   window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
+  // Back in the window (a screenshot, another app): the keys where they were.
+  window.addEventListener("focus", () => {
+    const a = document.activeElement;
+    if (!desk.current && (!a || a === document.body || !a.isConnected || !shown(a))) boardRefocus();
+  });
   window.addEventListener("keydown", (e) => { if (desk.current) boardEsc(e); }, true);
   // The search it had, over an update (app.js keepForReload).
   if (typeof kept !== "undefined" && kept && kept.search) { board.search.value = kept.search; boardSearch(kept.search); }
@@ -115,34 +120,33 @@ function boardKeys(e) {
   if (typing && typing.isConnected && shown(typing)) return;
   if (typing) typing.blur();
   const stops = boardStops();
-  const at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
+  let at = stops.findIndex((b) => b === document.activeElement || (b.matches(".today-go") && b.parentElement.contains(document.activeElement)));
+  // The keys lost (the window left and came back: a screenshot, another
+  // app): from the card they were on, not the top.
+  if (at < 0 && board.last) {
+    const cards = [...board.box.querySelectorAll(".tcard")];
+    const was = board.last[0] === "#" ? cards[Number(board.last.slice(1))] : board.box.querySelector(`.tcard[data-id="${CSS.escape(board.last)}"]`);
+    at = was ? stops.indexOf(was.querySelector(":scope > .today-go")) : -1;
+    if (at >= 0 && ["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) { e.preventDefault(); return boardFocus(stops[at]); }
+  }
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
   const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
   const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
   const k = e.key;
-  // Inside a card: Tab (and → ←, l h) go through its buttons, Enter presses
-  // one, Esc is the card again. Safari's Tab skips buttons; this one doesn't.
+  // A card is a row: l (→) goes into it, along its buttons; h (←) back,
+  // out of it from its first; Esc out at once. Enter presses the one you're on.
   const inside = cardInside(card);
   const on = inside.indexOf(document.activeElement);
   const into = (b) => { e.preventDefault(); b.focus({ preventScroll: true }); b.scrollIntoView({ block: "nearest" }); };
-  if (k === "Tab" && !e.shiftKey && card && inside.length && on < inside.length - 1) return into(inside[on + 1]);
-  if (k === "Tab" && e.shiftKey && card && on > 0) return into(inside[on - 1]);
-  if (k === "Tab" && e.shiftKey && card && on === 0) return into(stops[at]);
-  if (k === "Tab" && at >= 0) {     // off the card's last (or first) one: the next card, or the one before (on its last button)
-    const next = stops[at + (e.shiftKey ? -1 : 1)];
-    if (!next) return;
-    if (e.shiftKey && next.matches(".today-go")) { const last = cardInside(next.closest(".tcard")).pop(); return into(last || next); }
-    return to(at + (e.shiftKey ? -1 : 1));
-  }
-  if (on >= 0 && (k === "ArrowRight" || k === "l")) return into(inside[Math.min(on + 1, inside.length - 1)]);
-  if (on >= 0 && (k === "ArrowLeft" || k === "h")) return into(on === 0 ? stops[at] : inside[on - 1]);
+  if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
+  if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
+  // Tab: Chats | Tasks, the other one.
+  if (k === "Tab") { e.preventDefault(); return boardTab(board.tab === "chats" ? "tasks" : "chats"); }
   if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
   else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
   else if (k === "g" || k === "Home") to(0);
   else if (k === "G" || k === "End") to(stops.length - 1);
-  else if (k === "h" || k === "ArrowLeft") { e.preventDefault(); if (board.tab !== "chats") boardTab("chats"); }
-  else if (k === "l" || k === "ArrowRight") { e.preventDefault(); if (board.tab !== "tasks") boardTab("tasks"); }
   else if (k === "/") { e.preventDefault(); board.search.focus(); board.search.select(); }
   else if (k === "n") { e.preventDefault(); boardCompose(); }
   else if (k === "?") { e.preventDefault(); showKeys(); }
@@ -180,8 +184,8 @@ function boardEsc(e) {
 // The board's tabs, Chats and Tasks, each with what's your move.
 function modeButtons() {
   if (!app.view || !board.switchEl) return;
-  uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (h)" },
-          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (l)" }], board.tab, boardTab, board.switchEl);
+  uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (Tab)" },
+          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" }], board.tab, boardTab, board.switchEl);
 }
 
 // Chats or Tasks on the board, kept for the next time.
