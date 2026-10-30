@@ -749,7 +749,8 @@ the same chats as a pirates' tavern, on the phone as on a computer, drawn in
 pixels in your theme's colors. Your assistant keeps **the bar**. Each project is
 a **crew** at its own long table, under its flag: the Jolly Roger in the
 project's color with its name on it. Portholes show the sea under the sky as it
-is outside now; lanterns and candles flicker. Each chat is a pirate on their own
+is outside now; warm shafts of light fall through them, embers drift, lanterns and
+candles flicker. Each chat is a pirate on their own
 stool, wearing their crew's stripes (always the same pirate: their hat, an
 eyepatch, a beard, sometimes a parrot), and how they sit says where the chat
 stands:

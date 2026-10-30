@@ -16,11 +16,47 @@
 }
 .tv-bar { flex: 0 1 calc(var(--tavern-seat-w) * 2.2); }
 
+/* The air (tavern.js tavernAir), as in a dark hall lit by lanterns: shafts
+   of warm light falling from the portholes, embers drifting up through
+   them, the corners in shadow. Over the walls, under the pirates (but the
+   embers, in front of everyone); never in the way of a tap. */
+.tv-crew { position: relative; isolation: isolate; }
+.tv-crew .ui-flag, .tv-crew .tv-sign, .tv-crew .tv-portholes, .tv-crew .tv-shelf, .tv-crew .tv-lantern { position: relative; z-index: 2; }
+.tv-crew .tv-lantern { position: absolute; }
+.tv-table > * { position: relative; z-index: 2; }
+.tv-air { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.tv-air i { position: absolute; display: block; }
+.tv-rays {
+  left: 30%; width: 55%; top: 20px; height: 100%; transform: skewX(-18deg); transform-origin: top;
+  background: repeating-linear-gradient(90deg, transparent 0 34px, color-mix(in srgb, var(--tavern-light) 34%, transparent) 34px 58px, transparent 58px 96px, color-mix(in srgb, var(--tavern-light) 20%, transparent) 96px 108px, transparent 108px 150px);
+  -webkit-mask: linear-gradient(to bottom, #000 0, rgb(0 0 0 / .6) 45%, transparent 92%); mask: linear-gradient(to bottom, #000 0, rgb(0 0 0 / .6) 45%, transparent 92%);
+  filter: blur(7px); mix-blend-mode: screen; animation: tv-rays 9s ease-in-out infinite alternate;
+}
+.tv-crew.tv-bar .tv-rays { left: 5%; width: 70%; opacity: .7; }
+@keyframes tv-rays { from { opacity: .55; transform: skewX(-18deg) translateX(-6px); } to { opacity: 1; transform: skewX(-15deg) translateX(8px); } }
+.tv-vignette { inset: 0; background: radial-gradient(120% 90% at 50% 35%, transparent 55%, rgb(10 6 4 / .5) 100%); }
+/* Embers: a few warm sparks, drifting up and across, two depths. */
+.tv-motes {
+  inset: -40px 0 0; z-index: 3; mix-blend-mode: screen; opacity: .85;
+  background-image:
+    radial-gradient(circle, color-mix(in srgb, var(--tavern-light) 90%, var(--tavern-flame)) 0 1.2px, transparent 2px),
+    radial-gradient(circle, var(--tavern-light) 0 1px, transparent 1.8px),
+    radial-gradient(circle, color-mix(in srgb, var(--tavern-gold) 80%, transparent) 0 1.4px, transparent 2.2px);
+  background-size: 173px 151px, 211px 187px, 127px 233px;
+  background-position: 13px 40px, 90px 120px, 50px 10px;
+  animation: tv-drift 22s linear infinite;
+}
+.tv-motes.far { opacity: .45; filter: blur(.6px); background-size: 97px 113px, 143px 89px, 181px 131px; animation-duration: 34s; animation-direction: reverse; }
+@keyframes tv-drift {
+  from { background-position: 13px 40px, 90px 120px, 50px 10px; }
+  to { background-position: 73px -111px, 30px -67px, 110px -223px; }
+}
+
 /* Its wall: planks, the flag, portholes, a lantern's light. */
 .tv-wall {
   position: relative; display: flex; align-items: center; gap: 12px; height: 76px; padding: 12px 14px 0; box-sizing: border-box;
   background:
-    radial-gradient(120px 90px at calc(100% - 34px) 30px, color-mix(in srgb, var(--tavern-light) 28%, transparent), transparent),
+    radial-gradient(160px 110px at calc(100% - 30px) 30px, color-mix(in srgb, var(--tavern-light) 38%, transparent), transparent),
     repeating-linear-gradient(0deg, transparent 0 15px, color-mix(in oklab, var(--tavern-wood-dark) 80%, var(--tavern-ink)) 15px 17px),
     linear-gradient(var(--tavern-wood-dark), color-mix(in oklab, var(--tavern-wood) 80%, var(--tavern-wood-dark)));
   border-bottom: 5px solid color-mix(in oklab, var(--tavern-wood-dark) 70%, var(--tavern-ink));
@@ -76,11 +112,11 @@
 .tv-shelf i.b3 { --c: var(--cyan); height: 16px; } .tv-shelf i.b4 { --c: var(--magenta); }
 
 @media (max-width: 719px) {
-  :root { --tavern-seat-w: 120px; --tavern-scene-h: 116px; }
+  :root { --tavern-seat-w: 120px; --tavern-scene-h: 132px; }
   .tavern-hall { gap: 12px; }
   .tv-wall { height: 68px; gap: 8px; padding: 10px 10px 0; }
   .tv-porthole { width: 34px; height: 34px; }
   .tv-portholes { height: 38px; }
   .tv-bar { flex: 1 1 100%; }
 }
-@media (prefers-reduced-motion: reduce) { .tv-wave, .tv-lantern i { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .tv-wave, .tv-lantern i, .tv-rays, .tv-motes { animation: none !important; } }

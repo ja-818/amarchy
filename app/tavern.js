@@ -121,6 +121,13 @@ function tavernLantern() {
   return h("span", { class: "tv-lantern", "aria-hidden": "true" }, h("i", {}));
 }
 
+// The air in the hall, over the walls and under the pirates (embers over
+// them): shafts of warm light from the portholes, embers drifting, the
+// corners in shadow.
+function tavernAir() {
+  return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-rays" }), h("i", { class: "tv-vignette" }), h("i", { class: "tv-motes" }), h("i", { class: "tv-motes far" }));
+}
+
 // A crew: its wall (its flag, portholes, a lantern), its table, its pirates
 // on their stools, a free one at the end.
 function tavernCrew(repo, pirates, hue, sky) {
@@ -128,7 +135,7 @@ function tavernCrew(repo, pirates, hue, sky) {
                           open: () => newChatIn(repo), label: `New chat in ${projectName(repo)}` });
   free.todayData = `free|${repo}`;
   const count = pirates.filter(Boolean).length;
-  return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length + 1}` },
+  return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length + 1}` }, tavernAir(),
     h("div", { class: "tv-wall" }, uiFlag(projectName(repo), hue, { count }),
       h("span", { class: "tv-portholes" }, tavernPorthole(sky), tavernPorthole(sky)), tavernLantern()),
     h("div", { class: "tv-table" }, ...pirates.map((d) => d || uiPirate({ vacant: true, hue, look: uiLook(""), pose: "empty" })), free));
@@ -137,7 +144,7 @@ function tavernCrew(repo, pirates, hue, sky) {
 // The bar: your assistant behind it, the bottles on the shelf.
 function tavernBar(main, p, sky) {
   const bottles = h("span", { class: "tv-shelf", "aria-hidden": "true" }, ...Array.from({ length: 9 }, (_, i) => h("i", { class: `b${i % 5}` })));
-  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" },
+  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" }, tavernAir(),
     h("div", { class: "tv-wall" }, h("span", { class: "tv-sign" }, "The Bar"), bottles, tavernLantern()),
     h("div", { class: "tv-table" }, tavernPirate(main, p, true)));
 }
