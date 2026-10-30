@@ -300,7 +300,7 @@ host's chats without anything else installed.
 - **A card** is one surface: it lights as a whole under the pointer, and under the
   keys. A click anywhere on it opens the chat; its buttons do their own thing.
 - **One card is always lit**, the one the keys are on: the first as the board
-  opens, then wherever you left it, Chats, Tasks and the Office each their own. A click
+  opens, then wherever you left it, Chats, Tasks and the Tavern each their own. A click
   elsewhere, another window, a card that went: it stays lit (or the one in its
   place), and the keys go on from it.
 - **Everything has its key**, the keys on the first card as the board opens: `j` /
@@ -310,7 +310,7 @@ host's chats without anything else installed.
   `←`) back and out of it, `Esc` out at once, `Enter` presses the button you're on,
   `1`-`9` pick the card's answer, `x` completes its mission (with Undo; a task's
   Done), `r` opens what a done chat made (Review), `s` marks it seen, `Tab` is
-  Chats, Tasks or the [Office](#the-office) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
+  Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot
@@ -677,8 +677,8 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 ## Today
 
 **Today** is the app's home, the same on the phone and on a computer: the board,
-its bar with **Chats | Tasks | Office** (each with what's your move; the
-[Office](#the-office), your chats as people at their desks), the search, Group &
+its bar with **Chats | Tasks | Tavern** (each with what's your move; the
+[Tavern](#the-tavern), your chats as pirates, a crew per project), the search, Group &
 sort, the tools and **New chat** (a **+** on the phone). It's one queue of what to
 do, without reading any chat, each chat with its project as a colored label (higher
 priority first, then your projects' order), and one count over it:
@@ -742,33 +742,36 @@ just for that loop, with its brief, and write the chat on the loop's line
 (`(chat jaken-adidas-refund)`): from then on the loop has **Open chat** instead.
 Today adds no notifications of its own.
 
-### The Office
+### The Tavern
 
-**Office**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
-the same chats as an office, on the phone as on a computer. Each project is a
-room in its color, with its name on the wall, windows on the sky as it is
-outside now and a clock; your assistant sits at the **front desk**. Each chat is
-a person at their own desk, wearing their project's color, and how they sit
-says where the chat stands:
+**Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
+the same chats as a pirates' tavern, on the phone as on a computer, drawn in
+pixels in your theme's colors. Your assistant keeps **the bar**. Each project is
+a **crew** at its own long table, under its flag: the Jolly Roger in the
+project's color with its name on it. Portholes show the sea under the sky as it
+is outside now; lanterns and candles flicker. Each chat is a pirate on their own
+stool, wearing their crew's stripes (always the same pirate: their hat, an
+eyepatch, a beard, sometimes a parrot), and how they sit says where the chat
+stands:
 
 | They're | The chat |
 | --- | --- |
-| Typing, code on their screen | is working |
-| Leaning back with a coffee, a bar filling | finished its turn while something it started still runs |
-| Up and waving, **?** over them, what it asks in a bubble | asks you (a permission's **Allow** and **Deny** are on the desk) |
+| Plotting on a map, quill going | is working |
+| Taking a swig while the hourglass runs | finished its turn while something it started still runs |
+| Up with a hand raised, **?** over them, what it asks in a bubble | asks you (a permission's **Allow** and **Deny** are at their seat) |
 | Up, hands on their head, **!** | is blocked |
-| Holding up a page, **★** | finished a turn you haven't seen |
-| Arms up, **✓** (confetti the moment it happens) | reached its goal: **Complete** is on the desk |
-| Head on the desk, *z z* | is asleep |
-| Cobwebs on the chair, **…** | has been quiet two days or more |
+| Holding up a map, **★** | finished a turn you haven't seen |
+| Grog raised over a chest of gold, **✓** (gold and confetti the moment it happens) | reached its goal: **Complete** is at their seat |
+| Head on the table, candle out, *z z* | is asleep |
+| Gone quiet, the grog dry, **…** | has been quiet two days or more |
 
 Under each one, the chat's name and the same pill as its card on Chats. A click
-(or `Enter`) on someone opens their chat; held down (a right click), its menu.
-The keys are the board's: `j` / `k` from desk to desk, `x` completes a done
-one, `s` marks one seen. The free desk at the end of a room (**+**) starts a new
-chat in that project. Everyone keeps their desk: a chat that closes frees
-theirs, and the next new chat in that room takes it. The tab you were on stays
-(the Office too) the next time you open the app.
+(or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
+The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
+one, `s` marks one seen. The free stool at the end of a table (**Recruit**)
+starts a new chat in that project. Everyone keeps their stool: a chat that
+closes frees theirs, and the next new chat in that crew takes it. The tab you
+were on stays (the Tavern too) the next time you open the app.
 
 ## Automations
 

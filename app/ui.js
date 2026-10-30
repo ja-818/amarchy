@@ -9,8 +9,8 @@
 // - uiCard: one card for everything (a chat, a task, what a search found):
 //   a head (who or what project, its name, a pill), a body, its actions.
 //   The whole card opens it.
-// - uiDesk: a chat as a person at a desk, in pixels, posed as it stands
-//   (the Office).
+// - uiPirate: a chat as a pirate at their crew's table, in pixels, posed
+//   as it stands (the Tavern).
 // - uiPill: where something stands ("Done", "Asks you", "Running · …").
 // - uiButton: an action on a card or a section.
 // - uiSection: a small head with a count (an action at its end), its cards;
@@ -392,111 +392,130 @@ function uiMenu(title, items) {
   return sheet(sheetHead(title), h("div", { class: "menu ui-menu" }, ...items.map(row)));
 }
 
-// ---- an agent at its desk (the board's Office, office.js)
+// ---- a pirate at their crew's table (the board's Tavern, tavern.js)
 //
-// A chat as a person in the office: at a desk, its monitor beside it, drawn
+// A chat as a pirate in the tavern, sat at their crew's long table, drawn
 // in pixels (an SVG, shape-rendering crispEdges) from the theme's colors
-// (ui.css --office-*). What it does is how it sits: pose is
-// work (typing, code on its screen), run (leaning back, a bar filling),
-// ask (up, waving, ?), blocked (up, !), fresh (holding up what it made),
-// done (both arms up, ✓), idle, sleep (head on the desk, z z), stale (dust),
-// arrive (walking in with a box), empty (a free desk: + starts a chat).
-// look: who it is, the same every time (uiLook(id)): skin, hair, its style,
-// glasses, what's on its desk. Its shirt is its project's color (hue).
+// (ui.css --tavern-*). What it does is how they sit: pose is
+// work (plotting on a map, quill going), run (a swig while the hourglass
+// runs), ask (up, a hand raised, ?), blocked (up, hands on their head, !),
+// fresh (holding up a map: look), done (up with the grog, a chest of gold,
+// ✓), idle (a tankard and a candle), sleep (head on the table, candle out,
+// z z), stale (gone quiet, the grog dry), arrive (walking in with a sea bag), empty (a free
+// stool: + recruits a new one).
+// look: who they are, the same every time (uiLook(id)): skin, hair, hat,
+// an eyepatch, a beard, a parrot. Their shirt is their crew's color (hue).
+// barkeep: your assistant, behind the bar with an apron.
 // Like a card (uiCard) it's an article.tcard with the chat's id and a head
 // (.today-go) that opens it: the board's keys, its lit one, x and s, work on
-// a desk as on a card.
+// a pirate as on a card.
 
-const UI_POSES = ["work", "run", "ask", "blocked", "fresh", "done", "idle", "sleep", "stale", "arrive", "empty"];
-
-// Who a chat is, from its id: the same person on every screen.
+// Who a chat is, from its id: the same pirate on every screen.
 function uiLook(id) {
   let n = 2166136261;
   for (const c of String(id || "")) n = Math.imul(n ^ c.charCodeAt(0), 16777619) >>> 0;
   const pick = (k) => { const v = n % k; n = Math.floor(n / k) ^ (n >>> 7); return v; };
-  return { skin: pick(5), hair: pick(6), style: pick(5), glasses: pick(4) === 0, desk: ["mug", "plant", "lamp", "mug"][pick(4)] };
+  return { skin: pick(5), hair: pick(5), hat: pick(5), patch: pick(4) === 0, beard: pick(3) === 0, parrot: pick(6) === 0 };
 }
 
-// The drawing: 48 × 40 pixels.
-function uiSprite(look, pose, { headset = false } = {}) {
+// The drawing: 48 × 40 pixels, the table's top at 27 (38 × 37 of it the
+// pirate's, shown at one height; the table runs on past its edges, under
+// the next pirate's, however wide their stool is).
+function uiPirateSprite(look, pose, { barkeep = false } = {}) {
   const r = (x, y, w, hh, c) => `<rect x="${x}" y="${y}" width="${w}" height="${hh}" class="${c}"/>`;
-  const up = pose === "ask" || pose === "blocked" || pose === "done";      // stood up
   const out = [];
-  // The chair, behind whoever sits in it (a cobweb on a stalled one's).
-  out.push(`<g class="o-chair">${r(12, 12, 16, 15, "oc")}${r(13, 11, 14, 1, "oc")}${r(14, 13, 12, 1, "oc2")}</g>`);
-  if (pose === "stale") out.push(`<g class="o-web">${r(12, 12, 4, 1, "ow")}${r(12, 12, 1, 4, "ow")}${r(13, 13, 1, 1, "ow")}${r(14, 14, 1, 1, "ow")}</g>`);
+  const up = pose === "ask" || pose === "blocked" || pose === "done";
+  // The stool, its top behind the table.
+  out.push(r(17, 24, 14, 3, "ostool") + r(17, 24, 14, 1, "ostool2"));
   if (pose !== "empty") {
     const asleep = pose === "sleep";
-    const hy = asleep ? 14 : 6;       // the head's top: on the desk, asleep
-    const hx = asleep ? 17 : 16;
-    const hair = [];
-    const H = (x, y, w, hh) => hair.push(r(hx - 16 + x, hy - 6 + y, w, hh, "oh"));
-    if (look.style === 0) { H(15, 4, 10, 3); H(15, 7, 1, 3); H(24, 7, 1, 3); }
-    else if (look.style === 1) { H(15, 4, 10, 3); H(14, 6, 2, 10); H(24, 6, 2, 10); }
-    else if (look.style === 2) { H(16, 5, 8, 2); H(18, 2, 4, 3); H(15, 6, 1, 3); H(24, 6, 1, 3); }
-    else if (look.style === 3) { H(15, 4, 10, 2); H(16, 3, 2, 1); H(19, 2, 2, 2); H(22, 3, 2, 1); H(15, 6, 1, 2); H(24, 6, 1, 2); }
-    else { H(15, 5, 10, 2); H(15, 7, 2, 2); H(22, 7, 3, 1); }
+    const hx = asleep ? 21 : 20, hy = asleep ? 16 : 8;      // the head: on the table, asleep
+    const at = (x, y, w, hh, c) => r(hx + x, hy + y, w, hh, c);
     const shut = asleep || pose === "done" || pose === "stale";
-    const look2 = pose === "work" || pose === "run" ? 1 : 0;       // eyes on the screen
-    const eyes = shut ? r(hx + 2, hy + 5, 2, 1, "oe") + r(hx + 5, hy + 5, 2, 1, "oe")
-                      : `<g class="o-eyes">${r(hx + 2 + look2, hy + 4, 1, 2, "oe")}${r(hx + 5 + look2, hy + 4, 1, 2, "oe")}</g>`;
-    const glasses = look.glasses ? r(hx + 1, hy + 4, 3, 2, "og") + r(hx + 5, hy + 4, 3, 2, "og") + r(hx + 4, hy + 4, 1, 1, "og") : "";
-    const mouth = pose === "ask" || pose === "blocked" ? r(hx + 3, hy + 7, 2, 1, "om") : pose === "done" ? r(hx + 2, hy + 7, 4, 1, "om") : r(hx + 3, hy + 7, 2, 1, "om2");
-    const set = headset ? r(hx - 1, hy + 2, 1, 5, "ohs") + r(hx + 8, hy + 2, 1, 5, "ohs") + r(hx - 1, hy + 1, 10, 1, "ohs") + r(hx + 6, hy + 7, 3, 1, "ohs") : "";
-    const head = `<g class="o-head">${r(hx, hy, 8, 9, "ok")}${eyes}${glasses}${mouth}${hair.join("")}${set}</g>`;
-    const torso = r(18, 15, 4, 2, "ok") + r(14, 17, 12, 10, "os") + r(14, 17, 12, 1, "os2") + r(19, 17, 2, 3, "ok");
+    const eyeX = pose === "work" ? 1 : 0;      // eyes on the map
+    const eyes = shut ? at(1 + eyeX, 4, 2, 1, "oe") + at(5, 4, 2, 1, "oe")
+                      : `<g class="o-eyes">${at(2 + eyeX, 3, 1, 2, "oe")}${look.patch ? "" : at(5 + eyeX, 3, 1, 2, "oe")}</g>`;
+    const patch = look.patch ? at(-1, 1, 10, 1, "oink") + at(4, 2, 3, 3, "oink") : "";
+    const mouth = pose === "ask" || pose === "blocked" ? at(3, 7, 2, 1, "om") : pose === "done" ? at(2, 6, 4, 2, "om") : at(3, 7, 2, 1, "om2");
+    const beard = look.beard ? at(0, 5, 1, 4, "oh") + at(7, 5, 1, 4, "oh") + at(1, 7, 2, 2, "oh") + at(5, 7, 2, 2, "oh") + at(2, 9, 4, 1, "oh") : "";
+    // Hats: a tricorn, a bandana (their crew's), bald with an earring, a headscarf with long hair, a captain's hat.
+    const hat = [];
+    const hatOf = barkeep ? 1 : look.hat;
+    if (hatOf === 0) hat.push(at(-3, -1, 14, 2, "ohat"), at(-1, -4, 10, 3, "ohat"), at(-3, -2, 1, 1, "ohat"), at(10, -2, 1, 1, "ohat"), at(-3, 0, 14, 1, "ogold"), at(3, -3, 2, 2, "obone"));
+    else if (hatOf === 1) hat.push(at(-1, -2, 10, 4, "oband"), at(-1, -2, 10, 1, "oband2"), at(9, 0, 3, 2, "oband"), at(10, 2, 2, 3, "oband"), at(1, 0, 1, 1, "oband2"), at(5, -1, 1, 1, "oband2"));
+    else if (hatOf === 2) hat.push(at(-1, 0, 1, 4, "oh"), at(8, 0, 1, 4, "oh"), at(-1, 5, 1, 1, "ogold"), at(0, -1, 8, 1, "oshine"));
+    else if (hatOf === 3) hat.push(at(-1, -2, 10, 3, "oband"), at(-2, 1, 2, 9, "oh"), at(8, 1, 2, 9, "oh"), at(2, -1, 1, 1, "oband2"), at(6, -1, 1, 1, "oband2"));
+    else hat.push(at(-2, -1, 12, 2, "ohat"), at(0, -5, 8, 4, "ohat"), at(-2, 0, 12, 1, "ogold"), at(2, -4, 4, 2, "obone"), at(3, -3, 2, 1, "ohat"));
+    const top = hatOf === 2 ? "" : at(0, -1, 8, 1, "oh");
+    const head = `<g class="o-head">${at(0, 0, 8, 9, "ok")}${top}${eyes}${patch}${mouth}${beard}${hat.join("")}</g>`;
+    // The shirt: striped, their crew's color; an apron behind the bar.
+    const stripes = [19, 21, 23, 25].map((y) => r(18, y, 12, 1, "os2")).join("");
+    const torso = r(22, 16, 4, 2, "ok") + r(18, 18, 12, 9, "os") + stripes + r(22, 18, 4, 2, "ok") + (barkeep ? r(20, 20, 8, 7, "oapron") + r(21, 20, 1, 1, "oapron2") + r(26, 20, 1, 1, "oapron2") : "");
+    const parrot = look.parrot && !asleep ? `<g class="o-parrot">${r(30, 11, 4, 6, "opar")}${r(30, 9, 4, 3, "opar2")}${r(34, 10, 1, 2, "obeak")}${r(32, 10, 1, 1, "oe")}${r(30, 17, 2, 3, "opar")}</g>` : "";
+    const tank = (x, y) => r(x, y, 5, 6, "omug") + r(x, y, 5, 2, "ofoam") + r(x + 5, y + 2, 1, 3, "omug") + r(x + 1, y + 3, 1, 2, "omug2");
     let arms;
-    if (pose === "done") arms = `<g class="o-arms">${r(11, 8, 3, 10, "os")}${r(26, 8, 3, 10, "os")}${r(10, 5, 4, 3, "ok")}${r(26, 5, 4, 3, "ok")}</g>`;
-    else if (pose === "ask") arms = `${r(11, 18, 3, 8, "os")}${r(12, 25, 3, 2, "ok")}<g class="o-wave">${r(26, 7, 3, 11, "os")}${r(26, 4, 4, 3, "ok")}</g>`;
-    else if (pose === "blocked") arms = `${r(11, 9, 3, 9, "os")}${r(26, 9, 3, 9, "os")}${r(12, 6, 4, 3, "ok")}${r(24, 6, 4, 3, "ok")}`;
-    else if (pose === "fresh") arms = `${r(11, 18, 3, 8, "os")}${r(12, 25, 3, 2, "ok")}${r(26, 12, 3, 9, "os")}<g class="o-paper">${r(25, 3, 8, 10, "op")}${r(26, 5, 6, 1, "op2")}${r(26, 7, 5, 1, "op2")}${r(26, 9, 6, 1, "op2")}</g>${r(26, 11, 3, 2, "ok")}`;
-    else if (pose === "run") arms = `${r(26, 18, 3, 8, "os")}${r(25, 25, 3, 2, "ok")}<g class="o-sip">${r(11, 17, 3, 6, "os")}${r(12, 14, 3, 3, "ok")}${r(10, 11, 4, 4, "omug")}${r(9, 12, 1, 2, "omug")}</g>`;
-    else if (asleep) arms = `${r(10, 24, 20, 3, "os")}${r(10, 24, 3, 3, "ok")}${r(27, 24, 3, 3, "ok")}`;
-    else arms = `${r(11, 18, 3, 8, "os")}${r(26, 18, 3, 8, "os")}<g class="o-hand-l">${r(12, 25, 4, 2, "ok")}</g><g class="o-hand-r">${r(24, 25, 4, 2, "ok")}</g>`;
-    const box = pose === "arrive" ? `<g class="o-box">${r(13, 19, 14, 9, "obox")}${r(13, 21, 14, 1, "obox2")}${r(19, 19, 2, 2, "obox2")}</g>` : "";
-    out.push(`<g class="o-body${up ? " up" : ""}">${torso}${asleep ? "" : head}${arms}${asleep ? head : ""}${box}</g>`);
+    if (pose === "done") arms = `<g class="o-arms">${r(15, 8, 3, 11, "os")}${r(30, 8, 3, 11, "os")}${r(15, 6, 3, 2, "ok")}${r(30, 6, 3, 2, "ok")}${tank(30, 1)}</g>`;
+    else if (pose === "ask") arms = `${r(15, 19, 3, 7, "os")}${r(15, 25, 4, 2, "ok")}<g class="o-wave">${r(30, 7, 3, 12, "os")}${r(30, 4, 4, 3, "ok")}</g>`;
+    else if (pose === "blocked") arms = `${r(15, 10, 3, 9, "os")}${r(30, 10, 3, 9, "os")}${r(16, 7, 4, 3, "ok")}${r(28, 7, 4, 3, "ok")}`;
+    else if (pose === "fresh") arms = `${r(15, 19, 3, 7, "os")}${r(15, 25, 4, 2, "ok")}${r(30, 12, 3, 8, "os")}<g class="o-paper">${r(29, 1, 11, 11, "omap")}${r(29, 1, 11, 1, "omap2")}${r(29, 11, 11, 1, "omap2")}${r(31, 4, 1, 1, "opath")}${r(33, 5, 1, 1, "opath")}${r(35, 6, 1, 1, "opath")}${r(36, 7, 2, 1, "ox")}${r(36, 8, 2, 1, "ox")}</g>${r(30, 10, 3, 2, "ok")}`;
+    else if (pose === "run") arms = `${r(30, 19, 3, 7, "os")}${r(29, 25, 4, 2, "ok")}<g class="o-sip">${r(15, 17, 3, 6, "os")}${r(16, 14, 3, 3, "ok")}${tank(13, 9)}</g>`;
+    else if (pose === "work") arms = `${r(15, 19, 3, 7, "os")}${r(16, 25, 4, 2, "ok")}${r(30, 19, 3, 6, "os")}<g class="o-quill">${r(28, 23, 3, 2, "ok")}${r(29, 17, 1, 6, "ofeather")}${r(30, 16, 1, 5, "ofeather")}${r(28, 22, 1, 2, "oink")}</g>`;
+    else if (asleep) arms = `${r(14, 24, 20, 3, "os")}${r(14, 24, 3, 3, "ok")}${r(31, 24, 3, 3, "ok")}`;
+    else arms = `${r(15, 19, 3, 7, "os")}${r(30, 19, 3, 7, "os")}${r(16, 25, 4, 2, "ok")}${r(28, 25, 4, 2, "ok")}`;
+    const bag = pose === "arrive" ? `<g class="o-box">${r(14, 15, 10, 13, "obag")}${r(15, 13, 8, 3, "obag2")}${r(18, 12, 2, 2, "obag2")}${r(16, 19, 6, 1, "obag2")}</g>` : "";
+    out.push(`<g class="o-body${up ? " up" : ""}">${torso}${asleep ? "" : head}${parrot}${arms}${asleep ? head : ""}${bag}</g>`);
   }
-  // The desk, and what's on it.
-  out.push(`<g class="o-desk">${r(2, 27, 44, 2, "odt")}${r(2, 27, 44, 1, "odh")}${r(4, 29, 40, 10, "odf")}${r(7, 32, 10, 1, "odl")}${r(11, 34, 2, 1, "odl")}${r(31, 32, 10, 1, "odl")}${r(35, 34, 2, 1, "odl")}</g>`);
-  if (pose !== "run" && pose !== "empty") {
-    if (look.desk === "plant") out.push(`<g class="o-thing">${r(4, 22, 5, 5, "opot")}${r(5, 18, 1, 4, "olf")}${r(3, 17, 2, 2, "olf")}${r(7, 17, 2, 3, "olf")}${r(6, 15, 1, 3, "olf")}</g>`);
-    else if (look.desk === "lamp") out.push(`<g class="o-thing">${r(4, 25, 6, 2, "omf")}${r(6, 18, 1, 7, "omf")}${r(5, 16, 5, 3, "olamp")}</g>`);
-    else out.push(`<g class="o-thing">${r(5, 23, 4, 4, "omug")}${r(9, 24, 1, 2, "omug")}<g class="o-steam">${r(6, 19, 1, 2, "ost")}${r(7, 17, 1, 2, "ost")}</g></g>`);
-  }
-  // The monitor: what's on it says what it does.
-  const sc = [];
-  if (pose === "work") for (let i = 0; i < 5; i++) sc.push(r(31 + (i % 2) * 2, 13 + i * 2, [9, 6, 11, 7, 8][i], 1, `oln c${i % 4} l${i}`));
-  else if (pose === "run") sc.push(r(32, 16, 11, 3, "obar"), r(32, 16, 11, 3, "obar-on"), r(34, 13, 7, 1, "oln c0"));
-  else if (pose === "ask") sc.push(r(36, 13, 3, 1, "oq"), r(38, 14, 1, 2, "oq"), r(37, 16, 1, 2, "oq"), r(37, 19, 1, 1, "oq"));
-  else if (pose === "blocked") sc.push(r(37, 13, 1, 5, "obad"), r(37, 19, 1, 1, "obad"));
-  else if (pose === "done") sc.push(r(33, 17, 2, 1, "ook"), r(34, 18, 2, 1, "ook"), r(35, 19, 2, 1, "ook"), r(36, 18, 2, 1, "ook"), r(37, 17, 2, 1, "ook"), r(38, 16, 2, 1, "ook"), r(39, 15, 2, 1, "ook"), r(40, 14, 2, 1, "ook"));
-  else if (pose === "fresh") sc.push(r(34, 13, 7, 8, "op"), r(35, 15, 5, 1, "op2"), r(35, 17, 4, 1, "op2"), r(35, 19, 5, 1, "op2"));
-  else if (pose === "idle" || pose === "arrive") sc.push(r(32, 20, 2, 1, "ocur"));
-  const lit = { work: "on", run: "on", ask: "ask", blocked: "bad", done: "good", fresh: "on", idle: "dim", arrive: "dim" }[pose] || "off";
-  out.push(`<g class="o-mon">${r(29, 11, 17, 12, "omf")}${r(30, 12, 15, 10, `osc ${lit}`)}${sc.join("")}${r(36, 23, 3, 3, "omf")}${r(33, 26, 9, 1, "omf")}${lit === "off" && pose !== "empty" ? r(44, 21, 1, 1, "oled") : ""}</g>`);
-  return `<svg class="ui-sprite p-${pose} sk-${look.skin} hr-${look.hair}" viewBox="0 0 48 40" shape-rendering="crispEdges" aria-hidden="true">${out.join("")}</svg>`;
+  // The table: its top, its planks, a nail or two.
+  out.push(`<g class="o-desk">${r(-200, 27, 448, 2, "odt")}${r(-200, 27, 448, 1, "odh")}${r(-200, 29, 448, 11, "odf")}${r(-200, 33, 448, 1, "odl")}${r(-200, 37, 448, 1, "odl")}${r(11, 30, 1, 1, "onail")}${r(36, 34, 1, 1, "onail")}</g>`);
+  // What's on it.
+  const things = [];
+  const candle = (lit) => r(39, 21, 3, 6, "owax") + r(38, 26, 5, 1, "omug2") + (lit ? `<g class="o-flame">${r(40, 18, 1, 3, "oflame")}${r(39, 19, 3, 1, "oflame2")}</g>` : `<g class="o-steam">${r(40, 18, 1, 2, "ost")}${r(41, 16, 1, 2, "ost")}</g>`);
+  const mug = r(6, 21, 5, 6, "omug") + r(6, 21, 5, 2, "ofoam") + r(11, 23, 1, 3, "omug") + r(7, 24, 1, 2, "omug2");
+  if (pose === "work") things.push(r(17, 24, 13, 4, "omap"), r(17, 24, 13, 1, "omap2"), r(19, 26, 1, 1, "opath"), r(21, 25, 1, 1, "opath"), r(23, 26, 1, 1, "opath"), r(25, 25, 2, 1, "ox"), candle(true), mug);
+  else if (pose === "run") things.push(`<g class="o-glass">${r(37, 17, 7, 1, "owood")}${r(37, 26, 7, 1, "owood")}${r(38, 18, 5, 3, "oglass")}${r(39, 21, 3, 1, "oglass")}${r(38, 22, 5, 4, "oglass")}<g class="o-sand-top">${r(38, 19, 5, 2, "osand")}</g>${r(40, 21, 1, 2, "osand")}<g class="o-sand">${r(38, 24, 5, 2, "osand")}</g></g>`);
+  else if (pose === "done") things.push(r(35, 21, 11, 6, "ochest"), r(35, 19, 11, 2, "ochest2"), r(36, 19, 9, 1, "ogold"), r(37, 18, 2, 1, "ogold"), r(41, 18, 2, 1, "ogold"), r(40, 23, 1, 2, "ogold"), r(35, 21, 11, 1, "ochest2"), r(6, 25, 2, 2, "ogold"), r(9, 26, 2, 1, "ogold"));
+  else if (pose === "ask" || pose === "blocked" || pose === "fresh") things.push(mug, candle(true));
+  else if (pose === "sleep") things.push(mug, candle(false));
+  else if (pose === "idle" || pose === "arrive") things.push(mug, candle(true));
+  else if (pose === "stale") things.push(r(6, 24, 5, 3, "omug2"), candle(false));
+  out.push(things.join(""));
+  return `<svg class="ui-sprite p-${pose} sk-${look.skin} hr-${look.hair}${barkeep ? " barkeep" : ""}" viewBox="5 1 38 37" preserveAspectRatio="xMidYMax meet" shape-rendering="crispEdges" aria-hidden="true">${out.join("")}</svg>`;
 }
 
-// What floats over its head: a mark (? ! ✓ z…), and what it says, in a
+// What floats over their head: a mark (? ! ✓ z…), and what they say, in a
 // bubble (always for what asks you; for the rest under the pointer or the
-// keys). cheer: it just got done, confetti.
-function uiDesk({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "", say = "", title, pill = null, lead = null,
-                  actions = [], open, label = "", headset = false, cheer = false, vacant = false }) {
-  const art = h("span", { class: "ui-desk-art", html: uiSprite(look, pose, { headset }) });
-  const bubble = mark ? h("span", { class: `ui-desk-mark t-${tone || pose}`, "aria-hidden": "true" }, mark) : null;
-  const talk = say ? h("span", { class: `ui-desk-say${pose === "ask" || pose === "blocked" ? " pinned" : ""}` }, say) : null;
-  const confetti = cheer ? h("span", { class: "ui-confetti", "aria-hidden": "true" }, ...Array.from({ length: 14 }, () => h("i", {}))) : null;
-  if (vacant) return h("div", { class: `ui-desk vacant ph-${hue}`, "aria-hidden": "true" }, h("span", { class: "ui-desk-scene" }, art));
+// keys). cheer: they just got done, gold and confetti.
+function uiPirate({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "", say = "", title, pill = null, lead = null,
+                    actions = [], open, label = "", barkeep = false, cheer = false, vacant = false }) {
+  const art = h("span", { class: "ui-pirate-art", html: uiPirateSprite(look, pose, { barkeep }) });
+  if (vacant) return h("div", { class: `ui-pirate vacant ph-${hue}`, "aria-hidden": "true" }, h("span", { class: "ui-pirate-go" }, h("span", { class: "ui-pirate-scene" }, art)));
+  const bubble = mark ? h("span", { class: `ui-pirate-mark t-${tone || pose}`, "aria-hidden": "true" }, mark) : null;
+  const pinned = !!say && (pose === "ask" || pose === "blocked");
+  const talk = say ? h("span", { class: `ui-pirate-say${pinned ? " pinned" : ""}` }, say) : null;
+  const confetti = cheer ? h("span", { class: "ui-confetti", "aria-hidden": "true" }, ...Array.from({ length: 16 }, () => h("i", {}))) : null;
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
-  // What asks you is under the scene, over the name, always; the rest over the head, a moment.
-  const pinned = talk && talk.classList.contains("pinned");
-  const head = h("button", { class: "ui-desk-go today-go", type: "button", onclick: open, "aria-label": label || null },
-    h("span", { class: "ui-desk-scene" }, art, bubble, pinned ? null : talk, confetti), pinned ? talk : null,
-    h("span", { class: "ui-desk-plate" }, lead, prio, h("span", { class: "ui-desk-name" }, typeof title === "string" ? taskText(title) : title), pill));
-  const desk = h("article", { class: `tcard ui-desk p-${pose} ph-${hue}${cheer ? " cheer" : ""}`, "data-id": id || null,
-                              onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } },
-    head, actions.filter(Boolean).length ? h("div", { class: "ui-desk-actions" }, ...actions.filter(Boolean)) : null);
+  // What asks you is under them, over the name, always; the rest over the head, a moment.
+  const head = h("button", { class: "ui-pirate-go today-go", type: "button", onclick: open, "aria-label": label || null },
+    h("span", { class: "ui-pirate-scene" }, art, bubble, pinned ? null : talk, confetti), pinned ? talk : null,
+    h("span", { class: "ui-pirate-plate" }, lead, prio, h("span", { class: "ui-pirate-name" }, typeof title === "string" ? taskText(title) : title), pill));
+  const el = h("article", { class: `tcard ui-pirate p-${pose} ph-${hue}${cheer ? " cheer" : ""}`, "data-id": id || null,
+                            onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } },
+    head, actions.filter(Boolean).length ? h("div", { class: "ui-pirate-actions" }, ...actions.filter(Boolean)) : null);
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
-  return desk;
+  return el;
+}
+
+// A crew's flag: the Jolly Roger in their color, their name on it, waving.
+function uiFlag(name, hue, { count = null } = {}) {
+  const r = (x, y, w, hh, c) => `<rect x="${x}" y="${y}" width="${w}" height="${hh}" class="${c}"/>`;
+  const skull = r(4, 2, 6, 5, "obone") + r(5, 7, 4, 2, "obone") + r(5, 4, 1, 2, "oflag") + r(8, 4, 1, 2, "oflag") + r(7, 6, 1, 1, "oflag")
+    + r(1, 9, 2, 1, "obone") + r(3, 10, 2, 1, "obone") + r(9, 10, 2, 1, "obone") + r(11, 9, 2, 1, "obone") + r(5, 11, 4, 1, "obone")
+    + r(1, 12, 2, 1, "obone") + r(3, 11, 2, 1, "obone") + r(9, 11, 2, 1, "obone") + r(11, 12, 2, 1, "obone");
+  return h("span", { class: `ui-flag ph-${hue}` },
+    h("span", { class: "ui-flag-pole", "aria-hidden": "true" }),
+    h("span", { class: "ui-flag-cloth" },
+      h("span", { class: "ui-flag-skull", "aria-hidden": "true", html: `<svg viewBox="0 0 14 14" shape-rendering="crispEdges">${skull}</svg>` }),
+      h("span", { class: "ui-flag-name" }, name),
+      count !== null ? h("span", { class: "ui-flag-count" }, String(count)) : null));
 }

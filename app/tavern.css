@@ -1,0 +1,86 @@
+/* The Tavern (tavern.js): the board's third tab, your chats as pirates, a
+   crew per project. The pirates and flags are ui.css's (uiPirate, uiFlag);
+   here, the hall: plank walls, portholes on the sea, lanterns, the bar.
+   Design tokens only (docs/design-tokens.md). */
+
+/* Wider than the cards' column on a computer: crews side by side. */
+.board-scroll .today.tavern { max-width: calc(var(--page-width) + 400px); }
+.tavern-hall { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+
+/* A crew: as wide as its stools (--seats, tavern.js), growing to fill a row. */
+.tv-crew {
+  min-width: min(100%, 280px); max-width: 100%; box-sizing: border-box; overflow: hidden; border-radius: var(--tavern-radius);
+  flex: 1 1 calc(min(var(--seats, 2), 6) * var(--tavern-seat-w) + 4px);
+  border: 2px solid var(--tavern-wood-dark); box-shadow: 0 8px 24px rgb(0 0 0 / .3);
+  background: var(--tavern-plank);
+}
+.tv-bar { flex: 0 1 calc(var(--tavern-seat-w) * 2.2); }
+
+/* Its wall: planks, the flag, portholes, a lantern's light. */
+.tv-wall {
+  position: relative; display: flex; align-items: center; gap: 12px; height: 76px; padding: 12px 14px 0; box-sizing: border-box;
+  background:
+    radial-gradient(120px 90px at calc(100% - 34px) 30px, color-mix(in srgb, var(--tavern-light) 28%, transparent), transparent),
+    repeating-linear-gradient(0deg, transparent 0 15px, color-mix(in oklab, var(--tavern-wood-dark) 80%, var(--tavern-ink)) 15px 17px),
+    linear-gradient(var(--tavern-wood-dark), color-mix(in oklab, var(--tavern-wood) 80%, var(--tavern-wood-dark)));
+  border-bottom: 5px solid color-mix(in oklab, var(--tavern-wood-dark) 70%, var(--tavern-ink));
+}
+.tv-wall .ui-flag { flex: 0 1 auto; min-width: 0; }
+.tv-portholes { flex: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 0 18px; height: 44px; overflow: hidden; min-width: 0; }
+
+/* A porthole: brass, the sky, the sea moving. */
+.tv-porthole {
+  position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; box-sizing: border-box;
+  border: 4px solid var(--tavern-gold); box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--tavern-gold) 50%, var(--tavern-ink)), 0 2px 0 rgb(0 0 0 / .3);
+}
+.tv-porthole.day { background: linear-gradient(color-mix(in oklab, var(--cyan) 70%, var(--blue)), color-mix(in oklab, var(--cyan) 50%, var(--tavern-bone))); }
+.tv-porthole.dawn { background: linear-gradient(color-mix(in oklab, var(--blue) 50%, var(--surface)), color-mix(in oklab, var(--orange) 70%, var(--yellow))); }
+.tv-porthole.dusk { background: linear-gradient(color-mix(in oklab, var(--magenta) 55%, var(--blue)), var(--orange)); }
+.tv-porthole.night { background: linear-gradient(var(--surface-sunken), color-mix(in oklab, var(--blue) 30%, var(--surface-sunken))); }
+.tv-porthole i { position: absolute; display: block; }
+.tv-sun { width: 9px; height: 9px; border-radius: 50%; left: 18px; top: 6px; background: var(--tavern-light); }
+.tv-porthole.night .tv-sun { background: var(--tavern-bone); box-shadow: -14px 6px 0 -3px var(--tavern-bone), 4px 14px 0 -4px var(--tavern-bone); }
+.tv-porthole.dusk .tv-sun, .tv-porthole.dawn .tv-sun { top: 16px; background: color-mix(in oklab, var(--tavern-light) 60%, var(--red)); }
+.tv-wave { left: -20px; right: -20px; bottom: 0; height: 13px; background: var(--tavern-sea);
+           -webkit-mask: radial-gradient(5px 4px at 5px 0, transparent 98%, #000) 0 0 / 10px 100% repeat-x; mask: radial-gradient(5px 4px at 5px 0, transparent 98%, #000) 0 0 / 10px 100% repeat-x;
+           animation: tv-sea 3s ease-in-out infinite alternate; }
+.tv-wave.two { bottom: -3px; height: 9px; background: color-mix(in oklab, var(--tavern-sea) 70%, var(--tavern-ink)); animation-duration: 2.3s; animation-direction: alternate-reverse; }
+@keyframes tv-sea { from { transform: translate(-6px, 1px); } to { transform: translate(6px, -1px); } }
+
+/* A lantern hanging in the corner, flickering. */
+.tv-lantern { position: absolute; right: 22px; top: 0; width: 14px; height: 34px; flex: none; }
+.tv-lantern::before { content: ""; position: absolute; left: 6px; top: 0; width: 2px; height: 12px; background: var(--tavern-ink); }
+.tv-lantern i { position: absolute; left: 0; top: 12px; width: 14px; height: 18px; border-radius: 3px 3px 5px 5px; box-sizing: border-box;
+                border: 2px solid color-mix(in oklab, var(--tavern-gold) 50%, var(--tavern-ink)); background: var(--tavern-light);
+                box-shadow: 0 0 14px 4px color-mix(in srgb, var(--tavern-light) 55%, transparent); animation: tv-flicker 2.4s ease-in-out infinite; }
+@keyframes tv-flicker { 0%, 100% { opacity: 1; } 30% { opacity: .78; } 55% { opacity: .95; } 75% { opacity: .7; } }
+
+/* The table: pirates side by side on it, its wood running on under them. */
+.tv-table {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tavern-seat-w), 1fr)); gap: 0; padding: 4px 0 0;
+  background:
+    radial-gradient(60% 80px at 50% 0, color-mix(in srgb, var(--tavern-light) 10%, transparent), transparent),
+    repeating-linear-gradient(90deg, transparent 0 46px, color-mix(in oklab, var(--tavern-plank) 80%, var(--tavern-ink)) 46px 48px),
+    var(--tavern-plank);
+}
+
+/* The bar: a sign, bottles on the shelf. */
+.tv-sign { flex: none; padding: 5px 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; font-size: var(--caption);
+           color: var(--tavern-gold); background: color-mix(in oklab, var(--tavern-wood-dark) 70%, var(--tavern-ink));
+           border: 2px solid color-mix(in oklab, var(--tavern-gold) 60%, var(--tavern-wood-dark)); border-radius: 3px; box-shadow: 0 2px 0 rgb(0 0 0 / .3); }
+.tv-shelf { flex: 1; display: flex; align-items: flex-end; gap: 5px; height: 40px; padding: 0 6px; overflow: hidden; min-width: 0;
+            border-bottom: 4px solid var(--tavern-wood); }
+.tv-shelf i { flex: none; width: 8px; height: 22px; border-radius: 3px 3px 1px 1px; background: var(--c); position: relative; opacity: .9; }
+.tv-shelf i::before { content: ""; position: absolute; left: 2px; top: -6px; width: 4px; height: 7px; background: var(--c); }
+.tv-shelf i.b0 { --c: var(--green); } .tv-shelf i.b1 { --c: var(--red); height: 18px; } .tv-shelf i.b2 { --c: var(--tavern-gold); height: 26px; }
+.tv-shelf i.b3 { --c: var(--cyan); height: 16px; } .tv-shelf i.b4 { --c: var(--magenta); }
+
+@media (max-width: 719px) {
+  :root { --tavern-seat-w: 120px; --tavern-scene-h: 116px; }
+  .tavern-hall { gap: 12px; }
+  .tv-wall { height: 68px; gap: 8px; padding: 10px 10px 0; }
+  .tv-porthole { width: 34px; height: 34px; }
+  .tv-portholes { height: 38px; }
+  .tv-bar { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .tv-wave, .tv-lantern i { animation: none !important; } }

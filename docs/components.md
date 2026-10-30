@@ -10,11 +10,12 @@ the change.
 | Component | What it draws | Used by |
 | --- | --- | --- |
 | `uiCard({kind, hue, lead, chip, title, pill, body, actions, open, id})` | One card for everything: a chat, a task, what a search found. Its head (project or who, name, pill), its body, its actions. The whole card opens it; a chat's card held down (a right click, the menu key) opens its menu. | today.js (every card), tasks.js (search results) |
-| `uiDesk({id, hue, look, pose, mark, say, title, pill, lead, actions, open, cheer})` | A chat as a person at a desk, in pixels (`uiSprite`): its pose says where it stands (`work`, `run`, `ask`, `blocked`, `fresh`, `done`, `idle`, `sleep`, `stale`, `arrive`, `empty`), a mark over its head, what it asks in a bubble, its name and pill under it. `look` (`uiLook(id)`): the same person every time; its shirt, its project's color. A card underneath (`.tcard`, the chat's id, a `.today-go` head): the board's keys work on it. | office.js (the Office) |
+| `uiPirate({id, hue, look, pose, mark, say, title, pill, lead, actions, open, barkeep, cheer})` | A chat as a pirate at their crew's table, in pixels (`uiPirateSprite`): the pose says where it stands (`work`, `run`, `ask`, `blocked`, `fresh`, `done`, `idle`, `sleep`, `stale`, `arrive`, `empty`), a mark over their head, what it asks in a bubble, its name and pill under it. `look` (`uiLook(id)`): the same pirate every time; their stripes, their crew's color. A card underneath (`.tcard`, the chat's id, a `.today-go` head): the board's keys work on it. | tavern.js (the Tavern) |
+| `uiFlag(name, hue, {count})` | A crew's flag: the Jolly Roger in its project's color, its name on it, waving. | tavern.js |
 | `uiPill(text, tone, {long, title})` | Where something stands: `ask`, `late`, `done`, `working`, `running` (these two spin), `accent`, `warn`, `quiet`. `long` cuts its words short with … where they don't fit. | every card's state |
 | `uiButton(label, act, primary, cls)` | An action on a card or a section (`quiet`: words only; `complete`: Complete mission, its ✓, outlined like the rest). | cards, sections |
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
-| `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Office |
+| `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Tavern |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
 | `uiAction(icon, label, act, {title, key, cls})` | A bar's one thing to do, outlined (its key beside its words; an icon alone on a phone). | New chat, Complete |
@@ -62,8 +63,8 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
-| `--office-skin-*`, `--office-hair-*`, `--office-ink`, `--office-cloud` | The Office's people (the same in every theme), eyes, clouds |
-| `--office-desk`, `--office-desk-front`, `--office-metal`, `--office-screen`, `--office-floor`, `--office-wall`, `--office-radius`, `--office-desk-w` | Its desks, chairs and monitors, a room's floor and wall, a desk's room on the floor |
+| `--tavern-skin-*`, `--tavern-hair-*`, `--tavern-ink`, `--tavern-bone`, `--tavern-gold` | The Tavern's pirates (the same in every theme), a patch and a hat, the Jolly Roger's skull, gold |
+| `--tavern-wood`, `--tavern-wood-dark`, `--tavern-plank`, `--tavern-light`, `--tavern-sea`, `--tavern-radius`, `--tavern-seat-w`, `--tavern-scene-h` | Its tables, walls and floor, lantern and candle light, the sea in a porthole, a pirate's room at the table and how tall they're drawn |
 | `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
 
 ## Keeping the phone and the computer together
