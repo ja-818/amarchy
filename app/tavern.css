@@ -20,7 +20,8 @@
    of warm light falling from the portholes, embers drifting up through
    them, the corners in shadow. Over the walls, under the pirates (but the
    embers, in front of everyone); never in the way of a tap. */
-.tv-crew { position: relative; isolation: isolate; }
+.tv-crew { position: relative; isolation: isolate; color: var(--tavern-bone); }
+.tv-crew .ui-pirate-name .task.muted { color: color-mix(in srgb, var(--tavern-bone) 60%, transparent); }
 .tv-crew .ui-flag, .tv-crew .tv-sign, .tv-crew .tv-portholes, .tv-crew .tv-shelf, .tv-crew .tv-lantern { position: relative; z-index: 2; }
 .tv-crew .tv-lantern { position: absolute; }
 .tv-table > * { position: relative; z-index: 2; }
@@ -112,7 +113,7 @@
 .tv-shelf i.b3 { --c: var(--cyan); height: 16px; } .tv-shelf i.b4 { --c: var(--magenta); }
 
 @media (max-width: 719px) {
-  :root { --tavern-seat-w: 120px; --tavern-scene-h: 132px; }
+  :root { --tavern-seat-w: 150px; --tavern-scene-h: 150px; }
   .tavern-hall { gap: 12px; }
   .tv-wall { height: 68px; gap: 8px; padding: 10px 10px 0; }
   .tv-porthole { width: 34px; height: 34px; }

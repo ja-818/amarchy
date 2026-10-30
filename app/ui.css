@@ -104,12 +104,12 @@
   --tavern-bar-dark: #5a1a12;
   --tavern-wood: color-mix(in oklab, #9a6a44 85%, var(--orange));        /* wood is wood in every theme, tinted by it */
   --tavern-wood-dark: color-mix(in oklab, #4f3423 85%, var(--orange));
-  --tavern-plank: color-mix(in oklab, var(--orange) 14%, var(--surface));
+  --tavern-plank: color-mix(in oklab, #1e1410 92%, var(--orange));      /* dark in every theme: noir */
   --tavern-light: color-mix(in srgb, var(--yellow) 60%, var(--orange));      /* lanterns, candles */
   --tavern-sea: color-mix(in oklab, var(--blue) 70%, var(--surface-sunken));
   --tavern-radius: var(--card-radius);
-  --tavern-seat-w: 160px;                         /* a pirate's room at the table */
-  --tavern-scene-h: 170px;                        /* how tall a pirate is drawn, with their table */
+  --tavern-seat-w: 190px;                         /* a pirate's room at the table */
+  --tavern-scene-h: 196px;                        /* how tall a pirate is drawn, with their table */
 }
 @media (pointer: coarse) { :root { --control-h: 44px; } }
 
@@ -438,11 +438,11 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate-scene { position: relative; display: block; height: var(--tavern-scene-h); margin-top: 26px; width: 100%; }
 .ui-pirate-art, .ui-pirate-art svg { display: block; width: 100%; height: 100%; overflow: hidden; }
 /* The candle's light on whoever sits by it. */
-.ui-pirate-scene::before { content: ""; position: absolute; left: calc(50% + 46px); top: 30%; width: 170px; aspect-ratio: 1; transform: translate(-50%, -40%); border-radius: 50%; pointer-events: none;
+.ui-pirate-scene::before { content: ""; position: absolute; left: calc(50% + 62px); top: 46%; width: 170px; aspect-ratio: 1; transform: translate(-50%, -40%); border-radius: 50%; pointer-events: none;
                            background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-light) 42%, transparent), color-mix(in srgb, var(--tavern-light) 10%, transparent) 55%, transparent);
                            mix-blend-mode: screen; animation: ui-pirate-flicker 2.2s ease-in-out infinite; }
 .ui-pirate.p-sleep .ui-pirate-scene::before, .ui-pirate.p-stale .ui-pirate-scene::before, .ui-pirate.p-empty .ui-pirate-scene::before, .ui-pirate.p-run .ui-pirate-scene::before, .ui-pirate.vacant .ui-pirate-scene::before { display: none; }
-.ui-pirate.p-done .ui-pirate-scene::before { left: calc(50% + 50px); background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-gold) 35%, transparent), transparent); }
+.ui-pirate.p-done .ui-pirate-scene::before { left: calc(50% + 70px); background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-gold) 35%, transparent), transparent); }
 .ui-pirate-plate { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; }
 .ui-pirate-plate .avatar { width: 22px; height: 22px; }
 .ui-pirate-name { max-width: 100%; min-width: 0; font-size: var(--caption); line-height: 1.3; }
@@ -492,89 +492,90 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate-say-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .ui-pirate.p-blocked .ui-pirate-say.pinned { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 
-/* The drawing's colors (ui.js UI_PX: one letter a color). A warm rim of
-   lantern light on the pirates, a soft shadow under them. */
-.ui-sprite { filter: drop-shadow(0 -1px 0 color-mix(in srgb, var(--tavern-light) 45%, transparent)) drop-shadow(0 3px 4px rgb(0 0 0 / .35)); }
-.ui-sprite .xo { fill: var(--tavern-ink); }
-.ui-sprite .xs { fill: var(--o-skin); }
-.ui-sprite .xS { fill: color-mix(in oklab, var(--o-skin) 72%, var(--tavern-shade)); }
-.ui-sprite .xl { fill: color-mix(in oklab, var(--o-skin) 70%, var(--tavern-light)); }
-.ui-sprite .xh { fill: var(--o-hair); }
-.ui-sprite .xH { fill: color-mix(in oklab, var(--o-hair) 70%, var(--tavern-ink)); }
-.ui-sprite .xk { fill: var(--tavern-ink); }
-.ui-sprite .xe { fill: var(--tavern-bone); }
-.ui-sprite .xm { fill: color-mix(in oklab, var(--tavern-mouth) 80%, var(--tavern-ink)); }
-.ui-sprite .xn { fill: var(--tavern-tongue); }
-.ui-sprite .xw { fill: var(--tavern-bone); }
-.ui-sprite .xW { fill: color-mix(in oklab, var(--tavern-bone) 75%, var(--tavern-wood-dark)); }
-.ui-sprite .xc { fill: var(--ph); }
-.ui-sprite .xC { fill: color-mix(in oklab, var(--ph) 65%, var(--tavern-ink)); }
-.ui-sprite .xv { fill: color-mix(in oklab, var(--tavern-leather) 85%, var(--ph)); }
-.ui-sprite .xV { fill: color-mix(in oklab, var(--tavern-leather-dark) 85%, var(--ph)); }
-.ui-sprite .xb { fill: var(--tavern-belt); }
-.ui-sprite .xg, .ui-sprite .xy { fill: var(--tavern-gold); }
-.ui-sprite .xY { fill: color-mix(in oklab, var(--tavern-gold) 50%, var(--tavern-glint)); }
-.ui-sprite .xP { fill: color-mix(in oklab, var(--tavern-breeches) 85%, var(--ph)); }
-.ui-sprite .xt { fill: var(--tavern-hat); }
-.ui-sprite .xT { fill: var(--tavern-hat-light); }
-.ui-sprite .xB { fill: var(--tavern-bone); }
-.ui-sprite .xM { fill: color-mix(in oklab, var(--tavern-mug) 85%, var(--orange)); }
-.ui-sprite .xN { fill: color-mix(in oklab, var(--tavern-mug-light) 85%, var(--tavern-light)); }
-.ui-sprite .xx { fill: var(--tavern-bone); } .ui-sprite .xX { fill: color-mix(in oklab, var(--tavern-bone) 70%, var(--orange)); }
-.ui-sprite .xf { fill: color-mix(in oklab, var(--tavern-light) 70%, var(--tavern-ember)); } .ui-sprite .xF { fill: var(--tavern-flame); }
-.ui-sprite .xO { fill: color-mix(in oklab, var(--tavern-gold) 55%, var(--tavern-brass-dark)); }
-.ui-sprite .xq { fill: var(--tavern-parchment); } .ui-sprite .xQ { fill: var(--tavern-parchment-dark); }
-.ui-sprite .xd { fill: var(--tavern-map-ink); } .ui-sprite .xr { fill: var(--tavern-red); }
-.ui-sprite .xu { fill: var(--tavern-chest); } .ui-sprite .xU { fill: var(--tavern-chest-dark); }
-.ui-sprite .xa { fill: var(--tavern-canvas); } .ui-sprite .xA { fill: var(--tavern-canvas-dark); }
-.ui-sprite .xi { fill: color-mix(in srgb, var(--tavern-bone) 35%, transparent); }
-.ui-sprite .xz { fill: var(--tavern-wood); } .ui-sprite .xZ { fill: var(--tavern-wood-dark); }
-.ui-sprite .xZ2 { fill: color-mix(in oklab, var(--tavern-wood-dark) 70%, var(--tavern-ink)); }
-.ui-sprite .xl2 { fill: color-mix(in oklab, var(--tavern-wood) 55%, var(--tavern-light)); }
-.ui-sprite .xj { fill: var(--tavern-parrot-head); } .ui-sprite .xJ { fill: var(--tavern-parrot); }
+/* The drawing's colors (ui.js uiPirateSprite: noir ink, a candle's warm
+   light from their right). A soft shadow under them. */
+.ui-sprite { filter: drop-shadow(0 4px 6px rgb(0 0 0 / .45)); overflow: hidden; }
+.ui-sprite .n-ink { fill: var(--tavern-ink); }
+.ui-sprite .n-skin-dark { fill: color-mix(in oklab, var(--o-skin) 32%, var(--tavern-ink)); }
+.ui-sprite .n-skin { fill: var(--o-skin); }
+.ui-sprite .n-skin-hi { fill: color-mix(in oklab, var(--o-skin) 72%, var(--tavern-flame)); }
+.ui-sprite .n-hair { fill: var(--o-hair); }
+.ui-sprite .n-hair-lit { fill: color-mix(in oklab, var(--o-hair) 55%, var(--tavern-light)); }
+.ui-sprite .n-bone { fill: var(--tavern-bone); }
+.ui-sprite .n-bone-dark { fill: color-mix(in oklab, var(--tavern-bone) 45%, var(--tavern-ink)); }
+.ui-sprite .n-mouth { fill: var(--tavern-mouth); }
+.ui-sprite .n-scar { fill: var(--tavern-tongue); }
+.ui-sprite .n-ring { fill: none; stroke: var(--tavern-gold); stroke-width: 2.4; }
+.ui-sprite .n-hat { fill: var(--tavern-hat); }
+.ui-sprite .n-hat-lit { fill: color-mix(in oklab, var(--tavern-hat-light) 40%, var(--tavern-light)); }
+.ui-sprite .n-trim { fill: none; stroke: var(--tavern-gold); stroke-width: 2.4; }
+.ui-sprite .n-crew { fill: var(--ph); }
+.ui-sprite .n-crew-dark { fill: color-mix(in oklab, var(--ph) 45%, var(--tavern-ink)); }
+.ui-sprite .n-coat { fill: var(--tavern-hat); }
+.ui-sprite .n-coat-lit { fill: color-mix(in oklab, var(--tavern-leather) 70%, var(--tavern-light)); }
+.ui-sprite .n-metal { fill: color-mix(in oklab, var(--tavern-hat-light) 70%, var(--tavern-ink)); }
+.ui-sprite .n-metal-lit { fill: color-mix(in oklab, var(--tavern-bone) 55%, var(--tavern-light)); }
+.ui-sprite .n-handle { fill: none; stroke: color-mix(in oklab, var(--tavern-hat-light) 70%, var(--tavern-ink)); stroke-width: 5; }
+.ui-sprite .n-wax { fill: var(--tavern-parchment); } .ui-sprite .n-wax-lit { fill: var(--tavern-flame); }
+.ui-sprite .n-flame-out { fill: var(--tavern-light); } .ui-sprite .n-flame-in { fill: var(--tavern-flame); }
+.ui-sprite .n-wisp { fill: none; stroke: color-mix(in srgb, var(--tavern-bone) 35%, transparent); stroke-width: 2; }
+.ui-sprite .n-gold { fill: var(--tavern-gold); }
+.ui-sprite .n-gold-dark { fill: var(--tavern-brass-dark); }
+.ui-sprite .n-parch { fill: var(--tavern-parchment); } .ui-sprite .n-parch-dark { fill: var(--tavern-parchment-dark); }
+.ui-sprite .n-path { fill: none; stroke: var(--tavern-map-ink); stroke-width: 2.4; }
+.ui-sprite .n-x { fill: none; stroke: var(--tavern-red); stroke-width: 3.2; }
+.ui-sprite .n-chest { fill: var(--tavern-chest); } .ui-sprite .n-chest-dark { fill: var(--tavern-chest-dark); }
+.ui-sprite .n-glass { fill: color-mix(in srgb, var(--tavern-bone) 22%, transparent); }
+.ui-sprite .n-sand { fill: var(--tavern-gold); }
+.ui-sprite .n-canvas { fill: var(--tavern-canvas); } .ui-sprite .n-canvas-dark { fill: var(--tavern-canvas-dark); }
+.ui-sprite .n-chair { fill: var(--tavern-hat); } .ui-sprite .n-chair-lit { fill: var(--tavern-wood-dark); }
+.ui-sprite .n-wood { fill: var(--tavern-wood-dark); }
+.ui-sprite .n-wood-lit { fill: color-mix(in oklab, var(--tavern-wood) 55%, var(--tavern-light)); }
+.ui-sprite .n-grain { fill: none; stroke: color-mix(in oklab, var(--tavern-wood-dark) 70%, var(--tavern-ink)); stroke-width: 1.5; }
 .ui-sprite.sk-0 { --o-skin: var(--tavern-skin-0); } .ui-sprite.sk-1 { --o-skin: var(--tavern-skin-1); }
 .ui-sprite.sk-2 { --o-skin: var(--tavern-skin-2); } .ui-sprite.sk-3 { --o-skin: var(--tavern-skin-3); }
 .ui-sprite.sk-4 { --o-skin: var(--tavern-skin-4); }
-.ui-sprite.hr-0 { --o-hair: var(--tavern-hair-0); } .ui-sprite.hr-1 { --o-hair: var(--tavern-hair-1); }
-.ui-sprite.hr-2 { --o-hair: var(--tavern-hair-2); } .ui-sprite.hr-3 { --o-hair: var(--tavern-hair-3); }
-.ui-sprite.hr-4 { --o-hair: var(--tavern-hair-4); }
-/* The barkeep's table is the bar: darker, polished. */
-.ui-sprite.barkeep .xz { fill: color-mix(in oklab, var(--tavern-wood) 70%, var(--tavern-bar)); }
-.ui-sprite.barkeep .xZ { fill: color-mix(in oklab, var(--tavern-wood-dark) 75%, var(--tavern-bar-dark)); }
+.ui-sprite.hr-0, .ui-sprite.hr-1, .ui-sprite.hr-2 { --o-hair: var(--tavern-ink); }
+.ui-sprite.hr-3 { --o-hair: var(--tavern-hair-3); } .ui-sprite.hr-4 { --o-hair: var(--tavern-hair-4); }
+/* The barkeep's table is the bar: polished, redder. */
+.ui-sprite.barkeep .n-wood { fill: var(--tavern-bar-dark); }
+.ui-sprite.barkeep .n-wood-lit { fill: color-mix(in oklab, var(--tavern-bar) 60%, var(--tavern-light)); }
 
 /* How they move. */
-.ui-sprite g, .ui-sprite rect { transform-box: fill-box; }
-.ui-sprite .o-body { transition: transform .3s; }
-.ui-sprite .o-body.up { transform: translateY(-3px); }
-.p-work .o-quill { transform-origin: 50% 100%; animation: ui-pirate-write .5s steps(2) infinite; }
-.p-work .o-head { animation: ui-pirate-nod 1.6s steps(2) infinite; }
-.p-run .o-sip { animation: ui-pirate-sip 4s ease-in-out infinite; }
-.p-run .o-glass { transform-origin: 50% 50%; animation: ui-pirate-turn 4s steps(1) infinite; }
-.p-ask .o-wave { transform-origin: 50% 100%; animation: ui-pirate-wave .7s ease-in-out infinite alternate; }
-.p-done .o-body { animation: ui-pirate-jump .9s ease-in-out infinite; }
-.p-idle .o-head, .p-arrive .o-head, .p-stale .o-head { animation: ui-pirate-breathe 4s ease-in-out infinite; }
-.p-sleep .o-body { animation: ui-pirate-breathe 3s ease-in-out infinite; }
-.p-fresh .o-paper { animation: ui-pirate-breathe 1.6s ease-in-out infinite; }
-.o-parrot { animation: ui-pirate-bob 2.8s steps(2) infinite; }
-.o-flame { transform-origin: 50% 100%; animation: ui-pirate-flame 1.3s steps(3) infinite; }
-.o-eyes { animation: ui-pirate-wink 5s steps(1) infinite; transform-origin: 50% 50%; }
-.o-steam { animation: ui-pirate-steam 2.4s ease-in-out infinite; }
-.p-arrive .ui-pirate-art .o-body { animation: ui-pirate-in 1.4s ease-out both; }
-.p-blocked .o-body { animation: ui-pirate-shake .5s steps(2) infinite; }
-@keyframes ui-pirate-nod { 50% { transform: translateY(1px); } }
-@keyframes ui-pirate-turn { 50% { transform: scaleY(-1); } }
-@keyframes ui-pirate-write { 50% { transform: translate(-1px, 1px) rotate(-6deg); } }
-@keyframes ui-pirate-sip { 0%, 55%, 100% { transform: translateY(0); } 65%, 90% { transform: translateY(-3px); } }
-@keyframes ui-pirate-wave { from { transform: rotate(-12deg); } to { transform: rotate(14deg); } }
-@keyframes ui-pirate-jump { 0%, 100% { transform: translateY(-3px); } 50% { transform: translateY(-6px); } }
-@keyframes ui-pirate-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(.6px); } }
-@keyframes ui-pirate-bob { 50% { transform: translateY(-1px); } }
-@keyframes ui-pirate-flame { 33% { transform: scale(1.1, .85); } 66% { transform: scale(.85, 1.15); } }
+.ui-sprite g { transform-box: fill-box; }
+/* Placed by its transform (a head turned, a tankard where the hand is): from the drawing's corner, not its own. */
+.ui-sprite g[transform] { transform-box: view-box; transform-origin: 0 0; }
+.ui-sprite .n-body { transition: transform .3s; }
+.ui-sprite .n-body.up { transform: translateY(-6px); }
+.p-work .n-quill { transform-origin: 50% 100%; animation: ui-pirate-write .6s ease-in-out infinite alternate; }
+.p-work .n-head { animation: ui-pirate-nod 2.4s ease-in-out infinite; }
+.p-run .n-sip { transform-origin: 30% 100%; animation: ui-pirate-sip 4s ease-in-out infinite; }
+.p-run .n-glass { transform-origin: 50% 50%; animation: ui-pirate-turn 6s ease-in-out infinite; }
+.p-ask .n-wave { transform-origin: 50% 100%; animation: ui-pirate-wave .8s ease-in-out infinite alternate; }
+.p-done .n-body { animation: ui-pirate-jump 1s ease-in-out infinite; }
+.p-idle .n-head, .p-arrive .n-head, .p-stale .n-head, .p-fresh .n-head { animation: ui-pirate-breathe 4.5s ease-in-out infinite; }
+.p-sleep .n-body { animation: ui-pirate-breathe 3.2s ease-in-out infinite; }
+.p-fresh .n-paper { transform-origin: 50% 100%; animation: ui-pirate-show 1.8s ease-in-out infinite; }
+.n-flame { transform-origin: 50% 100%; animation: ui-pirate-flame 1.4s ease-in-out infinite; }
+.n-eyes { animation: ui-pirate-wink 5s steps(1) infinite; transform-origin: 50% 50%; }
+.n-smoke { animation: ui-pirate-steam 3s ease-in-out infinite; }
+.p-arrive .ui-pirate-art .n-body { animation: ui-pirate-in 1.4s ease-out both; }
+.p-blocked .n-body { animation: ui-pirate-shake .6s ease-in-out infinite; }
+.ui-pirate.p-stale .n-body, .ui-pirate.p-sleep .n-body { filter: saturate(.6) brightness(.75); }
+@keyframes ui-pirate-write { from { transform: rotate(-6deg); } to { transform: translate(-2px, 2px) rotate(6deg); } }
+@keyframes ui-pirate-nod { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
+@keyframes ui-pirate-sip { 0%, 55%, 100% { transform: translateY(0) rotate(0); } 65%, 90% { transform: translate(4px, -6px) rotate(-14deg); } }
+@keyframes ui-pirate-turn { 0%, 45% { transform: rotate(0); } 50%, 95% { transform: rotate(180deg); } 100% { transform: rotate(180deg); } }
+@keyframes ui-pirate-wave { from { transform: rotate(-8deg); } to { transform: rotate(10deg); } }
+@keyframes ui-pirate-jump { 0%, 100% { transform: translateY(-6px); } 50% { transform: translateY(-12px); } }
+@keyframes ui-pirate-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
+@keyframes ui-pirate-show { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-4deg) translateY(-2px); } }
+@keyframes ui-pirate-flame { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.08, .9); } 60% { transform: scale(.9, 1.12); } }
 @keyframes ui-pirate-flicker { 0%, 100% { opacity: .9; } 40% { opacity: .65; } 70% { opacity: 1; } }
-@keyframes ui-pirate-wink { 0%, 94% { transform: scaleY(1); } 95%, 97% { transform: scaleY(.15); } }
-@keyframes ui-pirate-steam { 0% { opacity: 0; transform: translateY(1px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-2px); } }
-@keyframes ui-pirate-in { from { transform: translateX(-26px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes ui-pirate-shake { 50% { transform: translate(.5px, -3px); } }
+@keyframes ui-pirate-wink { 0%, 94% { transform: scaleY(1); } 95%, 97% { transform: scaleY(.1); } }
+@keyframes ui-pirate-steam { 0% { opacity: 0; transform: translateY(2px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-6px); } }
+@keyframes ui-pirate-in { from { transform: translateX(-40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes ui-pirate-shake { 0%, 100% { transform: translate(0, -6px); } 50% { transform: translate(1.5px, -7px); } }
 
 /* Done just now: gold coins and confetti, once. */
 .ui-confetti { position: absolute; inset: 0; pointer-events: none; overflow: visible; }

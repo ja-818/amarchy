@@ -745,15 +745,15 @@ Today adds no notifications of its own.
 ### The Tavern
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
-the same chats as a pirates' tavern, on the phone as on a computer, drawn in
-pixels in your theme's colors. Your assistant keeps **the bar**. Each project is
+the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
+noir comic: ink-black shadows, faces lit by the candle on the table. Your assistant keeps **the bar**. Each project is
 a **crew** at its own long table, under its flag: the Jolly Roger in the
 project's color with its name on it. Portholes show the sea under the sky as it
 is outside now; warm shafts of light fall through them, embers drift, lanterns and
 candles flicker. Each chat is a pirate on their own
-stool, wearing their crew's stripes (always the same pirate: their hat, an
-eyepatch, a beard, sometimes a parrot), and how they sit says where the chat
-stands:
+stool, their coat's lapels in their crew's color (always the same pirate: a
+tricorn with the skull, a bandana, long hair or bald, an eyepatch, a beard or a
+mustache, a scar, an earring), and how they sit says where the chat stands:
 
 | They're | The chat |
 | --- | --- |
@@ -762,8 +762,8 @@ stands:
 | Up with a hand raised, **?** over them, what it asks in a bubble | asks you (a permission's **Allow** and **Deny** are at their seat) |
 | Up, hands on their head, **!** | is blocked |
 | Holding up a map, **★** | finished a turn you haven't seen |
-| Grog raised over a chest of gold, **✓** (gold and confetti the moment it happens) | reached its goal: **Complete** is at their seat |
-| Head on the table, candle out, *z z* | is asleep |
+| Both tankards raised over a chest of gold, **✓** (gold and confetti the moment it happens) | reached its goal: **Complete** is at their seat |
+| Slumped on the table, candle out, *z z* | is asleep |
 | Gone quiet, the grog dry, **…** | has been quiet two days or more |
 
 Under each one, the chat's name and the same pill as its card on Chats. A click

@@ -9,8 +9,8 @@
 // - uiCard: one card for everything (a chat, a task, what a search found):
 //   a head (who or what project, its name, a pill), a body, its actions.
 //   The whole card opens it.
-// - uiPirate: a chat as a pirate at their crew's table, in pixels, posed
-//   as it stands (the Tavern).
+// - uiPirate: a chat as a pirate at their crew's table, drawn in noir ink,
+//   posed as it stands (the Tavern).
 // - uiPill: where something stands ("Done", "Asks you", "Running · …").
 // - uiButton: an action on a card or a section.
 // - uiSection: a small head with a count (an action at its end), its cards;
@@ -395,8 +395,7 @@ function uiMenu(title, items) {
 // ---- a pirate at their crew's table (the board's Tavern, tavern.js)
 //
 // A chat as a pirate in the tavern, sat at their crew's long table, drawn
-// in pixels (an SVG, shape-rendering crispEdges) from the theme's colors
-// (ui.css --tavern-*). What it does is how they sit: pose is
+// as a noir comic (ink shadows, a candle's warm light; ui.css --tavern-*). What it does is how they sit: pose is
 // work (plotting on a map, quill going), run (a swig while the hourglass
 // runs), ask (up, a hand raised, ?), blocked (up, hands on their head, !),
 // fresh (holding up a map: look), done (up with the grog, a chest of gold,
@@ -404,7 +403,8 @@ function uiMenu(title, items) {
 // z z), stale (gone quiet, the grog dry), arrive (walking in with a sea bag), empty (a free
 // stool: + recruits a new one).
 // look: who they are, the same every time (uiLook(id)): skin, hair, hat,
-// an eyepatch, a beard, a parrot. Their shirt is their crew's color (hue).
+// an eyepatch, a beard or a mustache, a scar, an earring. Their coat's
+// lapels are their crew's color (hue).
 // barkeep: your assistant, behind the bar with an apron.
 // Like a card (uiCard) it's an article.tcard with the chat's id and a head
 // (.today-go) that opens it: the board's keys, its lit one, x and s, work on
@@ -415,137 +415,128 @@ function uiLook(id) {
   let n = 2166136261;
   for (const c of String(id || "")) n = Math.imul(n ^ c.charCodeAt(0), 16777619) >>> 0;
   const pick = (k) => { const v = n % k; n = Math.floor(n / k) ^ (n >>> 7); return v; };
-  return { skin: pick(5), hair: pick(5), hat: pick(4), patch: pick(4) === 0, beard: pick(3) === 0, parrot: pick(6) === 0 };
+  return { skin: pick(5), hair: pick(5), hat: pick(4), patch: pick(3) === 0, beard: pick(2) === 0, stache: pick(2) === 0, scar: pick(3) === 0, earring: pick(3) === 0 };
 }
 
-// ---- the drawings, pixel by pixel: one letter a pixel, "." none.
-// o outline · s S l skin, its shadow, its light · h H hair · k ink (eyes,
-// a patch) · e an eye's glint · m a mouth · n a tongue · w W a stripe's
-// white · c C the crew's color · v V the vest's leather · b a belt · g gold
-// · P breeches · t T a hat · B bone · M N a tankard · x X wax · f F a flame
-// · O brass · q Q parchment · d ink on it · r red · u U a chest · y Y gold
-// coins · a A a sea bag · i glass · z Z wood (a stool) · j J a parrot.
-const UI_PX = {
-  head: ["....oooooooo....", "..oollllsssSoo..", ".ollssssssssSSo.", ".olsssssssssSSo.", "olssssssssssssSo", "osssssssssssssSo",
-         "osssssssssssssSo", "osssssssssssssSo", "osssssssssssssSo", ".osssssssssssSo.", ".osssssssssssSo.", "..oSssssssssSo..", "....oooooooo...."],
-  eyes: ["", "", "", "", "", "...HHH....HHH...", "....ek....ek....", "....kk....kk...."],
-  wide: ["", "", "", "", "...HH......HH...", "....ee....ee....", "....ek....ek....", "....kk....kk...."],
-  shut: ["", "", "", "", "", "...HHH....HHH...", "", "...kkk....kkk..."],
-  happy: ["", "", "", "", "", "...HHH....HHH...", "....kk....kk....", "...k..k..k..k..."],
-  look: ["", "", "", "", "", "...HHH....HHH...", "", "....kk....kk...."],
-  nose: ["", "", "", "", "", "", "", "", ".......SS.......", "......SS........"],
-  calm: ["", "", "", "", "", "", "", "", "", "..........m.....", "......mmmm......"],
-  grin: ["", "", "", "", "", "", "", "", "", ".....mmmmmm.....", "......mnnm......"],
-  shout: ["", "", "", "", "", "", "", "", "", "......mmmm......", "......mnnm......", ".......mm......."],
-  worry: ["", "", "", "", "", "", "", "", "", "", ".....m.mm.m....."],
-  patch: ["", "", "", "kk..............", "..kk............", "....kk..kkkk....", "........kkkk....", "........kkkk....", ".........kk....."],
-  beard: ["", "", "", "", "", "", "h..............h", "hh............hh", "hhh..........hhh", ".hhhhhhHHhhhhhh.", ".hhhhh....hhhhh.",
-          "..hhhhhHhhhhhh..", "...ohhhhhhhho...", ".....oohhoo....."],
-  stache: ["", "", "", "", "", "", "", "", "", ".....hhhhhh.....", "....hh....hh...."],
-  fringe: ["....oooooooo....", "..oohhhhhhhhoo..", ".ohhhHhhhHhhhho.", ".oh.hh..hh..hho."],
-  slick: ["....oooooooo....", "..oohhhhhhhhoo..", ".ohhhhhhhhhHhho.", ".ohh........hho."],
-  bald: ["", "...ll...........", "..ll............", "", "", "", "", "", "", "..S.S......S.S..", "...S.S....S.S..."],
-  // Hats, from the head's corner (dx, dy).
-  tricorn: [-4, -7, "........oooooooo........", "......oottttttttoo......", "....oottttTTTTttttoo....", "..oottttTBBBBTtttttttoo.",
-            ".otttttttBkBkBtttttttto.", "otttttttttBBBttttttttto.", "oggggggggggggggggggggggo", "ottto..............ottto", ".oo..................oo."],
-  bandana: [-1, -2, ".....ooooooooo.......", "...oocccccccccoo.....", "..occwcccccwcccco....", ".occcccwccccccccoooo.",
-            ".oCCCCCCCCCCCCCCCoCCo", ".oooooooooooooooo.oCo", "..................oo."],
-  hair: [-2, -2, ".....oooooooooo.....", "...oohhhhhhhhhhoo...", "..ohhhhhhHhhhhhhho..", ".ohhhHhhhhhhhhhHhho.", ".occcccccccccccccco.",
-         "ohhho.hhh..hhh.ohhho", "ohhho..........ohhho", "ohhho..........ohhho", "ohhho..........ohhho", "ohhho..........ohhho", "ohhho..........ohhho",
-         "ohhho..........ohhho", "ohhho..........ohhho", "ohHho..........ohHho", "ohhho..........ohhho", ".ohho..........ohho.", "..oo............oo.."],
-  earring: [-2, 0, "", "", "", "", "", "", "", "", "g", "g"],
-  torso: ["........oSSSSo........", "...oooooowwwwoooooo...", "..ovvvvVwwwwwwVvvvvo..", "..ovvvvVccccccVvvvvo..", "..ovvvvVwwwwwwVvvvvo..",
-          "..ovgvvVccccccVvvgvo..", "..ovvvvVwwwwwwVvvvvo..", "..ovvvvVccccccVvvvvo..", "..ovgvvVwwwwwwVvvgvo..", "..ovvvvVccccccVvvvvo..",
-          "..obbbbbbbggbbbbbbbo..", "..oPPPPPPPPPPPPPPPPo..", "..oPPPPPPPPPPPPPPPPo.."],
-  apron: ["", "", "", "", "......wwwwwwwwww......", "......wwwwwwwwww......", ".....owwwwwwwwwwo.....", ".....owwwwwwwwwWo.....",
-          ".....owwwwwwwwwWo.....", ".....owwwwwwwwwWo.....", ".....owwWWWWWWWWo....."],
-  arm: [".ooo.", "owwWo", "owwWo", "owwWo", "owwWo", "oWwWo", "occCo", "ossso", "oslso", "ossSo", ".ooo."],
-  up: [".ooo.", "oslso", "ossso", "oSSSo", "occCo", "owwWo", "owwWo", "owwWo", "owwWo", "oWwWo", "owwWo", "owwWo", "owwWo", "oWwWo", "owwWo", ".ooo."],
-  short: [".ooo.", "oslso", "ossso", "oSSSo", "occCo", "owwWo", "owwWo", "oWwWo", "owwWo", ".ooo."],
-  flat: [".ooooooooooo..", "owwwwwwwcsslo.", "oWWWWWWWCsssSo", ".oooooooooooo."],
-  flatR: ["..ooooooooooo.", ".olsscwwwwwwwo", "oSsssCWWWWWWWo", ".oooooooooooo."],
-  mug: [".wwwww...", "owwwwwo..", "oMNMMMoo.", "oMNMMMo.o", "oMNMMMo.o", "oMNMMMoo.", "oMNMMMo..", ".ooooo..."],
-  candle: ["...k...", ".oxxxo.", ".oxxXo.", ".oxxXo.", ".oxxXo.", ".oxxXo.", "oOOOOOo"],
-  flame: ["...f...", "..fFf..", "..fFf.."],
-  smoke: ["....i..", "...i...", "..i....", "...i..."],
-  map: ["oooooooooooooooo", "oqqdqqqqqqqqqqQo", "oqqqqdqqdqqrqrQo", "oqqqqqqqqdqqrqQo", "oQQQQQQQQQQrQrQo", "oooooooooooooooo"],
-  quill: ["..ww", ".wwW", ".wwW", "wwW.", "wW..", "k..."],
-  scroll: ["oooooooooooo", "oqqqqqqqqqQo", "oqdqqqqqqqQo", "oqqdqqqqqqQo", "oqqqdqqrqrQo", "oqqqqdqqrqQo", "oqqqqqqrqrQo", "oqqqqqqqqqQo", "oQQQQQQQQQQo", "oooooooooooo"],
-  glass: ["OOOOOOO", ".oyyyo.", ".oiyio.", "..oyo..", "...y...", "..oio..", ".oiiio.", ".oyyyo.", ".oyyyo.", "OOOOOOO"],
-  chest: ["...Y..y..Y...", ".oyyYyyyyYyo.", "ouuyuuuuuyuuo", "oUUUUUyUUUUUo", "ouuyuuyuuyuuo", "ouuyuuuuuyuuo", "ouuyuuuuuyuuo", "oUUyUUUUUyUUo", ".ooooooooooo."],
-  bag: ["...oooooo...", "..oAaaaaAo..", ".oaaaaaaaaAo", "oaaaaaaaaaAo", "oaaaaaaaaaAo", "oAAAAAAAAAAo", "oaaaaaaaaaAo", "oaaaaaaaaaAo",
-        "oaaaaaaaaaAo", "oaaaaaaaaaAo", ".oaaaaaaaAo.", "..oooooooo.."],
-  stool: ["..oooooooooooo..", ".ozzzzzzzzzzzzo.", "oZZZZZZZZZZZZZZo", ".oo..........oo.", ".oZo........oZo."],
-  parrot: ["..ooo...", ".ojjjo..", "ojjkjgg.", "ojjjjo..", ".oJJJo..", ".oJJJJo.", ".oJJJJo.", "..oJJo..", "..o.o..."],
-  coins: ["..y....y", ".yY...yY"],
-};
+// ---- the drawing: noir, as a comic's ink (heavy black shadows, a few
+// warm colors, hard angles), lit by the candle on their right. 200 × 190,
+// the table's top at 160; it runs on past the edges, under the next pirate.
+// Each part a path; its color a class (ui.css .n-*): ink, skin (its shadow,
+// lit, its light), bone, the crew's color on the coat's lapels, gold...
 
-// A drawing at (x, y): its rows, each run of one letter one rect.
-function uiPx(rows, x, y) {
-  let out = "";
-  rows.forEach((row, j) => {
-    for (let i = 0; i < row.length;) {
-      const c = row[i];
-      let k = i + 1;
-      while (k < row.length && row[k] === c) k++;
-      if (c !== ".") out += `<rect x="${x + i}" y="${y + j}" width="${k - i}" height="1" class="x${c}"/>`;
-      i = k;
-    }
-  });
-  return out;
-}
-
-// The drawing: 56 × 50 pixels, the table's top at 38. Shown at one height;
-// the table runs on past its edges, under the next pirate's.
-function uiPirateSprite(look, pose, { barkeep = false } = {}) {
-  const P = UI_PX;
-  const g = (cls, inner) => `<g class="${cls}">${inner}</g>`;
+// The head, around its middle (0, 0): its face lit on one side, its look
+// (eyes, mouth) as it stands, then beard, patch, hat.
+function uiNoirHead(look, pose, barkeep) {
+  const P = (d, c) => `<path d="${d}" class="n-${c}"/>`;
   const out = [];
-  if (pose === "empty") out.push(uiPx(P.stool, 20, 33));
+  const hat = barkeep ? -1 : look.hat;      // 0 tricorn, 1 bandana, 2 long hair, 3 bald
+  if (hat === 2 || hat === 0) out.push(P("M-27 -20 L-35 22 L-40 62 L-25 58 L-21 12 Z M27 -20 L35 22 L40 62 L25 58 L21 12 Z", "hair"));
+  out.push(P("M-12 28 L-12 50 L12 50 L12 28 Z", "skin-dark"), P("M4 30 L12 30 L12 50 L6 46 Z", "skin"));
+  out.push(P("M-26 -24 L-28 6 L-20 26 L0 38 L20 26 L28 6 L26 -24 Z", "skin-dark"));
+  out.push(P("M4 -24 L26 -24 L28 6 L20 26 L8 34 L12 12 L6 -4 L10 -14 Z", "skin"), P("M16 -22 L26 -22 L27 0 L21 -10 Z", "skin-hi"));
+  // Eyes and brows.
+  const shut = pose === "sleep" || pose === "stale" || pose === "done";
+  const wide = pose === "ask" || pose === "blocked";
+  out.push(P(wide ? "M-22 -16 L-4 -20 L-5 -14 L-21 -11 Z M4 -20 L22 -17 L21 -11 L5 -14 Z" : pose === "work" ? "M-22 -10 L-4 -12 L-5 -6 L-21 -5 Z M4 -12 L22 -10 L21 -4 L5 -6 Z"
+                                                 : "M-22 -12 L-4 -15 L-5 -9 L-21 -6 Z M4 -15 L22 -13 L21 -7 L5 -9 Z", "ink"));
+  if (shut) out.push(P(pose === "done" ? "M-20 -2 L-14 -6 L-8 -2 L-9 0 L-14 -3 L-19 0 Z M8 -2 L14 -6 L20 -2 L19 0 L14 -3 L9 0 Z" : "M-20 -2 L-8 -3 L-8 -1 L-20 0 Z M8 -3 L20 -2 L20 0 L8 -1 Z", "ink"));
   else {
-    const asleep = pose === "sleep", up = pose === "ask" || pose === "blocked" || pose === "done";
-    const hx = 20, hy = asleep ? 24 : 12;
-    const at = (rows, dx = 0, dy = 0) => uiPx(rows, hx + dx, hy + dy);
-    // The face: eyes, a mouth, as they stand.
-    const eyes = asleep || pose === "stale" ? P.shut : pose === "done" ? P.happy : pose === "ask" || pose === "blocked" ? P.wide : pose === "work" ? P.look : P.eyes;
-    const mouth = pose === "done" || pose === "fresh" ? P.grin : pose === "ask" ? P.shout : pose === "blocked" ? P.worry : P.calm;
-    const hat = barkeep ? null : [P.tricorn, P.bandana, P.hair, null][look.hat];
-    let face = at(P.head) + (hat === P.tricorn ? at(P.fringe) : "") + (barkeep ? at(P.slick) : "") + (!barkeep && look.hat === 3 ? at(P.bald) : "");
-    face += g("o-eyes", at(eyes)) + at(P.nose) + at(mouth);
-    if (look.patch && !barkeep) face += at(P.patch);
-    if (barkeep) face += at(P.stache);
-    else if (look.beard) face += at(P.beard);
-    if (hat) face += at(hat.slice(2), hat[0], hat[1]);
-    if (!barkeep && look.hat === 3) face += at(P.earring.slice(2), P.earring[0], P.earring[1]);
-    const head = g("o-head", face);
-    const torso = uiPx(P.torso, 17, 25) + (barkeep ? uiPx(P.apron, 17, 25) : "");
-    const rest = (x) => uiPx(P.arm, x, 27);
-    let before = "", arms = "", held = "";
-    if (pose === "done") { before = uiPx(P.up, 13, 12) + uiPx(P.up, 38, 12); held = uiPx(P.mug, 37, 4); }
-    else if (pose === "ask") { arms = rest(14); before = g("o-wave", uiPx(P.up, 38, 12)); }
-    else if (pose === "blocked") before = uiPx(P.up, 14, 9) + uiPx(P.up, 37, 9);
-    else if (pose === "fresh") { arms = rest(14); before = uiPx(P.up, 38, 13); held = g("o-paper", uiPx(P.scroll, 35, 4)); }
-    else if (pose === "run") { arms = rest(37); held = g("o-sip", uiPx(P.short, 15, 18) + uiPx(P.mug, 10, 15)); }
-    else if (pose === "work") { arms = rest(14) + rest(37); held = uiPx(P.map, 20, 33) + g("o-quill", uiPx(P.quill, 38, 27)); }
-    else if (asleep) arms = uiPx(P.flat, 14, 33) + uiPx(P.flatR, 28, 33);
-    else arms = rest(14) + rest(37);
-    const bag = pose === "arrive" ? g("o-box", uiPx(P.bag, 13, 24)) : "";
-    const parrot = look.parrot && !asleep && !barkeep ? g("o-parrot", uiPx(P.parrot, 36, 17)) : "";
-    out.push(g(`o-body${up ? " up" : ""}`, asleep ? torso + arms + head : before + torso + head + parrot + arms + held + bag));
+    const dy = pose === "work" ? 3 : 0, h = wide ? 7 : 4;
+    out.push(P(`M-20 ${-5 + dy} L-8 ${-5 + dy} L-9 ${-5 + dy + h} L-19 ${-5 + dy + h} Z M8 ${-5 + dy} L20 ${-5 + dy} L18 ${-5 + dy + h} L10 ${-5 + dy + h} Z`, "ink"));
+    out.push(`<g class="n-eyes"><rect x="13" y="${-4 + dy}" width="2.5" height="2.5" class="n-bone"/></g>`);
   }
-  // The table: its top lit, its planks, a nail or two; under everyone.
-  const table = `<rect x="-300" y="38" width="656" height="1" class="xl2"/><rect x="-300" y="39" width="656" height="2" class="xz"/>`
-    + `<rect x="-300" y="41" width="656" height="1" class="xo"/><rect x="-300" y="42" width="656" height="8" class="xZ"/>`
-    + `<rect x="-300" y="45" width="656" height="1" class="xZ2"/><rect x="-300" y="48" width="656" height="1" class="xZ2"/>`
-    + `<rect x="12" y="43" width="1" height="1" class="xO"/><rect x="43" y="46" width="1" height="1" class="xO"/>`;
-  out.push(g("o-desk", table));
+  // Nose, a scar, the mouth.
+  out.push(P("M0 -8 L-6 14 L2 17 L8 14 Z", "ink"), P("M2 -8 L8 14 L4 16 L4 -2 Z", "skin-hi"));
+  if (look.scar) out.push(P("M12 4 L22 22 L20 23 L10 5 Z", "scar"));
+  const open = pose === "ask" || pose === "done" || pose === "fresh";
+  const beard = !barkeep && look.beard;
+  if (beard) out.push(P("M-26 2 L-22 24 L-14 44 L-6 38 L0 54 L6 38 L14 44 L22 24 L26 2 L18 16 L8 17 L0 20 L-8 17 L-18 16 Z", "hair"));
+  out.push(open ? P("M-8 20 L8 20 L5 29 L-5 29 Z", "mouth") + P("M-6 20 L6 20 L5 22.5 L-5 22.5 Z", "bone")
+                : pose === "blocked" ? P("M-6 24 L6 22 L6 24 L-6 26 Z", "mouth") : P("M-6 22 L6 22 L4 25 L-4 25 Z", "mouth"));
+  if (beard || barkeep || look.stache) out.push(P("M-15 16 L0 10 L15 16 L9 19 L0 15 L-9 19 Z", "hair"));
+  if (!beard && look.stache) out.push(P("M-5 30 L0 42 L5 30 Z", "hair"));
+  if (look.patch && !barkeep) out.push(P("M-24 -5 L-6 -6 L-7 8 L-15 11 L-23 7 Z", "ink"), P("M-27 -14 L27 -27 L28 -23 L-26 -9 Z", "ink"));
+  if (look.earring || hat === 3) out.push(`<circle cx="29" cy="12" r="3.4" class="n-ring"/>`);
+  // What's on top.
+  if (hat === 0) out.push(P("M-58 -24 Q-34 -38 -26 -32 Q-18 -64 0 -66 Q18 -64 26 -32 Q34 -38 58 -24 Q44 -14 26 -20 L-26 -20 Q-44 -14 -58 -24 Z", "hat"),
+                          P("M14 -60 Q26 -46 27 -31 L23 -31 Q21 -46 10 -58 Z", "hat-lit"),
+                          `<path d="M-55 -24 Q-34 -35 -26 -30 L26 -30 Q34 -35 55 -24" class="n-trim"/>`,
+                          P("M-6 -54 Q0 -60 6 -54 L6 -48 L3 -46 L-3 -46 L-6 -48 Z", "bone"), P("M-4 -52 L-1 -52 L-1 -50 L-4 -50 Z M1 -52 L4 -52 L4 -50 L1 -50 Z", "ink"),
+                          P("M-9 -44 L9 -40 L9 -38 L-9 -42 Z M9 -44 L-9 -40 L-9 -38 L9 -42 Z", "bone"));
+  else if (hat === 1) out.push(P("M-29 -16 Q-27 -44 0 -46 Q27 -44 29 -16 L22 -14 Q0 -26 -22 -14 Z", "crew"),
+                               P("M-29 -16 Q-27 -44 0 -46 L-3 -25 Q-14 -22 -22 -14 Z", "crew-dark"),
+                               P("M26 -26 L44 -16 L37 -8 L42 4 L28 -8 Z", "crew"), P("M-29 -16 L29 -16 L22 -14 L-22 -14 Z", "ink"));
+  else if (hat === 2 || barkeep) out.push(P("M-28 -18 Q-26 -46 0 -46 Q26 -46 28 -18 L24 -12 Q14 -30 -2 -28 Q-18 -26 -26 -10 Z", "hair"), P("M6 -44 Q22 -38 26 -20 L22 -18 Q18 -32 4 -40 Z", "hair-lit"));
+  else out.push(P("M10 -26 Q20 -26 24 -18 L20 -17 Q16 -23 9 -23 Z", "skin-hi"));
+  return out.join("");
+}
+
+// A tankard at (x, y), its foam; raised, it's drawn where the hand is.
+function uiNoirMug(x, y) {
+  return `<g transform="translate(${x} ${y})"><path d="M0 4 L28 4 L30 40 L-2 40 Z" class="n-metal"/><path d="M20 4 L28 4 L30 40 L22 40 Z" class="n-metal-lit"/>`
+    + `<path d="M-2 0 Q14 -8 30 0 L29 7 L-1 7 Z" class="n-bone"/><path d="M29 12 Q42 14 41 24 Q40 34 29 34" class="n-handle"/></g>`;
+}
+
+// The candle on their right, its flame (its light: the scene's, ui.css).
+function uiNoirCandle(lit) {
+  return `<path d="M164 118 L180 118 L180 160 L164 160 Z" class="n-wax"/><path d="M173 118 L180 118 L180 160 L173 160 Z" class="n-wax-lit"/>`
+    + `<path d="M158 160 L186 160 L183 154 L161 154 Z" class="n-gold-dark"/>`
+    + (lit ? `<g class="n-flame"><path d="M172 92 Q181 106 172 118 Q163 106 172 92 Z" class="n-flame-out"/><path d="M172 101 Q176 109 172 116 Q168 109 172 101 Z" class="n-flame-in"/></g>`
+           : `<g class="n-smoke"><path d="M172 116 Q166 106 173 98 Q179 90 172 80" class="n-wisp"/></g>`);
+}
+
+function uiPirateSprite(look, pose, { barkeep = false } = {}) {
+  const P = (d, c) => `<path d="${d}" class="n-${c}"/>`;
+  const out = [];
+  const sleeve = (d, lit) => P(d, "coat") + (lit ? P(lit, "coat-lit") : "");
+  if (pose === "empty") {
+    out.push(P("M66 92 Q100 80 134 92 L138 160 L62 160 Z", "chair"), P("M118 90 Q130 92 134 92 L138 160 L126 160 Z", "chair-lit"), uiNoirMug(24, 120));
+  } else {
+    const asleep = pose === "sleep";
+    const up = pose === "ask" || pose === "blocked" || pose === "done";
+    const body = [];
+    // The coat, its lit edge, the crew's lapels, the shirt.
+    body.push(P("M26 190 L36 150 Q44 126 82 118 L118 118 Q156 126 164 150 L174 190 Z", "coat"),
+              P("M118 118 Q156 126 164 150 L174 190 L162 190 L152 156 Q146 136 116 126 Z", "coat-lit"),
+              P("M82 118 L100 160 L90 190 L64 190 L71 134 Z", "crew-dark"), P("M118 118 L100 160 L110 190 L136 190 L129 134 Z", "crew"),
+              barkeep ? P("M84 118 L116 118 L118 190 L82 190 Z", "bone") + P("M84 118 L98 118 L96 190 L82 190 Z", "bone-dark")
+                      : P("M88 118 L100 156 L112 118 Z", "bone") + P("M88 118 L100 156 L96 118 Z", "bone-dark"));
+    // The head, where the pose puts it.
+    const tilt = pose === "work" ? "translate(100 90) rotate(6)" : asleep ? "translate(96 136) rotate(-78)" : pose === "stale" ? "translate(98 86) rotate(-7)" : "translate(100 80)";
+    const head = `<g transform="${tilt}"><g class="n-head">${uiNoirHead(look, pose, barkeep)}</g></g>`;
+    // Arms, hands, what they hold.
+    const handR = (x, y) => P(`M${x} ${y} L${x + 18} ${y - 2} L${x + 20} ${y + 12} L${x - 2} ${y + 13} Z`, "skin") + P(`M${x + 10} ${y - 1} L${x + 18} ${y - 2} L${x + 20} ${y + 12} L${x + 12} ${y + 12} Z`, "skin-hi");
+    const handL = (x, y) => P(`M${x} ${y} L${x + 18} ${y - 2} L${x + 20} ${y + 12} L${x - 2} ${y + 13} Z`, "skin-dark");
+    let arms = "", before = "", held = "";
+    const restL = sleeve("M40 132 L72 150 L66 162 L30 156 Z") + handL(28, 142);
+    const restR = sleeve("M160 132 L130 150 L134 162 L170 156 Z", "M160 132 L166 140 L170 156 L162 152 Z") + handR(126, 148);
+    if (pose === "ask") { arms = restL; before = `<g class="n-wave">${sleeve("M146 132 L170 128 L170 46 L152 46 Z", "M164 46 L170 46 L170 128 L164 128 Z")}${P("M150 30 L172 28 L174 48 L152 50 Z M150 12 L155 11 L156 31 L151 31 Z M156.5 8 L161.5 7.5 L162 30 L157 30.5 Z M163 9 L168 9 L168.5 29.5 L163.5 30 Z M169 14 L173 14 L173.5 29 L169.5 29.5 Z M150 38 L142 30 L139 33 L148 46 Z", "skin")}${P("M163 9 L168 9 L168.5 29.5 L163.5 30 Z M169 14 L173 14 L173.5 29 L169.5 29.5 Z M168 29 L172 28 L174 48 L166 49 Z", "skin-hi")}</g>`; }
+    else if (pose === "blocked") before = sleeve("M44 136 L62 132 L72 72 L56 70 Z") + handL(58, 56) + sleeve("M156 136 L138 132 L128 72 L144 70 Z", "M144 70 L156 136 L150 136 L139 72 Z") + handR(124, 56);
+    else if (pose === "done") { before = sleeve("M40 134 L58 130 L52 40 L36 42 Z") + handL(32, 26) + sleeve("M160 134 L142 130 L148 40 L164 42 Z", "M158 42 L164 42 L160 134 L154 132 Z") + handR(144, 26); held = uiNoirMug(142, 10) + uiNoirMug(26, 10); }
+    else if (pose === "fresh") { arms = restL; before = sleeve("M146 132 L168 128 L166 66 L150 66 Z", "M160 66 L166 66 L168 128 L162 128 Z") + handR(148, 52);
+      held = `<g class="n-paper">${P("M122 8 L192 16 L188 70 L118 62 Z", "parch")}${P("M122 8 L192 16 L191 22 L121 14 Z", "parch-dark")}${P("M132 30 L136 31 M142 36 L146 38 M152 42 L156 45", "path")}${P("M164 44 L174 54 M174 44 L164 54", "x")}</g>`; }
+    else if (pose === "run") { arms = restR; held = `<g class="n-sip">${sleeve("M40 134 L58 128 L72 104 L56 98 Z")}${handL(58, 92)}${uiNoirMug(60, 70)}</g>`; }
+    else if (pose === "work") { arms = sleeve("M40 132 L76 150 L70 162 L30 156 Z") + handL(70, 146) + restR;
+      held = P("M54 150 L146 150 L152 162 L48 162 Z", "parch") + P("M54 150 L146 150 L147 153 L53 153 Z", "parch-dark") + P("M70 156 L76 156 M84 157 L90 157 M98 156 L104 156", "path") + P("M118 154 L126 160 M126 154 L118 160", "x")
+        + `<g class="n-quill">${P("M136 148 L150 104 L156 108 L140 150 Z", "bone")}${P("M150 104 L156 108 L146 132 Z", "bone-dark")}</g>`; }
+    else if (asleep) arms = sleeve("M44 140 L156 140 L162 162 L38 162 Z", "M130 140 L156 140 L162 162 L140 162 Z");
+    else if (pose === "arrive") { arms = restR; before = P("M30 66 Q16 112 46 144 L84 128 Q76 90 54 60 Z", "canvas") + P("M54 60 Q76 90 84 128 L74 132 Q66 96 46 66 Z", "canvas-dark") + P("M38 92 L72 84 L74 90 L40 98 Z", "ink"); }
+    else arms = restL + restR;
+    body.unshift(before);
+    if (asleep) out.push(`<g class="n-body">${body.join("")}${arms}${head}</g>`);
+    else out.push(`<g class="n-body${up ? " up" : ""}">${body.join("")}${head}${arms}${held}</g>`);
+  }
+  // The table: its lit edge, the dark wood under it.
+  out.push(`<path d="M-400 160 L600 160 L600 164 L-400 164 Z" class="n-wood-lit"/><path d="M-400 164 L600 164 L600 200 L-400 200 Z" class="n-wood"/>`
+    + `<path d="M-400 176 L600 176 M-400 188 L600 188" class="n-grain"/>`);
   // What's on it.
   const lit = !(pose === "sleep" || pose === "stale" || pose === "empty");
-  const candle = uiPx(P.candle, 45, 31) + (lit ? g("o-flame", uiPx(P.flame, 45, 28)) : g("o-steam", uiPx(P.smoke, 45, 26)));
-  if (pose === "run") out.push(g("o-glass", uiPx(P.glass, 45, 28)));
-  else if (pose === "done") out.push(uiPx(P.chest, 42, 29) + uiPx(P.coins, 4, 36));
-  else if (pose !== "empty") out.push((pose === "stale" ? "" : uiPx(P.mug, 4, 30)) + candle);
-  return `<svg class="ui-sprite p-${pose} sk-${look.skin} hr-${look.hair}${barkeep ? " barkeep" : ""}" viewBox="2 2 52 48" preserveAspectRatio="xMidYMax meet" shape-rendering="crispEdges" aria-hidden="true">${out.join("")}</svg>`;
+  if (pose === "run") out.push(`<g class="n-glass">${P("M160 112 L186 112 L186 116 L160 116 Z M160 156 L186 156 L186 160 L160 160 Z", "gold-dark")}${P("M164 116 L182 116 L174 136 L182 156 L164 156 L172 136 Z", "glass")}${P("M166 118 L180 118 L173 134 Z", "sand")}${P("M172 138 L174 138 L180 154 L166 154 Z", "sand")}</g>`);
+  else if (pose === "done") out.push(P("M150 128 L194 128 L194 160 L150 160 Z", "chest"), P("M150 118 Q172 108 194 118 L194 128 L150 128 Z", "chest-dark"), P("M152 122 Q172 112 192 122 L192 128 L152 128 Z", "gold"),
+                                     P("M150 136 L194 136 L194 139 L150 139 Z M168 128 L176 128 L176 160 L168 160 Z", "gold-dark"), P("M30 156 L40 156 L40 160 L30 160 Z M44 157 L52 157 L52 160 L44 160 Z", "gold"));
+  else if (pose !== "empty") out.push(uiNoirCandle(lit));
+  if (["idle", "ask", "blocked", "stale", "arrive", "fresh"].includes(pose)) out.push(uiNoirMug(20, 120));
+  return `<svg class="ui-sprite noir p-${pose} sk-${look.skin} hr-${look.hair}${barkeep ? " barkeep" : ""}" viewBox="10 4 180 172" preserveAspectRatio="xMidYMax meet" aria-hidden="true">${out.join("")}</svg>`;
 }
 
 // What floats over their head: a mark (? ! ✓ z…), and what they say, in a
