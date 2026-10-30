@@ -746,31 +746,36 @@ Today adds no notifications of its own.
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
 the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
-noir comic: ink-black shadows, faces lit by the candle on the table. Your assistant keeps **the bar**. Each project is
-a **crew** at its own long table, under its flag: the Jolly Roger in the
-project's color with its name on it. Portholes show the sea under the sky as it
-is outside now; warm shafts of light fall through them, embers drift, lanterns and
-candles flicker. Each chat is a pirate on their own
-stool, their coat's lapels in their crew's color (always the same pirate: a
-tricorn with the skull, a bandana, long hair or bald, an eyepatch, a beard or a
-mustache, a scar, an earring), and how they sit says where the chat stands:
+noir comic: black shadows, faces lit by the candle on the table. Your assistant
+keeps **the bar**. Each project is a **crew** at its own long table, under its
+flag: the Jolly Roger in the project's color with its name on it. Portholes show
+the sea under the sky as it is outside now; warm shafts of light fall through
+them, embers drift, lanterns and candles flicker.
+
+The crew are ten pirates: the Captain, the Old Salt, the Deckhand, the
+Quartermistress, the Navigator, the Bosun, the Cook, the Gunner, the Gentleman
+and the Ghost. Each chat is one of them, always the same one (and no two at one
+table, until a crew has more than ten), their vest and lapels in their crew's
+color, and how they sit says where the chat stands:
 
 | They're | The chat |
 | --- | --- |
-| Plotting on a map, quill going | is working |
-| Taking a swig while the hourglass runs | finished its turn while something it started still runs |
-| Up with a hand raised, **?** over them, what it asks in a bubble | asks you (a permission's **Allow** and **Deny** are at their seat) |
-| Up, hands on their head, **!** | is blocked |
-| Holding up a map, **★** | finished a turn you haven't seen |
-| Both tankards raised over a chest of gold, **✓** (gold and confetti the moment it happens) | reached its goal: **Complete** is at their seat |
-| Slumped on the table, candle out, *z z* | is asleep |
-| Gone quiet, the grog dry, **…** | has been quiet two days or more |
+| Drinking: the golden beer up to the mouth, again and again | is working |
+| Raising the empty glass: another round! (what it asks in a bubble) | asks you (a permission's **Allow** and **Deny** are at their seat) |
+| Watching the hourglass, a beer at hand | finished its turn while something it started still runs |
+| Holding up the map, eyebrows up | finished a turn you haven't seen |
+| A full glass raised over a chest of gold, coins flying | reached its goal: **Complete** is at their seat (gold and confetti the moment it happens) |
+| Chin on a fist, looking away, the glass knocked over | is blocked |
+| Head down on their arms, no beer, the candle out, *z z Z* | is asleep |
+| Cobwebs, the candle burned down to a stub, eyes half shut | has been quiet two days or more |
+| Walking in with a sea bag | is being set up |
+| Sitting with a full beer, the candle lit | is idle |
 
 Under each one, the chat's name and the same pill as its card on Chats. A click
 (or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
 The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
-one, `s` marks one seen. The free stool at the end of a table (**Recruit**)
-starts a new chat in that project. Everyone keeps their stool: a chat that
+one, `s` marks one seen. The free chair at the end of a table (**Recruit**)
+starts a new chat in that project. Everyone keeps their seat: a chat that
 closes frees theirs, and the next new chat in that crew takes it. The tab you
 were on stays (the Tavern too) the next time you open the app.
 

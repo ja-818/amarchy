@@ -94,7 +94,7 @@
 
 /* The table: pirates side by side on it, its wood running on under them. */
 .tv-table {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tavern-seat-w), 1fr)); gap: 0; padding: 4px 0 0;
+  display: grid; grid-template-columns: repeat(auto-fill, var(--tavern-seat-w)); justify-content: center; gap: 0; padding: 4px 0 0;
   background:
     radial-gradient(60% 80px at 50% 0, color-mix(in srgb, var(--tavern-light) 10%, transparent), transparent),
     repeating-linear-gradient(90deg, transparent 0 46px, color-mix(in oklab, var(--tavern-plank) 80%, var(--tavern-ink)) 46px 48px),
@@ -113,7 +113,7 @@
 .tv-shelf i.b3 { --c: var(--cyan); height: 16px; } .tv-shelf i.b4 { --c: var(--magenta); }
 
 @media (max-width: 719px) {
-  :root { --tavern-seat-w: 150px; --tavern-scene-h: 150px; }
+  :root { --tavern-seat-w: 150px; }
   .tavern-hall { gap: 12px; }
   .tv-wall { height: 68px; gap: 8px; padding: 10px 10px 0; }
   .tv-porthole { width: 34px; height: 34px; }

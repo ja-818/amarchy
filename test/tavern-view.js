@@ -112,7 +112,11 @@ async function run(browser, port, layout) {
   })), "each crew under its flag: the Jolly Roger in its project's color, its name on it");
   const poses = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".ui-pirate[data-id]")].map((d) => [d.dataset.id, [...d.classList].find((c) => c.startsWith("p-")).slice(2)])));
   check(where, Object.entries(POSES).every(([id, pose]) => poses[id] === pose), `each one posed as their chat stands (${JSON.stringify(poses)})`);
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".ui-pirate[data-id]")].every((d) => d.querySelectorAll("svg.ui-sprite.noir path").length > 20)), "each one drawn: a pirate at the table");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".ui-pirate[data-id]")].every((d) => d.querySelectorAll("svg.ui-crew-art path").length > 20)), "each one drawn: a pirate at the table");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].every((c) => {
+    const faces = [...c.querySelectorAll(".ui-pirate[data-id] svg.ui-crew-art defs")].map((d) => d.querySelector("radialGradient").id);
+    return new Set(faces).size === faces.length;
+  })), "no pirate twice at one table");
   check(where, await p.evaluate(() => {
     const pill = (id) => (document.querySelector(`.ui-pirate[data-id="${id}"] .tpill`) || {}).innerText;
     return pill("web-ask") === "Asks you" && pill("api-perm") === "Permission" && pill("web-done") === "Done" && pill("api-block") === "Blocked";

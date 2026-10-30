@@ -92,17 +92,33 @@ function tavernTrack() {
   for (const [id, t] of tavern.cheer) if (t <= now) tavern.cheer.delete(id);
 }
 
-function tavernPirate(s, p, barkeep = false) {
+// Who each one at a table is: their own pirate (uiLook), or, when someone at
+// the table already is that one, the next pirate free. Ten at a table before
+// one comes twice.
+function tavernKinds(ids) {
+  const used = new Set(), out = new Map();
+  for (const id of ids) {
+    if (!id) continue;
+    let k = uiLook(id).kind;
+    for (let i = 0; i < UI_CREW.length && used.has(k); i++) k = (k + 1) % UI_CREW.length;
+    if (used.size >= UI_CREW.length) used.clear();
+    used.add(k);
+    out.set(id, k);
+  }
+  return out;
+}
+
+function tavernPirate(s, p, barkeep = false, kind = uiLook(s.id).kind) {
   const pose = tavernPose(s, p);
   const cheer = tavern.cheer.has(s.id);
   const actions = [];
   if (pose === "ask" && s.permission) actions.push(uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"));
   if (pose === "done" && !barkeep) actions.push(uiButton("Complete", () => todayComplete(s), false, "complete"));
   const title = barkeep ? s.assistant_name || "Assistant" : s.task || "New chat";
-  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: uiLook(s.id), pose, mark: TAVERN_MARKS[pose] || "", say: tavernSay(s, pose),
-                       title, pill: todayStatePill(s), lead: barkeep ? avatar(s, "small") : null, barkeep, cheer, actions,
+  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: { kind }, pose, mark: TAVERN_MARKS[pose] || "", say: tavernSay(s, pose),
+                       title, pill: todayStatePill(s), lead: barkeep ? avatar(s, "small") : null, cheer, actions,
                        open: () => todayOpen(s), label: `${title}: ${statusWords(s) || pose}` });
-  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer]);
+  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer, kind]);
   return n;
 }
 
@@ -167,7 +183,10 @@ function tavernNodes() {
   const nodes = [h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, "chats")), missionScore())];
   const hall = [];
   if (main) hall.push(tavernBar(main, p, sky));
-  for (const [repo] of crews) hall.push(tavernCrew(repo, seats[repo].map((id) => (id ? tavernPirate(byId.get(id), p) : null)), todayHue(repo), sky));
+  for (const [repo] of crews) {
+    const kinds = tavernKinds(seats[repo]);
+    hall.push(tavernCrew(repo, seats[repo].map((id) => (id ? tavernPirate(byId.get(id), p, false, kinds.get(id)) : null)), todayHue(repo), sky));
+  }
   if (!hall.length) hall.push(h("p", { class: "today-clear" }, "The tavern's empty: start a chat and a pirate takes a stool."));
   nodes.push(h("div", { class: `tavern-hall ${sky}` }, ...hall));
   return nodes;
