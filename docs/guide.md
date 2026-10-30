@@ -746,11 +746,13 @@ Today adds no notifications of its own.
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
 the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
-noir comic: black shadows, faces lit by the candle on the table. Your assistant
-keeps **the bar**. Each project is a **crew** at its own long table, under its
-flag: the Jolly Roger in the project's color with its name on it. Portholes show
-the sea under the sky as it is outside now; warm shafts of light fall through
-them, embers drift, lanterns and candles flicker.
+noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**
+(bottles on the shelves, a porthole on the sea under the sky as it is now). Each
+project is a **crew** at its own long table, its wall behind it (a beam,
+lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the
+project's color by its name, and what it's up to in a word or two: how many
+need you, have something to show you, are at work. Crews with someone that
+needs you come first; embers drift through the room.
 
 The crew are ten pirates: the Captain, the Old Salt, the Deckhand, the
 Quartermistress, the Navigator, the Bosun, the Cook, the Gunner, the Gentleman
@@ -771,12 +773,13 @@ color, and how they sit says where the chat stands:
 | Walking in with a sea bag | is being set up |
 | Sitting with a full beer, the candle lit | is idle |
 
-Under each one, the chat's name and the same pill as its card on Chats. A click
+Whoever's move is yours (asking, stuck, something to show you, done) has a ring of
+that color round them. Under each one, the chat's name and the same pill as its card on Chats. A click
 (or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
 The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
-one, `s` marks one seen. The free chair at the end of a table (**Recruit**)
-starts a new chat in that project. Everyone keeps their seat: a chat that
-closes frees theirs, and the next new chat in that crew takes it. The tab you
+one, `s` marks one seen. **+ Recruit** at the end of a table starts a new chat in that project. Everyone
+keeps their place at the table: a chat that closes leaves, the rest stay in
+order, and the next new chat in that crew takes its place. The tab you
 were on stays (the Tavern too) the next time you open the app.
 
 ## Automations

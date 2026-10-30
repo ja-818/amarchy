@@ -4,17 +4,17 @@
 // computer: the same chats as Chats, drawn as a pirates' tavern. Your
 // assistant keeps the bar. Each project is a crew at its own long table,
 // under its flag (the Jolly Roger in the project's color, its name on it).
-// Each chat is a pirate on their own stool (uiPirate in ui.js), and how
+// Each chat is one of the crew (uiPirate in ui.js), and how
 // they sit says where it stands: plotting on a map while it works, a swig
 // while the hourglass runs, up with a hand raised when it asks you, the
 // grog raised over a chest of gold when it's done, head on the table
 // asleep. A click (Enter) on one opens their chat; held down (a right
-// click), its menu; x completes a done one, as on the Chats tab. The free
-// stool at the end of each table recruits: a new chat in that project.
+// click), its menu; x completes a done one, as on the Chats tab. + at the
+// end of each table recruits: a new chat in that project.
 //
-// Everyone keeps their stool (tavernSeats, kept in this browser): one who
-// leaves frees theirs, the next to come takes it. The portholes show the sea
-// under the sky as it is outside now.
+// Everyone keeps their place at the table (tavernSeats, kept in this
+// browser): one who leaves frees theirs, the next to come takes it. Crews
+// with someone your move come first.
 
 const TAVERN_SEATS = "tavern-seats";
 const TAVERN_HOLES = 2;             // free stools a table keeps between pirates before it closes up
@@ -63,7 +63,8 @@ function tavernPose(s, p) {
   return "idle";
 }
 
-const TAVERN_MARKS = { ask: "?", blocked: "!", fresh: "★", done: "✓", run: "⧗", sleep: "z z", stale: "…", arrive: "…" };
+// A mark over their head where it's your move (the drawing says the rest).
+const TAVERN_MARKS = { ask: "?", blocked: "!", fresh: "★", done: "✓" };
 
 // What they say, in their bubble.
 function tavernSay(s, pose) {
@@ -128,44 +129,106 @@ function tavernSky() {
   return hr >= 7 && hr < 17 ? "day" : hr >= 17 && hr < 20 ? "dusk" : hr >= 5 && hr < 7 ? "dawn" : "night";
 }
 
-// A porthole: the sea under the sky as it is now (a moon and stars at night).
-function tavernPorthole(sky) {
-  return h("span", { class: `tv-porthole ${sky}`, "aria-hidden": "true" }, h("i", { class: "tv-sun" }), h("i", { class: "tv-wave" }), h("i", { class: "tv-wave two" }));
+// ---- the hall, drawn as the crew are: a noir comic's ink
+//
+// Behind each crew, its wall: a beam overhead, posts, a shelf of bottles
+// and barrels in silhouette, lanterns hanging (their light the warm one in
+// the room); the bar's, a porthole on the sea under the sky as it is now. The same
+// wall for a crew every time (its bottles by its name). 1600 wide, shown
+// from its left as far as the crew is wide.
+function tavernBack(name, sky, bar = false) {
+  let n = 0;
+  for (const c of String(name)) n = (n * 31 + c.charCodeAt(0)) >>> 0;
+  const rnd = () => { n = (Math.imul(n, 1103515245) + 12345) >>> 0; return n / 4294967296; };
+  const out = [`<defs><linearGradient id="tvw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#140c08"/><stop offset="1" stop-color="#0b0706"/></linearGradient>`
+    + `<radialGradient id="tvl" r=".5"><stop offset="0" stop-color="#ffb347" stop-opacity=".55"/><stop offset=".45" stop-color="#c0602a" stop-opacity=".18"/><stop offset="1" stop-color="#c0602a" stop-opacity="0"/></radialGradient></defs>`,
+    `<rect width="1600" height="110" fill="url(#tvw)"/>`];
+  // Lantern light on the wall, first: everything else stands in it.
+  const lamps = bar ? [196, 560, 920, 1280] : [230, 820, 1410];
+  for (const x of lamps) out.push(`<ellipse cx="${x}" cy="46" rx="190" ry="90" fill="url(#tvl)"/>`);
+  // The beam and posts.
+  out.push(`<rect width="1600" height="12" fill="#1e130d"/><rect y="12" width="1600" height="2" fill="#4a2a16"/>`);
+  for (let x = 400; x < 1600; x += 400) out.push(`<rect x="${x}" y="14" width="14" height="96" fill="#160e0a"/><rect x="${x + 11}" y="14" width="3" height="96" fill="#3a2214"/>`);
+  // The shelves: bottles (glass catching the light), barrels.
+  const shelves = bar ? [56, 96] : [80];
+  const glass = ["#3a5a2a", "#6a2a1a", "#8a5a1a", "#2a3a4a", "#4a2a3a"];
+  for (const y of shelves) {
+    out.push(`<rect y="${y}" width="1600" height="6" fill="#2a1810"/><rect y="${y}" width="1600" height="1.5" fill="#6a3c1c"/>`);
+    for (let x = 18; x < 1600;) {
+      if (!bar && rnd() < 0.12) {      // a barrel
+        out.push(`<path d="M${x} ${y} Q${x - 4} ${y - 17} ${x} ${y - 34} L${x + 34} ${y - 34} Q${x + 38} ${y - 17} ${x + 34} ${y} Z" fill="#24150d"/>`
+          + `<path d="M${x - 1} ${y - 9} L${x + 35} ${y - 9} M${x - 1} ${y - 25} L${x + 35} ${y - 25}" stroke="#5a3a1c" stroke-width="2"/><path d="M${x + 26} ${y - 33} Q${x + 30} ${y - 17} ${x + 27} ${y}" stroke="#4a2a16" stroke-width="3" fill="none"/>`);
+        x += 50; continue;
+      }
+      if (rnd() < 0.22) { x += 22 + rnd() * 30; continue; }
+      const hgt = 18 + rnd() * 14, w = 7 + rnd() * 4, c = glass[Math.floor(rnd() * glass.length)];
+      out.push(`<path d="M${x} ${y} L${x} ${y - hgt * .62} Q${x} ${y - hgt * .78} ${x + w * .35} ${y - hgt * .82} L${x + w * .35} ${y - hgt} L${x + w * .65} ${y - hgt} L${x + w * .65} ${y - hgt * .82} Q${x + w} ${y - hgt * .78} ${x + w} ${y - hgt * .62} L${x + w} ${y} Z" fill="${c}" opacity=".85"/>`
+        + `<rect x="${(x + w * .7).toFixed(1)}" y="${(y - hgt * .58).toFixed(1)}" width="1.5" height="${(hgt * .45).toFixed(1)}" fill="#ffd9a0" opacity=".45"/>`);
+      x += w + 3 + rnd() * 6;
+    }
+  }
+  // A porthole: brass, the sea under the sky as it is now.
+  if (bar) {
+    const sea = { day: ["#4a7a9a", "#6aa0b8"], dawn: ["#3a3a5a", "#c07a4a"], dusk: ["#4a2a4a", "#c0603a"], night: ["#0e1420", "#1a2a40"] }[sky] || ["#0e1420", "#1a2a40"];
+    out.push(`<g transform="translate(262 34)"><circle r="22" fill="${sea[0]}"/><path d="M-22 0 A22 22 0 0 0 22 0 Z" fill="${sea[1]}" opacity=".5"/>`
+      + `<path d="M-20 8 Q-12 4 -4 8 Q4 12 12 8 Q18 5 21 7 L20 12 Q0 26 -20 12 Z" fill="#0b1a2a"/>`
+      + (sky === "night" ? `<circle cx="9" cy="-9" r="4" fill="#efe6c8"/>` : `<circle cx="9" cy="-6" r="5" fill="#ffd27a"/>`)
+      + `<circle r="22" fill="none" stroke="#b8862a" stroke-width="6"/><circle r="25" fill="none" stroke="#3a2410" stroke-width="2"/>`
+      + [0, 90, 180, 270].map((d) => `<circle cx="${(25 * Math.cos(d * Math.PI / 180)).toFixed(1)}" cy="${(25 * Math.sin(d * Math.PI / 180)).toFixed(1)}" r="2.4" fill="#e0b048"/>`).join("") + `</g>`);
+  }
+  // The lanterns.
+  for (const x of lamps) out.push(`<g class="tv-lamp"><path d="M${x} 14 L${x} 28" stroke="#0b0706" stroke-width="2"/><path d="M${x - 9} 30 L${x + 9} 30 L${x + 7} 52 L${x - 7} 52 Z" fill="#ffcf7a"/>`
+    + `<path d="M${x - 9} 30 L${x + 9} 30 L${x + 7} 52 L${x - 7} 52 Z M${x} 30 L${x} 52" fill="none" stroke="#2a1608" stroke-width="2.4"/><path d="M${x - 11} 28 L${x + 11} 28 L${x + 8} 32 L${x - 8} 32 Z M${x - 8} 52 L${x + 8} 52 L${x + 6} 56 L${x - 6} 56 Z" fill="#2a1608"/></g>`);
+  return `<svg class="tv-back" viewBox="0 0 1600 110" preserveAspectRatio="xMinYMin slice" aria-hidden="true">${out.join("")}</svg>`;
 }
 
-function tavernLantern() {
-  return h("span", { class: "tv-lantern", "aria-hidden": "true" }, h("i", {}));
+// A crew's flag: the Jolly Roger, ragged, in the crew's color, in the
+// wind; drawn as the rest.
+function tavernFlag() {
+  return h("span", { class: "tv-flag", "aria-hidden": "true", html: `<svg viewBox="0 0 64 44"><path d="M3 2 L5 2 L5 44 L3 44 Z" fill="#6a4a2a"/><circle cx="4" cy="2" r="2.6" fill="#e0b048"/>`
+    + `<g class="tv-cloth"><path d="M5 4 Q22 0 36 5 Q50 10 62 5 L58 13 L63 19 L57 24 L62 31 Q48 36 34 31 Q20 26 5 31 Z" class="pa-crew"/>`
+    + `<path d="M5 4 Q22 0 36 5 L34 31 Q20 26 5 31 Z" fill="#0b0706" opacity=".28"/><path d="M36 5 Q50 10 62 5 L58 13 L63 19 L57 24 L62 31 Q48 36 34 31 Z" fill="#0b0706" opacity=".12"/>`
+    + `<path d="M27 9 Q33 8 38 10 Q41 14 39 18 L37 21 L29 21 L27 18 Q25 14 27 9 Z" fill="#f1ead8"/><path d="M29 13 L32 13 L32 16 L29 16 Z M34 13 L37 13 L36.5 16 L34 16 Z" fill="#0b0706"/>`
+    + `<path d="M22 22 L44 28 M44 22 L22 28" stroke="#f1ead8" stroke-width="2.6" stroke-linecap="round"/></g></svg>` });
 }
 
-// The air in the hall, over the walls and under the pirates (embers over
-// them): shafts of warm light from the portholes, embers drifting, the
-// corners in shadow.
+// The air in the hall: embers drifting through it, the corners in shadow.
 function tavernAir() {
-  return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-rays" }), h("i", { class: "tv-vignette" }), h("i", { class: "tv-motes" }), h("i", { class: "tv-motes far" }));
+  return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-vignette" }), h("i", { class: "tv-motes" }), h("i", { class: "tv-motes far" }));
 }
 
-// A crew: its wall (its flag, portholes, a lantern), its table, its pirates
-// on their stools, a free one at the end.
-function tavernCrew(repo, pirates, hue, sky) {
-  const free = uiPirate({ hue, look: uiLook(repo), pose: "empty", mark: "+", title: h("div", { class: "task muted" }, "Recruit"),
-                          open: () => newChatIn(repo), label: `New chat in ${projectName(repo)}` });
-  free.todayData = `free|${repo}`;
-  const count = pirates.filter(Boolean).length;
-  return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length + 1}` }, tavernAir(),
-    h("div", { class: "tv-wall" }, uiFlag(projectName(repo), hue, { count }),
-      h("span", { class: "tv-portholes" }, tavernPorthole(sky), tavernPorthole(sky)), tavernLantern()),
-    h("div", { class: "tv-table" }, ...pirates.map((d) => d || uiPirate({ vacant: true, hue, look: uiLook(""), pose: "empty" })), free));
+// What a crew is up to, in a few words: who needs you, who's done, who works.
+function tavernTally(poses) {
+  const n = (...ks) => poses.filter((x) => ks.includes(x)).length;
+  const need = n("ask", "blocked"), done = n("done", "fresh"), work = n("work", "run");
+  return [need ? uiPill(`${need} need${need === 1 ? "s" : ""} you`, "ask") : null, done ? uiPill(`${done} to see`, "done") : null, work ? uiPill(`${work} at work`, "quiet") : null].filter(Boolean);
 }
 
-// The bar: your assistant behind it, the bottles on the shelf.
+// A crew: its wall behind, its flag and name and what it's up to, its
+// table, its pirates in a row, and the slot that recruits.
+function tavernCrew(repo, pirates, hue, sky, poses) {
+  const recruit = h("article", { class: "tcard tv-recruit" },
+    h("button", { class: "today-go tv-recruit-go", type: "button", title: `New chat in ${projectName(repo)}`, "aria-label": `New chat in ${projectName(repo)}`, onclick: () => newChatIn(repo) },
+      h("span", { class: "tv-recruit-plus", "aria-hidden": "true" }, "+"), h("span", { class: "tv-recruit-word" }, "Recruit")));
+  recruit.todayData = `free|${repo}`;
+  return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length}` },
+    h("span", { class: "tv-wall", html: tavernBack(repo, sky) }), tavernAir(),
+    h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, projectName(repo), h("span", { class: "tv-count" }, String(pirates.length))),
+      h("span", { class: "tv-tally" }, ...tavernTally(poses))),
+    h("div", { class: "tv-table" }, ...pirates, recruit));
+}
+
+// The bar: your assistant behind it, the bottles on the shelves.
 function tavernBar(main, p, sky) {
-  const bottles = h("span", { class: "tv-shelf", "aria-hidden": "true" }, ...Array.from({ length: 9 }, (_, i) => h("i", { class: `b${i % 5}` })));
-  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" }, tavernAir(),
-    h("div", { class: "tv-wall" }, h("span", { class: "tv-sign" }, "The Bar"), bottles, tavernLantern()),
+  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" },
+    h("span", { class: "tv-wall", html: tavernBack("the bar", sky, true) }), tavernAir(),
+    h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, "The Bar")),
     h("div", { class: "tv-table" }, tavernPirate(main, p, true)));
 }
 
-// The tavern, for the board's box (today.js todayFill, its Tavern tab).
+// The tavern, for the board's box (today.js todayFill, its Tavern tab):
+// the bar, then the crews, those with someone your move first (each crew
+// as your projects order them, among those alike).
 function tavernNodes() {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
@@ -173,21 +236,26 @@ function tavernNodes() {
   const all = (v.sessions || []).filter((s) => !todayUI.closing.has(s.id));
   const main = all.find((s) => s.assistant === "main") || null;
   const rest = all.filter((s) => s !== main);
-  // The crews: your projects' order, then any other.
   const order = (v.projects || []).map((x) => x.name);
   for (const s of rest) if (!order.includes(s.repo)) order.push(s.repo);
   const crews = order.map((repo) => [repo, rest.filter((s) => s.repo === repo).map((s) => s.id)]).filter(([, ids]) => ids.length);
   const seats = tavernSeats(crews);
   const byId = new Map(rest.map((s) => [s.id, s]));
   const sky = tavernSky();
+  const urgency = (poses) => (poses.some((x) => x === "ask" || x === "blocked") ? 0 : poses.some((x) => x === "fresh" || x === "done") ? 1 : 2);
+  const drawn = crews.map(([repo], i) => {
+    const ids = seats[repo].filter(Boolean);      // the seats' order; a free one in between takes no room
+    const poses = ids.map((id) => tavernPose(byId.get(id), p));
+    return { repo, ids, poses, i, rank: urgency(poses) };
+  }).sort((a, b) => a.rank - b.rank || a.i - b.i);
   const nodes = [h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, "chats")), missionScore())];
   const hall = [];
   if (main) hall.push(tavernBar(main, p, sky));
-  for (const [repo] of crews) {
-    const kinds = tavernKinds(seats[repo]);
-    hall.push(tavernCrew(repo, seats[repo].map((id) => (id ? tavernPirate(byId.get(id), p, false, kinds.get(id)) : null)), todayHue(repo), sky));
+  for (const c of drawn) {
+    const kinds = tavernKinds(c.ids);
+    hall.push(tavernCrew(c.repo, c.ids.map((id) => tavernPirate(byId.get(id), p, false, kinds.get(id))), todayHue(c.repo), sky, c.poses));
   }
-  if (!hall.length) hall.push(h("p", { class: "today-clear" }, "The tavern's empty: start a chat and a pirate takes a stool."));
+  if (!hall.length) hall.push(h("p", { class: "today-clear" }, "The tavern's empty: start a chat and a pirate takes a seat."));
   nodes.push(h("div", { class: `tavern-hall ${sky}` }, ...hall));
   return nodes;
 }

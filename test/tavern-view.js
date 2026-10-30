@@ -77,8 +77,8 @@ const setChats = (p, chats) => p.evaluate((chats) => { window.__chats = chats; a
 // What the tavern shows, layout aside: its crews, in order, each its pirates
 // on their stools (id, pose, name, pill), its free stool.
 const SHAPE = () => [...document.querySelectorAll(".tavern-hall .tv-crew")].map((r) => ({
-  room: r.querySelector(".ui-flag, .tv-sign").textContent.replace(/\s+/g, " ").trim(),
-  desks: [...r.querySelectorAll(".tv-table > .ui-pirate")].map((d) => d.matches(".vacant") ? "vacant" : d.matches(".p-empty") ? "free"
+  room: r.querySelector(".tv-name").textContent.replace(/\s+/g, " ").trim(),
+  desks: [...r.querySelectorAll(".tv-table > .tcard")].map((d) => d.matches(".tv-recruit") ? "free"
     : [d.dataset.id, [...d.classList].find((c) => c.startsWith("p-")), d.querySelector(".ui-pirate-name").innerText.trim(), ((d.querySelector(".tpill") || {}).innerText || "").replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/, ""),
        [...d.querySelectorAll(".ui-pirate-actions button")].map((b) => b.innerText).join("/")].join("|")),
 }));
@@ -106,9 +106,12 @@ async function run(browser, port, layout) {
   const rooms = shapes[layout].map((r) => r.room);
   check(where, JSON.stringify(rooms) === JSON.stringify(["The Bar", "Web4", "Api5", "Ops1"]), `a room a project, in your order, your assistant at the bar first (${JSON.stringify(rooms)})`);
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew[data-crew]:not(.tv-bar)")].every((c) => {
-    const f = c.querySelector(".tv-wall .ui-flag");
-    return f && f.querySelector(".ui-flag-skull svg") && f.querySelector(".ui-flag-name").textContent === projectName(c.dataset.crew)
-      && f.className.includes(`ph-${todayHue(c.dataset.crew)}`) && getComputedStyle(f.querySelector(".ui-flag-cloth")).backgroundImage.includes("gradient");
+    const cloth = c.querySelector(".tv-head .tv-flag svg .pa-crew"), name = c.querySelector(".tv-name");
+    const probe = document.createElement("span");
+    probe.style.color = "var(--ph)"; c.append(probe);
+    const crew = getComputedStyle(probe).color; probe.remove();
+    return cloth && name && name.firstChild.textContent === projectName(c.dataset.crew) && c.className.includes(`ph-${todayHue(c.dataset.crew)}`)
+      && getComputedStyle(cloth).fill === crew;
   })), "each crew under its flag: the Jolly Roger in its project's color, its name on it");
   const poses = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".ui-pirate[data-id]")].map((d) => [d.dataset.id, [...d.classList].find((c) => c.startsWith("p-")).slice(2)])));
   check(where, Object.entries(POSES).every(([id, pose]) => poses[id] === pose), `each one posed as their chat stands (${JSON.stringify(poses)})`);
@@ -127,9 +130,9 @@ async function run(browser, port, layout) {
   check(where, await p.evaluate(() => [...document.querySelectorAll('.ui-pirate[data-id="api-perm"] .ui-pirate-actions button')].map((b) => b.innerText).join() === "Allow,Deny"
                                    && document.querySelector('.ui-pirate[data-id="web-done"] .ui-pirate-actions button').innerText === "Complete"),
         "a permission's Allow and Deny on its desk; Complete on a done one's");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].slice(1).every((r) => r.querySelector(".tv-table > .ui-pirate.p-empty:last-child"))
-                                   && !document.querySelector(".tv-crew:first-child .p-empty")),
-        "a free stool at the end of each crew's table");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].slice(1).every((r) => r.querySelector(".tv-table > .tv-recruit:last-child"))
+                                   && !document.querySelector(".tv-crew:first-child .tv-recruit")),
+        "Recruit at the end of each crew's table");
   check(where, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll(".tv-crew")].every((r) => r.getBoundingClientRect().right <= innerWidth + 1)),
         "it fits the screen: nothing wider");
   const sizes = await p.evaluate(() => [...document.querySelectorAll(".ui-pirate[data-id] .ui-pirate-scene")].map((s) => Math.round(s.getBoundingClientRect().width)));
@@ -156,7 +159,7 @@ async function run(browser, port, layout) {
   check(where, await until(p, () => board.tab === "tavern" && !!document.querySelector(".tavern-hall") && getComputedStyle(document.querySelector(".tasks-board")).display !== "none"), "back: the Tavern");
 
   // The free stool: a new chat, in that crew's project.
-  await p.evaluate(() => document.querySelector('.tv-crew[data-crew="ops"] .ui-pirate.p-empty .ui-pirate-go').click());
+  await p.evaluate(() => document.querySelector('.tv-crew[data-crew="ops"] .tv-recruit-go').click());
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && /Ops/.test(document.querySelector(".board-new").innerText)), "the free stool: recruits a new chat in its project");
   await p.evaluate(() => document.querySelector(".board-new-close") && document.querySelector(".board-new-close").click());
 
@@ -170,12 +173,12 @@ async function run(browser, port, layout) {
   check(where, await until(p, () => !document.querySelector(".ui-pirate.cheer"), null, 5000), `the cheer ends (${await p.evaluate(() => JSON.stringify([[...tavern.cheer], Date.now(), board.box.dataset.key.slice(0, 60), board.tab]))})`);
 
   // One leaves: their stool is free, everyone else where they were; the next to come takes it.
-  const seatsOf = () => p.evaluate(() => [...document.querySelectorAll('.tv-crew[data-crew="api"] .tv-table > .ui-pirate')].map((d) => d.dataset.id || (d.matches(".vacant") ? "_" : "+")));
+  const seatsOf = () => p.evaluate(() => [...document.querySelectorAll('.tv-crew[data-crew="api"] .tv-table > .tcard')].map((d) => d.dataset.id || "+"));
   const before = await seatsOf();
   await setChats(p, next.filter((c) => c.id !== "api-run"));
   await until(p, () => !document.querySelector('.ui-pirate[data-id="api-run"]'));
   const after = await seatsOf();
-  check(where, after.length === before.length && before.every((id, i) => (id === "api-run" ? after[i] === "_" : after[i] === id)), `one leaves: a free stool, the rest in their seats (${before} → ${after})`);
+  check(where, JSON.stringify(after) === JSON.stringify(before.filter((id) => id !== "api-run")), `one leaves: the rest in their order, no gap (${before} → ${after})`);
   await setChats(p, [...next.filter((c) => c.id !== "api-run"), C("api-new", "api", "New: the cache")]);
   await until(p, () => !!document.querySelector('.ui-pirate[data-id="api-new"]'));
   const again = await seatsOf();

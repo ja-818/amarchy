@@ -699,17 +699,3 @@ function uiPirate({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
   return el;
 }
-
-// A crew's flag: the Jolly Roger in their color, their name on it, waving.
-function uiFlag(name, hue, { count = null } = {}) {
-  const r = (x, y, w, hh, c) => `<rect x="${x}" y="${y}" width="${w}" height="${hh}" class="${c}"/>`;
-  const skull = r(4, 2, 6, 5, "obone") + r(5, 7, 4, 2, "obone") + r(5, 4, 1, 2, "oflag") + r(8, 4, 1, 2, "oflag") + r(7, 6, 1, 1, "oflag")
-    + r(1, 9, 2, 1, "obone") + r(3, 10, 2, 1, "obone") + r(9, 10, 2, 1, "obone") + r(11, 9, 2, 1, "obone") + r(5, 11, 4, 1, "obone")
-    + r(1, 12, 2, 1, "obone") + r(3, 11, 2, 1, "obone") + r(9, 11, 2, 1, "obone") + r(11, 12, 2, 1, "obone");
-  return h("span", { class: `ui-flag ph-${hue}` },
-    h("span", { class: "ui-flag-pole", "aria-hidden": "true" }),
-    h("span", { class: "ui-flag-cloth" },
-      h("span", { class: "ui-flag-skull", "aria-hidden": "true", html: `<svg viewBox="0 0 14 14" shape-rendering="crispEdges">${skull}</svg>` }),
-      h("span", { class: "ui-flag-name" }, name),
-      count !== null ? h("span", { class: "ui-flag-count" }, String(count)) : null));
-}
