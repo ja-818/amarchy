@@ -13,8 +13,7 @@
 // end of each table recruits: a new chat in that project.
 //
 // Everyone keeps their place at the table (tavernSeats, kept in this
-// browser): one who leaves frees theirs, the next to come takes it. Crews
-// with someone your move come first.
+// browser): one who leaves frees theirs, the next to come takes it.
 
 const TAVERN_SEATS = "tavern-seats";
 const TAVERN_HOLES = 2;             // free stools a table keeps between pirates before it closes up
@@ -227,8 +226,7 @@ function tavernBar(main, p, sky) {
 }
 
 // The tavern, for the board's box (today.js todayFill, its Tavern tab):
-// the bar, then the crews, those with someone your move first (each crew
-// as your projects order them, among those alike).
+// the bar, then the crews, as your projects order them.
 function tavernNodes() {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
@@ -242,12 +240,12 @@ function tavernNodes() {
   const seats = tavernSeats(crews);
   const byId = new Map(rest.map((s) => [s.id, s]));
   const sky = tavernSky();
-  const urgency = (poses) => (poses.some((x) => x === "ask" || x === "blocked") ? 0 : poses.some((x) => x === "fresh" || x === "done") ? 1 : 2);
-  const drawn = crews.map(([repo], i) => {
+  // Each crew where it always is (your projects' order): what needs you
+  // is in its head and rings, not in crews trading places.
+  const drawn = crews.map(([repo]) => {
     const ids = seats[repo].filter(Boolean);      // the seats' order; a free one in between takes no room
-    const poses = ids.map((id) => tavernPose(byId.get(id), p));
-    return { repo, ids, poses, i, rank: urgency(poses) };
-  }).sort((a, b) => a.rank - b.rank || a.i - b.i);
+    return { repo, ids, poses: ids.map((id) => tavernPose(byId.get(id), p)) };
+  });
   const nodes = [h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, "chats")), missionScore())];
   const hall = [];
   if (main) hall.push(tavernBar(main, p, sky));

@@ -751,8 +751,9 @@ noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar*
 project is a **crew** at its own long table, its wall behind it (a beam,
 lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the
 project's color by its name, and what it's up to in a word or two: how many
-need you, have something to show you, are at work. Crews with someone that
-needs you come first; embers drift through the room.
+need you, have something to show you, are at work. Each crew is one scene, the
+whole crew at one long table in the same candlelight; crews stay where they are,
+in your projects' order. Embers drift through the room.
 
 The crew are ten pirates: the Captain, the Old Salt, the Deckhand, the
 Quartermistress, the Navigator, the Bosun, the Cook, the Gunner, the Gentleman
@@ -773,8 +774,8 @@ color, and how they sit says where the chat stands:
 | Walking in with a sea bag | is being set up |
 | Sitting with a full beer, the candle lit | is idle |
 
-Whoever's move is yours (asking, stuck, something to show you, done) has a ring of
-that color round them. Under each one, the chat's name and the same pill as its card on Chats. A click
+Whoever's move is yours (asking, stuck, something to show you, done) has a glow of
+that color behind them, their place at the table lit in it. Under each one, the chat's name and the same pill as its card on Chats. A click
 (or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
 The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
 one, `s` marks one seen. **+ Recruit** at the end of a table starts a new chat in that project. Everyone

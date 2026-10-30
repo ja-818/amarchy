@@ -418,7 +418,8 @@ function uiLook(id) {
 // blocked (chin on a fist, the glass knocked over), sleep (head down on the
 // arms, the candle out), stale (cobwebs, the candle burned down), arrive
 // (walking in with a sea bag), empty (a free chair). 400 × 480, shown at
-// --tavern-seat-w; the art's own colors, as a picture's.
+// --tavern-seat-w; the art's own colors, as a picture's; no backdrop, so the
+// crew share one room and one long table.
 
 function uiCrewArt(o, state = "idle") {
   const skin = { light: ["#3c2219", "#c98656", "#e6a874"], tan: ["#33190f", "#b06e3e", "#d89260"], dark: ["#1c0e09", "#7a4a2a", "#a06a40"], pale: ["#3a2a26", "#d8a682", "#f0c8a0"], ghost: ["#2a2a28", "#c8c2ae", "#ece6d2"] }[o.skin || "light"];
@@ -430,7 +431,7 @@ function uiCrewArt(o, state = "idle") {
   const P = (d, f, extra = "") => L.push(f[0] === "." ? `<path d="${d}" class="${f.slice(1)}" ${extra}/>` : `<path d="${d}" fill="${f}" ${extra}/>`);
   L.push(`<defs><radialGradient id="pag${o.id}" cx="0.84" cy="0.74" r="0.75"><stop offset="0" stop-color="#f2a14a" stop-opacity=".9"/><stop offset=".25" stop-color="#8a3f1c" stop-opacity=".7"/><stop offset=".7" stop-color="#1c0f0b"/><stop offset="1" stop-color="#0b0706"/></radialGradient>
     <radialGradient id="paf${o.id}" cx=".5" cy=".6" r=".5"><stop offset="0" stop-color="#fff4c4"/><stop offset=".5" stop-color="#ffb347"/><stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient></defs>`);
-  L.push(`<rect width="400" height="480" fill="url(#pag${o.id})"/>`);
+  // No backdrop of its own: they sit in their crew's room, its light (tavern.css .tv-table).
   if (state === "empty") {
     P("M142 252 Q200 232 258 252 L264 430 L136 430 Z", "#1a100c"); P("M236 246 Q252 248 258 252 L264 430 L248 430 Z", "#4a2a16");
     L.push(`<circle cx="142" cy="250" r="7" fill="#1a100c"/><circle cx="258" cy="250" r="7" fill="#6a3a1c"/>`);

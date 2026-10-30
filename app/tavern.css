@@ -63,9 +63,26 @@
 /* The table: the crew side by side, their table one long one (each
    portrait's own, edge to edge), on the hall's dark. */
 .tv-table { position: relative; z-index: 2; display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; padding: 4px 8px 6px; }
+/* One room for the crew: each one's candle warming the dark round them
+   (a glow a seat wide, at its candle, fading into the next one's), the
+   back wall warmer toward the table. No edges between them. */
+.tv-crew { background: linear-gradient(#140c08, #0b0706 40%, #0b0706); }
+.tv-table > .ui-pirate .ui-pirate-scene {
+  background:
+    radial-gradient(70% 55% at 82% 72%, rgb(242 161 74 / .55), rgb(138 63 28 / .28) 45%, transparent 75%),
+    radial-gradient(90% 60% at 40% 60%, rgb(138 63 28 / .22), transparent 70%);
+}
+.tv-table > .ui-pirate.p-sleep .ui-pirate-scene, .tv-table > .ui-pirate.p-stale .ui-pirate-scene {
+  background: radial-gradient(90% 60% at 50% 70%, rgb(90 50 30 / .25), transparent 75%);
+}
+/* The table under them, one long one: its lit top, its dark front, behind
+   every seat and the gaps between. */
+.tv-table::before { content: ""; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none;
+                    top: calc(4px + 24px + var(--tavern-seat-w) * 1.2 * 428 / 480); height: calc(var(--tavern-seat-w) * 1.2 * 52 / 480);
+                    background: linear-gradient(#d68a48 0 15%, #24140d 15%); }
 .tv-bar .tv-table { justify-content: center; }
 .tv-table > .ui-pirate { width: var(--tavern-seat-w); flex: none; }
-.tv-table > .ui-pirate .ui-pirate-scene { margin-top: 24px; }
+.tv-table > .ui-pirate .ui-pirate-scene { margin-top: 24px; border-radius: 0; }
 .tv-crew .ui-pirate-name .task.muted { color: color-mix(in srgb, var(--tavern-bone) 60%, transparent); }
 
 /* Recruit: a slim slot at the end of the table, a new chat in the crew. */

@@ -457,17 +457,18 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate.p-blocked .ui-pirate-say.pinned { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 
 /* Your move (it asks you, it's stuck, it has something to show you, it's
-   done): a ring of its tone round them, a glow, so they stand out of the
-   crew at a glance. */
-.ui-pirate .ui-pirate-scene { border-radius: 4px; }
-.ui-pirate.p-ask .ui-pirate-scene { --ring: var(--warn, var(--warning)); }
-.ui-pirate.p-blocked .ui-pirate-scene { --ring: var(--danger); }
-.ui-pirate.p-fresh .ui-pirate-scene { --ring: var(--accent); }
-.ui-pirate.p-done .ui-pirate-scene { --ring: var(--success); }
-.ui-pirate:is(.p-ask, .p-blocked, .p-fresh, .p-done) .ui-pirate-scene {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 75%, transparent), 0 0 22px color-mix(in srgb, var(--ring) 35%, transparent);
-  z-index: 1;
+   done): a glow of its tone behind them and their place at the table lit
+   in it, so they stand out of the crew at a glance, still in the room. */
+.ui-pirate.p-ask { --ring: var(--warn, var(--warning)); }
+.ui-pirate.p-blocked { --ring: var(--danger); }
+.ui-pirate.p-fresh { --ring: var(--accent); }
+.ui-pirate.p-done { --ring: var(--success); }
+.ui-pirate:is(.p-ask, .p-blocked, .p-fresh, .p-done) .ui-pirate-scene::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(55% 50% at 50% 42%, color-mix(in srgb, var(--ring) 30%, transparent), transparent 75%),
+              linear-gradient(to top, transparent 0 7%, color-mix(in srgb, var(--ring) 90%, transparent) 7% 8.4%, transparent 8.4%);
 }
+.ui-pirate .ui-pirate-scene { isolation: isolate; }
 
 /* The crew's drawing (ui.js uiCrewArt): the art's own colors, but their
    vest and lapels, their crew's; and how they move. */
@@ -491,7 +492,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-crew-art .pa-coins circle { animation: pa-coin 1.4s ease-out infinite; }
 .ui-crew-art .pa-coins circle:nth-child(2) { animation-delay: .4s; } .ui-crew-art .pa-coins circle:nth-child(3) { animation-delay: .8s; }
 .ui-crew-art.pa-st-stale { filter: saturate(.55) brightness(.8); }
-.ui-crew-art.pa-st-arrive > :not(defs):not(rect:first-of-type) { animation: pa-arrive 1.2s ease-out both; }
+.ui-crew-art.pa-st-arrive > :not(defs) { animation: pa-arrive 1.2s ease-out both; }
 .ui-pirate.vacant .ui-crew-art { opacity: .45; }
 @keyframes pa-flame { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.1, .88); } 60% { transform: scale(.9, 1.12); } }
 @keyframes pa-glow { 0%, 100% { opacity: 1; } 45% { opacity: .75; } }
