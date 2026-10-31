@@ -67,14 +67,17 @@
    (a glow a seat wide, at its candle, fading into the next one's), the
    back wall warmer toward the table. No edges between them. */
 .tv-crew { background: linear-gradient(#140c08, #0b0706 40%, #0b0706); }
-.tv-table > .ui-pirate .ui-pirate-scene {
-  background:
-    radial-gradient(70% 55% at 82% 72%, rgb(242 161 74 / .55), rgb(138 63 28 / .28) 45%, transparent 75%),
-    radial-gradient(90% 60% at 40% 60%, rgb(138 63 28 / .22), transparent 70%);
+/* Each candle's light: a glow round it, wider than the pirate, spilling
+   onto the table and the pirates beside them (it fades out before its own
+   edge, so no seat's border cuts it). Behind the pirate (the scene isolates
+   it), over their neighbours a little, as light does. */
+.tv-table > .ui-pirate .ui-pirate-scene::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  left: -28%; width: 220%; top: -12%; height: 125%;
+  background: radial-gradient(closest-side, rgb(242 161 74 / .5), rgb(160 76 30 / .26) 40%, rgb(120 50 20 / .1) 70%, transparent);
 }
-.tv-table > .ui-pirate.p-sleep .ui-pirate-scene, .tv-table > .ui-pirate.p-stale .ui-pirate-scene {
-  background: radial-gradient(90% 60% at 50% 70%, rgb(90 50 30 / .25), transparent 75%);
-}
+.tv-table > .ui-pirate .ui-pirate-scene::before { left: calc(82% - 110%); }
+.tv-table > .ui-pirate:is(.p-sleep, .p-stale) .ui-pirate-scene::before { background: radial-gradient(closest-side, rgb(90 50 30 / .22), transparent); }
 /* The table under them, one long one: its lit top, its dark front, behind
    every seat and the gaps between. */
 .tv-table::before { content: ""; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none;

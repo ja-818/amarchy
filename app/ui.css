@@ -396,7 +396,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 /* ---- a pirate at their crew's table (uiPirate, the Tavern): a card with no
    box of its own, a pirate in pixels over a name plate; their table runs
    on from one to the next. */
-.tcard.ui-pirate { background: none; border: 0; border-radius: 0; position: relative; min-width: 0; }
+.tcard.ui-pirate { background: none; border: 0; border-radius: 0; position: relative; min-width: 0; overflow: visible; }      /* its candle's light spills onto its neighbours */
 @media (hover: hover) { .tcard.ui-pirate[data-id]:hover, .tcard.ui-pirate.p-empty:hover { background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-light) 16%, transparent), transparent); border: 0; } }
 .tcard.ui-pirate:has(> .ui-pirate-go:active) { background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-light) 26%, transparent), transparent); border: 0; }
 .keyed .tcard.ui-pirate.ui-sel, .tcard.ui-pirate:has(> .ui-pirate-go:focus-visible) {
@@ -465,7 +465,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate.p-done { --ring: var(--success); }
 .ui-pirate:is(.p-ask, .p-blocked, .p-fresh, .p-done) .ui-pirate-scene::after {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background: radial-gradient(55% 50% at 50% 42%, color-mix(in srgb, var(--ring) 30%, transparent), transparent 75%),
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--ring) 30%, transparent), transparent),
               linear-gradient(to top, transparent 0 7%, color-mix(in srgb, var(--ring) 90%, transparent) 7% 8.4%, transparent 8.4%);
 }
 .ui-pirate .ui-pirate-scene { isolation: isolate; }
