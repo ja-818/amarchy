@@ -751,8 +751,8 @@ noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar*
 project is a **crew** at its own long table, its wall behind it (a beam,
 lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the
 project's color by its name, and what it's up to in a word or two: how many
-need you, have something to show you, are at work. Each crew is one scene, the
-whole crew at one long table in the same candlelight; crews stay where they are,
+need you, have something to show you, are at work. The whole tavern is one hall,
+the bar and every crew's long table in it, in the same candlelight; crews stay where they are,
 in your projects' order. Embers drift through the room.
 
 The crew are ten pirates: the Captain, the Old Salt, the Deckhand, the
