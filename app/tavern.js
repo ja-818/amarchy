@@ -191,9 +191,9 @@ function tavernFlag() {
     + `<path d="M22 22 L44 28 M44 22 L22 28" stroke="#f1ead8" stroke-width="2.6" stroke-linecap="round"/></g></svg>` });
 }
 
-// The air in the hall: embers drifting through it, the corners in shadow.
+// The air in the hall: the corners in shadow.
 function tavernAir() {
-  return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-vignette" }), h("i", { class: "tv-motes" }), h("i", { class: "tv-motes far" }));
+  return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-vignette" }));
 }
 
 // What a crew is up to, in a few words: who needs you, who's done, who works.

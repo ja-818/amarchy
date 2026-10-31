@@ -25,25 +25,11 @@
 .tv-back .tv-lamp:nth-of-type(2n) { animation-delay: -1.1s; }
 @keyframes tv-flicker { 0%, 100% { opacity: 1; } 35% { opacity: .82; } 60% { opacity: .95; } 80% { opacity: .78; } }
 
-/* The air: embers drifting, the corners in shadow; never in a tap's way. */
+/* The air: the corners in shadow; never in a tap's way. */
 .tv-air { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
 .tv-air i { position: absolute; display: block; }
 .tv-vignette { inset: 0; background: radial-gradient(120% 100% at 50% 30%, transparent 60%, rgb(0 0 0 / .45) 100%); }
-.tv-motes {
-  inset: -40px 0 0; z-index: 3; mix-blend-mode: screen; opacity: .8;
-  background-image:
-    radial-gradient(circle, color-mix(in srgb, var(--tavern-light) 90%, var(--tavern-flame)) 0 1.2px, transparent 2px),
-    radial-gradient(circle, var(--tavern-light) 0 1px, transparent 1.8px),
-    radial-gradient(circle, color-mix(in srgb, var(--tavern-gold) 80%, transparent) 0 1.4px, transparent 2.2px);
-  background-size: 173px 151px, 211px 187px, 127px 233px;
-  background-position: 13px 40px, 90px 120px, 50px 10px;
-  animation: tv-drift 22s linear infinite;
-}
-.tv-motes.far { opacity: .4; filter: blur(.6px); background-size: 97px 113px, 143px 89px, 181px 131px; animation-duration: 34s; animation-direction: reverse; }
-@keyframes tv-drift {
-  from { background-position: 13px 40px, 90px 120px, 50px 10px; }
-  to { background-position: 73px -111px, 30px -67px, 110px -223px; }
-}
+
 
 /* Its head, over the wall: the flag, the name, what the crew is up to. */
 .tv-head { position: relative; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 52px; padding: 10px 12px 0; box-sizing: border-box; }
@@ -107,4 +93,4 @@
   .tv-tally { margin-left: 0; flex-basis: 100%; }
   .tv-table { padding: 2px 2px 4px; }
 }
-@media (prefers-reduced-motion: reduce) { .tv-motes, .tv-back .tv-lamp, .tv-cloth { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .tv-back .tv-lamp, .tv-cloth { animation: none !important; } }
