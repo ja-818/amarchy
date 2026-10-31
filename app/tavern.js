@@ -191,8 +191,7 @@ function tavernFlag() {
     + `<path d="M22 22 L44 28 M44 22 L22 28" stroke="#f1ead8" stroke-width="2.6" stroke-linecap="round"/></g></svg>` });
 }
 
-// The air in the hall, one for all of it: embers drifting through it, the
-// corners in shadow.
+// The air in the hall: embers drifting through it, the corners in shadow.
 function tavernAir() {
   return h("span", { class: "tv-air", "aria-hidden": "true" }, h("i", { class: "tv-vignette" }), h("i", { class: "tv-motes" }), h("i", { class: "tv-motes far" }));
 }
@@ -212,7 +211,7 @@ function tavernCrew(repo, pirates, hue, sky, poses) {
       h("span", { class: "tv-recruit-plus", "aria-hidden": "true" }, "+"), h("span", { class: "tv-recruit-word" }, "Recruit")));
   recruit.todayData = `free|${repo}`;
   return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length}` },
-    h("span", { class: "tv-wall", html: tavernBack(repo, sky) }),
+    h("span", { class: "tv-wall", html: tavernBack(repo, sky) }), tavernAir(),
     h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, projectName(repo), h("span", { class: "tv-count" }, String(pirates.length))),
       h("span", { class: "tv-tally" }, ...tavernTally(poses))),
     h("div", { class: "tv-table" }, ...pirates, recruit));
@@ -221,7 +220,7 @@ function tavernCrew(repo, pirates, hue, sky, poses) {
 // The bar: your assistant behind it, the bottles on the shelves.
 function tavernBar(main, p, sky) {
   return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" },
-    h("span", { class: "tv-wall", html: tavernBack("the bar", sky, true) }),
+    h("span", { class: "tv-wall", html: tavernBack("the bar", sky, true) }), tavernAir(),
     h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, "The Bar")),
     h("div", { class: "tv-table" }, tavernPirate(main, p, true)));
 }
@@ -255,7 +254,7 @@ function tavernNodes() {
     hall.push(tavernCrew(c.repo, c.ids.map((id) => tavernPirate(byId.get(id), p, false, kinds.get(id))), todayHue(c.repo), sky, c.poses));
   }
   if (!hall.length) hall.push(h("p", { class: "today-clear" }, "The tavern's empty: start a chat and a pirate takes a seat."));
-  nodes.push(h("div", { class: `tavern-hall ${sky}` }, ...hall, tavernAir()));
+  nodes.push(h("div", { class: `tavern-hall ${sky}` }, ...hall));
   return nodes;
 }
 

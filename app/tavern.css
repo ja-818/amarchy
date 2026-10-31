@@ -8,21 +8,18 @@
 /* Wider than the cards' column on a computer: crews side by side, each as
    wide as its crew, as many to a row as fit. */
 .board-scroll .today.tavern { max-width: calc(var(--page-width) + 400px); }
-/* One hall: the whole tavern one dark room, its corners in shadow, embers
-   drifting through all of it; the bar and the crews' tables in it, side by
-   side, no walls between them. */
-.tavern-hall {
-  position: relative; isolation: isolate; overflow: hidden; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0;
+.tavern-hall { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.tv-crew {
+  position: relative; isolation: isolate; overflow: hidden; box-sizing: border-box; min-width: min(100%, 300px); max-width: 100%;
+  flex: 0 1 auto;
   border-radius: var(--tavern-radius); background: #0b0706; color: var(--tavern-bone);
-  border: 1px solid #2a1a10; box-shadow: 0 12px 36px rgb(0 0 0 / .5);
+  border: 1px solid color-mix(in srgb, var(--ph) 30%, #2a1a10);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 200 140 / .06);
 }
-.tavern-hall > .tv-air { z-index: 3; }
-.tv-crew { position: relative; isolation: isolate; box-sizing: border-box; min-width: min(100%, 300px); max-width: 100%; flex: 1 1 auto; padding-bottom: 6px; }
-.tv-bar { flex: 0 0 calc(var(--tavern-seat-w) + 170px); }
+.tv-bar { width: calc(var(--tavern-seat-w) + 170px); }
 
 /* Its wall, behind everything: as tall as the head and the pirates' heads. */
-.tv-wall { position: absolute; left: 0; right: 0; top: 0; height: 110px; z-index: 0; pointer-events: none;
-           -webkit-mask: linear-gradient(#000 70%, transparent); mask: linear-gradient(#000 70%, transparent); }
+.tv-wall { position: absolute; left: 0; right: 0; top: 0; height: 110px; z-index: 0; pointer-events: none; }
 .tv-back { display: block; width: 100%; height: 100%; }
 .tv-back .tv-lamp { animation: tv-flicker 2.6s ease-in-out infinite; }
 .tv-back .tv-lamp:nth-of-type(2n) { animation-delay: -1.1s; }
@@ -31,7 +28,7 @@
 /* The air: embers drifting, the corners in shadow; never in a tap's way. */
 .tv-air { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
 .tv-air i { position: absolute; display: block; }
-.tv-vignette { inset: 0; background: radial-gradient(130% 100% at 50% 40%, transparent 65%, rgb(0 0 0 / .5) 100%); }
+.tv-vignette { inset: 0; background: radial-gradient(120% 100% at 50% 30%, transparent 60%, rgb(0 0 0 / .45) 100%); }
 .tv-motes {
   inset: -40px 0 0; z-index: 3; mix-blend-mode: screen; opacity: .8;
   background-image:
@@ -69,7 +66,7 @@
 /* One room for the crew: each one's candle warming the dark round them
    (a glow a seat wide, at its candle, fading into the next one's), the
    back wall warmer toward the table. No edges between them. */
-
+.tv-crew { background: linear-gradient(#140c08, #0b0706 40%, #0b0706); }
 .tv-table > .ui-pirate .ui-pirate-scene {
   background:
     radial-gradient(70% 55% at 82% 72%, rgb(242 161 74 / .55), rgb(138 63 28 / .28) 45%, transparent 75%),
@@ -103,7 +100,6 @@
   :root { --tavern-seat-w: 108px; }
   .tavern-hall { gap: 12px; }
   .tv-crew, .tv-bar { flex: 1 1 100%; width: 100%; }
-  .tv-crew + .tv-crew { padding-top: 6px; }
   .tv-table { justify-content: center; }
   .tv-tally { margin-left: 0; flex-basis: 100%; }
   .tv-table { padding: 2px 2px 4px; }
