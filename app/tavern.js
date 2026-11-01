@@ -203,13 +203,19 @@ function tavernTally(poses) {
   return [need ? uiPill(`${need} need${need === 1 ? "s" : ""} you`, "ask") : null, done ? uiPill(`${done} to see`, "done") : null, work ? uiPill(`${work} at work`, "quiet") : null].filter(Boolean);
 }
 
-// A crew: its wall behind, its flag and name and what it's up to, its
-// table, its pirates in a row, and the slot that recruits.
-function tavernCrew(repo, pirates, hue, sky, poses) {
+// The slot at the end of a table that recruits: a new chat in its project.
+function tavernRecruit(repo) {
   const recruit = h("article", { class: "tcard tv-recruit" },
     h("button", { class: "today-go tv-recruit-go", type: "button", title: `New chat in ${projectName(repo)}`, "aria-label": `New chat in ${projectName(repo)}`, onclick: () => newChatIn(repo) },
       h("span", { class: "tv-recruit-plus", "aria-hidden": "true" }, "+"), h("span", { class: "tv-recruit-word" }, "Recruit")));
   recruit.todayData = `free|${repo}`;
+  return recruit;
+}
+
+// A crew: its wall behind, its flag and name and what it's up to, its
+// table, its pirates in a row, and the slot that recruits.
+function tavernCrew(repo, pirates, hue, sky, poses) {
+  const recruit = tavernRecruit(repo);
   return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length}` },
     h("span", { class: "tv-wall", html: tavernBack(repo, sky) }), tavernAir(),
     h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, projectName(repo), h("span", { class: "tv-count" }, String(pirates.length))),
@@ -217,12 +223,15 @@ function tavernCrew(repo, pirates, hue, sky, poses) {
     h("div", { class: "tv-table" }, ...pirates, recruit));
 }
 
-// The bar: your assistant behind it, the bottles on the shelves.
-function tavernBar(main, p, sky) {
-  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: "--seats:1" },
+// The bar: your assistant behind it, and the rest of its project's chats
+// at it (its crew: they're its missions), the bottles on the shelves.
+function tavernBar(main, mates, p, sky) {
+  const kinds = tavernKinds([main.id, ...mates.map((s) => s.id)]);
+  const poses = [main, ...mates].map((s) => tavernPose(s, p));
+  return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: `--seats:${1 + mates.length}` },
     h("span", { class: "tv-wall", html: tavernBack("the bar", sky, true) }), tavernAir(),
-    h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, "The Bar")),
-    h("div", { class: "tv-table" }, tavernPirate(main, p, true)));
+    h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, "The Bar"), h("span", { class: "tv-tally" }, ...tavernTally(poses))),
+    h("div", { class: "tv-table" }, tavernPirate(main, p, true, kinds.get(main.id)), ...mates.map((s) => tavernPirate(s, p, false, kinds.get(s.id))), tavernRecruit(main.repo)));
 }
 
 // The tavern, for the board's box (today.js todayFill, its Tavern tab):
@@ -248,8 +257,11 @@ function tavernNodes() {
   });
   const nodes = [h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, "chats")), missionScore())];
   const hall = [];
-  if (main) hall.push(tavernBar(main, p, sky));
+  // Your assistant's project's chats are at the bar with it, not a crew of their own.
+  const atBar = main ? drawn.find((c) => c.repo === main.repo) : null;
+  if (main) hall.push(tavernBar(main, atBar ? atBar.ids.map((id) => byId.get(id)) : [], p, sky));
   for (const c of drawn) {
+    if (c === atBar) continue;
     const kinds = tavernKinds(c.ids);
     hall.push(tavernCrew(c.repo, c.ids.map((id) => tavernPirate(byId.get(id), p, false, kinds.get(id))), todayHue(c.repo), sky, c.poses));
   }

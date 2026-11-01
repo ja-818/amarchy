@@ -746,7 +746,7 @@ Today adds no notifications of its own.
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
 the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
-noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**
+noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**, and the other chats in its project sit at it with it
 (bottles on the shelves, a porthole on the sea under the sky as it is now). Each
 project is a **crew** at its own long table, its wall behind it (a beam,
 lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the
@@ -775,7 +775,8 @@ color, and how they sit says where the chat stands:
 | Sitting with a full beer, the candle lit | is idle |
 
 Whoever's move is yours (asking, stuck, something to show you, done) has a glow of
-that color behind them, their place at the table lit in it. Under each one, the chat's name and the same pill as its card on Chats. A click
+that color behind them, their place at the table lit in it. The one the keys are on stands in a lantern's light, their place at the table
+lit gold. Under each one, the chat's name and the same pill as its card on Chats. A click
 (or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
 The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
 one, `s` marks one seen. **+ Recruit** at the end of a table starts a new chat in that project. Everyone

@@ -16,7 +16,7 @@
   border: 1px solid color-mix(in srgb, var(--ph) 30%, #2a1a10);
   box-shadow: 0 10px 30px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 200 140 / .06);
 }
-.tv-bar { width: calc(var(--tavern-seat-w) + 170px); }
+.tv-bar { min-width: min(100%, calc(var(--tavern-seat-w) + 170px)); }
 
 /* Its wall, behind everything: as tall as the head and the pirates' heads. */
 .tv-wall { position: absolute; left: 0; right: 0; top: 0; height: 110px; z-index: 0; pointer-events: none; }
@@ -69,7 +69,7 @@
 .tv-table::before { content: ""; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none;
                     top: calc(4px + 24px + var(--tavern-seat-w) * 1.2 * 428 / 480); height: calc(var(--tavern-seat-w) * 1.2 * 52 / 480);
                     background: linear-gradient(#d68a48 0 15%, #24140d 15%); }
-.tv-bar .tv-table { justify-content: center; }
+
 .tv-table > .ui-pirate { width: var(--tavern-seat-w); flex: none; }
 .tv-table > .ui-pirate .ui-pirate-scene { margin-top: 24px; border-radius: 0; }
 .tv-crew .ui-pirate-name .task.muted { color: color-mix(in srgb, var(--tavern-bone) 60%, transparent); }
@@ -83,7 +83,9 @@
 .tv-recruit-word { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); }
 @media (hover: hover) { .tv-recruit-go:hover { background: color-mix(in srgb, var(--ph) 14%, transparent); border-style: solid; color: var(--tavern-bone); } }
 .tv-recruit-go:active { background: color-mix(in srgb, var(--ph) 22%, transparent); }
-.keyed .tcard.tv-recruit.ui-sel .tv-recruit-go, .tv-recruit-go:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.keyed .tcard.tv-recruit.ui-sel .tv-recruit-go, .tv-recruit-go:focus-visible { outline: none; border-style: solid; border-color: var(--tavern-gold); color: var(--tavern-gold);
+  background: radial-gradient(80% 60% at 50% 0, rgb(255 214 150 / .2), transparent); }
+.keyed .tcard.tv-recruit.ui-sel, .tcard.tv-recruit:has(> .tv-recruit-go:focus-visible) { background: none; box-shadow: none; border: 0; }
 
 @media (max-width: 719px) {
   :root { --tavern-seat-w: 108px; }
