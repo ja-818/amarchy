@@ -124,8 +124,9 @@
 .chat .ic { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; }
 .chat .ic svg { width: 100%; height: 100%; display: block; }
 .spinner { display: inline-block; flex: none; width: 18px; text-align: center; color: var(--accent); line-height: 1; }
-/* A spinner's glyph changes eleven times a second: in a box of its own, nothing around it is laid out again. */
-.spin { contain: layout paint style; }
+/* A spinner's glyph changes eleven times a second: in a box of its own, nothing around it is laid out again.
+   No paint containment: it clips to the box, and a braille glyph is taller than its line (its top dots cut flat). */
+.spin { contain: layout style; }
 
 /* ---- Claude's steps: one line, opened a step a line, a step its details */
 
