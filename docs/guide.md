@@ -746,7 +746,7 @@ Today adds no notifications of its own.
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
 the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
-noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**, and the other chats in its project sit at it with it
+noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**, its name on the sign, and the other chats in its project sit at it with it
 (bottles on the shelves, a porthole on the sea under the sky as it is now). Each
 project is a **crew** at its own long table, its wall behind it (a beam,
 lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the

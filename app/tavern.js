@@ -230,7 +230,7 @@ function tavernBar(main, mates, p, sky) {
   const poses = [main, ...mates].map((s) => tavernPose(s, p));
   return h("section", { class: `tv-crew tv-bar ph-${todayHue(main.repo)}`, "data-crew": "", style: `--seats:${1 + mates.length}` },
     h("span", { class: "tv-wall", html: tavernBack("the bar", sky, true) }), tavernAir(),
-    h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, "The Bar"), h("span", { class: "tv-tally" }, ...tavernTally(poses))),
+    h("header", { class: "tv-head" }, h("h3", { class: "tv-name tv-sign" }, main.assistant_name || projectName(main.repo)), h("span", { class: "tv-tally" }, ...tavernTally(poses))),
     h("div", { class: "tv-table" }, tavernPirate(main, p, true, kinds.get(main.id)), ...mates.map((s) => tavernPirate(s, p, false, kinds.get(s.id))), tavernRecruit(main.repo)));
 }
 

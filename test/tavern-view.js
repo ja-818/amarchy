@@ -105,7 +105,7 @@ async function run(browser, port, layout) {
   await sleep(300);
   shapes[layout] = await p.evaluate(SHAPE);
   const rooms = shapes[layout].map((r) => r.room);
-  check(where, JSON.stringify(rooms) === JSON.stringify(["The Bar", "Web4", "Api5", "Ops1"]), `a room a project, in your order, your assistant at the bar first (${JSON.stringify(rooms)})`);
+  check(where, JSON.stringify(rooms) === JSON.stringify(["Jaken", "Web4", "Api5", "Ops1"]), `a room a project, in your order, your assistant at the bar first (${JSON.stringify(rooms)})`);
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew[data-crew]:not(.tv-bar)")].every((c) => {
     const cloth = c.querySelector(".tv-head .tv-flag svg .pa-crew"), name = c.querySelector(".tv-name");
     const probe = document.createElement("span");
