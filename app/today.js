@@ -127,16 +127,31 @@ function projectChip(s) {
   return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
-// In order: higher priority first, then your projects' order, then the
-// newest reply (not the last thing done: a chat at work does something every
-// second, and the cards would trade places under your finger).
+// When a chat last had something for you (bin/amarchy last_answer): not the
+// last thing done, a chat at work does something every second, and the cards
+// would trade places under your finger.
+function todayLast(s) { return (s.today || {}).last || s.created || 0; }
+function todayNewest(a, b) { return todayLast(b) - todayLast(a) || (a.id < b.id ? -1 : 1); }
+
+// In order: higher priority first, then the newest answer.
 function todaySort(v, ss) {
-  const rank = new Map(((v.projects || []).map((p) => p.name)).map((name, i) => [name, i]));
   const prio = { high: 0, normal: 1, low: 2 };
-  const when = (s) => (s.today || {}).goal_at || (s.today || {}).at || 0;
-  return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
-    || (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99)
-    || when(b) - when(a) || (a.id < b.id ? -1 : 1));
+  return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || todayNewest(a, b));
+}
+
+// How the chats are ordered, the switch beside your streak: the same on every
+// screen (bin/amarchy list_sort); yours at once, as you pick (app.organize).
+const TODAY_SORTS = [
+  { key: "groups", label: "Groups", title: "In groups: at work, what needs you, done, the rest" },
+  { key: "priority", label: "Priority", title: "By priority: high, normal, low; the newest answer first in each" },
+  { key: "last", label: "Last", title: "The newest answer on top" },
+];
+function todaySortNow(v = app.view) {
+  const how = ((app.organize || v || {}).sort);
+  return TODAY_SORTS.some((o) => o.key === how) ? how : "groups";
+}
+function todaySorter(v) {
+  return uiTabs(TODAY_SORTS, todaySortNow(v), (key) => organizeList(key), h("div", { class: "seg ui-tabs today-sort", role: "tablist", "aria-label": "Order the chats" }));
 }
 
 // At work: Claude working, or what it started running (status "running":
@@ -834,23 +849,21 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   const close = p.done.length;
   const yours = (chats ? p.asks.length + p.blocked.length : 0) + (tasks ? p.dueNow.length + p.chaseNow.length : 0);
   const nodes = [];
-  if (top) nodes.push(h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
-  if (chats && p.main) nodes.push(tk(todayChat, "assistant")(p.main));      // your assistant, on top
-  // The board's Chats, grouped as you group the list (by priority, by
-  // project): its groups, what asks you first in each (todayGrouped).
-  const groups = (app.organize || v).group || [];
-  if (board && only === "chats" && groups.length && groups[0] !== "status") {
-    // Grouped too, what needs you (an answer, a look at what it did) comes
-    // first, then what's done (Review, Complete), then your groups for the rest.
-    const needs = [...p.asks, ...p.blocked, ...p.fresh];
-    const order = new Map((v.sessions || []).map((x, i) => [x.id, i]));
-    needs.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-    const cardOf = (x) => p.asks.includes(x) ? tk(todayAsk)(x) : p.blocked.includes(x) ? tk(todayBlocked)(x) : tk(todayChat, "fresh")(x);
-    nodes.push(uiSection("yours", "Needs you", { count: needs.length }, needs.map(cardOf)));
-    if (!needs.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
-    nodes.push(uiSection("finish", "Done", { count: p.done.length, extra: todayAll(p.done) }, p.done.map(tk(todayChat, "done"))));
-    return [...nodes, ...todayGrouped(v, p, groups, tk, new Set([...needs, ...p.done].map((x) => x.id)))].filter(Boolean);
+  // On Chats, how they're ordered beside your streak (what needs you is on
+  // its tab, and on the cards); on Tasks, what's for now.
+  if (top) nodes.push(h("div", { class: "today-summary" }, only === "chats" ? todaySorter(v) : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
+  // A chat's card, wherever it stands.
+  const cardOf = (s) => s === p.main ? tk(todayChat, "assistant")(s)
+    : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
+    : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
+  const how = only === "chats" ? todaySortNow(v) : "groups";
+  // Last: every chat, your assistant too, the newest answer on top.
+  if (how === "last") {
+    const all = (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)).sort(todayNewest);
+    return [...nodes, all.length ? h("div", { class: "tsec-cards" }, all.map(cardOf)) : null].filter(Boolean);
   }
+  if (chats && p.main) nodes.push(cardOf(p.main));      // your assistant, on top
+  if (how === "priority") return [...nodes, ...todayByPriority(v, p, cardOf)].filter(Boolean);
   // At work on top, folded, its count in sight; then what needs you (asks,
   // blocked, finished and not seen yet, your tasks due); then what's done
   // (Review, Complete); then every other chat, open: none is out of sight.
@@ -890,46 +903,16 @@ function todayAll(done) {
   return b;
 }
 
-// The board's chats in the list's groups and order (app.js groupLabel):
-// a section for each of the first grouping (High priority, Normal...; or
-// each project, in your order), the next grouping's names over its cards
-// inside, and in each, what asks you first, then the rest as the list has
-// them. Each card says where it stands, so nothing that's done waits unseen.
-function todayGrouped(v, p, groups, tk, shown = new Set()) {
-  const card = (s) => p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
-    : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
-  const label = (s, g) => (g === "project" ? projectName(s.repo) : groupLabel(s, g));
-  const first = (v.sessions || []).filter((s) => !s.setup && s.assistant !== "main" && !todayUI.closing.has(s.id) && !shown.has(s.id));
-  const sections = new Map();
-  for (const s of first) {
-    const k = label(s, groups[0]);
-    if (!sections.has(k)) sections.set(k, []);
-    sections.get(k).push(s);
-  }
-  // The groups in order whatever order the chats came in: High, Normal, Low; your projects' order.
-  const prioRank = { "High priority": 0, "Normal priority": 1, "Low priority": 2 };
-  const projRank = new Map((v.projects || []).map((pr, i) => [projectName(pr.name), i]));
-  const rank = (name) => (groups[0] === "priority" ? prioRank[name] ?? 1 : projRank.get(name) ?? 99);
-  const out = [];
-  for (const [name, ss] of [...sections].sort((a, b) => rank(a[0]) - rank(b[0]))) {
-    // By the next grouping (a project under High priority) if there's one, in
-    // its order; in each, what asks you first.
-    const subOf = (s) => (groups[1] && groups[1] !== "status" ? label(s, groups[1]) : "");
-    const subs = new Map();
-    for (const s of ss) { const k = subOf(s); if (!subs.has(k)) subs.set(k, []); subs.get(k).push(s); }
-    const subRank = (k) => (groups[1] === "priority" ? prioRank[k] ?? 1 : groups[1] === "project" ? projRank.get(k) ?? 99 : 0);
-    const kids = [];
-    for (const [k, list] of [...subs].sort((a, b) => subRank(a[0]) - subRank(b[0]))) {
-      if (k) kids.push(h("div", { class: "tsec-sub" }, k));
-      const asking = (s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s);
-      kids.push(...[...list.filter(asking), ...list.filter((s) => !asking(s))].map(card));
-    }
-    const asking = ss.filter((s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s)).length;
-    const key = `g-${groups[0]}-${name}`.toLowerCase().replace(/[^\w-]+/g, "-");
-    out.push(uiSection(key, name, { count: ss.length, extra: asking ? uiPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null,
-                                       fold: /^low/i.test(name) ? false : null }, kids));
-  }
-  return out;
+// The chats by priority: High, Normal, Low (folded), the newest answer first
+// in each. Each card says where it stands, and each head how many need you.
+function todayByPriority(v, p, cardOf) {
+  const ss = (v.sessions || []).filter((s) => !s.setup && s !== p.main && !todayUI.closing.has(s.id));
+  return ["high", "normal", "low"].map((level) => {
+    const list = ss.filter((s) => (s.priority || "normal") === level).sort(todayNewest);
+    const asking = list.filter((s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s)).length;
+    return uiSection(`prio-${level}`, `${PRIORITY[level]} priority`, { count: list.length, fold: level === "low" ? false : null,
+      extra: asking ? uiPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null }, list.map(cardOf));
+  });
 }
 
 // What Today shows of the view: drawn again only when it changes (each
@@ -939,7 +922,7 @@ function todayGrouped(v, p, groups, tk, shown = new Set()) {
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
   const m = missionsNow();
-  return JSON.stringify([todayUI.version, new Date().toDateString(), v.today, v.needs, (app.organize || v).group, v.sort,
+  return JSON.stringify([todayUI.version, new Date().toDateString(), v.today, v.needs, todaySortNow(v),
     [m.n, m.streak, m.goal, m.total], (v.sessions || []).map((s) => s.id).join(), (v.sessions || []).map((s) => [todayRowKey(s), todayTimes(s)])]);
 }
 

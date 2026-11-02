@@ -95,7 +95,8 @@ here holds for both.
 ## What the user sees
 
 - **The list**: every chat, its state in words (Needs your answer, Working,
-  Done, Ready, Asleep), grouped and sorted as the user likes, with priority.
+  Done, Ready, Asleep), in the order the user picks beside their streak: Groups,
+  Priority or Last (the newest answer on top).
 - **The chat**: their messages, your replies as text, your steps folded into
   one line (they can open each), checklists, and cards for your questions,
   permissions and plans (Approve and start, Approve another way, Keep planning).
@@ -183,12 +184,12 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   it sleeps a session even when something is lost. You can be put to sleep too,
   between turns: nothing you'd need is lost, the conversation resumes as it was.
 - `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session
-  matters to the user. The list puts higher priority first (unless the user sorts
-  it by date, `amarchy sort`). Without a level it prints it (that you can do
+  matters to the user. The list puts higher priority first (unless the user orders
+  it by Last, `amarchy sort`). Without a level it prints it (that you can do
   freely); only set it when asked.
 - `amarchy projects move <project> up|down|top|bottom|before <other>|after <other>`
   / `amarchy projects order <project>...`: the order the user's projects come in
-  (the list's project groups, the new-chat picker). Only when asked.
+  (the new-chat picker). Only when asked.
 - `amarchy rename "<what it's about>"`: name the session in the list and the
   header above the chat. Claude Code's own title (cut down to "Keyword: a few
   words") is shown until then, so don't rename unprompted. Never overwrite a name

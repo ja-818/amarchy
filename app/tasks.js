@@ -7,14 +7,14 @@
 // is the board again, where you were; and so is sending it something: it
 // works on that, and the next that's your move is lit, Enter to open it.
 //
-// The bar: the Ⓐ (the Amarchy menu: Group & sort, Automations, the look,
+// The bar: the Ⓐ (the Amarchy menu: Automations, the look,
 // Settings, Keys), Chats | Tasks | Tavern (what's your move on Chats and Tasks), the search,
 // New chat.
 //
 // Everything has its key (? shows them): j / k (or the arrows) from card
 // to card, l / h into a card along its buttons and back out, Enter opens
 // (or presses), 1-4 picks an answer, x completes its mission (with Undo), r
-// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Tavern, / searches, n starts a new chat, m the menu, o Group & sort.
+// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Tavern, / searches, n starts a new chat, m the menu, o the chats' next order (Groups, Priority, Last).
 
 const BOARD_TABS = ["chats", "tasks", "tavern"];
 const board = {
@@ -37,7 +37,7 @@ function boardBuild() {
   board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats, tasks or the tavern" });
   // The bar (ui.css .ui-bar), as an open chat's: where you are (the Ⓐ, its
-  // menu: Group & sort, Automations, the look, Settings, Keys…; Chats |
+  // menu: Automations, the look, Settings, Keys…; Chats |
   // Tasks), what you look for (the search), and the one thing to start.
   board.head = h("header", { class: "board-head" },
     h("div", { class: "board-head-in ui-bar" },
@@ -243,7 +243,12 @@ function boardKeys(e) {
   else if (k === "n") { e.preventDefault(); boardCompose(); }
   else if (k === "?") { e.preventDefault(); showKeys(); }
   else if (k === "m") { e.preventDefault(); deskMenu(); }
-  else if (k === "o") { e.preventDefault(); organizeSheet(); }
+  else if (k === "o") {
+    if (boardTabNow() !== "chats" || board.query) return;
+    e.preventDefault();
+    const at = TODAY_SORTS.findIndex((o) => o.key === todaySortNow());
+    organizeList(TODAY_SORTS[(at + 1) % TODAY_SORTS.length].key);
+  }
   else if (!card) return;
   else if (/^[1-9]$/.test(k)) {
     const o = card.querySelectorAll(".today-opt")[Number(k) - 1];

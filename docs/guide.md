@@ -69,16 +69,16 @@ priority:
 
 Start everything at once, then say what matters: every chat has a **priority**,
 High, Normal (what a new one gets) or Low. The list puts higher priority first,
-unless you sort it by date. Every chat still notifies you, whatever its priority.
+unless you order it by Last. Every chat still notifies you, whatever its priority.
 
-**Group & sort** (the button by the search) puts chats in sections: **by project**,
-**by priority** (High, Normal, Low) and **by status** (Needs you, Working, Done,
-Idle), or not grouped. Use any of them; together they nest in the order you turn
-them on, each one inside the ones already on. Turn on priority and then project
-for High, Normal and Low with each one's projects inside; project and then
-priority for the priorities inside each project. **Sort by** orders the chats
-inside each section: by **priority** (the default), **newest first** or **oldest
-first**. The choices stick.
+The switch beside your streak orders your chats, the same on every screen:
+
+- **Groups**: where each stands: At work, Needs you, Done, Ready.
+- **Priority**: High, Normal and Low, what needs you counted on each head.
+- **Last**: one list, the chat with the newest answer on top, whatever its priority.
+  A chat at work keeps its place until it answers; one asking you counts from when it asked.
+
+Inside a group or a priority, the newest answer comes first. On a computer, `o` goes to the next one.
 
 Your projects come in the order you choose, not alphabetically: in the list
 grouped by project, and in the picker of a new chat. **Order projects…** (in
@@ -256,7 +256,7 @@ host's chats without anything else installed.
 - **The bar**, as Omarchy's, the same over the board and over an open chat:
   where you are on the left, what you look at in the middle, icons and one
   outlined action on the right. On the board: the **Ⓐ** (`m`, `Ctrl+Alt+M`),
-  the **Amarchy menu**: New chat, **Group & sort** (`o`), Automations (a dot on
+  the **Amarchy menu**: New chat, Automations (a dot on
   the Ⓐ when one failed), theme, font and wallpaper, sound, a new project,
   Settings, Keys; then **Chats** or **Tasks** (each with what's your move); the
   **search** (`/`: a chat by its name or anything said in it, and your tasks,
@@ -269,8 +269,8 @@ host's chats without anything else installed.
   what finished that you haven't opened yet, with what it said and **Seen**),
   **Done** (its goal reached: **Review** opens the link its last reply gave,
   **Complete mission** closes it, with Undo) and **Ready** (every other chat).
-  Grouped (Group & sort): by priority (High first) or by project, after **Needs
-  you** and **Done**, which come first whatever the grouping.
+  The switch beside your streak (`o`) orders them instead by **Priority** or by
+  **Last**, the newest answer on top.
 - **Tasks**: your own (your loops file: due now, waiting on others, this week,
   further out, someday), each with **Follow up** (your assistant drafts the
   message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
@@ -310,7 +310,7 @@ host's chats without anything else installed.
   `←`) back and out of it, `Esc` out at once, `Enter` presses the button you're on,
   `1`-`9` pick the card's answer, `x` completes its mission (with Undo; a task's
   Done), `r` opens what a done chat made (Review), `s` marks it seen, `Tab` is
-  Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Group & sort, `?` all the keys.
+  Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Groups, Priority or Last, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot
@@ -420,7 +420,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 
 On the board, plain keys move and act (`j` / `k`, `Enter`, `x`…: see the board
 above, or `?`). Every menu takes the keys: a chat's menu (its •••), closing
-one, settings, the group & sort menu, the order of your projects, the project for a
+one, settings, the order of your projects, the project for a
 new chat, Claude's questions, and the phone's list itself. `↑`/`↓` go from line to
 line (buttons side by side, as High · Normal · Low, are one line: `←`/`→` go along
 it), `Home`/`End` to the ends, `↵` or `Space` picks, `Tab` stays inside, `Esc`
@@ -1042,9 +1042,7 @@ amarchy run <name>                    run another saved command of the project, 
 amarchy run --save <name> <command>   save one; --forget <name> drops it
 amarchy run --list                    the project's saved commands, name and command
 amarchy priority [high|normal|low|up|down] [--id <id>]   how much it matters (prints it without a level)
-amarchy group [project|priority|status] [on|off]         group the list (switches without on|off)
-amarchy group <grouping> <grouping>...                   group by these, nested in this order
-amarchy sort [priority|newest|oldest]                    sort the list inside its groups
+amarchy sort [groups|priority|last]   how the chats are ordered, the switch beside your streak
 amarchy sleep [id] [--force]          put a session to sleep (says why not when something would be lost)
 amarchy sleep --all [--force]         every session that can sleep, except those open on a phone or in a browser
 amarchy sleep --after [minutes|off]   how long an idle session waits before it sleeps on its own (default 1)
