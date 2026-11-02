@@ -138,7 +138,7 @@ function tavernBack(name) {
     `<rect width="1600" height="110" fill="url(#tvw)"/>`];
   // Lantern light on the wall, first: everything else stands in it.
   const lamps = [230, 820, 1410];
-  for (const x of lamps) out.push(`<ellipse cx="${x}" cy="46" rx="190" ry="90" fill="url(#tvl)"/>`);
+  for (const x of lamps) out.push(`<ellipse cx="${x}" cy="62" rx="190" ry="90" fill="url(#tvl)"/>`);
   // The beam and posts.
   out.push(`<rect width="1600" height="12" fill="#1e130d"/><rect y="12" width="1600" height="2" fill="#4a2a16"/>`);
   for (let x = 400; x < 1600; x += 400) out.push(`<rect x="${x}" y="14" width="14" height="96" fill="#160e0a"/><rect x="${x + 11}" y="14" width="3" height="96" fill="#3a2214"/>`);
@@ -161,8 +161,9 @@ function tavernBack(name) {
     }
   }
   // The lanterns.
-  for (const x of lamps) out.push(`<g class="tv-lamp"><path d="M${x} 14 L${x} 28" stroke="#0b0706" stroke-width="2"/><path d="M${x - 9} 30 L${x + 9} 30 L${x + 7} 52 L${x - 7} 52 Z" fill="#ffcf7a"/>`
-    + `<path d="M${x - 9} 30 L${x + 9} 30 L${x + 7} 52 L${x - 7} 52 Z M${x} 30 L${x} 52" fill="none" stroke="#2a1608" stroke-width="2.4"/><path d="M${x - 11} 28 L${x + 11} 28 L${x + 8} 32 L${x - 8} 32 Z M${x - 8} 52 L${x + 8} 52 L${x + 6} 56 L${x - 6} 56 Z" fill="#2a1608"/></g>`);
+  // (hung low, on long chains: only the chain behind the crew's name and tally)
+  for (const x of lamps) out.push(`<g class="tv-lamp"><path d="M${x} 14 L${x} 54" stroke="#0b0706" stroke-width="2"/><path d="M${x - 8} 56 L${x + 8} 56 L${x + 6} 74 L${x - 6} 74 Z" fill="#ffcf7a"/>`
+    + `<path d="M${x - 8} 56 L${x + 8} 56 L${x + 6} 74 L${x - 6} 74 Z M${x} 56 L${x} 74" fill="none" stroke="#2a1608" stroke-width="2.2"/><path d="M${x - 10} 54 L${x + 10} 54 L${x + 7} 58 L${x - 7} 58 Z M${x - 7} 74 L${x + 7} 74 L${x + 5} 78 L${x - 5} 78 Z" fill="#2a1608"/></g>`);
   return `<svg class="tv-back" viewBox="0 0 1600 110" preserveAspectRatio="xMinYMin slice" aria-hidden="true">${out.join("")}</svg>`;
 }
 

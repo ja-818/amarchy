@@ -8,10 +8,11 @@
 /* Wider than the cards' column on a computer: crews side by side, each as
    wide as its crew, as many to a row as fit. */
 .board-scroll .today.tavern { max-width: calc(var(--page-width) + 400px); }
-.tavern-hall { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.tavern-hall { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; align-items: flex-start; }
 .tv-crew {
-  position: relative; isolation: isolate; overflow: hidden; box-sizing: border-box; min-width: min(100%, 300px); max-width: 100%;
-  flex: 0 1 auto;
+  position: relative; isolation: isolate; overflow: hidden; box-sizing: border-box; min-width: min(100%, 300px);
+  /* Growing to fill its row, both edges on the page's; but not so far that a small crew is lost in its room. */
+  flex: 1 1 auto; max-width: min(100%, calc((var(--seats, 1) + 1) * var(--tavern-seat-w) * 1.7 + 40px));
   border-radius: var(--tavern-radius); background: #0b0706; color: var(--tavern-bone);
   border: 1px solid color-mix(in srgb, var(--ph) 30%, #2a1a10);
   box-shadow: 0 10px 30px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 200 140 / .06);
@@ -45,7 +46,7 @@
 
 /* The table: the crew side by side, their table one long one (each
    portrait's own, edge to edge), on the hall's dark. */
-.tv-table { position: relative; z-index: 2; display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; padding: 4px 8px 6px; }
+.tv-table { position: relative; z-index: 2; display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; padding: 4px 8px 6px; }
 /* One room for the crew: each one's candle warming the dark round them
    (a glow a seat wide, at its candle, fading into the next one's), the
    back wall warmer toward the table. No edges between them. */
@@ -79,8 +80,7 @@
 @media (max-width: 719px) {
   :root { --tavern-seat-w: 108px; }
   .tavern-hall { gap: 12px; }
-  .tv-crew { flex: 1 1 100%; width: 100%; }
-  .tv-table { justify-content: center; }
+  .tv-crew { flex: 1 1 100%; width: 100%; max-width: 100%; }
   .tv-tally { margin-left: 0; flex-basis: 100%; }
   .tv-table { padding: 2px 2px 4px; }
 }
