@@ -6,9 +6,6 @@
 .today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0;
                  display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .today-summary-text { min-width: 0; }
-/* How the chats are ordered, beside your streak: quieter than the bar's tabs. */
-.today-sort { min-width: 0; }
-.today-sort .control { font-size: var(--caption); padding: 0 10px; }
 .today-clear { margin: 2px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
 .today-clear .glyph { color: var(--success); }
 .today-note { margin: 6px 2px 0; font-size: var(--caption); color: var(--text-muted); }

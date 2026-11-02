@@ -1694,10 +1694,10 @@ async function setPriority(s, dir) {
   if (!s) return;
   const at = LEVELS.indexOf(s.priority || "normal");
   const level = LEVELS[Math.max(0, Math.min(2, at + (dir === "up" ? 1 : -1)))];
-  if (level === (s.priority || "normal")) return toast(`${PRIORITY[level]} priority already`);
+  if (level === (s.priority || "normal")) return toast(`${PRIORITY[level]} already`);
   try {
     await priorityNow(s, level);
-    toast(`${s.task || s.name}: ${PRIORITY[level]} priority`);
+    toast(`${s.task || s.name}: ${PRIORITY[level]}`);
   } catch (e) { /* said */ }
 }
 
@@ -1809,7 +1809,7 @@ function sessionItems(s) {
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
       act: () => assistantSheet(s) },
-    ...LEVELS.slice().reverse().map((p) => ({ label: `${PRIORITY[p]} priority`, detail: on((s.priority || "normal") === p),
+    ...LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
                                                 act: () => priorityNow(s, p).catch(() => {}) })),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
@@ -1840,7 +1840,7 @@ function showKeys() {
       ["1 – 4", "Pick that answer on the card"],
       ["x", "Complete the chat's mission, with Undo"], ["r", "Review: open the link a done chat gave"],
       ["s", "Seen: off Needs you without opening it"],
-      ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Groups, Priority, Last"], ["?", "These keys"]]),
+      ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
     ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
       ["i", "Write: the box"], ["Esc", "Out of the box or the message; again: back to the board"], ["Tab", "Brief / Chat"],
@@ -1852,7 +1852,7 @@ function showKeys() {
       ["Ctrl+Alt+Space / Enter", "Dictate: hold, or tap and tap again"], ["⌘V / drop", "A picture goes with your message"]]),
     ...part("Anywhere", [["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+A", "Go to a chat"], ["Ctrl+Alt+S", "Search"],
       ["Ctrl+Alt+H", "The board"], ["Ctrl+Alt+X", "Complete the chat's mission"], ["Ctrl+Alt+E", "Rename"],
-      ["Ctrl+Alt+↑ / ↓", "Raise / lower priority"], ["Ctrl+Alt+M", "Amarchy menu"], ["Ctrl+Alt+T", "Theme, font and wallpaper"]]));
+      ["Ctrl+Alt+↑ / ↓", "Pin / for later, a step"], ["Ctrl+Alt+M", "Amarchy menu"], ["Ctrl+Alt+T", "Theme, font and wallpaper"]]));
 }
 
 // Settings that are this browser's own (the rest is in app.js's sheet).
