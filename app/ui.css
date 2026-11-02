@@ -475,15 +475,6 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @keyframes ui-pirate-hop { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -4px); } }
 @keyframes ui-pirate-zz { 0% { opacity: 0; transform: translate(-30%, 6px); } 30%, 70% { opacity: .9; } 100% { opacity: 0; transform: translate(-70%, -8px); } }
 
-.ui-pirate-say {
-  position: absolute; z-index: 2; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); width: max-content; max-width: min(220px, 90vw);
-  padding: 6px 9px; border-radius: var(--radius-card); background: var(--surface); color: var(--text); border: 1px solid var(--border-menu, var(--border));
-  font-size: var(--caption); line-height: 1.35; text-align: left; box-shadow: 0 6px 18px rgb(0 0 0 / .25);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none;
-  opacity: 0; transition: opacity .12s;
-}
-@media (hover: hover) { .ui-pirate:hover .ui-pirate-say { opacity: 1; } }
-.keyed .ui-pirate.ui-sel .ui-pirate-say, .ui-pirate-go:focus-visible .ui-pirate-say { opacity: 1; }
 
 /* Your move (it asks you, it's stuck, it has something to show you, it's
    done): a glow of its tone behind them and their place at the table lit

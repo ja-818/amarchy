@@ -778,9 +778,11 @@ around (a long one scrolls inside), **its card**, the one from the Chats tab, in
 gold: the whole of what the first one waiting asks, with its answers (a permission's
 **Allow** and **Deny**), to answer right there; answered, the next one's comes up.
 Whoever's move is yours glows behind them, and the one the card is from stands in a
-lantern's light. A click on one with something for you (a done one's **Complete**,
-what a new one said) shows theirs; a click on the one showing, or on anyone else,
-opens their chat; held down (a right click), its menu. The whole card opens it too.
+lantern's light. Pointing at anyone, at work or asleep too, shows their card there
+(what they're at, what they last said) until the pointer leaves the crew, and a click
+opens their chat. On a phone, a tap on one with something for you shows theirs, and
+a tap on the one showing, or on anyone else, opens their chat. Held down (a right
+click), its menu. The whole card opens it too.
 The keys are the board's: `j` / `k` from pirate to pirate (the card follows),
 `1`-`9` answer it, `l` goes along its buttons, `Enter` opens the chat, `x` completes a done
 one, `s` marks one seen. The empty chair at the end of a table (**Recruit**) starts a new chat in that project. Everyone

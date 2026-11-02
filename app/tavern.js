@@ -23,6 +23,7 @@ const tavern = {
   poses: new Map(),   // a chat's pose when last drawn: id -> pose (one just done cheers)
   cheer: new Map(),   // a chat that just got done: id -> until when its gold flies
   open: new Map(),    // the card you asked for at each table: repo -> the chat's id
+  peek: null,         // the pirate you're pointing at (or the keys are on): {repo, id, keys}
 };
 
 // Each table's stools in order, the same from one time to the next: repo ->
@@ -67,18 +68,6 @@ function tavernPose(s, p) {
 // A mark over their head where it's your move (the drawing says the rest).
 const TAVERN_MARKS = { ask: "?", blocked: "!", fresh: "★", done: "✓" };
 
-// What they say, in their bubble.
-function tavernSay(s, pose) {
-  const t = s.today || {};
-  const q = ((t.asks || [])[0] || {}).question;
-  if (pose === "ask") return (s.secret_asks || []).length ? "Asks you for a secret" : s.asks || q || "Needs your answer";
-  if (pose === "run") return s.running ? `Running · ${s.running}` : "Running";
-  if (pose === "done") return t.goal ? `Done: ${t.goal}` : "Done";
-  if (pose === "sleep") return "Asleep";
-  if (pose === "arrive") return "Setting up…";
-  return s.said || t.goal || "";
-}
-
 // Who just got done (seen otherwise last time, done now): they cheer a
 // moment. Before the tavern is drawn (tavernKey), so what it shows says so.
 function tavernTrack() {
@@ -115,17 +104,18 @@ function tavernPirate(s, p, kind, talking) {
   const pose = tavernPose(s, p);
   const cheer = tavern.cheer.has(s.id);
   const title = barkeep ? s.assistant_name || "Assistant" : s.task || "New chat";
-  // With a card, a click shows it; on the one showing (or with the keys, or
-  // with nothing to show), the chat.
+  // With a card, a tap shows it; on the one showing (pointed at, with a
+  // mouse), or with the keys, or with nothing to show, the chat.
   const open = (e) => {
-    if (!TAVERN_CARDS.includes(pose) || talking || !e || !e.detail) return todayOpen(s);
+    if (!TAVERN_CARDS.includes(pose) || n.matches(".talking") || !e || !e.detail) { tavern.peek = null; return todayOpen(s); }
     tavern.open.set(s.repo, s.id);
-    todayFill(board.box);
+    tavernShowOn(n.closest(".tv-crew"), s.id, todayParts(app.view));
   };
-  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: { kind }, pose, mark: TAVERN_MARKS[pose] || "", say: talking ? "" : tavernSay(s, pose),
+  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: { kind }, pose, mark: TAVERN_MARKS[pose] || "",
                        title, pill: todayStatePill(s), cheer, open, label: `${title}: ${statusWords(s) || pose}` });
   if (talking) n.classList.add("talking");
-  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer, kind, talking]);
+  n.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") tavernPeek(n); });
+  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer, kind]);
   return n;
 }
 
@@ -137,6 +127,8 @@ function tavernPirate(s, p, kind, talking) {
 // Review and Complete, what a new one said. Its asks come by themselves, the
 // first that's waiting; answered, the next. A click on a pirate with
 // something to show (or j / k) shows theirs; the keys answer it (tasks.js).
+// Pointing at any pirate shows theirs, working or not (what it's at, what it
+// last said), until the pointer leaves the crew: all a crew says is here.
 
 const TAVERN_CARDS = ["ask", "blocked", "fresh", "done"];
 
@@ -144,6 +136,10 @@ const TAVERN_CARDS = ["ask", "blocked", "fresh", "done"];
 // the first that asks you, the first that's stuck; else none.
 function tavernShown(repo, people, p) {
   const poses = new Map(people.map((s) => [s.id, tavernPose(s, p)]));
+  // Pointed at, still (drawn again as the list changes, it stays), unless just answered: then the next.
+  const peek = tavern.peek;
+  if (peek && peek.repo === repo && poses.has(peek.id) && !todayUI.sent.has(peek.id)
+      && (peek.keys || document.querySelector(`.tv-crew[data-crew="${CSS.escape(repo)}"]:hover`))) return peek.id;
   const picked = tavern.open.get(repo);
   if (picked && TAVERN_CARDS.includes(poses.get(picked))) return picked;
   const first = (pose) => (people.find((s) => poses.get(s.id) === pose) || {}).id;
@@ -151,9 +147,39 @@ function tavernShown(repo, people, p) {
 }
 
 function tavernCard(s, p) {
-  const n = p.asks.includes(s) ? todayAsk(s) : p.blocked.includes(s) ? todayBlocked(s) : todayChat(s, p.fresh.includes(s) ? "fresh" : "done");
+  const n = p.asks.includes(s) ? todayAsk(s) : p.blocked.includes(s) ? todayBlocked(s)
+    : todayChat(s, s === p.main ? "assistant" : p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready");
   n.todayData = todayRowKey(s);
   return n;
+}
+
+// The place under the table shows this pirate's card, and they stand in the
+// lantern's light. In place: no redraw, their animations go on.
+function tavernShowOn(crew, id, p) {
+  const s = rowOf(id);
+  const say = crew.querySelector(".tv-say");
+  if (!say) return;
+  const card = s ? tavernCard(s, p) : null;
+  say.replaceChildren(card || h("p", { class: "tv-say-none" }, "Nothing for you here"));
+  crew.querySelectorAll(".ui-pirate.talking").forEach((x) => x.classList.remove("talking"));
+  if (card) { const on = crew.querySelector(`.ui-pirate[data-id="${CSS.escape(id)}"]`); if (on) on.classList.add("talking"); }
+}
+
+// Pointing at a pirate (or the keys on one): their card, whoever they are.
+function tavernPeek(pirate, keys = false) {
+  const crew = pirate.closest(".tv-crew");
+  if (!crew || !app.view) return;
+  tavern.peek = { repo: crew.dataset.crew, id: pirate.dataset.id, keys };
+  tavernShowOn(crew, pirate.dataset.id, todayParts(app.view));
+}
+
+// The pointer gone from the crew: back to whose card the table shows.
+function tavernHome(crew) {
+  tavern.peek = null;
+  if (!app.view || !crew.isConnected) return;
+  const p = todayParts(app.view);
+  const people = [...crew.querySelectorAll(".ui-pirate[data-id]")].map((x) => rowOf(x.dataset.id)).filter(Boolean);
+  tavernShowOn(crew, tavernShown(crew.dataset.crew, people, p), p);
 }
 
 // What the keys press on a pirate: the buttons on the card they're showing.
@@ -162,14 +188,14 @@ function tavernBody(card) {
   return card.closest(".tv-crew").querySelector(".tv-say .tcard") || card;
 }
 
-// The keys on a pirate with a card: it shows.
+// The keys on a pirate: their card shows.
 function tavernFollow(stop) {
   const pirate = stop.closest(".ui-pirate[data-id]");
-  if (!pirate || pirate.matches(".talking") || !TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return;
+  if (!pirate || pirate.matches(".talking")) return;
+  if (!TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return tavernPeek(pirate, true);
+  tavern.peek = null;
   tavern.open.set(pirate.closest(".tv-crew").dataset.crew, pirate.dataset.id);
-  todayFill(board.box);
-  const lit = board.box.querySelector(`.ui-pirate[data-id="${CSS.escape(pirate.dataset.id)}"] > .today-go`);
-  if (lit) lit.focus({ preventScroll: true });
+  tavernShowOn(pirate.closest(".tv-crew"), pirate.dataset.id, todayParts(app.view));
 }
 
 // ---- the hall, drawn as the crew are: a noir comic's ink
@@ -255,7 +281,8 @@ function tavernCrew(repo, people, p, name = projectName(repo)) {
   const kinds = tavernKinds(people.map((x) => x.id));
   const shown = tavernShown(repo, people, p);
   const card = shown ? tavernCard(people.find((x) => x.id === shown), p) : null;
-  return h("section", { class: `tv-crew ph-${todayHue(repo)}`, "data-crew": repo, style: `--seats:${people.length}` },
+  return h("section", { class: `tv-crew ph-${todayHue(repo)}`, "data-crew": repo, style: `--seats:${people.length}`,
+                         onpointerleave: (e) => { if (e.pointerType === "mouse") tavernHome(e.currentTarget); } },
     h("span", { class: "tv-wall", html: tavernBack(repo) }), tavernAir(),
     h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, name, h("span", { class: "tv-count" }, String(people.length))),
       h("span", { class: "tv-tally" }, ...tavernTally(people.map((x) => tavernPose(x, p))))),
