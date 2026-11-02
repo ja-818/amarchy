@@ -20,6 +20,7 @@
 // - uiTool: a tool's icon button in a bar.
 // - uiScore: your score in a word or two (the streak's flame, today's
 //   missions against your goal, a ring); a tap opens the rest.
+// - spinner (app.js, drawn in ui.css): something at work.
 // - uiProgress: progress to something (a rank's to the next).
 // - uiStepper: a number to pick, with − and + (your daily goal).
 // - uiBadges: badges, earned and to earn.
@@ -226,7 +227,7 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
 // accent, warn, quiet). working and running spin. long: words that may not fit, cut
 // short with "…" (all of them on hover).
 function uiPill(text, tone, { long = false, title = null } = {}) {
-  const wheel = tone === "working" || tone === "running" ? h("span", { class: "spinner spin" }, SPINNER[spin.frame]) : null;
+  const wheel = tone === "working" || tone === "running" ? spinner() : null;
   return h("span", { class: `tpill t-${tone}${long ? " long" : ""}`, title: title || (long ? text : null) },
     wheel, long ? h("span", { class: "tpill-text" }, text) : text);
 }

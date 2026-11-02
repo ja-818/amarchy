@@ -134,6 +134,34 @@ html { touch-action: manipulation; }
 .tcard-title .task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tcard-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
 .tcard-what.open { display: block; }
+/* The spinner: six dots drawn here, not a character, whose place in its line
+   is each font's own. In whole pixels, as far apart as they're wide: crisp at
+   any size, in the middle of its box. A frame changes eleven times a second:
+   in a box of its own, nothing around it is laid out again. */
+.spinner { flex: none; width: 18px; color: var(--accent); }
+.spin {
+  display: inline-grid; place-items: center; contain: layout style;
+  --dot: .16em;
+  --d1: linear-gradient(currentColor 0 0) 0 0 / var(--dot) var(--dot) no-repeat;
+  --d2: linear-gradient(currentColor 0 0) 0 calc(2 * var(--dot)) / var(--dot) var(--dot) no-repeat;
+  --d3: linear-gradient(currentColor 0 0) 0 calc(4 * var(--dot)) / var(--dot) var(--dot) no-repeat;
+  --d4: linear-gradient(currentColor 0 0) calc(2 * var(--dot)) 0 / var(--dot) var(--dot) no-repeat;
+  --d5: linear-gradient(currentColor 0 0) calc(2 * var(--dot)) calc(2 * var(--dot)) / var(--dot) var(--dot) no-repeat;
+  --d6: linear-gradient(currentColor 0 0) calc(2 * var(--dot)) calc(4 * var(--dot)) / var(--dot) var(--dot) no-repeat;
+}
+@supports (width: round(1em, 1px)) { .spin { --dot: max(2px, round(.16em, 1px)); } }
+.spin::before { content: ""; width: calc(3 * var(--dot)); height: calc(5 * var(--dot)); }
+.spin[data-f="0"]::before { background: var(--d1), var(--d2), var(--d4); }
+.spin[data-f="1"]::before { background: var(--d1), var(--d4), var(--d5); }
+.spin[data-f="2"]::before { background: var(--d1), var(--d4), var(--d5), var(--d6); }
+.spin[data-f="3"]::before { background: var(--d4), var(--d5), var(--d6); }
+.spin[data-f="4"]::before { background: var(--d3), var(--d4), var(--d5), var(--d6); }
+.spin[data-f="5"]::before { background: var(--d3), var(--d5), var(--d6); }
+.spin[data-f="6"]::before { background: var(--d2), var(--d3), var(--d6); }
+.spin[data-f="7"]::before { background: var(--d1), var(--d2), var(--d3), var(--d6); }
+.spin[data-f="8"]::before { background: var(--d1), var(--d2), var(--d3); }
+.spin[data-f="9"]::before { background: var(--d1), var(--d2), var(--d3), var(--d4); }
+
 /* Where it stands: the reply card's badge. */
 .tpill {
   flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--caption); font-weight: 700; padding: 2px 9px;
@@ -146,7 +174,7 @@ html { touch-action: manipulation; }
 .tpill.t-working, .tpill.t-running, .tpill.t-accent { --pill: var(--accent); }
 .tpill.t-warn { --pill: var(--warn, var(--warning)); }
 .tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
-.tpill .spinner { line-height: 1; }
+.tpill .spinner { width: auto; }
 /* Words that may not fit (Running · what runs): cut short with … */
 .tpill.long { flex: 0 1 auto; min-width: 0; max-width: 50%; }
 .tpill.long .tpill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

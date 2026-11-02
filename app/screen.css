@@ -334,7 +334,7 @@ li.open > .answer-toggle .pt-text { text-decoration: none; }
   border-radius: 50%; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
 }
 .act-node .ic, .act-node svg { display: block; width: 13px; height: 13px; }
-.act-node .spinner { font-size: 13px; line-height: 1; color: var(--accent); }
+.act-node .spinner { font-size: 13px; color: var(--accent); }
 .act-fold .act-node { color: var(--text); }
 .act-fold.failed .act-node { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
 .act-fold.going .act-node, .act-now .act-node { border-color: var(--accent); }
