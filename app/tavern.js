@@ -8,8 +8,9 @@
 // they sit says where it stands: plotting on a map while it works, a swig
 // while the hourglass runs, up with a hand raised when it asks you, the
 // grog raised over a chest of gold when it's done, head on the table
-// asleep. A click (Enter) on one opens their chat; held down (a right
-// click), its menu; x completes a done one, as on the Chats tab. The empty
+// asleep. A click on one with something for you shows it on the
+// table's card; on any other, or again (or Enter), their chat; held down (a
+// right click), its menu; x completes a done one, as on the Chats tab. The empty
 // chair at the end of each table recruits: a new chat in that project.
 //
 // Everyone keeps their place at the table (tavernSeats, kept in this
@@ -21,6 +22,7 @@ const TAVERN_CHEER = 2500;          // ms a chat that just got done cheers
 const tavern = {
   poses: new Map(),   // a chat's pose when last drawn: id -> pose (one just done cheers)
   cheer: new Map(),   // a chat that just got done: id -> until when its gold flies
+  open: new Map(),    // the card you asked for at each table: repo -> the chat's id
 };
 
 // Each table's stools in order, the same from one time to the next: repo ->
@@ -108,18 +110,65 @@ function tavernKinds(ids) {
   return out;
 }
 
-function tavernPirate(s, p, barkeep = false, kind = uiLook(s.id).kind) {
+function tavernPirate(s, p, kind, talking) {
+  const barkeep = s.assistant === "main";
   const pose = tavernPose(s, p);
   const cheer = tavern.cheer.has(s.id);
-  const actions = [];
-  if (pose === "ask" && s.permission) actions.push(uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"));
-  if (pose === "done" && !barkeep) actions.push(uiButton("Complete", () => todayComplete(s), false, "complete"));
   const title = barkeep ? s.assistant_name || "Assistant" : s.task || "New chat";
-  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: { kind }, pose, mark: TAVERN_MARKS[pose] || "", say: tavernSay(s, pose),
-                       title, pill: todayStatePill(s), lead: barkeep ? avatar(s, "small") : null, cheer, actions,
-                       open: () => todayOpen(s), label: `${title}: ${statusWords(s) || pose}` });
-  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer, kind]);
+  // With a card, a click shows it; on the one showing (or with the keys, or
+  // with nothing to show), the chat.
+  const open = (e) => {
+    if (!TAVERN_CARDS.includes(pose) || talking || !e || !e.detail) return todayOpen(s);
+    tavern.open.set(s.repo, s.id);
+    todayFill(board.box);
+  };
+  const n = uiPirate({ id: s.id, hue: todayHue(s.repo), look: { kind }, pose, mark: TAVERN_MARKS[pose] || "", say: talking ? "" : tavernSay(s, pose),
+                       title, pill: todayStatePill(s), cheer, open, label: `${title}: ${statusWords(s) || pose}` });
+  if (talking) n.classList.add("talking");
+  n.todayData = JSON.stringify([todayRowKey(s), pose, cheer, kind, talking]);
   return n;
+}
+
+// ---- what a pirate has for you, on the table's card
+//
+// Each table shows one card under it, the Chats tab's own: the whole
+// question and its answers (a permission's Allow and Deny...), a done one's
+// Review and Complete, what a new one said. Its asks come by themselves, the
+// first that's waiting; answered, the next. A click on a pirate with
+// something to show (or j / k) shows theirs; the keys answer it (tasks.js).
+
+const TAVERN_CARDS = ["ask", "blocked", "fresh", "done"];
+
+// Whose card the table shows: the one you asked for while it has one, else
+// the first that asks you, the first that's stuck; else none.
+function tavernShown(repo, people, p) {
+  const poses = new Map(people.map((s) => [s.id, tavernPose(s, p)]));
+  const picked = tavern.open.get(repo);
+  if (picked && TAVERN_CARDS.includes(poses.get(picked))) return picked;
+  const first = (pose) => (people.find((s) => poses.get(s.id) === pose) || {}).id;
+  return first("ask") || first("blocked") || null;
+}
+
+function tavernCard(s, p) {
+  const n = p.asks.includes(s) ? todayAsk(s) : p.blocked.includes(s) ? todayBlocked(s) : todayChat(s, p.fresh.includes(s) ? "fresh" : "done");
+  n.todayData = todayRowKey(s);
+  return n;
+}
+
+// What the keys press on a pirate: the buttons on the card they're showing.
+function tavernBody(card) {
+  if (!card || !card.matches(".ui-pirate.talking")) return card;
+  return card.closest(".tv-crew").querySelector(".tv-say .tcard") || card;
+}
+
+// The keys on a pirate with a card: it shows.
+function tavernFollow(stop) {
+  const pirate = stop.closest(".ui-pirate[data-id]");
+  if (!pirate || pirate.matches(".talking") || !TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return;
+  tavern.open.set(pirate.closest(".tv-crew").dataset.crew, pirate.dataset.id);
+  todayFill(board.box);
+  const lit = board.box.querySelector(`.ui-pirate[data-id="${CSS.escape(pirate.dataset.id)}"] > .today-go`);
+  if (lit) lit.focus({ preventScroll: true });
 }
 
 // ---- the hall, drawn as the crew are: a noir comic's ink
@@ -199,22 +248,18 @@ function tavernRecruit(repo) {
 }
 
 // A crew: its wall behind, its flag and name and what it's up to, its
-// table, its pirates in a row, and the empty chair that recruits.
-function tavernCrew(repo, pirates, hue, poses, name = projectName(repo)) {
-  const recruit = tavernRecruit(repo);
-  return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length}` },
+// table, its pirates in a row, the empty chair that recruits; under them,
+// the table's card.
+function tavernCrew(repo, people, p, name = projectName(repo)) {
+  const kinds = tavernKinds(people.map((x) => x.id));
+  const shown = tavernShown(repo, people, p);
+  const card = shown ? tavernCard(people.find((x) => x.id === shown), p) : null;
+  return h("section", { class: `tv-crew ph-${todayHue(repo)}`, "data-crew": repo, style: `--seats:${people.length}` },
     h("span", { class: "tv-wall", html: tavernBack(repo) }), tavernAir(),
-    h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, name, h("span", { class: "tv-count" }, String(pirates.length))),
-      h("span", { class: "tv-tally" }, ...tavernTally(poses))),
-    h("div", { class: "tv-table" }, ...pirates, recruit));
-}
-
-// Your assistant's crew: a crew as the others, under its name, your
-// assistant first and the rest of its project's chats (its missions).
-function tavernOwnCrew(main, mates, p) {
-  const kinds = tavernKinds([main.id, ...mates.map((s) => s.id)]);
-  return tavernCrew(main.repo, [tavernPirate(main, p, true, kinds.get(main.id)), ...mates.map((s) => tavernPirate(s, p, false, kinds.get(s.id)))],
-                    todayHue(main.repo), [main, ...mates].map((s) => tavernPose(s, p)), main.assistant_name || projectName(main.repo));
+    h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, name, h("span", { class: "tv-count" }, String(people.length))),
+      h("span", { class: "tv-tally" }, ...tavernTally(people.map((x) => tavernPose(x, p))))),
+    h("div", { class: "tv-table" }, ...people.map((x) => tavernPirate(x, p, kinds.get(x.id), x.id === shown)), tavernRecruit(repo)),
+    h("div", { class: "tv-say", hidden: !card }, card));
 }
 
 // The tavern, for the board's box (today.js todayFill, its Tavern tab):
@@ -233,29 +278,22 @@ function tavernNodes() {
   const byId = new Map(rest.map((s) => [s.id, s]));
   // Each crew where it always is (your projects' order): what needs you
   // is in its head and rings, not in crews trading places.
-  const drawn = crews.map(([repo]) => {
-    const ids = seats[repo].filter(Boolean);      // the seats' order; a free one in between takes no room
-    return { repo, ids, poses: ids.map((id) => tavernPose(byId.get(id), p)) };
-  });
+  const drawn = crews.map(([repo]) => ({ repo, people: seats[repo].filter(Boolean).map((id) => byId.get(id)) }));      // the seats' order; a free one in between takes no room
   const nodes = [h("div", { class: "today-summary" }, h("span", { class: "today-summary-text" }, todaySummary(v, "chats")), missionScore())];
   const hall = [];
-  // Your assistant's project's chats are in its crew.
+  // Your assistant's project's chats are in its crew: its crew first, under its name.
   const own = main ? drawn.find((c) => c.repo === main.repo) : null;
-  if (main) hall.push(tavernOwnCrew(main, own ? own.ids.map((id) => byId.get(id)) : [], p));
-  for (const c of drawn) {
-    if (c === own) continue;
-    const kinds = tavernKinds(c.ids);
-    hall.push(tavernCrew(c.repo, c.ids.map((id) => tavernPirate(byId.get(id), p, false, kinds.get(id))), todayHue(c.repo), c.poses));
-  }
+  if (main) hall.push(tavernCrew(main.repo, [main, ...(own ? own.people : [])], p, main.assistant_name || projectName(main.repo)));
+  for (const c of drawn) if (c !== own) hall.push(tavernCrew(c.repo, c.people, p));
   if (!hall.length) hall.push(h("p", { class: "today-clear" }, "The tavern's empty: start a chat and a pirate takes a seat."));
   nodes.push(h("div", { class: "tavern-hall" }, ...hall));
   return nodes;
 }
 
-// What the tavern shows besides the chats: who cheers.
+// What the tavern shows besides the chats: who cheers, whose card you asked for.
 function tavernKey() {
   tavernTrack();
-  return [...tavern.cheer.keys()].join();
+  return JSON.stringify([[...tavern.cheer.keys()], [...tavern.open]]);
 }
 
 // A cheer ended: drawn again, while it shows.

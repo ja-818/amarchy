@@ -165,7 +165,7 @@ function boardMarkIn(nodes) {
 // What j / k go through: each card in sight (its head), and the head of a
 // group that folds (Enter unfolds it).
 function boardStops() {
-  return [...board.box.querySelectorAll(".tcard > .today-go, details.tsec > summary")].filter(shown);
+  return [...board.box.querySelectorAll(".tcard > .today-go, details.tsec > summary")].filter((x) => shown(x) && !x.closest(".tv-say"));      // (a pirate's card: the pirate is the stop, tavern.js)
 }
 
 // The keys to a card (its head), in sight.
@@ -209,12 +209,13 @@ function boardKeys(e) {
   const focused = at >= 0;
   if (!focused) at = stops.indexOf(boardSel());
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
-  const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
-  const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
+  const to = (i) => { e.preventDefault(); const stop = stops[Math.max(0, Math.min(stops.length - 1, i))]; boardFocus(stop); if (board.tab === "tavern") tavernFollow(stop); };
+  const body = tavernBody(card);      // (a pirate's buttons are on the table's card)
+  const press = (sel) => { const b = body && [...body.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
   const k = e.key;
   // A card is a row: l (→) goes into it, along its buttons; h (←) back,
   // out of it from its first; Esc out at once. Enter presses the one you're on.
-  const inside = cardInside(card);
+  const inside = cardInside(body);
   // On a button in it, or the focus off it: the one lit in it (uiInner).
   let on = inside.indexOf(document.activeElement);
   if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(card, inside));
@@ -251,7 +252,7 @@ function boardKeys(e) {
   }
   else if (!card) return;
   else if (/^[1-9]$/.test(k)) {
-    const o = card.querySelectorAll(".today-opt")[Number(k) - 1];
+    const o = body.querySelectorAll(".today-opt")[Number(k) - 1];
     if (o) { e.preventDefault(); o.click(); }
   } else if (k === "x") {
     const s = card.dataset.id && row(card.dataset.id);

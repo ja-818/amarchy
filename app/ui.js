@@ -397,7 +397,8 @@ function uiMenu(title, items) {
 //
 // A chat as a pirate in the tavern, sat at their crew's long table: one of
 // the crew (uiCrewArt, below), in their crew's color (hue), posed as it
-// stands (pose: see the crew), a mark over their head, what they say.
+// stands (pose: see the crew), a mark over their head, what they say; under
+// them, at one height, their name and where they stand.
 // Like a card (uiCard) it's an article.tcard with the chat's id and a head
 // (.today-go) that opens it: the board's keys, its lit one, x and s, work on
 // a pirate as on a card.
@@ -682,26 +683,21 @@ const UI_CREW = [
   { id: 10, name: "The Ghost", what: "A skull under the hood, a green glint in its eyes, a parrot", hat: "hood", ghost: true, skin: "ghost", parrot: true },
 ];
 
-// What floats over their head: a mark (? ! ✓ z…), and what they say, in a
-// bubble (always for what asks you; for the rest under the pointer or the
-// keys). cheer: they just got done, gold and confetti.
-function uiPirate({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "", say = "", title, pill = null, lead = null,
-                    actions = [], open, label = "", cheer = false, vacant = false }) {
+// What floats over their head: a mark (? ! ✓ ★), and what they say, in a
+// bubble under the pointer or the keys. cheer: they just got done, gold and
+// confetti.
+function uiPirate({ id = null, hue = 0, look, pose = "idle", mark = "", tone = "", say = "", title, pill = null, open, label = "", cheer = false }) {
   const art = h("span", { class: "ui-pirate-art", html: uiCrewArt(UI_CREW[look.kind], pose) });
-  if (vacant) return h("div", { class: `ui-pirate vacant ph-${hue}`, "aria-hidden": "true" }, h("span", { class: "ui-pirate-go" }, h("span", { class: "ui-pirate-scene" }, art)));
   const bubble = mark ? h("span", { class: `ui-pirate-mark t-${tone || pose}`, "aria-hidden": "true" }, mark) : null;
-  const pinned = !!say && (pose === "ask" || pose === "blocked");
-  const talk = say ? h("span", { class: `ui-pirate-say${pinned ? " pinned" : ""}` }, pinned ? h("span", { class: "ui-pirate-say-text" }, say) : say) : null;
+  const talk = say ? h("span", { class: "ui-pirate-say" }, say) : null;
   const confetti = cheer ? h("span", { class: "ui-confetti", "aria-hidden": "true" }, ...Array.from({ length: 16 }, () => h("i", {}))) : null;
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
-  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
-  // What asks you is under them, over the name, always; the rest over the head, a moment.
+  const prio = s && s.priority && s.priority !== "normal" ? h("span", { class: "ui-pirate-prio" }, glyph(s.priority, `prio ${s.priority}`)) : null;
   const head = h("button", { class: "ui-pirate-go today-go", type: "button", onclick: open, "aria-label": label || null },
-    h("span", { class: "ui-pirate-scene" }, art, bubble, pinned ? null : talk, confetti), pinned ? talk : null,
-    h("span", { class: "ui-pirate-plate" }, lead, prio, h("span", { class: "ui-pirate-name" }, typeof title === "string" ? taskText(title) : title), pill));
+    h("span", { class: "ui-pirate-scene" }, art, prio, bubble, talk, confetti),
+    h("span", { class: "ui-pirate-plate" }, h("span", { class: "ui-pirate-name" }, typeof title === "string" ? taskText(title) : title), pill));
   const el = h("article", { class: `tcard ui-pirate p-${pose} ph-${hue}${cheer ? " cheer" : ""}`, "data-id": id || null,
-                            onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } },
-    head, actions.filter(Boolean).length ? h("div", { class: "ui-pirate-actions" }, ...actions.filter(Boolean)) : null);
+                            onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head);
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
   return el;
 }

@@ -429,12 +429,14 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .tcard.ui-pirate:has(> .ui-pirate-go:active) { background: radial-gradient(closest-side, color-mix(in srgb, var(--tavern-light) 26%, transparent), transparent); border: 0; }
 /* The one the keys are on: no ring, a lantern's light falling on them
    from above, their place at the table lit gold, their name in it. */
-.keyed .tcard.ui-pirate.ui-sel .ui-pirate-scene::after, .ui-pirate-go:focus-visible .ui-pirate-scene::after {
+.ui-pirate.talking .ui-pirate-scene::after, .keyed .tcard.ui-pirate.ui-sel .ui-pirate-scene::after, .ui-pirate-go:focus-visible .ui-pirate-scene::after {
   content: ""; position: absolute; left: -12%; right: -12%; top: -26px; bottom: 0; z-index: 2; pointer-events: none; mix-blend-mode: screen;
-  background:
-    linear-gradient(to top, transparent 0 7%, var(--tavern-gold) 7% 8.6%, transparent 8.6%),
-    radial-gradient(60% 75% at 50% 0, rgb(255 214 150 / .34), rgb(255 180 100 / .12) 55%, transparent 80%);
+  background: radial-gradient(60% 75% at 50% 0, rgb(255 214 150 / .34), rgb(255 180 100 / .12) 55%, transparent 80%);
   clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
+}
+.keyed .tcard.ui-pirate.ui-sel .ui-pirate-scene::after, .ui-pirate-go:focus-visible .ui-pirate-scene::after {
+  background: linear-gradient(to top, transparent 0 7%, var(--tavern-gold) 7% 8.6%, transparent 8.6%),
+              radial-gradient(60% 75% at 50% 0, rgb(255 214 150 / .34), rgb(255 180 100 / .12) 55%, transparent 80%);
 }
 .keyed .tcard.ui-pirate.ui-sel .ui-pirate-name, .ui-pirate-go:focus-visible .ui-pirate-name { color: var(--tavern-gold); }
 /* (not a card's ring, nor a button's) */
@@ -444,14 +446,12 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate-scene { position: relative; display: block; width: var(--tavern-seat-w); height: calc(var(--tavern-seat-w) * 1.2); margin: 26px auto 0; }
 .ui-pirate-art, .ui-pirate-art svg { display: block; width: 100%; height: 100%; overflow: hidden; }
 /* The candle's light on whoever sits by it. */
-.ui-pirate-plate { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; }
-.ui-pirate-plate .avatar { width: 22px; height: 22px; }
-.ui-pirate-name { max-width: 100%; min-width: 0; font-size: var(--caption); line-height: 1.3; }
+/* Under them, at one height across the table: their name, where they stand. */
+.ui-pirate-plate { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 0 6px; }
+.ui-pirate-name { display: flex; align-items: flex-start; justify-content: center; width: 100%; min-width: 0; min-height: 2.6em; font-size: var(--caption); line-height: 1.3; }
 .ui-pirate-name .task { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: normal; font-size: var(--caption); }
-.ui-pirate-name .task.muted { color: var(--text-muted); }
-.ui-pirate-plate .tpill { max-width: 100%; overflow: hidden; }
-.ui-pirate-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 0 6px 8px; }
-.ui-pirate-actions .tbtn { min-height: var(--control-h-small); padding: 0 8px; font-size: var(--caption); }
+.ui-pirate-plate .tpill { max-width: 100%; overflow: hidden; border: 0; padding: 0; background: none; font-weight: 600; }
+.ui-pirate-prio { position: absolute; left: 4px; top: 4px; z-index: 1; }
 .ui-pirate.vacant { pointer-events: none; }
 .ui-pirate.p-stale .o-body, .ui-pirate.p-sleep .o-body { filter: saturate(.7) brightness(.82); }
 
@@ -483,14 +483,6 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 }
 @media (hover: hover) { .ui-pirate:hover .ui-pirate-say { opacity: 1; } }
 .keyed .ui-pirate.ui-sel .ui-pirate-say, .ui-pirate-go:focus-visible .ui-pirate-say { opacity: 1; }
-/* What asks you: a speech bubble under them, its tail up to them, two lines
-   at most (the lines clamped inside it, never under its padding). */
-.ui-pirate-say.pinned { opacity: 1; position: relative; left: auto; bottom: auto; transform: none; width: auto; max-width: none; margin: 4px 6px 0; box-shadow: 0 4px 12px rgb(0 0 0 / .3);
-                        display: block; overflow: visible; border-color: color-mix(in srgb, var(--warn, var(--warning)) 55%, transparent); }
-.ui-pirate-say.pinned::before { content: ""; position: absolute; left: 50%; top: -6px; width: 9px; height: 9px; transform: translateX(-50%) rotate(45deg);
-                                background: var(--surface); border-left: 1px solid; border-top: 1px solid; border-color: inherit; }
-.ui-pirate-say-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.ui-pirate.p-blocked .ui-pirate-say.pinned { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 
 /* Your move (it asks you, it's stuck, it has something to show you, it's
    done): a glow of its tone behind them and their place at the table lit

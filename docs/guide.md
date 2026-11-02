@@ -772,11 +772,16 @@ color, and how they sit says where the chat stands:
 | Walking in with a sea bag | is being set up |
 | Sitting with a full beer, the candle lit | is idle |
 
-Whoever's move is yours (asking, stuck, something to show you, done) has a glow of
-that color behind them, their place at the table lit in it. The one the keys are on stands in a lantern's light, their place at the table
-lit gold. Under each one, the chat's name and the same pill as its card on Chats. A click
-(or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
-The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
+Under each one, lined up across the table, the chat's name and where it stands.
+Under the table, **its card**, the one from the Chats tab, in the room's dark and
+gold: the whole of what the first one waiting asks, with its answers (a permission's
+**Allow** and **Deny**), to answer right there; answered, the next one's comes up.
+Whoever's move is yours glows behind them, and the one the card is from stands in a
+lantern's light. A click on one with something for you (a done one's **Complete**,
+what a new one said) shows theirs; a click on the one showing, or on anyone else,
+opens their chat; held down (a right click), its menu. The whole card opens it too.
+The keys are the board's: `j` / `k` from pirate to pirate (the card follows),
+`1`-`9` answer it, `l` goes along its buttons, `Enter` opens the chat, `x` completes a done
 one, `s` marks one seen. The empty chair at the end of a table (**Recruit**) starts a new chat in that project. Everyone
 keeps their place at the table: a chat that closes leaves, the rest stay in
 order, and the next new chat in that crew takes its place. The tab you

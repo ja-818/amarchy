@@ -80,8 +80,8 @@ const setChats = (p, chats) => p.evaluate((chats) => { window.__chats = chats; a
 const SHAPE = () => [...document.querySelectorAll(".tavern-hall .tv-crew")].map((r) => ({
   room: r.querySelector(".tv-name").textContent.replace(/\s+/g, " ").trim(),
   desks: [...r.querySelectorAll(".tv-table > .tcard")].map((d) => d.matches(".tv-recruit") ? "free"
-    : [d.dataset.id, [...d.classList].find((c) => c.startsWith("p-")), d.querySelector(".ui-pirate-name").innerText.trim(), ((d.querySelector(".tpill") || {}).innerText || "").replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/, ""),
-       [...d.querySelectorAll(".ui-pirate-actions button")].map((b) => b.innerText).join("/")].join("|")),
+    : [d.dataset.id, [...d.classList].find((c) => c.startsWith("p-")), d.querySelector(".ui-pirate-name").innerText.trim(), ((d.querySelector(".tpill") || {}).innerText || "").replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/, "")].join("|")),
+  card: [...r.querySelectorAll(".tv-say .tcard button")].map((b) => b.innerText).join("/"),
 }));
 
 const shapes = {};
@@ -128,12 +128,29 @@ async function run(browser, port, layout) {
     const pill = (id) => (document.querySelector(`.ui-pirate[data-id="${id}"] .tpill`) || {}).innerText;
     return pill("web-ask") === "Asks you" && pill("api-perm") === "Permission" && pill("web-done") === "Done" && pill("api-block") === "Blocked";
   }), "their pills: the same words as their cards on Chats");
-  check(where, await p.evaluate(() => /Submit it now\?/.test(document.querySelector('.ui-pirate[data-id="web-ask"] .ui-pirate-say.pinned').innerText)
-                                   && /gcloud/.test(document.querySelector('.ui-pirate[data-id="api-perm"] .ui-pirate-say.pinned').innerText)),
-        "what one asks you, in a bubble over them, always");
-  check(where, await p.evaluate(() => [...document.querySelectorAll('.ui-pirate[data-id="api-perm"] .ui-pirate-actions button')].map((b) => b.innerText).join() === "Allow,Deny"
-                                   && document.querySelector('.ui-pirate[data-id="web-done"] .ui-pirate-actions button').innerText === "Complete"),
-        "a permission's Allow and Deny on its desk; Complete on a done one's");
+  // Under them, one height across a table: name and status lined up, whatever they are.
+  check(where, await p.evaluate(() => { const r = [...document.querySelectorAll('.tv-crew[data-crew="api"] .ui-pirate[data-id]')].map((x) => Math.round(x.querySelector(".tpill").getBoundingClientRect().top - x.getBoundingClientRect().top));
+    return new Set(r).size === 1; }), "their status lines at one height across the table");
+  // The table's card: what the first that's waiting asks, whole, with its answers; nothing to open.
+  const cardOf = (repo) => p.evaluate((repo) => { const c = document.querySelector(`.tv-crew[data-crew="${repo}"] .tv-say`); return c.hidden ? null : c.innerText; }, repo);
+  check(where, /Submit it now\?/.test(await cardOf("web") || "") && /Submit/.test(await cardOf("web")) && /gcloud/.test(await cardOf("api") || "") && /Allow/.test(await cardOf("api")) && /Deny/.test(await cardOf("api")),
+        "each table's card: the whole question and its answers, by itself");
+  check(where, await cardOf("ops") === null, "a table with nothing for you: no card");
+  check(where, await p.evaluate(() => document.querySelector('.ui-pirate[data-id="web-ask"]').matches(".talking")), "the one it's from, in the lantern's light");
+  // A click on one with something to show: theirs; again: their chat.
+  await p.click('.ui-pirate[data-id="web-done"] .ui-pirate-go');
+  check(where, await until(p, () => /Complete/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText) && document.querySelector('.ui-pirate[data-id="web-done"]').matches(".talking")), "a click on a done one: its card, Complete on it");
+  await p.click('.ui-pirate[data-id="web-ask"] .ui-pirate-go');
+  check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "a click on another: theirs");
+  await p.click('.ui-pirate[data-id="web-ask"] .ui-pirate-go');
+  check(where, await until(p, () => (app.desk ? desk.current : app.session && app.session.id) === "web-ask"), "again: their chat");
+  await p.evaluate(() => (app.desk ? boardBack() : go("#/")));
+  await until(p, () => !!document.querySelector(".tavern-hall .tv-say:not([hidden])") && getComputedStyle(document.querySelector(".tasks-board")).display !== "none");
+  // Answered on the card: gone from the table, Undo brings it back.
+  await p.evaluate(() => document.querySelector('.tv-crew[data-crew="web"] .tv-say .today-opt').click());
+  check(where, await until(p, () => document.querySelector('.tv-crew[data-crew="web"] .tv-say').hidden && !!document.querySelector(".undo-toast")), "answered on the card: the card goes, with Undo");
+  await p.evaluate(() => document.querySelector(".undo-toast .text-btn").click());
+  check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "Undo: back");
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].every((r) => r.querySelector(".tv-table > .tv-recruit:last-child"))),
         "an empty chair, Recruit, at the end of each table");
   check(where, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll(".tv-crew")].every((r) => r.getBoundingClientRect().right <= innerWidth + 1)),
@@ -149,6 +166,16 @@ async function run(browser, port, layout) {
     const lit = await p.evaluate(() => (document.querySelector(".ui-pirate.ui-sel") || {}).dataset?.id || "");
     check(where, lit && lit !== "me-jaken", `j: the next pirate lit (${lit})`);
     await p.screenshot({ path: path.join(SHOTS, `${where}-tavern-keys.png`) });
+    // j / k on one with a card: it shows; 1 answers it.
+    await p.evaluate(() => { const s = document.querySelector('.ui-pirate[data-id="api-perm"] > .today-go'); boardFocus(s); });
+    await p.keyboard.press("j"); await p.keyboard.press("k");
+    check(where, await until(p, () => /gcloud/.test(document.querySelector('.tv-crew[data-crew="api"] .tv-say').innerText)), "j / k: the card follows");
+    await p.evaluate(() => { const s = document.querySelector('.ui-pirate[data-id="web-ask"] > .today-go'); boardFocus(s); tavernFollow(s); });
+    await p.keyboard.press("1");
+    check(where, await until(p, () => !!document.querySelector(".undo-toast")), "1: answers the card");
+    await p.evaluate(() => document.querySelector(".undo-toast .text-btn").click());
+    await until(p, () => !!document.querySelector('.ui-pirate[data-id="web-ask"].talking'));
+    await p.evaluate(() => { boardFocus(document.querySelector('.ui-pirate[data-id="web-work"] > .today-go')); });
     await p.keyboard.press("Enter");
     check(where, await until(p, () => desk.current === document.querySelector(".ui-pirate.ui-sel")?.dataset.id || (desk.current && desk.current !== "")), "Enter: their chat");
     await p.keyboard.press("Escape");

@@ -77,6 +77,23 @@
 @media (hover: hover) { .tv-recruit:hover .ui-crew-art { opacity: 1; } .tv-recruit:hover .tv-recruit-word { color: var(--tavern-gold); } }
 .tv-recruit-word { color: color-mix(in srgb, var(--tavern-bone) 75%, transparent); letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
 
+/* The table's card (tavern.js tavernCard): the Chats tab's, in the room's
+   dark and gold, in every theme: what's asked, read whole, answered here. */
+.tv-say {
+  position: relative; z-index: 2; margin: 2px auto 12px; padding: 0 12px; box-sizing: border-box; width: 100%; max-width: 640px;
+  --text: var(--tavern-bone); --text-muted: color-mix(in srgb, var(--tavern-bone) 65%, transparent);
+  --card-bg: #1c110b; --card-border: color-mix(in srgb, var(--tavern-gold) 40%, transparent);
+  --card-hover-bg: rgb(255 220 170 / .05); --card-hover-border: color-mix(in srgb, var(--tavern-gold) 65%, transparent);
+  --card-focus-bg: rgb(255 220 170 / .05); --card-focus-border: var(--tavern-gold); --card-press-bg: rgb(255 220 170 / .1);
+  --button-bg: rgb(255 240 210 / .06); --button-border: rgb(255 240 210 / .4); --button-hover-bg: rgb(255 240 210 / .14); --button-press-bg: rgb(255 240 210 / .2);
+  --button-primary-bg: var(--tavern-gold); --button-primary-text: var(--tavern-ink);
+  color: var(--text);
+}
+.tv-say[hidden] { display: none; }
+.tv-say .tcard { color: var(--text); box-shadow: 0 6px 18px rgb(0 0 0 / .4); }
+.tv-say .tbtn { color: var(--text); }
+.tv-say .tbtn.primary { color: var(--button-primary-text); }
+
 @media (max-width: 719px) {
   :root { --tavern-seat-w: 108px; }
   .tavern-hall { gap: 12px; }
