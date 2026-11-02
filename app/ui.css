@@ -439,7 +439,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .keyed .tcard.ui-pirate.ui-sel .ui-pirate-name, .ui-pirate-go:focus-visible .ui-pirate-name { color: var(--tavern-gold); }
 /* (not a card's ring, nor a button's) */
 .keyed .tcard.ui-pirate.ui-sel, .tcard.ui-pirate:has(> .ui-pirate-go:focus-visible) { background: none; box-shadow: none; border: 0; outline: none; }
-.ui-pirate-go:focus-visible, .tv-recruit-go:focus { outline: none; }
+.ui-pirate-go:focus-visible { outline: none; }
 .ui-pirate-go { display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 0 0 8px; gap: 6px; background: none; border: 0; color: var(--text); cursor: pointer; text-align: center; outline: none; }
 .ui-pirate-scene { position: relative; display: block; width: var(--tavern-seat-w); height: calc(var(--tavern-seat-w) * 1.2); margin: 26px auto 0; }
 .ui-pirate-art, .ui-pirate-art svg { display: block; width: 100%; height: 100%; overflow: hidden; }
@@ -453,7 +453,6 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-pirate-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 0 6px 8px; }
 .ui-pirate-actions .tbtn { min-height: var(--control-h-small); padding: 0 8px; font-size: var(--caption); }
 .ui-pirate.vacant { pointer-events: none; }
-.ui-pirate.p-empty .ui-pirate-art .o-desk ~ *, .ui-pirate.vacant .o-stool { opacity: .5; }
 .ui-pirate.p-stale .o-body, .ui-pirate.p-sleep .o-body { filter: saturate(.7) brightness(.82); }
 
 /* What floats over a head: a mark, a bubble of what they say. */

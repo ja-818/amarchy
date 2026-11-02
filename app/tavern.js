@@ -9,8 +9,8 @@
 // while the hourglass runs, up with a hand raised when it asks you, the
 // grog raised over a chest of gold when it's done, head on the table
 // asleep. A click (Enter) on one opens their chat; held down (a right
-// click), its menu; x completes a done one, as on the Chats tab. + at the
-// end of each table recruits: a new chat in that project.
+// click), its menu; x completes a done one, as on the Chats tab. The empty
+// chair at the end of each table recruits: a new chat in that project.
 //
 // Everyone keeps their place at the table (tavernSeats, kept in this
 // browser): one who leaves frees theirs, the next to come takes it.
@@ -188,17 +188,17 @@ function tavernTally(poses) {
   return [need ? uiPill(`${need} need${need === 1 ? "s" : ""} you`, "ask") : null, done ? uiPill(`${done} to see`, "done") : null, work ? uiPill(`${work} at work`, "quiet") : null].filter(Boolean);
 }
 
-// The slot at the end of a table that recruits: a new chat in its project.
+// The empty chair at the end of a table: Recruit, a new chat in its project.
 function tavernRecruit(repo) {
-  const recruit = h("article", { class: "tcard tv-recruit" },
-    h("button", { class: "today-go tv-recruit-go", type: "button", title: `New chat in ${projectName(repo)}`, "aria-label": `New chat in ${projectName(repo)}`, onclick: () => newChatIn(repo) },
-      h("span", { class: "tv-recruit-plus", "aria-hidden": "true" }, "+"), h("span", { class: "tv-recruit-word" }, "Recruit")));
-  recruit.todayData = `free|${repo}`;
-  return recruit;
+  const chair = uiPirate({ hue: todayHue(repo), look: { kind: 0 }, pose: "empty", title: h("div", { class: "task tv-recruit-word" }, "Recruit"),
+                           open: () => newChatIn(repo), label: `Recruit: a new chat in ${projectName(repo)}` });
+  chair.classList.add("tv-recruit");
+  chair.todayData = `free|${repo}`;
+  return chair;
 }
 
 // A crew: its wall behind, its flag and name and what it's up to, its
-// table, its pirates in a row, and the slot that recruits.
+// table, its pirates in a row, and the empty chair that recruits.
 function tavernCrew(repo, pirates, hue, poses, name = projectName(repo)) {
   const recruit = tavernRecruit(repo);
   return h("section", { class: `tv-crew ph-${hue}`, "data-crew": repo, style: `--seats:${pirates.length}` },

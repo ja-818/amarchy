@@ -434,8 +434,12 @@ function uiCrewArt(o, state = "idle") {
     <radialGradient id="paf${o.id}" cx=".5" cy=".6" r=".5"><stop offset="0" stop-color="#fff4c4"/><stop offset=".5" stop-color="#ffb347"/><stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient></defs>`);
   // No backdrop of its own: they sit in their crew's room, its light (tavern.css .tv-table).
   if (state === "empty") {
-    P("M142 252 Q200 232 258 252 L264 430 L136 430 Z", "#1a100c"); P("M236 246 Q252 248 258 252 L264 430 L248 430 Z", "#4a2a16");
-    L.push(`<circle cx="142" cy="250" r="7" fill="#1a100c"/><circle cx="258" cy="250" r="7" fill="#6a3a1c"/>`);
+    // A high-backed chair, pulled out, waiting: its posts and carved top, slats, the seat over the table's edge; lit from the candle's side.
+    P("M138 214 L156 214 L160 430 L132 430 Z", "#1c110b"); P("M244 214 L262 214 L268 430 L240 430 Z", "#2a180e"); P("M256 214 L262 214 L268 430 L258 430 Z", "#8a4f24");
+    P("M132 226 Q200 188 268 226 L264 256 Q200 228 136 256 Z", "#24150d"); P("M204 208 Q240 212 268 226 L264 256 Q236 240 204 236 Z", "#6a3c1c"); P("M204 208 Q240 212 268 226 L267 232 Q238 218 204 214 Z", "#b06a30");
+    for (const [x, c] of [[172, "#1c110b"], [196, "#22140c"], [220, "#4a2a16"]]) P(`M${x} 244 L${x + 12} 243 L${x + 12} 400 L${x} 400 Z`, c);
+    P("M124 392 L276 392 L284 412 L116 412 Z", "#2a180e"); P("M204 392 L276 392 L284 412 L204 412 Z", "#7a4520"); P("M116 412 L284 412 L284 420 L116 420 Z", "#160d08");
+    L.push(`<circle cx="147" cy="208" r="9" fill="#24150d"/><circle cx="253" cy="208" r="9" fill="#8a4f24"/><circle cx="256" cy="205" r="3" fill="#d68a48"/><circle cx="144" cy="205" r="2.4" fill="#4a2a16"/>`);
     P("M0 428 L400 428 L400 480 L0 480 Z", "#24140d"); P("M0 428 L400 428 L400 436 L0 436 Z", "#8a4a24"); P("M220 428 L400 428 L400 436 L220 436 Z", "#d68a48");
     L.push(`<path d="M60 344 L108 344 L112 430 L56 430 Z" fill="#f4e4b8" opacity=".14"/><path d="M60 344 L108 344 L112 430 L56 430 Z" fill="none" stroke="#f8e8c0" stroke-width="2.5" opacity=".6"/><path d="M110 360 Q136 364 134 390 Q132 410 110 412" fill="none" stroke="#f8e8c0" stroke-width="6" opacity=".35"/>`);
     L.push(`<rect x="318" y="372" width="22" height="58" fill="#e8d6a8"/><rect x="330" y="372" width="10" height="58" fill="#fff0c8"/><path d="M312 428 L346 428 L344 420 L314 420 Z" fill="#6a4a20"/><ellipse cx="329" cy="352" rx="18" ry="30" fill="url(#paf${o.id})" class="pa-glow"/><g class="pa-flame"><path d="M329 336 Q338 352 329 366 Q320 352 329 336 Z" fill="#fff4c4"/></g>`);

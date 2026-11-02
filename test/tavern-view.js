@@ -135,7 +135,7 @@ async function run(browser, port, layout) {
                                    && document.querySelector('.ui-pirate[data-id="web-done"] .ui-pirate-actions button').innerText === "Complete"),
         "a permission's Allow and Deny on its desk; Complete on a done one's");
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].every((r) => r.querySelector(".tv-table > .tv-recruit:last-child"))),
-        "Recruit at the end of each table");
+        "an empty chair, Recruit, at the end of each table");
   check(where, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll(".tv-crew")].every((r) => r.getBoundingClientRect().right <= innerWidth + 1)),
         "it fits the screen: nothing wider");
   const sizes = await p.evaluate(() => [...document.querySelectorAll(".ui-pirate[data-id] .ui-pirate-scene")].map((s) => Math.round(s.getBoundingClientRect().width)));
@@ -162,7 +162,7 @@ async function run(browser, port, layout) {
   check(where, await until(p, () => board.tab === "tavern" && !!document.querySelector(".tavern-hall") && getComputedStyle(document.querySelector(".tasks-board")).display !== "none"), "back: the Tavern");
 
   // The free stool: a new chat, in that crew's project.
-  await p.evaluate(() => document.querySelector('.tv-crew[data-crew="ops"] .tv-recruit-go').click());
+  await p.evaluate(() => document.querySelector('.tv-crew[data-crew="ops"] .tv-recruit .ui-pirate-go').click());
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && /Ops/.test(document.querySelector(".board-new").innerText)), "the free stool: recruits a new chat in its project");
   await p.evaluate(() => document.querySelector(".board-new-close") && document.querySelector(".board-new-close").click());
 

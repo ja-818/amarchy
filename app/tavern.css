@@ -71,18 +71,10 @@
 .tv-table > .ui-pirate .ui-pirate-scene { margin-top: 24px; border-radius: 0; }
 .tv-crew .ui-pirate-name .task.muted { color: color-mix(in srgb, var(--tavern-bone) 60%, transparent); }
 
-/* Recruit: a slim slot at the end of the table, a new chat in the crew. */
-.tcard.tv-recruit { flex: none; width: 54px; background: none; border: 0; }
-.tv-recruit-go { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; box-sizing: border-box;
-                 height: calc(var(--tavern-seat-w) * 1.2); margin-top: 24px; padding: 0; border-radius: 6px; cursor: pointer;
-                 border: 1px dashed color-mix(in srgb, var(--ph) 55%, transparent); background: rgb(255 200 140 / .03); color: color-mix(in srgb, var(--tavern-bone) 70%, transparent); }
-.tv-recruit-plus { font-size: 22px; font-weight: 700; line-height: 1; color: var(--ph); }
-.tv-recruit-word { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); }
-@media (hover: hover) { .tv-recruit-go:hover { background: color-mix(in srgb, var(--ph) 14%, transparent); border-style: solid; color: var(--tavern-bone); } }
-.tv-recruit-go:active { background: color-mix(in srgb, var(--ph) 22%, transparent); }
-.keyed .tcard.tv-recruit.ui-sel .tv-recruit-go, .tv-recruit-go:focus-visible { outline: none; border-style: solid; border-color: var(--tavern-gold); color: var(--tavern-gold);
-  background: radial-gradient(80% 60% at 50% 0, rgb(255 214 150 / .2), transparent); }
-.keyed .tcard.tv-recruit.ui-sel, .tcard.tv-recruit:has(> .tv-recruit-go:focus-visible) { background: none; box-shadow: none; border: 0; }
+/* Recruit: the empty chair at the end of the table; lit when you point at it. */
+.tv-recruit .ui-crew-art { opacity: .8; transition: opacity .15s; }
+@media (hover: hover) { .tv-recruit:hover .ui-crew-art { opacity: 1; } .tv-recruit:hover .tv-recruit-word { color: var(--tavern-gold); } }
+.tv-recruit-word { color: color-mix(in srgb, var(--tavern-bone) 75%, transparent); letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
 
 @media (max-width: 719px) {
   :root { --tavern-seat-w: 108px; }

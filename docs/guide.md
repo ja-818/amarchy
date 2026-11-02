@@ -777,7 +777,7 @@ that color behind them, their place at the table lit in it. The one the keys are
 lit gold. Under each one, the chat's name and the same pill as its card on Chats. A click
 (or `Enter`) on a pirate opens their chat; held down (a right click), its menu.
 The keys are the board's: `j` / `k` from pirate to pirate, `x` completes a done
-one, `s` marks one seen. **+ Recruit** at the end of a table starts a new chat in that project. Everyone
+one, `s` marks one seen. The empty chair at the end of a table (**Recruit**) starts a new chat in that project. Everyone
 keeps their place at the table: a chat that closes leaves, the rest stay in
 order, and the next new chat in that crew takes its place. The tab you
 were on stays (the Tavern too) the next time you open the app.
