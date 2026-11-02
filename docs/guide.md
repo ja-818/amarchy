@@ -746,14 +746,12 @@ Today adds no notifications of its own.
 
 **Tavern**, the board's third tab (after Chats | Tasks; `Tab` gets there), shows
 the same chats as a pirates' tavern, on the phone as on a computer, drawn as a
-noir comic: black shadows, faces lit by candles. Your assistant keeps **the bar**, its name on the sign, and the other chats in its project sit at it with it
-(bottles on the shelves, a porthole on the sea under the sky as it is now). Each
-project is a **crew** at its own long table, its wall behind it (a beam,
-lanterns, shelves of bottles and barrels), its ragged Jolly Roger in the
-project's color by its name, and what it's up to in a word or two: how many
-need you, have something to show you, are at work. Each crew is one scene, the
-whole crew at one long table in the same candlelight; crews stay where they are,
-in your projects' order.
+noir comic: black shadows, faces lit by candles. Each project is a **crew** at
+its own long table, its wall behind it (a beam, lanterns, shelves of bottles and
+barrels), its ragged Jolly Roger in the project's color by its name, and what
+it's up to in a word or two: how many need you, have something to show you, are
+at work. Your assistant's crew comes first, under its name, your assistant and
+the other chats in its project. Crews stay where they are, in your projects' order.
 
 The crew are ten pirates: the Captain, the Old Salt, the Deckhand, the
 Quartermistress, the Navigator, the Bosun, the Cook, the Gunner, the Gentleman

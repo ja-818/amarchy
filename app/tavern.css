@@ -1,7 +1,7 @@
 /* The Tavern (tavern.js): the board's third tab, your chats as the crew, a
    crew per project. The crew are ui.css's (uiPirate, uiCrewArt); here, the
    hall around them, inked as they are: each crew's wall (tavernBack: a
-   beam, shelves of bottles, lanterns, a porthole), its flag and name and
+   beam, shelves of bottles, lanterns), its flag and name and
    what it's up to, its long table. Design tokens only (docs/design-tokens.md),
    but for the drawings' own colors. */
 
@@ -16,7 +16,6 @@
   border: 1px solid color-mix(in srgb, var(--ph) 30%, #2a1a10);
   box-shadow: 0 10px 30px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 200 140 / .06);
 }
-.tv-bar { min-width: min(100%, calc(var(--tavern-seat-w) + 170px)); }
 
 /* Its wall, behind everything: as tall as the head and the pirates' heads. */
 .tv-wall { position: absolute; left: 0; right: 0; top: 0; height: 110px; z-index: 0; pointer-events: none; }
@@ -41,8 +40,6 @@
 .tv-name { margin: 0; display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: var(--body); font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
            color: var(--tavern-bone); text-shadow: 0 2px 6px rgb(0 0 0 / .8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tv-count { font-size: var(--caption); font-weight: 700; letter-spacing: 0; color: color-mix(in srgb, var(--tavern-bone) 55%, transparent); }
-.tv-sign { padding: 4px 12px; border: 2px solid color-mix(in oklab, var(--tavern-gold) 60%, #2a1608); border-radius: 3px; color: var(--tavern-gold);
-           background: rgb(20 10 6 / .85); box-shadow: 0 3px 8px rgb(0 0 0 / .6); }
 .tv-tally { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .tv-tally .tpill { background: rgb(11 7 6 / .7); }
 
@@ -90,7 +87,7 @@
 @media (max-width: 719px) {
   :root { --tavern-seat-w: 108px; }
   .tavern-hall { gap: 12px; }
-  .tv-crew, .tv-bar { flex: 1 1 100%; width: 100%; }
+  .tv-crew { flex: 1 1 100%; width: 100%; }
   .tv-table { justify-content: center; }
   .tv-tally { margin-left: 0; flex-basis: 100%; }
   .tv-table { padding: 2px 2px 4px; }
