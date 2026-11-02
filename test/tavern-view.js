@@ -170,6 +170,11 @@ async function run(browser, port, layout) {
     await p.hover('.ui-pirate[data-id="web-sleep"] .ui-pirate-go');
     check(where, await until(p, () => /json-render/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText) && !/Drawing the desks/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "pointing at another: theirs, nothing left of the last");
     check(where, await p.evaluate(() => !document.querySelector(".ui-pirate-say")), "no words anywhere else");
+    await p.hover('.tv-crew[data-crew="web"] .tv-recruit .ui-pirate-go');
+    check(where, await until(p, () => { const c = document.querySelector('.tv-crew[data-crew="web"]'); return !c.querySelector(".tv-say").innerText.trim() && !c.querySelector(".talking"); }), "pointing at the empty chair: nothing under the table");
+    await p.evaluate(() => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, said: x.id === "web-work" ? "Then the tables" : x.said })) }; refresh(); });
+    await sleep(300);
+    check(where, await p.evaluate(() => { const c = document.querySelector('.tv-crew[data-crew="web"]'); return !c.querySelector(".tv-say").innerText.trim() && !c.querySelector(".talking"); }), "and still nothing as the list changes");
   }
   await p.mouse.move(1, 1);
   check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "the pointer gone: back to who's waiting");

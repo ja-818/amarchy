@@ -23,7 +23,7 @@ const tavern = {
   poses: new Map(),   // a chat's pose when last drawn: id -> pose (one just done cheers)
   cheer: new Map(),   // a chat that just got done: id -> until when its gold flies
   open: new Map(),    // the card you asked for at each table: repo -> the chat's id
-  peek: null,         // the pirate you're pointing at (or the keys are on): {repo, id, keys}
+  peek: null,         // the pirate you're pointing at (or the keys are on): {repo, id, keys}; id "": the empty chair
 };
 
 // Each table's stools in order, the same from one time to the next: repo ->
@@ -138,7 +138,7 @@ function tavernShown(repo, people, p) {
   const poses = new Map(people.map((s) => [s.id, tavernPose(s, p)]));
   // Pointed at, still (drawn again as the list changes, it stays), unless just answered: then the next.
   const peek = tavern.peek;
-  if (peek && peek.repo === repo && poses.has(peek.id) && !todayUI.sent.has(peek.id)
+  if (peek && peek.repo === repo && (poses.has(peek.id) || peek.id === "") && !todayUI.sent.has(peek.id)
       && (peek.keys || document.querySelector(`.tv-crew[data-crew="${CSS.escape(repo)}"]:hover`))) return peek.id;
   const picked = tavern.open.get(repo);
   if (picked && TAVERN_CARDS.includes(poses.get(picked))) return picked;
@@ -153,6 +153,12 @@ function tavernCard(s, p) {
   return n;
 }
 
+// What the place under a table holds: a card; on the empty chair nothing at
+// all (Recruit says it); else that there's nothing for you.
+function tavernSayKids(card, shown) {
+  return card ? [card] : shown === "" ? [] : [h("p", { class: "tv-say-none" }, "Nothing for you here")];
+}
+
 // The place under the table shows this pirate's card, and they stand in the
 // lantern's light. In place: no redraw, their animations go on.
 function tavernShowOn(crew, id, p) {
@@ -160,7 +166,7 @@ function tavernShowOn(crew, id, p) {
   const say = crew.querySelector(".tv-say");
   if (!say) return;
   const card = s ? tavernCard(s, p) : null;
-  say.replaceChildren(card || h("p", { class: "tv-say-none" }, "Nothing for you here"));
+  say.replaceChildren(...tavernSayKids(card, id));
   crew.querySelectorAll(".ui-pirate.talking").forEach((x) => x.classList.remove("talking"));
   if (card) { const on = crew.querySelector(`.ui-pirate[data-id="${CSS.escape(id)}"]`); if (on) on.classList.add("talking"); }
 }
@@ -169,8 +175,9 @@ function tavernShowOn(crew, id, p) {
 function tavernPeek(pirate, keys = false) {
   const crew = pirate.closest(".tv-crew");
   if (!crew || !app.view) return;
-  tavern.peek = { repo: crew.dataset.crew, id: pirate.dataset.id, keys };
-  tavernShowOn(crew, pirate.dataset.id, todayParts(app.view));
+  const id = pirate.dataset.id || "";      // (the empty chair has none)
+  tavern.peek = { repo: crew.dataset.crew, id, keys };
+  tavernShowOn(crew, id, todayParts(app.view));
 }
 
 // The pointer gone from the crew: back to whose card the table shows.
@@ -190,9 +197,9 @@ function tavernBody(card) {
 
 // The keys on a pirate: their card shows.
 function tavernFollow(stop) {
-  const pirate = stop.closest(".ui-pirate[data-id]");
+  const pirate = stop.closest(".ui-pirate");
   if (!pirate || pirate.matches(".talking")) return;
-  if (!TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return tavernPeek(pirate, true);
+  if (!pirate.dataset.id || !TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return tavernPeek(pirate, true);
   tavern.peek = null;
   tavern.open.set(pirate.closest(".tv-crew").dataset.crew, pirate.dataset.id);
   tavernShowOn(pirate.closest(".tv-crew"), pirate.dataset.id, todayParts(app.view));
@@ -270,6 +277,7 @@ function tavernRecruit(repo) {
   const chair = uiPirate({ hue: todayHue(repo), look: { kind: 0 }, pose: "empty", title: h("div", { class: "task tv-recruit-word" }, "Recruit"),
                            open: () => newChatIn(repo), label: `Recruit: a new chat in ${projectName(repo)}` });
   chair.classList.add("tv-recruit");
+  chair.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") tavernPeek(chair); });
   chair.todayData = `free|${repo}`;
   return chair;
 }
@@ -287,7 +295,7 @@ function tavernCrew(repo, people, p, name = projectName(repo)) {
     h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, name, h("span", { class: "tv-count" }, String(people.length))),
       h("span", { class: "tv-tally" }, ...tavernTally(people.map((x) => tavernPose(x, p))))),
     h("div", { class: "tv-table" }, ...people.map((x) => tavernPirate(x, p, kinds.get(x.id), x.id === shown)), tavernRecruit(repo)),
-    h("div", { class: "tv-say" }, card || h("p", { class: "tv-say-none" }, "Nothing for you here")));
+    h("div", { class: "tv-say" }, ...tavernSayKids(card, shown)));
 }
 
 // The tavern, for the board's box (today.js todayFill, its Tavern tab):

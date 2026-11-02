@@ -780,7 +780,7 @@ gold: the whole of what the first one waiting asks, with its answers (a permissi
 **Allow** and **Deny**), to answer right there; answered, the next one's comes up.
 Whoever's move is yours glows behind them, and the one the card is from stands in a
 lantern's light. Pointing at anyone, at work or asleep too, shows their card there
-(what they're at, what they last said) until the pointer leaves the crew, and a click
+(what they're at, what they last said) until the pointer leaves the crew (on the empty chair, nothing), and a click
 opens their chat. On a phone, a tap on one with something for you shows theirs, and
 a tap on the one showing, or on anyone else, opens their chat. Held down (a right
 click), its menu. The whole card opens it too.
