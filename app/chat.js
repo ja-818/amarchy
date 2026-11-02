@@ -154,11 +154,6 @@ function icon(name, cls) {
                            `stroke-linecap="round" stroke-linejoin="round">${CHAT_ICONS[name] || ""}</svg>` });
 }
 
-// The spinner app.js turns (with the sessions' own): Claude at work.
-function spinner() {
-  return h("span", { class: "spinner spin", "aria-hidden": "true" }, SPINNER[spin.frame]);
-}
-
 // ---- Claude's steps, in words
 
 function baseName(p) {

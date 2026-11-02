@@ -310,6 +310,7 @@ body::before {
 .state { width: var(--icon-large); flex: none; font-size: var(--icon-large); text-align: center; line-height: 1; }
 .state.idle, .state.asleep { opacity: 0.8; }
 .state.waiting, .state.working { color: var(--selected-text); }
+.state.working { padding: 0; }      /* not the chat's .working line, whose name it shares */
 .state.done { color: var(--accent); }
 .empty { text-align: center; color: var(--text-muted); padding: 48px 24px; }
 

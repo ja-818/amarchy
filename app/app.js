@@ -10,7 +10,7 @@ const app = { view: null, key: "", user: "", online: true, list: null, session: 
 // a helper): Claude goes on when that ends (bin/amarchy session_view).
 const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep" };
 const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
 // The glyphs of amarchy's list (Nerd Font icons), for what has no drawing
 // below (ICONS, used first: they never wait on a font), when the look's
 // font has them; else plain marks.
@@ -84,7 +84,7 @@ function glyph(name, cls) {
 // check in the accent when it finished and you haven't opened it yet.
 function stateIcon(s) {
   const st = doneOf(s);
-  if (st === "working" || st === "running") return h("span", { class: `state working spin${st === "running" ? " running" : ""}`, title: STATUS[st] }, SPINNER[spin.frame]);
+  if (st === "working" || st === "running") return h("span", { class: `state working spin${st === "running" ? " running" : ""}`, title: STATUS[st], "data-f": spin.frame });
   const el = glyph(st, `state ${st}`);
   el.title = STATUS[st];
   return el;
@@ -96,10 +96,13 @@ function stateIcon(s) {
 const spin = { frame: 0, all: document.getElementsByClassName("spin") };
 setInterval(() => {
   if (document.visibilityState !== "visible" || !spin.all.length) return;
-  spin.frame = (spin.frame + 1) % SPINNER.length;
-  const glyph = SPINNER[spin.frame];
-  for (const el of spin.all) if (el.firstChild && el.firstChild.nodeType === 3) el.firstChild.data = glyph; else el.textContent = glyph;
+  spin.frame = (spin.frame + 1) % SPINNER_FRAMES;
+  for (const el of spin.all) el.setAttribute("data-f", spin.frame);
 }, 90);
+
+function spinner() {
+  return h("span", { class: "spinner spin", "aria-hidden": "true", "data-f": spin.frame });
+}
 
 // What a session is about, the keyword before ": " in bold.
 function taskText(task, cls) {
