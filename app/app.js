@@ -9,7 +9,7 @@ const app = { view: null, key: "", user: "", online: true, list: null, session: 
 // running: its turn ended, but something it started still runs (a test run,
 // a helper): Claude goes on when that ends (bin/amarchy session_view).
 const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep" };
-const PRIORITY = { high: "High", normal: "Normal", low: "Low" };
+const PRIORITY = { high: "Pinned", normal: "Now", low: "For later" };
 const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
 // The glyphs of amarchy's list (Nerd Font icons), for what has no drawing
 // below (ICONS, used first: they never wait on a font), when the look's
@@ -619,8 +619,6 @@ function openList() {
   es.addEventListener("list", (e) => {
     app.view = JSON.parse(e.data);
     aheadOn(app.view);
-    const o = app.organize;
-    if (o && o.done && o.sort === app.view.sort) app.organize = null;
     app.online = true;
     app.failed = "";
     app.nerd = !!app.view.nerd;
@@ -770,23 +768,6 @@ function orderProjects(lit) {
 
 function same(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
 
-// How the chats are ordered (today.js todaySorter): shown at once, then saved
-// on the host (amarchy sort), so every phone's and browser's list changes too.
-async function organizeList(sort) {
-  const mine = { sort, done: false };
-  app.organize = mine;
-  refresh();
-  try {
-    await api("/api/list", { sort });
-    mine.done = true;
-    if (app.view && app.view.sort === sort && app.organize === mine) app.organize = null;
-  } catch (e) {
-    if (app.organize === mine) app.organize = null;
-    toast(e.message);
-    refresh();
-  }
-}
-
 // Held down (as a right click in the wide layout): what you can change about
 // it from the list, its priority. With the keys: the menu key, or Shift+F10.
 function holdable(el, onHold) {
@@ -809,7 +790,7 @@ function holdable(el, onHold) {
   return el;
 }
 
-// High, normal or low, the one it is on.
+// Pinned, Now or For later, the one it is on.
 function prioritySeg(s) {
   return h("div", { class: "seg" }, ...["high", "normal", "low"].map((p) =>
     h("button", { class: `control${(s.priority || "normal") === p ? " on" : ""}`,
@@ -829,7 +810,7 @@ function renameNow(s, t) {
 }
 
 function rowMenu(s) {
-  sheet(sheetHead(title(s), where(s)), h("div", { class: "section" }, "Priority"), prioritySeg(s),
+  sheet(sheetHead(title(s), where(s)), prioritySeg(s),
     h("button", { class: "control wide", onclick: () => { closeSheets(); go(`#/s/${encodeURIComponent(s.id)}`); } },
       "Open"),
     ...sessionActions(s),

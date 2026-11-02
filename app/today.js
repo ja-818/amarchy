@@ -37,6 +37,7 @@ const todayUI = {
   sent: new Map(),      // a chat you answered: id -> {key: what it asked then, at}
   closing: new Set(),   // chats closing (their Undo still up): off the page
   more: new Set(),      // lists with "+N more" opened
+  needsOnly: false,     // Chats shows only what needs you (the filter beside your streak)
   seen: new Set(),      // chats you marked seen here (until the view says so)
   expand: new Set(),    // loops whose whole text you opened
   version: 0,           // bumped by what's done here: drawn again (todayFill)
@@ -127,31 +128,13 @@ function projectChip(s) {
   return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
-// When a chat last had something for you (bin/amarchy last_answer): not the
-// last thing done, a chat at work does something every second, and the cards
-// would trade places under your finger.
-function todayLast(s) { return (s.today || {}).last || s.created || 0; }
-function todayNewest(a, b) { return todayLast(b) - todayLast(a) || (a.id < b.id ? -1 : 1); }
-
-// In order: higher priority first, then the newest answer.
+// In order, as you set it: your assistant, what you pinned, then the one you
+// last wrote to (bin/amarchy last_you). What a chat does never moves its card.
 function todaySort(v, ss) {
   const prio = { high: 0, normal: 1, low: 2 };
-  return ss.slice().sort((a, b) => (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || todayNewest(a, b));
-}
-
-// How the chats are ordered, the switch beside your streak: the same on every
-// screen (bin/amarchy list_sort); yours at once, as you pick (app.organize).
-const TODAY_SORTS = [
-  { key: "groups", label: "Groups", title: "In groups: at work, what needs you, done, the rest" },
-  { key: "priority", label: "Priority", title: "By priority: high, normal, low; the newest answer first in each" },
-  { key: "last", label: "Last", title: "The newest answer on top" },
-];
-function todaySortNow(v = app.view) {
-  const how = ((app.organize || v || {}).sort);
-  return TODAY_SORTS.some((o) => o.key === how) ? how : "groups";
-}
-function todaySorter(v) {
-  return uiTabs(TODAY_SORTS, todaySortNow(v), (key) => organizeList(key), h("div", { class: "seg ui-tabs today-sort", role: "tablist", "aria-label": "Order the chats" }));
+  const you = (s) => (s.today || {}).you_at || s.created || 0;
+  return ss.slice().sort((a, b) => (b.assistant === "main") - (a.assistant === "main") || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
+    || you(b) - you(a) || (a.id < b.id ? -1 : 1));
 }
 
 // At work: Claude working, or what it started running (status "running":
@@ -845,53 +828,44 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   const tk = (draw, ...more) => (s) => { const n = board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more); n.todayData = todayRowKey(s); return n; };
   const loop = (l) => { const n = todayLoop(l, v); n.todayData = JSON.stringify([l, (v.today.sent || {})[l.key] || null, (v.today.assistant || {}).name]); return n; };
   const hasLoops = !!(v.today && v.today.source);
-  const chats = only !== "tasks", tasks = only !== "chats";
-  const close = p.done.length;
-  const yours = (chats ? p.asks.length + p.blocked.length : 0) + (tasks ? p.dueNow.length + p.chaseNow.length : 0);
   const nodes = [];
-  // On Chats, how they're ordered beside your streak (what needs you is on
-  // its tab, and on the cards); on Tasks, what's for now.
-  if (top) nodes.push(h("div", { class: "today-summary" }, only === "chats" ? todaySorter(v) : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
+  const needing = (s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s);
+  // On Chats, Needs you beside your streak; on Tasks, what's for now.
+  if (top) nodes.push(h("div", { class: "today-summary" }, only === "chats"
+    ? uiFilter({ label: "Needs you", count: todayCount(v, "chats"), on: todayUI.needsOnly, title: "Only what needs you (o)", act: () => todayNeedsOnly(!todayUI.needsOnly) })
+    : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
   // A chat's card, wherever it stands.
   const cardOf = (s) => s === p.main ? tk(todayChat, "assistant")(s)
     : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
-  const how = only === "chats" ? todaySortNow(v) : "groups";
-  // Last: every chat, your assistant too, the newest answer on top.
-  if (how === "last") {
-    const all = (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)).sort(todayNewest);
-    return [...nodes, all.length ? h("div", { class: "tsec-cards" }, all.map(cardOf)) : null].filter(Boolean);
+  // Your chats: Now, then For later, as you put them (todaySort). Where each
+  // stands is on its card, and never moves it.
+  if (only === "chats") {
+    const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
+    const later = (s) => s.priority === "low" && s.assistant !== "main";
+    const nowAll = ss.filter((s) => !later(s)), laterAll = ss.filter(later);
+    const on = todayUI.needsOnly, show = (list) => (on ? list.filter(needing) : list);
+    const now = show(nowAll), put = show(laterAll), waiting = laterAll.filter(needing).length;
+    nodes.push(uiSection("now", "Now", { count: now.length, extra: on ? null : todayAll(now.filter((s) => p.done.includes(s))) }, now.map(cardOf)));
+    if (on && !now.length && !put.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
+    else if (!now.length && !on && laterAll.length) nodes.push(h("p", { class: "today-clear" }, "Nothing in Now. Bring one back from For later."));
+    // Folded, what waits in it counted on its head; filtered, in sight.
+    nodes.push(uiSection(on ? "forlater-needs" : "forlater", "For later", { count: put.length, fold: on ? true : false,
+      extra: !on && waiting ? uiPill(`${waiting} need${waiting === 1 ? "s" : ""} you`, "ask") : null }, put.map(cardOf)));
+    return nodes.filter(Boolean);
   }
-  if (chats && p.main) nodes.push(cardOf(p.main));      // your assistant, on top
-  if (how === "priority") return [...nodes, ...todayByPriority(v, p, cardOf)].filter(Boolean);
-  // At work on top, folded, its count in sight; then what needs you (asks,
-  // blocked, finished and not seen yet, your tasks due); then what's done
-  // (Review, Complete); then every other chat, open: none is out of sight.
-  const runs = p.working.filter((s) => s.status === "running").length, works = p.working.length - runs;
-  if (chats) nodes.push(uiSection("working", "At work", { count: p.working.length, fold: false,
-    extra: p.working.length ? uiPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },
-    p.working.map(tk(todayChat, "working"))));
-  const needs = yours + (chats ? p.fresh.length : 0);
-  nodes.push(uiSection("yours", only === "tasks" ? "Now" : "Needs you", { count: needs },
-    chats ? [p.asks.map(tk(todayAsk)), p.blocked.map(tk(todayBlocked)), p.fresh.map(tk(todayChat, "fresh"))] : [],
-    tasks ? [p.chaseNow.map(loop), p.dueNow.map(loop)] : []));
-  if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), chats && close ? ` Nothing needs you. ${close} done, below.` : " Nothing needs you."));
-  if (chats) {
-    nodes.push(uiSection("finish", "Done", { count: close, extra: todayAll(p.done) }, p.done.map(tk(todayChat, "done"))));
-    nodes.push(uiSection("idle", "Ready", { count: p.ready.length }, p.ready.map(tk(todayChat, "ready"))));
-  }
-  if (tasks) {
-    nodes.push(uiSection("chase", "Waiting on others", { count: p.waiting.length, fold: only === "tasks" }, p.waiting.map(loop)));
-    nodes.push(uiSection("week", "Later this week", { count: p.week.length, fold: only === "tasks" }, p.week.map(loop)));
-    nodes.push(uiSection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
-    if (only === "tasks") nodes.push(uiSection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
-  }
-  if (tasks) {
-    if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
-    if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your tasks show here from your loops file: set it in ",
-      h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
-    else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark tasks done from here."));
-  }
+  // Your tasks: what's for now, then the rest.
+  const needs = p.dueNow.length + p.chaseNow.length;
+  nodes.push(uiSection("yours", "Now", { count: needs }, p.chaseNow.map(loop), p.dueNow.map(loop)));
+  if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
+  nodes.push(uiSection("chase", "Waiting on others", { count: p.waiting.length, fold: true }, p.waiting.map(loop)));
+  nodes.push(uiSection("week", "Later this week", { count: p.week.length, fold: true }, p.week.map(loop)));
+  nodes.push(uiSection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
+  nodes.push(uiSection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
+  if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
+  if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your tasks show here from your loops file: set it in ",
+    h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
+  else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark tasks done from here."));
   return nodes.filter(Boolean);
 }
 
@@ -903,16 +877,10 @@ function todayAll(done) {
   return b;
 }
 
-// The chats by priority: High, Normal, Low (folded), the newest answer first
-// in each. Each card says where it stands, and each head how many need you.
-function todayByPriority(v, p, cardOf) {
-  const ss = (v.sessions || []).filter((s) => !s.setup && s !== p.main && !todayUI.closing.has(s.id));
-  return ["high", "normal", "low"].map((level) => {
-    const list = ss.filter((s) => (s.priority || "normal") === level).sort(todayNewest);
-    const asking = list.filter((s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s)).length;
-    return uiSection(`prio-${level}`, `${PRIORITY[level]} priority`, { count: list.length, fold: level === "low" ? false : null,
-      extra: asking ? uiPill(`${asking} need${asking === 1 ? "s" : ""} you`, "ask") : null }, list.map(cardOf));
-  });
+// Only what needs you, or everything again.
+function todayNeedsOnly(on) {
+  todayUI.needsOnly = on;
+  todayRedraw();
 }
 
 // What Today shows of the view: drawn again only when it changes (each
@@ -922,7 +890,7 @@ function todayByPriority(v, p, cardOf) {
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
   const m = missionsNow();
-  return JSON.stringify([todayUI.version, new Date().toDateString(), v.today, v.needs, todaySortNow(v),
+  return JSON.stringify([todayUI.version, new Date().toDateString(), v.today, v.needs, todayUI.needsOnly,
     [m.n, m.streak, m.goal, m.total], (v.sessions || []).map((s) => s.id).join(), (v.sessions || []).map((s) => [todayRowKey(s), todayTimes(s)])]);
 }
 

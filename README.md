@@ -56,8 +56,8 @@ leaves your projects and chats alone.
 ## The app
 
 - **The list**: your chats, each with its name, what it's doing ("Needs your answer",
-  "Working", "Done", "Ready") and its project. The switch beside your streak orders them: in
-  groups, by priority, or the last to answer on top.
+  "Working", "Done", "Ready") and its project, in two lists you decide: **Now** (pinned on top) and
+  **For later**. A chat's state never moves its card; **Needs you** filters to what waits on you.
 - **The chat**: what you said, what Claude says, the steps it took (folded into one line you
   can open), and the cards for its questions and permissions. Under it, the box you type in,
   with the model and how Claude asks for permission.
@@ -78,7 +78,7 @@ On a computer's browser:
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |
 | `Ctrl+Alt+R` | Run the project in the terminal |
-| `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority |
+| `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned |
 | `Ctrl+Alt+A` | Go to a chat, by its name |
 | `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |

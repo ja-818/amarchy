@@ -14,7 +14,7 @@
 // Everything has its key (? shows them): j / k (or the arrows) from card
 // to card, l / h into a card along its buttons and back out, Enter opens
 // (or presses), 1-4 picks an answer, x completes its mission (with Undo), r
-// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Tavern, / searches, n starts a new chat, m the menu, o the chats' next order (Groups, Priority, Last).
+// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Tavern, / searches, n starts a new chat, m the menu, p pins a chat, f puts it for later, o shows only what needs you.
 
 const BOARD_TABS = ["chats", "tasks", "tavern"];
 const board = {
@@ -247,8 +247,7 @@ function boardKeys(e) {
   else if (k === "o") {
     if (boardTabNow() !== "chats" || board.query) return;
     e.preventDefault();
-    const at = TODAY_SORTS.findIndex((o) => o.key === todaySortNow());
-    organizeList(TODAY_SORTS[(at + 1) % TODAY_SORTS.length].key);
+    todayNeedsOnly(!todayUI.needsOnly);
   }
   else if (!card) return;
   else if (/^[1-9]$/.test(k)) {
@@ -258,6 +257,10 @@ function boardKeys(e) {
     const s = card.dataset.id && row(card.dataset.id);
     if (s && s.assistant !== "main") { e.preventDefault(); todayComplete(s); }
     else if (!s) press(".tbtn.loop-done");      // a task: Done
+  } else if (k === "p" || k === "f") {
+    // Pinned or For later; again, back in Now.
+    const s = card.dataset.id && row(card.dataset.id), level = k === "p" ? "high" : "low";
+    if (s && s.assistant !== "main") { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
   } else if (k === "r") press("a.tbtn");
   else if (k === "s") press(".tbtn.seen");
 }

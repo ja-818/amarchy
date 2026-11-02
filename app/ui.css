@@ -295,6 +295,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 }
 .ui-tool { padding: 0; font-size: 16px; }
 @media (hover: hover) { .ui-tool:hover, .head-btn:hover, .ui-tabs .control:hover { color: var(--text); background: var(--control-hover); } }
+.ui-filter:disabled { opacity: .55; }
 .head-btn.on, .ui-tabs .control.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
 .ui-tool .glyph svg, .head-btn .glyph svg, .ui-action .glyph svg { width: 18px; height: 18px; }
 .head-btn .ic { width: 18px; height: 18px; }

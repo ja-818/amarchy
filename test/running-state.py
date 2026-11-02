@@ -70,7 +70,6 @@ try:
     s = view([bash("runtask01", "Run the full check, e2e and tour chain")])
     check(s["status"] == "running" and s["running"] == "Run the full check, e2e and tour chain", f"idle, a run going: running ({s['status']}, {s['running']!r})")
     check(not s["unseen"] and s["background"] == 1, "not done (unseen) while it runs")
-    check(am.status_group(s) == "running", "grouped as running")
     check(am.alert_kind(s, "running", "working") is None, "its turn ending with a run going: no chime")
     s = view([bash("srvtask01", "Start the app")])
     check(s["status"] == "idle" and s["serving"] == "Start the app" and s["running"] == "", f"only a server going: idle, serving ({s['status']}, {s['serving']!r})")

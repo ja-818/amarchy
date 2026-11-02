@@ -67,18 +67,20 @@ priority:
 - **Ready**: it's idle; nothing is waiting for you.
 - **Asleep**: its Claude isn't running, to free its memory (see [Sleep](#sleep)).
 
-Start everything at once, then say what matters: every chat has a **priority**,
-High, Normal (what a new one gets) or Low. The list puts higher priority first,
-unless you order it by Last. Every chat still notifies you, whatever its priority.
+Start everything at once, then say what you're on. Your chats are two lists, and
+you decide what's in them:
 
-The switch beside your streak orders your chats, the same on every screen:
+- **Now**: what you're working on. Every new chat starts here. **Pinned** ones (the
+  flag) always stay on top: what matters most.
+- **For later**: under Now, folded. A chat you put here stays until you bring it
+  back, whatever it does; its head counts what needs you in it.
 
-- **Groups**: where each stands: At work, Needs you, Done, Ready.
-- **Priority**: High, Normal and Low, what needs you counted on each head.
-- **Last**: one list, the chat with the newest answer on top, whatever its priority.
-  A chat at work keeps its place until it answers; one asking you counts from when it asked.
-
-Inside a group or a priority, the newest answer comes first. On a computer, `o` goes to the next one.
+Inside each, the chat you last wrote to comes first. A chat's state (Asks you,
+Working, New, Done) is a label on its card and never moves it, so nothing shifts
+while you read. **Needs you**, beside your streak, shows only the chats waiting on
+you, For later's too (`o`). Hold a card (a right click on a computer) to pin it or
+put it for later; on a computer `p` pins and `f` puts it for later, and again puts
+it back in Now. Every chat still notifies you, wherever it is.
 
 Your projects come in the order you choose, not alphabetically: in the list
 grouped by project, and in the picker of a new chat. **Order projects…** (in
@@ -194,10 +196,10 @@ with a current browser works). It opens on [Today](#today): what to do now. Its
 groups and sort as a computer: each one's name, its state in words and its
 project, then what it asks you ("Asks: Which theme should be the default?") or the
 last thing its Claude wrote; its time, a dot while you haven't read what it
-finished, and its priority on the right. Your assistant's card stays on top (see
+finished, and its flag if pinned. Your assistant's card stays on top (see
 [Your assistant](#your-assistant)). The search reads names, projects and branches.
 
-- **Hold a chat** (or its ••• menu) to set its priority, rename it, run its project
+- **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, run its project
   or a saved command, add a picture or a secret, make it your assistant, or close
   it. Closing asks first, as on a computer, and says if uncommitted work would go
   with it.
@@ -264,13 +266,11 @@ host's chats without anything else installed.
   empties it); and **New chat** (`n`). On the phone the same, the search under
   it and New chat a +; the menu a sheet.
 - **Chats**: every chat a card (its project, its state, its goal and what it last
-  said, its question's buttons). Not grouped, by where each stands: **At work**
-  (folded, how many working), **Needs you** (what asks you, what's blocked, and
-  what finished that you haven't opened yet, with what it said and **Seen**),
-  **Done** (its goal reached: **Review** opens the link its last reply gave,
-  **Complete mission** closes it, with Undo) and **Ready** (every other chat).
-  The switch beside your streak (`o`) orders them instead by **Priority** or by
-  **Last**, the newest answer on top.
+  said, its question's buttons), in **Now** and **For later**: pinned on top, then
+  the one you last wrote to (`p` pins, `f` for later). **Needs you** (`o`) shows only
+  what asks you, what's blocked and what finished that you haven't opened yet. A done
+  chat's **Review** opens the link its last reply gave, **Complete mission** closes
+  it, with Undo.
 - **Tasks**: your own (your loops file: due now, waiting on others, this week,
   further out, someday), each with **Follow up** (your assistant drafts the
   message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
@@ -310,7 +310,7 @@ host's chats without anything else installed.
   `←`) back and out of it, `Esc` out at once, `Enter` presses the button you're on,
   `1`-`9` pick the card's answer, `x` completes its mission (with Undo; a task's
   Done), `r` opens what a done chat made (Review), `s` marks it seen, `Tab` is
-  Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` Groups, Priority or Last, `?` all the keys.
+  Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` only what needs you, `p` pin, `f` for later, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
   new chat, as on the phone), the mic, and the picture button. A **screenshot
@@ -339,7 +339,7 @@ host's chats without anything else installed.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
   project and name (click: rename), where it stands (its tone a dot), `⋯` its
   menu (the side panel's **Terminal**, **Changes** and **Details**, each with its
-  key; rename, priority, a secret…), and **Complete** (its mission: closed, with
+  key; rename, pin, a secret…), and **Complete** (its mission: closed, with
   Undo), last. The board's bar is built the same way: the **Ⓐ** a box as ‹ is,
   **New chat** as Complete.
 - **The side panel** has three tabs, a click (or a key) away, as wide as you drag
@@ -413,7 +413,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
 | `Ctrl+Alt+H` | The board (from a chat: back to it). |
-| `Ctrl+Alt+Up` / `Down` | Raise / lower the chat's priority. |
+| `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned. |
 | `Ctrl+Alt+E` / `M` / `X` | Rename / the amarchy menu / complete the chat's mission (with Undo). |
 | `Ctrl+Alt+T` | The look: theme, font and wallpaper (see [Theme](#theme)). |
 | `Ctrl+Alt+Space` / `Ctrl+Alt+Enter` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
@@ -678,10 +678,9 @@ amarchy secret forget NAME [--project <name>|--all]       # also: secret rm
 
 **Today** is the app's home, the same on the phone and on a computer: the board,
 its bar with **Chats | Tasks | Tavern** (each with what's your move; the
-[Tavern](#the-tavern), your chats as pirates, a crew per project), the search, Group &
-sort, the tools and **New chat** (a **+** on the phone). It's one queue of what to
-do, without reading any chat, each chat with its project as a colored label (higher
-priority first, then your projects' order), and one count over it:
+[Tavern](#the-tavern), your chats as pirates, a crew per project), the search, the tools and **New chat** (a **+** on the phone). It's one queue of what to
+do, without reading any chat, each chat with its project as a colored label (pinned
+first, then the one you last wrote to), and one count over it:
 
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission's **Allow** and
@@ -709,7 +708,7 @@ fanfare (not when your chimes are off), and **Next mission**. Undo stays under i
 Your assistant is a line on top. What you answer, allow or close goes after a few
 seconds with **Undo** at the bottom of the screen, so a slip costs nothing. A chat you
 open from the board comes back to the board once you send it something. Held down
-on the phone (a right click on a computer), a chat's card opens its menu: priority,
+on the phone (a right click on a computer), a chat's card opens its menu: pin, for later,
 name, commands, **Complete mission**.
 
 Each chat knows its goal and where it stands because every reply ends with a goal
@@ -1049,8 +1048,7 @@ amarchy run --show | --set <command>  the project's run command (guessed from th
 amarchy run <name>                    run another saved command of the project, the same way
 amarchy run --save <name> <command>   save one; --forget <name> drops it
 amarchy run --list                    the project's saved commands, name and command
-amarchy priority [high|normal|low|up|down] [--id <id>]   how much it matters (prints it without a level)
-amarchy sort [groups|priority|last]   how the chats are ordered, the switch beside your streak
+amarchy priority [high|normal|low|up|down] [--id <id>]   high: pinned; normal: Now; low: For later (prints it without a level)
 amarchy sleep [id] [--force]          put a session to sleep (says why not when something would be lost)
 amarchy sleep --all [--force]         every session that can sleep, except those open on a phone or in a browser
 amarchy sleep --after [minutes|off]   how long an idle session waits before it sleeps on its own (default 1)

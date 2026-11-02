@@ -297,7 +297,7 @@ async function answeredFromBoard(p, where) {
     [...document.querySelectorAll(".chat-dock .card .cta")].find((b) => b.innerText.trim() === "Allow").click();
     await new Promise((r) => requestAnimationFrame(() => r()));
     const card = document.querySelector('.board-today .tcard[data-id="proj-perm"]');
-    return { took: performance.now() - t, board: !(app.desk ? desk.current : app.session), asks: !!card && !!card.closest(".today-yours") };
+    return { took: performance.now() - t, board: !(app.desk ? desk.current : app.session), asks: !!card && card.classList.contains("k-ask") };
   });
   check(where, r.board && !r.asks && r.took < 50, `Allow: back on the board in ${Math.round(r.took)} ms, its card no longer asking (${JSON.stringify(r)})`);
   await sleep(1700);
@@ -306,7 +306,7 @@ async function answeredFromBoard(p, where) {
   await until(p, () => !!document.querySelector(".chat-dock .card.permission"));
   await p.evaluate(() => [...document.querySelectorAll(".chat-dock .card .cta")].find((b) => b.innerText.trim() === "Allow").click());
   check(where, await until(p, () => /The question changed/.test((document.querySelector(".toast") || {}).innerText || "") &&
-    !!document.querySelector('.board-today .today-yours .tcard[data-id="proj-perm"]')), "refused: why, and its card asks again");
+    !!document.querySelector('.board-today .tcard.k-ask[data-id="proj-perm"]')), "refused: why, and its card asks again");
   p.held.answer = {};
   await p.evaluate(() => { todayUI.sent.clear(); todayRedraw(); });
 }
@@ -528,17 +528,17 @@ async function pushed(browser, port) {
   const ctx = await browser.newContext({ baseURL: `http://127.0.0.1:${port}` });
   const p = await ctx.newPage();
   await p.goto("/");
-  await until(p, () => window.app && app.view && app.view.sort);
+  await until(p, () => window.app && app.view);
   const r = await p.evaluate(async () => {
     const times = [];
-    for (const sort of ["last", "priority", "groups", "last", "groups"]) {
+    for (const on of [true, false, true, false, true]) {
       await new Promise((ok) => setTimeout(ok, 300 + Math.random() * 400));
       const t = performance.now();
       const es = new EventSource("/api/events");
       await new Promise((ok) => es.addEventListener("list", ok, { once: true }));
-      const got = new Promise((ok) => es.addEventListener("list", (e) => { if (JSON.parse(e.data).sort === sort) ok(); }));
+      const got = new Promise((ok) => es.addEventListener("list", (e) => { if (JSON.parse(e.data).show_terminals === on) ok(); }));
       const t0 = performance.now();
-      await api("/api/list", { sort });
+      await api("/api/terminals", { on });
       await got;
       times.push(Math.round(performance.now() - t0));
       es.close();

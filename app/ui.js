@@ -16,6 +16,7 @@
 // - uiSection: a small head with a count (an action at its end), its cards;
 //   folded or not.
 // - uiTabs: one of a few (Chats | Tasks), each with what's your move.
+// - uiFilter: shows only some of what's there, on or off, with how many.
 // - uiSearch: the search box.
 // - uiTool: a tool's icon button in a bar.
 // - uiScore: your score in a word or two (the streak's flame, today's
@@ -206,7 +207,7 @@ function uiPatchPart(old, next) {
 // before the chip (an avatar); id: the chat it is, if one (its priority mark,
 // data-id for the keys).
 function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label }) {
-  // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓ sets it).
+  // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
@@ -264,6 +265,13 @@ function uiTabs(items, on, pick, el = null, label = "") {
     t.label, t.count ? h("span", { class: "tab-count" }, String(t.count)) : ""));
   uiSwap(box, kids);
   return box;
+}
+
+// A filter: on, only what it names shows; its count in a badge. With nothing
+// to show it can't be turned on.
+function uiFilter({ label, count = 0, on = false, title = null, act }) {
+  return h("button", { class: `head-btn ui-filter${on ? " on" : ""}`, type: "button", title, "aria-pressed": String(on), disabled: !count && !on ? true : null, onclick: act },
+    label, count ? h("span", { class: "tab-count" }, String(count)) : "");
 }
 
 // The search box: its icon, the field, and the key that gets there (a
