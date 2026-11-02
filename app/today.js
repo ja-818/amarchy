@@ -838,14 +838,24 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   const cardOf = (s) => s === p.main ? tk(todayChat, "assistant")(s)
     : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
-  // Your chats: Now, then For later, as you put them (todaySort). Where each
-  // stands is on its card, and never moves it.
+  // Your chats: your assistant, what's at work (its own list, folded, so what
+  // you can act on starts right under it), then Now and For later, as you put
+  // them (todaySort). Done working, a chat is back in its place there.
   if (only === "chats") {
     const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
+    const on = todayUI.needsOnly;
     const later = (s) => s.priority === "low" && s.assistant !== "main";
-    const nowAll = ss.filter((s) => !later(s)), laterAll = ss.filter(later);
-    const on = todayUI.needsOnly, show = (list) => (on ? list.filter(needing) : list);
+    const free = ss.filter((s) => !p.working.includes(s) && (on || s !== p.main));
+    const nowAll = free.filter((s) => !later(s)), laterAll = free.filter(later);
+    const show = (list) => (on ? list.filter(needing) : list);
     const now = show(nowAll), put = show(laterAll), waiting = laterAll.filter(needing).length;
+    if (!on) {
+      if (p.main) nodes.push(cardOf(p.main));
+      const runs = p.working.filter((s) => s.status === "running").length, works = p.working.length - runs;
+      nodes.push(uiSection("working", "At work", { count: p.working.length, fold: false,
+        extra: p.working.length ? uiPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },
+        p.working.map(cardOf)));
+    }
     nodes.push(uiSection("now", "Now", { count: now.length, extra: on ? null : todayAll(now.filter((s) => p.done.includes(s))) }, now.map(cardOf)));
     if (on && !now.length && !put.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
     else if (!now.length && !on && laterAll.length) nodes.push(h("p", { class: "today-clear" }, "Nothing in Now. Bring one back from For later."));

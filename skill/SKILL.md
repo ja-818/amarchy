@@ -95,8 +95,8 @@ here holds for both.
 ## What the user sees
 
 - **The list**: every chat, its state in words (Needs your answer, Working,
-  Done, Ready, Asleep), in two lists the user decides: Now (pinned ones on top) and
-  For later (`priority` high, normal and low).
+  Done, Ready, Asleep), At work (folded, on top), then two lists the user decides: Now
+  (pinned ones on top) and For later (`priority` high, normal and low).
 - **The chat**: their messages, your replies as text, your steps folded into
   one line (they can open each), checklists, and cards for your questions,
   permissions and plans (Approve and start, Approve another way, Keep planning).

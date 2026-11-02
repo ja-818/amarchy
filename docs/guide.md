@@ -70,14 +70,16 @@ priority:
 Start everything at once, then say what you're on. Your chats are two lists, and
 you decide what's in them:
 
+- **At work**: on top, folded, every chat Claude is working on, with how many. Once
+  it stops, a chat is back in its place in Now or For later.
 - **Now**: what you're working on. Every new chat starts here. **Pinned** ones (the
   flag) always stay on top: what matters most.
 - **For later**: under Now, folded. A chat you put here stays until you bring it
-  back, whatever it does; its head counts what needs you in it.
+  back, wherever it was; its head counts what needs you in it.
 
 Inside each, the chat you last wrote to comes first. A chat's state (Asks you,
-Working, New, Done) is a label on its card and never moves it, so nothing shifts
-while you read. **Needs you**, beside your streak, shows only the chats waiting on
+New, Done) is a label on its card and never moves it, so nothing shifts while you
+read. **Needs you**, beside your streak, shows only the chats waiting on
 you, For later's too (`o`). Hold a card (a right click on a computer) to pin it or
 put it for later; on a computer `p` pins and `f` puts it for later, and again puts
 it back in Now. Every chat still notifies you, wherever it is.
@@ -266,7 +268,7 @@ host's chats without anything else installed.
   empties it); and **New chat** (`n`). On the phone the same, the search under
   it and New chat a +; the menu a sheet.
 - **Chats**: every chat a card (its project, its state, its goal and what it last
-  said, its question's buttons), in **Now** and **For later**: pinned on top, then
+  said, its question's buttons), in **At work** (folded), **Now** and **For later**: pinned on top, then
   the one you last wrote to (`p` pins, `f` for later). **Needs you** (`o`) shows only
   what asks you, what's blocked and what finished that you haven't opened yet. A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes

@@ -186,16 +186,20 @@ const click = (p, sel, label) => p.evaluate(({ sel, label }) => {
 // On the board, its tab (Chats or Tasks); elsewhere both are on one page.
 const tab = (p, which) => p.evaluate((which) => { if (boardOn() && board.tab !== which) boardTab(which); }, which);
 
-// A running chat: Running · what runs, not Done, new or stalled, no Complete
+// A running chat: under At work with what runs, not Done, new or stalled, no Complete
 // on its card; completing it anyway asks first, saying the run stops.
 async function running(p, where) {
   await tab(p, "chats");
   check(where, await p.evaluate((what) => {
-    const c = document.querySelector(".today:not([hidden]) .today-now .tcard[data-id=proj-run]");
+    const c = document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run]");
     return !!c && c.querySelector(".tpill.t-running").textContent.includes(`Running · ${what}`);
-  }, RUNNING), "a running chat: Running · what runs");
+  }, RUNNING), "a running chat: under At work, Running · what runs");
+  check(where, await p.evaluate(() => !document.querySelector(".today-now .tcard[data-id=proj-run], .today-forlater .tcard[data-id=proj-run]")), "not in Now or For later too");
+  check(where, await p.evaluate(() => /1 working · 1 running/.test(document.querySelector(".today-working .tsec-head").textContent)), "At work counts it: 1 working · 1 running");
+  await p.evaluate(() => { document.querySelector(".today-working").open = true; });
   check(where, await p.evaluate(() => ![...document.querySelectorAll(".tcard[data-id=proj-run] .tbtn")].some((b) => /Complete/.test(b.innerText))), "no Complete mission on it");
   await p.screenshot({ path: path.join(SHOTS, `${where}-running.png`), fullPage: true });
+  await p.evaluate(() => { document.querySelector(".today-working").open = false; uiState.open.delete("working"); });
   await p.evaluate(() => todayComplete(row("proj-run")));
   check(where, await until(p, (what) => { const s = document.querySelector(".sheet"); return !!s && s.textContent.includes(`Stops what's still running: ${what}`) && /Stop it and complete/.test(s.textContent); }, RUNNING),
         "Complete anyway: asked first, saying the run stops");
@@ -210,6 +214,7 @@ async function running(p, where) {
   check(where, await until(p, () => /Working/.test((document.querySelector(".today:not([hidden]) .tcard[data-id=proj-run] .tpill") || {}).textContent || "")), "the run ended: Working");
   await set({ status: "idle", unseen: true });
   check(where, await until(p, () => /Done/.test((document.querySelector(".today:not([hidden]) .tcard[data-id=proj-run] .tpill") || {}).textContent || "")), "then Done, new");
+  check(where, await p.evaluate(() => !!document.querySelector(".today-now .tcard[data-id=proj-run]")), "and back in Now");
   // Back as the test's chats are (the list as the host sends it).
   await p.evaluate((chats) => { app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); }, CHATS);
   await until(p, () => !!document.querySelector(".today:not([hidden]) .tcard[data-id=proj-run] .tpill.t-running"));
@@ -225,28 +230,35 @@ async function sortChecks(p, where) {
     return { row: Math.abs((t.top + t.bottom) - (s.top + s.bottom)) < 4, inside: s.right <= r.getBoundingClientRect().right + 1 && t.right <= s.left, over: document.documentElement.scrollWidth <= innerWidth }; });
   check(where, box.row && box.inside && box.over, `Needs you and the streak on one row, in the width (${JSON.stringify(box)})`);
   const heads = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
-  check(where, JSON.stringify(heads) === JSON.stringify(["Now", "For later"]), `Chats: Now, For later and nothing else (${heads.join(", ")})`);
+  check(where, JSON.stringify(heads) === JSON.stringify(["At work", "Now", "For later"]), `Chats: At work, Now, For later (${heads.join(", ")})`);
+  check(where, await p.evaluate(() => { const kids = [...board.box.children].filter((n) => !n.matches(".today-summary")); return kids[0].matches(".k-assistant, :has(.k-assistant)") && kids[1].matches("details.today-working") && !kids[1].open; }),
+        "your assistant, then At work, folded");
+  check(where, /2 working|1 working · 1 running/i.test(await text(p, ".today-working .tsec-head")), "its head says how many");
   const now = await ids(".today-now");
-  check(where, now[0] === "me-jaken" && now[1] === "proj-work", `your assistant, then what you pinned (${now.join(", ")})`);
+  check(where, !now.includes("proj-work") && (await ids(".today-working")).includes("proj-work"), `what's at work isn't in Now, pinned or not (${now.join(", ")})`);
   check(where, !now.includes("proj-later") && (await ids(".today-forlater")).includes("proj-later"), "a low one in For later, not in Now");
   check(where, await p.evaluate(() => !document.querySelector(".today-forlater").open), "For later starts folded");
 
-  // A state moves nothing; you writing does.
-  await change("proj-quiet", { status: "working" });
-  await until(p, () => /Working/.test((document.querySelector(".tcard[data-id=proj-quiet] .tpill") || {}).textContent || ""));
-  await change("proj-quiet", { status: "idle", unseen: true, today: { state: "done" } });
+  // Working, it goes to At work; done, back in its place. Nothing else moves a card.
+  const quiet = now[now.length - 1];
+  await change(quiet, { status: "working" });
+  check(where, await until(p, (id) => !!document.querySelector(`.today-working .tcard[data-id=${id}]`), quiet), "working: under At work");
+  await change(quiet, { status: "idle", unseen: true, today: { state: "done" } });
+  await until(p, (id) => !!document.querySelector(`.today-now .tcard[data-id=${id}]`), quiet);
+  check(where, JSON.stringify(await ids(".today-now")) === JSON.stringify(now), "stopped: back in its place, the rest unmoved");
+  await change("proj-later", { status: "working" });
+  check(where, await until(p, () => !!document.querySelector(".today-working .tcard[data-id=proj-later]")), "one in For later working: under At work too");
   await change("proj-later", { status: "waiting", asks: "Claude asks to run x" });
   await until(p, () => !!document.querySelector(".tcard.k-ask[data-id=proj-later]"));
-  check(where, JSON.stringify(await ids(".today-now")) === JSON.stringify(now), "what a chat does never moves its card");
-  check(where, (await ids(".today-forlater")).includes("proj-later"), "one in For later asking stays in For later");
+  check(where, (await ids(".today-forlater")).includes("proj-later"), "then asking, back in For later, not up in Now");
   check(where, /1 need/i.test(await text(p, ".today-forlater .tsec-head")), "and its head says so");
   const count = await text(p, ".ui-filter .tab-count");
   check(where, Number(count) >= 1, `Needs you counts it (${count})`);
   await change("proj-later", { status: "idle", asks: "" });
-  const moved = now[now.length - 1];
+  const moved = now[now.length - 2];
   await change(moved, { today: { you_at: Math.floor(Date.now() / 1000) } });
   const wrote = await ids(".today-now");
-  check(where, wrote[2] === moved && wrote[1] === "proj-work", `you wrote to it: first after what's pinned (${wrote.join(", ")})`);
+  check(where, wrote[0] === moved, `you wrote to it: first in Now (${wrote.join(", ")})`);
 
   // The filter: only what needs you, each list's own.
   await change("proj-later", { status: "waiting", asks: "Claude asks to run x" });
@@ -255,22 +267,29 @@ async function sortChecks(p, where) {
   const onlyThose = await p.evaluate(() => [...board.box.querySelectorAll(".tcard[data-id]")].map((c) => `${c.dataset.id} ${c.className}`));
   check(where, onlyThose.length && !onlyThose.some((c) => /^(me-jaken|proj-work|proj-run) /.test(c)), `Needs you: only those (${onlyThose.join("; ")})`);
   check(where, await p.evaluate(() => { const d = document.querySelector(".today-forlater-needs"); return !!d && d.open && !!d.querySelector(".tcard[data-id=proj-later]"); }), "For later's in sight too");
+  check(where, await p.evaluate(() => !document.querySelector(".today-working")), "and no At work: it doesn't need you");
   await p.screenshot({ path: path.join(SHOTS, `${where}-needs-you.png`) });
   await p.keyboard.press("o");
-  check(where, await until(p, () => !todayUI.needsOnly && !!document.querySelector(".today-now .tcard[data-id=me-jaken]")), "o: everything again");
+  check(where, await until(p, () => !todayUI.needsOnly && !!document.querySelector(".today-working")), "o: everything again");
 
   // Moved by you: p pins, f for later, again back in Now.
   const key = async (id, k) => { await p.evaluate((id) => boardFocus(document.querySelector(`.tcard[data-id=${id}] .today-go`)), id); await p.keyboard.press(k); };
+  await p.route("**/priority", (r) => r.fulfill({ json: {} }));
   await key("proj-done2", "p");
   check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2] .prio.high")), "p: pinned, its flag on");
+  await change("proj-done2", { priority: "high" });
+  check(where, await until(p, () => document.querySelector(".today-now .tcard[data-id]").dataset.id === "proj-done2"), "pinned: first in Now");
   await key("proj-done2", "p");
   check(where, await until(p, () => !document.querySelector(".tcard[data-id=proj-done2] .prio.high")), "p again: back in Now");
+  await change("proj-done2", { priority: "normal" });
   await key("proj-done2", "f");
   check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "f: For later");
+  await change("proj-done2", { priority: "low" });
   await p.evaluate(() => { document.querySelector(".today-forlater").open = true; });
   await p.screenshot({ path: path.join(SHOTS, `${where}-for-later.png`), fullPage: true });
   await key("proj-done2", "f");
   check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2]")), "f again: back in Now");
+  await p.unroute("**/priority");
   await p.evaluate(() => { document.querySelector(".today-forlater").open = false; uiState.open.delete("forlater"); });
   // Back as the test's chats are.
   await p.evaluate((chats) => { ahead.clear(); app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); }, CHATS);
@@ -402,7 +421,7 @@ async function common(p, where) {
     check(where, !/Submit it now\?/.test(await text(p, ".today:not([hidden])")), "its Tasks: tasks only");
     await tab(p, "chats");
   }
-  check(where, /Now/i.test(t) && /For later/i.test(t) && !/At work/i.test(t), "Now and For later");
+  check(where, /At work/i.test(t) && /Now/i.test(t) && /For later/i.test(t), "At work, Now and For later");
   check(where, /Submit it now\?/.test(t) && /Claude asks to run gcloud/.test(t), "a chat's question and a permission are your move");
   check(where, /Fix the per-minute calc/.test(t) && /Submit the fellowship/.test(t), "loops due by tomorrow are your move");
   await tab(p, "tasks");
@@ -678,7 +697,7 @@ async function phone(browser, port) {
   await p.evaluate((chats) => { app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); board.scroll.scrollTop = 0; }, CHATS);
   await common(p, where);
   // A card opens its chat, its own screen; Back: the board, where it was.
-  await p.evaluate(() => { board.scroll.scrollTop = 60; document.querySelector(".ticket[data-id=proj-work] .today-go").click(); });
+  await p.evaluate(() => { board.box.style.paddingBottom = "400px"; board.scroll.scrollTop = 60; document.querySelector(".ticket[data-id=proj-work] .today-go").click(); });
   check(where, await until(p, () => app.session && app.session.id === "proj-work"), "a card opens its chat");
   shapes.phoneHead = await p.evaluate(HEAD);
   check(where, await until(p, () => !!document.querySelector(".chat-dock .cbtn.send svg") && !!document.querySelector(".chat-dock .cbtn.mic svg")),
@@ -686,6 +705,7 @@ async function phone(browser, port) {
   await p.screenshot({ path: path.join(SHOTS, "phone-chat-open.png") });
   await p.evaluate(() => go("#/"));
   check(where, await until(p, () => !app.session && !!document.querySelector(".home-view .tasks-board") && board.scroll.scrollTop === 60), `back: the board, where it was (${await p.evaluate(() => [board.scroll.scrollTop, board.scroll.scrollHeight, board.scroll.clientHeight].join(","))})`);
+  await p.evaluate(() => { board.box.style.paddingBottom = ""; });
   // Sent something: back on the board, told what's left.
   await p.evaluate(() => todayOpen(app.view.sessions.find((s) => s.id === "proj-work")));
   await until(p, () => app.session && app.session.id === "proj-work");
