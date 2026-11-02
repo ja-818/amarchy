@@ -773,7 +773,8 @@ color, and how they sit says where the chat stands:
 | Sitting with a full beer, the candle lit | is idle |
 
 Under each one, lined up across the table, the chat's name and where it stands.
-Under the table, **its card**, the one from the Chats tab, in the room's dark and
+Under the table, always there and always one size so nothing moves as you click
+around (a long one scrolls inside), **its card**, the one from the Chats tab, in the room's dark and
 gold: the whole of what the first one waiting asks, with its answers (a permission's
 **Allow** and **Deny**), to answer right there; answered, the next one's comes up.
 Whoever's move is yours glows behind them, and the one the card is from stands in a

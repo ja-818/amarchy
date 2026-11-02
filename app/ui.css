@@ -78,6 +78,7 @@
   --tavern-light: color-mix(in srgb, var(--yellow) 60%, var(--orange));      /* lanterns, candles */
   --tavern-sea: color-mix(in oklab, var(--blue) 70%, var(--surface-sunken));
   --tavern-radius: var(--card-radius);
+  --tavern-card-h: 176px;                         /* the place under a table for its card: one size, always */
   --tavern-seat-w: 120px;                         /* a pirate's portrait's width (its height: 1.2 times it) */
 }
 @media (pointer: coarse) { :root { --control-h: 44px; } }

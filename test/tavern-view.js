@@ -132,11 +132,21 @@ async function run(browser, port, layout) {
   check(where, await p.evaluate(() => { const r = [...document.querySelectorAll('.tv-crew[data-crew="api"] .ui-pirate[data-id]')].map((x) => Math.round(x.querySelector(".tpill").getBoundingClientRect().top - x.getBoundingClientRect().top));
     return new Set(r).size === 1; }), "their status lines at one height across the table");
   // The table's card: what the first that's waiting asks, whole, with its answers; nothing to open.
-  const cardOf = (repo) => p.evaluate((repo) => { const c = document.querySelector(`.tv-crew[data-crew="${repo}"] .tv-say`); return c.hidden ? null : c.innerText; }, repo);
+  const cardOf = (repo) => p.evaluate((repo) => { const c = document.querySelector(`.tv-crew[data-crew="${repo}"] .tv-say`); return c.querySelector(".tcard") ? c.innerText : null; }, repo);
   check(where, /Submit it now\?/.test(await cardOf("web") || "") && /Submit/.test(await cardOf("web")) && /gcloud/.test(await cardOf("api") || "") && /Allow/.test(await cardOf("api")) && /Deny/.test(await cardOf("api")),
         "each table's card: the whole question and its answers, by itself");
-  check(where, await cardOf("ops") === null, "a table with nothing for you: no card");
+  check(where, await cardOf("ops") === null, "a table with nothing for you: no card, its place kept");
   check(where, await p.evaluate(() => document.querySelector('.ui-pirate[data-id="web-ask"]').matches(".talking")), "the one it's from, in the lantern's light");
+  // Clicking around moves nothing: every crew, pirate and card where it was, whatever shows.
+  const places = () => p.evaluate(() => JSON.stringify([...document.querySelectorAll(".tv-crew, .ui-pirate, .tv-say")].map((x) => { const r = x.getBoundingClientRect(); return [r.x, r.y + board.scroll.scrollTop, r.width, r.height].map(Math.round); })));
+  const still = await places();
+  let moved = 0;
+  for (const id of ["web-done", "api-fresh", "api-block", "web-ask", "api-perm"]) {
+    await p.click(`.ui-pirate[data-id="${id}"] .ui-pirate-go`);
+    await sleep(120);
+    if (await places() !== still) moved++;
+  }
+  check(where, !moved, `clicking from pirate to pirate moves nothing (${moved} of 5 moved it)`);
   // A click on one with something to show: theirs; again: their chat.
   await p.click('.ui-pirate[data-id="web-done"] .ui-pirate-go');
   check(where, await until(p, () => /Complete/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText) && document.querySelector('.ui-pirate[data-id="web-done"]').matches(".talking")), "a click on a done one: its card, Complete on it");
@@ -145,10 +155,10 @@ async function run(browser, port, layout) {
   await p.click('.ui-pirate[data-id="web-ask"] .ui-pirate-go');
   check(where, await until(p, () => (app.desk ? desk.current : app.session && app.session.id) === "web-ask"), "again: their chat");
   await p.evaluate(() => (app.desk ? boardBack() : go("#/")));
-  await until(p, () => !!document.querySelector(".tavern-hall .tv-say:not([hidden])") && getComputedStyle(document.querySelector(".tasks-board")).display !== "none");
+  await until(p, () => !!document.querySelector(".tavern-hall .tv-say .tcard") && getComputedStyle(document.querySelector(".tasks-board")).display !== "none");
   // Answered on the card: gone from the table, Undo brings it back.
   await p.evaluate(() => document.querySelector('.tv-crew[data-crew="web"] .tv-say .today-opt').click());
-  check(where, await until(p, () => document.querySelector('.tv-crew[data-crew="web"] .tv-say').hidden && !!document.querySelector(".undo-toast")), "answered on the card: the card goes, with Undo");
+  check(where, await until(p, () => !document.querySelector('.tv-crew[data-crew="web"] .tv-say .tcard') && !!document.querySelector(".undo-toast")), "answered on the card: the card goes, with Undo");
   await p.evaluate(() => document.querySelector(".undo-toast .text-btn").click());
   check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "Undo: back");
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tv-crew")].every((r) => r.querySelector(".tv-table > .tv-recruit:last-child"))),

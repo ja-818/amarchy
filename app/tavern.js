@@ -131,7 +131,8 @@ function tavernPirate(s, p, kind, talking) {
 
 // ---- what a pirate has for you, on the table's card
 //
-// Each table shows one card under it, the Chats tab's own: the whole
+// Each table has one place under it, always there, always one size (clicking
+// around moves nothing), for one card, the Chats tab's own: the whole
 // question and its answers (a permission's Allow and Deny...), a done one's
 // Review and Complete, what a new one said. Its asks come by themselves, the
 // first that's waiting; answered, the next. A click on a pirate with
@@ -259,7 +260,7 @@ function tavernCrew(repo, people, p, name = projectName(repo)) {
     h("header", { class: "tv-head" }, tavernFlag(), h("h3", { class: "tv-name" }, name, h("span", { class: "tv-count" }, String(people.length))),
       h("span", { class: "tv-tally" }, ...tavernTally(people.map((x) => tavernPose(x, p))))),
     h("div", { class: "tv-table" }, ...people.map((x) => tavernPirate(x, p, kinds.get(x.id), x.id === shown)), tavernRecruit(repo)),
-    h("div", { class: "tv-say", hidden: !card }, card));
+    h("div", { class: "tv-say" }, card || h("p", { class: "tv-say-none" }, "Nothing for you here")));
 }
 
 // The tavern, for the board's box (today.js todayFill, its Tavern tab):

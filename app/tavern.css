@@ -8,7 +8,7 @@
 /* Wider than the cards' column on a computer: crews side by side, each as
    wide as its crew, as many to a row as fit. */
 .board-scroll .today.tavern { max-width: calc(var(--page-width) + 400px); }
-.tavern-hall { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; align-items: flex-start; }
+.tavern-hall { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; align-items: stretch; }
 .tv-crew {
   position: relative; isolation: isolate; overflow: hidden; box-sizing: border-box; min-width: min(100%, 300px);
   /* Growing to fill its row, both edges on the page's; but not so far that a small crew is lost in its room. */
@@ -80,7 +80,9 @@
 /* The table's card (tavern.js tavernCard): the Chats tab's, in the room's
    dark and gold, in every theme: what's asked, read whole, answered here. */
 .tv-say {
-  position: relative; z-index: 2; margin: 2px auto 12px; padding: 0 12px; box-sizing: border-box; width: 100%; max-width: 640px;
+  /* One size, whatever it shows: what it says never widens the crew (no
+     width of its own, it takes the table's), and a long one scrolls inside. */
+  position: relative; z-index: 2; margin: 2px auto 12px; padding: 0 12px; box-sizing: border-box; width: 0; min-width: 100%; max-width: 640px; height: var(--tavern-card-h);
   --text: var(--tavern-bone); --text-muted: color-mix(in srgb, var(--tavern-bone) 65%, transparent);
   --card-bg: #1c110b; --card-border: color-mix(in srgb, var(--tavern-gold) 40%, transparent);
   --card-hover-bg: rgb(255 220 170 / .05); --card-hover-border: color-mix(in srgb, var(--tavern-gold) 65%, transparent);
@@ -89,13 +91,14 @@
   --button-primary-bg: var(--tavern-gold); --button-primary-text: var(--tavern-ink);
   color: var(--text);
 }
-.tv-say[hidden] { display: none; }
-.tv-say .tcard { color: var(--text); box-shadow: 0 6px 18px rgb(0 0 0 / .4); }
+.tv-say .tcard { color: var(--text); box-shadow: 0 6px 18px rgb(0 0 0 / .4); height: 100%; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
+.tv-say-none { display: grid; place-items: center; height: 100%; margin: 0; box-sizing: border-box; font-size: var(--caption); color: var(--text-muted);
+               border: 1px dashed rgb(255 240 210 / .14); border-radius: var(--card-radius); }
 .tv-say .tbtn { color: var(--text); }
 .tv-say .tbtn.primary { color: var(--button-primary-text); }
 
 @media (max-width: 719px) {
-  :root { --tavern-seat-w: 108px; }
+  :root { --tavern-seat-w: 108px; --tavern-card-h: 200px; }
   .tavern-hall { gap: 12px; }
   .tv-crew { flex: 1 1 100%; width: 100%; max-width: 100%; }
   .tv-tally { margin-left: 0; flex-basis: 100%; }
