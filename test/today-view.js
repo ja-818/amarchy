@@ -219,6 +219,49 @@ async function running(p, where) {
   await until(p, () => !!document.querySelector(".today:not([hidden]) .today-working .tcard[data-id=proj-run]"));
 }
 
+// The switch beside the streak: Groups, Priority, Last, one row with the score
+// on every width, what's picked kept on the host, and the order it says.
+async function sortChecks(p, where) {
+  const pick = async (key) => { await p.evaluate((k) => document.querySelector(`.today-sort [data-tab=${k}]`).click(), key);
+                                 await until(p, (k) => app.view.sort === k && !app.organize, key); };
+  const box = await p.evaluate(() => { const r = document.querySelector(".today-summary"), t = r.querySelector(".today-sort").getBoundingClientRect(), s = r.querySelector(".ui-score").getBoundingClientRect();
+    return { row: Math.abs((t.top + t.bottom) - (s.top + s.bottom)) < 4, inside: s.right <= r.getBoundingClientRect().right + 1 && t.right <= s.left, over: document.documentElement.scrollWidth <= innerWidth }; });
+  check(where, box.row && box.inside && box.over, `the switch and the streak on one row, in the width (${JSON.stringify(box)})`);
+
+  await pick("priority");
+  const heads = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
+  check(where, heads[0] === "High priority" && heads.includes("Normal priority") && !heads.includes("Needs you") && !heads.includes("Done"), `Priority: only its levels, High first (${heads.join(", ")})`);
+  check(where, /Build: Today/.test(await p.evaluate(() => [...board.box.querySelectorAll(".tsec")].find((x) => /^High/.test(x.querySelector(".tsec-title").textContent)).innerText)), "the high one under High");
+  const prioIds = await p.evaluate(() => [...board.box.querySelectorAll(".tcard[data-id]")].map((c) => c.dataset.id));
+  check(where, new Set(prioIds).size === prioIds.length, "each chat once");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-sort-priority.png`) });
+
+  // Last: a flat list, by each chat's own time; a new answer takes it to the top.
+  await pick("last");
+  const cards = () => p.evaluate(() => [...board.box.querySelectorAll(".tcard[data-id]")].map((c) => c.dataset.id));
+  const flat = await p.evaluate(() => board.box.querySelectorAll(".tsec").length);
+  const order = await cards();
+  const want = await p.evaluate(() => app.view.sessions.filter((s) => !s.setup && !todayUI.closing.has(s.id)).sort(todayNewest).map((s) => s.id));
+  check(where, !flat && JSON.stringify(order) === JSON.stringify(want) && new Set(order).size === order.length, `Last: no sections, each chat once, the newest answer first (${order.join(", ")})`);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-sort-last.png`) });
+  const bottom = order[order.length - 1];
+  await p.evaluate((id) => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === id ? { ...x, today: { ...x.today, last: Date.now() / 1000 + 5 } } : x)) }; refresh(); }, bottom);
+  check(where, await until(p, (id) => (board.box.querySelector(".tcard[data-id]") || { dataset: {} }).dataset.id === id, bottom), "an answer just in: on top");
+  await p.keyboard.press("j");
+  check(where, await p.evaluate(() => !!document.activeElement.closest(".board-today .tcard")), "j still goes from card to card");
+
+  // The tab that isn't Chats has no switch, and o does nothing on it.
+  await p.evaluate(() => document.querySelector(".board-switch [data-tab=tasks]").click());
+  check(where, await until(p, () => !document.querySelector(".today-sort")), "on Tasks, no switch");
+  await p.keyboard.press("o");
+  check(where, await p.evaluate(() => (app.organize || app.view).sort) === "last", "o on Tasks changes nothing");
+  await p.evaluate(() => document.querySelector(".board-switch [data-tab=chats]").click());
+  await until(p, () => !!document.querySelector(".today-sort"));
+  await pick("groups");
+  const groups = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
+  check(where, groups.includes("Needs you"), `Groups: its sections again (${groups.join(", ")})`);
+}
+
 // The list comes every second or so while chats work: the board isn't drawn
 // again for what it doesn't show (a working chat's last second, its step),
 // its cards keep their order, and what does change waits for your finger
@@ -588,6 +631,7 @@ async function phone(browser, port) {
   check(where, await p.evaluate(() => !document.querySelector(".list-view, .home-tabs, .hero, .session-row")), "no list of its own: the board is the home");
   shapes.phone = await p.evaluate(SHAPE);
   await shotTasks(p, where);
+  await sortChecks(p, where);
   check(where, /^Chats\s*3\s*Tasks\s*3\s*Tavern$/.test((await text(p, ".board-switch")).trim()), `its tabs: Chats (3) | Tasks (3) | Tavern (${JSON.stringify(await text(p, ".board-switch"))})`);
   check(where, await p.evaluate(() => { const r = document.querySelector(".board-switch").getBoundingClientRect(), s = document.querySelector(".board-search").getBoundingClientRect();
                                         return s.top >= r.bottom - 1 && s.width > 300 && document.documentElement.scrollWidth <= innerWidth; }),
@@ -659,14 +703,17 @@ async function wide(browser, port) {
   // One bar for both: the board's and an open chat's are .ui-bar, their slots one height.
   check(where, await p.evaluate(() => !!document.querySelector(".board-head-in.ui-bar") && !!document.querySelector(".desk-head.ui-bar")), "the board's bar and a chat's are one bar");
   await p.keyboard.press("m");
-  check(where, await until(p, () => !!document.querySelector(".picker") && /Group & sort/.test(document.querySelector(".picker").innerText)), "m: the Amarchy menu, Group & sort in it");
+  check(where, await until(p, () => !!document.querySelector(".picker") && !/Group & sort/.test(document.querySelector(".picker").innerText)), "m: the Amarchy menu, no Group & sort in it");
   await p.keyboard.press("Escape");
+  await until(p, () => !document.querySelector(".picker"));
+  const sortOn = () => p.evaluate(() => (document.querySelector(".today-sort .control.on") || {}).textContent);
+  check(where, /^Groups\s*Priority\s*Last$/.test((await text(p, ".today-sort")).trim()), "beside the streak: Groups | Priority | Last");
   await p.keyboard.press("o");
-  check(where, await until(p, () => /Group by/.test((document.querySelector(".sheet") || {}).innerText || "")), "o: Group & sort");
-  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Project/.test(b.innerText)).click());
-  check(where, await until(p, () => (app.organize || app.view).group.includes("project") && document.querySelector(".sheet .menu-item.on") && /Project/.test(document.querySelector(".sheet .menu-item.on").innerText)),
-        "a grouping picked: on at once, the sheet still up");
-  await p.evaluate(() => [...document.querySelectorAll(".sheet .menu-item")].find((b) => /Not grouped/.test(b.innerText)).click());
+  check(where, await until(p, () => /Priority/.test((document.querySelector(".today-sort .control.on") || {}).textContent)), `o: the next order (${await sortOn()})`);
+  await p.keyboard.press("o");
+  await p.keyboard.press("o");
+  check(where, await until(p, () => /Groups/.test((document.querySelector(".today-sort .control.on") || {}).textContent)), "o: round to Groups");
+  await until(p, () => app.view.sort === "groups");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
   await p.evaluate(() => boardRefocus());
@@ -772,27 +819,7 @@ async function wide(browser, port) {
   check(where, await p.evaluate(() => !!document.activeElement.closest(".board-today")), `keys left in a hidden box: j takes them back to the board (${g0})`);
   await p.evaluate(() => window.__ghost.remove());
 
-  // Grouped as the list is: by priority (High first, what asks you first in each), by project.
-  await p.evaluate(() => { app.organize = { group: ["priority"], sort: "priority" }; refresh(); });
-  const grouped = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
-  const clear = await p.evaluate(() => /Nothing needs you/.test(board.box.innerText));
-  check(where, (grouped[0] === "Needs you" || (clear && grouped[0] === "Done")) && grouped.includes("High priority") && grouped.includes("Normal priority"),
-        `by priority: Needs you (or that nothing does) first, Done, then its groups (${grouped.join(", ")})`);
-  check(where, grouped.indexOf("High priority") < grouped.indexOf("Normal priority"), "High before Normal");
-  check(where, /Build: Today/.test(await p.evaluate(() => [...board.box.querySelectorAll(".tsec")].find((x) => /^High/.test(x.querySelector(".tsec-title").textContent)).innerText))
-               && !!(await p.$(".board-today .tsec .prio.high")), "the high one in High, its mark on it");
-  const inGroups = await p.evaluate(() => [...board.box.querySelectorAll(".tsec")].filter((x) => /priority$/.test(x.querySelector(".tsec-title").textContent))
-    .flatMap((x) => [...x.querySelectorAll(".tcard")].map((c) => c.className)));
-  check(where, !inGroups.some((c) => /k-ask|k-blocked|k-fresh/.test(c)), "what needs you isn't in the groups too");
-  await p.evaluate(() => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === "proj-done2" ? { ...x, unseen: true, today: { ...x.today, state: "" } } : x)) }; refresh(); });
-  const unseenFirst = await p.evaluate(() => { const sec = board.box.querySelector(".tsec"); return sec && sec.querySelector(".tsec-title").textContent === "Needs you" && !!sec.querySelector(".tcard[data-id=proj-done2]"); });
-  check(where, unseenFirst, "grouped, a chat you haven't opened is under Needs you, first");
-  await p.evaluate(() => { app.organize = { group: ["project"], sort: "priority" }; refresh(); });
-  const byProject = await p.evaluate(() => [...board.box.querySelectorAll(".tsec .tsec-title")].map((t) => t.textContent));
-  check(where, byProject.includes("Proj") && !byProject.includes("High priority"), `by project: one group each (${byProject.join(", ")})`);
-  await p.screenshot({ path: path.join(SHOTS, "wide-by-project.png") });
-  await p.evaluate(() => { app.organize = { group: [], sort: "priority" }; refresh(); });
-  check(where, /Needs you/i.test(await text(p, ".board-today")), "not grouped: Needs you, Done… again");
+  await sortChecks(p, where);
 
   // Ctrl+Alt+J / K: from chat to chat in the board's order.
   await p.evaluate(() => { board.scroll.focus(); });

@@ -1764,7 +1764,6 @@ function deskMenu() {
   const s = app.desk ? row(keyedId()) : null;
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardCompose() },
-    { label: "Group & sort…", icon: "organize", key: "O", act: () => organizeSheet() },
     { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
     desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
@@ -1841,7 +1840,7 @@ function showKeys() {
       ["1 – 4", "Pick that answer on the card"],
       ["x", "Complete the chat's mission, with Undo"], ["r", "Review: open the link a done chat gave"],
       ["s", "Seen: off Needs you without opening it"],
-      ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Group & sort"], ["?", "These keys"]]),
+      ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Groups, Priority, Last"], ["?", "These keys"]]),
     ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
       ["i", "Write: the box"], ["Esc", "Out of the box or the message; again: back to the board"], ["Tab", "Brief / Chat"],

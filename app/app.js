@@ -617,7 +617,7 @@ function openList() {
     app.view = JSON.parse(e.data);
     aheadOn(app.view);
     const o = app.organize;
-    if (o && o.done && same(o.group, app.view.group) && o.sort === app.view.sort) app.organize = null;
+    if (o && o.done && o.sort === app.view.sort) app.organize = null;
     app.online = true;
     app.failed = "";
     app.nerd = !!app.view.nerd;
@@ -662,14 +662,8 @@ function closeList() {
 // What needs you, on the tab and the app's icon (manage.js).
 function badge() { markWaiting(); }
 
-function groupLabel(s, g) {
-  if (g === "project") return s.repo;
-  if (g === "priority") return `${PRIORITY[s.priority] || "Normal"} priority`;
-  return STATUS[doneOf(s)];
-}
-
 // The phone's home: the board (tasks.js), the very one a computer has:
-// Chats | Tasks, the search, Group & sort, the tools, New chat, the same
+// Chats | Tasks, the search, the tools, New chat, the same
 // cards. Only its layout fits the phone (today.css). A chat opens over it
 // (SessionView); back, it's where you were.
 function homeView() {
@@ -718,7 +712,7 @@ async function moveProject(name, where, other) {
   }
 }
 
-// The order your projects come in (the list's project groups, the picker of
+// The order your projects come in (the picker of
 // a new session): each with arrows to move it, the one you came from lit.
 function orderProjects(lit) {
   const names = (app.view && app.view.projects || []).map((p) => p.name);
@@ -773,54 +767,16 @@ function orderProjects(lit) {
 
 function same(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
 
-// How the list is grouped (any of them, nested in the order you turn them
-// on, each showing its level) and sorted inside its groups. It's one setting
-// on the host (amarchy group, sort): change it here and every phone's and
-// browser's list changes too.
-const GROUPINGS = [["project", "project", "Project"], ["priority", "high", "Priority"],
-                   ["status", "status", "Status"], ["none", "organize", "Not grouped"]];
-const SORTINGS = [["priority", "high", "Priority"], ["newest", "newest", "Newest first"], ["oldest", "oldest", "Oldest first"]];
-
-// Group & sort, a sheet (the board's: the Amarchy menu, o on the board):
-// any of the groupings, nested in the order you turn them on (each saying
-// its level), the sort inside them, and your projects' order. It stays up
-// as you pick, each pick shown at once.
-function organizeSheet() {
-  const box = h("div", { class: "menu organize" });
-  const draw = () => {
-    const v = app.organize || app.view || {};
-    const groups = v.group || [], sort = v.sort || "priority";
-    const row = (icon, label, on, level, pick) =>
-      h("button", { class: `menu-item${on ? " on" : ""}`, type: "button", role: "menuitemcheckbox", "aria-checked": String(on),
-                    onclick: () => { pick(); draw(); } },
-        h("span", { class: "label" }, glyph(icon, "icon"), label),
-        on ? (level ? h("span", { class: "val level" }, level) : glyph("check", "val")) : null);
-    keepFocus(box, () => box.replaceChildren(
-      h("div", { class: "section" }, "Group by"),
-      ...GROUPINGS.map(([what, icon, label]) => {
-        const on = what === "none" ? !groups.length : groups.includes(what);
-        const level = on && what !== "none" && groups.length > 1 ? String(groups.indexOf(what) + 1) : "";
-        const next = what === "none" ? [] : on ? groups.filter((g) => g !== what) : [...groups, what];
-        return row(icon, label, on, level, () => organizeList(next, sort));
-      }),
-      h("div", { class: "section" }, "Sort by"),
-      ...SORTINGS.map(([what, icon, label]) => row(icon, label, sort === what, "", () => organizeList(groups, what))),
-      h("div", { class: "section" }, "Projects"),
-      h("button", { class: "menu-item", type: "button", onclick: () => orderProjects() },
-        h("span", { class: "label" }, glyph("order", "icon"), "Order projects…"))));
-  };
-  draw();
-  sheet(sheetHead("Group & sort", "Your chats, on every screen"), box);
-}
-
-async function organizeList(group, sort) {
-  const mine = { group, sort, done: false };
+// How the chats are ordered (today.js todaySorter): shown at once, then saved
+// on the host (amarchy sort), so every phone's and browser's list changes too.
+async function organizeList(sort) {
+  const mine = { sort, done: false };
   app.organize = mine;
   refresh();
   try {
-    await api("/api/list", { group, sort });
+    await api("/api/list", { sort });
     mine.done = true;
-    if (app.view && same(app.view.group, group) && app.view.sort === sort && app.organize === mine) app.organize = null;
+    if (app.view && app.view.sort === sort && app.organize === mine) app.organize = null;
   } catch (e) {
     if (app.organize === mine) app.organize = null;
     toast(e.message);

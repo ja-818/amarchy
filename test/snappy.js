@@ -531,14 +531,14 @@ async function pushed(browser, port) {
   await until(p, () => window.app && app.view && app.view.sort);
   const r = await p.evaluate(async () => {
     const times = [];
-    for (const sort of ["newest", "oldest", "priority", "newest", "priority"]) {
+    for (const sort of ["last", "priority", "groups", "last", "groups"]) {
       await new Promise((ok) => setTimeout(ok, 300 + Math.random() * 400));
       const t = performance.now();
       const es = new EventSource("/api/events");
       await new Promise((ok) => es.addEventListener("list", ok, { once: true }));
       const got = new Promise((ok) => es.addEventListener("list", (e) => { if (JSON.parse(e.data).sort === sort) ok(); }));
       const t0 = performance.now();
-      await api("/api/list", { group: [], sort });
+      await api("/api/list", { sort });
       await got;
       times.push(Math.round(performance.now() - t0));
       es.close();

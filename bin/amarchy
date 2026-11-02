@@ -14,7 +14,7 @@ results to stdout and fail with a non-zero exit.
 Projects (git repos directly inside AMARCHY_WORK):
   amarchy projects [--json]             your projects and their session counts
   amarchy projects --github [--json]    your GitHub repos (✓ = already added)
-  amarchy projects order [project...]   the order your projects come in (the list's project groups, the
+  amarchy projects order [project...]   the order your projects come in (the
                                         app's pickers): prints it, or puts these first, in this order; the
                                         rest keep theirs, and new ones go last, by name
   amarchy projects move <project> up|down|top|bottom
@@ -54,19 +54,11 @@ Sessions:
   amarchy run --list                    the project's saved commands, name and command
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
-                                        list puts higher priority first, unless it's sorted by date;
+                                        list puts higher priority first, unless it's sorted by last;
                                         new sessions are normal
-  amarchy group [project|priority|status] [on|off]
-                                        group the list by project, priority (High, Normal, Low) and/or
-                                        status (Needs you, Working, Running, Done, Idle), nested in the order you
-                                        turn them on (a new one goes inside the others); without
-                                        on|off switches it, without anything prints the grouping
-                                        outermost first; `group none` drops them all
-  amarchy group <grouping> <grouping>...
-                                        group by these, nested in this order, outermost first, e.g.
-                                        `group priority project`: each priority, its projects inside
-  amarchy sort [priority|newest|oldest] sort the list inside its groups: by priority (the default),
-                                        or by when the session was opened; prints it without one
+  amarchy sort [groups|priority|last]   how the chats are ordered, the switch beside your streak: groups
+                                        (Needs you, Done, Ready...), priority (High, Normal, Low) or last (the
+                                        one that last had an answer for you on top); prints it without one
 
 Sleep (a session you're not using lets go of its Claude Code, and its memory, until you type in it or send
 it something; its screen stays as it was, and what you type goes to Claude when it's back):
@@ -310,9 +302,7 @@ SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
 UNSEEN = STATE / "unseen"       # sessions that finished while you weren't looking, until you open them
 RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
-GROUP_FILE = STATE / "group"    # how the list is grouped: "project", "priority", "status", any or none, outermost first
-SORT_FILE = STATE / "sort"      # how it's sorted inside its groups: "priority", "newest" or "oldest"
-ORDER_FILE = STATE / "order"    # the same from before: "activity" was grouped by status
+SORT_FILE = STATE / "sort"      # how the chats are ordered: "groups", "priority" or "last"
 PROJECT_ORDER = STATE / "project-order"  # the order your projects come in, one name a line (see project_order)
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
 MISSIONS = STATE / "missions.jsonl"   # every chat completed (closed): when, which, how long it took (missions_view)
@@ -455,7 +445,7 @@ def projects(remotes=True):
 
 
 # Your projects come in the order you put them in (`amarchy projects order`,
-# or moved one at a time from any list): the list's project groups, the
+# or moved one at a time from any list): the
 # pickers. One you haven't placed goes after the ones you have, by name, so
 # a project you add shows up last until you move it.
 
@@ -3644,29 +3634,9 @@ def status_group(s):
 # sessions are normal; the list always puts the higher ones first.
 PRIORITIES = ("high", "normal", "low")
 RANK = {p: i for i, p in enumerate(PRIORITIES)}
-# How the list can be grouped: any of them, on its own or together, nested in
-# whatever order you pick (`amarchy group priority project`).
-GROUPS = ("project", "priority", "status")
-# How it's sorted inside its groups (or all of it, ungrouped); priority is the default.
-SORTS = ("priority", "newest", "oldest")
-
-
-def list_groups():
-    """How every list of sessions is grouped: by project, priority and/or
-    status, outermost first, or none of them."""
-    try:
-        groups = []
-        for g in GROUP_FILE.read_text().split():
-            if g in GROUPS and g not in groups:
-                groups.append(g)
-        return groups
-    except OSError:
-        pass
-    # `amarchy order activity`, from before there was more than one grouping.
-    try:
-        return ["status"] if ORDER_FILE.read_text().strip() == "activity" else []
-    except OSError:
-        return []
+# How the chats are ordered, the switch beside your streak: in groups (where
+# each stands), by priority, or the one that last had an answer for you first.
+SORTS = ("groups", "priority", "last")
 
 
 def priority(s):
@@ -3675,86 +3645,49 @@ def priority(s):
 
 
 def list_sort():
-    """How the list is sorted inside its groups: by priority (higher first,
-    then the order you opened them in), newest first or oldest first."""
+    """How the chats are ordered. Groups unless you picked another (what's
+    left from before, "newest" or "oldest", is groups too)."""
     try:
         how = SORT_FILE.read_text().strip()
     except OSError:
-        return "priority"
-    return how if how in SORTS else "priority"
+        return "groups"
+    return how if how in SORTS else "groups"
 
 
-def session_order(s, groups=None, how=None, projects_in=None):
-    """Grouped first (outermost first, in the order the groupings nest; the
-    projects in yours, see project_order), then sorted inside each group: by
-    priority, higher first, or by when it was opened. Ties keep the order you
-    opened them in, so each one keeps its place."""
-    groups = list_groups() if groups is None else groups
+def last_answer(s):
+    """When a chat last had something for you, what Last sorts by: its newest
+    reply; if it's asking now, when it asked. At work, the reply before you
+    wrote: what it says on the way isn't an answer yet, and the cards would
+    trade places under your finger. It has said nothing yet: when it opened."""
+    t = chat_reply(s)
+    when = {"working": t["reply_before"], "running": t["reply_before"], "waiting": t["at"]}.get(s.get("status"), t["reply_at"])
+    return when or s.get("created", 0)
+
+
+def session_order(s, how=None):
+    """In the order the board shows them. Last: the newest answer first, your
+    assistant among them. Else your assistant's section first (it, then the
+    other sessions of its project), by where each stands if in groups, and
+    higher priority first, the newest answer first inside it."""
     how = list_sort() if how is None else how
-    projects_in = project_rank(project_order()) if projects_in is None else projects_in
-    rank = RANK[priority(s)]
-    created = s.get("created", 0)
-    by = {"project": projects_in(s["repo"]), "priority": rank,
-          "status": STATUS_GROUPS.get(status_group(s), len(STATUS_GROUPS))}
-    # Your assistant's section first, above the groups: it, then the other
-    # sessions of its project.
-    return ({"main": 0, "near": 1}.get(s.get("assistant"), 2), *(by[g] for g in groups),
-            rank if how == "priority" else 0,
-            -created if how == "newest" else created, s["id"])
-
-
-def set_groups(groups):
-    STATE.mkdir(parents=True, exist_ok=True)
-    GROUP_FILE.write_text(" ".join(groups) + "\n")
-    ORDER_FILE.unlink(missing_ok=True)
-
-
-def cmd_group(args):
-    """Group the list by project, priority and/or status: `group project`
-    switches one, `group project on|off` sets it, `group none` drops them all,
-    `group priority project` sets them all, nested in that order. One turned
-    on goes inside the ones already on; one already on keeps its place.
-    Prints what the list is grouped by now, outermost first."""
-    groups = list_groups()
-    usage = "usage: amarchy group [project|priority|status [on|off] | <grouping> <grouping>... | none]"
-    if args == ["none"]:
-        groups = []
-    elif len(args) > 1 and all(a in GROUPS for a in args):
-        if len(set(args)) < len(args):
-            return fail(usage)
-        groups = list(args)
-    elif args:
-        what, *how = args
-        if what not in GROUPS or len(how) > 1 or how and how[0] not in ("on", "off"):
-            return fail(usage)
-        on = how[0] == "on" if how else what not in groups
-        if not on:
-            groups = [g for g in groups if g != what]
-        elif what not in groups:
-            groups = groups + [what]
-    if args:
-        set_groups(groups)
-    print(" ".join(groups) or "none")
-    return 0
+    if how == "last":
+        return (-last_answer(s), s["id"])
+    state = STATUS_GROUPS.get(status_group(s), len(STATUS_GROUPS)) if how == "groups" else 0
+    return ({"main": 0, "near": 1}.get(s.get("assistant"), 2), state, RANK[priority(s)], -last_answer(s), s["id"])
 
 
 def set_list(data):
-    """Group and sort the list as {"group": [...], "sort": ..., "projects":
-    [...]} says (from the app); without "projects" (a page from before
-    there was an order), their order stays as it is. What's
-    already so is left alone, so it keeps its time. None, or what's wrong with it."""
-    groups, how = data.get("group") if isinstance(data, dict) else None, (data or {}).get("sort")
-    if not isinstance(groups, list) or not all(g in GROUPS for g in groups) or len(set(groups)) < len(groups):
-        return "group: project, priority and/or status, each once"
+    """Order the chats as {"sort": ..., "projects": [...]} says (from the
+    app); without "projects", their order stays as it is. What's already so
+    is left alone, so it keeps its time. None, or what's wrong with it."""
+    how = data.get("sort") if isinstance(data, dict) else None
     if how not in SORTS:
-        return "sort: priority, newest or oldest"
+        return "sort: groups, priority or last"
     if "projects" in data:
         # Theirs, all of it: one it hasn't placed isn't placed here either.
         why = set_project_order(data["projects"], rest=False)
         if why:
             return why
-    if groups != list_groups():
-        set_groups(groups)
     if how != list_sort():
         STATE.mkdir(parents=True, exist_ok=True)
         SORT_FILE.write_text(how + "\n")
@@ -3762,25 +3695,15 @@ def set_list(data):
 
 
 def cmd_sort(args):
-    """`amarchy sort priority|newest|oldest`: how the list is sorted inside its
-    groups. Prints how it's sorted now."""
+    """`amarchy sort groups|priority|last`: how the chats are ordered. Prints
+    how they are now."""
     if len(args) > 1 or args and args[0] not in SORTS:
-        return fail("usage: amarchy sort [priority|newest|oldest]")
+        return fail("usage: amarchy sort [groups|priority|last]")
     if args:
         STATE.mkdir(parents=True, exist_ok=True)
         SORT_FILE.write_text(args[0] + "\n")
     print(list_sort())
     return 0
-
-
-def cmd_order(args):
-    """`amarchy order opened|activity`, from before `amarchy group`: activity
-    is grouped by status. Grouping by project is left as it is."""
-    groups = list_groups()
-    order = args[0] if args else ("opened" if "status" in groups else "activity")
-    if order not in ("opened", "activity"):
-        return fail(f"unknown order {order!r} (opened or activity)")
-    return cmd_group(["status", "on" if order == "activity" else "off"])
 
 
 def cmd_priority(args):
@@ -4067,8 +3990,8 @@ def session_view():
             # What it last wrote: its notifications' body, and the list's
             # preview while you haven't read it.
             s["said"] = last_said(s)
-    groups, how, projects_in = list_groups(), list_sort(), project_rank(project_order())
-    ss.sort(key=lambda s: session_order(s, groups, how, projects_in))
+    how = list_sort()
+    ss.sort(key=lambda s: session_order(s, how))
     return ss
 
 
@@ -9349,7 +9272,7 @@ def app_watch(st):
                 if s["unseen"] and time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
                     mark_seen(s["id"])
                     s["unseen"] = False
-            view = {"hostname": host_name(), "sessions": ss, "projects": ps, "group": list_groups(),
+            view = {"hostname": host_name(), "sessions": ss, "projects": ps,
                     "sort": list_sort(), "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
@@ -9520,9 +9443,11 @@ _replies = {}
 def chat_reply(s):
     """Where a chat stands, from its conversation: its goal and state (the
     newest goal block, and when it was written: goal_at), the questions its
-    last reply asks that you haven't answered (asks), and when anything last
-    happened in it (at). Read again only when the conversation has moved."""
-    empty = {"goal": "", "state": "", "goal_at": 0, "asks": [], "at": 0, "links": []}
+    last reply asks that you haven't answered (asks), when it last wrote to
+    you (reply_at) and last did before your newest message (reply_before),
+    and when anything last happened in it (at). Read again only when the
+    conversation has moved."""
+    empty = {"goal": "", "state": "", "goal_at": 0, "asks": [], "at": 0, "links": [], "reply_at": 0, "reply_before": 0}
     f = transcript(s) if s.get("id") else None
     if not f:
         return empty
@@ -9541,13 +9466,14 @@ def chat_reply(s):
     out = {**empty, "at": st.st_mtime}
     answered, reply_seen = False, False
     for tail in (200_000, 2_000_000):
-        out.update(goal="", state="", goal_at=0, asks=[], links=[])
-        answered, reply_seen = False, False
+        out.update(goal="", state="", goal_at=0, asks=[], links=[], reply_at=0, reply_before=0)
+        answered, reply_seen, past_you = False, False, False
         for r in reversed(conversation_records(f, tail=tail)):
             if not isinstance(r, dict) or r.get("isSidechain"):
                 continue
-            if not reply_seen and human_turn(r):
-                answered = True
+            if human_turn(r):
+                past_you = True
+                answered = answered or not reply_seen
                 continue
             if r.get("type") != "assistant":
                 continue
@@ -9556,19 +9482,25 @@ def chat_reply(s):
                 if isinstance(content, list) else content if isinstance(content, str) else ""
             if not text.strip():
                 continue
+            if past_you and not out["reply_before"]:
+                out["reply_before"] = timestamp(r)
             if not reply_seen:
                 reply_seen = True
+                out["reply_at"] = timestamp(r)
                 out["links"] = reply_links(text)       # where to see what it made: Review
                 if not answered:
                     out["asks"] = reply_choices(text)
             goal = reply_goal(text)
             if goal:
                 out.update(goal=goal["goal"], state=goal["state"], goal_at=timestamp(r) or 0)
+                out["reply_before"] = out["reply_before"] or timestamp(r)     # (its last answer, your message or not since)
                 break
         if out["goal"] or st.st_size <= tail or (before and before["goal"]):
             break
     if not out["goal"] and before and before["goal"]:
         out.update(goal=before["goal"], state=before["state"], goal_at=before["goal_at"])
+    if not out["reply_before"] and before:
+        out["reply_before"] = before["reply_before"]      # (its last one further back than what's read)
     _replies[str(f)] = (st.st_mtime_ns, st.st_size, out)
     if len(_replies) > 500:
         _replies.clear()
@@ -9927,7 +9859,7 @@ def app_words(st, ss):
         s["today"] = chat_reply(s)      # its goal, its state, what its last reply asks you (Today)
         # When it last moved, to the minute (Today says "5m ago" at most): a
         # chat at work writes every second, and the list isn't new for that.
-        s["today"] = {**s["today"], "at": s["today"]["at"] // 60 * 60}
+        s["today"] = {**s["today"], "at": s["today"]["at"] // 60 * 60, "last": last_answer(s)}
         words = last_words(s)
         if not s.get("assistant"):
             s["said"] = words["said"]
@@ -10809,7 +10741,7 @@ def app_handler(st, users, address):
                 name, where, other = data.get("name"), data.get("where"), data.get("other")
                 why = move_project(name, where, other) if isinstance(name, str) else "which project?"
                 return self.error(400, why) if why else self.send(200, {"projects": project_names()})
-            if self.path == "/api/list":      # group and sort the list (amarchy group, sort, projects order)
+            if self.path == "/api/list":      # how the chats are ordered (amarchy sort, projects order)
                 why = set_list(data)
                 return self.error(400, why) if why else self.send(200, {})
             if self.path == "/api/sleep":     # when idle sessions sleep (amarchy sleep --after), or all of them now
@@ -13867,9 +13799,7 @@ OPTIONS = {
     "rename": ({"--id", "--reset"}, {"--id"}, set()),
     "run": ({"--show", "--set", "--save", "--forget", "--list"}, {"--forget"}, {"--set", "--save"}),
     "priority": ({"--id"}, {"--id"}, set()),
-    "group": (set(), set(), set()),
     "sort": (set(), set(), set()),
-    "order": (set(), set(), set()),
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
     "theme": ({"--show", "--list", "--json", "--font", "--wallpaper", "--refresh-wallpapers", "--cut",
@@ -13991,12 +13921,8 @@ def main(argv):
         return cmd_theme(args)
     elif cmd == "sound":
         return cmd_sound(args)
-    elif cmd == "group":
-        return cmd_group(args)
     elif cmd == "sort":
         return cmd_sort(args)
-    elif cmd == "order":
-        return cmd_order(args)
     elif cmd == "hook" and len(args) == 2:
         cmd_hook(*args)
     elif cmd == "seen" and len(args) == 1:

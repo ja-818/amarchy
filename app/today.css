@@ -6,6 +6,9 @@
 .today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0;
                  display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .today-summary-text { min-width: 0; }
+/* How the chats are ordered, beside your streak: quieter than the bar's tabs. */
+.today-sort { min-width: 0; }
+.today-sort .control { font-size: var(--caption); padding: 0 10px; }
 .today-clear { margin: 2px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
 .today-clear .glyph { color: var(--success); }
 .today-note { margin: 6px 2px 0; font-size: var(--caption); color: var(--text-muted); }
@@ -90,9 +93,6 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .tcard-ask:focus-visible, .keyed .tcard-ask.ui-in { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 .tcard-askbox .tcard-actions { padding: 0 0 12px; }
 
-/* The board's Group & sort (the list's menu), by the search. */
-.desk /* Inside a group, the next grouping's name over its cards (a project, under High priority). */
-.tsec-sub { margin: 6px 2px 0; font-size: var(--caption); font-weight: 700; color: var(--text-muted); }
 .tcard-head .prio { flex: none; font-size: 12px; }
 .tcard-head .prio.high { color: var(--danger); }
 .tcard-head .prio.low { color: var(--text-muted); }

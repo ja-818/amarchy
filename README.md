@@ -56,8 +56,8 @@ leaves your projects and chats alone.
 ## The app
 
 - **The list**: your chats, each with its name, what it's doing ("Needs your answer",
-  "Working", "Done", "Ready") and its project. Put them in groups by project, priority or
-  status if you like.
+  "Working", "Done", "Ready") and its project. The switch beside your streak orders them: in
+  groups, by priority, or the last to answer on top.
 - **The chat**: what you said, what Claude says, the steps it took (folded into one line you
   can open), and the cards for its questions and permissions. Under it, the box you type in,
   with the model and how Claude asks for permission.
