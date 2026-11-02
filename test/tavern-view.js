@@ -178,6 +178,15 @@ async function run(browser, port, layout) {
   }
   await p.mouse.move(1, 1);
   check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "the pointer gone: back to who's waiting");
+  if (layout === "wide") {
+    // The keys on the empty chair, then off to another table: who's waiting is back.
+    await p.mouse.move(1, 1);
+    const chair = () => { const go = document.querySelector('.tv-crew[data-crew="web"] .tv-recruit > .today-go'); boardFocus(go); tavernFollow(go); };
+    await p.evaluate(chair);
+    check(where, await until(p, () => !document.querySelector('.tv-crew[data-crew="web"] .tv-say').children.length), "the keys on Recruit: nothing under the table");
+    await p.evaluate(() => { const go = document.querySelector('.ui-pirate[data-id="api-perm"] > .today-go'); boardFocus(go); tavernFollow(go); });
+    check(where, await until(p, () => /Submit it now/.test(document.querySelector('.tv-crew[data-crew="web"] .tv-say').innerText)), "the keys off to another table: who's waiting again");
+  }
   // Answered on the card: gone from the table, Undo brings it back.
   await p.evaluate(() => document.querySelector('.tv-crew[data-crew="web"] .tv-say .today-opt').click());
   check(where, await until(p, () => !document.querySelector('.tv-crew[data-crew="web"] .tv-say .tcard') && !!document.querySelector(".undo-toast")), "answered on the card: the card goes, with Undo");

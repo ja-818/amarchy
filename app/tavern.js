@@ -197,6 +197,9 @@ function tavernBody(card) {
 
 // The keys on a pirate: their card shows.
 function tavernFollow(stop) {
+  // Off another table: back to whose card it shows.
+  const was = tavern.peek && document.querySelector(`.tv-crew[data-crew="${CSS.escape(tavern.peek.repo)}"]`);
+  if (was && !was.contains(stop)) tavernHome(was);
   const pirate = stop.closest(".ui-pirate");
   if (!pirate || pirate.matches(".talking")) return;
   if (!pirate.dataset.id || !TAVERN_CARDS.some((x) => pirate.matches(`.p-${x}`))) return tavernPeek(pirate, true);
