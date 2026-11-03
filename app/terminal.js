@@ -273,22 +273,8 @@ class SessionTerminal {
     }
   }
 
-  async commands() {
-    let cmds = [];
-    try {
-      const r = await fetch(`/api/session/${encodeURIComponent(this.id)}/commands`);
-      cmds = (await r.json()).commands || [];
-    } catch (e) { return toast("Can't reach Amarchy"); }
-    const s = this.row();
-    if (app.desk && typeof picker === "function") {
-      return picker({ title: `Run in ${projectName(s.repo) || "the project"}`, items: [
-        ...cmds.map((c) => ({ label: c.name, detail: c.command, icon: "send", act: () => this.run(c.name === "run" ? undefined : c.name) })),
-        { label: "Save a new command…", icon: "plus", always: true, act: () => this.saveCommand() }] });
-    }
-    sheet(sheetHead(`Run in ${projectName(s.repo) || "the project"}`, "In this chat's terminal; again restarts it"),
-      h("div", { class: "menu" }, ...cmds.map((c) => h("button", { class: "menu-item", onclick: () => { closeSheets(); this.run(c.name === "run" ? undefined : c.name); } },
-        h("span", { class: "label" }, h("span", { class: "text" }, c.name, h("small", {}, c.command)))))),
-      h("button", { class: "control wide", onclick: () => this.saveCommand() }, "Save a new command…"));
+  commands() {
+    commandsSheet(this.row(), () => { if (this.shown !== "term") this.show("term"); });
   }
 
   // Save a command for the project (name "run": the run command), then run it.

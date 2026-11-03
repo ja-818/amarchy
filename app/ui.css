@@ -349,6 +349,14 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .head-state .tpill:not(.t-working):not(.t-running)::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pill); }
 .head-state .tpill .spinner { color: var(--pill); }
 .ui-action.board-back { width: var(--control-h); padding: 0; color: var(--text); }
+.ui-action.ui-preview { color: var(--link); }
+/* Short of room, a chat with a preview keeps its name: its state a dot. */
+@media (max-width: 719px) {
+  .head-btns:has(.ui-preview) .head-state { padding: 0; width: var(--control-h); justify-content: center; }
+  .head-btns:has(.ui-preview) .head-state .tpill { font-size: 0; gap: 0; }
+}
+.ui-action.ui-preview.stopped { color: var(--text-muted); }
+.ui-action.ui-preview:disabled, .tbtn.ui-preview:disabled { opacity: .6; }
 .head-btns { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .head-btn.more { width: var(--control-h); padding: 0; justify-content: center; font-size: 16px; }
 .phone-head { flex: none; gap: 4px; padding-left: var(--page-pad); padding-right: var(--page-pad); }

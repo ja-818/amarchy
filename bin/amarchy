@@ -52,6 +52,9 @@ Sessions:
   amarchy run <name>                    run another saved command of the project, the same way
   amarchy run --save <name> <command>   save one; --forget <name> drops it
   amarchy run --list                    the project's saved commands, name and command
+  amarchy preview <url>                 what this chat made, live: the Preview button on the chat and its card
+                                        opens it, whichever reply you're on. --clear takes it off; with neither
+                                        it prints the one set. --id <id> for another session
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
                                         list keeps high ones pinned on top of Now, low ones in For later;
@@ -680,7 +683,8 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission")
+               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission",
+               "preview_up")
 
 
 def own_session_id():
@@ -866,6 +870,75 @@ def save_command(repo, name, command):
 
 
 RUN_DEFAULT = "run"
+
+
+def preview_local(url):
+    """Where on this machine a preview's address lands: (host, port), or None
+    for one served elsewhere (a deploy)."""
+    u = urllib.parse.urlsplit(url)
+    name, bind = host_network()
+    here = {"localhost", "127.0.0.1", "::1", "0.0.0.0", name.lower(), socket.gethostname().lower()} | ({bind} if bind else set())
+    host = (u.hostname or "").lower()
+    if host not in here and host.split(".")[0] != name.lower():
+        return None
+    try:
+        port = u.port or (443 if u.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return (bind if bind and host not in ("localhost", "127.0.0.1", "::1", "0.0.0.0") else "127.0.0.1", port)
+
+
+_preview_up = {}
+def preview_up(url):
+    """Whether a chat's preview answers: its port on this machine takes a
+    connection (at once when nothing listens). One served elsewhere isn't
+    tried: taken to be up."""
+    where = preview_local(url)
+    if not where:
+        return True
+    known = _preview_up.get(where)
+    if known and time.time() - known[0] < 2:       # (the list is read every second or so)
+        return known[1]
+    try:
+        socket.create_connection(where, timeout=0.15).close()
+        up = True
+    except OSError:
+        up = False
+    _preview_up[where] = (time.time(), up)
+    return up
+
+
+def cmd_preview(args):
+    """A session's live preview: an address the app keeps a button for."""
+    sid = None
+    if "--id" in args:
+        i = args.index("--id")
+        sid = args[i + 1] if i + 1 < len(args) else None
+        args = args[:i] + args[i + 2:]
+    sid = sid or own_session_id()
+    s = session(sid) if sid else None
+    if not s:
+        return fail(f"No session {sid!r}" if sid else "Not in a session (name one with --id <id>)")
+    if "--clear" in args:
+        s.pop("preview", None)
+        save_session(s)
+        return 0
+    if not args:
+        if s.get("preview"):
+            print(s["preview"]["url"])
+        return 0
+    url = args[0].strip()
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return fail(f"Not an address to open: {url} (http://... or https://...)")
+    name, bind = host_network()
+    if bind and u.hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return fail(f"{url} doesn't reach their browser: listen on {bind} and give http://{name}:<port>")
+    s["preview"] = {"url": url}
+    save_session(s)
+    if not preview_up(url):
+        print(f"Saved, but nothing answers at {url} yet: its button says so until it does.")
+    return 0
 
 
 def cmd_run(args):
@@ -3481,11 +3554,12 @@ def agent_context(s):
                  "as the choices you offered. ")
     if bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
-                 f"(reachable only from their private network), and give them http://{name}:<port>. ")
+                 f"(reachable only from their private network), and put http://{name}:<port> on its Preview button with "
+                 f"`amarchy preview <url>`. ")
     else:
         text += (f"What you serve here is reachable only on this machine: listen on localhost, and to open "
                  f"it they forward the port (ssh -L <port>:localhost:<port> {name}) and use "
-                 f"http://localhost:<port>. ")
+                 f"http://localhost:<port> (`amarchy preview <url>` puts it on its Preview button). ")
     return text + "Other sessions share this machine, so a port may be taken: pick a free one."
 
 
@@ -3911,6 +3985,7 @@ def session_view():
         if s["status"] == "idle" and runs and not s["sleeping"] and not s.get("setup"):
             s["status"] = "running"
         s["priority"] = priority(s)
+        s["preview_up"] = preview_up(s["preview"]["url"]) if s.get("preview") else False
         # Done, and you haven't opened it since.
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
         # The secrets its Claude asks you for (amarchy secret ask): a card each.
@@ -12273,6 +12348,7 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   - Not yet
   ```
 - A link for them to open goes in a link block; a date to keep, in an event block.
+- Something live for them to look at (a dev server you started, a preview, a deploy): as soon as it answers, before your reply, run `amarchy preview <url>`. It puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation. Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used go last, under "## Sources", as links.
 - The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, the reply gives them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one: it's the Review button on the chat's card. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
   ```goal state="working"
@@ -13726,6 +13802,7 @@ OPTIONS = {
     "close": ({"--force"}, set(), set()),
     "rename": ({"--id", "--reset"}, {"--id"}, set()),
     "run": ({"--show", "--set", "--save", "--forget", "--list"}, {"--forget"}, {"--set", "--save"}),
+    "preview": ({"--id", "--clear"}, {"--id"}, set()),
     "priority": ({"--id"}, {"--id"}, set()),
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
@@ -13844,6 +13921,8 @@ def main(argv):
         print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
     elif cmd == "run":
         return cmd_run(args)
+    elif cmd == "preview":
+        return cmd_preview(args)
     elif cmd == "theme":
         return cmd_theme(args)
     elif cmd == "sound":

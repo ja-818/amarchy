@@ -731,78 +731,10 @@ function renderSide() {
 }
 
 // ---- the Terminal tab: the session's own terminal, and Claude's classic
-// terminal (the TUI). terminal.js's SessionTerminal (C3) when it's there,
-// else the same two terminals with a switch of their own.
+// terminal (the TUI): terminal.js's SessionTerminal.
 
 function makeTerminal() {
-  if (typeof SessionTerminal === "function")
-    return new SessionTerminal({ id: null, phone: false, onShow: () => deskHead(), onBack: () => toChat() });
-  return new DeskTerminal();
-}
-
-class DeskTerminal {
-  constructor() {
-    this.id = null;
-    this.showing = "term";
-    this.term = new TermPane("term");
-    this.claude = new TermPane("claude");
-    this.seg = h("div", { class: "seg term-switch" });
-    this.el = h("div", { class: "desk-term" },
-      h("div", { class: "term-bar" }, this.seg,
-        h("button", { class: "control", type: "button", title: "Run the project (Ctrl+Alt+R)", onclick: () => runProject() }, glyph("send"), "Run"),
-        h("button", { class: "control", type: "button", title: "Run a saved command (Ctrl+Alt+C)", onclick: () => pickCommand() }, "Commands…")),
-      h("div", { class: "term-body" }, this.term.box, this.claude.box));
-    this.draw();
-  }
-
-  pane() { return this.showing === "claude" ? this.claude : this.term; }
-  which() { return this.showing; }
-
-  open(id) {
-    if (this.id !== id) {
-      releaseClassic();
-      this.id = id;
-    }
-    const other = this.showing === "claude" ? this.term : this.claude;
-    other.disconnect();
-    this.pane().open(id);
-    this.draw();
-  }
-
-  close() {
-    releaseClassic(this.id);
-    this.term.disconnect();
-    this.claude.disconnect();
-    this.id = null;
-  }
-
-  show(which) {
-    this.showing = which === "claude" ? "claude" : "term";
-    if (this.showing !== "claude") releaseClassic(this.id);
-    if (this.id) this.open(this.id);
-    this.draw();
-    deskHead();
-  }
-
-  // Claude's classic terminal: held on while it shows (terminal.js), the
-  // same conversation.
-  async classic() {
-    const s = row(this.id);
-    if (!(await holdClassic(this.id, s && s.engine))) return;
-    this.show("claude");
-  }
-
-  draw() {
-    const s = row(this.id);
-    this.seg.replaceChildren(...[["term", "Project terminal"], ["claude", "Claude's classic terminal"]].map(([k, label]) =>
-      h("button", { class: `control${this.showing === k ? " on" : ""}`, type: "button", onclick: () => { this.show(k); this.focus(); } }, label)));
-    this.term.box.hidden = this.showing !== "term";
-    this.claude.box.hidden = this.showing !== "claude";
-  }
-
-  fit() { this.pane().fit(); }
-  restyle() { this.term.restyle(); this.claude.restyle(); }
-  focus() { this.pane().focus(); }
+  return new SessionTerminal({ id: null, phone: false, onShow: () => deskHead(), onBack: () => toChat() });
 }
 
 // ---- the Changes tab: everything the session changed (its worktree
@@ -1406,7 +1338,7 @@ const DESK_KEYS = {
   KeyG: () => desk.current && sideToggle("changes"), KeyI: () => desk.current && sideToggle("details"),
   KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
   KeyL: () => classicTerminal(),
-  KeyR: () => runProject(), KeyC: () => pickCommand(),
+  KeyR: () => uiPreviewGo(row(keyedId())),
   KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => boardBack(),
   ArrowUp: () => keyedId() && setPriority(row(keyedId()), "up"),
   ArrowDown: () => keyedId() && setPriority(row(keyedId()), "down"),
@@ -1668,17 +1600,6 @@ function keyedId() {
   return card ? card.dataset.id : null;
 }
 
-// What needs a chat open (Run, its commands): from the board, the card the
-// keyboard is on opens first, its terminal beside it.
-function needsChat(again) {
-  if (desk.current) return false;
-  const id = keyedId();
-  if (!id) { toast("Open a chat first"); return true; }
-  boardOpen(id);
-  setTimeout(again, 300);
-  return true;
-}
-
 function renameSession() {
   const s = row(keyedId());
   if (!s) return;
@@ -1709,53 +1630,6 @@ async function closeCurrent() {
   todayComplete(s);
 }
 
-async function runProject(name) {
-  if (needsChat(() => runProject(name))) return;
-  const s = row(desk.current);
-  if (!s) return;
-  try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/run`, name ? { name } : {});
-    toTerminal("term");
-  } catch (e) {
-    if (/No run command/.test(e.message))
-      return ask(`Run command for ${projectName(s.repo)}`, "", async (cmd) => {
-        if (!cmd.trim()) return;
-        try {
-          await api(`/api/session/${encodeURIComponent(s.id)}/commands`, { name: "run", command: cmd.trim() });
-          runProject();
-        } catch (err) { toast(err.message); }
-      }, { note: "↵ saves it for the project and runs it (amarchy run --set)" });
-    toast(e.message);
-  }
-}
-
-async function pickCommand() {
-  if (needsChat(() => pickCommand())) return;
-  const s = row(desk.current);
-  if (!s) return;
-  let cmds = [];
-  try {
-    const r = await fetch(`/api/session/${encodeURIComponent(s.id)}/commands`);
-    cmds = (await r.json()).commands || [];
-  } catch (e) { return toast("Can't reach Amarchy"); }
-  picker({ title: `Run in ${projectName(s.repo)}`, items: [
-    ...cmds.map((c) => ({ label: c.name, detail: c.command, icon: "send", act: () => runProject(c.name) })),
-    { label: "Save a new command…", icon: "plus", always: true, act: () => saveCommand(s) }] });
-}
-
-function saveCommand(s) {
-  ask("Name for the command", "", (name) => {
-    if (!/^[\w.-]{1,40}$/.test(name.trim())) return toast("A short name: letters, numbers, - and .");
-    ask(`Command for ${name.trim()}`, "", async (cmd) => {
-      if (!cmd.trim()) return;
-      try {
-        await api(`/api/session/${encodeURIComponent(s.id)}/commands`, { name: name.trim(), command: cmd.trim() });
-        runProject(name.trim());
-      } catch (e) { toast(e.message); }
-    });
-  });
-}
-
 // The Amarchy menu (the Ⓐ, m on the board, Ctrl+Alt+M): everything you
 // can do from here, each with its key. A keyboard's card on a computer, a
 // sheet on the phone (ui.js uiMenu); what needs keys or a chat open, on a
@@ -1764,14 +1638,10 @@ function deskMenu() {
   const s = app.desk ? row(keyedId()) : null;
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardCompose() },
+    s && s.preview ? { label: "Open the preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", act: () => uiPreviewGo(s) } : null,
     { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
     desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
-    s && desk.current ? { label: "Run", icon: "send", desk: true, group: () => ({ title: "Run", items: [
-      { label: "Run the project", key: "Ctrl+Alt+R", act: () => runProject() },
-      { label: "Run a command…", key: "Ctrl+Alt+C", act: () => pickCommand() },
-      { label: "Saved commands…", detail: "change, forget", act: () => commandsSheet(s, () => toTerminal("term")) },
-      { label: "The terminal", key: "Ctrl+Alt+→", act: () => toTerminal("term") }] }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     { label: "Automations", icon: "clock", detail: autoState.failed ? `${autoState.failed} failed last time` : "what runs by itself", act: () => automationsSheet() },
     { label: "Theme, font and wallpaper…", icon: "image", key: "Ctrl+Alt+T", act: () => openLook() },
@@ -1838,7 +1708,7 @@ function showKeys() {
       ["l  or  →", "Into the card, along its buttons"], ["h  or  ←", "Back along them, out of the card"],
       ["Enter", "Open the chat; on a button, press it (a folded group: unfold it)"], ["Esc", "Out of the card"],
       ["1 – 4", "Pick that answer on the card"],
-      ["x", "Complete the chat's mission, with Undo"], ["r", "Review: open the link a done chat gave"],
+      ["x", "Complete the chat's mission, with Undo"], ["r", "Open what it made: Review, or its Preview"],
       ["s", "Seen: off Needs you without opening it"],
       ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
     ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
@@ -1848,7 +1718,7 @@ function showKeys() {
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
       ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
-      ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R / C", "Run the project / a command"],
+      ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Open its preview"],
       ["Ctrl+Alt+Space / Enter", "Dictate: hold, or tap and tap again"], ["⌘V / drop", "A picture goes with your message"]]),
     ...part("Anywhere", [["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+A", "Go to a chat"], ["Ctrl+Alt+S", "Search"],
       ["Ctrl+Alt+H", "The board"], ["Ctrl+Alt+X", "Complete the chat's mission"], ["Ctrl+Alt+E", "Rename"],

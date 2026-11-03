@@ -45,7 +45,8 @@ there, and the user sees both through the app. Then:
 
 - The user's browser isn't on your machine. Your SessionStart context says
   which address to listen on (the machine's private network address, never
-  `0.0.0.0` on your own initiative) and what URL to give them. Other sessions
+  `0.0.0.0` on your own initiative) and what URL to give them (`amarchy preview`,
+  below). Other sessions
   share the machine, so check the port is free.
 - `amarchy run`, `list`, `new`, `rename`, `close` and messaging other sessions
   work as below; the other sessions you see are the host's.
@@ -141,6 +142,13 @@ command's usage without running it (an option it doesn't know fails instead).
   dependency, config, migrations, server code without reload), or when the user
   asks. The user sees it in the app when terminals are on.
 - `amarchy run <name>`: run another saved command the same way.
+- `amarchy preview <url>`: put what you serve for the user to look at (a dev
+  server, a deploy) on this chat's **Preview** button, on its head and its card,
+  where it stays. Run it as soon as it answers, and again when the address
+  changes; `amarchy preview --clear` when you stop serving it for good. On a host
+  a localhost address is refused: it wouldn't reach their browser. Nothing
+  answering, the button reads Restart preview, and its tap reaches you as a message
+  saying so: start it again.
 - `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key or
   password from the user without it going through the chat (see "Secrets"
   below).

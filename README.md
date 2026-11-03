@@ -77,7 +77,7 @@ On a computer's browser:
 | `Ctrl+Alt+S` | Search chats |
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |
-| `Ctrl+Alt+R` | Run the project in the terminal |
+| `Ctrl+Alt+R` | Open the chat's preview |
 | `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned |
 | `Ctrl+Alt+A` | Go to a chat, by its name |
 | `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |

@@ -29,6 +29,7 @@
 // - uiChart: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat, as its card's head: Back, its project
 //   and name (a tap: rename), its pill; its menu, Complete.
+// - uiPreview: a chat's live preview, a tap away, on its head and its card.
 // - uiAction: a bar's one thing to do (New chat, Complete), outlined.
 // - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
 // - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
@@ -363,11 +364,50 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
     h("div", { class: "head-btns" },
       // Where it stands: a box as the buttons are, its tone a dot in it.
       h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
+      uiPreview(s, { head: true }),
       h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
       main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
                                                "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete"))),
   ];
+}
+
+// A chat's live preview (amarchy preview): the same on its head and its card,
+// there as soon as its Claude sets it. Nothing answering, a tap asks that
+// Claude to start it again (a message, as yours is; it wakes a sleeping one).
+const uiPreviewAsked = new Map();     // chat -> when: asked, for the moment it takes
+
+function uiPreviewGo(s) {
+  if (!s || !s.preview) return toast("No preview in this chat yet");
+  if (s.preview_up) return openLink(s.preview.url);
+  const at = uiPreviewAsked.get(s.id);
+  if (at && Date.now() - at < 60000) return;
+  uiPreviewAsked.set(s.id, Date.now());
+  api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: `The preview at ${s.preview.url} isn't answering: start it again.` })
+    .then(() => toast("Asked it to start the preview again"))
+    .catch((e) => { uiPreviewAsked.delete(s.id); toast(e.message); });
+}
+
+function uiPreview(s, { head = false } = {}) {
+  if (!s.preview) return null;
+  if (s.preview_up) uiPreviewAsked.delete(s.id);
+  const asked = !s.preview_up && Date.now() - (uiPreviewAsked.get(s.id) || 0) < 60000;
+  const words = s.preview_up ? "Preview" : asked ? "Restarting…" : "Restart preview";
+  const title = s.preview_up ? `Open ${s.preview.url}` : `${s.preview.url} isn't answering: ask its Claude to start it again`;
+  const go = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    uiPreviewGo(s);
+    if (!s.preview_up) {
+      const b = e.currentTarget;
+      b.disabled = true;
+      (b.querySelector(".label") || b).textContent = "Restarting…";
+    }
+  };
+  if (head) return h("button", { class: `control ui-action ui-preview${s.preview_up ? "" : " stopped"}`, type: "button", title, "aria-label": words,
+                                 disabled: asked || null, onclick: go }, glyph("preview"), h("span", { class: "label" }, words));
+  if (s.preview_up) return h("a", { class: "tbtn ui-preview", href: s.preview.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
+  return h("button", { class: "tbtn quiet ui-preview", type: "button", title, disabled: asked || null, onclick: go }, words);
 }
 
 // A bar's one thing to do, outlined (not filled): an icon, its words (an

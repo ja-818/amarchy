@@ -135,11 +135,8 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 
 /* The Terminal tab: the project's terminal or Claude's classic one, with
    Run and the saved commands over it. */
-.desk-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .term-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; }
 .term-bar .control { min-height: var(--control-h); padding: 2px 12px; gap: 6px; font-size: var(--caption); white-space: nowrap; }
-.term-bar .term-switch { flex: 1; min-width: 0; }
-.term-bar .term-switch .control { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .term-banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: var(--caption); color: var(--text-muted); }
 .term-banner span { flex: 1; }
 /* terminal.css draws the phone's lines under these two: not on the desk. */

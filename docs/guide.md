@@ -175,8 +175,8 @@ runs, on the phone too:
 
 - **Run** starts the project's run command (`bin/dev`, `npm run dev`, `cargo run`...,
   guessed from the repo until you set one; it asks when it can't tell). Again
-  restarts it. **Commands…** runs one of the project's other saved commands, or
-  saves a new one.
+  restarts it. **Commands…** runs, changes or forgets the project's other saved
+  commands, or saves a new one.
 - Under it, on a phone, the keys a phone's keyboard hasn't: Esc, Tab, **Ctrl** (it
   waits for the next key), the arrows, ^C, ^D, `|` `~` `/` `-`, and **A−**/**A+** for
   the text size.
@@ -201,8 +201,7 @@ last thing its Claude wrote; its time, a dot while you haven't read what it
 finished, and its flag if pinned. Your assistant's card stays on top (see
 [Your assistant](#your-assistant)). The search reads names, projects and branches.
 
-- **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, run its project
-  or a saved command, add a picture or a secret, make it your assistant, or close
+- **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, add a picture or a secret, make it your assistant, or close
   it. Closing asks first, as on a computer, and says if uncommitted work would go
   with it.
 - **Settings** (the gear) picks the chimes, your assistant, your projects, the
@@ -311,7 +310,7 @@ host's chats without anything else installed.
   `o`) opens, `l` (or `→`) goes into the card and along its buttons, `h` (or
   `←`) back and out of it, `Esc` out at once, `Enter` presses the button you're on,
   `1`-`9` pick the card's answer, `x` completes its mission (with Undo; a task's
-  Done), `r` opens what a done chat made (Review), `s` marks it seen, `Tab` is
+  Done), `r` opens what a chat made (its Review, else its Preview), `s` marks it seen, `Tab` is
   Chats, Tasks or the [Tavern](#the-tavern) (`Shift+Tab` back), `/` the search, `n` a new chat, `m` the Amarchy menu, `o` only what needs you, `p` pin, `f` for later, `?` all the keys.
 - **New chat** is **What do you want to do?** at the top of the board: a big box
   with the project and the model under it (the model stays the default of every
@@ -412,7 +411,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+L` | Claude's classic terminal in the side panel; again, back to the chat's terminal. |
 | `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
-| `Ctrl+Alt+R` / `C` | Run the project / another saved command in the terminal. |
+| `Ctrl+Alt+R` | Open the chat's preview. |
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
 | `Ctrl+Alt+H` | The board (from a chat: back to it). |
 | `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned. |
@@ -476,6 +475,12 @@ start its Claude, sending it something does. **Settings → Sleep** has the minu
 to sleep**.
 
 ## Claude knows it's in amarchy
+
+**Preview.** When Claude serves something for you to look at (a dev server, a
+deploy), it puts the address on the chat with `amarchy preview <url>`: a **Preview**
+button appears on the chat's head and its card, and stays whichever reply you're on.
+If nothing answers there any more, it reads **Restart preview**, and a tap asks that
+chat's Claude to start it again. `Ctrl+Alt+R` (`r` on the board) opens it.
 
 Each chat's Claude starts knowing where it is: which chat, worktree and branch it's
 on, where the project's main checkout is, and that the terminal runs the project.

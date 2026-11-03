@@ -355,8 +355,8 @@ function todayAsk(s) {
     const tone = secret ? "secret" : s.permission ? "permission" : "ask";
     return uiCard({ ...base, pill: uiPill(TODAY_PILLS[tone], "ask"),
       body: [h("p", { class: "tcard-text" }, secret ? "Asks you for a secret" : s.asks || "Needs your answer")],
-      actions: s.permission ? [uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"), uiButton("Open", () => todayOpen(s))]
-                            : [uiButton("Answer", () => todayOpen(s), true)] });
+      actions: s.permission ? [uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"), uiButton("Open", () => todayOpen(s)), uiPreview(s)]
+                            : [uiButton("Answer", () => todayOpen(s), true), uiPreview(s)] });
   }
   const key = JSON.stringify(qs);
   let st = todayUI.answers.get(s.id);
@@ -383,14 +383,14 @@ function todayAsk(s) {
         if (qs.every((_, j) => st.picks[j] !== undefined)) send();
         else todayRedraw();
       } }, o.label)), i === qs.length - 1 ? uiButton("Other…", () => todayOpen(s), false, "quiet") : null)));
-  return uiCard({ ...base, pill: uiPill(TODAY_PILLS.ask, "ask"), body });
+  return uiCard({ ...base, pill: uiPill(TODAY_PILLS.ask, "ask"), body, actions: [uiPreview(s)] });
 }
 
 function todayBlocked(s) {
   return uiCard({ kind: "blocked", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", id: s.id,
     open: () => todayOpen(s), pill: uiPill("Blocked", "late"),
     body: [(s.today || {}).goal ? h("p", { class: "tcard-text muted" }, s.today.goal) : null],
-    actions: [uiButton("See why", () => todayOpen(s), true)] });
+    actions: [uiButton("See why", () => todayOpen(s), true), uiPreview(s)] });
 }
 
 // One of your loops: who (or Due), what (a tap shows all of it), when, and
@@ -488,7 +488,7 @@ function todayChat(s, kind) {
     : main ? uiPill(statusWords(s), "quiet") : t.at ? uiPill(autoPast(t.at), "quiet") : null;
   const said = (boardOn() || kind === "fresh") && !main && s.said ? s.said : "";
   // Done: Review (where to see what it made, from its reply) and Complete.
-  const link = (t.links || [])[0];
+  const link = (t.links || []).find((l) => !s.preview || l.url !== s.preview.url);      // (not its Preview, twice)
   const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
@@ -498,10 +498,10 @@ function todayChat(s, kind) {
     title: main ? s.assistant_name || s.task : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
-    actions: finished ? [review, complete]
-      : kind === "fresh" ? [seenBtn]
-      : kind === "stale" || stalled ? [told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : uiButton("Ask status", () => todayNudge(s)),
-                                       uiButton("Complete mission", () => todayComplete(s), false, "complete")] : [] });
+    actions: finished ? [review, uiPreview(s), complete]
+      : kind === "fresh" ? [uiPreview(s), seenBtn]
+      : kind === "stale" || stalled ? [uiPreview(s), told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : uiButton("Ask status", () => todayNudge(s)),
+                                       uiButton("Complete mission", () => todayComplete(s), false, "complete")] : [uiPreview(s)] });
 }
 
 // Seen without opening it: off Needs you.

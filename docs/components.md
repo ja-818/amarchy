@@ -17,6 +17,7 @@ the change.
 | `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Tavern |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
+| `uiPreview(s, {head})` | A chat's live preview (`amarchy preview`): opens it, or asks its Claude to start it again when nothing answers. | Over a chat, on its card |
 | `uiAction(icon, label, act, {title, key, cls})` | A bar's one thing to do, outlined (its key beside its words; an icon alone on a phone). | New chat, Complete |
 | `uiBrand(act)` | The Ⓐ: the Amarchy menu, as Omarchy's mark opens its own; its dot, an automation that failed. | the board's bar |
 | `uiMenu(title, items)` | A menu: a keyboard's card on a computer (type to find, ↑ ↓ ↵), a sheet on the phone; items `{label, detail, icon, key, act, group, desk}`. | the Amarchy menu |
