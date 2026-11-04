@@ -56,6 +56,15 @@ async function run(browser, port, layout) {
     const bar = [...document.querySelectorAll(".head-btns")].find((b) => b.offsetParent);
     return bar.getBoundingClientRect().right > innerWidth + 1 || document.documentElement.scrollWidth > innerWidth;
   });
+  const head = await p.evaluate(() => {
+    const bar = [...document.querySelectorAll(".head-btns")].find((b) => b.offsetParent);
+    const [more, prev, done] = [".more", ".ui-preview", ".complete"].map((c) => bar.querySelector(c));
+    const look = (el) => { const c = getComputedStyle(el); return [c.color, c.backgroundColor, c.borderColor, c.height].join(); };
+    return { order: [...bar.children].map((c) => (c.matches(".more") ? "more" : c.matches(".ui-preview") ? "preview" : c.matches(".complete") ? "complete" : "state")).join(" "),
+             same: look(prev) === look(done), left: more.getBoundingClientRect().right <= prev.getBoundingClientRect().left };
+  });
+  check(layout, head.order === "state more preview complete" && head.left, `its place: ... Preview Complete (${head.order})`);
+  check(layout, head.same, "it looks as Complete does");
   check(layout, !crowded, "the head still fits");
   const name = await p.evaluate(() => [...document.querySelectorAll(".head-title")].find((b) => b.offsetParent).getBoundingClientRect().width);
   check(layout, name >= 100, `its name keeps its room (${Math.round(name)}px)`);
