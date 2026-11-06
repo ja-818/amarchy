@@ -9,9 +9,9 @@ the change.
 
 | Component | What it draws | Used by |
 | --- | --- | --- |
-| `uiCard({kind, hue, lead, chip, title, pill, body, actions, open, id})` | One card for everything: a chat, a task, what a search found. Its head (project or who, name, pill), its body, its actions. The whole card opens it; a chat's card held down (a right click, the menu key) opens its menu. | today.js (every card), tasks.js (search results) |
+| `uiCard({kind, hue, lead, chip, title, pill, body, actions, open, id, unseen})` | One card for everything: a chat, a task, what a search found. Its head (project or who, name, pill), its body, its actions. The whole card opens it; a chat's card held down (a right click, the menu key) opens its menu. `unseen`: a chat that answered and you haven't opened since, lit (its ground washed in `--unseen`, a bar down its edge, a glow that breathes, its name bold). | today.js (every card), tasks.js (search results) |
 | `uiPirate({id, hue, look, pose, mark, say, title, pill, open, cheer})` | A chat as one of the crew at their crew's table: ten pirates drawn as a noir comic (`uiCrewArt`, `UI_CREW`), the same one for a chat every time (`uiLook(id).kind`), their vest and lapels their crew's color, posed as it stands (`idle`, `work`, `ask`, `run`, `fresh`, `done`, `blocked`, `sleep`, `stale`, `arrive`, `empty`), a mark over their head, what they say in a bubble under the pointer, their name and status under them at one height (what's for you is on the table's card: a `uiCard`, tavern.js). A card underneath (`.tcard`, the chat's id, a `.today-go` head): the board's keys work on it. | tavern.js (the Tavern) |
-| `uiPill(text, tone, {long, title})` | Where something stands: `ask`, `late`, `done`, `working`, `running` (these two spin), `accent`, `warn`, `quiet`. `long` cuts its words short with … where they don't fit. | every card's state |
+| `uiPill(text, tone, {long, title})` | Where something stands: `ask`, `late`, `done`, `working`, `running` (these two spin), `accent`, `warn`, `quiet`, `new` (filled in `--unseen`, a dot beating in it: what you haven't seen). `long` cuts its words short with … where they don't fit. | every card's state |
 | `uiButton(label, act, primary, cls)` | An action on a card or a section (`quiet`: words only; `complete`: Complete mission, its ✓, outlined like the rest). | cards, sections |
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
 | `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Tavern |
@@ -54,6 +54,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--card-bg`, `--card-border`, `--card-border-width`, `--card-radius` | A card's surface, its rule, its corners |
 | `--card-hover-bg`, `--card-hover-border`, `--card-focus-bg`, `--card-focus-border`, `--card-press-bg` | A card under the pointer, under the keys, pressed |
 | `--card-pad-x`, `--card-gap` | Inside a card, between cards |
+| `--unseen`, `--unseen-wash` | A chat that answered and you haven't opened (an unseen card, the New pill): its color (the accent) and how much of it the card's ground has |
 | `--pill-radius`, `--pill-border-width`, `--pill-border-mix` | A pill's corners and rule (square as the buttons: `--button-radius`) (how much of its tone the rule has) |
 | `--button-bg`, `--button-border`, `--button-hover-bg`, `--button-press-bg`, `--button-radius`, `--button-primary-bg`, `--button-primary-text` | A button at rest, hovered, pressed, the primary one |
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |

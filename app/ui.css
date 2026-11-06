@@ -17,6 +17,9 @@
   --card-press-bg: var(--control-pressed);   /* under a finger, the moment it lands */
   --card-pad-x: 14px;
   --card-gap: 8px;            /* between cards */
+  /* A chat that answered and you haven't opened since (uiCard unseen). */
+  --unseen: var(--accent);
+  --unseen-wash: 24%;         /* how much of it the card's ground has */
   /* A pill (uiPill): where something stands. */
   --pill-radius: var(--button-radius);     /* square as the buttons */
   --pill-border-width: 1px;
@@ -128,6 +131,34 @@ html { touch-action: manipulation; }
   background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--card-bg);
   border-color: var(--card-focus-border); box-shadow: 0 0 0 1px var(--card-focus-border);
 }
+/* Answered and not opened yet: lit, so it catches the eye among the rest. Not
+   a border (that's the one the keys are on): its ground washed in --unseen
+   from the left, a bar of it down its edge, a glow that breathes round it,
+   its name in bold and a filled New beating in it. Under the pointer, still
+   lit; the one the keys are on, ringed as ever. */
+.tcard.unseen {
+  --unseen-ground: linear-gradient(90deg, color-mix(in srgb, var(--unseen) var(--unseen-wash), transparent),
+                                          color-mix(in srgb, var(--unseen) calc(var(--unseen-wash) / 3), transparent) 70%);
+  background: var(--unseen-ground), var(--card-bg);
+  border-color: color-mix(in srgb, var(--unseen) 60%, var(--card-border));
+  box-shadow: inset 4px 0 0 var(--unseen), 0 0 18px -6px var(--unseen);
+}
+@media (hover: hover) { .tcard.unseen[data-id]:hover {
+  background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--unseen-ground), var(--card-bg);
+  border-color: var(--unseen);
+} }
+.tcard.unseen:has(> .tcard-head:active) { background: linear-gradient(var(--card-press-bg), var(--card-press-bg)), var(--unseen-ground), var(--card-bg); }
+.tcard.unseen:has(> .tcard-head:focus-visible), .keyed .tcard.unseen.ui-sel {
+  background: linear-gradient(var(--card-focus-bg), var(--card-focus-bg)), var(--unseen-ground), var(--card-bg);
+  box-shadow: inset 4px 0 0 var(--unseen), 0 0 0 1px var(--card-focus-border);
+}
+.tcard.unseen .tcard-title { font-weight: 700; }
+@media (prefers-reduced-motion: no-preference) {
+  .tcard.unseen:not(.ui-sel, :has(> .tcard-head:focus-visible)) { animation: tcard-unseen 2.6s ease-in-out infinite; }
+}
+@keyframes tcard-unseen {
+  50% { box-shadow: inset 4px 0 0 var(--unseen), 0 0 26px -2px color-mix(in srgb, var(--unseen) 70%, transparent); }
+}
 /* Its project (or who), in its own color: a word, not a box. */
 .tcard-chip { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
@@ -175,6 +206,12 @@ html { touch-action: manipulation; }
 .tpill.t-working, .tpill.t-running, .tpill.t-accent { --pill: var(--accent); }
 .tpill.t-warn { --pill: var(--warn, var(--warning)); }
 .tpill.t-quiet { --pill: var(--text-muted); font-weight: 600; }
+/* New: filled in --unseen, a dot beating in it. */
+.tpill.t-new { --pill: var(--unseen); color: var(--on-accent); background: var(--pill); border-color: var(--pill); font-weight: 800; }
+.tpill-beat { position: relative; width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
+.tpill-beat::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: currentColor; opacity: 0; }
+@media (prefers-reduced-motion: no-preference) { .tpill-beat::after { animation: tpill-beat 1.6s ease-out infinite; } }
+@keyframes tpill-beat { 0% { opacity: .7; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
 .tpill .spinner { width: auto; }
 /* Words that may not fit (Running · what runs): cut short with … */
 .tpill.long { flex: 0 1 auto; min-width: 0; max-width: 50%; }

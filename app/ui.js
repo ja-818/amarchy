@@ -206,8 +206,9 @@ function uiPatchPart(old, next) {
 // A card. head: what opens it (a chat) or opens its text (a task). kind: what
 // it is (k-<kind>, for its look); hue: its project's color (ph-<hue>); lead:
 // before the chip (an avatar); id: the chat it is, if one (its priority mark,
-// data-id for the keys).
-function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label }) {
+// data-id for the keys); unseen: a chat that answered and you haven't opened
+// it since (lit, so it catches the eye).
+function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = false }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
@@ -216,7 +217,7 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
     lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
     h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
   // The whole card opens it (its buttons, links and boxes do their own thing).
-  const card = h("article", { class: `tcard k-${kind} ph-${hue}`, "data-id": id || null,
+  const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen ? " unseen" : ""}`, "data-id": id || null,
                               onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
     ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
   // A chat's: held down on a phone, a right click on a computer (the menu key
@@ -226,10 +227,10 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
 }
 
 // A pill: its words in its tone's color (ask, late, done, working, running,
-// accent, warn, quiet). working and running spin. long: words that may not fit, cut
+// accent, warn, quiet; new: filled, a dot beating in it). working and running spin. long: words that may not fit, cut
 // short with "…" (all of them on hover).
 function uiPill(text, tone, { long = false, title = null } = {}) {
-  const wheel = tone === "working" || tone === "running" ? spinner() : null;
+  const wheel = tone === "working" || tone === "running" ? spinner() : tone === "new" ? h("span", { class: "tpill-beat", "aria-hidden": "true" }) : null;
   return h("span", { class: `tpill t-${tone}${long ? " long" : ""}`, title: title || (long ? text : null) },
     wheel, long ? h("span", { class: "tpill-text" }, text) : text);
 }

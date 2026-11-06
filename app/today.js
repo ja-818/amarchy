@@ -482,7 +482,7 @@ function todayChat(s, kind) {
   const finished = t.state === "done" && !running;
   const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
   const pill = running ? todayRunningPill(s)
-    : kind === "fresh" ? uiPill(finished ? "Done · new" : "New", finished ? "done" : "ask")
+    : kind === "fresh" ? uiPill(finished ? "Done · new" : "New", "new")
     : kind === "done" ? uiPill("Done", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
     : kind === "working" || s.status === "working" ? uiPill("Working", "working")
     : main ? uiPill(statusWords(s), "quiet") : t.at ? uiPill(autoPast(t.at), "quiet") : null;
@@ -496,7 +496,7 @@ function todayChat(s, kind) {
   const seenBtn = kind === "fresh" && !finished ? uiButton("Seen", () => todaySeen(s), false, "quiet seen") : null;
   return uiCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
-    lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
+    lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill, unseen: kind === "fresh",
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
     actions: finished ? [review, uiPreview(s), complete]
       : kind === "fresh" ? [uiPreview(s), seenBtn]

@@ -431,11 +431,18 @@ async function common(p, where) {
   check(where, /Study: T3 vs amarchy/.test(await text(p, ".today-now")) && /Stalled/.test(await text(p, ".tcard[data-id=proj-quiet]")), "done chats in Now; a stalled one says so");
   check(where, /Complete all 2/.test(await text(p, ".today-now .tsec-head")), "Complete all, with two done");
   check(where, /stale cookie/.test(await text(p, ".tcard.k-fresh[data-id=proj-fresh]")), "finished but not seen: it needs you, with what it said");
+  check(where, await p.evaluate(() => { const c = document.querySelector(".tcard.k-fresh[data-id=proj-fresh]"); const pill = c && c.querySelector(".tpill.t-new");
+    return !!c && c.classList.contains("unseen") && /gradient/.test(getComputedStyle(c).backgroundImage) && /inset/.test(getComputedStyle(c).boxShadow)
+      && !!pill && pill.innerText.trim() === "New" && !!pill.querySelector(".tpill-beat") && getComputedStyle(pill).backgroundColor !== "rgba(0, 0, 0, 0)"; }),
+    "not seen yet: lit (washed, a bar down its edge, a filled New beating)");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.unseen")].every((c) => c.classList.contains("k-fresh") || c.querySelector(".tpill.t-new"))
+                                      && !document.querySelector(".tcard.k-ask.unseen, .tcard.k-working.unseen")), "only what you haven't seen is lit");
   check(where, await p.evaluate(() => { const a = document.querySelector(".tcard.k-done a.tbtn"); return !!a && a.href === "https://github.com/x/y/pull/1" && /Open the PR/.test(a.innerText); }), "a done chat's Review: the link its reply gave");
   check(where, !!(await p.$(".tcard.k-assistant")), "your assistant: a line on top, never to finish");
   // Seen without opening: off Needs you.
   await p.evaluate(() => { const c = document.querySelector(".tcard[data-id=proj-fresh]"); [...c.querySelectorAll(".tbtn")].find((b) => b.innerText === "Seen").click(); });
   check(where, await until(p, () => !document.querySelector(".tcard.k-fresh[data-id=proj-fresh]")), "Seen: off Needs you");
+  check(where, await p.evaluate(() => !document.querySelector(".tcard.unseen[data-id=proj-fresh]")), "seen: no longer lit");
   check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.k-ask .tcard-chip")].every((c) => c.innerText === "Proj")
                                       && document.querySelectorAll(".tcard .tcard-chip").length >= 2), "every chat says its project");
   check(where, await p.evaluate(() => !document.querySelector(".today-opt.primary")), "no option is pushed on you");
