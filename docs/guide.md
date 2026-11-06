@@ -446,8 +446,8 @@ them; only sending (or typing in the terminal) does.
 A chat never sleeps while something would be lost with its Claude:
 
 - it's working, or it's asking you something (a permission, a question);
-- a command Claude started is still running in the background (a dev server, a
-  build);
+- a command Claude started is still running in the background and runs to an end
+  (a build, a test run);
 - background agents are still at it (its conversation is still moving, or Claude is
   busy);
 - a `/loop` or a scheduled task is due to wake it;
@@ -457,8 +457,23 @@ A chat never sleeps while something would be lost with its Claude:
 Claude Code **background sessions** (`/bg`) started from a chat are listed in its
 Details. When the chat sleeps, those with nothing left to do are stopped as well
 (Claude Code keeps their conversations: `claude attach <id>` brings one back).
-Running ones are left alone, and so is anything else running from a sleeping
-chat's worktree (a dev server you may still want): only closing stops it.
+Running ones are left alone.
+
+What the chat left running goes with it, so a chat you've left holds no memory at
+all: the dev servers and watchers its Claude started (in the background, or let go
+of with `(pnpm dev &)`), a headless browser a script left behind, and what runs in
+its terminal (its run command). amarchy finds them by the chat's own process group
+on the host (each pane's systemd scope), so nothing of another chat's is touched.
+One thing keeps them: **its page open** in a browser on your phone or computer
+(a dev server's page holds a connection to it while it's open). Then they stay,
+and stop once you've closed it. Its **Preview** button reads **Restart preview**
+after that: a tap asks its Claude to start it again. Closing a chat stops all of it
+too.
+
+A chat whose turn was **cut off** before it finished (the machine ran out of
+memory, or restarted, or Claude crashed) says **Interrupted**, asleep or not,
+instead of its last time or Ready: send it something to carry on (`amarchy list`:
+`interrupted`).
 
 ```sh
 amarchy sleep              # this chat, now (it says why not, if something would be lost)

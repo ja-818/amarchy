@@ -252,6 +252,8 @@
 
 .chat-dock .dock-note { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 2px 8px 4px;
                         color: var(--text-muted); font-size: var(--caption); text-align: center; }
+.chat-dock .dock-note.interrupted { color: var(--text); }
+.chat-dock .dock-note .cut-mark { color: var(--warn, var(--warning)); }
 .text-btn { min-height: 36px; padding: 6px 8px; color: var(--link); font-weight: 700; white-space: nowrap; border-radius: var(--radius-control); }
 .text-btn:active { background: var(--control-pressed); }
 

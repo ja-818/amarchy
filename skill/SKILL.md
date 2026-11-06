@@ -125,7 +125,9 @@ command's usage without running it (an option it doesn't know fails instead).
   test run or a helper, and its Claude goes on when that ends; `idle`),
   `running` (what runs, in words), `serving` (a dev server or watcher it left
   running: it never ends, so the session counts as idle), `sleeping` (its Claude Code isn't running until the user types in it
-  or sends it something; it still shows as idle), `unseen` (idle, and finished a
+  or sends it something; it still shows as idle), `interrupted` (idle, but its last
+  turn was cut off before it finished: the machine ran out of memory or restarted,
+  Claude crashed; the user sees "Interrupted"), `unseen` (idle, and finished a
   turn the user hasn't opened yet), `priority` (`high`, `normal`, `low`), `task`
   (what it's about: the user's name for it, else Claude Code's title cut down to
   "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current`
@@ -188,7 +190,10 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   sessions open nowhere (on a host: on no phone or browser) sleep on their own
   after `amarchy sleep --after` minutes (default 1), so you rarely need these. A
   session never sleeps while it's working, asking the user something, or running
-  background commands or agents. Never add `--force` without explicit approval:
+  background commands that run to an end, or agents. What it left serving (a dev
+  server, a watcher, its terminal's run command, a headless browser) stops when it
+  sleeps, unless the user has its page open; so start servers again after a wake
+  (its Preview button then asks you to). Never add `--force` without explicit approval:
   it sleeps a session even when something is lost. You can be put to sleep too,
   between turns: nothing you'd need is lost, the conversation resumes as it was.
 - `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session

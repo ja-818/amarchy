@@ -327,9 +327,16 @@ function todayStatePill(s) {
     return uiPill(s.permission ? "Permission" : "Asks you", "ask");
   if (s.status === "working") return uiPill("Working", "working");
   if (s.status === "running") return todayRunningPill(s);
+  if (s.interrupted) return todayInterruptedPill();
   if (t.state === "blocked") return uiPill("Blocked", "late");
   if (t.state === "done") return uiPill("Done", "done");
   return uiPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
+}
+
+// Its turn was cut off before it finished (the machine ran out of memory,
+// Claude crashed): whatever its goal block said last, it isn't that.
+function todayInterruptedPill() {
+  return uiPill("Interrupted", "warn", { title: "Its last turn was cut off before it finished: send it something to carry on" });
 }
 
 function todayChip(s) { return s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo); }
@@ -482,6 +489,7 @@ function todayChat(s, kind) {
   const finished = t.state === "done" && !running;
   const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
   const pill = running ? todayRunningPill(s)
+    : s.interrupted ? todayInterruptedPill()
     : kind === "fresh" ? uiPill(finished ? "Done · new" : "New", "new")
     : kind === "done" ? uiPill("Done", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
     : kind === "working" || s.status === "working" ? uiPill("Working", "working")
@@ -908,7 +916,7 @@ function todayKey(v) {
 // request, its questions' answers): the same, the same card (todayFill
 // keeps it, but for what it shows that changed).
 function todayRowKey(s) {
-  return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.asks,
+  return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission, (s.secret_asks || []).length, s.assistant,
     s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : ""]);
 }

@@ -408,8 +408,32 @@ async function steady(p, where) {
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
 }
 
+// A chat whose turn was cut off (the machine ran out of memory): asleep
+// since, yet "Interrupted", not its last when, Ready or Asleep: on its card,
+// on its open chat's bar, and over the box you type in.
+async function interrupted(p, where) {
+  const set = (o) => p.evaluate((o) => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === "proj-later" ? { ...x, ...o } : x)) }; refresh(); }, o);
+  await tab(p, "chats");
+  await set({ interrupted: true, sleeping: true });
+  check(where, await until(p, () => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tpill");
+                                       return !!c && c.textContent === "Interrupted" && c.classList.contains("t-warn"); }), "a turn cut off: its card says Interrupted");
+  check(where, await p.evaluate(() => statusWords(row("proj-later")) === "Interrupted" && statusTone(row("proj-later")) === "interrupted"), "its state in words: Interrupted, asleep or not");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-interrupted.png`), fullPage: true });
+  await p.evaluate(() => todayOpen(row("proj-later")));
+  check(where, await until(p, () => [...document.querySelectorAll(".head-state .tpill")].some((x) => x.offsetParent && x.textContent === "Interrupted")), "its chat's bar: Interrupted");
+  check(where, await until(p, () => [...document.querySelectorAll(".chat-dock .dock-note.interrupted")].some((x) => x.offsetParent && /Interrupted before it finished/.test(x.textContent))
+                                     && ![...document.querySelectorAll(".chat-dock .dock-note")].some((x) => x.offsetParent && /Asleep to save memory/.test(x.textContent))),
+        "over the box: interrupted before it finished (not Asleep too)");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-interrupted-open.png`) });
+  await p.evaluate(() => go("#/"));
+  await until(p, () => !(app.desk ? desk.current : app.session));
+  await set({ interrupted: false, sleeping: false });
+  check(where, await until(p, () => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tpill"); return !c || c.textContent !== "Interrupted"; }), "carried on: not Interrupted any more");
+}
+
 async function common(p, where) {
   await running(p, where);
+  await interrupted(p, where);
   await steady(p, where);
   await tab(p, "chats");
   let t = await text(p, ".today:not([hidden])");

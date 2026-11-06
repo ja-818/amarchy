@@ -8,7 +8,10 @@ const app = { view: null, key: "", user: "", online: true, list: null, session: 
               query: "", organize: null, tab: "today" };     // tab: the phone's home, Today or Chats (today.js)
 // running: its turn ended, but something it started still runs (a test run,
 // a helper): Claude goes on when that ends (bin/amarchy session_view).
-const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep" };
+// interrupted: its turn was cut off before it finished (the machine ran out
+// of memory, Claude crashed): idle, but not done.
+const STATUS = { waiting: "Needs your answer", working: "Working", running: "Running", done: "Done", idle: "Ready", asleep: "Asleep",
+                 interrupted: "Interrupted" };
 const PRIORITY = { high: "Pinned", normal: "Now", low: "For later" };
 const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
 // The glyphs of amarchy's list (Nerd Font icons), for what has no drawing
@@ -21,9 +24,10 @@ const NERD = {
   organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
   up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}", image: "\u{F02E9}", clock: "\u{F0150}", next: "\u{F0142}",
 };
-const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", high: "▲", low: "▼", check: "✓", close: "✕",
+const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", interrupted: "!", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅", clock: "◷", next: "›" };
 const ICONS = {
+  interrupted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
@@ -413,7 +417,11 @@ function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
 function stateOf(s) { return s.status || "idle"; }
 // As the list shows it: "done" for one that finished and you haven't opened since.
-function doneOf(s) { return stateOf(s) === "idle" && s.unseen === true ? "done" : stateOf(s); }
+// "interrupted" for one whose turn was cut off.
+function doneOf(s) {
+  if (stateOf(s) !== "idle") return stateOf(s);
+  return s.interrupted === true ? "interrupted" : s.unseen === true ? "done" : "idle";
+}
 // Asleep: its Claude Code isn't running (its memory freed) until something
 // you send wakes it, its conversation kept; waking: Claude on its way back.
 function sleepOf(s) { return !s || s.setup ? "" : s.waking ? "waking" : s.sleeping ? "asleep" : ""; }
@@ -427,13 +435,16 @@ function sleepMark(s) {
 }
 
 // A session's state in words, as the list and the chat's header say it,
-// and its tone (the color of those words): asleep is quiet, whatever it did last.
+// and its tone (the color of those words): asleep is quiet, whatever it did
+// last, but for a turn cut off: that says so, asleep or not.
 function statusTone(s) {
+  if (!s.setup && doneOf(s) === "interrupted") return "interrupted";
   return s.setup || sleepOf(s) ? "quiet" : doneOf(s);
 }
 
 function statusWords(s) {
   if (s.setup) return "Setting up…";
+  if (doneOf(s) === "interrupted") return STATUS.interrupted;
   const sl = sleepOf(s);
   if (sl) return SLEEP[sl];
   return STATUS[doneOf(s)] || "";

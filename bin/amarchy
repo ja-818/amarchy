@@ -2137,6 +2137,20 @@ def clear_asleep(sid):
     (claude_dir(sid) / "asleep").unlink(missing_ok=True)
 
 
+def asleep_if_gone(s):
+    """A session whose Claude's tmux is gone (the machine restarted, or its
+    user's systemd did) with no mark saying it sleeps: asleep, as attaching
+    to it would say (host_start), so waking it and sending it something
+    start its Claude again instead of waiting on a pane that isn't there.
+    Whether it was."""
+    sid = s["id"]
+    if (s.get("setup") or asleep_since(sid) is not None or waking_now(sid) or not Path(s["path"]).is_dir()
+            or (CLOSING / f"{sid}.json").exists() or tmux_has(tmux_name(sid))):
+        return False
+    mark_asleep(sid)
+    return True
+
+
 WAKING = 60     # seconds a session counts as waking until its Claude says it's up
 
 
@@ -2326,6 +2340,241 @@ def timestamp(record):
         return 0
 
 
+def proc_started(pid):
+    """When a process started (clock ticks since boot): with its pid, which
+    process it is, so a pid used again by a new one isn't taken for it."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    return int(stat[stat.rfind(")") + 2:].split()[19])
+
+
+def stop_processes(pids, wait=5):
+    """Stop these processes: SIGTERM (a whole process group at once when all
+    of it is among them), then SIGKILL for what's still there after `wait`
+    seconds. Never this process or what started it. How many it stopped."""
+    procs = processes()
+    spared, pid = set(), os.getpid()
+    while pid > 1 and pid not in spared:
+        spared.add(pid)
+        pid = procs.get(pid, (0,))[0]
+    found = {p: proc_started(p) for p in pids if p in procs and p not in spared and p > 1}
+    found = {p: t for p, t in found.items() if t is not None}
+    if not found:
+        return 0
+    groups = {}
+    for p in procs:
+        try:
+            groups.setdefault(os.getpgid(p), set()).add(p)
+        except OSError:
+            pass
+    for p in found:
+        try:
+            g = os.getpgid(p)
+        except OSError:
+            continue
+        if g > 1 and groups.get(g, set()) <= found.keys():
+            try:
+                os.killpg(g, 15)
+                continue
+            except OSError:
+                pass
+        try:
+            os.kill(p, 15)
+        except OSError:
+            pass
+
+    def running(p):
+        try:
+            stat = Path(f"/proc/{p}/stat").read_text()
+        except OSError:
+            return False
+        # A zombie only waits for its parent; a new process may have its pid.
+        return stat[stat.rfind(")") + 2] != "Z" and proc_started(p) == found[p]
+
+    end = time.time() + wait
+    while time.time() < end and any(running(p) for p in found):
+        time.sleep(0.1)
+    for p in found:
+        if running(p):
+            try:
+                os.kill(p, 9)
+            except OSError:
+                pass
+    return len(found)
+
+
+def pane_scope(pid):
+    """The cgroup of a tmux pane's process, when the pane has one of its own
+    (systemd gives each a tmux-spawn-*.scope): everything started in the
+    pane stays in it, what was let go of too (`(pnpm dev &)`, a browser a
+    script left behind). None otherwise: panes share tmux's then."""
+    try:
+        lines = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+    except OSError:
+        return None
+    path = next((l[3:] for l in lines if l.startswith("0::")), "")
+    name = path.rsplit("/", 1)[-1]
+    if not (name.startswith("tmux-spawn-") and name.endswith(".scope")):
+        return None
+    return Path("/sys/fs/cgroup" + path)
+
+
+def scope_pids(scope):
+    try:
+        return {int(x) for x in (scope / "cgroup.procs").read_text().split()} if scope else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def term_pane(s):
+    """The pid of a session's terminal pane's process (its shell), or None."""
+    pid = tmux("display-message", "-p", "-t", f"={tmux_name(s['id'], 'term')}:", "#{pane_pid}").stdout.strip()
+    return int(pid) if pid.isdigit() else None
+
+
+def in_tree(path, procs):
+    """The processes whose working directory or executable is in a folder."""
+    inside = str(path).rstrip("/") + "/"
+    out = set()
+    for p in procs:
+        for link in ("cwd", "exe"):
+            try:
+                target = os.readlink(f"/proc/{p}/{link}").removesuffix(" (deleted)")
+            except OSError:       # gone, or not ours
+                continue
+            if (target + "/").startswith(inside):
+                out.add(p)
+                break
+    return out
+
+
+AMARCHY_OWN = {"send", "reap", "claude-reload", "shorten", "protocol-check", "dictation"}
+
+
+def amarchy_own(pid):
+    """Whether a process is amarchy's own work, started from a pane and let go
+    of (closing another session, a message on its way): never a session's to stop."""
+    line = cmdline(pid)
+    return any(Path(a).name == "amarchy" and line[i + 1:i + 2] and line[i + 1] in AMARCHY_OWN
+               for i, a in enumerate(line[:3]))
+
+
+def left_running(s, procs, pane=None, claude=None):
+    """What a session leaves running besides its Claude: the dev servers,
+    watchers and browsers its Claude started and let go of (still in its
+    pane's scope, outside the pane's loop), its Claude's background commands
+    (a `pnpm dev` with run_in_background), and what runs in its terminal (its
+    run command), the terminal's shell aside. Claude's MCP servers aren't
+    among them: they go with Claude. The pids."""
+    out = set()
+    pane = pane or host_pane(s)
+    if pane:
+        loop = pane["pid"]
+        family = {loop, *descendants(loop, procs)}      # the loop and what it runs: Claude, its broker, the wait for a key
+        scope = pane_scope(loop)
+        if scope:
+            out |= scope_pids(scope) - family
+        else:       # no scope of its own: what runs from its worktree, outside the loop
+            out |= in_tree(s["path"], procs) - family
+    if claude:
+        for p in descendants(claude, procs):
+            if "/shell-snapshots/" in " ".join(cmdline(p)):
+                out |= {p, *descendants(p, procs)}
+    term = term_pane(s)
+    if term and term in procs:
+        out |= set(descendants(term, procs)) | scope_pids(pane_scope(term))
+    # Never a Claude (nor what it runs) that isn't this session's own: a
+    # pane's scope holds its own only, but should one ever hold another's,
+    # that one is awake.
+    claudes = {p for p in out if procs.get(p, (0, ""))[1] == "claude" and p != claude}
+    for c in list(claudes):
+        claudes |= set(descendants(c, procs))
+    return {p for p in out if p in procs and p != term and p not in claudes and not amarchy_own(p)}
+
+
+def tcp_sockets():
+    """Every TCP socket: [(state, (local address, port), (remote address, port), inode)],
+    addresses as the kernel writes them (hex)."""
+    out = []
+    for name in ("tcp", "tcp6"):
+        try:
+            lines = Path(f"/proc/net/{name}").read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) < 10:
+                continue
+            (la, lp), (ra, rp) = f[1].split(":"), f[2].split(":")
+            out.append((f[3], (la, int(lp, 16)), (ra, int(rp, 16)), f[9]))
+    return out
+
+
+def loopback(address):
+    return (address[-2:] == "7F" if len(address) == 8 else
+            address == "0" * 24 + "01000000" or (address.startswith("0" * 16 + "FFFF0000") and address[-2:] == "7F"))
+
+
+def watched(pids):
+    """Whether you have a page of what these processes serve open: a port one
+    of them listens on has a connection in from another machine (a browser
+    on your phone or computer: a dev server's page holds its live-reload
+    connection open while it's open)."""
+    inodes = set()
+    for p in pids:
+        try:
+            for fd in os.listdir(f"/proc/{p}/fd"):
+                try:
+                    link = os.readlink(f"/proc/{p}/fd/{fd}")
+                except OSError:
+                    continue
+                if link.startswith("socket:["):
+                    inodes.add(link[8:-1])
+        except OSError:
+            continue
+    if not inodes:
+        return False
+    sockets = tcp_sockets()
+    ports = {local[1] for state, local, _, inode in sockets if state == "0A" and inode in inodes}
+    return any(state == "01" and local[1] in ports and not loopback(remote[0]) and remote[0] != local[0]
+               for state, local, remote, _ in sockets)
+
+
+def stop_left_running(s, procs=None):
+    """Stop what a sleeping session left running (left_running), unless you
+    have a page of it open (watched): then it's kept, and the sleep timer
+    looks again. Returns how many it stopped, or None if it kept them."""
+    procs = procs or processes()
+    pane = host_pane(s)
+    # Only a session that sleeps, its Claude gone: never one that's awake.
+    if asleep_since(s["id"]) is None or waking_now(s["id"]) or not pane or pane_claude(pane, procs):
+        return 0
+    left = left_running(s, procs, pane)
+    if not left:
+        return 0
+    if watched(left):
+        return None
+    return stop_processes(left)
+
+
+def shell_serves(pid, tasks=()):
+    """Whether a background command of Claude's serves rather than runs to an
+    end (a dev server, a watcher: task_serves): by its task (the one its
+    output goes to) on the chat engine, else by the command itself."""
+    try:
+        out = os.readlink(f"/proc/{pid}/fd/1")
+    except OSError:
+        out = ""
+    m = re.search(r"/tasks/([\w-]{1,64})\.output$", out)
+    task = next((t for t in tasks if isinstance(t, dict) and m and t.get("task_id") == m.group(1)), None)
+    if task:
+        return task_serves(task)
+    command = re.sub(r"^.*?&& eval '?|'? < /dev/null.*$|' && pwd -P.*$", "", " ".join(cmdline(pid)), flags=re.S)
+    return bool(SERVING_RUN.search(command))
+
+
 def sleep_blockers(s, pane, procs, auto):
     """Why the session's Claude had better not exit now, if anything: what
     it would lose. Empty when it can sleep."""
@@ -2342,15 +2591,19 @@ def sleep_blockers(s, pane, procs, auto):
     if engine(s) == "terminal" and claude_prompt(s):
         # What's typed in a classic terminal's prompt would go with it: it waits for you.
         reasons.append("a message is typed in its prompt")
+    live = agent_live(sid) if engine(s) == "chat" else {}
     if engine(s) == "chat":
-        live = agent_live(sid)
         if live.get("pending") and status != "waiting":
             reasons.append("it's waiting for your answer")
-        if live.get("tasks"):
-            reasons.append(f"a task is running in the background ({live['tasks'][0].get('description') or ''})")
+        # What only serves (a dev server) doesn't keep it awake: it's stopped
+        # with it (put_to_sleep), unless you have its page open.
+        runs = [t for t in live.get("tasks") or [] if isinstance(t, dict) and not task_serves(t)]
+        if runs:
+            reasons.append(f"a task is running in the background ({runs[0].get('description') or ''})")
         if live.get("queue"):
             reasons.append("a message is waiting to go in")
-    shells = [p for p in descendants(pid, procs) if "/shell-snapshots/" in " ".join(cmdline(p))]
+    shells = [p for p in descendants(pid, procs) if "/shell-snapshots/" in " ".join(cmdline(p))
+              and not shell_serves(p, live.get("tasks") or [])]
     if shells:
         command = " ".join(cmdline(shells[0]))
         command = re.sub(r"^.*?&& eval '?|'? < /dev/null.*$|' && pwd -P.*$", "", command)[:60]
@@ -2414,6 +2667,11 @@ def put_to_sleep(s, auto=False, force=False):
         return "; ".join(reasons)
     pid = pane_claude(pane, procs)
     loop = pane_loop(pane, procs)
+    # What it leaves running (a dev server, a headless browser) goes with it,
+    # unless you have a page of it open: then it stays, and the timer looks
+    # again once you've closed it (sleep_idle).
+    left = left_running(s, procs, pane, pid)
+    held = left if left and watched(left) else set()
     try:
         set_conversation_id(sid, json.loads((HOME / f".claude/sessions/{pid}.json").read_text()).get("sessionId", ""))
     except (OSError, ValueError, TypeError):
@@ -2422,21 +2680,23 @@ def put_to_sleep(s, auto=False, force=False):
     clear_waking(sid)
     try:
         stop_background(s)
-        if pid:
-            freeze_claude(pid, procs)
+        gone = freeze_claude(pid, procs, spare=held) if pid else set()
     except BaseException:
         clear_asleep(sid)       # it isn't asleep: say so, for whoever tries next
         raise
     if not loop:
         host_respawn(s)         # on the loop that sleeps, showing the conversation as amarchy draws it
+    stop_processes((gone | left) - held)
     return None
 
 
-def freeze_claude(pid, procs):
+def freeze_claude(pid, procs, spare=()):
     """Stop a Claude Code at once, before it can put the terminal back (its
-    last screen stays), then what it ran (MCP servers) and what it leaves in
-    ~/.claude/sessions. It's idle: its conversation is all written already."""
-    children = descendants(pid, procs)
+    last screen stays), then what it ran (MCP servers, but what's in spare)
+    and what it leaves in ~/.claude/sessions. It's idle: its conversation is
+    all written already. Returns what it ran, sent SIGTERM, for
+    stop_processes to see to the end."""
+    children = [p for p in descendants(pid, procs) if p not in spare]
     try:
         info = json.loads((HOME / f".claude/sessions/{pid}.json").read_text())
     except (OSError, ValueError):
@@ -2459,13 +2719,14 @@ def freeze_claude(pid, procs):
             key.unlink(missing_ok=True)
         if info.get("messagingSocketPath"):
             Path(info["messagingSocketPath"]).unlink(missing_ok=True)
+    return set(children)
 
 
 def wake(s):
     """Start a sleeping session's Claude again, in its tmux pane (starting
     its tmux if it's gone)."""
     sid = s["id"]
-    if asleep_since(sid) is None:
+    if asleep_since(sid) is None and not asleep_if_gone(s):
         return
     woken(sid)
     pane = host_pane(s)
@@ -2575,7 +2836,19 @@ def sleep_idle():
         return 0
     shown, last = on_screen()
     for s in session_view():
-        if not s["awake"] or s["sleeping"] or s["id"] in shown or s["status"] not in ("idle", "waiting"):
+        if not s["awake"]:
+            asleep_if_gone(session(s["id"]) or s)      # after a restart: asleep, so it wakes
+            continue
+        if s["id"] in shown:
+            continue
+        if s["sleeping"]:
+            # Asleep: what it still leaves running (kept while you had its
+            # page open, or started in its terminal since) stops too, once
+            # it's been off your screens as long.
+            if asleep_since(s["id"]) is not None and time.time() - last.get(s["id"], 0) >= after * 60:
+                stop_left_running(session(s["id"]))
+            continue
+        if s["status"] not in ("idle", "waiting"):
             continue
         try:
             since = (STATUS / s["id"]).stat().st_mtime
@@ -3363,72 +3636,19 @@ def stop_claude(pane):
         pass
 
 
-def stop_leftovers(path):
+def stop_leftovers(path, scopes=()):
     """Stop what still runs from a worktree once its session's Claude and
     tmux are gone: whatever Claude started in the background (a
     `nohup pnpm dev &`) lives on outside them, holding its port and serving
     files that are about to go. A process counts if its working directory or
-    its executable is in the worktree. Whole process groups get SIGTERM when
-    all of them are in it, the rest one by one; SIGKILL for what's left after
-    a few seconds. Never this process or what started it."""
-    inside = str(path).rstrip("/") + "/"
-    procs = processes()
-    spared, pid = set(), os.getpid()
-    while pid > 1 and pid not in spared:
-        spared.add(pid)
-        pid = procs.get(pid, (0,))[0]
-
-    def in_worktree(p):
-        for link in ("cwd", "exe"):
-            try:
-                target = os.readlink(f"/proc/{p}/{link}").removesuffix(" (deleted)")
-            except OSError:       # gone, or not ours
-                continue
-            if (target + "/").startswith(inside):
-                return True
-        return False
-
-    found = {p for p in procs if p not in spared and in_worktree(p)}
-    if not found:
-        return 0
-    groups = {}
-    for p in procs:
-        try:
-            groups.setdefault(os.getpgid(p), set()).add(p)
-        except OSError:
-            pass
-    for p in found:
-        try:
-            g = os.getpgid(p)
-        except OSError:
-            continue
-        if g > 1 and groups.get(g, set()) <= found:
-            try:
-                os.killpg(g, 15)
-                continue
-            except OSError:
-                pass
-        try:
-            os.kill(p, 15)
-        except OSError:
-            pass
-    def running(p):
-        try:
-            stat = Path(f"/proc/{p}/stat").read_text()
-        except OSError:
-            return False
-        return stat[stat.rfind(")") + 2] != "Z"   # a zombie only waits for its parent
-
-    end = time.time() + 5
-    while time.time() < end and any(running(p) for p in found):
-        time.sleep(0.1)
-    for p in found:
-        if running(p) and in_worktree(p):     # not a new process that got its pid
-            try:
-                os.kill(p, 9)
-            except OSError:
-                pass
-    return len(found)
+    its executable is in the worktree, or it's still in one of the session's
+    panes' scopes (a headless browser started from /tmp). SIGKILL for what's
+    left after a few seconds (stop_processes). Never this process or what
+    started it."""
+    found = in_tree(path, processes())
+    for scope in scopes:
+        found |= {p for p in scope_pids(scope) if not amarchy_own(p)}
+    return stop_processes(found) if found else 0
 
 
 def cmd_reap(sid):
@@ -3448,6 +3668,8 @@ def cmd_reap(sid):
     path = Path(s["path"])
     # Its background sessions (/bg) would go on working in a worktree that's gone.
     stop_background(s, only_idle=False)
+    pane, term = host_pane(s), term_pane(s)
+    scopes = [x for x in (pane_scope(pane["pid"]) if pane else None, pane_scope(term) if term else None) if x]
     host_stop(s)
     repo_dir = WORK / s["repo"]
 
@@ -3469,7 +3691,7 @@ def cmd_reap(sid):
             return keep_open()
     # What its Claude started in the background (a dev server) outlives its
     # tmux, and would go on running from a worktree that's gone.
-    stop_leftovers(path)
+    stop_leftovers(path, scopes)
     removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
     sh("git", "worktree", "prune", cwd=repo_dir)
     if path.exists() and removed.returncode != 0:
@@ -3986,8 +4208,11 @@ def session_view():
             s["status"] = "running"
         s["priority"] = priority(s)
         s["preview_up"] = preview_up(s["preview"]["url"]) if s.get("preview") else False
+        # Its last turn was cut off (the machine ran out of memory, Claude
+        # crashed): idle, but not done. Asleep or not, it says so.
+        s["interrupted"] = interrupted(s)
         # Done, and you haven't opened it since.
-        s["unseen"] = s["status"] == "idle" and not s.get("setup") and unseen(s["id"])
+        s["unseen"] = s["status"] == "idle" and not s.get("setup") and not s["interrupted"] and unseen(s["id"])
         # The secrets its Claude asks you for (amarchy secret ask): a card each.
         s["secret_asks"] = secret_asks(s["id"])
     mine = assistant()
@@ -11615,6 +11840,8 @@ def send_deliver(sid, text, deadline):
                 if answer.get("ok"):
                     return None     # the broker has it, and gives it to Claude once it's free
                 wait = answer.get("error") or "its broker didn't take it"
+            elif asleep_if_gone(s):
+                continue        # its tmux went with a restart: asleep, it wakes with the message
             else:
                 pane = host_pane(s)
                 if pane and pane_claude(pane, processes()) is None and not starting(sid):
@@ -12039,6 +12266,98 @@ def agent_live(sid):
         return json.loads(agent_live_file(sid).read_text())
     except (OSError, ValueError):
         return {}
+
+
+# A turn cut off: Claude was stopped in the middle of one (the machine ran
+# out of memory, it restarted, Claude crashed), so it never ended with a
+# result. Told by Claude's own output (stream.jsonl): the last of it that says
+# anything about a turn is a turn under way (Claude writing, a tool's
+# answer, a message going in), not a result. What a Claude writes as it
+# starts (init, its hooks, amarchy's control requests) and a turn's
+# "completed" after its result say nothing either way.
+TURN_CUT_READ = 1 << 20     # bytes read from the end of stream.jsonl at a time
+TURN_CUT_QUIET = 10         # seconds still before a turn under way counts as cut off (it may just be starting)
+_turn_cut = {}              # sid -> ((size, mtime), cut)
+
+
+def turn_record(o):
+    """What a line of stream.jsonl says of a turn: "end", "on", or None."""
+    if not isinstance(o, dict):
+        return None
+    kind = o.get("type")
+    if kind == "result":
+        return "end"
+    if kind in ("assistant", "user", "stream_event"):
+        return "on"
+    if kind == "command_lifecycle":
+        return "on" if o.get("state") in ("queued", "started") else None
+    if kind == "system":
+        return "on" if o.get("subtype") in ("thinking_tokens", "task_started", "task_progress") or o.get("status") == "requesting" else None
+    sent = o.get("_sent")
+    if isinstance(sent, dict) and sent.get("type") == "user":
+        return "on"
+    return None
+
+
+def turn_cut(sid):
+    """Whether the session's last turn was cut off before it ended (see
+    above): what its stream.jsonl says, read once per change of it."""
+    f = claude_dir(sid) / "stream.jsonl"
+    try:
+        st = f.stat()
+    except OSError:
+        return False
+    key = (st.st_size, st.st_mtime_ns)
+    known = _turn_cut.get(sid)
+    if known and known[0] == key:
+        return known[1]
+    cut, said = False, None
+    try:
+        with open(f, "rb") as fh:
+            end, rest = st.st_size, b""
+            while end > 0 and said is None and st.st_size - end < 8 * TURN_CUT_READ:
+                start = max(0, end - TURN_CUT_READ)
+                fh.seek(start)
+                data = fh.read(end - start) + rest
+                lines = data.split(b"\n")
+                rest = lines.pop(0) if start > 0 else b""     # most likely cut in half: read with what's before it
+                for line in reversed(lines):
+                    if not line.strip():
+                        continue
+                    try:
+                        said = turn_record(json.loads(line))
+                    except ValueError:
+                        continue
+                    if said:
+                        break
+                end = start
+    except OSError:
+        return False
+    cut = said == "on"
+    if len(_turn_cut) > 500:
+        _turn_cut.clear()
+    _turn_cut[sid] = (key, cut)
+    return cut
+
+
+def interrupted(s):
+    """Whether a chat's last turn was cut off and nothing is carrying it on:
+    it isn't working, waiting or running, its Claude's output has been still
+    a while (a turn just starting isn't cut off), and its conversation didn't
+    go on in Claude's classic terminal since."""
+    if s.get("setup") or s.get("status") != "idle" or not turn_cut(s["id"]):
+        return False
+    try:
+        stream = (claude_dir(s["id"]) / "stream.jsonl").stat().st_mtime
+    except OSError:
+        return False
+    if time.time() - stream < TURN_CUT_QUIET and agent_up(s["id"]):
+        return False
+    f = transcript(s)
+    try:
+        return not f or f.stat().st_mtime < stream + 60
+    except OSError:
+        return True
 
 
 def agent_up(sid, live=None):

@@ -312,6 +312,7 @@ body::before {
 .state.waiting, .state.working { color: var(--selected-text); }
 .state.working { padding: 0; }      /* not the chat's .working line, whose name it shares */
 .state.done { color: var(--accent); }
+.state.interrupted { color: var(--warn, var(--warning)); }
 .empty { text-align: center; color: var(--text-muted); padding: 48px 24px; }
 
 /* Your assistant's place at the top of the list (amarchy assistant): its card,
