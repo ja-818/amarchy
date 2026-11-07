@@ -149,6 +149,12 @@ else:
         am.preview_tend()
         check(not am.preview_pids(sid) and gone(port), "a preview whose chat is gone stops")
         am.save_session(s)
+        # Never one this amarchy didn't start (the real ones, while this test runs).
+        other = f"t{os.getpid()}-other"
+        subprocess.run(["systemd-run", "--user", "--quiet", f"--unit={am.preview_unit(other)}", "sleep", "60"], check=True)
+        am.preview_tend()
+        check(bool(am.preview_pids(other)), "another amarchy's preview (no record of it here): left alone")
+        subprocess.run(["systemctl", "--user", "stop", am.preview_unit(other)], capture_output=True)
 
         # An address alone: the command goes, and so does its service.
         am.preview_start(am.session(sid), wait=20)

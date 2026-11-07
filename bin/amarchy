@@ -1316,7 +1316,7 @@ def preview_tend():
     shown, _ = on_screen()
     known = set()
     for s in sessions():
-        known.add(preview_unit(s["id"]))
+        known.add(s["id"])
         p = s.get("preview") or {}
         pids = preview_pids(s["id"]) if p.get("run") else set()
         if not pids:
@@ -1328,15 +1328,18 @@ def preview_tend():
             continue
         if now - (rec.get("used") or rec.get("started") or now) >= (p.get("idle") or PREVIEW_IDLE):
             preview_stop(s, why="idle")
-    base = preview_cgroup("x").parent
-    try:
-        units = [d.name for d in base.iterdir() if d.name.startswith("amarchy-preview-") and d.name.endswith(".service")]
-    except OSError:
-        units = []
-    for unit in units:
-        if unit not in known and not any(preview_unit(sid.stem) == unit for sid in CLOSING.glob("*.json")):
-            sh("systemctl", "--user", "stop", unit)
-            sh("systemctl", "--user", "reset-failed", unit)
+    # A chat gone (closed while amarchy wasn't looking, a close cut off): its
+    # preview goes too. Only the ones this amarchy started (its record of
+    # each): never another's, as a test's with a state of its own.
+    for rec in PREVIEWS.glob("*.json") if PREVIEWS.is_dir() else []:
+        sid = rec.stem
+        if sid in known or (CLOSING / f"{sid}.json").exists():
+            continue
+        if preview_pids(sid) or preview_failed(sid):
+            sh("systemctl", "--user", "stop", preview_unit(sid))
+            sh("systemctl", "--user", "reset-failed", preview_unit(sid))
+        rec.unlink(missing_ok=True)
+        (PREVIEWS / f"{sid}.log").unlink(missing_ok=True)
 
 
 def duration(text):
