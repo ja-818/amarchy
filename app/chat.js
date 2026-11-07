@@ -196,11 +196,10 @@ function peerName(to) {
 }
 
 // Tools that are Claude's bookkeeping: not shown.
-const BRIEF_TOOL_NAME = "mcp__amarchy__update_brief";      // bin/amarchy BRIEF_TOOL: the brief view draws it
-const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet", BRIEF_TOOL_NAME]);
+const HIDDEN_TOOLS = new Set(["ToolSearch", "TodoRead", "TaskList", "TaskGet"]);
 const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at once when opened again
 const chatsSeen = new Map();
-const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)      // their id -> {items, start, facts}, the last left last (Chat.close)
+const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
@@ -211,7 +210,6 @@ function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
 function stepWords(name, input) {
   const i = input || {};
   const file = baseName(i.file_path || i.notebook_path || i.path);
-  if (name === BRIEF_TOOL_NAME) return { kind: "other", past: "Updated the brief", now: "Updating the brief" };
   const mcp = mcpParts(name);
   if (mcp) return { kind: "other", past: `Used ${mcp.server}: ${mcp.what}`, now: `Using ${mcp.server}: ${mcp.what}` };
   // Claude's plan file (plan mode keeps it in ~/.claude/plans).
@@ -694,14 +692,12 @@ function screenCard(chat, d, step) {
 
 // ---- the chat
 
-// The brief (bin/amarchy's update_brief): the chat's living summary, at its
-// top. Its states, in words.
-const BRIEF_STATES = { done: "Done", working: "Working", blocked: "Blocked", waiting: "Waiting on you" };
-const VERDICT_WORDS = { good: "Good", caution: "Careful", bad: "Avoid", neutral: "Depends" };
-const ARTIFACT_KINDS = ["message", "link", "command", "event", "todos", "contact", "place", "session", "table", "file", "text", "code"];
+// ---- what Claude says: its markdown, and in their place the blocks named
+// for what they hold (bin/amarchy REPLY_FORMAT), each with its buttons.
+
 const CHANNEL_WORDS = { whatsapp: "WhatsApp", email: "Email", slack: "Slack", sms: "Text message", other: "Message" };
 
-// An address a reply's artifact may open: the web, mail, a call or a text
+// An address a block may open: the web, mail, a call or a text
 // message, WhatsApp, or a chat of yours in the app. Nothing else.
 function artifactHref(href) {
   const v = String(href || "").trim();
@@ -718,149 +714,11 @@ function artifactDate(v) {
   return d && !isNaN(d) ? d : null;
 }
 
-// A link in the brief: an http or https address, opened in a new tab (nothing else).
-function briefLink(url, label) {
-  let u;
-  try { u = new URL(String(url || "")); } catch { return null; }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-  return h("a", { class: "brief-link", href: u.href, target: "_blank", rel: "noopener" },
-    h("span", { class: "brief-link-label" }, String(label || u.host)),
-    h("span", { class: "brief-link-host" }, u.host + (u.pathname.length > 1 ? u.pathname : "")));
-}
-
-// A list of strings from what a model wrote (nothing else in it).
-function texts(v, n = 8) {
-  return (Array.isArray(v) ? v : []).filter((x) => typeof x === "string" && x.trim()).slice(0, n);
-}
-
-// A reply as update_brief gave it, in one shape: the per-turn reply (title,
-// answer, plan…), or the brief before it (headline, changed, next), read the
-// same way. Only what a model wrote that the app can draw; null for none.
-function briefShape(b) {
-  if (!b || typeof b !== "object") return null;
-  const str = (v) => (typeof v === "string" ? v.trim() : "");
-  const objs = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
-  const answer = Array.isArray(b.answer)
-    ? b.answer.map((x) => (typeof x === "string" ? { point: x } : x)).filter((x) => x && str(x.point)).map((x) => ({ point: str(x.point), detail: str(x.detail) }))
-    : texts(b.changed, 8).map((point) => ({ point }));
-  const plan = Array.isArray(b.plan)
-    ? objs(b.plan).filter((x) => str(x.step)).map((x) => ({ step: str(x.step), state: ["done", "doing", "next"].includes(x.state) ? x.state : "next" }))
-    : texts(b.next, 4).map((step) => ({ step, state: "next" }));
-  return {
-    title: str(b.title) || str(b.headline), status: b.status, kind: str(b.kind), goal: str(b.goal), answer, plan,
-    explanation: typeof b.explanation === "string" ? b.explanation.trim().slice(0, 20000) : "",
-    short: str(b.short),
-    artifacts: objs(b.artifacts).filter((x) => ARTIFACT_KINDS.includes(x.type)).slice(0, 10),
-    sources: objs(b.sources).map((x) => ({ url: str(x.url), label: str(x.label) })).filter((x) => artifactHref(x.url) && !x.url.startsWith("#")).slice(0, 20),
-    tables: objs(b.tables).filter((x) => Array.isArray(x.columns) && Array.isArray(x.rows) && x.rows.length).slice(0, 3).map((x) => ({
-      title: str(x.title), note: str(x.note), columns: x.columns.slice(0, 8).map((c) => String(c ?? "")),
-      rows: x.rows.filter(Array.isArray).slice(0, 20).map((r) => r.slice(0, 8).map((c) => String(c ?? ""))),
-      pick: Number.isInteger(x.pick) ? x.pick : -1 })),
-    verdicts: objs(b.verdicts).filter((x) => str(x.option)).slice(0, 8)
-      .map((x) => ({ option: str(x.option), reason: str(x.reason), rating: ["good", "caution", "bad", "neutral"].includes(x.rating) ? x.rating : "neutral" })),
-    waiting: objs(b.waiting).filter((q) => typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3),
-    tests: objs(b.tests).filter((x) => typeof x.name === "string").slice(0, 6),
-    check: objs(b.check).filter((x) => typeof x.label === "string").slice(0, 4),
-    notes: texts(b.notes, 4),
-  };
-}
-
 // The first line of what Claude said (its markdown's marks left out).
 function firstLine(text) {
   const line = String(text || "").split("\n").map((l) => l.replace(/^[#>*\-\s]+/, "").replace(/[*_`]/g, "").trim()).find(Boolean) || "";
   return cut(line, 120);
 }
-
-const TEST_RUN = /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\bpytest\b|\bgo test\b|\bcargo test\b|\bnode\s+\S*test\S*\.js\b|\bplaywright\b|\bjest\b|\bvitest\b|\brspec\b|\bphpunit\b|\bmake\s+test\b|\btest\/\S+|-protocol-test\b/;
-
-// What a turn changed, from its record: the files its edits touched (+/−,
-// summed by file) and the git commands that went through (commit, push, merge).
-function changesOf(items, results) {
-  const files = new Map(), git = [];
-  for (const it of items) {
-    if (it.kind !== "tool") continue;
-    const res = results.get(it.id);
-    if (res && res.error) continue;
-    if (/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(it.name)) {
-      for (const f of stepDiff(it.name, it.input || {}, res) || []) {
-        const path = f.path || (it.input || {}).file_path || "";
-        if (!path) continue;
-        const had = files.get(path) || { path, add: 0, del: 0, created: false };
-        had.add += f.add || 0;
-        had.del += f.del || 0;
-        had.created = had.created || !!f.created;
-        files.set(path, had);
-      }
-    } else if (it.name === "Bash") {
-      const cmd = String((it.input || {}).command || "");
-      for (const m of cmd.matchAll(/git\s+(?:-C\s+\S+\s+)?commit\b[^\n]*?-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g))
-        git.push({ kind: "commit", text: `Committed “${cut((m[1] || m[2] || m[3] || "").split("\n")[0], 80)}”` });
-      if (/git\s+(?:-C\s+\S+\s+)?commit\b[^\n]*-F\s+-/.test(cmd) && !/-m\s/.test(cmd)) {
-        const subject = (cmd.match(/<<'?EOF'?\n([^\n]*)/) || [])[1] || "";
-        git.push({ kind: "commit", text: subject ? `Committed “${cut(subject, 80)}”` : "Committed" });
-      }
-      const merge = cmd.match(/git\s+(?:-C\s+\S+\s+)?merge\s+(?:--no-edit\s+|-q\s+)*([^\s;&|]+)/);
-      if (merge) git.push({ kind: "merge", text: `Merged ${merge[1]}` });
-      if (/git\s+(?:-C\s+\S+\s+)?push\b/.test(cmd) && !git.some((g) => g.kind === "push")) git.push({ kind: "push", text: "Pushed" });
-    }
-  }
-  const all = [...files.values()];
-  const commits = git.filter((g) => g.kind === "commit").length;
-  const short = [commits ? `${commits} commit${commits === 1 ? "" : "s"}` : null,
-    git.some((g) => g.kind === "merge") ? "merged" : null, git.some((g) => g.kind === "push") ? "pushed" : null].filter(Boolean).join(" · ");
-  return { files: all, add: all.reduce((n, f) => n + f.add, 0), del: all.reduce((n, f) => n + f.del, 0), git, short };
-}
-
-// The test runs in a turn's record, with how they went.
-function testsOf(items, results) {
-  const out = [];
-  for (const it of items) {
-    if (it.kind !== "tool" || it.name !== "Bash") continue;
-    const cmd = String((it.input || {}).command || "");
-    if (!TEST_RUN.test(cmd)) continue;
-    const res = results.get(it.id);
-    out.push({ name: (it.input || {}).description || cut(cmd.replace(/\s+/g, " "), 70), result: !res ? "skipped" : res.error ? "fail" : "pass" });
-  }
-  return out.slice(-6);
-}
-
-// What a turn did, in order, folded as the conversation folds it: each run of
-// steps between two things Claude said is one entry (in the chat's words:
-// "Edited search.js and ran 2 commands"), opening to its steps; what Claude
-// said, and what came in by itself (a background task that ended), between.
-function activityOf(items, results, userView) {
-  const entries = [];
-  let fold = null, steps = 0, failed = 0;
-  for (const it of items) {
-    if (it.kind === "tool") {
-      if (HIDDEN_TOOLS.has(it.name)) continue;
-      steps++;
-      const result = results.get(it.id) || null;
-      if (result && result.error && !DENIED.test(String(result.text || ""))) failed++;
-      if (!fold) entries.push(fold = { type: "fold", steps: [] });
-      fold.steps.push({ id: it.id, name: it.name, input: it.input || {}, at: it.at, result, words: stepWords(it.name, it.input || {}) });
-    } else if (it.kind === "claude" && !it.aside) {
-      fold = null;
-      entries.push({ type: "said", text: cut(firstLine(it.text), 140) });
-    } else if (it.kind === "user" && !it.turn) {
-      const v = userView(it.text);
-      fold = null;
-      entries.push({ type: "event", text: typeof v.note === "string" ? v.note : v.summary || cut(String(it.text || ""), 100) });
-    } else if (it.kind === "note") {
-      fold = null;
-      entries.push({ type: "event", text: it.text === "Interrupted" ? "You stopped Claude" : cut(it.text, 100) });
-    }
-  }
-  const times = items.map((i) => Date.parse(i.at)).filter((x) => !isNaN(x));
-  const mins = times.length > 1 ? Math.round((Math.max(...times) - Math.min(...times)) / 60000) : 0;
-  const summary = [`${steps} step${steps === 1 ? "" : "s"}`, failed ? `${failed} didn't work` : null, mins ? `${mins} min` : null]
-    .filter(Boolean).join(" · ");
-  return { entries, steps, summary };
-}
-
-// ---- a reply in amarchy's format (bin/amarchy REPLY_FORMAT): its first line
-// the outcome (the card's title), then markdown with "## " sections, and fenced
-// blocks named for what they hold, which the card gives buttons.
 
 // Where the chat stands, in the goal block each reply ends with (bin/amarchy
 // REPLY_FORMAT): its goal and its state. Not shown as words: under the
@@ -886,7 +744,7 @@ function replyAttrs(s) {
   return o;
 }
 
-// A fenced block, as the card's things to use (the artifacts' shapes) or choices.
+// A fenced block, as the thing it holds (artifactParts draws it) or choices.
 function replyBlock(kind, a, body) {
   const lines = body.split("\n");
   switch (kind) {
@@ -911,132 +769,33 @@ function replyBlock(kind, a, body) {
   }
 }
 
-// A reply's parts: its title (the first line, unless the reply starts with a
-// block), and its sections (the first, before any "## " heading, has none),
-// each a list of blocks: markdown, a thing to use, choices.
-function parseReply(text) {
+// What Claude said, in order: its markdown ({md}) and the blocks named for
+// what they hold (replyBlock), each where it wrote it. A fence of any other
+// kind (code) stays in the markdown; the goal block isn't shown (replyGoal).
+function replyParts(text) {
   const lines = String(text || "").replace(/\r/g, "").split("\n");
-  let i = 0;
-  while (i < lines.length && !lines[i].trim()) i++;
-  let title = "";
-  if (i < lines.length && !/^```|^\s*\|/.test(lines[i])) {
-    title = lines[i].replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
-    i++;
-  }
-  const sections = [{ head: null, blocks: [] }];
-  const choices = [];       // wherever they are (even under Sources): asked after the reply's body
-  const things = [];        // the things to use, wherever they are: all under For you, never folded away
-  let cur = sections[0], buf = [];
+  const parts = [];
+  let buf = [];
   const flush = () => {
-    if (buf.join("\n").trim()) cur.blocks.push({ type: "md", text: buf.join("\n").trim() });
+    if (buf.join("\n").trim()) parts.push({ md: buf.join("\n").trim() });
     buf = [];
   };
-  for (; i < lines.length; i++) {
-    const line = lines[i];
-    const head = line.match(/^##\s+(.+?)\s*#*\s*$/);
-    if (head) { flush(); cur = { head: head[1], blocks: [] }; sections.push(cur); continue; }
-    const fence = line.match(/^```\s*([A-Za-z]+)?(.*)$/);
-    if (fence) {
-      const kind = (fence[1] || "").toLowerCase();
-      const body = [];
-      for (i++; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
-      if (kind === "goal") continue;      // where the chat stands: not part of the card (replyGoal)
-      if (kind === "choices") { flush(); choices.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
-      else if (REPLY_BLOCKS.includes(kind)) { flush(); things.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").trim())); }
-      else buf.push(line, ...body, "```");
-      continue;
-    }
-    buf.push(line);
+  for (let i = 0; i < lines.length; i++) {
+    const fence = lines[i].match(/^ {0,3}```\s*([A-Za-z]+)?(.*)$/);
+    if (!fence) { buf.push(lines[i]); continue; }
+    const kind = (fence[1] || "").toLowerCase();
+    const body = [];
+    for (i++; i < lines.length && !/^ {0,3}```\s*$/.test(lines[i]); i++) body.push(lines[i]);
+    if (kind === "goal") continue;
+    if (REPLY_BLOCKS.includes(kind)) { flush(); parts.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").replace(/^\s*\n|\s+$/g, ""))); }
+    else buf.push(lines[i - body.length - 1], ...body, "```");
   }
   flush();
-  inferActions(sections, choices, things);
-  // A section left empty by what moved out of it (only its block) goes.
-  return { title, sections: sections.filter((x, n) => n === 0 || x.blocks.length), choices, things, goal: replyGoal(text) };
+  return parts;
 }
 
-// What a reply asks of you or gives you, when Claude wrote it in its prose
-// instead of a block (a persona's own style, a habit): its list of what's
-// still open as a to-do list, its question as one to answer with a tap, the
-// links it gives you to open. So none of it is lost in the text. Each only if
-// the reply has no block of that kind already.
-function inferActions(sections, choices, things) {
-  const isSources = (sec) => sec.head && /^sources\b/i.test(sec.head.replace(/[*_`]/g, "").trim());
-  const mds = sections.filter((sec) => !isSources(sec)).flatMap((sec) => sec.blocks.filter((b) => b.type === "md"));
-  const clean = (x) => x.replace(/\*\*|__|`/g, "").replace(/^[*_]+|[*_]+$/g, "").trim();
-  // "Still open:", "Waiting on Felipe:"… and the list under it.
-  if (!things.some((t) => t.type === "todos")) {
-    const lead = /^\s*(?:\*\*|__)?((?:still open|waiting on|open loops?|loops|to ?dos?|pending|next steps?|left to do)\b[^\n]{0,60}?)(?:\*\*|__)?\s*:?\s*(?:\*\*|__)?\s*$/i;
-    for (const b of mds) {
-      const lines = b.text.split("\n");
-      for (let n = 0; n < lines.length; n++) {
-        const m = lines[n].match(lead);
-        if (!m) continue;
-        let e = n + 1;
-        while (e < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[e])) e++;
-        if (e - n < 2) continue;
-        const items = lines.slice(n + 1, e).map((l) => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[( |x|X)\]\s*)?/, (_, x) => (x && /x/i.test(x) ? "\u0000" : "")))
-          .map((l) => ({ text: l.replace(/\u0000/, ""), due: "", done: l.startsWith("\u0000") }));
-        things.push({ type: "todos", title: clean(m[1]).replace(/:$/, ""), items });
-        // Out of the text, with a "====" line that only set it apart.
-        let from = n;
-        while (from > 0 && /^\s*(=+|-{3,}|\*{3,})?\s*$/.test(lines[from - 1])) from--;
-        lines.splice(from, e - from);
-        n = from - 1;
-      }
-      b.text = lines.join("\n").trim();
-    }
-  }
-  // The question it ends on: in its last two paragraphs, the last sentence
-  // ending in "?" (or "? (yes)"). Yes or no when it's shaped so, else an
-  // answer you write.
-  if (!choices.some((c) => c.options.length)) {
-    const paras = mds.map((b) => b.text).join("\n\n").replace(/```[\s\S]*?```/g, "").split(/\n\s*\n/)
-      .filter((x) => x.trim() && !/^\s*\|/.test(x)).slice(-2);
-    let q = "";
-    for (const para of paras.reverse()) {
-      const found = [...para.replace(/\n\s*([-*+]|\d+[.)])\s+/g, "\n").split(/\n|(?<=[.!])\s+/)]
-        .map((x) => x.trim()).filter((x) => /\?(\s*\([^)]{0,40}\))?[*_]*$/.test(x)).pop();
-      if (found) { q = found; break; }
-    }
-    if (q) {
-      q = q.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
-      const yesNo = /\((?:yes|no|y\/n)\b[^)]*\)[*_]*$/i.test(q) || /^[*_]*(shall|should|do|does|did|can|could|want|would|will|is|are|was|may|ok|okay|ready|go|ship|merge|send|keep|proceed|try|start)\b/i.test(clean(q));
-      const question = clean(q.replace(/\s*\((?:yes|no|y\/n)\b[^)]*\)[*_]*$/i, ""));
-      if (question.length > 3) choices.push({ type: "choices", question, options: yesNo
-        ? [{ label: "Yes", send: "Yes" }, { label: "No", send: "No" }, { label: "Answer", send: "", draft: true }]
-        : [{ label: "Answer", send: "", draft: true }] });
-    }
-  }
-  // The links it gives you (not its sources), a button each to open, unless
-  // it cites so many it's a reading list.
-  if (!things.some((t) => t.type === "link")) {
-    const seen = new Map();
-    for (const b of mds) {
-      const text = b.text.replace(/```[\s\S]*?```/g, "");
-      for (const m of text.matchAll(/\[([^\]]{1,80})\]\((https?:\/\/[^\s)]+)\)|(?<![(\[<"])\b(https?:\/\/[^\s<>)\]"'`*]+[^\s<>)\]"'`*.,;:!?])/g)) {
-        const url = m[2] || m[3];
-        if (/\.\.|…/.test(url)) continue;     // "http://amarchy:3123/...": not a link to open
-        if (!seen.has(url)) seen.set(url, m[1] ? clean(m[1]) : "");
-      }
-    }
-    if (seen.size && seen.size <= 4)
-      for (const [url, label] of seen) things.push({ type: "link", url, title: label || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").slice(0, 60), note: "" });
-  }
-}
-
-// What a folded section holds, in a few words: its table ("Table · 8 rows"),
-// its list ("5 points"), else its first sentence.
-function sectionHint(sec) {
-  const text = sec.blocks.filter((b) => b.type === "md").map((b) => b.text).join("\n");
-  const rows = text.split("\n").filter((l) => /^\s*\|/.test(l) && !/^\s*\|?\s*:?-{2,}/.test(l)).length;
-  if (rows > 1) return `Table · ${rows - 1} row${rows - 1 === 1 ? "" : "s"}`;
-  const items = text.split("\n").filter((l) => /^\s*([-*+]|\d+[.)])\s+/.test(l)).length;
-  if (items > 1) return `${items} points`;
-  const line = text.split("\n").map((l) => l.replace(/[#>*_`|]/g, "").trim()).find(Boolean) || "";
-  return cut(line.split(/(?<=[.!?])\s/)[0], 90);
-}
-
-// Tables in a reply's text, as the card's: cards per row on a phone.
+// Tables in what Claude said: on a phone, each row a little card, its cells
+// under their column's name (blocks.css, from data-label).
 function tableize(el) {
   el.querySelectorAll("table").forEach((tb) => {
     tb.classList.add("rtable");
@@ -1050,22 +809,6 @@ function tableize(el) {
   return el;
 }
 
-// How the chats show on this device: "screen" (the brief) or "chat" (the
-// conversation). Settings and a chat's menu set it; every chat open takes it.
-function chatView() { return store.get("chatView") === "chat" ? "chat" : "screen"; }
-function setChatView(mode) {
-  store.set("chatView", mode);
-  window.dispatchEvent(new CustomEvent("amarchy-chatview", { detail: mode }));
-}
-
-// The choice, as a row of two (Settings, a chat's menu); then(): after a tap.
-function chatViewSeg(then) {
-  const now = chatView();
-  return h("div", { class: "seg" }, ...[["screen", "Brief"], ["chat", "Chat"]].map(([mode, label]) =>
-    h("button", { class: `control${now === mode ? " on" : ""}`, type: "button", "aria-pressed": String(now === mode),
-                  onclick: () => { setChatView(mode); if (then) then(); } }, label)));
-}
-
 // ---- a chat's stream, asked for as your finger lands on its card
 //
 // A tap's click comes when the finger lifts, a tenth of a second or more
@@ -1074,7 +817,7 @@ function chatViewSeg(then) {
 // it's open is kept, and given to it in order (Chat.open). Not opened (the
 // finger scrolled, or went elsewhere): closed.
 
-const STREAM_EVENTS = ["session", "conversation", "facts", "screen", "live", "gone"];
+const STREAM_EVENTS = ["session", "conversation", "screen", "live", "gone"];
 let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: listener}, timer}
 
 function chatStreamEarly(id) {
@@ -1152,18 +895,12 @@ class Chat {
     this.live = null;
     this.placeholder = "Message Claude";
     this.view = { content: null, above: [], composer: true };
-    // How the chat shows: the brief (the default) or the conversation. Both
-    // are drawn from the same items, kept here in order (see keepItems).
-    this.mode = chatView();
+    // The conversation's items, in order (see keepItems).
     this.goal = null;           // what the chat is for, from its replies (keepItems)
     this.items = [];
     this.itemKeys = new Set();
-    this.sturns = [];           // the turns the brief view shows, in order (newTurn)
-    this.sturn = null;          // the last of them
-    this.brief = null;          // the latest brief: {key, data} (update_brief's input)
-    this.facts = null;          // what git says (the stream's "facts": bin/amarchy brief_facts)
-    this.answers = new Map();   // your answers to a brief's questions, by its key: {picks, sent}
-    this.opened = new Map();    // replies and their sections you opened or closed: "<reply>" / "<reply>|<section>" -> open
+    this.answers = new Map();   // your answers to a message's choices, by its key: {picks, sent}
+    this.opened = new Map();    // the blocks you opened or folded, by their key -> open
     this.outbox = [];           // what you sent, shown at once, until the conversation (or the queue) has it (send)
     this.answeredAsks = new Map();      // the cards you answered, off the dock at once: their id -> when (act)
     this.reset();
@@ -1188,19 +925,15 @@ class Chat {
     this.conv = h("div", { class: "conv chat-conv" });
     this.tail = h("div", { class: "chat-tail" });
     this.conv.append(this.tail);
-    // A code block's Copy, a fold opened (in the conversation, and on the screen).
-    const copy = (e) => {
+    // A code block's Copy.
+    this.conv.addEventListener("click", (e) => {
       const btn = e.target.closest(".copy");
       if (!btn) return;
       const code = btn.closest(".code").querySelector("code").textContent;
       copyText(code).then(() => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); });
-    };
-    this.conv.addEventListener("click", copy);
-    this.stage = h("div", { class: "screen-stage" });
-    this.stage.addEventListener("click", copy);
-    this.stageWork = h("div", { class: "working screen-work", role: "status", hidden: true }, spinner(), h("span", { class: "now" }));
+    });
     this.outboxEl = h("div", { class: "chat-conv chat-outbox" });
-    this.scroller = h("div", { class: "scroll chat-scroll" }, this.body(), this.outboxEl);
+    this.scroller = h("div", { class: "scroll chat-scroll" }, this.conv, this.outboxEl);
     this.latest = h("button", { class: "to-latest", type: "button", hidden: true, "aria-label": "Go to the latest",
                                 onclick: () => this.toBottom(true) }, icon("down"));
     // At the bottom, it stays there as what's under grows (a reply coming in,
@@ -1209,7 +942,7 @@ class Chat {
     this.stuck = true;
     this.scroller.addEventListener("scroll", () => { this.stuck = this.measureBottom(); if (this.stuck) this.latest.hidden = true; }, { passive: true });
     this.sizes = new ResizeObserver(() => { if (this.stuck) this.scroller.scrollTop = this.scroller.scrollHeight; });
-    for (const el of [this.scroller, this.conv, this.stage, this.outboxEl]) this.sizes.observe(el);
+    for (const el of [this.scroller, this.conv, this.outboxEl]) this.sizes.observe(el);
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     // The message the keys are on, lit (navMark), kept by the chat whatever
@@ -1229,16 +962,7 @@ class Chat {
     let marking = 0;
     new MutationObserver(() => { if (!marking) marking = requestAnimationFrame(() => { marking = 0; this.navMark(); }); })
       .observe(this.scroller, { childList: true, subtree: true });
-    // The switch between the two views, over the chat (hidden over the terminal and the other views).
-    this.screenBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("screen") }, "Brief");
-    this.chatBtn = h("button", { class: "vs-btn", type: "button", onclick: () => this.showMode("chat") }, "Chat");
-    this.switchEl = h("div", { class: "view-switch", role: "group", "aria-label": "How the chat shows" }, this.screenBtn, this.chatBtn);
-    this.drawSwitch();
-    // (On the phone it's in Settings and the chat's menu instead: opts.noSwitch.)
-    this.el = h("div", { class: "chat" }, this.opts.noSwitch ? null : this.switchEl,
-                h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
-    // Chosen in Settings (setChatView): every chat open takes it.
-    this.onViewChosen = (e) => this.showMode(e.detail);      // (listened for while it's open: open)
+    this.el = h("div", { class: "chat" }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     this.listenDrops();
     this.renderDock();
   }
@@ -1340,7 +1064,6 @@ class Chat {
     // own then adding only what came since (conversation).
     const was = chatsSeen.get(this.id);
     if (was && !this.items.length) {
-      this.facts = was.facts;
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
     chatsOpen.set(this.id, this);
@@ -1353,8 +1076,6 @@ class Chat {
     window.addEventListener("amarchy-ask", this.onAskEvent);
     this.onNavKey = this.onNavKey || ((e) => this.navKey(e));
     window.addEventListener("keydown", this.onNavKey, true);
-    // (Taken off on close: on again each time it opens, a phone's coming back too.)
-    window.addEventListener("amarchy-chatview", this.onViewChosen);
     this.clearNotes();
     const on = {
       session: (e) => {
@@ -1364,7 +1085,6 @@ class Chat {
         this.renderTail();
       },
       conversation: (e) => this.conversation(JSON.parse(e.data)),
-      facts: (e) => { this.facts = JSON.parse(e.data); this.drawBrief(); },
       screen: (e) => {
         this.screen = JSON.parse(e.data);
         if (this.opts.onScreen) this.opts.onScreen(this.screen);
@@ -1388,14 +1108,13 @@ class Chat {
     clearInterval(this.bgTimer);
     if (this.items.length) {
       chatsSeen.delete(this.id);
-      chatsSeen.set(this.id, { items: this.items.slice(), start: this.start, facts: this.facts });
+      chatsSeen.set(this.id, { items: this.items.slice(), start: this.start });
       while (chatsSeen.size > CHATS_SEEN) chatsSeen.delete(chatsSeen.keys().next().value);
     }
     if (this.es) this.es.close();
     this.es = null;
     window.removeEventListener("amarchy-ask", this.onAskEvent);
     window.removeEventListener("keydown", this.onNavKey, true);
-    window.removeEventListener("amarchy-chatview", this.onViewChosen);
     clearInterval(this.workingTimer);
     this.workingEl = null;
     this.closeMenu();       // (its listener on the page held the chat after it closed)
@@ -1435,17 +1154,15 @@ class Chat {
 
   // ---- the keys, as on the board: j / k (↓ ↑) from message to message,
   // l (→) into one, along its buttons and links, h (←) back and out of it,
-  // Enter opens or folds a reply (on a button, presses it), g / G the first
-  // and the latest, d / u half a page, i the box you type in and Esc out of
-  // it again, Tab the view (Brief | Chat). Esc on a message: opts.back.
+  // Enter on a button presses it, g / G the first and the latest, d / u half
+  // a page, i the box you type in and Esc out of it again. Esc on a message:
+  // opts.back.
   // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
   // dictate works from anywhere).
 
   navItems() {
-    const root = this.body();
-    if (!root.isConnected) return [];
-    const all = this.mode === "screen" ? root.querySelectorAll(".turn-you, .turn-reply") : root.querySelectorAll(":scope > :not(.chat-tail)");
-    return [...all].filter((el) => el.childElementCount && el.getClientRects().length);
+    if (!this.conv.isConnected) return [];
+    return [...this.conv.querySelectorAll(":scope > :not(.chat-tail)")].filter((el) => el.childElementCount && el.getClientRects().length);
   }
 
   // The message el is in, if it's one the keys go through.
@@ -1483,9 +1200,9 @@ class Chat {
     return lit;
   }
 
-  // What's in a message to go to: its buttons and links (not a reply's head: Enter's).
+  // What's in a message to go to: its buttons and links.
   navInside(item) {
-    return item ? [...item.querySelectorAll("button, a[href], summary")].filter((b) => !b.matches(".reply-head") && !b.disabled && b.getClientRects().length) : [];
+    return item ? [...item.querySelectorAll("button, a[href], summary")].filter((b) => !b.disabled && b.getClientRects().length) : [];
   }
 
   // up: come to from below (k), so a message taller than the page shows its
@@ -1563,18 +1280,8 @@ class Chat {
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
     if (k === "G" || k === "End") { go(items.length - 1); this.toBottom(true); return true; }
     if (k === "d" || k === "u") { this.scroller.scrollBy({ top: (k === "d" ? 1 : -1) * this.scroller.clientHeight / 2 }); return done(); }
-    if (k === "Tab") {
-      const n = items.length - at;
-      this.showMode(this.mode === "screen" ? "chat" : "screen");
-      const now = this.navItems();
-      this.navTo(now[at < 0 ? now.length - 1 : Math.max(0, now.length - n)]);
-      return done();
-    }
     if (!item) return false;
     if (k === "l" || k === "ArrowRight") {
-      // A folded reply opens to go into it.
-      const head = item.querySelector(".reply-head[aria-expanded=false]");
-      if (!inside.length && head) { head.click(); const now = this.navInside(item); if (now.length) this.navTo(now[0]); return done(); }
       if (inside.length) this.navTo(inside[Math.min(on + 1, inside.length - 1)]);
       return done();
     }
@@ -1583,11 +1290,7 @@ class Chat {
     if (k === "Escape" && this.opts.back) { this.opts.back(); return done(); }      // the phone's; a computer's board has its own Esc
     // Enter, the focus off the message: the button lit in it, pressed.
     if (k === "Enter" && !focused && on >= 0 && !(a && a.closest && a.closest("button, a[href], summary"))) { this.navTo(inside[on]); inside[on].click(); return done(); }
-    if (k === "Enter" && (a === item || (!focused && !(a && a.closest && a.closest("button, a[href], summary")))) && !item.matches("button, a[href]")) {
-      const head = item.querySelector(".reply-head");
-      if (head) { head.click(); this.navTo(item); }
-      return done();
-    }
+    if (k === "Enter" && (a === item || (!focused && !(a && a.closest && a.closest("button, a[href], summary")))) && !item.matches("button, a[href]")) return done();
     return false;
   }
 
@@ -1633,9 +1336,9 @@ class Chat {
   }
 
   // What the scroller shows: another view's content, or the conversation
-  // (the brief or the chat) with what you sent under it, on its way.
+  // with what you sent under it, on its way.
   showBody(content = null) {
-    this.scroller.replaceChildren(...(content ? [content] : [this.body(), this.outboxEl]));
+    this.scroller.replaceChildren(...(content ? [content] : [this.conv, this.outboxEl]));
   }
 
   atBottom() { return this.stuck; }
@@ -1673,7 +1376,7 @@ class Chat {
   conversationDraw(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
-    // view doesn't jump, nor the brief's answers you started go.
+    // view doesn't jump, nor the answers you started go.
     if (d.reset && !d.redraw && d.start === this.start && this.items.length && d.items.length >= this.items.length &&
         this.items.every((it, i) => it.key && d.items[i].key === it.key)) {
       d = { items: d.items.slice(this.items.length) };
@@ -1688,13 +1391,8 @@ class Chat {
       for (const out of this.outbox) { out.mark = 0; out.redrawn = true; }
     }
     this.keepItems(d.items);
-    // The page after an update: its scroll, as it was (app.js keptChatScroll), in either view.
+    // The page after an update: its scroll, as it was (app.js keptChatScroll).
     const back = d.reset ? keptChatScroll(this.id) : null;
-    if (this.mode === "screen") {
-      this.screenConversation(d);
-      if (back !== null) requestAnimationFrame(() => { this.scroller.scrollTop = back; this.stuck = this.measureBottom(); this.latest.hidden = this.stuck; });
-      return;
-    }
     const stick = back === null && (d.reset || this.atBottom());
     if (d.reset) {
       this.reset();
@@ -1741,7 +1439,6 @@ class Chat {
       // Nothing before it after all: the button goes, nothing drawn again.
       if (!(d.items || []).length) { this.start = d.start || 0; if (this.start <= 0) this.earlierBtn.remove(); return; }
       this.keepItems(d.items, true);
-      if (this.mode === "screen") { this.start = d.start; return this.rebuildScreen(true); }
       // Its own folds: what came before doesn't join the ones after it.
       const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard };
       this.fold = null;
@@ -1767,11 +1464,7 @@ class Chat {
     this.earlierBtn.disabled = false;
   }
 
-  // ---- the two views: the brief (the default), or the conversation
-
-  body() { return this.mode === "screen" ? this.stage : this.conv; }
-
-  // The items the conversation has, in order, whichever view shows them.
+  // The items the conversation has, in order.
   keepItems(items, front) {
     const fresh = items.filter((it) => !it.key || !this.itemKeys.has(it.key));
     for (const it of fresh) if (it.key) this.itemKeys.add(it.key);
@@ -1784,9 +1477,8 @@ class Chat {
     // Its state with it (the goal block's): a done chat offers to close (renderDone).
     let goal = null, state = "";
     for (let i = this.items.length - 1; i >= 0 && goal === null; i--) {
-      const it = this.items[i], b = it.brief;
-      if (b && typeof b.goal === "string" && b.goal.trim()) goal = b.goal.trim();
-      else if (it.kind === "claude" && !it.aside && /```[ \t]*goal\b/.test(it.text || "")) {
+      const it = this.items[i];
+      if (it.kind === "claude" && !it.aside && /```[ \t]*goal\b/.test(it.text || "")) {
         const g = replyGoal(it.text);
         if (g && g.goal) { goal = g.goal; state = g.state; }
       }
@@ -1803,396 +1495,68 @@ class Chat {
     }
   }
 
-  // The view: the brief or the conversation (the switch over the chat).
-  showMode(mode) {
-    if (mode === this.mode) return;
-    this.mode = mode;
-    store.set("chatView", mode);
-    this.drawSwitch();
-    if (mode === "chat") this.conversation({ reset: true, redraw: true, items: this.items.slice(), start: this.start });
-    else this.rebuildScreen();
-    if (!this.view.content) this.showBody();
-    this.toBottom(true);
-  }
-
-  drawSwitch() {
-    for (const [btn, on] of [[this.screenBtn, this.mode === "screen"], [this.chatBtn, this.mode === "chat"]]) {
-      btn.classList.toggle("on", on);
-      btn.setAttribute("aria-pressed", String(on));
-    }
-  }
-
-  // ---- the brief view's timeline: each turn (a message of yours, and all Claude
-  // did for it) is your message, the brief's headline for it, and Claude's work
-  // in a fold (its words and steps, as the conversation shows them).
-  // Oldest first, as a conversation reads.
-
-  rebuildScreen(keepPlace) {
-    const fromEnd = this.scroller.scrollHeight - this.scroller.scrollTop;
-    this.reset();
-    this.conv.replaceChildren(this.tail);       // drawn again when it's shown (and add() mustn't find its bubbles)
-    this.sturns = [];
-    this.sturn = null;
-    this.emptyScreen = null;
-    this.earlierBtn = this.start > 0 ? h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages") : null;
-    this.stage.replaceChildren(...[this.earlierBtn, this.stageWork].filter(Boolean));
-    this.brief = null;
-    for (const it of this.items) this.screenAdd(it);
-    this.drawEmpty();
-    for (const t of this.sturns) this.drawReply(t);
-    this.drawLive();
-    if (!this.view.content && this.scroller.firstChild !== this.stage) this.showBody();
-    if (keepPlace) this.scroller.scrollTop = this.scroller.scrollHeight - fromEnd;
-  }
-
-  screenConversation(d) {
-    if (d.reset) {
-      this.rebuildScreen();
-      this.toBottom(true);
-      return;
-    }
-    const stick = this.atBottom();
-    const had = this.brief, last = this.sturn;
-    for (const it of d.items) this.screenAdd(it);
-    this.drawEmpty();
-    // A new turn: the replies before it fold again (only the newest is open
-    // unless you open another; the sections you opened stay as you left them).
-    if (this.sturn !== last) for (const k of [...this.opened.keys()]) if (!k.includes("|")) this.opened.delete(k);
-    // What changed: the turns that got items, and with a new brief or a new
-    // turn, the ones before (the newest reply is open, its questions live).
-    for (const t of this.sturns) if (t.dirty || this.brief !== had || this.sturn !== last) this.drawReply(t);
-    this.drawLive();
-    if (stick) this.toBottom();
-    else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
-  }
-
-  // One item into the cards view: a message of yours starts a turn (its
-  // pictures and words one bubble), the rest go into the turn's fold.
-  screenAdd(it) {
-    if (it.key && this.keys.has(it.key)) return;
-    const rec = it.rec || String(it.key || "").split(":")[0];
-    if (it.kind === "user" && it.turn) {
-      if (!this.sturn || this.sturn.rec !== rec) this.newTurn(rec);
-      this.add(it, this.sturn.you);
-      return;
-    }
-    const t = this.sturn || this.newTurn(null);
-    this.add(it, t.body);
-    t.items.push(it);
-    t.dirty = true;
-    if (it.kind === "tool" && it.brief) {
-      t.brief = it.brief;
-      t.briefKey = it.key;
-      this.brief = { key: it.key, data: it.brief };
-    }
-    if (it.kind === "claude" && !it.aside) t.said = it.text;
-  }
-
-  newTurn(rec) {
-    const t = { rec, said: "", items: [], sig: null, brief: null, dirty: true };
-    t.you = h("div", { class: "turn-you" });
-    t.body = h("div", { class: "turn-work-body" });     // the original message: Claude's words and steps, as the conversation shows them
-    t.reply = h("div", { class: "turn-reply" });
-    t.el = h("section", { class: "turn" }, t.you, t.reply);
-    this.stage.insertBefore(t.el, this.stageWork);
-    this.sturns.push(t);
-    this.sturn = t;
-    return t;
-  }
-
-  drawEmpty() {
-    const empty = !this.sturns.length;
-    if (empty && !this.emptyScreen) {
-      this.emptyScreen = h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
-                           h("div", {}, "Write it below, or hold the mic and say it."));
-      this.stage.insertBefore(this.emptyScreen, this.stageWork);
-    } else if (!empty && this.emptyScreen) {
-      this.emptyScreen.remove();
-      this.emptyScreen = null;
-    }
-  }
-
-  // The fold with Claude's work: its words and its steps.
-  // Claude's reply to a turn, as one card: its title (the outcome) opens and
-  // folds it; under it, sections that each fold to a line saying what they
-  // hold. What needs judgment Claude wrote (update_brief: the answer, plan,
-  // questions, checks, notes); what it did comes from the record (the
-  // turn's items: activity, files changed, commits, test runs). While it
-  // works, the card says so and its activity fills in; a turn from before the
-  // brief gets the same card from Claude's words.
-  drawReply(t) {
-    t.dirty = false;
-    const last = t === this.sturn;
-    const live = last && !t.brief && this.working();
-    const key = t.briefKey || `turn:${t.rec || t.items[0] && t.items[0].key}`;
-    const sig = JSON.stringify([key, t.items.length, live, last, last ? this.facts : null, this.openedSig(key)]);
-    if (sig === t.sig) return;
-    t.sig = sig;
-    if (!t.items.length && !live) return t.reply.replaceChildren();
-    // The keys stay on what they were on in it (a section opened with Enter, the live card's every second).
-    keepFocus(t.reply, () => t.reply.replaceChildren(this.replyCard(t, key, last, live)));
-  }
-
-  // The sections opened or closed in a reply, for its sig.
-  openedSig(key) {
-    return [...this.opened].filter(([k]) => k === key || k.startsWith(`${key}|`)).map(([k, v]) => `${k}=${v}`).join(",");
-  }
-
   isOpen(k, otherwise) { return this.opened.has(k) ? this.opened.get(k) : otherwise; }
 
-  // What Claude is doing now, where the brief view says it: in the live
-  // reply (its title, its activity's last line), else (no live reply yet) in
-  // the line under the last turn. Again whenever the replies are drawn, not
-  // only when the live state moves, or a reply that just went live would sit
-  // under a stale line until the next step.
-  drawLive() {
-    const live = this.engine === "chat" ? this.live : null;
-    const now = this.activity(live);
-    const t = this.sturn;
-    if (t && t.liveNow) t.liveNow.textContent = now ? ` ${now.text}` : "";
-    if (t) this.drawNow(t);
-    this.stageWork.hidden = !(now && !(t && t.liveNow));
-    if (now) this.stageWork.querySelector(".now").textContent = now.text;
-  }
-
-  // The live activity's last line: what Claude is doing now, or the line it's
-  // writing as it writes it (the chat engine's partial text).
-  drawNow(t) {
-    if (!t.liveAct) return;
-    const live = this.engine === "chat" ? this.live : null;
-    const partial = live && live.partial ? String(live.partial).trim().split("\n").filter(Boolean).pop() || "" : "";
-    const now = this.activity(live);
-    t.liveAct.textContent = partial ? `Writing: “${partial.length > 110 ? `…${partial.slice(-110)}` : partial}”` : now ? now.text : "Working…";
-    if (t.liveRow) t.liveRow.hidden = !partial && !!t.liveRunning && !(live && live.thinking);
-  }
-
-  // The newest reply again (git's facts came in).
-  drawBrief() {
-    if (this.mode === "screen" && this.sturn) this.drawReply(this.sturn);
-  }
-
-  replyCard(t, key, last, live) {
-    const b = briefShape(t.brief);
-    const reply = !b && !live && t.said ? parseReply(t.said) : null;     // the reply as Claude wrote it, in amarchy's format
-    // What it needs from you: the newest reply's questions (a brief's, or the
-    // choices a reply in the format ends with), as the Needs you form.
-    const ask = !last ? [] : b ? (t.briefKey === (this.brief && this.brief.key) ? b.waiting : [])
-      : reply ? reply.choices.filter((c) => c.options.length) : [];
-    const st = live ? "working" : b && b.status in BRIEF_STATES ? b.status
-      : reply ? (ask.length ? "waiting" : reply.goal && reply.goal.state in BRIEF_STATES ? reply.goal.state : "done") : "plain";
-    const open = this.isOpen(key, last);
-    const card = h("article", { class: `reply st-${st}${open ? " open" : ""}${live ? " live" : ""}` });      // st-: not the chat's own .working
-    const toggle = (k, now) => { this.opened.set(k, !now); this.drawReply(t); };
-    const title = live ? "Working…" : b ? b.title || BRIEF_STATES[st] : (reply && reply.title) || firstLine(t.said) || "Claude's reply";
-    t.liveNow = live ? h("span", { class: "reply-now" }) : null;
-    card.append(h("button", { class: "reply-head", type: "button", "aria-expanded": String(open), onclick: () => toggle(key, open) },
-      live ? spinner() : null,
-      h("span", { class: "reply-title" }, h("span", {}, title), t.liveNow),
-      ask.length && !open ? h("span", { class: "reply-badge" }, "Needs you") : null,
-      icon("chevron", "chev")));
-    if (!open) return card;
-    // First what came of it, always there (the chat's goal is in its header). A
-    // question's turn is an answer card: the short answer, the verdicts, the
-    // takeaways not said already, the explanation folded by topic. Any other:
-    // the summary, then the explanation if there is one.
-    const answer = !!b && (b.kind === "answer" || !!b.short || b.verdicts.length > 0);
-    if (answer) {
-      if (b.short) card.append(h("div", { class: "reply-short", html: inline(b.short) }));
-      if (b.verdicts.length) card.append(h("ul", { class: "verdicts" }, ...b.verdicts.map((v) =>
-        h("li", { class: `verdict is-${v.rating}` }, h("span", { class: "verdict-badge" }, VERDICT_WORDS[v.rating]),
-          h("div", { class: "verdict-text" }, h("span", { class: "verdict-option", html: inline(v.option) }),
-            v.reason ? h("span", { class: "verdict-reason", html: inline(v.reason) }) : null)))));
-      for (const tb of b.tables) card.append(this.tableView(tb));
-      if (b.answer.length) card.append(h("div", { class: "reply-summary" }, h("div", { class: "reply-k" }, "Takeaways"),
-        h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x)))));
-      if (b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
-      if (b.explanation) card.append(this.explainTopics(b.explanation, key, toggle));
-    } else {
-      const top = h("div", { class: "reply-summary" });
-      if (b && b.answer.length) top.append(h("div", { class: "reply-k" }, "Summary"), h("ul", { class: "answer-list" }, ...b.answer.map((x) => this.answerPoint(x))));
-      if (top.childElementCount) card.append(top);
-      if (reply) card.append(...this.replyBody(reply, key, toggle, last, t.said.length > 1200, ask));
-      // Its comparisons and side-by-side data, open.
-      for (const tb of b ? b.tables : []) card.append(this.tableView(tb));
-      // What it made for you to use (a draft, a link, a command, an event…), each a row with its action.
-      if (b && b.artifacts.length) card.append(this.artifactsView(b.artifacts, key, toggle));
-      // What it explained, when you asked: the explanation itself, in full.
-      if (b && b.explanation) card.append(h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"),
-        h("div", { class: "msg claude explain-body", html: md(b.explanation) })));
+  // What Claude said, as it wrote it (replyParts): its markdown, and in
+  // their place the blocks it made for you to use, each with its buttons;
+  // its questions (choices) as buttons to tap, together where the first
+  // one is. key: the message's, for what you open, fold and answer in it.
+  // Questions that aren't the newest thing any more are past (markPast).
+  claudeView(text, key, past) {
+    const el = h("div", { class: "msg claude" });
+    const parts = replyParts(text);
+    const qs = parts.filter((p) => p.type === "choices" && p.options.length);
+    let n = 0;
+    for (const p of parts) {
+      if (p.md !== undefined) el.append(tableize(h("div", { class: "md", html: md(p.md) })));
+      else if (p.type !== "choices") el.append(this.blockView(p, `${key}|b${n++}`));
+      else if (p === qs[0]) {
+        const box = this.choicesView({ waiting: qs }, `${key}|q`);
+        if (box) el.append(box);
+        if (box && past) this.markPast(box);
+      }
     }
-    // Where it came from: every source, a row that opens to their links.
-    if (b && b.sources.length) {
-      const k = `${key}|sources`;
-      const on = this.isOpen(k, false);
-      const row = h("div", { class: `reply-sources${on ? " open" : ""}` },
-        h("button", { class: "sources-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
-          h("span", { class: "reply-k" }, "Sources"), h("span", { class: "sources-sum" }, `${b.sources.length} · ${b.sources.map((x) => {
-            try { return new URL(x.url).host.replace(/^www\./, ""); } catch { return ""; } }).filter((x, i, all) => x && all.indexOf(x) === i).slice(0, 3).join(", ")}`),
-          icon("chevron", "chev")));
-      if (on) row.append(h("ul", { class: "sources-list" }, ...b.sources.map((x) => {
-        let host = "";
-        try { host = new URL(x.url).host.replace(/^www\./, ""); } catch { /* no host */ }
-        return h("li", {}, h("a", { href: artifactHref(x.url), target: "_blank", rel: "noopener" }, x.label || host || x.url), host && x.label ? h("span", { class: "src-host" }, host) : null);
-      })));
-      card.append(row);
-    }
-    // Then what it needs from you, with that context: the newest reply's questions.
-    if (ask.length && b) card.append(h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, key)));      // (a reply in the format has its own, above its sections)
+    return el;
+  }
 
-    // The rest is what happened (plan, changes, checks, activity, notes, the
-    // original message): under More, each its own section. While Claude works,
-    // its activity shows anyway, to watch.
-    const results = new Map(t.items.filter((i) => i.kind === "result").map((i) => [i.tool, i]));
-    const more = this.isOpen(`${key}|more`, false);
-    const held = [], flags = [];
-    const section = (name, label, summary, build, otherwise = false, shown = false) => {
-      if (!summary) return;
-      if (!shown && !more) return held.push(label);
-      const k = `${key}|${name}`;
-      const on = this.isOpen(k, otherwise);
-      const sec = h("div", { class: `rsec rsec-${name}${on ? " open" : ""}` },
-        h("button", { class: "rsec-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
-          h("span", { class: "rsec-label" }, label), h("span", { class: "rsec-sum" }, on ? "" : summary), icon("chevron", "chev")));
-      if (on) sec.append(h("div", { class: "rsec-body" }, build()));
-      (shown ? card : extra).append(sec);
+  // The questions asked before what comes now (you or Claude said something
+  // since), in the conversation and in what's going into it (where).
+  pastQuestions(where) {
+    for (const root of new Set([this.conv, where]))
+      if (root && root.querySelectorAll) root.querySelectorAll(".choices:not(.past)").forEach((b) => this.markPast(b));
+  }
+
+  // A message's questions that aren't the newest thing any more: shown as
+  // they were, no longer to tap.
+  markPast(box) {
+    box.classList.add("past");
+    box.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  }
+
+  // A block Claude made for you to use (replyBlock), where it wrote it: a row
+  // with its kind, its name, what it is and its quick action (Copy, Open);
+  // under it all of it and every action that fits. Open, unless you fold it.
+  blockView(a, key) {
+    const on = this.isOpen(key, true);
+    const v = this.artifactParts(a);
+    const toggle = () => {
+      this.opened.set(key, !on);
+      const next = this.blockView(a, key);
+      const had = box.contains(document.activeElement);
+      box.replaceWith(next);
+      if (had) next.querySelector(".art-toggle").focus({ preventScroll: true });
     };
-    const extra = document.createDocumentFragment();
-    // Activity: what Claude did, in order, folded as the conversation folds it (shown while it works).
-    const act = activityOf(t.items, results, (text) => this.userView(text));
-    t.liveAct = null;
-    if (live) section("activity", "Activity", act.steps ? `${act.steps} step${act.steps === 1 ? "" : "s"} so far` : "starting",
-      () => this.activityView(act.entries, t), true, true);
-    // Plan: its steps, done / doing / next.
-    if (b && b.plan.length) {
-      const done = b.plan.filter((x) => x.state === "done").length;
-      section("plan", "Plan", `${done} of ${b.plan.length} done${b.plan.find((x) => x.state !== "done") ? ` · next: ${b.plan.find((x) => x.state !== "done").step}` : ""}`,
-        () => h("ol", { class: "plan-steps" }, ...b.plan.map((x) => h("li", { class: `is-${x.state}` }, h("span", { class: "mark", html: x.state === "done" ? TICK : "" }),
-          h("span", { html: inline(x.step) })))));
-    }
-    // Changes: the files the turn's edits touched (+/−), its commits, pushes, merges; git now, on the newest.
-    const ch = changesOf(t.items, results);
-    const facts = last ? this.briefFacts() : null;
-    const chSum = [ch.files.length ? `${ch.files.length} file${ch.files.length === 1 ? "" : "s"} +${ch.add} −${ch.del}` : null,
-      ch.short || null].filter(Boolean).join(" · ");
-    const f = this.facts;
-    const factsSum = facts && f ? [f.branch, f.commits ? `${f.commits} commit${f.commits === 1 ? "" : "s"} on it` : null,
-      f.uncommitted ? `${f.uncommitted} uncommitted` : null].filter(Boolean).join(" · ") : null;
-    section("changes", "Changes", chSum || factsSum, () => this.changesView(ch, facts));
-    // Checks: tests (Claude's, else the test runs in the record) and how to try it.
-    const tests = b && b.tests.length ? b.tests : testsOf(t.items, results);
-    const fails = tests.filter((x) => x.result === "fail").length;
-    if (fails) flags.push(`${fails} test${fails === 1 ? "" : "s"} failing`);
-    const checkSum = [tests.length ? (fails ? `${fails} failing of ${tests.length}` : `${tests.length} passed`) : null,
-      b && b.check.length ? `${b.check.length} way${b.check.length === 1 ? "" : "s"} to try it` : null].filter(Boolean).join(" · ");
-    section("checks", "Checks", checkSum, () => this.checksView(tests, b ? b.check : []), fails > 0);
-    if (!live && act.entries.length) section("activity", "Activity", act.summary, () => this.activityView(act.entries, null));
-    // Notes.
-    if (b && b.notes.length) section("notes", "Notes", `${b.notes.length} · ${b.notes[0]}`,
-      () => h("ul", { class: "brief-list notes" }, ...b.notes.map((x) => h("li", { html: inline(x) }))));
-    // The original message: the turn as the conversation shows it.
-    const said = t.items.filter((i) => i.kind === "claude" && !i.aside).length;
-    if (t.body.childElementCount) section("words", reply ? "Transcript" : "Original message", `${said} message${said === 1 ? "" : "s"}${act.steps ? ` · ${act.steps} step${act.steps === 1 ? "" : "s"}` : ""}`, () => t.body);
-    if (held.length || (more && extra.childNodes.length)) {
-      card.append(h("div", { class: "rsec rsec-more" }, h("button", { class: "rsec-head", type: "button", "aria-expanded": String(more),
-        onclick: () => toggle(`${key}|more`, more) },
-        h("span", { class: "rsec-label" }, more ? "Less" : "More"),
-        h("span", { class: "rsec-sum" }, more ? "" : [...flags, held.join(" · ")].join(" · ")), icon("chevron", "chev"))));
-      card.append(extra);
-    }
-    return card;
-  }
-
-  // A table in a reply, open: a real table on a wide screen; on a phone each
-  // row a little card, its cells under their column's name (screen.css, from
-  // data-label). The row Claude recommends is marked.
-  tableView(tb) {
-    const cols = tb.columns;
-    const head = cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", { html: inline(c) })))) : null;
-    const body = h("tbody", {}, ...tb.rows.map((r, i) => h("tr", { class: i === tb.pick ? "pick" : "" },
-      ...r.map((c, j) => h("td", { "data-label": j && cols[j] ? cols[j].replace(/[*_`]/g, "") : null, class: j ? "" : "lead" },
-        j === 0 && i === tb.pick ? h("span", { class: "pick-badge" }, "Pick") : null, h("span", { html: inline(c) }))))));
-    return h("div", { class: "reply-table" }, h("div", { class: "reply-k" }, tb.title || "Comparison"),
-      h("div", { class: "rtable-wrap" }, h("table", { class: "rtable" }, head, body)),
-      tb.note ? h("div", { class: "rtable-note", html: inline(tb.note) }) : null);
-  }
-
-  // A reply in amarchy's format, laid out (parseReply): what comes before its
-  // first "## " heading open; each section a row that folds (the first ones
-  // open on the newest reply, all of them when it's short; Sources folded);
-  // its blocks in place: text (tables as cards on a phone), the things to use
-  // as rows with their buttons, choices as buttons on the newest reply.
-  replyBody(reply, key, toggle, last, long, ask = []) {
-    const blocks = (list, at) => {
-      const out = [];
-      let things = [];
-      const flush = () => {
-        if (things.length) out.push(this.artifactsView(things, `${key}|${at}${out.length}`, toggle, ""));
-        things = [];
-      };
-      list.forEach((bl, n) => {
-        if (bl.type === "md") { flush(); out.push(tableize(h("div", { class: "msg claude reply-md", html: md(bl.text) }))); }
-        else things.push(bl);
-      });
-      flush();
-      return out;
-    };
-    const out = [];
-    const root = reply.sections[0];
-    if (root.blocks.length) {
-      // Its opening, a few lines of it when it runs long (all of it a tap away).
-      const body = h("div", { class: "reply-body" }, ...blocks(root.blocks, "r"));
-      const words = root.blocks.filter((x) => x.type === "md").reduce((n, x) => n + x.text.length, 0);
-      if (words > 700) {
-        const k = `${key}|all`;
-        const all = this.isOpen(k, false);
-        body.classList.toggle("clipped", !all);
-        out.push(h("div", { class: "reply-opening" }, body,
-          h("button", { class: "text-btn reply-all", type: "button", onclick: () => toggle(k, all) }, all ? "Show less" : "Show all")));
-      } else out.push(body);
-    }
-    // What it made for you to use, wherever it wrote it: at hand, never folded away.
-    const forYou = reply.things.length ? this.artifactsView(reply.things, `${key}|things`, toggle) : null;
-    reply.sections.slice(1).forEach((sec, i) => {
-      const k = `${key}|sec${i}`;
-      const sources = /^sources?$/i.test(sec.head.replace(/[*_:]/g, "").trim());
-      // A long reply's sections start folded (a short one's open), each saying what's in it.
-      const on = this.isOpen(k, last && !sources && !long);
-      const row = h("div", { class: `topic reply-sec${on ? " open" : ""}${sources ? " sources" : ""}` },
-        h("button", { class: "topic-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
-          h("span", { class: "topic-text" }, h("span", { class: "topic-title", html: inline(sec.head) }),
-            on ? null : h("span", { class: "topic-hint" }, sectionHint(sec))), icon("chevron", "chev")));
-      if (on) row.append(h("div", { class: "reply-sec-body" }, ...blocks(sec.blocks, `s${i}-`)));
-      out.push(row);
-    });
-    // Needs you: its questions, after the text and the things that give them
-    // context, above the sections (all of them together: one answer each).
-    const needs = ask.length ? h("div", { class: "reply-needs" }, h("div", { class: "reply-k" }, "Needs you"), this.briefWaiting({ waiting: ask }, `${key}|needs`)) : null;
-    if (reply.sections.length > 1) return [out[0] && root.blocks.length ? out[0] : null, forYou, needs, h("div", { class: "topics reply-secs" }, ...out.slice(root.blocks.length ? 1 : 0))].filter(Boolean);
-    return [...out, forYou, needs].filter(Boolean);
-  }
-
-  // What a reply made for you to use, under "For you": each artifact a row
-  // (its kind, its name, what it is) with its quick action (Copy, Open) at
-  // hand while folded; open, all of it and every action that fits it.
-  artifactsView(list, key, toggle, label = "For you") {
-    const box = h("div", { class: `reply-artifacts${label ? "" : " inline"}` }, label ? h("div", { class: "reply-k" }, label) : null);
-    box.append(h("ul", { class: "artifacts" }, ...list.map((a, i) => {
-      const k = `${key}|art${i}`;
-      const on = this.isOpen(k, false);
-      const v = this.artifactParts(a);
-      const li = h("li", { class: `art art-${a.type}${on ? " open" : ""}` });
-      const head = h("div", { class: "art-head" },
-        h("button", { class: "art-toggle", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
+    const li = h("li", { class: `art art-${a.type}${on ? " open" : ""}` },
+      h("div", { class: "art-head" },
+        h("button", { class: "art-toggle", type: "button", "aria-expanded": String(on), onclick: toggle },
           h("span", { class: "art-ic" }, icon(v.icon)),
           h("span", { class: "art-text" }, h("span", { class: "art-title" }, v.title), v.sub ? h("span", { class: "art-sub" }, v.sub) : null),
           icon("chevron", "chev")),
-        v.quick || null);
-      li.append(head);
-      if (on) li.append(h("div", { class: "art-body" }, ...v.body.filter(Boolean),
-        v.actions.filter(Boolean).length ? h("div", { class: "art-actions" }, ...v.actions.filter(Boolean)) : null,
-        a.note ? h("div", { class: "art-note", html: inline(String(a.note)) }) : null));
-      return li;
-    })));
+        v.quick || null));
+    if (on) li.append(h("div", { class: "art-body" }, ...v.body.filter(Boolean),
+      v.actions.filter(Boolean).length ? h("div", { class: "art-actions" }, ...v.actions.filter(Boolean)) : null,
+      a.note ? h("div", { class: "art-note", html: inline(String(a.note)) }) : null));
+    const box = h("ul", { class: "artifacts block" }, li);
     return box;
   }
 
@@ -2300,169 +1664,16 @@ class Chat {
     }
   }
 
-  // An answer's explanation, folded by topic: what comes before its first
-  // "## " heading shows as it is; each heading is a row that opens its part.
-  // Without headings, all of it, as it is.
-  explainTopics(text, key, toggle) {
-    const parts = [];
-    let cur = { head: "", lines: [] };
-    for (const line of String(text).split("\n")) {
-      const m = line.match(/^#{2,3}\s+(.+?)\s*#*\s*$/);
-      if (m) { parts.push(cur); cur = { head: m[1], lines: [] }; } else cur.lines.push(line);
-    }
-    parts.push(cur);
-    const intro = parts[0].lines.join("\n").trim();
-    const topics = parts.slice(1).filter((p) => p.head);
-    const box = h("div", { class: "reply-explain" }, h("div", { class: "reply-k" }, "Explanation"));
-    if (intro) box.append(h("div", { class: "msg claude explain-body", html: md(intro) }));
-    if (topics.length) box.append(h("div", { class: "topics" }, ...topics.map((p, i) => {
-      const k = `${key}|topic${i}`;
-      const on = this.isOpen(k, false);
-      const row = h("div", { class: `topic${on ? " open" : ""}` },
-        h("button", { class: "topic-head", type: "button", "aria-expanded": String(on), onclick: () => toggle(k, on) },
-          h("span", { class: "topic-title", html: inline(p.head) }), icon("chevron", "chev")));
-      if (on) row.append(h("div", { class: "msg claude explain-body topic-body", html: md(p.lines.join("\n").trim()) }));
-      return row;
-    })));
-    return box;
-  }
-
-  // A summary point. With its why (detail), a row that opens it under the
-  // point: the reason, the numbers, the context behind it.
-  answerPoint(x) {
-    if (!x.detail) return h("li", {}, h("span", { class: "pt-text", html: inline(x.point) }));
-    const why = h("div", { class: "answer-detail", hidden: true, html: inline(x.detail) });
-    const li = h("li", { class: "has-detail" });
-    const btn = h("button", { class: "answer-toggle", type: "button", "aria-expanded": "false", onclick: () => {
-      why.hidden = !why.hidden;
-      btn.setAttribute("aria-expanded", String(!why.hidden));
-      li.classList.toggle("open", !why.hidden);
-    } }, h("span", { class: "pt-text", html: inline(x.point) }), icon("chevron", "chev"));
-    li.append(btn, why);
-    return li;
-  }
-
-  changesView(ch, facts) {
-    const box = h("div", { class: "changes" });
-    if (ch.files.length) {
-      const most = Math.max(...ch.files.map((f) => f.add + f.del), 1);
-      box.append(h("ul", { class: "change-files" }, ...ch.files.map((f) =>
-        h("li", {}, h("span", { class: "change-path", title: f.path }, baseName(f.path) || f.path),
-          f.created ? h("span", { class: "change-new" }, "new") : null,
-          h("span", { class: "change-n" }, h("span", { class: "add" }, `+${f.add}`), " ", h("span", { class: "del" }, `−${f.del}`)),
-          h("span", { class: "change-bar" }, h("span", { class: "add", style: `width:${(f.add / most) * 100}%` }),
-            h("span", { class: "del", style: `width:${(f.del / most) * 100}%` }))))));
-    }
-    if (ch.git.length) box.append(h("ul", { class: "brief-list git" }, ...ch.git.map((g) => h("li", {}, g.text))));
-    if (facts) box.append(facts);
-    return box;
-  }
-
-  checksView(tests, checks) {
-    const box = h("div", { class: "checks" });
-    if (tests.length) box.append(h("ul", { class: "brief-list tests" }, ...tests.map((x) =>
-      h("li", { class: `is-${["pass", "fail", "skipped"].includes(x.result) ? x.result : "skipped"}` },
-        h("span", { class: "mark", html: x.result === "pass" ? TICK : "" }, x.result === "fail" ? "✕" : x.result === "skipped" ? "–" : ""),
-        h("span", { html: inline(x.name) }), x.detail ? h("span", { class: "detail" }, ` · ${x.detail}`) : null))));
-    for (const x of checks) box.append(briefLink(x.url, x.label) ||
-      h("div", { class: "brief-how" }, h("strong", {}, x.label), x.how ? h("span", { html: ` ${inline(String(x.how))}` }) : null));
-    return box;
-  }
-
-  // The activity as a timeline. A fold is a row: how it went (a spinner while
-  // its steps run), the chat's sentence for them, their +/−, what didn't
-  // work, how long; a tap lists its steps (kind, words, the command, the
-  // diff's +/−, the first line of an error). live: the turn under way, whose
-  // timeline ends with what it's doing now (drawNow keeps that line up to date).
-  activityView(entries, live) {
-    const list = h("ol", { class: "activity" });
-    let running = false;
-    entries.forEach((e, n) => {
-      if (e.type === "said") return list.append(h("li", { class: "act act-said" }, h("span", { class: "act-node" }, icon("message")),
-        h("div", { class: "act-main" }, h("span", { class: "act-quote" }, e.text))));
-      if (e.type === "event") return list.append(h("li", { class: "act act-event" }, h("span", { class: "act-node" }, icon("clock")),
-        h("div", { class: "act-main" }, h("span", { class: "act-title" }, e.text))));
-      const steps = e.steps;
-      const done = steps.filter((x) => x.result);
-      const refused = steps.filter((x) => x.result && x.result.error && DENIED.test(String(x.result.text || ""))).length;
-      const failed = steps.filter((x) => x.result && x.result.error).length - refused;
-      const going = !!live && n === entries.length - 1 && steps.some((x) => !x.result);
-      running = running || going;
-      const times = steps.flatMap((x) => [x.at, x.result && x.result.at]).filter(Boolean).map((t) => Date.parse(t)).filter((t) => !isNaN(t));
-      const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
-      const diffs = steps.flatMap((x) => (x.words.kind === "edit" || x.words.kind === "create" ? stepDiff(x.name, x.input, x.result) || [] : []));
-      const title = going && !done.length ? `${steps[0].words.now}…` : steps.length === 1 ? steps[0].words.past : stepsSummary(done.length ? done : steps);
-      // Opened, it stays open as the reply is drawn again (its next step came): kept by its first step.
-      const key = `act|${steps[0].id}`;
-      const was = this.isOpen(key, false);
-      const open = h("ol", { class: "act-steps", hidden: !was }, ...steps.map((x) => this.activityStep(x)));
-      const one = steps.length === 1 && !steps[0].input.command && !diffs.length && !(steps[0].result && steps[0].result.error);
-      const row = h(one ? "div" : "button", { class: "act-row", ...(one ? {} : { type: "button", "aria-expanded": String(was), onclick: () => {
-          open.hidden = !open.hidden;
-          this.opened.set(key, !open.hidden);
-          row.setAttribute("aria-expanded", String(!open.hidden));
-          li.classList.toggle("open", !open.hidden);
-        } }) },
-        h("span", { class: "act-title" }, title),
-        h("span", { class: "act-chips" }, ...[steps.length > 1 ? h("span", { class: "chip" }, `${steps.length} steps`) : null, diffChip(diffs),
-          failed ? h("span", { class: "chip bad" }, `${failed} didn't work`) : null,
-          refused ? h("span", { class: "chip" }, `you said no to ${refused}`) : null,
-          took >= 5000 ? h("span", { class: "chip took" }, duration(took)) : null].filter(Boolean)),
-        one ? null : icon("chevron", "chev"));
-      const li = h("li", { class: `act act-fold${failed ? " failed" : ""}${going ? " going" : ""}${was && !one ? " open" : ""}` },
-        h("span", { class: "act-node" }, going ? spinner() : icon(failed ? "failed" : CHAT_ICONS[steps[0].words.kind] && steps.every((x) => x.words.kind === steps[0].words.kind) ? steps[0].words.kind : "check")),
-        h("div", { class: "act-main" }, row, open));
-      list.append(li);
-    });
-    if (live) {
-      live.liveAct = h("span", { class: "act-title" });
-      live.liveRow = h("li", { class: "act act-now" }, h("span", { class: "act-node" }, spinner()), h("div", { class: "act-main" }, live.liveAct));
-      live.liveRunning = running;
-      list.append(live.liveRow);
-      this.drawNow(live);
-    }
-    return list;
-  }
-
-  // One step of a fold, opened: its kind, what it did, the command it ran,
-  // the +/− of its edit, the first line of what went wrong.
-  activityStep(x) {
-    const err = x.result && x.result.error;
-    const diff = x.words.kind === "edit" || x.words.kind === "create" ? diffChip(stepDiff(x.name, x.input, x.result) || []) : null;
-    const cmd = x.input.command ? String(x.input.command).split("\n")[0] : "";
-    return h("li", { class: `act-step${err ? " failed" : ""}${x.result ? "" : " going"}` },
-      h("span", { class: "act-step-ic" }, icon(err ? "failed" : CHAT_ICONS[x.words.kind] ? x.words.kind : "other")),
-      h("div", { class: "act-step-main" }, h("span", { class: "act-step-what" }, x.words.past, diff),
-        cmd && x.input.description ? h("code", { class: "act-cmd" }, cmd) : null,
-        err ? h("span", { class: "act-err" }, cut(String(x.result.text || "").split("\n").find((l) => l.trim()) || "It didn't work", 140)) : null));
-  }
-
-  // What git says, as it is (bin/amarchy brief_facts): a row of chips.
-  briefFacts() {
-    const f = this.facts;
-    if (!f || !f.branch) return null;
-    const chip = (text, cls) => h("span", { class: `fact${cls ? ` ${cls}` : ""}` }, text);
-    const n = (k, one, many) => `${f[k]} ${f[k] === 1 ? one : many}`;
-    const chips = [chip(f.branch, "branch")];
-    if (f.commits) chips.push(chip(n("commits", "commit", "commits")));
-    if (f.files) chips.push(chip(`${n("files", "file", "files")} +${f.added || 0} −${f.removed || 0}`));
-    if (f.uncommitted) chips.push(chip(`${f.uncommitted} uncommitted`, "warn"));
-    if (f.unpushed) chips.push(chip(`${f.unpushed} not pushed`, "warn"));
-    if (f.commits && f.merged === true) chips.push(chip(`merged into ${String(f.base || "main").replace(/^origin\//, "")}`, "ok"));
-    else if (f.commits && f.merged === false) chips.push(chip(`not in ${String(f.base || "main").replace(/^origin\//, "")} yet`));
-    return h("div", { class: "brief-facts" }, ...chips);
-  }
-
   // What waits on you: each question and its options. One question: a tap
   // sends. Several: a tap marks it answered, and they go together once all
   // are (or with Send). A draft option puts its start in the box.
-  briefWaiting(b, key) {
+  choicesView(b, key) {
     const qs = (Array.isArray(b.waiting) ? b.waiting : [])
       .filter((q) => q && typeof q.question === "string" && Array.isArray(q.options) && q.options.length).slice(0, 3);
     if (!qs.length) return null;
     let st = this.answers.get(key);
     if (!st) this.answers.set(key, st = { picks: {}, sent: false });
-    const box = h("div", { class: "brief-waiting" });
+    const box = h("div", { class: "choices" });
     const rows = qs.map((q, i) => {
       const opts = q.options.filter((o) => o && typeof o.label === "string").slice(0, 4);
       return h("div", { class: "bq" }, h("div", { class: "bq-q", html: inline(q.question) }),
@@ -2528,12 +1739,13 @@ class Chat {
   add(it, where, earlier) {
     if (it.key && this.keys.has(it.key)) return;
     if (it.key) this.keys.add(it.key);
-    if (it.kind === "claude" && it.aside) return;      // said again after the brief (bin/amarchy app_items)
+    if (it.kind === "claude" && it.aside) return;      // said again after an old reply (update_brief: bin/amarchy app_items)
     this.where = where;
     if (it.kind === "result") return this.result(it);
     if (it.kind === "tool") return this.tool(it, where, earlier);
     this.fold = null;       // anything else ends the steps before it
     if (it.kind === "user") {
+      if (it.turn && !earlier) this.pastQuestions(where);
       // A message's pictures and its words are items of their own (keyed
       // "<its record>:<n>"): one bubble.
       const rec = it.rec || String(it.key || "").split(":")[0];
@@ -2567,7 +1779,8 @@ class Chat {
       where.append(long ? h("details", { class: "msg note long" }, h("summary", {}, cut(text.split("\n")[0], 70)), h("pre", {}, text))
                         : h("div", { class: "msg note" }, text));
     } else if (it.kind === "claude") {
-      where.append(h("div", { class: "msg claude", html: md(withoutGoal(it.text)) }));
+      if (!earlier) this.pastQuestions(where);
+      where.append(this.claudeView(it.text, it.key || `said:${this.items.indexOf(it)}`, earlier));
       if (!earlier) {
         // What Claude was writing is in the conversation now.
         this.said = String(it.text || "").replace(/\s+$/, "");
@@ -2819,14 +2032,6 @@ class Chat {
 
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
-    if (this.mode === "screen") {
-      // The brief view: what Claude is doing, in the live reply's title (its activity fills in under it).
-      const stick = this.atBottom();
-      if (this.sturn) this.drawReply(this.sturn);
-      this.drawLive();
-      if (stick) this.toBottom();
-      return;
-    }
     const stick = this.atBottom();
     this.streamTo(live && this.working() ? live.partial || "" : "");
     // What it's doing, in words, unless that's the step spinning just above,
@@ -2857,7 +2062,7 @@ class Chat {
       if (this.stream && !this.stream.done) return null;                        // its words are coming in
       const since = live.working_since ? live.working_since * 1000 : null;
       const a = live.activity;
-      if (a && a.tool && (!HIDDEN_TOOLS.has(a.tool) || a.tool === BRIEF_TOOL_NAME)) {
+      if (a && a.tool && !HIDDEN_TOOLS.has(a.tool)) {
         let text = stepWords(a.tool, a.input || {}).now;
         // A helper's own step: "A helper is on it: … · reading app.js".
         if (a.step && a.step.tool && !HIDDEN_TOOLS.has(a.step.tool)) {
@@ -2965,7 +2170,8 @@ class Chat {
       s.head = null;
       this.streamEl.replaceChildren(...s.parts);
     }
-    if (head !== s.head) { s.head = head; s.parts[0].innerHTML = head ? md(head) : ""; }
+    // (What's written whole, as the conversation will show it: its blocks drawn, not to tap yet.)
+    if (head !== s.head) { s.head = head; s.parts[0].replaceChildren(...(head ? this.claudeView(head, "stream", true).childNodes : [])); }
     s.parts[1].innerHTML = md(tail || " ");
     this.streamEl.classList.toggle("done", s.done);
     // The caret, at the end of the last line written (in a list's last item, not under it).

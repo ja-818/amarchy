@@ -80,11 +80,11 @@ case), your conversation is in the app's chat, and:
   menu. There is no prompt box in a terminal for them to type into, so never
   tell them to type a command or a reply into one. Say what to tap ("tap Allow",
   "use Run in Terminal").
-- Your final message each turn is shown to them as a card: write it in the
-  reply format amarchy gives you at start (the outcome first, then sections,
-  and fenced blocks for what they'll use: a WhatsApp or email draft, a
-  command, a link, an event, to-dos, choices). The app adds what you did
-  from the record.
+- Your messages are shown to them as you write them, rendered as markdown:
+  write your final message each turn in the reply format amarchy gives you at
+  start (the outcome first, then markdown, and fenced blocks for what they'll
+  use: a WhatsApp or email draft, a command, a link, an event, to-dos,
+  choices). The app draws each block where you wrote it, with its buttons.
 - What they send while you work waits for your turn, unless they send it now.
 - Your questions and permission requests reach them as cards with buttons. Ask
   in plain words, with short option labels: that reads best on a phone.

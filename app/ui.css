@@ -98,9 +98,8 @@ html { touch-action: manipulation; }
   padding-left: var(--page-pad); padding-right: var(--page-pad);
 }
 
-/* ---- one card for everything (today.js todayCard): the chat's reply card's
-   look (screen.css .reply), so a card here and the reply in its chat are one
-   thing: one surface, a rule round it, a round badge saying where it stands.
+/* ---- one card for everything (today.js todayCard): one surface, a rule
+   round it, a round badge saying where it stands.
    The whole card lights as one, under the pointer and under the keys: its
    head is no box of its own. */
 .tcard {

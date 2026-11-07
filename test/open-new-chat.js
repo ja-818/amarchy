@@ -9,7 +9,7 @@
 //   node test/open-new-chat.js          both layouts
 //   node test/open-new-chat.js phone    one layout (phone | wide)
 //
-// Needs what test/brief-view.js needs (Chromium, playwright-core). It starts
+// Needs what test/reply-view.js needs (Chromium, playwright-core). It starts
 // its own app server from this checkout's bin/amarchy, with a home and state
 // of its own. Exits 0 when every check passed.
 

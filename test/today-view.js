@@ -10,7 +10,7 @@
 //   node test/today-view.js          both layouts
 //   node test/today-view.js phone    one layout (phone | wide)
 //
-// Needs what test/brief-view.js needs (Chromium, playwright-core). It starts
+// Needs what test/reply-view.js needs (Chromium, playwright-core). It starts
 // its own app server from this checkout's bin/amarchy, with a home and state
 // of its own. Exits 0 when every check passed.
 
@@ -623,8 +623,8 @@ async function common(p, where) {
   // The goal block: the chat's, never shown in its reply.
   const r = await p.evaluate(() => {
     const t = "It shipped\n\nAll done.\n\n```goal state=\"done\"\nShip Today\n```\n";
-    const x = parseReply(t);
-    return { goal: x.goal, body: JSON.stringify(x.sections), said: withoutGoal(t) };
+    const x = replyGoal(t);
+    return { goal: x, body: JSON.stringify(replyParts(t)), said: withoutGoal(t) };
   });
   check(where, r.goal && r.goal.goal === "Ship Today" && r.goal.state === "done", "a reply's goal block read");
   check(where, !/Ship Today/.test(r.body) && !/goal/.test(r.said), "and never shown in the reply");

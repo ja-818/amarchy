@@ -11,7 +11,7 @@
 //   node test/new-chat-share.js          both layouts
 //   node test/new-chat-share.js phone    one layout (phone | wide)
 //
-// Needs what test/brief-view.js needs (Chromium, playwright-core). It starts
+// Needs what test/reply-view.js needs (Chromium, playwright-core). It starts
 // its own app server from this checkout's bin/amarchy, with a home and state
 // of its own. Exits 0 when every check passed.
 
@@ -29,7 +29,7 @@ const BIN = path.join(ROOT, "bin", "amarchy");
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "new-chat-share-"));
 const ONLY = process.argv[2];
 
-// The app server brief-view.js starts: the app's handler on 127.0.0.1, with
+// The app server reply-view.js starts: the app's handler on 127.0.0.1, with
 // the Tailscale login it expects, and the Origin of its own host on what a
 // page sends (a request without one, as a Shortcut's, stays without).
 const SHIM = `

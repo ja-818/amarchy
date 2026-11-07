@@ -1933,7 +1933,7 @@ def claude_argv(s, prefill="", prompt=None):
     model = chosen_model(s["id"]) if prompt is not None else None
     return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []), *claude_resume(s),
             *(["--prefill", prefill] if prefill and prompt is None else []),
-            *brief_mcp_args(), *reply_format_args(), "--settings", hook_settings(s["id"]), *first]
+            *reply_format_args(), "--settings", hook_settings(s["id"]), *first]
 
 
 def pane_loop(pane, procs):
@@ -3854,10 +3854,6 @@ def cmd_hook(sid, state):
         live = agent_live(sid)
         if live.get("pending") and live.get("state") not in ("exited", None):
             return
-    # A turn ended with work the brief doesn't have: Claude updates it first
-    # (the session stays working meanwhile, so it's done, and you're told,
-    # once the brief is there). Asked once a stop (stop_hook_active: the
-    # second goes through).
     # A turn ended on a Claude started with an older reply format (or none):
     # it's started again once idle (claude_reload), the same conversation, with
     # the format amarchy gives now. (A tool's description would be kept in the
@@ -4528,7 +4524,7 @@ def step_input(given):
 
 def last_words(s, limit=240):
     """From the end of the session's conversation: the last thing its Claude
-    wrote, in a line (said: a brief's first words, the list's preview), and
+    wrote, in a line (said: the list's preview), and
     the step it's on, if its last tool call has no result yet (step: {tool,
     input}, or None). Read again only when the conversation has moved."""
     f = transcript(s)
@@ -7570,12 +7566,97 @@ def user_item(text):
     return {"kind": "user", "text": text}
 
 
+def brief_text(b):
+    """An old reply written with update_brief (its input), as the text it
+    held, in the reply format: its title, its answer and explanation, its
+    tables, what it made for you as blocks, its questions as choices, its
+    caveats and sources, its goal. "" for nothing."""
+    if not isinstance(b, dict):
+        return ""
+    def s(v):
+        return v.strip() if isinstance(v, str) else ""
+    def objs(v):
+        return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+    def cell(v):
+        return str(v if v is not None else "").replace("|", "\\|").replace("\n", " ")
+    def attrs(**kw):
+        return "".join(f' {k}="{s(v).replace(chr(34), chr(39))}"' for k, v in kw.items() if s(v))
+    out = []
+    if s(b.get("title")) or s(b.get("headline")):
+        out.append(s(b.get("title")) or s(b.get("headline")))
+    if s(b.get("short")):
+        out.append(s(b.get("short")))
+    verdicts = [f"- **{s(v.get('option'))}** ({s(v.get('rating')) or 'neutral'})" + (f": {s(v.get('reason'))}" if s(v.get("reason")) else "")
+                for v in objs(b.get("verdicts")) if s(v.get("option"))]
+    if verdicts:
+        out.append("\n".join(verdicts))
+    points = []
+    for x in (b.get("answer") if isinstance(b.get("answer"), list) else b.get("changed") if isinstance(b.get("changed"), list) else []):
+        point, detail = (s(x), "") if isinstance(x, str) else (s(x.get("point")), s(x.get("detail"))) if isinstance(x, dict) else ("", "")
+        if point:
+            points.append(f"- {point}" + (f" {detail}" if detail else ""))
+    if points:
+        out.append("\n".join(points))
+    if s(b.get("explanation")):
+        out.append(s(b.get("explanation")))
+    for t in objs(b.get("tables")):
+        cols, rows = t.get("columns"), [r for r in (t.get("rows") or []) if isinstance(r, list)]
+        if not isinstance(cols, list) or not cols or not rows:
+            continue
+        table = [f"| {' | '.join(cell(c) for c in cols)} |", f"|{'---|' * len(cols)}"] + [f"| {' | '.join(cell(c) for c in r)} |" for r in rows]
+        out.append((f"**{s(t.get('title'))}**\n\n" if s(t.get("title")) else "") + "\n".join(table))
+    plan = [f"- [{'x' if x.get('state') == 'done' else ' '}] {s(x.get('step'))}" for x in objs(b.get("plan")) if s(x.get("step"))]
+    if plan:
+        out.append(f"```todos title=\"Plan\"\n" + "\n".join(plan) + "\n```")
+    for a in objs(b.get("artifacts")):
+        kind = a.get("type")
+        if kind == "message":
+            ch = a.get("channel") if a.get("channel") in ("whatsapp", "email", "slack", "sms") else "email"
+            out.append(f"```{ch}{attrs(to=a.get('to'), phone=a.get('phone'), subject=a.get('subject'))}\n{s(a.get('body'))}\n```")
+        elif kind == "link" and s(a.get("url")):
+            out.append(f"```link{attrs(label=a.get('title'), note=a.get('note'))}\n{s(a.get('url'))}\n```")
+        elif kind == "command" and s(a.get("command")):
+            out.append(f"```command{attrs(cwd=a.get('where'))}\n{s(a.get('command'))}\n```")
+        elif kind == "event":
+            out.append(f"```event{attrs(title=a.get('title'), when=a.get('when'), end=a.get('end'), where=a.get('where'))}\n{s(a.get('note'))}\n```")
+        elif kind == "todos":
+            items = [f"- [{'x' if x.get('done') else ' '}] {s(x.get('text'))}" + (f" ({s(x.get('due'))})" if s(x.get("due")) else "")
+                     for x in objs(a.get("items")) if s(x.get("text"))]
+            out.append(f"```todos{attrs(title=a.get('title'))}\n" + "\n".join(items) + "\n```")
+        elif kind == "contact":
+            out.append(f"```contact{attrs(name=a.get('name'), role=a.get('role'), phone=a.get('phone'), email=a.get('email'))}\n```")
+        elif kind == "place":
+            out.append(f"```place{attrs(name=a.get('name'), where=a.get('where'), hours=a.get('hours'))}\n```")
+        elif kind == "session":
+            out.append(f"```session{attrs(id=a.get('name'))}\n{s(a.get('body'))}\n```")
+        elif kind == "code" and s(a.get("code")):
+            out.append(f"```{s(a.get('language'))}\n{s(a.get('code'))}\n```")
+        elif s(a.get("body")):
+            out.append((f"**{s(a.get('title'))}**\n\n" if s(a.get("title")) else "") + s(a.get("body")))
+    for q in objs(b.get("waiting")):
+        opts = [f"- {s(o.get('label'))}" + (f" | {s(o.get('send'))}" if s(o.get("send")) else "")
+                for o in objs(q.get("options")) if s(o.get("label"))]
+        if s(q.get("question")) and opts:
+            out.append(f"```choices{attrs(question=q.get('question'))}\n" + "\n".join(opts) + "\n```")
+    notes = [f"- {s(x)}" for x in (b.get("notes") or []) if s(x)] if isinstance(b.get("notes"), list) else []
+    if notes:
+        out.append("\n".join(notes))
+    sources = [f"- [{s(x.get('label')) or s(x.get('url'))}]({s(x.get('url'))})" for x in objs(b.get("sources")) if s(x.get("url"))]
+    if sources:
+        out.append("## Sources\n\n" + "\n".join(sources))
+    if s(b.get("goal")):
+        state = b.get("status") if b.get("status") in ("working", "waiting", "blocked", "done") else ""
+        out.append(f"```goal{attrs(state=state)}\n{s(b.get('goal'))}\n```")
+    return "\n\n".join(out)
+
+
 def app_items(records, s):
     """A conversation's records as the app shows them: what you said, what
     Claude said, its tool calls (each result follows as "result", for the
     call it answers) and notes. Thinking and Claude Code's bookkeeping are left out.
     What Claude says after its brief (update_brief) until your next message is
-    marked aside: it repeats what it said, and the app leaves it out."""
+    marked aside: it repeats what it said, and the app leaves it out; the
+    brief itself is shown as the text it held (brief_text)."""
     out, briefed = [], False
     for r in records:
         if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta"):
@@ -7596,7 +7677,7 @@ def app_items(records, s):
                 if b.get("type") == "text":
                     item = user_item(b.get("text") or "")
                     if item and item["kind"] == "user" and human_message(item["text"]):
-                        item["turn"] = True     # yours: it starts a turn (the brief view groups by them)
+                        item["turn"] = True     # yours: it starts a turn
                     found.append(item)
                 elif b.get("type") == "image":       # shown at /api/session/<id>/image/<rec>/<n>
                     found.append({"kind": "user", "text": "[image]", "rec": rid, "turn": True,
@@ -7613,9 +7694,9 @@ def app_items(records, s):
                     found.append({"kind": "claude", "text": b["text"].strip(), **({"aside": True} if briefed else {})})
                 elif b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
                     briefed = True
-                    # The brief as Claude wrote it: the app draws it (chat.js drawBrief).
-                    found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""), "summary": "Updated the brief",
-                                  "brief": b.get("input") if isinstance(b.get("input"), dict) else {}})
+                    text = brief_text(b.get("input"))
+                    if text:
+                        found.append({"kind": "claude", "text": text})
                 elif b.get("type") == "tool_use":
                     found.append({"kind": "tool", "id": b.get("id", ""), "name": b.get("name", ""),
                                   "summary": tool_summary(b.get("name"), b.get("input"), s)[:600],
@@ -10788,7 +10869,6 @@ def app_handler(st, users, address):
             self.stream_start()
             conv, screen, row, beat = AppConversation(s), None, None, time.time()
             screen_at = 0       # when its pane was last read (app_screen)
-            facts, facts_at, facts_status = None, 0, None     # git's facts for the brief (brief_facts), as last sent
             # On the chat engine, its live state too (live.json, chat_live) as
             # it changes: what Claude is writing, doing and asking.
             live, live_sig, tick = None, None, 0
@@ -10843,14 +10923,6 @@ def app_handler(st, users, address):
                         self.event("conversation", {"reset": True, "items": items, "start": conv.start})
                     elif items:
                         self.event("conversation", {"items": items})
-                    # Again when the session's state changes (a turn ended: commits, files), and every minute.
-                    status = (now or {}).get("status")
-                    if status != facts_status or time.time() - facts_at > 60:
-                        facts_status, facts_at = status, time.time()
-                        seen_facts = brief_facts(session(s["id"]) or s)
-                        if seen_facts != facts:
-                            facts = seen_facts
-                            self.event("facts", facts)
                     if time.time() - beat > KEEPALIVE:
                         self.out(b": still here\n\n")
                         beat = time.time()
@@ -12399,7 +12471,7 @@ def claude_resume(s):
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
     claude arguments, its conversation, amarchy's hooks."""
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *brief_mcp_args(), *reply_format_args(),
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *reply_format_args(),
             "--settings", hook_settings(s["id"])]
 
 
@@ -12450,189 +12522,25 @@ def conversation_title(text):
     return title if 0 < len(title) <= 80 else None
 
 
-# ---- the brief: what the person reads instead of the conversation
-#
-# The app's main view (the brief, app/chat.js) gives each chat one living
-# document: its goal, where it stands, what changed, the tests, how to check
-# it, what waits on you, what's next. Claude answers as it always does; when
-# a turn ends, amarchy's Stop hook asks the same Claude, in the same
-# conversation (so with all it knows, and its cache), to update the brief
-# (BRIEF_ASK, with what git says: brief_facts), and it does with update_brief,
-# a tool amarchy serves (`amarchy brief-mcp`). The app draws the tool's input
-# from the transcript (app_items: "brief"); the hook's ask and the call stay
-# out of the conversation you read.
-
-BRIEF_SERVER = "amarchy"
-BRIEF_TOOL = f"mcp__{BRIEF_SERVER}__update_brief"
-BRIEF_DEF = {
-    "name": "update_brief",
-    "description": "Writes this turn's reply as the person reads it in amarchy, instead of your messages: a title, your answer "
-                   "as points, the plan, what needs them, checks and notes. amarchy adds what you did (the activity, files "
-                   "changed, commits, test runs) from the record itself, so don't list those. Call it once, when amarchy asks "
-                   "at the end of a turn.",
-    "inputSchema": {
-        "type": "object", "additionalProperties": False, "required": ["title", "status"],
-        "properties": {
-            "title": {"type": "string", "description": "The outcome of this turn in at most 10 words, as a person would say it: "
-                                                       "what happened, what you found, or what you need."},
-            "status": {"type": "string", "enum": ["done", "working", "blocked", "waiting"],
-                       "description": "done (the turn's job is finished), working (more steps under way or planned), blocked "
-                                      "(you can't go on), waiting (you need the person)."},
-            "kind": {"type": "string", "enum": ["answer", "change", "investigation", "plan", "task", "problem"],
-                     "description": "What this turn was: an answer to a question (they asked you to explain, judge, compare "
-                                    "or tell them something: the app shows it as an answer card), a change made, an "
-                                    "investigation or report, a plan, a task carried out (an email sent, a clean-up), or a "
-                                    "problem."},
-            "short": {"type": "string", "description": "For an answer: the short answer, in one or two plain sentences, as "
-                                                       "you'd say it to a friend (\"Depends on the kind: prescribed ones are "
-                                                       "fine, online injectables are risky.\")."},
-            "verdicts": {"type": "array", "maxItems": 8, "description": "For an answer that judges or compares (good or bad, "
-                         "which one, is it safe): one row per option, with its rating and a one-line reason.",
-                         "items": {"type": "object", "required": ["option", "rating", "reason"], "additionalProperties": False,
-                                   "properties": {"option": {"type": "string", "description": "A few words: what's rated."},
-                                                  "rating": {"type": "string", "enum": ["good", "caution", "bad", "neutral"]},
-                                                  "reason": {"type": "string", "description": "Why, in one short line."}}}},
-            "goal": {"type": "string", "description": "What the person is trying to get done in this chat, in one short sentence. "
-                                                      "Keep it unless it changed."},
-            "explanation": {"type": "string", "description": "When they asked you to explain, teach, compare or answer "
-                            "something: the explanation itself, complete, in markdown, as you'd want to read it, split into "
-                            "topics under '## ' headings (each folds on its own: \"## What peptides are\", \"## Side "
-                            "effects\"), with short paragraphs, lists, a table or code where they help. Not a description of "
-                            "it. Leave it out for a turn that only did work."},
-            "answer": {"type": "array", "maxItems": 12, "description": "The summary: everything from this turn the person "
-                       "needs, as short points: what you found, decided, did and concluded, with the exact names, numbers, URLs "
-                       "and results. Complete, so they never need your messages (it's what they read first, under the title), "
-                       "but each point short. Each point says the thing itself (\"The login loop comes from a stale cookie\"), "
-                       "never only that you did something (\"Explained the login loop\"). Not the steps you took (the app "
-                       "shows those).",
-                       "items": {"type": "object", "required": ["point"], "additionalProperties": False,
-                                 "properties": {"point": {"type": "string", "description": "A few words to one short sentence."},
-                                                "detail": {"type": "string", "description": "Why it's so: the reason, the "
-                                                           "numbers or the context behind the point, in a sentence or "
-                                                           "three, shown when they open it. Give one for every point "
-                                                           "that has a reason."}}}},
-            "sources": {"type": "array", "maxItems": 20, "description": "Every source you used or cite (a web page, a doc, "
-                        "an email), so they can check it.",
-                        "items": {"type": "object", "required": ["url"], "additionalProperties": False,
-                                  "properties": {"label": {"type": "string", "description": "What it is, a few words."},
-                                                 "url": {"type": "string"}}}},
-            "tables": {"type": "array", "maxItems": 3, "description": "Comparisons and side-by-side data, shown open in the "
-                       "reply (\"Model | Chip | RAM | Price\"): when a table says it better than points, always use one. "
-                       "Cells short, with exact values; markdown in cells is fine.",
-                       "items": {"type": "object", "required": ["columns", "rows"], "additionalProperties": False,
-                                 "properties": {"title": {"type": "string", "description": "What it compares, a few words."},
-                                                "columns": {"type": "array", "maxItems": 8, "items": {"type": "string"}},
-                                                "rows": {"type": "array", "maxItems": 20, "items": {"type": "array", "items": {"type": "string"}}},
-                                                "pick": {"type": "integer", "description": "The row you recommend, counting from 0, "
-                                                                                           "when there's one: it's marked."},
-                                                "note": {"type": "string", "description": "One line under it (\"Prices from Oct 2026\")."}}}},
-            "artifacts": {"type": "array", "maxItems": 10, "description": "The things this turn made for the person to use, "
-                          "each complete, so they never go looking for them: a message to send (message: on WhatsApp, by "
-                          "email, on Slack...), a link to open (link), a command to run (command), an event (event), to-dos "
-                          "and loops (todos), a person (contact), a place (place), another chat you started or messaged "
-                          "(session, by its id), data (table), a file you wrote for them to open (file), a document or note "
-                          "(text), code (code). The thing itself, in full: \"I drafted it\" or \"it's in my other message\" "
-                          "is never enough. Lists the person tracks (still open, waiting on, loops, follow-ups) always "
-                          "go in, as todos. Not the record (steps, edited files): the app shows that.",
-                          "items": {"type": "object", "required": ["type"], "additionalProperties": False, "properties": {
-                              "type": {"type": "string", "enum": ["message", "link", "command", "event", "todos", "contact",
-                                                                  "place", "session", "table", "file", "text", "code"]},
-                              "title": {"type": "string", "description": "A short name for it (\"WhatsApp to the C21 group\")."},
-                              "channel": {"type": "string", "enum": ["whatsapp", "email", "slack", "sms", "other"],
-                                          "description": "message: where it goes."},
-                              "to": {"type": "string", "description": "message: who it's for (a person, a group, an address)."},
-                              "subject": {"type": "string", "description": "message (email): its subject."},
-                              "body": {"type": "string", "description": "message: the whole text, ready to send. text: the "
-                                                                        "document, in markdown."},
-                              "name": {"type": "string", "description": "contact, place: the name. session: the chat's id."},
-                              "role": {"type": "string", "description": "contact: who they are to the person."},
-                              "phone": {"type": "string", "description": "message, contact, place: a phone number, with its "
-                                                                         "country code."},
-                              "email": {"type": "string", "description": "message (email), contact: the address."},
-                              "url": {"type": "string", "description": "link, place: the address to open."},
-                              "command": {"type": "string", "description": "command: exactly what to run."},
-                              "code": {"type": "string"}, "language": {"type": "string"},
-                              "path": {"type": "string", "description": "file: where it is."},
-                              "when": {"type": "string", "description": "event: when it starts, ISO 8601 with the time zone "
-                                                                        "when known (2026-10-29T15:40:00-05:00)."},
-                              "end": {"type": "string", "description": "event: when it ends, the same way."},
-                              "where": {"type": "string", "description": "event: the place or address. place: its address. "
-                                                                         "command: the folder to run it in."},
-                              "hours": {"type": "string", "description": "place: when it's open."},
-                              "items": {"type": "array", "maxItems": 20, "description": "todos: each to-do.",
-                                        "items": {"type": "object", "required": ["text"], "additionalProperties": False,
-                                                  "properties": {"text": {"type": "string"}, "due": {"type": "string"},
-                                                                 "who": {"type": "string"}, "done": {"type": "boolean"}}}},
-                              "columns": {"type": "array", "items": {"type": "string"}},
-                              "rows": {"type": "array", "maxItems": 50, "items": {"type": "array", "items": {"type": "string"}}},
-                              "note": {"type": "string", "description": "One line on it (\"The link expires in 10 minutes\", "
-                                                                        "\"Send it from the WhatsApp Business number\")."},
-                          }}},
-            "plan": {"type": "array", "maxItems": 12, "description": "The steps toward the goal, when there's a plan: done, "
-                                                                    "doing (under way) or next.",
-                     "items": {"type": "object", "required": ["step", "state"], "additionalProperties": False,
-                               "properties": {"step": {"type": "string"},
-                                              "state": {"type": "string", "enum": ["done", "doing", "next"]}}}},
-            "waiting": {"type": "array", "maxItems": 3,
-                        "description": "Decisions only the person can make, each a question with its options as buttons: label "
-                                       "(1 to 4 words) and send (the full message as they'd type it); draft: true when they "
-                                       "must add their own words (send is its start).",
-                        "items": {"type": "object", "required": ["question", "options"], "additionalProperties": False,
-                                  "properties": {"question": {"type": "string"}, "options": {
-                                      "type": "array", "maxItems": 4, "items": {
-                                          "type": "object", "required": ["label", "send"], "additionalProperties": False,
-                                          "properties": {"label": {"type": "string"}, "send": {"type": "string"},
-                                                         "draft": {"type": "boolean"}}}}}}},
-            "tests": {"type": "array", "maxItems": 6, "description": "Tests and checks you ran, with their real results and a "
-                                                                    "few words on what they cover.",
-                      "items": {"type": "object", "required": ["name", "result"], "additionalProperties": False,
-                                "properties": {"name": {"type": "string"},
-                                               "result": {"type": "string", "enum": ["pass", "fail", "skipped"]},
-                                               "detail": {"type": "string"}}}},
-            "check": {"type": "array", "maxItems": 3, "description": "How the person can see or try the result themselves: a URL "
-                                                                    "to open, or what to tap.",
-                      "items": {"type": "object", "required": ["label"], "additionalProperties": False,
-                                "properties": {"label": {"type": "string"}, "url": {"type": "string"}, "how": {"type": "string"}}}},
-            "notes": {"type": "array", "maxItems": 4, "items": {"type": "string"},
-                      "description": "Risks, caveats and what isn't done. Never git's state (merged, pushed, committed): the "
-                                     "app shows that itself."},
-        },
-    },
-}
-BRIEF_ASK = (
-    "amarchy: now write this turn's reply by calling update_brief once (ToolSearch can load it). The person reads it "
-    "instead of your messages, so it must hold everything from this turn they need: the outcome as its title, a summary "
-    "(answer) as complete points (every finding, decision, name, number, URL and result that matters: it's what they read "
-    "first, so leave nothing important out, just keep each point short), the plan if there is one, what needs them, how "
-    "to check it, and caveats. If they asked you to explain or answer something, the explanation itself goes in "
-    "explanation, in full: a point never says you explained or found something without saying what. A question's "
-    "turn is kind answer: the short answer, verdicts when it judges or compares, the explanation in '## ' topics, and "
-    "summary points only for takeaways not already said. A comparison or side-by-side data goes in tables (shown open), "
-    "not flattened into points. Anything you made for them to use (a message to send, a link, "
-    "a command, an event, to-dos, a contact, a place, a chat you started, a table, a file, a document) goes in "
-    "artifacts, complete, so nothing they need is left in your messages; so do lists they track (still open, waiting "
-    "on, loops), as todos. Give each summary point its why (detail). Every source you cite goes in sources. Only what "
-    "helps: every part is optional but the title, so a simple answer is a title and a point or two, "
-    "and the plan, tests, checks, notes and questions are left out when there are none. Write for someone glancing at a "
-    "phone who may not remember this conversation: name things, plain words. "
-    "Don't list the steps you took, the files you changed or the commits: the app shows those from the record. Never "
-    "invent anything. What git says now: {facts}. Your reply was already delivered: after update_brief, end your turn "
-    "with no text."
-)
+# An old conversation's replies may be calls to update_brief, the tool amarchy
+# once had Claude write each reply with (until 2026-11): app_items shows them
+# as the text they held (brief_text).
+BRIEF_TOOL = "mcp__amarchy__update_brief"
 
 
-# ---- the reply format: Claude writes each reply as the card it becomes
+# ---- the reply format: how Claude writes, for the app to show as it is
 #
 # Given at every start (--append-system-prompt, both engines): a reply leads
-# with its outcome, then markdown sections, tables for comparisons, and fenced
+# with its outcome, then markdown (sections, lists, tables, links), and fenced
 # blocks named for what they hold (a draft, a command, an event...) that the
-# app gives buttons (chat.js parseReply). No second rendition of the reply, so
-# nothing is lost or said twice, and no extra step at the end of a turn.
-REPLY_FORMAT = """amarchy shows the person each of your replies as a card built from your markdown, on their phone or computer. They read that, so write every reply (not your working notes in between, only your final message of a turn) like this. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and put it in these blocks, because buttons come only from them.
+# app draws in their place with buttons (chat.js claudeView). What Claude
+# wrote is what you read, every word of it, in its order: nothing summarized,
+# folded away or moved.
+REPLY_FORMAT = """amarchy shows the person your replies as you write them, rendered as markdown, on their phone or computer: every word, in your order, nothing summarized or folded away. Write each reply (your final message of a turn, not your working notes in between) to be read there. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and use these blocks, because buttons come only from them.
 
-- First line: the outcome in one plain sentence, as you'd say it to them. It becomes the card's title. No greeting, no "Here's...", no heading mark.
-- Then the rest, as you normally would, in markdown: short paragraphs and lists, "## " headings for sections (each folds in the card), a table for any comparison or side-by-side data, code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point: the card is all they read.
-- Anything they will use goes in a fenced block named for it, so the card gives it buttons (Copy, Open in WhatsApp, Add to calendar...). Attributes go on the opening line as key="value":
+- Lead with the outcome in one plain sentence, as you'd say it to them. No greeting, no "Here's...".
+- Then the rest in markdown: short paragraphs and lists, "## " headings to break up anything long, a table for any comparison or side-by-side data, links as [words](url), code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point.
+- Anything they will use goes in a fenced block named for it, where it belongs in the reply; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar...). Attributes go on the opening line as key="value":
   ```whatsapp to="Felipe" phone="+57 300 111 2233"
   the whole message, ready to send
   ```
@@ -12661,7 +12569,7 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   what that chat is doing
   ```
 - Lists they track (still open, waiting on, loops) go in a todos block, every time you list them.
-- Any question you ask them, a yes or no included, goes in a choices block at the end, never only in your prose; each option is "- Label | the full message it sends" (or just "- Label"):
+- Any question you ask them, a yes or no included, goes in a choices block at the end, so they answer with a tap; each option is "- Label | the full message it sends" (or just "- Label"):
   ```choices question="Ship it to main?"
   - Ship it | Ship it: merge to main and push
   - Not yet
@@ -12669,7 +12577,7 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
 - A link for them to open goes in a link block; a date to keep, in an event block.
 - Something live for them to look at (a dev server you started, a preview, a deploy): as soon as it answers, before your reply, run `amarchy preview <url>`. It puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation. Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used go last, under "## Sources", as links.
-- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, the reply gives them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one: it's the Review button on the chat's card. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
+- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the reply: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, give them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
   ```goal state="working"
   Make Today the app's home screen
   ```
@@ -12703,109 +12611,7 @@ def claude_format_version():
     return None
 
 
-# Which update_brief a Claude has: a hash of what the tool says it takes (the
-# ask changes need no new Claude: the hook sends it each turn). A
-# Claude started with another (before amarchy changed the tool) is started
-# again at an idle moment (claude_reload), so a chat that's always open (an
-# assistant) gets the new one too.
-BRIEF_VERSION = hashlib.sha1(json.dumps(BRIEF_DEF, sort_keys=True).encode()).hexdigest()[:10]
-BRIEF_RELOAD_EVERY = 600    # seconds between two tries to start a session's Claude again for it
-
-
-def brief_mcp_args():
-    """The brief's tool for a session's Claude (both engines): amarchy's MCP
-    server (its version in its arguments: claude_brief_version), allowed
-    without asking."""
-    mcp = {"mcpServers": {BRIEF_SERVER: {"type": "stdio", "command": sys.executable, "args": [SELF, "brief-mcp", BRIEF_VERSION]}}}
-    return ["--mcp-config", json.dumps(mcp), "--allowedTools", BRIEF_TOOL]
-
-
-def brief_mcp():
-    """amarchy brief-mcp: the MCP server (stdio, JSON lines) that gives a
-    session's Claude update_brief. The tool only answers: the app draws the
-    brief from what Claude sent, in the transcript (app_items)."""
-    def send(reply):
-        sys.stdout.write(json.dumps(reply) + "\n")
-        sys.stdout.flush()
-    for line in sys.stdin:
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(msg, dict) or "id" not in msg:       # a notification: nothing to answer
-            continue
-        method, params = msg.get("method"), msg.get("params") if isinstance(msg.get("params"), dict) else {}
-        if method == "initialize":
-            result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
-                      "serverInfo": {"name": BRIEF_SERVER, "version": "1"}}
-        elif method == "tools/list":
-            result = {"tools": [BRIEF_DEF]}
-        elif method == "tools/call":
-            ok = params.get("name") == BRIEF_DEF["name"]
-            result = {"content": [{"type": "text", "text": "Brief updated. The person already has your answer: end your turn now, "
-                                                           "with no text." if ok else f"No tool {params.get('name')}."}],
-                      "isError": not ok}
-        elif method == "ping":
-            result = {}
-        else:
-            send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": f"Unknown method: {method}"}})
-            continue
-        send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
-    return 0
-
-
-def brief_facts(s):
-    """What git says about a session's work, for its brief: exact, written by
-    no one. {branch, base, commits (since it left its base), recent (their
-    subjects), files, added, removed (against the base, uncommitted work in),
-    uncommitted, unpushed, merged (into the base)}; {} outside a repository."""
-    path = s.get("path")
-    if not path or not Path(path).is_dir():
-        return {}
-
-    def git(*a):
-        r = sh("git", *a, cwd=path)
-        return r.stdout.strip() if r.returncode == 0 else None
-    branch = git("rev-parse", "--abbrev-ref", "HEAD")
-    if not branch:
-        return {}
-    base, mb = git_base(s)
-    out = {"branch": branch, "base": base}
-    if mb:
-        commits = (git("log", "--format=%s", f"{mb}..HEAD") or "").splitlines()
-        out["commits"], out["recent"] = len(commits), commits[:3]
-        stat = git("diff", "--shortstat", mb) or ""
-        for key, word in (("files", "file"), ("added", "insertion"), ("removed", "deletion")):
-            m = re.search(rf"(\d+) {word}", stat)
-            out[key] = int(m.group(1)) if m else 0
-        if commits:
-            out["merged"] = sh("git", "merge-base", "--is-ancestor", "HEAD", base, cwd=path).returncode == 0
-    out["uncommitted"] = len((git("status", "--porcelain") or "").splitlines())
-    unpushed = git("rev-list", "--count", "@{upstream}..HEAD")
-    if unpushed and unpushed.isdigit():
-        out["unpushed"] = int(unpushed)
-    return out
-
-
-def claude_brief_version():
-    """Which update_brief the Claude a hook runs for has: None for none (it
-    started before amarchy served it), "" for the first one (no version),
-    else its version (BRIEF_VERSION when it's the current one)."""
-    pid = os.getppid()
-    for _ in range(6):
-        try:
-            stat = Path(f"/proc/{pid}/stat").read_text()
-            if stat[stat.find("(") + 1:stat.rfind(")")] == "claude":
-                args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-                for i, a in enumerate(args):
-                    if b'"brief-mcp"' in a or a == b"brief-mcp":
-                        m = re.search(rb'"brief-mcp",\s*"([0-9a-f]+)"', a)
-                        return m.group(1).decode() if m else ""
-                return None
-            pid = int(stat[stat.rfind(")") + 2:].split()[1])
-        except (OSError, ValueError, IndexError):
-            return None
-    return None
+RELOAD_EVERY = 600     # seconds between two tries to start a session's Claude again for a newer reply format
 
 
 def claude_reload(sid):
@@ -12813,16 +12619,16 @@ def claude_reload(sid):
     same conversation, so it gets what amarchy gives a Claude now (the reply
     format; the Stop hook starts this when the one it has is older). Only once
     it's idle and nothing would be lost (a turn, a question, a background
-    task), waiting for that up to BRIEF_RELOAD_EVERY seconds, and at most once
+    task), waiting for that up to RELOAD_EVERY seconds, and at most once
     in that time."""
-    mark = claude_dir(sid) / "brief-reload"
+    mark = claude_dir(sid) / "format-reload"
     try:
-        if time.time() - mark.stat().st_mtime < BRIEF_RELOAD_EVERY:
+        if time.time() - mark.stat().st_mtime < RELOAD_EVERY:
             return 0
     except OSError:
         pass
     write_file(mark, f"{time.time()}\n")
-    end = time.time() + BRIEF_RELOAD_EVERY      # a quiet moment can take a while: its conversation settles after a turn
+    end = time.time() + RELOAD_EVERY      # a quiet moment can take a while: its conversation settles after a turn
     while time.time() < end:
         time.sleep(5)
         s = session(sid)
@@ -12847,43 +12653,6 @@ def claude_reload(sid):
         host_respawn(session(sid) or s)
         return 0
     return 0
-
-
-def brief_needed(path, tail=4_000_000):
-    """Whether a conversation's Claude has done something its reply (the
-    brief) doesn't have yet: steps since it last called update_brief, or,
-    with no call since your last message, any words or steps. Words after a
-    call don't count: they're what Claude says again once it's written
-    (app_items marks them aside), and asking again would only repeat it."""
-    try:
-        with open(path, "rb") as fh:
-            end = fh.seek(0, 2)
-            fh.seek(max(0, end - tail))
-            lines = fh.read().splitlines()
-    except (OSError, TypeError):
-        return False
-    steps = words = False       # since the newest record, going back
-    for line in reversed(lines):
-        if b'"type":"assistant"' not in line and b'"type":"user"' not in line:
-            continue
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if human_record(r):
-            return steps or words       # your message, and what Claude did after it
-        if r.get("type") != "assistant" or r.get("isSidechain"):
-            continue
-        for b in reversed((r.get("message") or {}).get("content") or []):
-            if not isinstance(b, dict):
-                continue
-            if b.get("type") == "tool_use" and b.get("name") == BRIEF_TOOL:
-                return steps            # its reply is written: only steps after it need another
-            if b.get("type") == "tool_use" and b.get("name") != "ToolSearch":
-                steps = True
-            elif b.get("type") == "text" and (b.get("text") or "").strip():
-                words = True
-    return False
 
 
 def human_message(text):
@@ -14146,7 +13915,7 @@ OPTIONS = {
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "shorten": None, "attach": None, "held": None,
-    "paste": None, "agent": None, "brief-mcp": None, "claude-reload": None,
+    "paste": None, "agent": None, "claude-reload": None,
 }
 HELP = ("-h", "--help")
 OLD_USAGE = {"order": "  amarchy order [opened|activity]       from before `amarchy group`: activity is "
@@ -14270,8 +14039,6 @@ def main(argv):
         return cmd_held(args[0])
     elif cmd == "paste":
         return cmd_paste(args)
-    elif cmd == "brief-mcp" and len(args) <= 1:
-        return brief_mcp()
     elif cmd == "claude-reload" and len(args) == 1:
         return claude_reload(args[0])
     elif cmd == "agent":

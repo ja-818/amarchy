@@ -32,7 +32,6 @@ const PLACES = {
   "a running pill": 'uiPill("Running · the tests", "running", { long: true }).outerHTML',
   "a chat's working line": '`<div class="chat"><div class="working">${spinner().outerHTML}<span class="now">Reading</span></div></div>`',
   "a step": '`<div class="chat"><div class="fold-head">${spinner().outerHTML}</div></div>`',
-  "the activity": '`<div class="chat"><div class="act-node">${spinner().outerHTML}</div></div>`',
   "a row": '`<div class="row">${stateIcon({ status: "working" }).outerHTML}</div>`',
   "an avatar": '`<div class="avatar-wrap">${stateIcon({ status: "working" }).outerHTML}</div>`',
 };
@@ -146,13 +145,9 @@ async function run(browser, layout, port) {
     check(layout, s.soft === 0, `${place}: crisp (${s.soft} soft pixels)`);
     check(layout, Math.abs(x - (b.spin.x + b.spin.w / 2)) <= grace && Math.abs(y - (b.spin.y + b.spin.h / 2)) <= grace,
           `${place}: in the middle of its box (off by ${(x - b.spin.x - b.spin.w / 2).toFixed(2)}, ${(y - b.spin.y - b.spin.h / 2).toFixed(2)})`);
-    if (b.holder && /pill|activity/.test(place)) {
+    if (b.holder && /pill/.test(place)) {
       check(layout, Math.abs(y - (b.holder.y + b.holder.h / 2)) <= grace,
             `${place}: in the middle of what holds it, up and down (off by ${(y - b.holder.y - b.holder.h / 2).toFixed(2)})`);
-    }
-    if (/activity/.test(place)) {
-      check(layout, Math.abs(x - (b.holder.x + b.holder.w / 2)) <= grace,
-            `${place}: in the middle of what holds it, across (off by ${(x - b.holder.x - b.holder.w / 2).toFixed(2)})`);
     }
   });
   check(layout, !errors.length, `no page errors ${errors.join(" | ")}`);

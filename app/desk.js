@@ -576,7 +576,7 @@ function leaveNewChat() {
 // type in, read from its stream.
 function deskChat(id) {
   const chat = new Chat({
-    id, row: row(id), noSwitch: true,
+    id, row: row(id),
     onSession: (r) => { if (chat === desk.chat) { uiWhenStill("desk-head", deskHead); desk.details.sessionChanged(r); } },
     onGoal: () => { if (chat === desk.chat) deskHead(); },        // what the chat is for, under its name
     onSent: () => { if (chat === desk.chat) boardSent(id); },     // it works on it: back to the board (tasks.js)
