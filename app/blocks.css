@@ -98,8 +98,8 @@
 .bq.answered .bq-q::before { content: "✓ "; color: var(--success); }
 .bq-opts { display: flex; flex-wrap: wrap; gap: 8px; }
 .bq-opt {
-  flex: 1 1 0; min-width: 6em; min-height: var(--control-h); padding: 8px 12px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
-  border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); overflow-wrap: anywhere;
+  flex: 1 1 auto; min-width: 6em; min-height: var(--control-h); padding: 8px 12px; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--control-bg); overflow-wrap: break-word;
 }
 @media (hover: hover) { .bq-opt:hover { background: var(--control-hover); } }
 .bq-opt:focus-visible, .keyed .bq-opt.ui-in { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -114,5 +114,5 @@
 .bq-foot { display: flex; align-items: center; gap: 12px; }
 .bq-foot:has(.bq-status:empty):has(.bq-send[hidden]) { display: none; }
 .bq-status { font-size: var(--caption); color: var(--text-muted); }
-.choices.past .bq-opt:not(.chosen) { opacity: 0.45; }
+.choices.past .bq-opt:not(.chosen) { opacity: 0.45; color: var(--text); background: var(--control-bg); border-color: var(--control-border); }
 .choices.past .bq-opt.draft { display: none; }
