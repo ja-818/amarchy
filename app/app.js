@@ -462,6 +462,10 @@ function statusLine(s) {
   return `${words} · ${now.charAt(0).toLowerCase()}${now.slice(1)}`;
 }
 
+// A chat whose turn was cut off (interrupted), told to carry on: the same
+// words from its card and from the chat. Asleep, it wakes with them.
+const RESUME_TEXT = "Carry on where you were cut off";
+
 async function wakeSession(s) {
   try {
     await aheadOf(s.id, { waking: true }, (r) => r.waking || !r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/wake`));
@@ -920,7 +924,7 @@ class SessionView {
     const bar = this.titleEl;
     // The conversation, its cards and the box you type in (chat.js).
     this.chat = new Chat({
-      id: this.id, row: this.row, noSwitch: true,      // Cards | Chat: in Settings and the menu (⋯)
+      id: this.id, row: this.row,
       onGoal: () => this.renderHeader(),              // what the chat is for, under its name
       onSession: (row) => { this.row = row; uiWhenStill(`head-${this.id}`, () => this.renderHeader()); },
       onGone: (why) => {
@@ -1035,7 +1039,6 @@ class SessionView {
       ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
     sheet(sheetHead(title(row), where(row)),
       h("div", { class: "section" }, "Priority"), seg,
-      h("div", { class: "section" }, "Show replies as"), chatViewSeg(() => { closeSheets(); if (this.mode === "terminal") this.setMode("chat"); }),
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
@@ -2097,9 +2100,6 @@ async function openSettings() {
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
-    kids.push(h("div", { class: "section" }, "Replies"), chatViewSeg(() => draw()),
-      h("p", {}, chatView() === "screen" ? "Brief: each chat's goal, where it stands, what changed and what waits on you, kept up to date by Claude; its own words a tap away."
-                                         : "Chat: Claude's replies as it writes them, the whole conversation."));
     kids.push(...shareSettings());
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));

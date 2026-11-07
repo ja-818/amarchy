@@ -323,11 +323,10 @@ host's chats without anything else installed.
 - **A chat opened** with a click takes the whole window, its box ready: answer,
   approve, write. Opened with the keys (`Enter` on its card), the keys are on its
   latest message, as on the board's cards: `j` / `k` (or `↓` / `↑`) from message
-  to message, `l` (or `→`) into one, along its buttons and links (a folded reply
-  opens), `h` (or `←`) back and out, `Enter` opens or folds a reply (on a button,
-  presses it), `g` / `G` the first and the latest, `d` / `u` half a page, `Tab`
-  Brief or Chat, and `i` the box to write in (`Ctrl+Alt+Enter` dictates from
-  anywhere). On a message the letters are these keys, not words. As on the board,
+  to message, `l` (or `→`) into one, along its buttons and links, `h` (or `←`)
+  back and out, `Enter` on a button presses it, `g` / `G` the first and the
+  latest, `d` / `u` half a page, and `i` the box to write in (`Ctrl+Alt+Enter`
+  dictates from anywhere). On a message the letters are these keys, not words. As on the board,
   one message is lit (the latest, until you move): a click elsewhere, the bar,
   another window leave it lit, and the keys go on from it. `Esc` in the box
   goes out of it onto the latest message; on a message, **← Back** or `Esc`
@@ -472,7 +471,8 @@ touches it (below).
 
 A chat whose turn was **cut off** before it finished (the machine ran out of
 memory, or restarted, or Claude crashed) says **Interrupted**, asleep or not,
-instead of its last time or Ready: send it something to carry on (`amarchy list`:
+instead of its last time or Ready. **Resume**, on its card and in the chat, tells it
+to carry on where it was cut off (and wakes it if it sleeps) (`amarchy list`:
 `interrupted`).
 
 ```sh
@@ -914,7 +914,7 @@ amarchy assistant off                    # a chat like the others again
   says "Message Jaken".
 - **It always tells you** when it needs you or is done, whatever `amarchy alerts`
   lets through of the others: under its name and picture (in a computer's browser it
-  stays until you dismiss it), with what it said as the body (a brief's first words),
+  stays until you dismiss it), with what it said as the body (its first words),
   and with a chime of its own, `herald` (a knock of the staff and two horn notes;
   `amarchy sound --assistant <name|off>` picks another). What it sends with `amarchy
   notify` goes under its name too, and a tap opens it. On an iPhone a notification

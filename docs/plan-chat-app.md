@@ -176,100 +176,48 @@ terminals; after this, the wide layout is chat-first too.
   changed), *Details* (model, mode, context and plan usage, background
   tasks). Zen mode hides the sidebar, as today. Keyboard shortcuts stay.
 
-### The brief: the default view
+### What Claude says: one view, as it wrote it
 
-The chat's main view is the **brief view**; the plain conversation is the
-other, one tap away: on a computer the **Brief | Chat** switch over the chat;
-on the phone, Settings → *Replies* or a chat's menu (⋯) → *Show replies as*.
-The choice is kept on the device and every chat open takes it. (The phone's
-terminals open from the chat's menu; its back arrow returns to the chat.)
+The chat has one view, the conversation, on the phone and on a computer.
+(Until 2026-11 there was a second one, the *brief*: each turn as a card built
+from Claude's reply, its sections folded, its blocks lifted out, the rest
+under *More*. It moved and hid what Claude wrote, so you opened the
+transcript anyway: it's gone.) Claude's reply is shown **as it wrote it**,
+every word in its order, rendered as markdown, with amarchy's affordances in
+the places Claude put them:
 
-Each turn is your message and **Claude's reply as one card**, read in layers:
-
-- **Glance**: the card's title, the turn's outcome; its coloured edge says
-  where it stands (done, working, blocked, waiting on you). The newest reply
-  is open; the ones before are their title, opened with a tap. A folded reply
-  that needs you says so.
-- **Read**: right under the title, always there, the turn's *Summary*: its
-  points, each with its why (`detail`: the reason, the numbers, the context)
-  when it has one, the point a row that opens it; then *Needs you*
-  (questions as buttons), after the context that explains them. The chat's
-  *goal* (from its newest reply that says one) is under the chat's name in
-  the header, not on the cards. *Sources*, a folded row, has every link
-  Claude used or cites.
-- **Tables**: a comparison or side-by-side data (`tables`) shows open in the
-  reply, after the summary (or an answer's verdicts): a real table on a wide
-  screen, a little card per row on the phone (its cells under their column's
-  name), the row Claude recommends marked *Pick*.
-- **Lists you track** (still open, waiting on, loops, follow-ups) are always
-  in For you, as to-dos.
-- **For you**: what the turn made for you to use (`artifacts`), right after
-  the summary, each a row with its quick action at hand while folded and
-  every action that fits it open, so nothing you need stays in Claude's
-  messages (or in an earlier conversation): a *message* draft (Copy, Open in
-  WhatsApp / mail / Messages, filled in), a *link* (Open), a *command* or
-  *code* (Copy), an *event* (Add to Google Calendar, Map), *to-dos* with
-  their due dates, a *contact* (Call, WhatsApp, Email), a *place* (Map,
-  Call, Website), another *chat* (Open, in the app), a *table* (Copy as
-  tab-separated), a *file* (its path), a *text* document. Links open only on
-  the web, mail, a call, a text message or a chat of yours.
-- **An answer** (a turn where you asked a question: kind *answer*) gets its
-  own card: the *short answer* in larger type; *verdicts* when it judges or
-  compares, a row per option with its badge (Good, Careful, Avoid, Depends)
-  and a one-line reason; *Takeaways* only for what those don't say; and the
-  *Explanation* folded by topic (each `## ` heading a row that opens its
-  part, any intro above them open). The chat's *goal* (from
-  its newest reply that says one) isn't on the cards: it's under the chat's
-  name in the header, on the phone and on a computer.
-- **Look into it**: the rest is what happened, under one *More* row that says
-  what's there ("1 test failing · Plan · Changes · Checks · Activity · Notes
-  · Original message"), each its own folding section: *Plan* (done / doing /
-  next), *Changes* (files with +/− and a bar, commits, merges, pushes; git
-  now on the newest), *Checks* (tests and their results, ways to try it;
-  open when one fails), *Activity*, *Notes*, *Original message*.
-- **Activity** is a timeline, folded the way the conversation folds Claude's
-  steps: each run of steps between two things it said is one row in the
-  chat's words ("Read 2 files, edited search.js, ran 2 commands and searched
-  once"), with its +/−, what didn't work and how long; a tap lists its steps
-  (their kind, the command in a pill, an edit's +/−, the first line of an
-  error). What Claude said sits between as quiet quotes, background events
-  where they happened. *Original message* is the turn as the conversation
-  shows it.
-- Every part but the title is optional, so a simple answer is a title and a
-  point or two.
-
-**Who writes what.** Claude's reply *is* the card: amarchy gives every
-Claude a reply format when it starts (`REPLY_FORMAT`, `--append-system-prompt`,
-both engines): the outcome in its first line (the card's title), then
-markdown with `## ` sections (each folds; *Sources* folded), tables for
-comparisons, and fenced blocks named for what they hold (`whatsapp`, `email`,
-`slack`, `sms`, `command`, `link`, `event`, `todos`, `contact`, `place`,
-`session`, `file`, `choices`), which the card gives buttons (`parseReply`,
-`replyBody` in app/chat.js; the things to use are always lifted into *For you*, right after the opening text, and choices to the end, wherever Claude wrote them, so a folded section never hides them). The format holds over any other reply style (a persona's, a project's closing line); and when Claude still asks or lists in prose, the card finds it (`inferActions`): a "Still open:" / "Waiting on…:" list becomes a to-do list (out of the text), the question its last two paragraphs end on gets Yes / No / Answer (yes-or-no shaped) or Answer (fills the box), and up to 4 links (not its sources) a button each. One rendition, so nothing is lost or said twice,
-the card is there as soon as the turn ends, and no extra step is spent on it.
-What Claude *did* comes from the record, never from the model: the activity,
-the files changed and their +/−, commits and pushes, test runs (`changesOf`,
-`testsOf`, `activityOf`). Replies written before, with `update_brief` (asked
-by the Stop hook then; its tool is still served), keep their card. A Claude
-started with an older format (or none) is started again at an idle moment,
-the same conversation (`claude-reload`, `FORMAT_VERSION`): the format is
-given at start, so the new Claude has it (a tool's description, by
-contrast, is kept in the conversation once loaded).
-
-**New tools reach every chat.** update_brief has a version (a hash of what
-it takes, `BRIEF_VERSION`, in its server's arguments). When a turn's reply is
-written by a Claude with an older one (or none), the Stop hook starts
-`amarchy claude-reload`: once the chat is idle and nothing would be lost, its
-Claude is started again with the same conversation, now with the current
-tool (at most every ten minutes). A chat that's always open, like an
-assistant, gets every change too.
-
-While Claude works, the turn's card is live: *Working…* and what it's doing
-in its title, its activity shown (not under More) and filling in, ending with a live line: the
-step under way ("Running the tests…", "Thinking…") or the line Claude is
-writing as it writes it. A turn from before the brief gets the
-same card, its title and answer from Claude's words. A brief in the older
-shape (headline, changed, next) is read as a reply.
+- **Guidance, not translation.** amarchy gives every Claude a reply format
+  when it starts (`REPLY_FORMAT`, `--append-system-prompt`, both engines):
+  the outcome in its first sentence, then markdown (`## ` sections, lists,
+  tables for comparisons, links, code), and fenced blocks named for what
+  they hold. The format holds over any other reply style (a persona's, a
+  project's closing line). Nothing is rewritten, summarized or moved.
+- **Blocks, where it wrote them** (`replyParts`, `claudeView`,
+  `blockView` in app/chat.js): `whatsapp`, `email`, `slack`, `sms` (a draft:
+  Copy, Open in WhatsApp / mail / Messages, filled in), `command` (Copy),
+  `link` (Open), `event` (Add to Google Calendar, Map), `todos`, `contact`
+  (Call, WhatsApp, Email), `place` (Map, Call, Website), `session` (Open the
+  chat), `file` (its path). Each is a row (its kind, name, quick action) with
+  all of it open under it; a tap folds it. Links open only on the web, mail,
+  a call, a text message or a chat of yours. Any other fence is code, with
+  its Copy.
+- **Questions** (`choices` blocks) are buttons, together where the first one
+  is: a tap sends that option's message (several questions: a tap each, they
+  go together). Once you or Claude say something newer, they stay as they
+  were, your pick lit, no longer to tap.
+- **Tables**: a real table on a wide screen, a little card per row on the
+  phone (its cells under their column's name).
+- **The goal block** each reply ends with isn't shown: it's the chat's goal,
+  under its name and on Today, and its state (a done chat offers to close).
+- **Old replies** written with `update_brief` (the tool the brief used; no
+  longer served) show as the text they held (`brief_text` in bin/amarchy:
+  title, points, explanation, tables, its blocks, its questions, goal).
+- A Claude started with an older format (or none) is started again at an
+  idle moment, the same conversation (`claude-reload`, `FORMAT_VERSION`, at
+  most every ten minutes): the format is given at start, so the new Claude
+  has it. A chat that's always open, like an assistant, gets it too.
+- New affordances are added the same way: a block kind Claude can write
+  (`REPLY_FORMAT`), drawn where it's written (`replyBlock`, `artifactParts`).
 
 ### The conversation
 

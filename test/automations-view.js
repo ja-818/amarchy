@@ -6,7 +6,7 @@
 //
 //   node test/automations-view.js
 //
-// Needs what test/brief-view.js needs (Chromium, playwright-core). It starts
+// Needs what test/reply-view.js needs (Chromium, playwright-core). It starts
 // its own app server from this checkout's bin/amarchy, with a home and state
 // of its own, but systemctl --user is this machine's: the list is your real
 // timers (only read), and Run now and Pause act on a test timer of its own
@@ -23,7 +23,7 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "bin", "amarchy");
 
-// The app server brief-view.js starts: the app's handler on 127.0.0.1, with
+// The app server reply-view.js starts: the app's handler on 127.0.0.1, with
 // the Tailscale login it expects, and the Origin of its own host on what a
 // page sends (a request without one, as a Shortcut's, stays without).
 const SHIM = `
