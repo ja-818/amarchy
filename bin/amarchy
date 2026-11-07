@@ -52,9 +52,19 @@ Sessions:
   amarchy run <name>                    run another saved command of the project, the same way
   amarchy run --save <name> <command>   save one; --forget <name> drops it
   amarchy run --list                    the project's saved commands, name and command
-  amarchy preview <url>                 what this chat made, live: the Preview button on the chat and its card
-                                        opens it, whichever reply you're on. --clear takes it off; with neither
-                                        it prints the one set. --id <id> for another session
+  amarchy preview --run '<command>' <url> [--port <n>]... [--stop '<command>'] [--memory 2G] [--idle 3h]
+                                        what this chat serves for you to look at (a dev server): amarchy runs
+                                        the command as a service of the chat's own, outside its Claude (sleep
+                                        doesn't stop it), capped in memory, and stops it after --idle unused or
+                                        when the chat is completed (with the --stop command, for what it started
+                                        elsewhere, like containers), checking its ports (the URL's, and each
+                                        --port: an HMR port) are free. Waits until it answers; --no-start saves only.
+                                        Its Preview button opens it, starting it again first when it isn't running
+  amarchy preview start | restart | stop | status | log [--lines <n>]
+                                        start or stop it by hand, where it stands, what it wrote
+  amarchy preview <url>                 an address only (a deploy, served elsewhere) on the Preview button.
+                                        --clear stops it and takes it off; with nothing it prints the address.
+                                        --id <id> for another session
   amarchy priority [high|normal|low|up|down] [--id <id>]
                                         how much the session matters (prints it without a level): the
                                         list keeps high ones pinned on top of Now, low ones in For later;
@@ -684,7 +694,7 @@ def save_session(s):
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
                "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission",
-               "preview_up")
+               "preview_up", "preview_state")
 
 
 def own_session_id():
@@ -908,34 +918,545 @@ def preview_up(url):
     return up
 
 
+# ---- a chat's preview: what it serves for you to look at
+#
+# A preview is the chat's, not its Claude's: Claude registers it once
+# (`amarchy preview --run '<command>' <url>`), with the ports it takes (the
+# URL's, an HMR port) and maybe a command that tears it down (`--stop`), and
+# amarchy runs it as a systemd user service of its own, amarchy-preview-<id>:
+# outside the chat's panes, so it outlives its Claude's sleep (left_running
+# stops what Claude left serving, never this); capped (PREVIEW_MEMORY, and
+# among the first the kernel kills when memory runs out, before a chat); its
+# output in a log Claude can read (`amarchy preview log`). Its Preview button
+# starts it when it isn't running and opens the page once it answers (the app's
+# /preview/<id> page waits for it), no message to Claude. It stops when nobody
+# had its page open for PREVIEW_IDLE while its chat sat idle (preview_tend),
+# and when the chat closes: Complete stops it, runs its stop command, and
+# checks every one of its ports is free before the chat goes (preview_close).
+#
+# A preview served elsewhere (a deploy) is an address only: `amarchy preview
+# <url>`. One registered before (an address, no command) answers nothing: its
+# button asks its Claude to start it, and register it.
+
+PREVIEW_MEMORY = "2G"           # its memory at most (`--memory`): over it, its own processes are killed, nothing else
+PREVIEW_IDLE = 3 * 3600         # seconds unused before it stops (`--idle`): no page open, its chat idle
+PREVIEW_WAIT = 90               # seconds `amarchy preview --run` / `start` waits for it to answer
+PREVIEW_STOP_WAIT = 45          # seconds its stop command gets
+PREVIEWS = STATE / "previews"   # per chat: <id>.json (when it started, was last used, why it stopped), <id>.log
+                                # (not STATE/preview: the desktop's old file of that name, migrate takes it away)
+
+
+def preview_unit(sid):
+    return f"amarchy-preview-{re.sub(r'[^A-Za-z0-9_.-]', '_', sid)}.service"
+
+
+_app_slice = []
+def preview_cgroup(sid):
+    """Where a chat's preview service runs: its cgroup (the user manager's
+    app.slice, where systemd-run --user puts it)."""
+    if not _app_slice:
+        uid = os.getuid()
+        base = Path(f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/app.slice")
+        if not base.is_dir():
+            got = sh("systemctl", "--user", "show", "-p", "ControlGroup", "--value", "app.slice").stdout.strip()
+            base = Path("/sys/fs/cgroup" + got) if got else base
+        _app_slice.append(base)
+    return _app_slice[0] / preview_unit(sid)
+
+
+def preview_pids(sid):
+    return scope_pids(preview_cgroup(sid))
+
+
+def preview_failed(sid):
+    """Whether its service ended on its own, in error: systemd keeps a failed
+    transient unit (its file) until it's reset; one stopped cleanly is gone."""
+    return (Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "systemd/transient"
+            / preview_unit(sid)).exists()
+
+
+def preview_record(sid):
+    try:
+        d = json.loads((PREVIEWS / f"{sid}.json").read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def preview_note(sid, **changes):
+    d = {**preview_record(sid), **changes}
+    write_file(PREVIEWS / f"{sid}.json", json.dumps({k: v for k, v in d.items() if v is not None}))
+
+
+def preview_log(sid, lines=40):
+    """The last lines its service wrote (what it said, its errors)."""
+    try:
+        with open(PREVIEWS / f"{sid}.log", "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(f.tell() - 64_000, 0))
+            text = f.read().decode(errors="replace")
+    except OSError:
+        return ""
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r(?!\n)", "", text)
+    return mask_secrets("\n".join(text.splitlines()[-lines:]))
+
+
+def preview_ports(p):
+    """The ports a chat's preview takes on this machine: its address's (when
+    it's here) and the ones registered with it (an HMR port)."""
+    where = preview_local(p.get("url") or "")
+    return sorted({*(p.get("ports") or []), *([where[1]] if where else [])})
+
+
+def preview_state(s):
+    """Where a chat's preview stands: up (it answers), starting (its service
+    runs, nothing answers yet), failed (its service ended in error), stopped
+    (registered, not running), down (an address only, nothing answering),
+    or None (none)."""
+    p = s.get("preview")
+    if not p:
+        return None
+    if preview_up(p["url"]):
+        return "up"
+    if not p.get("run"):
+        return "down"
+    if preview_pids(s["id"]):
+        return "starting"
+    return "failed" if preview_failed(s["id"]) else "stopped"
+
+
+def listeners(ports):
+    """What listens on these TCP ports: [{port, pid (None when it isn't
+    yours to see: root's docker-proxy, say), uid, local}]."""
+    ports = set(ports)
+    found = []
+    for name in ("tcp", "tcp6"):
+        try:
+            lines = Path(f"/proc/net/{name}").read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) < 10 or f[3] != "0A":
+                continue
+            la, lp = f[1].split(":")
+            if int(lp, 16) in ports:
+                found.append({"port": int(lp, 16), "inode": f[9], "uid": int(f[7]), "local": la, "pid": None})
+    if not found:
+        return []
+    want = {x["inode"] for x in found}
+    owner = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            for fd in os.listdir(f"/proc/{d}/fd"):
+                try:
+                    link = os.readlink(f"/proc/{d}/fd/{fd}")
+                except OSError:
+                    continue
+                if link.startswith("socket:[") and link[8:-1] in want:
+                    owner.setdefault(link[8:-1], int(d))
+        except OSError:
+            continue
+    out, seen = [], set()
+    for x in found:
+        x["pid"] = owner.get(x["inode"])
+        key = (x["port"], x["pid"])
+        if key not in seen:
+            seen.add(key)
+            out.append({k: x[k] for k in ("port", "pid", "uid", "local")})
+    return out
+
+
+def holder_words(x):
+    """What holds a port, in words: `node …/vite --port 5180` (pid 123)."""
+    if x["pid"] is None:
+        try:
+            import pwd
+            who = pwd.getpwuid(x["uid"]).pw_name
+        except (KeyError, ImportError):
+            who = str(x["uid"])
+        return f"port {x['port']}: a process of {who}'s (docker?)"
+    line = " ".join(a for a in cmdline(x["pid"]) if a)[:90] or "a process"
+    return f"port {x['port']}: {line} (pid {x['pid']})"
+
+
+def holder_session(pid, procs=None):
+    """The chat a process is of, by where it runs (its worktree) or its
+    preview service: its id, or None."""
+    try:
+        cg = Path(f"/proc/{pid}/cgroup").read_text()
+    except OSError:
+        return None
+    m = re.search(r"/amarchy-preview-([^/]+)\.service$", cg.strip(), re.M)
+    ss = sessions()
+    if m:
+        return next((s["id"] for s in ss if preview_unit(s["id"]) == f"amarchy-preview-{m.group(1)}.service"), None)
+    for s in ss:
+        if in_tree(s["path"], [pid]):
+            return s["id"]
+    return None
+
+
+def preview_strays(s, holders, procs=None):
+    """Of what holds a preview's ports, what is this chat's own (a server its
+    Claude started before, in its worktree or its panes): the pids. Its own
+    service's aren't strays."""
+    procs = procs or processes()
+    own = preview_pids(s["id"])
+    mine = left_running(s, procs) | in_tree(s["path"], procs)
+    return {x["pid"] for x in holders if x["pid"] and x["pid"] not in own and x["pid"] in mine}
+
+
+def preview_exec_env(s):
+    p = s.get("preview") or {}
+    env = clean_env()
+    env.update(session_env(s))
+    env.update(secret_env(s))
+    rec = preview_record(s["id"])
+    if rec.get("path"):
+        env["PATH"] = rec["path"]       # the PATH of whoever registered it (Claude's: mise's, nvm's tools)
+    name, bind = host_network()
+    env.update(AMARCHY_PREVIEW_URL=p.get("url", ""), AMARCHY_BIND=bind or "127.0.0.1")
+    return env
+
+
+def cmd_preview_exec(args):
+    """What a chat's preview service runs (plumbing): its command, in its
+    worktree, with the session's environment and the project's secrets
+    (not in the unit, where systemctl would show them); `--stop` its stop
+    command instead."""
+    s = session(args[0]) if args else None
+    p = (s or {}).get("preview") or {}
+    command = p.get("stop") if args[1:2] == ["--stop"] else p.get("run")
+    if not s or not command:
+        return fail("no such preview")
+    os.chdir(s["path"])
+    os.execve("/bin/bash", ["bash", "-lc", command], preview_exec_env(s))
+
+
+_preview_starting = threading.Lock()     # the app's server: two taps (the button, its page) start it once
+
+
+def preview_start(s, restart=False, wait=0, say=None):
+    """Start a chat's preview service (again, with restart). Its ports first:
+    a server of the chat's own on one (started the old way) is stopped, one
+    of anyone else's refuses it. With wait, it waits that many seconds for
+    it to answer. Returns None, or why it didn't start (or isn't answering)."""
+    with _preview_starting:
+        why = preview_launch(s, restart, say or (lambda text: None))
+    if why or not wait:
+        return why
+    return preview_wait(s, wait, say or (lambda text: None))
+
+
+def preview_launch(s, restart, say):
+    p = s.get("preview") or {}
+    sid = s["id"]
+    if not p.get("run"):
+        return "it has no command to start it with (amarchy preview --run '<command>' <url>)"
+    if s.get("setup") or not Path(s["path"]).is_dir():
+        return "its worktree isn't there"
+    unit = preview_unit(sid)
+    if preview_pids(sid):
+        if not restart:
+            return None
+        sh("systemctl", "--user", "stop", unit)
+    holders = listeners(preview_ports(p))
+    strays = preview_strays(s, holders)
+    if strays:
+        say(f"Stopping what this chat left on its ports: " + "; ".join(holder_words(x) for x in holders if x["pid"] in strays))
+        stop_processes(strays)
+        holders = [x for x in listeners(preview_ports(p)) if x["pid"] not in strays]
+    own = preview_pids(sid)
+    taken = [x for x in holders if x["pid"] not in own]
+    if taken:
+        words = []
+        for x in taken:
+            other = holder_session(x["pid"]) if x["pid"] else None
+            words.append(holder_words(x) + (f", chat {other}" if other and other != sid else ""))
+        return "its ports are taken: " + "; ".join(words)
+    sh("systemctl", "--user", "reset-failed", unit)
+    PREVIEWS.mkdir(parents=True, exist_ok=True)
+    log = PREVIEWS / f"{sid}.log"
+    log.write_text("")
+    memory = p.get("memory") or PREVIEW_MEMORY
+    r = sh("systemd-run", "--user", "--quiet", f"--unit={unit}", f"--description=Preview of {sid} (amarchy)",
+           "-p", f"MemoryMax={memory}", "-p", "MemorySwapMax=256M", "-p", "OOMScoreAdjust=500",
+           "-p", "KillMode=control-group", "-p", "TimeoutStopSec=10", "-p", f"WorkingDirectory={s['path']}",
+           "-p", f"StandardOutput=append:{log}", "-p", f"StandardError=append:{log}",
+           "--setenv=AMARCHY=1", f"--setenv=AMARCHY_SESSION={sid}",
+           # amarchy's state where this amarchy has it (preview-exec reads the session there)
+           *[f"--setenv={k}={os.environ[k]}" for k in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "AMARCHY_WORK") if os.environ.get(k)],
+           ENTRY, "preview-exec", sid)
+    if r.returncode != 0:
+        return None if preview_pids(sid) else f"systemd couldn't start it: {last_line(r, 'systemd-run failed')}"
+    now = time.time()
+    preview_note(sid, started=now, used=now, stopped=None, why=None)
+    _preview_up.clear()
+    return None
+
+
+def preview_wait(s, wait, say):
+    """Wait for a preview to answer: None once it does, else why not."""
+    p, sid = s["preview"], s["id"]
+    end = time.time() + wait
+    while time.time() < end:
+        _preview_up.clear()
+        if preview_up(p["url"]):
+            return None
+        if not preview_pids(sid):
+            time.sleep(0.3)
+            if not preview_pids(sid):
+                return "it stopped on its own"
+        time.sleep(0.5)
+    where = preview_local(p["url"])
+    loose = [x for x in listeners([where[1]]) if where] if where else []
+    if loose and where and where[0] != "127.0.0.1" and all(x["local"] in ("0100007F", "0" * 24 + "01000000") for x in loose):
+        return f"it listens on localhost only: make it listen on {where[0]} (--host {where[0]})"
+    return f"nothing answers at {p['url']} after {wait} s"
+
+
+def preview_leftovers(s, wait=5):
+    """What's left of a chat's preview after it stopped: its service's
+    processes, and what still listens on its ports (but another chat's).
+    Waits that long for it to go. [words]."""
+    p, sid = s.get("preview") or {}, s["id"]
+    end = time.time() + wait
+    while True:
+        left = [f"its preview service: {len(preview_pids(sid))} process{'es' if len(preview_pids(sid)) != 1 else ''}"] if preview_pids(sid) else []
+        for x in listeners(preview_ports(p)):
+            other = holder_session(x["pid"]) if x["pid"] else None
+            if not other or other == sid:
+                left.append(holder_words(x))
+        if not left or time.time() >= end:
+            return left
+        time.sleep(0.3)
+
+
+def preview_stop(s, teardown=True, why="stopped"):
+    """Stop a chat's preview: its stop command (with teardown), its service,
+    and then what of the chat's own still holds its ports. What's left of
+    it after that (preview_leftovers): [words], empty when it's all gone."""
+    p, sid = s.get("preview") or {}, s["id"]
+    if not p:
+        return []
+    unit = preview_unit(sid)
+    if teardown and p.get("stop") and Path(s["path"]).is_dir():
+        try:
+            with open(PREVIEWS / f"{sid}.log", "a") as log:
+                log.write(f"\n$ {p['stop']}\n")
+                log.flush()
+                subprocess.run([ENTRY, "preview-exec", sid, "--stop"], stdin=subprocess.DEVNULL, stdout=log,
+                               stderr=log, timeout=PREVIEW_STOP_WAIT, cwd=s["path"])
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if p.get("run"):
+        sh("systemctl", "--user", "stop", unit)
+        sh("systemctl", "--user", "reset-failed", unit)
+        preview_note(sid, stopped=time.time(), why=why)
+    strays = preview_strays(s, listeners(preview_ports(p)))
+    if strays:
+        stop_processes(strays)
+    _preview_up.clear()
+    return preview_leftovers(s) if p.get("run") or p.get("ports") else []
+
+
+def preview_close(s):
+    """Before a chat closes: its preview stopped, and nothing of it left (its
+    service, its ports). [words] of what's still there."""
+    p = s.get("preview") or {}
+    if not p.get("run") and not p.get("ports"):
+        return []
+    return preview_stop(s, why="closed")
+
+
+def preview_info(s, lines=40):
+    """A chat's preview, whole, for the app (its sheet, Details) and
+    `amarchy preview status`."""
+    p = s.get("preview")
+    if not p:
+        return None
+    sid = s["id"]
+    rec = preview_record(sid)
+    state = preview_state(s)
+    out = {"url": p["url"], "run": p.get("run") or "", "stop": p.get("stop") or "", "ports": preview_ports(p),
+           "memory_max": p.get("memory") or PREVIEW_MEMORY, "idle": p.get("idle") or PREVIEW_IDLE, "state": state}
+    if p.get("run"):
+        pids = preview_pids(sid)
+        if pids:
+            try:
+                out["memory"] = int((preview_cgroup(sid) / "memory.current").read_text())
+            except (OSError, ValueError):
+                pass
+            out["since"] = rec.get("started")
+            out["used"] = rec.get("used")
+        else:
+            out["stopped"], out["why"] = rec.get("stopped"), rec.get("why")
+        out["log"] = preview_log(sid, lines)
+    return out
+
+
+def preview_running():
+    """Every chat's preview running now, for Automations: [info + id, task]."""
+    out = []
+    for s in sessions():
+        if (s.get("preview") or {}).get("run") and preview_pids(s["id"]):
+            info = preview_info(s, lines=0)
+            info.pop("log", None)
+            out.append({"id": s["id"], "task": s.get("title") or s["name"], "repo": s["repo"], **info})
+    return out
+
+
+def preview_tend():
+    """The sleep timer's (every 30 s): a preview nobody used for its idle
+    time stops (used: its page open, its chat open on a device or at work);
+    one whose chat is gone (closed while amarchy wasn't looking) too."""
+    shown, _ = on_screen()
+    known = set()
+    for s in sessions():
+        known.add(preview_unit(s["id"]))
+        p = s.get("preview") or {}
+        pids = preview_pids(s["id"]) if p.get("run") else set()
+        if not pids:
+            continue
+        rec, now = preview_record(s["id"]), time.time()
+        if watched(pids) or s["id"] in shown or s.get("status") in ("working", "waiting", "running"):
+            if now - (rec.get("used") or 0) > 60:
+                preview_note(s["id"], used=now)
+            continue
+        if now - (rec.get("used") or rec.get("started") or now) >= (p.get("idle") or PREVIEW_IDLE):
+            preview_stop(s, why="idle")
+    base = preview_cgroup("x").parent
+    try:
+        units = [d.name for d in base.iterdir() if d.name.startswith("amarchy-preview-") and d.name.endswith(".service")]
+    except OSError:
+        units = []
+    for unit in units:
+        if unit not in known and not any(preview_unit(sid.stem) == unit for sid in CLOSING.glob("*.json")):
+            sh("systemctl", "--user", "stop", unit)
+            sh("systemctl", "--user", "reset-failed", unit)
+
+
+def duration(text):
+    """'3h', '90m', '45s', '2d' or seconds: seconds, or None."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*", str(text))
+    if not m:
+        return None
+    return int(float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)])
+
+
 def cmd_preview(args):
-    """A session's live preview: an address the app keeps a button for."""
-    sid = None
-    if "--id" in args:
-        i = args.index("--id")
-        sid = args[i + 1] if i + 1 < len(args) else None
-        args = args[:i] + args[i + 2:]
-    sid = sid or own_session_id()
+    """A session's live preview: an address the app keeps a button for, and
+    the command that serves it, run by amarchy (see above)."""
+    args = list(args)
+    opts, ports = {}, []
+    for name in ("--id", "--run", "--stop", "--url", "--memory", "--idle", "--lines"):
+        while name in args:
+            i = args.index(name)
+            if i + 1 >= len(args):
+                return fail(f"{name} needs a value\n{usage('preview')}")
+            opts[name] = args[i + 1]
+            del args[i:i + 2]
+    while "--port" in args:
+        i = args.index("--port")
+        value = args[i + 1] if i + 1 < len(args) else ""
+        if not value.isdigit() or not 0 < int(value) < 65536:
+            return fail(f"--port takes a port number, not {value!r}")
+        ports.append(int(value))
+        del args[i:i + 2]
+    flags = {a for a in args if a.startswith("--")}
+    args = [a for a in args if not a.startswith("--")]
+    sid = opts.get("--id") or own_session_id()
     s = session(sid) if sid else None
     if not s:
         return fail(f"No session {sid!r}" if sid else "Not in a session (name one with --id <id>)")
-    if "--clear" in args:
+    p = s.get("preview") or {}
+    if "--clear" in flags:
+        left = preview_stop(s, why="cleared")
         s.pop("preview", None)
         save_session(s)
+        if left:
+            print("Forgotten, but still there: " + "; ".join(left))
         return 0
-    if not args:
-        if s.get("preview"):
-            print(s["preview"]["url"])
+    action = args[0] if args and args[0] in ("start", "restart", "stop", "log", "status") else None
+    if action:
+        if not p:
+            return fail("This chat has no preview: amarchy preview --run '<command>' <url>")
+        if action == "status":
+            print(json.dumps(preview_info(s), indent=2))
+            return 0
+        if action == "log":
+            n = opts.get("--lines", "60")
+            print(preview_log(sid, int(n) if n.isdigit() else 60))
+            return 0
+        if action == "stop":
+            left = preview_stop(s, why="stopped")
+            if left:
+                return fail("Stopped, but still there: " + "; ".join(left))
+            return 0
+        why = preview_start(s, restart=action == "restart", wait=PREVIEW_WAIT, say=print)
+        if why:
+            log = preview_log(sid, 15)
+            return fail(f"{p['url']}: {why}" + (f"\nIts log ends:\n{log}" if log else ""))
+        print(f"Up at {p['url']}")
         return 0
-    url = args[0].strip()
+    url = (opts.get("--url") or (args[0] if args else "")).strip()
+    if not url and not ({"--run", "--stop", "--memory", "--idle"} & opts.keys() or ports):
+        if p:
+            print(p["url"])
+        return 0
+    url = url or p.get("url", "")
     u = urllib.parse.urlsplit(url)
     if u.scheme not in ("http", "https") or not u.hostname:
         return fail(f"Not an address to open: {url} (http://... or https://...)")
     name, bind = host_network()
     if bind and u.hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
         return fail(f"{url} doesn't reach their browser: listen on {bind} and give http://{name}:<port>")
-    s["preview"] = {"url": url}
+    new = {"url": url}
+    # --run sets the command; --stop, --port, --memory or --idle alone change
+    # the one it has; an address alone is an address only (a deploy).
+    edits = bool({"--stop", "--memory", "--idle"} & opts.keys() or ports)
+    run = opts.get("--run") or (p.get("run") if edits else None)
+    if edits and not run:
+        return fail("--stop, --port, --memory and --idle go with a command: amarchy preview --run '<command>' <url>")
+    if run:
+        if not preview_local(url):
+            return fail(f"{url} isn't on this machine: a command amarchy runs serves here (http://{name}:<port>)")
+        new["run"] = run.strip()
+        stop = opts.get("--stop", p.get("stop"))
+        if stop:
+            new["stop"] = stop.strip()
+        new_ports = sorted(set(ports or p.get("ports") or []))
+        if new_ports:
+            new["ports"] = new_ports
+        memory = opts.get("--memory", p.get("memory"))
+        if memory:
+            if not re.fullmatch(r"\d+(?:\.\d+)?[KMGT]?", memory, re.I):
+                return fail(f"--memory takes a size like 2G or 1500M, not {memory!r}")
+            new["memory"] = memory.upper()
+        idle = opts.get("--idle", p.get("idle"))
+        if idle is not None:
+            secs = duration(idle)
+            if not secs or secs < 300:
+                return fail(f"--idle takes a time of 5 minutes or more, like 3h or 90m, not {idle!r}")
+            new["idle"] = secs
+    if p.get("run") and p != new and preview_pids(sid):
+        preview_stop(s, teardown=not run, why="changed")       # started again with what it is now (below)
+    s["preview"] = new
     save_session(s)
+    if run:
+        preview_note(sid, path=os.environ.get("PATH", ""))
+        if "--no-start" in flags:
+            return 0
+        why = preview_start(s, wait=PREVIEW_WAIT, say=print)
+        if why:
+            log = preview_log(sid, 15)
+            return fail(f"Saved, but {why}" + (f"\nIts log ends:\n{log}" if log else "") +
+                        "\nFix it, then: amarchy preview restart")
+        print(f"Up at {url}: its Preview button opens it, and starts it again whenever it isn't running.")
+        return 0
     if not preview_up(url):
         print(f"Saved, but nothing answers at {url} yet: its button says so until it does.")
     return 0
@@ -1229,6 +1750,26 @@ SECRET_READERS = ("cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|sed
                   "xxd|od|hexdump|base64|base32|cp|mv|scp|rsync|tar|zip|gzip|ln|tee|diff|cmp|python|python3|node|"
                   "perl|ruby|php|source|\\.|env|dotenv|jq|yq|vim?|nvim|nano|emacs|code|open|xdg-open|curl|wget|"
                   "find|ls|stat|file|wc|md5sum|sha\\w*sum|openssl|gpg|printf|echo|eval|exec|sh|bash|zsh|fish")
+
+
+def serve_reminder(event):
+    """PreToolUse: a dev server Claude starts in the background (Bash's
+    run_in_background, or `&`) stops when its chat sleeps. What it's told,
+    for one the user is to open, or None (it goes ahead either way: a server
+    for its own test run is fine)."""
+    if not isinstance(event, dict) or event.get("tool_name") != "Bash":
+        return None
+    given = event.get("tool_input") or {}
+    command = str(given.get("command") or "")
+    if "amarchy preview" in command or not SERVING_RUN.search(command):
+        return None
+    if not (given.get("run_in_background") or re.search(r"&\s*(?:$|\)|disown)|\bnohup\b|\bsetsid\b|systemd-run", command)):
+        return None
+    return ("amarchy: a server started here stops when this chat sleeps (a minute after it goes idle). If it's "
+            "for the user to look at, don't keep it here: register it as the chat's preview, and amarchy runs it "
+            "outside your shells, starts it again from its Preview button, and stops it when the chat is "
+            "completed: amarchy preview --run '<command>' http://<host>:<port> [--port <hmr port>] "
+            "[--stop '<teardown>'] (the amarchy skill). Only a server for your own check (a test run) belongs here.")
 
 
 def secret_guard(event):
@@ -2491,7 +3032,10 @@ def left_running(s, procs, pane=None, claude=None):
     claudes = {p for p in out if procs.get(p, (0, ""))[1] == "claude" and p != claude}
     for c in list(claudes):
         claudes |= set(descendants(c, procs))
-    return {p for p in out if p in procs and p != term and p not in claudes and not amarchy_own(p)}
+    # Its preview is the chat's, not its Claude's: it stays (preview_tend
+    # stops it when it's gone unused).
+    preview = preview_pids(s["id"])
+    return {p for p in out if p in procs and p != term and p not in claudes and p not in preview and not amarchy_own(p)}
 
 
 def tcp_sockets():
@@ -2831,6 +3375,10 @@ def sleep_idle():
     phone or browser (on_screen) for long enough goes to sleep, if nothing
     would be lost. The time counts from when it was last open on one, if
     that's later."""
+    try:
+        preview_tend()
+    except OSError as e:
+        print(f"amarchy: couldn't look after the previews: {e}", file=sys.stderr)
     after = sleep_after()
     if after is None:
         return 0
@@ -3292,6 +3840,9 @@ def dirty(path):
     return bool(sh("git", "status", "--porcelain", cwd=path).stdout.strip())
 
 
+PREVIEW_LEFT = "its preview is still running: "
+
+
 def close(sid, force=False):
     """Close a session: its row goes at once; then, in the background, its
     Claude Code exits the way it would on its own, its tmux ends, the
@@ -3305,6 +3856,11 @@ def close(sid, force=False):
     path = Path(s["path"])
     if path.exists() and dirty(path) and not force:
         return "uncommitted changes"
+    # Its preview stopped, and nothing of it left behind (its service, a
+    # process on one of its ports): else it stays open, to stop that first.
+    left = preview_close(s)
+    if left:
+        return PREVIEW_LEFT + "; ".join(left)
     # Out of the list, and out of reach of everything that reads it (the
     # app, its Claude's hooks, the pane's loop, which then lets its tmux end).
     # The file waits in CLOSING until reap is done with it.
@@ -3703,6 +4259,8 @@ def cmd_reap(sid):
     if had_branch:
         sh("git", "branch", "-d", s["branch"], cwd=repo_dir)    # kept when it isn't merged
     shutil.rmtree(claude_dir(sid), ignore_errors=True)
+    for x in (PREVIEWS / f"{sid}.json", PREVIEWS / f"{sid}.log"):
+        x.unlink(missing_ok=True)
     set_trust(path, False)
     f.unlink(missing_ok=True)
     (CLOSING / f"{sid}.lock").unlink(missing_ok=True)
@@ -3715,6 +4273,9 @@ def cmd_close(args):
     if not s:
         return fail(f"No session {sid!r}" if sid else "Not in a session (name one: amarchy close <id>)")
     err = close(sid, force="--force" in args)
+    if err and err.startswith(PREVIEW_LEFT):
+        return fail(f"{sid}: {err}. Stop that (amarchy preview stop, or what started it), then close it again; "
+                    f"if it isn't this chat's, amarchy preview --clear forgets the preview")
     if err:
         return fail(f"{sid}: {err} (amarchy close {sid} --force discards them)")
     return 0
@@ -3776,8 +4337,12 @@ def agent_context(s):
                  "as the choices you offered. ")
     if bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
-                 f"(reachable only from their private network), and put http://{name}:<port> on its Preview button with "
-                 f"`amarchy preview <url>`. ")
+                 f"(reachable only from their private network) and register it as this chat's preview: "
+                 f"`amarchy preview --run '<command>' http://{name}:<port>` (plus `--port <n>` for each other port "
+                 f"it takes, like an HMR port, and `--stop '<command>'` if it starts something elsewhere, like "
+                 f"containers). amarchy runs it as a service of the chat's own, so it outlives your sleep, puts it "
+                 f"on the Preview button (which starts it again when it isn't running), and stops it when the chat "
+                 f"is completed. Don't leave a dev server in your background shells: it stops when the chat sleeps. ")
     else:
         text += (f"What you serve here is reachable only on this machine: listen on localhost, and to open "
                  f"it they forward the port (ssh -L <port>:localhost:<port> {name}) and use "
@@ -3839,6 +4404,9 @@ def cmd_hook(sid, state):
         if refused:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                      "permissionDecisionReason": refused}}))
+        elif serve_reminder(event):
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                     "additionalContext": serve_reminder(event)}}))
     # A background session forked from this one (/bg) carries its hooks, but
     # it isn't the session's own Claude: it says nothing about the session.
     if hook_claude().get("kind") == "bg":
@@ -4207,7 +4775,8 @@ def session_view():
         if s["status"] == "idle" and runs and not s["sleeping"] and not s.get("setup"):
             s["status"] = "running"
         s["priority"] = priority(s)
-        s["preview_up"] = preview_up(s["preview"]["url"]) if s.get("preview") else False
+        s["preview_state"] = preview_state(s)
+        s["preview_up"] = s["preview_state"] == "up"
         # Its last turn was cut off (the machine ran out of memory, Claude
         # crashed): idle, but not done. Asleep or not, it says so.
         s["interrupted"] = interrupted(s)
@@ -7753,7 +8322,10 @@ def app_closing(s):
     changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.is_dir() else 0
     tasks = (agent_live(s["id"]).get("tasks") or []) if engine(s) == "chat" else []
     runs, _ = background_runs(tasks, background_sessions(s))
-    return {"changes": changes, "amarchy": installed_from(path), "running": runs}
+    p = s.get("preview") or {}
+    # Its preview stops too (and is checked gone: the close itself says if it isn't).
+    preview = p["url"] if p.get("run") and preview_state(s) in ("up", "starting") else ""
+    return {"changes": changes, "amarchy": installed_from(path), "running": runs, "preview": preview}
 
 
 # ---- the wide layout's side panel (desk.js): a session's Changes and Details
@@ -7946,6 +8518,7 @@ def app_details(s):
         out["live"] = {k: live.get(k) for k in ("state", "tasks", "rate_limits", "cost_usd", "turns", "version")}
     else:
         out["model"], out["mode"] = transcript_settings(s)
+    out["preview"] = preview_info(s, lines=12)
     out["background"] = [{"name": d.get("name") or d.get("jobId") or (d.get("sessionId") or "")[:8],
                           "status": d.get("status"), "started": (d.get("startedAt") or 0) / 1000,
                           "cwd": d.get("cwd")} for d in background_sessions(s)]
@@ -10567,8 +11140,8 @@ def app_handler(st, users, address):
                 with st.changed:
                     ss = list(st.view.get("sessions") or [])
                 return self.send(200, {"q": q, "results": search_chats(q, ss)})
-            if path == "/api/automations":      # what runs by itself (see "automations")
-                return self.send(200, {"automations": automation_list(), "at": time.time()})
+            if path == "/api/automations":      # what runs by itself (see "automations"), and the chats' previews
+                return self.send(200, {"automations": automation_list(), "previews": preview_running(), "at": time.time()})
             if path == "/api/automations/log":
                 a = automation_find((args.get("id") or [""])[0])
                 if not a:
@@ -10593,6 +11166,17 @@ def app_handler(st, users, address):
                 self.end_headers()
                 self.wfile.write(found[1])
                 return
+            m = re.fullmatch(r"/api/session/([^/]+)/preview", path)
+            if m:       # a chat's preview, whole (its sheet, the page that waits for it)
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                info = preview_info(s, lines=60)
+                if not info:
+                    return self.error(404, "This chat has no preview")
+                with st.changed:
+                    row = next((x for x in st.view.get("sessions") or [] if x.get("id") == s["id"]), {})
+                return self.send(200, {**info, "task": row.get("task") or s.get("title") or s["name"], "id": s["id"]})
             m = re.fullmatch(r"/api/session/([^/]+)/(changes|details)", path)
             if m:
                 s = self.session(m.group(1))
@@ -10997,13 +11581,29 @@ def app_handler(st, users, address):
             if m:
                 s = self.session(m.group(1))
                 return self.chat(s, m.group(2), data) if s else None
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|wake|sleep)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|wake|sleep|preview)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
             what = m.group(2)
             if what in ("rename", "run", "commands"):
                 return self.desk_action(s, what, data)
+            if what == "preview":       # {action: start|restart|stop}: its Preview button, its sheet
+                action = data.get("action")
+                if action not in ("start", "restart", "stop"):
+                    return self.error(400, "start, restart or stop")
+                if not (s.get("preview") or {}).get("run"):
+                    return self.error(409, "Its preview has no command to start it with")
+                if action == "stop":
+                    left = preview_stop(s)
+                    if left:
+                        return self.send(409, {"error": "Stopped, but something is left", "left": left,
+                                               "preview": preview_info(s)})
+                else:
+                    why = preview_start(s, restart=action == "restart")
+                    if why:
+                        return self.error(409, f"It didn't start: {why}")
+                return self.send(200, {"preview": preview_info(s)})
             if what == "assistant":
                 return self.assistant(s, data)
             if what == "seen":
@@ -11031,7 +11631,11 @@ def app_handler(st, users, address):
                 closing = app_closing(s)
                 if closing["changes"] and data.get("discard") is not True:
                     return self.send(409, {"error": "It has uncommitted changes", **closing})
-                r = run_amarchy("close", s["id"], *(["--force"] if closing["changes"] else []))
+                # Its preview stopped and checked gone first: what's left, its Claude stops.
+                left = preview_close(s)
+                if left:
+                    return self.send(409, {"error": "Its preview is still running", "preview_left": left, **closing})
+                r = run_amarchy("close", s["id"], *(["--force"] if closing["changes"] else []), timeout=150)
                 return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr))
             if what == "priority":
                 level = data.get("level")
@@ -12667,7 +13271,7 @@ REPLY_FORMAT = """amarchy shows the person each of your replies as a card built 
   - Not yet
   ```
 - A link for them to open goes in a link block; a date to keep, in an event block.
-- Something live for them to look at (a dev server you started, a preview, a deploy): as soon as it answers, before your reply, run `amarchy preview <url>`. It puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation. Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
+- Something live for them to look at: a dev server, register it as the chat's preview instead of starting it in your shell (`amarchy preview --run '<command>' <url>`: amarchy runs it, keeps it through your sleep, and stops it when the chat is completed); a deploy, `amarchy preview <url>`. Either puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation (it starts the server again when it isn't running). Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used go last, under "## Sources", as links.
 - The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the card: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, the reply gives them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one: it's the Review button on the chat's card. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
   ```goal state="working"
@@ -14121,7 +14725,8 @@ OPTIONS = {
     "close": ({"--force"}, set(), set()),
     "rename": ({"--id", "--reset"}, {"--id"}, set()),
     "run": ({"--show", "--set", "--save", "--forget", "--list"}, {"--forget"}, {"--set", "--save"}),
-    "preview": ({"--id", "--clear"}, {"--id"}, set()),
+    "preview": ({"--id", "--clear", "--run", "--stop", "--url", "--port", "--memory", "--idle", "--lines", "--no-start"},
+                {"--id", "--run", "--stop", "--url", "--port", "--memory", "--idle", "--lines"}, set()),
     "priority": ({"--id"}, {"--id"}, set()),
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
@@ -14145,7 +14750,7 @@ OPTIONS = {
     "terminals": (set(), set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
-    "reap": None, "shorten": None, "attach": None, "held": None,
+    "reap": None, "preview-exec": None, "shorten": None, "attach": None, "held": None,
     "paste": None, "agent": None, "brief-mcp": None, "claude-reload": None,
 }
 HELP = ("-h", "--help")
@@ -14254,6 +14859,8 @@ def main(argv):
         return cmd_sleep(args)
     elif cmd == "wake":
         return cmd_wake(args)
+    elif cmd == "preview-exec" and args:
+        return cmd_preview_exec(args)
     elif cmd == "reap" and len(args) == 1:
         return cmd_reap(args[0])
     elif cmd == "claude" and len(args) == 1:

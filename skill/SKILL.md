@@ -144,13 +144,34 @@ command's usage without running it (an option it doesn't know fails instead).
   dependency, config, migrations, server code without reload), or when the user
   asks. The user sees it in the app when terminals are on.
 - `amarchy run <name>`: run another saved command the same way.
-- `amarchy preview <url>`: put what you serve for the user to look at (a dev
-  server, a deploy) on this chat's **Preview** button, on its head and its card,
-  where it stays. Run it as soon as it answers, and again when the address
-  changes; `amarchy preview --clear` when you stop serving it for good. On a host
-  a localhost address is refused: it wouldn't reach their browser. Nothing
-  answering, the button reads Restart preview, and its tap reaches you as a message
-  saying so: start it again.
+- `amarchy preview --run '<command>' <url>`: what you serve for the user to look
+  at (a dev server) is the chat's **preview**, not a background shell of yours.
+  **Register it instead of starting it yourself** (no `run_in_background`, no
+  `&`, no `systemd-run` of your own): amarchy runs the command as a service of the
+  chat's own (`amarchy-preview-<id>`), so it outlives your sleep (a server in your
+  shells stops a minute after the chat goes idle), puts it on the chat's
+  **Preview** button (its head and its card), and returns once it answers (or
+  with its log when it doesn't). The button starts it again when it isn't running
+  (no message to you), and **Complete** stops it and checks it's gone.
+  - Listen on the host's address (your SessionStart context: `--host 100.x.y.z`),
+    on a free port; the URL is `http://<host>:<port>`. A localhost URL is refused.
+  - `--port <n>` for each other port it takes (an HMR / websocket port, an API
+    beside it): amarchy checks they're free before it starts, and after it stops.
+  - `--stop '<command>'` when it starts something outside itself that must go too
+    (`docker compose down`): it runs on stop and on Complete.
+  - It's capped at `--memory 2G` (raise it only if it really needs more: other chats
+    share the machine) and stops after `--idle 3h` unused (nobody had its page open,
+    the chat idle); the button starts it again in one tap.
+  - Its output: `amarchy preview log [--lines n]` (you can't read the terminal, but
+    you can read this). `amarchy preview status` says where it stands (JSON).
+  - `amarchy preview restart` after a change it won't pick up by itself (a new
+    dependency, config), `start`, `stop`. Register again to change the command.
+  - A server it keeps in memory (an in-memory dev database) keeps its data while it
+    runs, through your sleep; a restart loses it, as any restart would.
+  - Something on one of its ports already: one of this chat's own old servers is
+    stopped for it; anyone else's makes it refuse, saying whose (pick another port).
+- `amarchy preview <url>`: a deploy or anything served elsewhere: an address only,
+  on the same button. `amarchy preview --clear` stops it and takes it off.
 - `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key or
   password from the user without it going through the chat (see "Secrets"
   below).
@@ -192,8 +213,8 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   session never sleeps while it's working, asking the user something, or running
   background commands that run to an end, or agents. What it left serving (a dev
   server, a watcher, its terminal's run command, a headless browser) stops when it
-  sleeps, unless the user has its page open; so start servers again after a wake
-  (its Preview button then asks you to). Never add `--force` without explicit approval:
+  sleeps, unless the user has its page open; its registered preview
+  (`amarchy preview --run`) never does: it's the chat's, not yours. Never add `--force` without explicit approval:
   it sleeps a session even when something is lost. You can be put to sleep too,
   between turns: nothing you'd need is lost, the conversation resumes as it was.
 - `amarchy priority high|normal|low|up|down [--id <id>]`: how much a session
@@ -226,8 +247,10 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   See "Talking to other sessions".
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
-- `amarchy close <id>`: close **another** session. It stops every process still
-  running from that worktree (dev servers started in the background too),
+- `amarchy close <id>`: close **another** session. It stops its preview first and
+  refuses while something still holds one of its ports (it says what: stop that,
+  or `amarchy preview --clear --id <id>` if it isn't that chat's), then stops every
+  process still running from that worktree (dev servers started in the background too),
   removes the worktree, and refuses if it has uncommitted changes. Never add
   `--force` without explicit approval: it discards them.
 - `amarchy automations run|pause|resume <timer>`: run a job now, or pause it

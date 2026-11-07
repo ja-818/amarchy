@@ -595,3 +595,18 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @media (prefers-reduced-motion: reduce) {
   .ui-crew-art *, .ui-pirate-mark, .ui-confetti i { animation: none !important; }
 }
+
+/* ---- a chat's preview: its sheet (ui.js uiPreviewSheet), and the page that
+   waits for it to start (preview.html), the app's card in your theme */
+.ui-preview.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--button-border)); }
+.preview-state { margin: 0 0 8px; font-weight: 700; }
+.preview-state.failed { color: var(--danger); }
+.preview-state.up { color: var(--success); }
+.preview-log { max-height: 40vh; overflow: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono, ui-monospace, monospace); font-size: var(--caption, 12px); }
+.preview-one .details { margin-bottom: 12px; }
+.preview-one .details .kv { grid-template-columns: 96px minmax(0, 1fr); }
+.preview-page { min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box; }
+.preview-wait { width: min(640px, 100%); }
+.preview-wait .tcard-body { padding: 0 var(--card-pad-x) 12px; display: grid; gap: 10px; }
+.preview-wait .preview-say { margin: 0; color: var(--text-muted); }
+.preview-wait .tcard-actions { display: flex; gap: 8px; padding: 0 var(--card-pad-x) 14px; flex-wrap: wrap; }

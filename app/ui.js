@@ -29,7 +29,9 @@
 // - uiChart: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat, as its card's head: Back, its project
 //   and name (a tap: rename), its pill; its menu, Complete.
-// - uiPreview: a chat's live preview, a tap away, on its head and its card.
+// - uiPreview: a chat's live preview, a tap away, on its head and its card;
+//   uiPreviewSheet, all of it (start, stop, its log); uiPreviewLeft, what
+//   Complete found still running.
 // - uiAction: a bar's one thing to do (New chat, Complete), outlined.
 // - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
 // - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
@@ -376,41 +378,161 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
 }
 
 // A chat's live preview (amarchy preview): the same on its head and its card,
-// there as soon as its Claude sets it. Nothing answering, a tap asks that
-// Claude to start it again (a message, as yours is; it wakes a sleeping one).
+// there as soon as its Claude registers it. Answering, a tap opens it. Not
+// running, a tap starts it (the server runs its command, no message to
+// Claude) and opens the page that waits for it (preview.html), which turns
+// into it once it answers. Failed, a tap opens its sheet (what it wrote, Try
+// again, Ask Claude to fix it). One registered as an address only (from
+// before), nothing answering: a tap asks its Claude to start it, and to
+// register it, as a message (once a minute at most).
 const uiPreviewAsked = new Map();     // chat -> when: asked, for the moment it takes
+
+const UI_PREVIEW_WORDS = { up: "Preview", starting: "Starting…", stopped: "Start preview", failed: "Preview failed", down: "Restart preview" };
+
+function uiPreviewOf(s) {
+  return s.preview_state || (s.preview_up ? "up" : s.preview && s.preview.run ? "stopped" : "down");
+}
 
 function uiPreviewGo(s) {
   if (!s || !s.preview) return toast("No preview in this chat yet");
-  if (s.preview_up) return openLink(s.preview.url);
+  const state = uiPreviewOf(s);
+  if (state === "up") return openLink(s.preview.url);
+  if (state === "failed") return uiPreviewSheet(s);
+  if (state === "stopped" || state === "starting") return openLink(new URL(`/preview.html?id=${encodeURIComponent(s.id)}`, location.href).href, { here: true });
   const at = uiPreviewAsked.get(s.id);
   if (at && Date.now() - at < 60000) return;
   uiPreviewAsked.set(s.id, Date.now());
-  api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: `The preview at ${s.preview.url} isn't answering: start it again.` })
+  api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: `The preview at ${s.preview.url} isn't answering: start it again, and register it (amarchy preview --run '<command>' ${s.preview.url}) so its Preview button starts it from now on.` })
     .then(() => toast("Asked it to start the preview again"))
     .catch((e) => { uiPreviewAsked.delete(s.id); toast(e.message); });
 }
 
 function uiPreview(s, { head = false } = {}) {
   if (!s.preview) return null;
-  if (s.preview_up) uiPreviewAsked.delete(s.id);
-  const asked = !s.preview_up && Date.now() - (uiPreviewAsked.get(s.id) || 0) < 60000;
-  const words = s.preview_up ? "Preview" : asked ? "Restarting…" : "Restart preview";
-  const title = s.preview_up ? `Open ${s.preview.url}` : `${s.preview.url} isn't answering: ask its Claude to start it again`;
+  const state = uiPreviewOf(s);
+  if (state !== "down") uiPreviewAsked.delete(s.id);
+  const asked = state === "down" && Date.now() - (uiPreviewAsked.get(s.id) || 0) < 60000;
+  const words = asked ? "Restarting…" : UI_PREVIEW_WORDS[state];
+  const title = { up: `Open ${s.preview.url}`, starting: `${s.preview.url} is starting: open it once it answers`,
+                  stopped: `Start ${s.preview.url} and open it`, failed: `${s.preview.url} stopped with an error: see why`,
+                  down: `${s.preview.url} isn't answering: ask its Claude to start it again` }[state];
   const go = (e) => {
     e.stopPropagation();
     e.preventDefault();
     uiPreviewGo(s);
-    if (!s.preview_up) {
+    if (state === "down") {
       const b = e.currentTarget;
       b.disabled = true;
       (b.querySelector(".label") || b).textContent = "Restarting…";
     }
   };
-  if (head) return h("button", { class: "control ui-action ui-preview", type: "button", title, "aria-label": words,
+  const cls = `ui-preview${state === "failed" ? " bad" : ""}`;
+  if (head) return h("button", { class: `control ui-action ${cls}`, type: "button", title, "aria-label": words,
                                  disabled: asked || null, onclick: go }, glyph("preview"), h("span", { class: "label" }, words));
-  if (s.preview_up) return h("a", { class: "tbtn ui-preview", href: s.preview.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
-  return h("button", { class: "tbtn ui-preview", type: "button", title, disabled: asked || null, onclick: go }, words);
+  if (state === "up") return h("a", { class: `tbtn ${cls}`, href: s.preview.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
+  return h("button", { class: `tbtn ${cls}`, type: "button", title, disabled: asked || null, onclick: go }, words);
+}
+
+// Its size, as said: 412 MB, 1.4 GB.
+function uiBytes(n) {
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`;
+}
+
+// Where a chat's preview stands, in words (its sheet, Details, Automations).
+function uiPreviewStatus(p) {
+  const since = (t) => (t ? new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
+  const why = { idle: `unused for ${Math.round((p.idle || 10800) / 3600 * 10) / 10} h`, closed: "the chat was completed", changed: "its command changed", cleared: "taken off" };
+  const mem = p.memory ? ` · ${uiBytes(p.memory)} of ${p.memory_max}` : "";
+  switch (p.state) {
+    case "up": return p.run ? `Running${mem}${p.since ? ` · since ${since(p.since)}` : ""}` : "Answering";
+    case "starting": return `Starting${mem}`;
+    case "failed": return "Stopped with an error";
+    case "stopped": return p.why && why[p.why] ? `Stopped: ${why[p.why]}` : "Not running";
+    default: return "Not answering";
+  }
+}
+
+// A chat's preview, whole: where it stands, what runs it, what it wrote,
+// and Open, Start, Restart, Stop (Ask Claude to fix it, when it failed). Its
+// sheet, on the phone and the computer; the chat's menu opens it.
+async function uiPreviewSheet(s) {
+  const id = s.id;
+  const body = h("div", { class: "preview-one" }, h("p", { class: "hint" }, "…"));
+  const back = sheet({ key: "preview" }, sheetHead("Preview", s.task || ""), body);
+  let p = null, busy = "";
+  const act = async (action) => {
+    busy = action;
+    draw();
+    try {
+      const d = await api(`/api/session/${encodeURIComponent(id)}/preview`, { action });
+      p = d.preview || p;
+      if (action !== "stop") openLink(new URL(`/preview.html?id=${encodeURIComponent(id)}`, location.href).href, { here: true });
+    } catch (e) {
+      toast(e.message);
+      if (e.data && e.data.preview) p = e.data.preview;
+    }
+    busy = "";
+    draw();
+  };
+  const fix = () => {
+    const log = (p.log || "").split("\n").slice(-15).join("\n");
+    api(`/api/session/${encodeURIComponent(id)}/send`, { text: `The preview (${p.run}) stopped with an error. Its log ends:\n\n${log}\n\nFix it and start it again (amarchy preview restart).` })
+      .then(() => { toast("Asked Claude to fix it"); closeSheet(); }, (e) => toast(e.message));
+  };
+  const item = (label, value) => (value ? h("div", { class: "kv" }, h("span", { class: "k" }, label), h("span", { class: "v" }, value)) : null);
+  const draw = () => {
+    if (!p) return;
+    const running = p.state === "up" || p.state === "starting";
+    const button = (label, action, primary) => h("button", { class: `control wide${primary ? " primary" : ""}`, type: "button", disabled: !!busy || null,
+                                                       onclick: () => act(action) }, busy === action ? `${label}…` : label);
+    const kids = [
+      h("p", { class: `preview-state ${p.state}` }, uiPreviewStatus(p)),
+      h("div", { class: "details" },
+        item("Address", h("code", {}, p.url)),
+        item("Command", p.run ? h("code", {}, p.run) : "None: an address only"),
+        item("Stops with", p.stop ? h("code", {}, p.stop) : null),
+        item("Ports", (p.ports || []).length ? p.ports.join(", ") : null),
+        item("Limits", p.run ? `${p.memory_max} of memory · stops after ${Math.round(p.idle / 360) / 10} h unused` : null)),
+      p.state === "up" ? h("button", { class: "control wide primary", type: "button", onclick: () => openLink(p.url) }, "Open it") : null,
+      p.run && !running ? button(p.state === "failed" ? "Try again" : "Start it", "start", p.state !== "up") : null,
+      p.run && running ? button("Restart", "restart") : null,
+      p.run && running ? button("Stop", "stop") : null,
+      p.state === "failed" ? h("button", { class: "control wide", type: "button", onclick: fix }, "Ask Claude to fix it") : null,
+      p.log ? h("div", { class: "section" }, "What it wrote") : null,
+      p.log ? h("pre", { class: "auto-log preview-log", role: "log" }, p.log) : null,
+    ];
+    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids.filter(Boolean)));
+  };
+  const load = async () => {
+    try {
+      const r = await fetch(`/api/session/${encodeURIComponent(id)}/preview`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Couldn't read it");
+      p = d;
+      draw();
+    } catch (e) {
+      if (!p) body.replaceChildren(h("p", {}, e instanceof TypeError ? "Can't reach Amarchy" : e.message));
+    }
+  };
+  back.redraw = load;
+  await load();
+  const tick = setInterval(() => {
+    if (!back.isConnected) return clearInterval(tick);
+    if (!back.hidden && document.visibilityState === "visible" && !busy) load();
+  }, 2000);
+}
+
+// Complete stopped its preview, and something of it is still there (a
+// process on its port, what its stop command didn't stop): the chat stays
+// until it's gone. Its Claude is asked to stop it; you complete it after.
+function uiPreviewLeft(s, left) {
+  const ask = () => api(`/api/session/${encodeURIComponent(s.id)}/send`, {
+    text: `I want to complete this chat, but its preview is still running after amarchy stopped it:\n${left.map((x) => `- ${x}`).join("\n")}\n\nStop it (and whatever started it), check its ports are free, then tell me it's done so I can complete the chat. If it isn't this chat's, run amarchy preview --clear.` })
+    .then(() => { toast("Asked Claude to stop it"); closeSheets(); }, (e) => toast(e.message));
+  sheet({ key: "preview-left" }, sheetHead("Its preview is still running", "Complete it once that's stopped"),
+    h("ul", { class: "close-stops" }, ...left.map((x) => h("li", {}, x))),
+    h("button", { class: "control wide primary", type: "button", onclick: ask }, "Ask Claude to stop it"),
+    h("button", { class: "control wide", type: "button", onclick: closeSheet }, "Cancel"));
 }
 
 // A bar's one thing to do, outlined (not filled): an icon, its words (an

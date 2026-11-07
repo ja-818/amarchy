@@ -246,9 +246,11 @@ function todayCloseNow(ss, said = "") {
       try {
         await api(`/api/session/${encodeURIComponent(s.id)}/close`, { discard: false });
       } catch (e) {
-        failed.push(`${s.task || s.name}: ${e.message}`);
         todayUI.closing.delete(s.id);
         missionUndo([s]);
+        // Its preview didn't stop: its Claude is asked to, and you complete it after.
+        if (e.data && e.data.preview_left) uiPreviewLeft(s, e.data.preview_left);
+        else failed.push(`${s.task || s.name}: ${e.message}`);
       }
     }
     if (failed.length) { toast(`Didn't close ${failed.join("; ")}`); todayRedraw(); }

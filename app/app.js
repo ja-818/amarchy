@@ -179,7 +179,7 @@ async function api(path, body) {
   }
   let data = {};
   try { data = await res.json(); } catch (e) { /* no body */ }
-  if (!res.ok) throw new Error(data.error || `It didn't work (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `It didn't work (${res.status})`), { status: res.status, data });
   return data;
 }
 
@@ -377,8 +377,9 @@ function follow(href, target) {
 }
 
 // Called from a click (or a key), so the browser lets it open something.
-function openLink(uri) {
-  const url = outward(uri);
+// here: a page of this app's (preview.html), opened as a link elsewhere is.
+function openLink(uri, { here = false } = {}) {
+  const url = here ? new URL(uri, location.href).href : outward(uri);
   if (!url) return;
   const b = linkBrowser();
   if (!b) return follow(url, "_blank");
@@ -864,12 +865,15 @@ async function confirmClose(s, known) {
   // What it runs that hasn't ended (a test run, a helper) stops halfway: said whole.
   const runs = c.running || [];
   const stops = runs.length ? h("p", { class: "close-stops" }, `Stops what's still running: ${runs[0]}${runs.length > 1 ? ` (and ${runs.length - 1} more)` : ""}.`) : null;
+  // Its preview stops with it (and is checked gone).
+  const preview = c.preview ? h("p", { class: "close-stops" }, `Stops its preview, ${c.preview}.`) : null;
   const yes = h("button", { class: "control wide danger", onclick: async () => {
     yes.disabled = true;
     try {
       const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/close`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ discard: n > 0 }) });
       const d = await res.json().catch(() => ({}));
+      if (res.status === 409 && d.preview_left) { closeSheets(); return uiPreviewLeft(s, d.preview_left); }     // still running: its Claude stops it first
       if (res.status === 409 && d.changes) return confirmClose(s, d);      // changes since: ask again
       if (!res.ok) throw new Error(d.error || "It didn't close");
       closeSheets();
@@ -882,7 +886,7 @@ async function confirmClose(s, known) {
       toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message);
     }
   } }, n ? "Complete and discard changes" : runs.length ? "Stop it and complete" : "Complete mission ✓");
-  sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), stops, yes,
+  sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), stops, preview, yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
 }
 
@@ -1035,6 +1039,7 @@ class SessionView {
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
+      row.preview ? h("button", { class: "control wide", onclick: () => { closeSheets(); uiPreviewSheet({ ...row, id: this.id }); } }, "Preview…") : null,
       ...sessionActions({ ...row, id: this.id }),
       closeButton({ ...row, id: this.id }),
       h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);

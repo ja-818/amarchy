@@ -7,6 +7,10 @@
 // job arms for itself (a meeting's alarms) are under it, not in the list.
 // The server's side is "automations" in bin/amarchy (amarchy automations).
 //
+// The chats' previews running now (amarchy preview: dev servers, each a
+// service of its own) are on top, with the memory each takes: one opens its
+// sheet, where it stops.
+//
 // The way in: the clock beside the gear (the phone's list), the clock in the
 // list's bar and the menu (a computer), Settings. It wears a red dot while
 // one's last run failed.
@@ -14,7 +18,7 @@
 const AUTO_POLL = 120000;     // ms between looks for a failed one (the dot), while the app is in sight
 const AUTO_LIVE = 2000;       // ms between looks while one you started runs
 const AUTO_LIVE_MAX = 180000; // ms it's watched that way at most
-const autoState = { list: null, at: 0, failed: 0, loading: null };
+const autoState = { list: null, previews: [], at: 0, failed: 0, loading: null };
 
 async function automationsGet() {
   if (autoState.loading) return autoState.loading;
@@ -24,6 +28,7 @@ async function automationsGet() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "Can't read the automations");
       autoState.list = d.automations || [];
+      autoState.previews = d.previews || [];
       autoState.at = Date.now();
       autoState.failed = autoState.list.filter(autoFailed).length;
       autoDots();
@@ -158,6 +163,14 @@ function autoRow(a, byId) {
     glyph("next", "go"));
 }
 
+// A chat's preview running: its chat, its address, its memory; a tap, its sheet.
+function previewRow(p) {
+  return h("button", { class: "auto-row running", type: "button", "data-id": p.id, onclick: () => uiPreviewSheet({ id: p.id, preview: { url: p.url, run: p.run } }) },
+    h("span", { class: "auto-mark running", "aria-hidden": "true" }),
+    h("span", { class: "text" }, h("b", {}, p.task), h("span", { class: "about" }, p.url), h("small", {}, uiPreviewStatus(p))),
+    glyph("next", "go"));
+}
+
 async function automationsSheet() {
   const body = h("div", { class: "auto-body" }, autoState.list ? null : h("p", {}, "…"));
   const back = sheet({ key: "automations" }, sheetHead("Automations", "What runs for you by itself, on your host"), body);
@@ -166,6 +179,12 @@ async function automationsSheet() {
     if (!list) return;
     const byId = Object.fromEntries(list.map((a) => [a.id, a]));
     const kids = [];
+    const previews = autoState.previews || [];
+    if (previews.length) {
+      const total = previews.reduce((n, p) => n + (p.memory || 0), 0);
+      kids.push(h("div", { class: "section" }, `Previews running${total ? ` · ${uiBytes(total)}` : ""}`),
+        h("div", { class: "auto-list" }, ...previews.map(previewRow)));
+    }
     if (!list.length) kids.push(h("p", {}, "Nothing runs by itself here yet. A project's scheduled jobs (systemd user timers) show up here once they're set up."));
     if (autoState.failed) kids.push(h("p", { class: "auto-alert" }, `${autoState.failed === 1 ? "One" : autoState.failed} failed the last time it ran: tap it for its log.`));
     for (const [owner, rows] of autoGroups(list)) {

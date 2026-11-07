@@ -1177,6 +1177,12 @@ class DeskDetails {
       kids.push(use(lim.five_hour, "Plan, 5 hours"), use(lim.seven_day, "Plan, this week"),
         live.turns ? item("This run", `${live.turns} turn${live.turns === 1 ? "" : "s"}${live.cost_usd ? ` · $${live.cost_usd.toFixed(2)} at API prices` : ""}`) : null);
     }
+    // Its preview (amarchy preview): where it stands; all of it in its sheet.
+    const p = d.preview;
+    if (p) kids.push(h("div", { class: "section" }, "Preview"),
+      item("Address", h("code", {}, p.url), h("button", { class: "text-btn", type: "button", onclick: () => uiPreviewSheet({ ...s, id: d.id, preview: s.preview || p }) }, "Open its sheet")),
+      item("State", uiPreviewStatus(p)),
+      item("Command", p.run ? h("code", {}, p.run) : null));
     const tasks = Array.isArray(live.tasks) ? live.tasks : [];
     const bg = d.background || [];
     kids.push(h("div", { class: "section" }, "In the background"));
@@ -1675,6 +1681,7 @@ function sessionItems(s) {
     { label: "Add a picture or a file…", detail: "it goes with your next message",
       act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
     { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo }) },
+    ...(s.preview ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s) }] : []),
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",

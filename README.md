@@ -28,6 +28,9 @@ When one of them asks you something or finishes, you know.
   app card, and the value is kept on your machine, never in the conversation.
 - **Light on memory.** A chat you're not using goes to sleep and frees its memory. Send it
   something and it wakes up where it was.
+- **Previews that stay up.** What a chat serves for you to look at (a dev server) runs as the
+  chat's own service, capped in memory: a sleeping Claude doesn't take it down, its Preview
+  button starts it again in one tap, and completing the chat stops it and checks it's gone.
 - **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
   working while your laptop or phone sleeps.
 - **On your phone and in your browser.** An app you add to your home screen, and the same

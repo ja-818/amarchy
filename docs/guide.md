@@ -101,7 +101,7 @@ and the chat goes away; without a network it starts from what was fetched last.
 **Close** a chat when you're done with it. Closing asks first if it has uncommitted
 changes, and says what would be lost. Its Claude exits as if you had quit it, any
 process still running from its worktree is stopped (a dev server Claude started in
-the background, say), the worktree is removed, and the branch is deleted if it was
+the background, say), its preview is stopped and checked gone (Preview, below), the worktree is removed, and the branch is deleted if it was
 merged. Close is the only thing that ends a chat for good.
 
 ## The chat
@@ -466,9 +466,9 @@ its terminal (its run command). amarchy finds them by the chat's own process gro
 on the host (each pane's systemd scope), so nothing of another chat's is touched.
 One thing keeps them: **its page open** in a browser on your phone or computer
 (a dev server's page holds a connection to it while it's open). Then they stay,
-and stop once you've closed it. Its **Preview** button reads **Restart preview**
-after that: a tap asks its Claude to start it again. Closing a chat stops all of it
-too.
+and stop once you've closed it. Closing a chat stops all of it too. Its
+**preview** is the exception: it's the chat's, not its Claude's, and sleep never
+touches it (below).
 
 A chat whose turn was **cut off** before it finished (the machine ran out of
 memory, or restarted, or Claude crashed) says **Interrupted**, asleep or not,
@@ -491,11 +491,39 @@ to sleep**.
 
 ## Claude knows it's in amarchy
 
-**Preview.** When Claude serves something for you to look at (a dev server, a
-deploy), it puts the address on the chat with `amarchy preview <url>`: a **Preview**
-button appears on the chat's head and its card, and stays whichever reply you're on.
-If nothing answers there any more, it reads **Restart preview**, and a tap asks that
-chat's Claude to start it again. `Ctrl+Alt+R` (`r` on the board) opens it.
+**Preview.** What a chat serves for you to look at (a dev server) is its
+**preview**. Its Claude registers it once, with the command that serves it, its
+address and the ports it takes:
+
+```sh
+amarchy preview --run 'pnpm dev --host 100.89.29.4 --port 5180' http://amarchy:5180 \
+  --port 24680 --stop 'docker compose down'
+```
+
+amarchy runs the command as a systemd user service of the chat's own
+(`amarchy-preview-<chat>`), outside Claude, so the chat sleeping doesn't stop it;
+capped at 2 GB of memory (`--memory`), and among the first things the kernel kills
+when memory runs out, before any chat. A **Preview** button appears on the chat's
+head and its card, and stays whichever reply you're on:
+
+| It says | When | A tap |
+| --- | --- | --- |
+| **Preview** | it answers | opens it |
+| **Start preview** | it isn't running (stopped, the machine restarted) | starts it, and opens a page that turns into it once it answers |
+| **Starting…** | its service runs, nothing answers yet | the same page |
+| **Preview failed** | it stopped with an error | its sheet: what it wrote, **Try again**, **Ask Claude to fix it** |
+| **Restart preview** | an address only (registered before, or a deploy) and nothing answers | asks its Claude to start it (and register it) |
+
+The chat's menu has **Preview…**: its sheet, with where it stands (memory, since
+when), its command and ports, what it wrote, and Start, Restart and Stop. Details
+shows it too, and **Automations** lists every preview running with its memory.
+
+It stops by itself after **3 hours unused** (`--idle`): nobody had its page open,
+and the chat sat idle. **Complete** stops it (its `--stop` command too) and checks
+it's really gone: its service, and every one of its ports free. If something still
+holds one, the chat stays open and says what: **Ask Claude to stop it**, then
+complete it. A preview served elsewhere (a deploy) is an address only:
+`amarchy preview <url>`. `Ctrl+Alt+R` (`r` on the board) opens it.
 
 Each chat's Claude starts knowing where it is: which chat, worktree and branch it's
 on, where the project's main checkout is, and that the terminal runs the project.
