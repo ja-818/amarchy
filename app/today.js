@@ -70,6 +70,10 @@ function todayIsAnswered(s) {
   return true;
 }
 
+// Answered and you haven't opened it since: its card lit (uiCard), wherever
+// it is, a question for you or not. Marked Seen, or answered on its card: seen.
+function todayUnseen(s) { return !!s.unseen && !todayUI.seen.has(s.id) && !todayIsAnswered(s); }
+
 function rowOf(id) { return app.view && app.view.sessions.find((s) => s.id === id) || null; }
 
 // A toast with Undo: act() runs when it's gone, unless Undo was pressed
@@ -159,7 +163,7 @@ function todayParts(v) {
   const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
   const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
   // Finished a turn you haven't opened: it needs you too (to see what it did).
-  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && !todayBusy(s) && s.unseen && !todayUI.seen.has(s.id));
+  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && !todayBusy(s) && todayUnseen(s));
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isMain(s));
   const done = rest.filter((s) => !todayBusy(s) && (s.today || {}).state === "done");
   const quietFor = (s) => now - ((s.today || {}).at || 0);
@@ -297,6 +301,7 @@ function todayPermit(s, choice) {
   todayAnswered(s.id);
   todayRedraw();
   todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
+    seenNow(s.id);
     api(`/api/session/${encodeURIComponent(s.id)}/answer`, { request_id: p.request_id, choice })
       .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
@@ -376,6 +381,7 @@ function todayAsk(s) {
     todayRedraw();
     todayUndo(`Sent to ${s.task || "the chat"}`, () => {
       todayUI.answers.delete(s.id);
+      seenNow(s.id);
       api(`/api/session/${encodeURIComponent(s.id)}/send`, { text })
         .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
     }, () => { todayUI.sent.delete(s.id); st.picks = {}; todayRedraw(); });
@@ -504,7 +510,7 @@ function todayChat(s, kind) {
   const seenBtn = kind === "fresh" && !finished ? uiButton("Seen", () => todaySeen(s), false, "quiet seen") : null;
   return uiCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
     title: main ? s.assistant_name || s.task : s.task || "New chat",
-    lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill, unseen: kind === "fresh",
+    lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
     actions: finished ? [review, uiPreview(s), complete]
       : kind === "fresh" ? [uiPreview(s), seenBtn]

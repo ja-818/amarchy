@@ -113,7 +113,7 @@ const T = (o) => ({ goal: "", state: "", goal_at: 0, asks: [], at: NOW - 600, ..
 
 const CHATS = [
   { id: "me-jaken", repo: "me", name: "jaken", task: "Jaken", status: "idle", engine: "chat", path: "/tmp/j", assistant: "main", assistant_name: "Jaken", today: T({}) },
-  { id: "proj-ask", repo: "proj", name: "ask", task: "Fellowship: application", status: "idle", engine: "chat", path: "/tmp/a",
+  { id: "proj-ask", repo: "proj", name: "ask", task: "Fellowship: application", status: "idle", unseen: true, engine: "chat", path: "/tmp/a",
     today: T({ goal: "Submit the application", state: "waiting", asks: [{ question: "Submit it now?", options: [{ label: "Submit", send: "Submit it now" }, { label: "Wait", send: "Wait until Friday" }] }] }) },
   { id: "proj-perm", repo: "proj", name: "perm", task: "Meta: verification", status: "waiting", asks: "Claude asks to run gcloud", engine: "chat", path: "/tmp/p", today: T({}),
     permission: { request_id: "req-1", tool: "Bash" } },
@@ -459,8 +459,9 @@ async function common(p, where) {
     return !!c && c.classList.contains("unseen") && /gradient/.test(getComputedStyle(c).backgroundImage) && /inset/.test(getComputedStyle(c).boxShadow)
       && !!pill && pill.innerText.trim() === "New" && !!pill.querySelector(".tpill-beat") && getComputedStyle(pill).backgroundColor !== "rgba(0, 0, 0, 0)"; }),
     "not seen yet: lit (washed, a bar down its edge, a filled New beating)");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.unseen")].every((c) => c.classList.contains("k-fresh") || c.querySelector(".tpill.t-new"))
-                                      && !document.querySelector(".tcard.k-ask.unseen, .tcard.k-working.unseen")), "only what you haven't seen is lit");
+  check(where, await p.evaluate(() => !!document.querySelector(".tcard.k-ask.unseen[data-id=proj-ask]")), "a question you haven't seen: lit too");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".tcard.unseen")].every((c) => ["proj-fresh", "proj-ask"].includes(c.dataset.id))),
+        "only what you haven't seen is lit");
   check(where, await p.evaluate(() => { const a = document.querySelector(".tcard.k-done a.tbtn"); return !!a && a.href === "https://github.com/x/y/pull/1" && /Open the PR/.test(a.innerText); }), "a done chat's Review: the link its reply gave");
   check(where, !!(await p.$(".tcard.k-assistant")), "your assistant: a line on top, never to finish");
   // Seen without opening: off Needs you.

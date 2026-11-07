@@ -207,10 +207,12 @@ function uiPatchPart(old, next) {
 // it is (k-<kind>, for its look); hue: its project's color (ph-<hue>); lead:
 // before the chip (an avatar); id: the chat it is, if one (its priority mark,
 // data-id for the keys); unseen: a chat that answered and you haven't opened
-// it since (lit, so it catches the eye).
-function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = false }) {
+// it since (lit, so it catches the eye), whatever it asks: by default its
+// chat's own (today.js todayUnseen).
+function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = null }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
+  if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
   const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
