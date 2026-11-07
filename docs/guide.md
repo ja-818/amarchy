@@ -471,7 +471,8 @@ too.
 
 A chat whose turn was **cut off** before it finished (the machine ran out of
 memory, or restarted, or Claude crashed) says **Interrupted**, asleep or not,
-instead of its last time or Ready: send it something to carry on (`amarchy list`:
+instead of its last time or Ready. **Resume**, on its card and in the chat, tells it
+to carry on where it was cut off (and wakes it if it sleeps) (`amarchy list`:
 `interrupted`).
 
 ```sh

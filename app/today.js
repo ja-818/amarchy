@@ -280,6 +280,21 @@ async function todayCloseDone(ss) {
   if (ask.length) confirmClose(ask[0][0], ask[0][1]);
 }
 
+// Resume a chat whose turn was cut off: it's told to carry on (and wakes for it).
+async function todayResume(s) {
+  todayUI.told.set(s.id, "resuming");
+  todayRedraw();
+  try {
+    await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: RESUME_TEXT });
+    todayUI.told.set(s.id, "resumed");
+    setTimeout(() => { if (todayUI.told.get(s.id) === "resumed") { todayUI.told.delete(s.id); todayRedraw(); } }, 60000);     // cut off again later: Resume again
+  } catch (e) {
+    todayUI.told.delete(s.id);
+    toast(e.message);
+  }
+  todayRedraw();
+}
+
 // Ask a stalled chat where it stands.
 async function todayNudge(s) {
   todayUI.told.set(s.id, "nudging");
@@ -512,7 +527,9 @@ function todayChat(s, kind) {
     title: main ? s.assistant_name || s.task : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
-    actions: finished ? [review, uiPreview(s), complete]
+    actions: s.interrupted && !main ? [uiPreview(s), told === "resuming" || told === "resumed" ? h("span", { class: "tcard-note" }, told === "resuming" ? "Resuming…" : "Resumed")
+                                         : uiButton("Resume", () => todayResume(s), true, "resume")]
+      : finished ? [review, uiPreview(s), complete]
       : kind === "fresh" ? [uiPreview(s), seenBtn]
       : kind === "stale" || stalled ? [uiPreview(s), told ? h("span", { class: "tcard-note" }, told === "nudging" ? "Asking…" : "Asked") : uiButton("Ask status", () => todayNudge(s)),
                                        uiButton("Complete mission", () => todayComplete(s), false, "complete")] : [uiPreview(s)] });

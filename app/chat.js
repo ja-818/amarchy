@@ -2240,8 +2240,9 @@ class Chat {
       // Its last turn was cut off (the machine ran out of memory): it says so,
       // asleep or not (what you send wakes it all the same).
       if (cut && sleep !== "waking") kids.push(h("div", { class: "dock-note interrupted" }, glyph("interrupted", "cut-mark"),
-        h("span", {}, "Interrupted before it finished. Send something to carry on."),
-        sleep === "asleep" ? h("button", { class: "text-btn", type: "button", onclick: () => wakeSession(this.row) }, "Wake") : null));
+        h("span", {}, "Interrupted before it finished."),
+        h("button", { class: "text-btn resume", type: "button", title: `Send it: ${RESUME_TEXT}`,
+                      onclick: () => this.post("send", { text: RESUME_TEXT }).catch((e) => toast(e.message)) }, "Resume")));
       // Asleep, what you send wakes it (with that as Claude's first message).
       else if (sleep === "asleep") kids.push(h("div", { class: "dock-note" }, glyph("asleep", "sleep"),
         h("span", {}, "Asleep to save memory. Send something to wake it."),

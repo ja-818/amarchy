@@ -418,13 +418,25 @@ async function interrupted(p, where) {
   check(where, await until(p, () => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tpill");
                                        return !!c && c.textContent === "Interrupted" && c.classList.contains("t-warn"); }), "a turn cut off: its card says Interrupted");
   check(where, await p.evaluate(() => statusWords(row("proj-later")) === "Interrupted" && statusTone(row("proj-later")) === "interrupted"), "its state in words: Interrupted, asleep or not");
-  await p.screenshot({ path: path.join(SHOTS, `${where}-interrupted.png`), fullPage: true });
+  await p.evaluate(() => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later]"); const sec = c && c.closest("details"); if (sec) sec.open = true; c && c.scrollIntoView(); });
+  check(where, await until(p, () => [...document.querySelectorAll(".today:not([hidden]) .tcard[data-id=proj-later] .tbtn.resume.primary")].some((b) => b.textContent === "Resume")), "its card: Resume");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-interrupted.png`) });
+  const sentBefore = p.posts.length;
+  await p.evaluate(() => document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tbtn.resume").click());
+  check(where, await until(p, () => /Resumed/.test(document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later]").textContent)), "Resume tapped: Resumed");
+  check(where, p.posts.slice(sentBefore).some((x) => /proj-later\/send/.test(x.url) && x.body.text === "Carry on where you were cut off"), "it sent: Carry on where you were cut off");
+  // Folded again, as it was (For later starts folded).
+  await p.evaluate(() => { todayUI.told.delete("proj-later"); document.querySelectorAll(".today-forlater").forEach((d) => { d.open = false; }); uiState.open.delete("forlater"); todayRedraw(); });
   await p.evaluate(() => todayOpen(row("proj-later")));
   check(where, await until(p, () => [...document.querySelectorAll(".head-state .tpill")].some((x) => x.offsetParent && x.textContent === "Interrupted")), "its chat's bar: Interrupted");
   check(where, await until(p, () => [...document.querySelectorAll(".chat-dock .dock-note.interrupted")].some((x) => x.offsetParent && /Interrupted before it finished/.test(x.textContent))
                                      && ![...document.querySelectorAll(".chat-dock .dock-note")].some((x) => x.offsetParent && /Asleep to save memory/.test(x.textContent))),
         "over the box: interrupted before it finished (not Asleep too)");
   await p.screenshot({ path: path.join(SHOTS, `${where}-interrupted-open.png`) });
+  const before = p.posts.length;
+  check(where, await p.evaluate(() => { const b = [...document.querySelectorAll(".chat-dock .dock-note.interrupted .resume")].find((x) => x.offsetParent); if (b) b.click(); return !!b; }), "in the chat: Resume");
+  check(where, await until(p, () => true) && p.posts.slice(before).some((x) => /proj-later\/send/.test(x.url) && x.body.text === "Carry on where you were cut off"), "the chat's Resume sent it too");
+  await sleep(300);
   await p.evaluate(() => go("#/"));
   await until(p, () => !(app.desk ? desk.current : app.session));
   await set({ interrupted: false, sleeping: false });

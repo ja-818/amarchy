@@ -461,6 +461,10 @@ function statusLine(s) {
   return `${words} · ${now.charAt(0).toLowerCase()}${now.slice(1)}`;
 }
 
+// A chat whose turn was cut off (interrupted), told to carry on: the same
+// words from its card and from the chat. Asleep, it wakes with them.
+const RESUME_TEXT = "Carry on where you were cut off";
+
 async function wakeSession(s) {
   try {
     await aheadOf(s.id, { waking: true }, (r) => r.waking || !r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/wake`));
