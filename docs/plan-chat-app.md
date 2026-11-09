@@ -195,7 +195,8 @@ the places Claude put them:
 - **Blocks, where it wrote them** (`replyParts`, `claudeView`,
   `blockView` in app/chat.js): `whatsapp`, `email`, `slack`, `sms` (a draft:
   Copy, Open in WhatsApp / mail / Messages, filled in), `command` (Copy),
-  `link` (Open), `event` (Add to Google Calendar, Map), `todos`, `contact`
+  `link` (Open), `event` (Add to Google Calendar, Map), `todos`, `fields`,
+  `chart`, `contact`
   (Call, WhatsApp, Email), `place` (Map, Call, Website), `session` (Open the
   chat), `file` (its path). Each is a row (its kind, name, quick action) with
   all of it open under it; a tap folds it. Links open only on the web, mail,
@@ -216,8 +217,37 @@ the places Claude put them:
   idle moment, the same conversation (`claude-reload`, `FORMAT_VERSION`, at
   most every ten minutes): the format is given at start, so the new Claude
   has it. A chat that's always open, like an assistant, gets it too.
-- New affordances are added the same way: a block kind Claude can write
-  (`REPLY_FORMAT`), drawn where it's written (`replyBlock`, `artifactParts`).
+- **One catalog** (`app/blocks.json`): every block's kind, what it's for,
+  its attributes (their types: text, phone, email, datetime, url, path, a
+  chat's id, one of a list; aliases), its body's shape (text, code, url,
+  todos, options, fields, series), an example and its rule. From it come the
+  guidance Claude gets (`blocks_guidance` in bin/amarchy: the examples and
+  rules in `REPLY_FORMAT`), what the app reads (served as `blocks.js`;
+  `replyParts`, `blockBody` in app/chat.js) and the check when a turn ends
+  (`reply_blocks`, `block_issues`). The app and the server read a reply the
+  same way (test/reply-view.js compares them). A new block is a catalog
+  entry and its drawing (`artifactParts`); the test fails for a kind the app
+  doesn't draw.
+- **Checked when a turn ends** (`reply_fix`, the Stop hook): a block the app
+  can't draw (a date that isn't one, curly quotes, an attribute the block
+  doesn't take, a question with no options or more than 4, a chart's row
+  that isn't numbers, a chat id that isn't one, an address not to open, a
+  block not closed) sends the reply back to Claude with what's wrong, to
+  write it again whole; the chat stays Working meanwhile, and the reply
+  sent back isn't shown (`fix_feedback`: its words go aside). A reply
+  without its goal block gets asked for that block alone, added to it.
+  Once a turn (`stop_hook_active`), and only for a Claude that has the
+  current format. The hook's words aren't something you said.
+- **Fields** (`fields`): the details of one thing, a label and its value a
+  row each, with Copy. **Charts** (`chart`, `type` bar or line, `unit`):
+  "Label: number" lines, or a markdown table for several series. Drawn by
+  the dataviz method (`chartView`): one axis; bars from one baseline, a row
+  each, the value at the tip; lines 2px, the end dot ringed, round ticks,
+  the first, middle and last labels; a legend for two or more series; the
+  series' colors in a fixed order validated for color-blind readers
+  (`--chart-1..8` in ui.css, light steps from theme.css on a light theme;
+  one series wears the accent); under the pointer or the finger, a
+  crosshair and every series' value; *Numbers* shows it as a table.
 
 ### The conversation
 

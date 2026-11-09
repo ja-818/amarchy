@@ -1,0 +1,111 @@
+{
+  "about": "The blocks Claude writes in a reply for the app to draw with buttons: one catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), the app that draws them (chat.js replyParts, artifactParts) and the check when a turn ends (bin/amarchy reply_issues). A block is a fenced block named for its kind, its attributes key=\"value\" on the opening line, its body under it. Attribute types: text, phone, email, datetime (ISO 8601 with a time and an offset), url, path, session (a chat's id), one of a list (enum). Body shapes: text, code, url (its first line), todos (- [ ] lines), options (- Label | message), fields (Label: value lines), series (Label: number lines, or a markdown table: labels, then a column of numbers per series).",
+  "blocks": [
+    {
+      "kind": "whatsapp", "for": "a WhatsApp message to send",
+      "attrs": { "to": { "type": "text" }, "phone": { "type": "phone" } },
+      "body": { "shape": "text", "need": true },
+      "example": { "attrs": "to=\"Felipe\" phone=\"+57 300 111 2233\"", "body": "the whole message, ready to send" }
+    },
+    {
+      "kind": "email", "for": "an email to send",
+      "attrs": { "to": { "type": "text" }, "email": { "type": "email" }, "subject": { "type": "text" } },
+      "body": { "shape": "text", "need": true },
+      "example": { "attrs": "to=\"ana@example.com\" subject=\"Contract\"", "body": "the whole email" }
+    },
+    {
+      "kind": "slack", "for": "a Slack message", "short": true,
+      "attrs": { "to": { "type": "text" } },
+      "body": { "shape": "text", "need": true },
+      "example": { "attrs": "to=\"#channel\"" }
+    },
+    {
+      "kind": "sms", "for": "a text message", "short": true,
+      "attrs": { "to": { "type": "text" }, "phone": { "type": "phone", "need": true } },
+      "body": { "shape": "text", "need": true },
+      "example": { "attrs": "phone=\"+1 555 0100\"" }
+    },
+    {
+      "kind": "command", "for": "a command for them to run",
+      "attrs": { "cwd": { "type": "text", "alias": ["where"] } },
+      "body": { "shape": "code", "need": true },
+      "example": { "attrs": "cwd=\"~/Work/houston\"", "body": "exactly what to run" }
+    },
+    {
+      "kind": "link", "for": "a link for them to open",
+      "attrs": { "label": { "type": "text", "alias": ["title"] } },
+      "body": { "shape": "url", "need": true },
+      "example": { "attrs": "label=\"Sign in to Gmail\" note=\"Expires in 10 minutes\"", "body": "https://..." }
+    },
+    {
+      "kind": "event", "for": "a date to keep",
+      "attrs": { "title": { "type": "text", "need": true }, "when": { "type": "datetime", "need": true },
+                 "end": { "type": "datetime" }, "where": { "type": "text" } },
+      "body": { "shape": "text" },
+      "example": { "attrs": "title=\"ECOS panel\" when=\"2026-10-29T15:40:00-05:00\" end=\"2026-10-29T17:00:00-05:00\" where=\"Teatro Panorama, Bogotá\"", "body": "any notes" }
+    },
+    {
+      "kind": "todos", "for": "a list they track",
+      "attrs": { "title": { "type": "text" } },
+      "body": { "shape": "todos", "need": true },
+      "example": { "attrs": "title=\"Still open\"", "body": "- [ ] Send the C21 summary (today)\n- [x] Twilio top-up" },
+      "rule": "Lists they track (still open, waiting on, loops) go in a todos block, every time you list them."
+    },
+    {
+      "kind": "fields", "for": "the details of one thing, label by label (an invoice, an account, a booking)",
+      "attrs": { "title": { "type": "text" } },
+      "body": { "shape": "fields", "need": true },
+      "example": { "attrs": "title=\"Twilio number\"", "body": "Number: +1 628 296 2190\nCost: $1.15/month\nAccount: Houston" }
+    },
+    {
+      "kind": "chart", "for": "numbers worth seeing as a chart (a trend, a comparison)",
+      "attrs": { "title": { "type": "text", "need": true }, "type": { "type": "enum", "of": ["bar", "line"] },
+                 "unit": { "type": "text" } },
+      "body": { "shape": "series", "need": true },
+      "example": { "attrs": "type=\"bar\" title=\"Replies per day\" unit=\"replies\"", "body": "Mon: 12\nTue: 18\nWed: 9" },
+      "rule": "A chart takes \"Label: number\" lines (one series), or a markdown table for several: the labels, then a column of numbers per series. bar compares, line shows a trend over time. Only real numbers you have, at most 8 series."
+    },
+    {
+      "kind": "contact", "for": "a person to reach",
+      "attrs": { "name": { "type": "text", "need": true }, "role": { "type": "text" }, "phone": { "type": "phone" },
+                 "email": { "type": "email" } },
+      "body": { "shape": "text" },
+      "example": { "attrs": "name=\"Gaby Mendez\" role=\"Quantística\" phone=\"+57 310 555 0101\" email=\"gaby@example.com\"", "body": "" }
+    },
+    {
+      "kind": "place", "for": "a place to go",
+      "attrs": { "name": { "type": "text" }, "where": { "type": "text", "alias": ["address"] }, "hours": { "type": "text" },
+                 "phone": { "type": "phone" }, "url": { "type": "url" } },
+      "needAny": ["name", "where"],
+      "body": { "shape": "text" },
+      "example": { "attrs": "name=\"Spinning Center Rosales\" where=\"Cl. 72 #5-83, Bogotá\" hours=\"Mon-Fri 6am-9pm\"", "body": "" }
+    },
+    {
+      "kind": "session", "for": "another chat (one you started, or one this is about)",
+      "attrs": { "id": { "type": "session", "need": true, "alias": ["name"] } },
+      "body": { "shape": "text" },
+      "example": { "attrs": "id=\"houston-os-c21-crm\"", "body": "what that chat is doing" }
+    },
+    {
+      "kind": "file", "for": "a file you made for them",
+      "attrs": { "path": { "type": "path", "need": true } },
+      "body": { "shape": "text" },
+      "example": { "attrs": "path=\"~/Work/houston/docs/proposal.pdf\"", "body": "what's in it" }
+    },
+    {
+      "kind": "choices", "for": "a question for them, answered with a tap",
+      "attrs": { "question": { "type": "text", "need": true } },
+      "body": { "shape": "options", "need": true },
+      "example": { "attrs": "question=\"Ship it to main?\"", "body": "- Ship it | Ship it: merge to main and push\n- Not yet" },
+      "rule": "Any question you ask them, a yes or no included, goes in a choices block at the end, so they answer with a tap; each option (at most 4) is \"- Label | the full message it sends\" (or just \"- Label\")."
+    },
+    {
+      "kind": "goal", "hidden": true, "for": "this chat's goal and where it stands",
+      "attrs": { "state": { "type": "enum", "of": ["working", "waiting", "blocked", "done"], "need": true } },
+      "body": { "shape": "text", "need": true },
+      "example": { "attrs": "state=\"working\"", "body": "Make Today the app's home screen" },
+      "rule": "The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the reply: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, give them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:"
+    }
+  ],
+  "common": { "title": { "type": "text" }, "note": { "type": "text" } }
+}

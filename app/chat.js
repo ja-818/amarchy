@@ -143,6 +143,8 @@ const CHAT_ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  chart: '<path d="M4 20h16M7 16v-4M12 16V7M17 16v-7"/>',
+  fields: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h3M13 9h4M7 15h3M13 15h4"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
@@ -720,59 +722,92 @@ function firstLine(text) {
   return cut(line, 120);
 }
 
-// Where the chat stands, in the goal block each reply ends with (bin/amarchy
-// REPLY_FORMAT): its goal and its state. Not shown as words: under the
-// chat's name, on Today, and as the strip that offers to close a done chat.
-const GOAL_STATES = ["working", "waiting", "blocked", "done"];
-const GOAL_FENCE = /^```[ \t]*goal\b([^\n]*)\n([\s\S]*?)^```[ \t]*$\n?/gm;
+// ---- the blocks (app/blocks.json, served as blocks.js: BLOCK_CATALOG): one
+// catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), what's
+// read here, and the check when a turn ends (bin/amarchy reply_issues).
+// Read here as bin/amarchy reads them (reply_blocks, block_body): the same
+// blocks, the same parts of them (test/blocks-catalog.js compares the two).
 
-function replyGoal(text) {
-  const found = [...String(text || "").matchAll(GOAL_FENCE)].pop();
-  if (!found) return null;
-  const state = (replyAttrs(found[1]).state || "").trim().toLowerCase();
-  const goal = found[2].split(/\s+/).join(" ").trim();
-  return goal || state ? { goal, state: GOAL_STATES.includes(state) ? state : "" } : null;
+const BLOCKS = new Map((typeof BLOCK_CATALOG === "object" && BLOCK_CATALOG ? BLOCK_CATALOG.blocks : []).map((b) => [b.kind, b]));
+const BLOCK_COMMON = (typeof BLOCK_CATALOG === "object" && BLOCK_CATALOG && BLOCK_CATALOG.common) || {};
+const BLOCK_ATTR = /(\w+)\s*=\s*"([^"]*)"/g;
+const BLOCK_FIELD = /^\s*(?:[-*]\s+)?([^:]{1,60}?)\s*:\s+(.+?)\s*$/;
+
+// A number as a chart's row has it ("1,200", "$4.2", "12%", "50 ms"), or null.
+function blockNumber(text) {
+  const m = String(text || "").trim().match(/^[^\d\-+.]{0,3}([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*[%a-zA-Z/]*$/);
+  const v = m ? parseFloat(m[1].replace(/,/g, "")) : NaN;
+  return isFinite(v) ? v : null;
 }
 
-function withoutGoal(text) { return String(text || "").replace(GOAL_FENCE, "").replace(/\s+$/, ""); }
-
-const REPLY_BLOCKS = ["whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "contact", "place", "session", "file", "choices"];
-
-function replyAttrs(s) {
-  const o = {};
-  for (const m of String(s || "").matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) o[m[1].toLowerCase()] = m[2];
-  return o;
-}
-
-// A fenced block, as the thing it holds (artifactParts draws it) or choices.
-function replyBlock(kind, a, body) {
-  const lines = body.split("\n");
-  switch (kind) {
-    case "whatsapp": case "email": case "slack": case "sms":
-      return { type: "message", channel: kind, to: a.to || "", phone: a.phone || "", email: a.email || (kind === "email" && /@/.test(a.to || "") ? a.to : ""),
-               subject: a.subject || "", body, title: a.title || "", note: a.note || "" };
-    case "command": return { type: "command", command: body, where: a.cwd || a.where || "", title: a.title || "", note: a.note || "" };
-    case "link": return { type: "link", url: (lines.find((l) => l.trim()) || a.url || "").trim(), title: a.label || a.title || "", note: a.note || "" };
-    case "event": return { type: "event", title: a.title || "", when: a.when || "", end: a.end || "", where: a.where || "", note: body || a.note || "" };
-    case "todos": return { type: "todos", title: a.title || "", items: lines.map((l) => l.match(/^\s*[-*]\s*(?:\[( |x|X)\]\s*)?(.+?)\s*$/)).filter(Boolean).map((m) => {
+// A block's body read by its shape (bin/amarchy block_body).
+function blockBody(shape, body) {
+  const lines = body.split("\n").filter((l) => l.trim());
+  if (shape === "todos") {
+    const items = [], bad = [];
+    for (const l of lines) {
+      const m = l.match(/^\s*[-*]\s*(?:\[( |x|X)\]\s*)?(.+?)\s*$/);
+      if (!m) { bad.push(l); continue; }
       const due = m[2].match(/\s*\(([^)]{1,40})\)\s*$/);
-      return { text: due ? m[2].slice(0, due.index) : m[2], due: due ? due[1] : "", done: /x/i.test(m[1] || "") };
-    }) };
-    case "contact": return { type: "contact", name: a.name || "", role: a.role || "", phone: a.phone || "", email: a.email || "", note: body || a.note || "" };
-    case "place": return { type: "place", name: a.name || "", where: a.where || a.address || "", hours: a.hours || "", phone: a.phone || "", url: a.url || "", note: body || a.note || "" };
-    case "session": return { type: "session", name: a.id || a.name || "", title: a.title || "", body };
-    case "file": return { type: "file", path: a.path || "", title: a.title || "", body };
-    default: return { type: "choices", question: a.question || "", options: lines.map((l) => l.match(/^\s*[-*]\s*(.+?)\s*$/)).filter(Boolean).map((m) => {
-      const [label, send] = m[1].split(/\s+\|\s+/);
-      return { label: label.trim(), send: (send || label).trim() };
-    }).slice(0, 4) };
+      items.push({ text: due ? m[2].slice(0, due.index) : m[2], due: due ? due[1] : "", done: (m[1] || "").toLowerCase() === "x" });
+    }
+    return { items, bad };
   }
+  if (shape === "options") {
+    const options = [], bad = [];
+    for (const l of lines) {
+      const m = l.match(/^\s*[-*]\s*(.+?)\s*$/);
+      if (!m) { bad.push(l); continue; }
+      const at = m[1].search(/\s+\|\s+/);
+      const label = at < 0 ? m[1] : m[1].slice(0, at), send = at < 0 ? m[1] : m[1].slice(at).replace(/^\s+\|\s+/, "");
+      options.push({ label: label.trim(), send: send.trim() });
+    }
+    return { options, bad };
+  }
+  if (shape === "fields") {
+    const fields = [], bad = [];
+    for (const l of lines) {
+      const m = l.match(BLOCK_FIELD);
+      if (m) fields.push({ label: m[1].trim(), value: m[2] }); else bad.push(l);
+    }
+    return { fields, bad };
+  }
+  if (shape === "series") {
+    let series = [];
+    const points = [], bad = [];
+    if (lines.length && lines[0].trimStart().startsWith("|")) {
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(lines[0]);
+      series = head.slice(1);
+      for (const l of lines.slice(1)) {
+        if (/^\s*\|?\s*:?-{2,}/.test(l)) continue;
+        const row = cells(l), values = row.slice(1).map(blockNumber);
+        if (row.length !== head.length || values.some((v) => v === null)) bad.push(l);
+        else points.push({ label: row[0], values });
+      }
+    } else {
+      series = [""];
+      for (const l of lines) {
+        const m = l.match(BLOCK_FIELD), v = m ? blockNumber(m[2]) : null;
+        if (v === null) bad.push(l); else points.push({ label: m[1].trim(), values: [v] });
+      }
+    }
+    return { series, points, bad };
+  }
+  if (shape === "url") return { url: lines.length ? lines[0].trim() : "" };
+  return {};
 }
 
-// What Claude said, in order: its markdown ({md}) and the blocks named for
-// what they hold (replyBlock), each where it wrote it. A fence of any other
-// kind (code) stays in the markdown; the goal block isn't shown (replyGoal).
-function replyParts(text) {
+// The catalog's blocks in what Claude said, in order (bin/amarchy reply_blocks).
+function replyBlocks(text) {
+  return replyParts(text, true).filter((p) => p.kind);
+}
+
+// What Claude said, in order: its markdown ({md}) and the catalog's blocks
+// ({kind, attrs, body...}), each where it wrote it. A fence of any other
+// kind (code) stays in the markdown; a hidden block (the goal) isn't a part
+// unless all: asked for (replyBlocks).
+function replyParts(text, all) {
   const lines = String(text || "").replace(/\r/g, "").split("\n");
   const parts = [];
   let buf = [];
@@ -783,15 +818,171 @@ function replyParts(text) {
   for (let i = 0; i < lines.length; i++) {
     const fence = lines[i].match(/^ {0,3}```\s*([A-Za-z]+)?(.*)$/);
     if (!fence) { buf.push(lines[i]); continue; }
-    const kind = (fence[1] || "").toLowerCase();
+    const kind = (fence[1] || "").toLowerCase(), start = i;
     const body = [];
     for (i++; i < lines.length && !/^ {0,3}```\s*$/.test(lines[i]); i++) body.push(lines[i]);
-    if (kind === "goal") continue;
-    if (REPLY_BLOCKS.includes(kind)) { flush(); parts.push(replyBlock(kind, replyAttrs(fence[2]), body.join("\n").replace(/^\s*\n|\s+$/g, ""))); }
-    else buf.push(lines[i - body.length - 1], ...body, "```");
+    const d = BLOCKS.get(kind);
+    if (!d) { buf.push(lines[start], ...body, "```"); continue; }
+    if (d.hidden && !all) continue;
+    const specs = { ...BLOCK_COMMON, ...(d.attrs || {}) };
+    const names = new Map(Object.entries(specs).flatMap(([name, spec]) => [name, ...(spec.alias || [])].map((a) => [a, name])));
+    const raw = [...fence[2].matchAll(BLOCK_ATTR)].map((m) => [m[1].toLowerCase(), m[2]]);
+    const attrs = {};
+    for (const [k, v] of raw) if (names.has(k) && !(names.get(k) in attrs)) attrs[names.get(k)] = v;
+    const text = body.join("\n").replace(/^\n+/, "").replace(/\s+$/, "");
+    flush();
+    parts.push({ kind, attrs, unknown: raw.map(([k]) => k).filter((k) => !names.has(k)), rest: fence[2].replace(BLOCK_ATTR, "").trim(),
+                 body: text, closed: i < lines.length, line: start + 1, ...blockBody((d.body || {}).shape || "text", text) });
   }
   flush();
   return parts;
+}
+
+// Where the chat stands, in the goal block each reply ends with: its goal
+// and its state. Not shown as words: under the chat's name, on Today, and
+// as the strip that offers to close a done chat.
+const GOAL_STATES = ["working", "waiting", "blocked", "done"];
+const GOAL_FENCE = /^```[ \t]*goal\b([^\n]*)\n([\s\S]*?)^```[ \t]*$\n?/gm;
+
+function replyGoal(text) {
+  const found = replyBlocks(text).filter((b) => b.kind === "goal").pop();
+  if (!found) return null;
+  const state = (found.attrs.state || "").trim().toLowerCase();
+  const goal = found.body.split(/\s+/).join(" ").trim();
+  return goal || state ? { goal, state: GOAL_STATES.includes(state) ? state : "" } : null;
+}
+
+function withoutGoal(text) { return String(text || "").replace(GOAL_FENCE, "").replace(/\s+$/, ""); }
+
+// ---- a chart block, drawn (docs/plan-chat-app.md, the dataviz method): one
+// axis, thin marks, the series' colors in a fixed order (--chart-1..8, ui.css;
+// one series, the theme's accent), text in the text's colors, a legend for
+// two or more series, and its numbers a tap away (Numbers: a table).
+// Bars: a row each, its value at the tip (HTML: crisp at any width). Lines:
+// the plot stretched to its box (vector-effect keeps them 2px), its labels
+// and end dots in HTML over it, a crosshair and what each series is there
+// under the finger or the pointer.
+
+// A chart's number in words: compact from 10,000 (12K, 4.2M), its unit
+// ($ before, % after; any other is the chart's subtitle).
+function chartNumber(v, unit) {
+  const a = Math.abs(v);
+  const n = a >= 1e9 ? `${+(v / 1e9).toFixed(1)}B` : a >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : a >= 1e4 ? `${+(v / 1e3).toFixed(1)}K`
+    : `${+v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : 2)}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const u = String(unit || "").trim();
+  return /^[$€£¥]$/.test(u) ? (v < 0 ? `-${u}${n.slice(1)}` : `${u}${n}`) : u === "%" ? `${n}%` : n;
+}
+
+// Round ticks for a range: about four, at 1, 2 or 5 times a power of ten.
+function chartTicks(lo, hi) {
+  if (lo === hi) { lo = lo > 0 ? 0 : lo - 1; hi = hi > 0 ? hi : hi + 1; }
+  const raw = (hi - lo) / 4, pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * pow).find((x) => x >= raw);
+  const ticks = [];
+  for (let t = Math.floor(lo / step) * step; t <= hi + step * 1e-9; t += step) ticks.push(+t.toFixed(10));
+  if (ticks[ticks.length - 1] < hi) ticks.push(ticks[ticks.length - 1] + step);
+  return ticks;
+}
+
+function chartView(a) {
+  const unit = (a.attrs.unit || "").trim(), pts = a.points || [], series = a.series || [];
+  const many = series.length > 1;
+  const color = (i) => (many ? `s${(i % 8) + 1}` : "s0");
+  const box = h("div", { class: "chart" });
+  if (!pts.length) return box;
+  if (many) box.append(h("div", { class: "chart-legend" }, ...series.map((name, i) =>
+    h("span", { class: "chart-key" }, h("span", { class: `chart-swatch ${color(i)}` }), name))));
+  const line = (a.attrs.type || "").toLowerCase() === "line";
+  const all = pts.flatMap((p) => p.values);
+  if (!line) {
+    // Bars from one baseline (0), a row per label, a bar per series.
+    const lo = Math.min(0, ...all), hi = Math.max(0, ...all), span = hi - lo || 1, zero = (-lo / span) * 100;
+    box.append(h("div", { class: `chart-bars${many ? " grouped" : ""}`, role: "img", "aria-label": a.attrs.title || "Chart" },
+      ...pts.map((p) => h("div", { class: "chart-row" }, h("span", { class: "chart-label" }, p.label),
+        h("div", { class: "chart-cells" }, ...p.values.map((v, i) => {
+          const bar = h("span", { class: `chart-bar ${color(i)}${v < 0 ? " neg" : ""}` });
+          bar.style.left = `${v < 0 ? zero - (-v / span) * 100 : zero}%`;
+          bar.style.width = `${(Math.abs(v) / span) * 100}%`;
+          const val = h("span", { class: "chart-val" }, chartNumber(v, unit));
+          // At its tip, past the bar's end (before it for one below 0).
+          if (v < 0) val.style.right = `${100 - (zero - (-v / span) * 100)}%`;
+          else val.style.left = `${zero + (v / span) * 100}%`;
+          return h("div", { class: "chart-track" }, bar, val);
+        }))))));
+  } else {
+    // Lines: x by order, y on round ticks; the plot's 0..100 box stretched to its size.
+    const ticks = chartTicks(Math.min(...all), Math.max(...all));
+    const lo = ticks[0], hi = ticks[ticks.length - 1];
+    const x = (i) => (pts.length === 1 ? 50 : (i / (pts.length - 1)) * 100), y = (v) => 100 - ((v - lo) / (hi - lo)) * 100;
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", "chart-svg");
+    const el = (name, attrs) => { const e = document.createElementNS(NS, name); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
+    for (const t of ticks) svg.append(el("line", { x1: 0, x2: 100, y1: y(t), y2: y(t), class: `chart-grid${t === 0 ? " zero" : ""}`, "vector-effect": "non-scaling-stroke" }));
+    series.forEach((_, si) => {
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${x(i)},${y(p.values[si])}`).join(" ");
+      if (!many) svg.append(el("path", { d: `${d} L${x(pts.length - 1)},100 L${x(0)},100 Z`, class: `chart-area ${color(si)}` }));
+      svg.append(el("path", { d, class: `chart-line ${color(si)}`, "vector-effect": "non-scaling-stroke" }));
+    });
+    const plot = h("div", { class: "chart-plot" }, svg);
+    // The last value of each series: its dot, and its number beside it (one series).
+    series.forEach((_, si) => {
+      const v = pts[pts.length - 1].values[si];
+      const dot = h("span", { class: `chart-dot ${color(si)}` });
+      dot.style.left = `${x(pts.length - 1)}%`;
+      dot.style.top = `${y(v)}%`;
+      plot.append(dot);
+      if (!many) {
+        const end = h("span", { class: "chart-end" }, chartNumber(v, unit));
+        end.style.top = `${y(v)}%`;
+        plot.append(end);
+      }
+    });
+    // Under the finger or the pointer: a crosshair, and every series there.
+    const cross = h("span", { class: "chart-cross", hidden: true });
+    const tip = h("div", { class: "chart-tip", hidden: true });
+    const dots = series.map((_, si) => h("span", { class: `chart-dot hover ${color(si)}`, hidden: true }));
+    plot.append(cross, ...dots, tip);
+    const at = (e) => {
+      const r = plot.getBoundingClientRect();
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1))));
+      cross.hidden = tip.hidden = false;
+      cross.style.left = `${x(i)}%`;
+      dots.forEach((d, si) => { d.hidden = false; d.style.left = `${x(i)}%`; d.style.top = `${y(pts[i].values[si])}%`; });
+      tip.replaceChildren(h("div", { class: "chart-tip-head" }, pts[i].label), ...series.map((name, si) =>
+        h("div", { class: "chart-tip-row" }, many ? h("span", { class: `chart-swatch ${color(si)}` }) : null,
+          h("strong", {}, chartNumber(pts[i].values[si], unit)), many ? h("span", {}, name) : null)));
+      tip.classList.toggle("left", x(i) > 55);
+      tip.style.left = `${x(i)}%`;
+    };
+    const off = () => { cross.hidden = tip.hidden = true; dots.forEach((d) => { d.hidden = true; }); };
+    plot.addEventListener("pointermove", at);
+    plot.addEventListener("pointerdown", at);
+    plot.addEventListener("pointerleave", off);
+    const yAxis = h("div", { class: "chart-y" }, ...ticks.map((t) => { const l = h("span", {}, chartNumber(t, unit)); l.style.top = `${y(t)}%`; return l; }));
+    const marks = pts.length > 4 ? [0, Math.floor((pts.length - 1) / 2), pts.length - 1] : pts.map((_, i) => i);
+    const xAxis = h("div", { class: "chart-x" }, ...marks.map((i) => {
+      const l = h("span", { class: i === 0 ? "first" : i === pts.length - 1 ? "last" : "" }, pts[i].label);
+      l.style.left = `${x(i)}%`;
+      return l;
+    }));
+    box.append(h("div", { class: "chart-lines", role: "img", "aria-label": a.attrs.title || "Chart" }, yAxis, plot, h("span"), xAxis));
+  }
+  // Its numbers, as a table, a tap away (and for whoever can't tell the colors).
+  const table = h("div", { class: "table-wrap rtable-wrap chart-table", hidden: true },
+    h("table", { class: "rtable" }, h("thead", {}, h("tr", {}, h("th", {}, ""), ...series.map((name) => h("th", {}, name || "Value")))),
+      h("tbody", {}, ...pts.map((p) => h("tr", {}, h("td", { class: "lead" }, p.label),
+        ...p.values.map((v, i) => h("td", { "data-label": series[i] || "Value" }, chartNumber(v, unit))))))));
+  const toggle = h("button", { class: "art-btn chart-numbers", type: "button", "aria-expanded": "false", onclick: (e) => {
+    e.stopPropagation();
+    table.hidden = !table.hidden;
+    toggle.setAttribute("aria-expanded", String(!table.hidden));
+    toggle.textContent = table.hidden ? "Numbers" : "Hide numbers";
+  } }, "Numbers");
+  box.append(toggle, table);
+  return box;
 }
 
 // Tables in what Claude said: on a phone, each row a little card, its cells
@@ -1505,13 +1696,13 @@ class Chat {
   claudeView(text, key, past) {
     const el = h("div", { class: "msg claude" });
     const parts = replyParts(text);
-    const qs = parts.filter((p) => p.type === "choices" && p.options.length);
+    const asked = parts.filter((p) => p.kind === "choices" && p.options.length);
     let n = 0;
     for (const p of parts) {
       if (p.md !== undefined) el.append(tableize(h("div", { class: "md", html: md(p.md) })));
-      else if (p.type !== "choices") el.append(this.blockView(p, `${key}|b${n++}`));
-      else if (p === qs[0]) {
-        const box = this.choicesView({ waiting: qs }, `${key}|q`);
+      else if (p.kind !== "choices") el.append(this.blockView(p, `${key}|b${n++}`));
+      else if (p === asked[0]) {
+        const box = this.choicesView({ waiting: asked.map((q) => ({ question: q.attrs.question || "", options: q.options.slice(0, 4) })) }, `${key}|q`);
         if (box) el.append(box);
         if (box && past) this.markPast(box);
       }
@@ -1546,7 +1737,7 @@ class Chat {
       box.replaceWith(next);
       if (had) next.querySelector(".art-toggle").focus({ preventScroll: true });
     };
-    const li = h("li", { class: `art art-${a.type}${on ? " open" : ""}` },
+    const li = h("li", { class: `art art-${v.look || a.kind}${on ? " open" : ""}` },
       h("div", { class: "art-head" },
         h("button", { class: "art-toggle", type: "button", "aria-expanded": String(on), onclick: toggle },
           h("span", { class: "art-ic" }, icon(v.icon)),
@@ -1555,15 +1746,17 @@ class Chat {
         v.quick || null));
     if (on) li.append(h("div", { class: "art-body" }, ...v.body.filter(Boolean),
       v.actions.filter(Boolean).length ? h("div", { class: "art-actions" }, ...v.actions.filter(Boolean)) : null,
-      a.note ? h("div", { class: "art-note", html: inline(String(a.note)) }) : null));
+      a.attrs.note ? h("div", { class: "art-note", html: inline(String(a.attrs.note)) }) : null));
     const box = h("ul", { class: "artifacts block" }, li);
     return box;
   }
 
-  // An artifact's parts: its icon, title, the line under it, its quick
-  // action, what it shows open and the actions there.
+  // A block's parts (a reply's block: replyParts): its icon, title, the line
+  // under it, its quick action, what it shows open and the actions there;
+  // look: its class, when it's not its kind's (a message's channels share one).
   artifactParts(a) {
     const str = (x) => (typeof x === "string" ? x.trim() : "");
+    const at = a.attrs || {}, body = str(a.body), title = str(at.title);
     const copy = (text, label = "Copy") => {
       const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
         e.stopPropagation();
@@ -1579,17 +1772,16 @@ class Chat {
     const digits = (p) => str(p).replace(/[^\d]/g, "");
     const pre = (text) => h("div", { class: "art-pre" }, text);
     const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
-    switch (a.type) {
-      case "message": {
-        const ch = CHANNEL_WORDS[a.channel] ? a.channel : "other";
-        const body = str(a.body), to = str(a.to);
-        const wa = ch === "whatsapp" ? `https://wa.me/${digits(a.phone)}?text=${encodeURIComponent(body)}` : null;
-        const mailTo = str(a.email) || (/@/.test(to) ? to : "");
-        const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(a.subject))}&body=${encodeURIComponent(body)}` : null;
-        const sms = ch === "sms" && digits(a.phone) ? `sms:+${digits(a.phone)}?&body=${encodeURIComponent(body)}` : null;
-        return { icon: "message", title: str(a.title) || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
+    switch (a.kind) {
+      case "whatsapp": case "email": case "slack": case "sms": {
+        const ch = a.kind, to = str(at.to);
+        const wa = ch === "whatsapp" ? `https://wa.me/${digits(at.phone)}?text=${encodeURIComponent(body)}` : null;
+        const mailTo = str(at.email) || (/@/.test(to) ? to : "");
+        const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(at.subject))}&body=${encodeURIComponent(body)}` : null;
+        const sms = ch === "sms" && digits(at.phone) ? `sms:+${digits(at.phone)}?&body=${encodeURIComponent(body)}` : null;
+        return { look: "message", icon: "message", title: title || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
           quick: body ? copy(body) : null,
-          body: [a.subject ? field("Subject", str(a.subject)) : null, pre(body)],
+          body: [at.subject ? field("Subject", str(at.subject)) : null, pre(body)],
           actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
             body ? copy(body, "Copy the message") : null] };
       }
@@ -1597,70 +1789,74 @@ class Chat {
         const href = artifactHref(a.url);
         let host = "";
         try { host = new URL(a.url).host; } catch { /* not a URL */ }
-        return { icon: "web", title: str(a.title) || host || "Link", sub: host, quick: href ? open(href, "Open", true) : null,
+        return { icon: "web", title: str(at.label) || title || host || "Link", sub: host, quick: href ? open(href, "Open", true) : null,
           body: [pre(str(a.url))], actions: [href ? copy(href, "Copy the link") : null] };
       }
       case "command":
-        return { icon: "run", title: str(a.title) || "Command to run", sub: str(a.where) ? `in ${str(a.where)}` : cut(str(a.command), 60),
-          quick: copy(str(a.command)), body: [h("div", { class: "art-code" }, str(a.command))], actions: [] };
-      case "code":
-        return { icon: "file", title: str(a.title) || `Code${a.language ? ` (${str(a.language)})` : ""}`, sub: `${str(a.code).split("\n").length} lines`,
-          quick: copy(str(a.code)), body: [h("div", { class: "art-code" }, str(a.code))], actions: [] };
+        return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),
+          quick: copy(body), body: [h("div", { class: "art-code" }, body)], actions: [] };
       case "event": {
-        const start = artifactDate(a.when), end = artifactDate(a.end) || (start ? new Date(start.getTime() + 3600000) : null);
-        const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(a.when);
+        const start = artifactDate(at.when), end = artifactDate(at.end) || (start ? new Date(start.getTime() + 3600000) : null);
+        const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(at.when);
         const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-        const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(str(a.title) || "Event")}` +
-          `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(a.where))}&details=${encodeURIComponent(str(a.note))}` : null;
-        const map = str(a.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(a.where))}` : null;
-        return { icon: "clock", title: str(a.title) || "Event", sub: [when, str(a.where)].filter(Boolean).join(" · "), quick: null,
-          body: [when ? field("When", when, end && a.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
-            str(a.where) ? field("Where", str(a.where)) : null],
+        const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title || "Event")}` +
+          `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(at.where))}&details=${encodeURIComponent(body)}` : null;
+        const map = str(at.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(at.where))}` : null;
+        return { icon: "clock", title: title || "Event", sub: [when, str(at.where)].filter(Boolean).join(" · "), quick: null,
+          body: [when ? field("When", when, end && at.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
+            str(at.where) ? field("Where", str(at.where)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
           actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
       }
       case "todos": {
-        const items = (Array.isArray(a.items) ? a.items : []).filter((x) => x && str(x.text));
+        const items = (a.items || []).filter((x) => str(x.text));
         const left = items.filter((x) => !x.done).length;
-        return { icon: "list", title: str(a.title) || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
+        return { icon: "list", title: title || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
           body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
             h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
-            str(x.due) || str(x.who) ? h("span", { class: "meta" }, [str(x.due), str(x.who)].filter(Boolean).join(" · ")) : null)))],
+            str(x.due) ? h("span", { class: "meta" }, str(x.due)) : null)))],
           actions: [] };
       }
+      case "fields": {
+        const fields = a.fields || [];
+        return { icon: "fields", title: title || "Details", sub: `${fields.length} detail${fields.length === 1 ? "" : "s"}`,
+          quick: fields.length ? copy(fields.map((f) => `${f.label}: ${f.value}`).join("\n")) : null,
+          body: [h("dl", { class: "art-dl" }, ...fields.flatMap((f) => [h("dt", {}, f.label), h("dd", { html: inline(f.value) })]))],
+          actions: [] };
+      }
+      case "chart": {
+        const pts = a.points || [];
+        const tsv = [["", ...a.series], ...pts.map((p) => [p.label, ...p.values])].map((r) => r.join("\t")).join("\n");
+        return { icon: "chart", title: title || "Chart", sub: [/^[$€£¥%]$/.test(str(at.unit)) ? "" : str(at.unit), `${pts.length} ${(at.type || "bar") === "line" ? "points" : "values"}`,
+            a.series.length > 1 ? `${a.series.length} series` : ""].filter(Boolean).join(" · "),
+          quick: pts.length ? copy(tsv) : null, body: [chartView(a)], actions: [] };
+      }
       case "contact": {
-        const ph = digits(a.phone);
-        return { icon: "helper", title: str(a.name) || str(a.title) || "Contact", sub: str(a.role), quick: null,
-          body: [ph ? field("Phone", `+${ph}`) : null, str(a.email) ? field("Email", str(a.email)) : null],
-          actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(a.email) && open(`mailto:${str(a.email)}`, "Email"),
+        const ph = digits(at.phone);
+        return { icon: "helper", title: str(at.name) || title || "Contact", sub: str(at.role), quick: null,
+          body: [ph ? field("Phone", `+${ph}`) : null, str(at.email) ? field("Email", str(at.email)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
+          actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(at.email) && open(`mailto:${str(at.email)}`, "Email"),
             ph ? copy(`+${ph}`, "Copy the number") : null] };
       }
       case "place": {
-        const where = str(a.where);
-        const map = where || str(a.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(a.name), where].filter(Boolean).join(", "))}` : null;
-        const ph = digits(a.phone);
-        return { icon: "web", title: str(a.name) || str(a.title) || "Place", sub: [str(a.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
-          body: [where ? field("Address", where) : null, str(a.hours) ? field("Hours", str(a.hours)) : null, ph ? field("Phone", `+${ph}`) : null],
-          actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(a.url) && open(str(a.url), "Website")] };
+        const where = str(at.where);
+        const map = where || str(at.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(at.name), where].filter(Boolean).join(", "))}` : null;
+        const ph = digits(at.phone);
+        return { icon: "web", title: str(at.name) || title || "Place", sub: [str(at.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
+          body: [where ? field("Address", where) : null, str(at.hours) ? field("Hours", str(at.hours)) : null, ph ? field("Phone", `+${ph}`) : null,
+            body ? h("div", { class: "art-note", html: inline(body) }) : null],
+          actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(at.url) && open(str(at.url), "Website")] };
       }
       case "session": {
-        const id = str(a.name);
-        return { icon: "message", title: str(a.title) || id || "A chat", sub: id && str(a.title) ? id : "Another chat", quick: id ? open(`#/s/${id}`, "Open") : null,
-          body: [str(a.body) ? h("div", { class: "msg claude", html: md(str(a.body)) }) : null], actions: [] };
-      }
-      case "table": {
-        const cols = (Array.isArray(a.columns) ? a.columns : []).map(String);
-        const rows = (Array.isArray(a.rows) ? a.rows : []).filter(Array.isArray);
-        return { icon: "list", title: str(a.title) || "Table", sub: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
-          quick: copy([cols, ...rows].map((r) => r.join("\t")).join("\n")),
-          body: [h("div", { class: "art-table" }, h("table", {}, cols.length ? h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c)))) : null,
-            h("tbody", {}, ...rows.map((r) => h("tr", {}, ...r.map((c) => h("td", {}, String(c))))))))], actions: [] };
+        const id = str(at.id);
+        return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${id}`, "Open") : null,
+          body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
       }
       case "file":
-        return { icon: "file", title: str(a.title) || baseName(str(a.path)) || "File", sub: str(a.path), quick: copy(str(a.path), "Copy path"),
-          body: [str(a.body) ? pre(str(a.body)) : null], actions: [] };
+        return { icon: "file", title: title || baseName(str(at.path)) || "File", sub: str(at.path), quick: copy(str(at.path), "Copy path"),
+          body: [body ? pre(body) : null], actions: [] };
       default:
-        return { icon: "file", title: str(a.title) || "Note", sub: cut(firstLine(str(a.body)), 70), quick: str(a.body) ? copy(str(a.body)) : null,
-          body: [h("div", { class: "msg claude", html: md(str(a.body)) })], actions: [] };
+        return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
+          body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };
     }
   }
 
@@ -1779,8 +1975,12 @@ class Chat {
       where.append(long ? h("details", { class: "msg note long" }, h("summary", {}, cut(text.split("\n")[0], 70)), h("pre", {}, text))
                         : h("div", { class: "msg note" }, text));
     } else if (it.kind === "claude") {
-      if (!earlier) this.pastQuestions(where);
-      where.append(this.claudeView(it.text, it.key || `said:${this.items.indexOf(it)}`, earlier));
+      // (Only a goal block, added to the reply before it when it had none: nothing to show.)
+      const view = this.claudeView(it.text, it.key || `said:${this.items.indexOf(it)}`, earlier);
+      if (view.childElementCount) {
+        if (!earlier) this.pastQuestions(where);
+        where.append(view);
+      }
       if (!earlier) {
         // What Claude was writing is in the conversation now.
         this.said = String(it.text || "").replace(/\s+$/, "");

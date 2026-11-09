@@ -117,6 +117,20 @@ print(json.dumps(am.brief_text(json.loads(sys.argv[2]))))
   return JSON.parse(r.stdout);
 }
 
+// A reply's blocks as the server reads them (bin/amarchy reply_blocks).
+function serverBlocks(text) {
+  const py = `
+import importlib.machinery, importlib.util, json, sys
+loader = importlib.machinery.SourceFileLoader("am", sys.argv[1])
+am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+loader.exec_module(am)
+print(json.dumps(am.reply_blocks(sys.stdin.read())))
+`;
+  const r = require("child_process").spawnSync("python3", ["-I", "-c", py, BIN], { input: text, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return JSON.parse(r.stdout);
+}
+
 const OLD_BRIEF = {
   title: "A plan for the search page", status: "done", goal: "Plan the search page",
   answer: [{ point: "Three steps", detail: "build, test, ship" }],
@@ -163,6 +177,27 @@ const REPLY = [
   "```todos title=\"Still open\"",
   "- [ ] Send the C21 summary (today)",
   "- [x] Twilio top-up",
+  "```",
+  "",
+  "```fields title=\"Twilio number\"",
+  "Number: +1 628 296 2190",
+  "Cost: **$1.15**/month",
+  "```",
+  "",
+  "```chart type=\"bar\" title=\"Replies per day\" unit=\"$\"",
+  "Mon: 1,200",
+  "Tue: 18",
+  "Wed: -40",
+  "```",
+  "",
+  "```chart type=\"line\" title=\"Speed\" unit=\"ms\"",
+  "| Week | Local | Algolia |",
+  "|---|---|---|",
+  "| W1 | 50 | 20 |",
+  "| W2 | 45 | 22 |",
+  "| W3 | 40 | 21 |",
+  "| W4 | 38 | 19 |",
+  "| W5 | 30 | 20 |",
   "```",
   "",
   "## Sources",
@@ -248,7 +283,7 @@ async function run(browser, base, layout) {
       gcal: last.querySelector(".art-event .art-actions a")?.getAttribute("href"),
       unsafe: [...last.querySelectorAll("a")].some((a) => /^javascript/i.test(a.getAttribute("href") || "")),
       code: last.querySelector(".md .code code")?.textContent,
-      table: [...last.querySelectorAll("table.rtable tbody tr")].map((tr) => [...tr.children].map((td) => `${td.dataset.label || ""}=${td.textContent}`).join(",")),
+      table: [...last.querySelectorAll(".md table.rtable tbody tr")].map((tr) => [...tr.children].map((td) => `${td.dataset.label || ""}=${td.textContent}`).join(",")),
       todos: [...last.querySelectorAll(".art-todos li")].map((li) => `${li.className}|${li.querySelector(".t").textContent}`),
       qs: [...last.querySelectorAll(".choices .bq-opt")].map((b) => `${b.textContent}${b.disabled ? "(off)" : ""}`),
       oldQs: [...msgs[0].querySelectorAll(".choices .bq-opt")].map((b) => `${b.textContent}${b.disabled ? "(off)" : ""}`),
@@ -262,7 +297,7 @@ async function run(browser, base, layout) {
   check(layout, !s.switch, "one view: no Brief | Chat switch, no reply cards");
   check(layout, s.msgs === 3, `every message Claude wrote, but the one it said again after an old brief (${JSON.stringify(s.said)})`);
   check(layout, JSON.stringify(s.order) === JSON.stringify(["md:The search page wo", "block:art-message", "md:How it compares", "block:art-command", "md:jsCopyconst x = se", "block:art-event",
-    "block:art-link", "block:art-todos", "md:Sources", "choices"]), `in Claude's order, each block where it wrote it (${JSON.stringify(s.order)})`);
+    "block:art-link", "block:art-todos", "block:art-fields", "block:art-chart", "block:art-chart", "md:Sources", "choices"]), `in Claude's order, each block where it wrote it (${JSON.stringify(s.order)})`);
   check(layout, s.text.includes("<img src=x onerror") && s.pwned === undefined && s.text.includes("120 items") && s.text.includes("Search UX guide"),
     "every word, as text: nothing runs as markup");
   check(layout, s.open.every(Boolean) && s.pre.startsWith("Hola equipo") &&
@@ -282,6 +317,60 @@ async function run(browser, base, layout) {
   await shot("reply-top");
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("reply-end");
+
+  // Fields and charts.
+  const viz = await page.evaluate(() => {
+    const last = [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1);
+    const [bar, line] = last.querySelectorAll(".art-chart");
+    const r = (el) => el.getBoundingClientRect();
+    const bars = [...bar.querySelectorAll(".chart-bar")].map((b) => Math.round(r(b).width));
+    const vals = [...bar.querySelectorAll(".chart-val")];
+    const outside = vals.every((v, i) => { const b = bar.querySelectorAll(".chart-bar")[i]; return i === 2 ? r(v).right <= r(b).left + 1 : r(v).left >= r(b).right - 1; });
+    const inside = vals.every((v) => r(v).right <= r(bar).right + 1 && r(v).left >= r(bar).left - 1);
+    return {
+      fields: [...last.querySelectorAll(".art-dl dt, .art-dl dd")].map((x) => x.innerHTML),
+      bars, vals: vals.map((v) => v.textContent), outside, inside, barLegend: !!bar.querySelector(".chart-legend"),
+      legend: [...line.querySelectorAll(".chart-key")].map((k) => k.textContent),
+      lines: line.querySelectorAll(".chart-line").length, colors: [...line.querySelectorAll(".chart-line")].map((p) => getComputedStyle(p).stroke),
+      width: [...line.querySelectorAll(".chart-line")].map((p) => getComputedStyle(p).strokeWidth),
+      y: [...line.querySelectorAll(".chart-y span")].map((s) => s.textContent), x: [...line.querySelectorAll(".chart-x span")].map((s) => s.textContent),
+      sub: line.querySelector(".art-sub").textContent,
+    };
+  });
+  check(layout, JSON.stringify(viz.fields) === JSON.stringify(["Number", "+1 628 296 2190", "Cost", "<strong>$1.15</strong>/month"]), `fields: label and value a row each (${JSON.stringify(viz.fields)})`);
+  check(layout, viz.bars[0] > viz.bars[1] * 20 && viz.bars[2] > 0 && JSON.stringify(viz.vals) === JSON.stringify(["$1,200", "$18", "-$40"]) && viz.outside && viz.inside && !viz.barLegend,
+    `bars from one baseline, each value at its tip and in the block, one series without a legend (${JSON.stringify([viz.bars, viz.vals, viz.outside, viz.inside])})`);
+  check(layout, JSON.stringify(viz.legend) === JSON.stringify(["Local", "Algolia"]) && viz.lines === 2 && viz.colors[0] !== viz.colors[1] && viz.width.every((w) => w === "2px"),
+    `lines: a legend, a 2px line each in its own color (${JSON.stringify([viz.legend, viz.colors, viz.width])})`);
+  check(layout, JSON.stringify(viz.y) === JSON.stringify(["15", "20", "25", "30", "35", "40", "45", "50"]) || viz.y.length >= 3 && viz.y.length <= 9,
+    `round ticks on the one axis (${viz.y.join(" ")})`);
+  check(layout, JSON.stringify(viz.x) === JSON.stringify(["W1", "W3", "W5"]) && /ms/.test(viz.sub), `the first, middle and last labels; its unit in the line under its name (${viz.x}, ${viz.sub})`);
+  // Under the pointer: the crosshair and every series there.
+  const plot = await page.evaluate(() => { const p = [...document.querySelectorAll(".msg.claude")].at(-1).querySelectorAll(".chart-plot")[0].getBoundingClientRect();
+    return { x: p.left + p.width * 0.25, y: p.top + p.height / 2 }; });
+  await page.mouse.move(plot.x, plot.y);
+  const tip = await page.evaluate(() => { const t = [...document.querySelectorAll(".msg.claude")].at(-1).querySelector(".chart-tip"); return t.hidden ? null : t.textContent; });
+  check(layout, tip === "W245Local22Algolia", `the pointer on W2: its values, each series (${tip})`);
+  await page.evaluate(() => [...document.querySelectorAll(".msg.claude")].at(-1).querySelectorAll(".chart-numbers")[1].click());
+  const numbers = await page.evaluate(() => [...[...document.querySelectorAll(".msg.claude")].at(-1).querySelectorAll(".chart-table")[1].querySelectorAll("tbody tr")].map((tr) => tr.textContent));
+  check(layout, numbers.length === 5 && numbers[0] === "W15020", `Numbers: the chart as a table (${numbers[0]})`);
+  await page.evaluate(() => { const m = [...document.querySelectorAll(".msg.claude")].at(-1).querySelector(".art-dl"); m.scrollIntoView(); });
+  await shot("charts");
+
+  // One catalog: the app reads every block as the server does, and draws every kind.
+  const samples = [REPLY, briefText(OLD_BRIEF), "```todos\n- [ ] a (today)\n- b\n- [x] c\n```\n```place address=\"Cl 72\" colour=\"x\" “a”\nnote\n```\n```chart\nMon: 12%\nTue: x\n```\n```whatsapp\nunclosed"];
+  for (const t of samples) {
+    const js = await page.evaluate((t) => JSON.stringify(replyBlocks(t)), t);
+    const py = JSON.stringify(serverBlocks(t));
+    check(layout, js === py, `the app reads the blocks as the server does${js === py ? "" : `\n    app:    ${js}\n    server: ${py}`}`);
+  }
+  const kinds = await page.evaluate(() => [...BLOCKS.values()].filter((b) => !b.hidden).map((b) => {
+    const p = replyBlocks(`\`\`\`${b.kind} ${b.example.attrs}\n${b.example.body || "x"}\n\`\`\``)[0];
+    const drawn = b.kind === "choices" ? !!window.__chat.choicesView({ waiting: [{ question: p.attrs.question, options: p.options }] }, "kinds")
+      : p && !window.__chat.artifactParts(p).fallback;
+    return `${b.kind}:${drawn ? "drawn" : "MISSING"}`;
+  }));
+  check(layout, kinds.length >= 15 && kinds.every((k) => k.endsWith("drawn")), `every kind in the catalog is drawn (${kinds.join(" ")})`);
 
   // Copy, folding a block, and answering with a tap.
   await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; });

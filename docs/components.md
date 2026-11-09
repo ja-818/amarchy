@@ -63,6 +63,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--score-flame`, `--score-cool`, `--score-ring`, `--score-flash`, `--score-bg`, `--score-border`, `--score-radius` | Your score's flame (and cooled), its goal ring, a fast reply's flash, its button |
 | `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
+| `--chart-1` … `--chart-8`, `--chart-single`, `--chart-grid`, `--chart-axis` | A chart block's series, in that order (validated together for color-blind readers; a light theme gets their light steps), one series' color, its gridlines and its zero line |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
 | `--tavern-ink`, `--tavern-bone`, `--tavern-gold`, `--tavern-flame` | The Tavern's darkest shadow, its bone (the Jolly Roger, words in the dark), gold, a flame's heart |
 | `--tavern-wood`, `--tavern-wood-dark`, `--tavern-plank`, `--tavern-light`, `--tavern-sea`, `--tavern-radius`, `--tavern-seat-w`, `--tavern-scene-h` | Its tables, walls and floor, lantern and candle light, the sea in a porthole, a pirate's portrait's width (`--tavern-seat-w`, its height 1.2 times it) |

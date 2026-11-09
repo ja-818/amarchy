@@ -4425,6 +4425,16 @@ def cmd_hook(sid, state):
         live = agent_live(sid)
         if live.get("pending") and live.get("state") not in ("exited", None):
             return
+    # A turn ended with a reply whose blocks can't be drawn, or without its
+    # goal block: sent back to Claude to fix (reply_fix), once (the second
+    # stop is stop_hook_active), and the session stays working meanwhile.
+    # Only a Claude that has the current format: it knows what's asked.
+    if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
+            and claude_format_version() == FORMAT_VERSION:
+        ask = reply_fix(event)
+        if ask:
+            print(json.dumps({"decision": "block", "reason": ask}))
+            return
     # A turn ended on a Claude started with an older reply format (or none):
     # it's started again once idle (claude_reload), the same conversation, with
     # the format amarchy gives now. (A tool's description would be kept in the
@@ -5130,6 +5140,7 @@ def last_words(s, limit=240):
             text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
                 if isinstance(content, list) else content if isinstance(content, str) else ""
             text = without_goal(text)      # where the chat stands: Today's, not words of the reply
+            text = re.sub(r"(?m)^ {0,3}```.*$", "", text)       # a block's fences: its words stay
             # Markdown's marks and list bullets out: words, in a line.
             # (Only emphasis marks: TEST_KEY keeps its underscore.)
             text = re.sub(r"(?m)^\s*(?:[-*+•]|\d+[.)]|#+|>)\s+", "", text)
@@ -6930,6 +6941,9 @@ def look_stamp(look=None):
     return {"look": look["sig"], "font": look["font"]["key"], "theme": look["theme"], "name": look["name"]}
 
 
+CHART_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
+
+
 def app_theme_css():
     """/theme.css: the look over app.css's own (Tokyo Night), and the font.
     Omarchy's wallpapers are fetched first thing, if they aren't here, and
@@ -6941,6 +6955,8 @@ def app_theme_css():
     out += [f"  --{k}: {v};" for k, v in look["vars"].items() if re.fullmatch(r"[\w-]+", k)
             and re.fullmatch(r"[\w#().,/% -]+", str(v))]
     out.append(f"  color-scheme: {'light' if look.get('mode') == 'light' else 'dark'};")
+    if look.get("mode") == "light":     # a chart's series, stepped for a light ground (ui.css --chart-*)
+        out.append("  " + " ".join(f"--chart-{i}: {c};" for i, c in enumerate(CHART_LIGHT, 1)))
     term = look["terminal"]
     if isinstance(term.get("size"), (int, float)):      # points, as a terminal has them: 96 dpi
         out.append(f"  --term-size: {round(term['size'] * 4 / 3, 2)}px;")
@@ -8135,6 +8151,9 @@ def user_item(text):
             return {"kind": "note", "text": inner} if inner else None
     if text.startswith("[Request interrupted"):
         return {"kind": "note", "text": "Interrupted"}
+    if text.startswith(HOOK_FEEDBACK):
+        # amarchy's own (reply_fix): not shown; another hook's, a quiet line.
+        return None if FIX_MARK in text or GOAL_MARK in text else {"kind": "note", "text": text}
     return {"kind": "user", "text": text}
 
 
@@ -8231,7 +8250,17 @@ def app_items(records, s):
     brief itself is shown as the text it held (brief_text)."""
     out, briefed = [], False
     for r in records:
-        if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta"):
+        if not isinstance(r, dict) or r.get("isSidechain"):
+            continue
+        if r.get("type") == "user" and fix_feedback(r):
+            # The reply sent back to be written again (reply_fix): its words
+            # go, the one written again takes their place.
+            for item in reversed(out):
+                if item.get("kind") != "claude":
+                    break
+                item["aside"] = True
+            continue
+        if r.get("isMeta"):
             continue
         kind, rid, at = r.get("type"), r.get("uuid") or "", r.get("timestamp") or ""
         message = r.get("message") if isinstance(r.get("message"), dict) else {}
@@ -10055,17 +10084,21 @@ def gzip_bytes(data):
 APP_FILES = {}      # an app file's path -> (its stat, its bytes, gzipped)
 
 
-def app_file(f):
+def app_file(f, script=None):
     """An app file's bytes and the same gzipped, read and squeezed once for
-    as long as it doesn't change (every page asks for them all)."""
+    as long as it doesn't change (every page asks for them all). script: a
+    JSON file, as a script that names it (const <script> = ...;)."""
     st = f.stat()
     sig = (st.st_mtime_ns, st.st_size)
-    kept = APP_FILES.get(str(f))
+    key = f"{f}|{script or ''}"
+    kept = APP_FILES.get(key)
     if kept and kept[0] == sig:
         return kept[1], kept[2]
     data = f.read_bytes()
-    APP_FILES[str(f)] = (sig, data, gzip_bytes(data))
-    return data, APP_FILES[str(f)][2]
+    if script:
+        data = f"const {script} = ".encode() + data.strip() + b";\n"
+    APP_FILES[key] = (sig, data, gzip_bytes(data))
+    return data, APP_FILES[key][2]
 
 
 def app_build():
@@ -10249,13 +10282,288 @@ LOOPS_FILE = STATE / "loops"                # the loops file's path (amarchy tod
 LOOPS_SENT = STATE / "loops-sent.json"      # {key: {action, at}}: what Today told your assistant, until it's done
 GOAL_STATES = ("working", "waiting", "blocked", "done")
 GOAL_BLOCK = re.compile(r"(?ms)^```[ \t]*goal\b([^\n]*)\n(.*?)^```[ \t]*$\n?")
-CHOICES_BLOCK = re.compile(r"(?ms)^```[ \t]*choices\b([^\n]*)\n(.*?)^```[ \t]*$")
 STALE_DAYS = 2      # a chat idle longer: close or nudge it
 
 
-def block_attrs(line):
-    """A fenced block's key="value" pairs (on its opening line)."""
-    return {k.lower(): v for k, v in re.findall(r'(\w+)\s*=\s*"([^"]*)"', line or "")}
+# ---- the blocks a reply holds (app/blocks.json, the catalog): read as the app
+# reads them (chat.js replyParts, replyBlock), and checked when a turn ends.
+
+BLOCKS_FILE = APP_PAGES / "blocks.json"
+_block_catalog = {}
+FENCE_OPEN = re.compile(r"^ {0,3}```\s*([A-Za-z]+)?(.*)$")
+FENCE_CLOSE = re.compile(r"^ {0,3}```\s*$")
+BLOCK_ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+BLOCK_URL = re.compile(r"^(https?://\S+|mailto:\S+|tel:\S+|sms:\S+)$")
+BLOCK_NUMBER = re.compile(r"^[^\d\-+.]{0,3}([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*[%a-zA-Z/]*$")
+BLOCK_FIELD = re.compile(r"^\s*(?:[-*]\s+)?([^:]{1,60}?)\s*:\s+(.+?)\s*$")
+BLOCK_SERIES_MAX = 8
+
+
+def block_catalog():
+    """app/blocks.json: {blocks: [{kind, for, attrs, body, example, rule...}],
+    common: the attributes every block takes}. Read again when it changes."""
+    try:
+        mtime = BLOCKS_FILE.stat().st_mtime_ns
+    except OSError:
+        return {"blocks": [], "common": {}}
+    if _block_catalog.get("mtime") != mtime:
+        try:
+            _block_catalog.update(mtime=mtime, data=json.loads(BLOCKS_FILE.read_text()))
+        except (OSError, ValueError):
+            return {"blocks": [], "common": {}}
+    return _block_catalog["data"]
+
+
+def block_kinds():
+    return {b["kind"]: b for b in block_catalog()["blocks"]}
+
+
+def block_number(text):
+    m = BLOCK_NUMBER.match((text or "").strip())
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def block_body(shape, body):
+    """A block's body read by its shape: {items}, {options}, {fields},
+    {series, points}, {url}, with the lines that don't fit it (bad)."""
+    lines = [l for l in body.split("\n") if l.strip()]
+    if shape == "todos":
+        items, bad = [], []
+        for l in lines:
+            m = re.match(r"^\s*[-*]\s*(?:\[( |x|X)\]\s*)?(.+?)\s*$", l)
+            if not m:
+                bad.append(l)
+                continue
+            due = re.search(r"\s*\(([^)]{1,40})\)\s*$", m.group(2))
+            items.append({"text": m.group(2)[:due.start()] if due else m.group(2), "due": due.group(1) if due else "",
+                          "done": (m.group(1) or "").lower() == "x"})
+        return {"items": items, "bad": bad}
+    if shape == "options":
+        options, bad = [], []
+        for l in lines:
+            m = re.match(r"^\s*[-*]\s*(.+?)\s*$", l)
+            if not m:
+                bad.append(l)
+                continue
+            label, *send = re.split(r"\s+\|\s+", m.group(1), maxsplit=1)
+            options.append({"label": label.strip(), "send": (send[0] if send else label).strip()})
+        return {"options": options, "bad": bad}
+    if shape == "fields":
+        fields, bad = [], []
+        for l in lines:
+            m = BLOCK_FIELD.match(l)
+            if m:
+                fields.append({"label": m.group(1).strip(), "value": m.group(2)})
+            else:
+                bad.append(l)
+        return {"fields": fields, "bad": bad}
+    if shape == "series":
+        series, points, bad = [], [], []
+        if lines and lines[0].lstrip().startswith("|"):
+            cells = lambda l: [c.strip() for c in l.strip().strip("|").split("|")]
+            head = cells(lines[0])
+            series = head[1:]
+            for l in lines[1:]:
+                if re.match(r"^\s*\|?\s*:?-{2,}", l):
+                    continue
+                row = cells(l)
+                values = [block_number(c) for c in row[1:]]
+                if len(row) != len(head) or any(v is None for v in values):
+                    bad.append(l)
+                else:
+                    points.append({"label": row[0], "values": values})
+        else:
+            series = [""]
+            for l in lines:
+                m = BLOCK_FIELD.match(l)
+                v = block_number(m.group(2)) if m else None
+                if v is None:
+                    bad.append(l)
+                else:
+                    points.append({"label": m.group(1).strip(), "values": [v]})
+        return {"series": series, "points": points, "bad": bad}
+    if shape == "url":
+        return {"url": lines[0].strip() if lines else ""}
+    return {}
+
+
+def reply_blocks(text):
+    """The catalog's blocks in a reply, in order: [{kind, attrs (by their
+    names, aliases read as them), unknown (attributes it doesn't take),
+    rest (what's on the opening line besides key="value" pairs), body,
+    closed, line}] and what block_body reads of the body. Any other fence
+    (code) is skipped whole, as the app shows it as code."""
+    kinds, common = block_kinds(), block_catalog().get("common", {})
+    out = []
+    lines = (text or "").replace("\r", "").split("\n")
+    i = 0
+    while i < len(lines):
+        m = FENCE_OPEN.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        kind, start, body = (m.group(1) or "").lower(), i, []
+        i += 1
+        while i < len(lines) and not FENCE_CLOSE.match(lines[i]):
+            body.append(lines[i])
+            i += 1
+        closed = i < len(lines)
+        i += 1
+        d = kinds.get(kind)
+        if not d:
+            continue
+        specs = {**common, **d.get("attrs", {})}
+        names = {a: name for name, spec in specs.items() for a in [name, *spec.get("alias", [])]}
+        raw = [(k.lower(), v) for k, v in BLOCK_ATTR.findall(m.group(2))]
+        attrs = {}
+        for k, v in raw:
+            if k in names:
+                attrs.setdefault(names[k], v)
+        text_body = "\n".join(body).strip("\n").rstrip()
+        out.append({"kind": kind, "attrs": attrs, "unknown": [k for k, _ in raw if k not in names],
+                    "rest": BLOCK_ATTR.sub("", m.group(2)).strip(), "body": text_body, "closed": closed,
+                    "line": start + 1, **block_body(d.get("body", {}).get("shape", "text"), text_body)})
+    return out
+
+
+def block_issues(b, chat_exists=None):
+    """What's wrong with a block, so its buttons can't work, in words for
+    Claude to fix: [] when nothing. chat_exists(id): whether a chat is there
+    (a session block's), when it can be asked."""
+    d = block_kinds()[b["kind"]]
+    specs = {**block_catalog().get("common", {}), **d.get("attrs", {})}
+    name = f"The {b['kind']} block"
+    out = []
+    if not b["closed"]:
+        out.append(f"{name} isn't closed with ```.")
+    if b["rest"]:
+        out.append(f"{name}'s opening line has {b['rest']!r}, which isn't key=\"value\" (straight double quotes).")
+    if b["unknown"]:
+        out.append(f"{name} takes no {', '.join(repr(k) for k in b['unknown'])} (it takes: {', '.join(specs)}).")
+    for key, spec in specs.items():
+        v = b["attrs"].get(key, "").strip()
+        if not v:
+            if spec.get("need"):
+                out.append(f"{name} needs {key}=\"...\".")
+            continue
+        kind = spec.get("type", "text")
+        if kind == "phone" and len(re.sub(r"\D", "", v)) < 7:
+            out.append(f"{name}'s {key} {v!r} isn't a phone number (with its country code: \"+57 300 111 2233\").")
+        elif kind == "email" and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            out.append(f"{name}'s {key} {v!r} isn't an email address.")
+        elif kind == "url" and not BLOCK_URL.match(v):
+            out.append(f"{name}'s {key} {v!r} isn't a web address (https://...).")
+        elif kind == "enum" and v.lower() not in spec.get("of", []):
+            out.append(f"{name}'s {key} is {v!r}: it's one of {', '.join(spec.get('of', []))}.")
+        elif kind == "datetime":
+            try:
+                if "T" not in v:
+                    raise ValueError
+                datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except ValueError:
+                out.append(f"{name}'s {key} {v!r} isn't a date and time (ISO 8601 with its offset: \"2026-10-29T15:40:00-05:00\").")
+        elif kind == "session" and chat_exists and not chat_exists(v):
+            out.append(f"{name}'s {key} {v!r} isn't a chat's id (amarchy list --compact has them).")
+    if d.get("needAny") and not any(b["attrs"].get(k, "").strip() for k in d["needAny"]):
+        out.append(f"{name} needs {' or '.join(d['needAny'])}.")
+    if b["kind"] == "event" and b["attrs"].get("end") and b["attrs"].get("when"):
+        try:
+            when, end = (datetime.datetime.fromisoformat(b["attrs"][k].replace("Z", "+00:00")) for k in ("when", "end"))
+            if (end.tzinfo is None) == (when.tzinfo is None) and end <= when:
+                out.append(f"{name} ends before it starts.")
+        except ValueError:
+            pass
+    shape, need = d.get("body", {}).get("shape", "text"), d.get("body", {}).get("need")
+    if need and not b["body"].strip():
+        out.append(f"{name} is empty.")
+    elif shape == "url" and b["body"].strip() and not BLOCK_URL.match(b.get("url", "")):
+        out.append(f"{name}'s address {b.get('url', '')!r} isn't one to open (https://, mailto:, tel:, sms:).")
+    elif shape == "todos" and need and not b["items"]:
+        out.append(f"{name} has no \"- [ ] ...\" lines.")
+    elif shape == "options":
+        if not b["options"]:
+            out.append(f"{name} has no \"- Label | message\" options.")
+        elif len(b["options"]) > 4:
+            out.append(f"{name} has {len(b['options'])} options: at most 4 (one question per block).")
+    elif shape == "fields":
+        if b["bad"]:
+            out.append(f"{name} has lines that aren't \"Label: value\": {b['bad'][0]!r}.")
+        elif need and not b["fields"]:
+            out.append(f"{name} has no \"Label: value\" lines.")
+    elif shape == "series":
+        if b["bad"]:
+            out.append(f"{name} has rows that aren't a label and numbers: {b['bad'][0]!r}.")
+        elif len(b["points"]) < 2:
+            out.append(f"{name} needs at least 2 values to chart.")
+        if len(b["series"]) > BLOCK_SERIES_MAX:
+            out.append(f"{name} has {len(b['series'])} series: at most {BLOCK_SERIES_MAX}.")
+    return out
+
+
+HOOK_FEEDBACK = "Stop hook feedback:"
+FIX_MARK = "amarchy: some blocks in your reply can't be drawn"
+GOAL_MARK = "amarchy: your reply doesn't end with its goal block"
+FIX_ASK = (FIX_MARK + ", so their buttons won't work:\n{issues}\nWrite your whole reply again with them fixed, "
+           "as if for the first time (don't mention the fix): the person sees it in place of the one you wrote.")
+GOAL_ASK = (GOAL_MARK + ". Send only that block now, nothing else: it's added to the reply you wrote.")
+
+
+def fix_feedback(r):
+    """Whether a conversation record is the Stop hook sending a reply back to
+    be written again (FIX_ASK; Claude Code records it as its own, isMeta)."""
+    content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+    texts = [content] if isinstance(content, str) else [b.get("text") or "" for b in content or [] if isinstance(b, dict) and b.get("type") == "text"]
+    return any(t.startswith(HOOK_FEEDBACK) and FIX_MARK in t for t in texts)
+
+
+def turn_reply(path, tail=2_000_000):
+    """The reply a turn ended with, from its conversation: the words Claude
+    wrote after its last step, since your last message. "" for none."""
+    texts = []
+    for r in reversed(conversation_records(path, tail=tail) if path else []):
+        if not isinstance(r, dict) or r.get("isSidechain"):
+            continue
+        content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+        if r.get("type") == "user":
+            break       # yours, a step's result, a hook's feedback: the reply is what came after
+        if r.get("type") != "assistant" or not isinstance(content, list):
+            continue
+        for b in reversed(content):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use":
+                return "\n\n".join(texts)
+            if b.get("type") == "text" and (b.get("text") or "").strip():
+                texts.insert(0, b["text"])
+    return "\n\n".join(texts)
+
+
+def reply_fix(event):
+    """What a turn's reply needs fixed, as the Stop hook asks Claude (FIX_ASK,
+    GOAL_ASK), or None: its blocks the app can't draw (reply_issues), else a
+    missing goal block. Nothing for a turn that ended without words."""
+    text = event.get("last_assistant_message") if isinstance(event.get("last_assistant_message"), str) else None
+    if not text:
+        text = turn_reply(event.get("transcript_path"))
+    if not text or not text.strip():
+        return None
+    issues, has_goal = reply_issues(text, lambda sid: session(sid) is not None)
+    if issues:
+        return FIX_ASK.format(issues="\n".join(f"- {i}" for i in issues[:12]))
+    return None if has_goal else GOAL_ASK
+
+
+def reply_issues(text, chat_exists=None):
+    """A reply's blocks checked (block_issues), and whether it has its goal
+    block: (issues, has_goal)."""
+    blocks = reply_blocks(text)
+    issues = [i for b in blocks for i in block_issues(b, chat_exists)]
+    return issues, any(b["kind"] == "goal" for b in blocks)
 
 
 def without_goal(text):
@@ -10265,45 +10573,29 @@ def without_goal(text):
 
 def reply_goal(text):
     """The goal block a reply ends with: {"goal", "state"}, or None."""
-    found = list(GOAL_BLOCK.finditer(text or ""))
+    found = [b for b in reply_blocks(text) if b["kind"] == "goal"]
     if not found:
         return None
-    m = found[-1]
-    state = block_attrs(m.group(1)).get("state", "").strip().lower()
-    goal = " ".join(m.group(2).split())[:200]
+    state = found[-1]["attrs"].get("state", "").strip().lower()
+    goal = " ".join(found[-1]["body"].split())[:200]
     return {"goal": goal, "state": state if state in GOAL_STATES else ""} if goal or state else None
 
 
 def reply_choices(text):
     """The questions a reply asks with its choices blocks, as the app's
-    Needs you form has them (chat.js replyBlock): [{question, options:
-    [{label, send}]}], options at most 4."""
-    out = []
-    for m in CHOICES_BLOCK.finditer(text or ""):
-        opts = []
-        for line in m.group(2).splitlines():
-            o = re.match(r"^\s*[-*]\s*(.+?)\s*$", line)
-            if not o:
-                continue
-            label, _, send = o.group(1).partition(" | ")
-            opts.append({"label": label.strip(), "send": (send or label).strip()})
-        if opts:
-            out.append({"question": block_attrs(m.group(1)).get("question", ""), "options": opts[:4]})
-    return out[:3]
-
-
-LINK_BLOCK = re.compile(r"(?ms)^```[ \t]*link\b([^\n]*)\n(.*?)^```")
+    Needs you form has them: [{question, options: [{label, send}]}],
+    options at most 4."""
+    return [{"question": b["attrs"].get("question", ""), "options": b["options"][:4]}
+            for b in reply_blocks(text) if b["kind"] == "choices" and b["options"]][:3]
 
 
 def reply_links(text):
     """Where to see what a reply made (its link blocks, else the links in its
     words, not its Sources): [{label, url}], at most 3. A done chat's Review."""
     out = []
-    for m in LINK_BLOCK.finditer(text or ""):
-        url = next((l.strip() for l in m.group(2).splitlines() if re.match(r"https?://", l.strip())), "")
-        a = block_attrs(m.group(1))
-        if url:
-            out.append({"label": a.get("label") or a.get("title") or "", "url": url})
+    for b in reply_blocks(text):
+        if b["kind"] == "link" and re.match(r"https?://", b["url"]):
+            out.append({"label": b["attrs"].get("label", ""), "url": b["url"]})
     if not out:
         words = re.split(r"(?mi)^##\s+sources\b", without_goal(text or ""))[0]
         words = re.sub(r"(?ms)^```.*?^```", "", words)
@@ -10326,7 +10618,7 @@ def human_turn(r):
     if isinstance(content, list):
         content = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
     text = (content or "").strip() if isinstance(content, str) else ""
-    return bool(text) and not text.startswith(("<", "amarchy:", "This session is being continued"))
+    return bool(text) and not text.startswith(("<", "amarchy:", HOOK_FEEDBACK, "This session is being continued"))
 
 
 _replies = {}
@@ -10373,7 +10665,7 @@ def chat_reply(s):
                 if isinstance(content, list) else content if isinstance(content, str) else ""
             if not text.strip():
                 continue
-            if not reply_seen:
+            if not reply_seen and without_goal(text).strip():       # (only its goal block: added to the reply before it, reply_fix)
                 reply_seen = True
                 out["links"] = reply_links(text)       # where to see what it made: Review
                 if not answered:
@@ -11366,6 +11658,10 @@ def app_handler(st, users, address):
             # same name is always the same file.
             folder, _, name = name.rpartition("/") if name.startswith("vendor/") else ("", "", name)
             f = APP_PAGES / folder / name
+            # The blocks' catalog (blocks.json), for the app's scripts: blocks.js.
+            script = "BLOCK_CATALOG" if name == "blocks.js" and not folder else None
+            if script:
+                f = APP_PAGES / "blocks.json"
             if not re.fullmatch(r"[\w-]+(\.[\w-]+)+", name) or Path(name).suffix not in APP_TYPES or not f.is_file():
                 return self.error(404, "not found")
             # The build this page is (index.html knows it, sw.js caches by it,
@@ -11399,7 +11695,7 @@ def app_handler(st, users, address):
                     data = data.replace(b"{{nonce}}", nonce.encode())
                 data, more = self.squeezed(data, ctype)
             else:
-                data, packed = app_file(f)
+                data, packed = app_file(f, script)
                 data, more = self.squeezed(data, ctype, packed)
             self.head(200, ctype, [("Content-Length", str(len(data))), *extra, *more], cache=cache, nonce=nonce)
             self.end_headers()
@@ -13138,56 +13434,51 @@ BRIEF_TOOL = "mcp__amarchy__update_brief"
 # ---- the reply format: how Claude writes, for the app to show as it is
 #
 # Given at every start (--append-system-prompt, both engines): a reply leads
-# with its outcome, then markdown (sections, lists, tables, links), and fenced
-# blocks named for what they hold (a draft, a command, an event...) that the
-# app draws in their place with buttons (chat.js claudeView). What Claude
-# wrote is what you read, every word of it, in its order: nothing summarized,
-# folded away or moved.
-REPLY_FORMAT = """amarchy shows the person your replies as you write them, rendered as markdown, on their phone or computer: every word, in your order, nothing summarized or folded away. Write each reply (your final message of a turn, not your working notes in between) to be read there. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and use these blocks, because buttons come only from them.
+# with its outcome, then markdown (sections, lists, tables, links), and the
+# blocks of app/blocks.json (the catalog: what each is for, its attributes,
+# its body), which the app draws in their place with buttons (chat.js
+# claudeView) and the Stop hook checks (reply_issues). What Claude wrote is
+# what you read, every word of it, in its order: nothing summarized, folded
+# away or moved.
+
+def blocks_guidance():
+    """The catalog's blocks, as the reply format shows them to Claude: an
+    example of each (the short ones on one line), then their rules."""
+    def fence(b):
+        ex = b.get("example", {})
+        head = f"```{b['kind']}{' ' + ex['attrs'] if ex.get('attrs') else ''}"
+        body = [f"  {line}" for line in (ex.get("body") or "").split("\n") if ex.get("body")]
+        return [f"  {head}", *body, "  ```"]
+    shown = [b for b in block_catalog()["blocks"] if not b.get("hidden")]
+    out = []
+    for b in shown:
+        if not b.get("short"):
+            out += [f"  {b['for'][0].upper()}{b['for'][1:]}:", *fence(b)]
+    short = [b for b in shown if b.get("short")]
+    if short:
+        out.append("  (also " + " and ".join(f"```{b['kind']} {b['example']['attrs']}``` for {b['for']}" for b in short) + ")")
+    for b in shown:
+        if b.get("rule"):
+            out.append(f"- {b['rule']}")
+    return "\n".join(out)
+
+
+def goal_guidance():
+    b = block_kinds()["goal"]
+    return "\n".join([f"- {b['rule']}", *[f"  {line}" for line in [f"```goal {b['example']['attrs']}", b["example"]["body"], "```"]]])
+
+
+REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rendered as markdown, on their phone or computer: every word, in your order, nothing summarized or folded away. Write each reply (your final message of a turn, not your working notes in between) to be read there. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and use these blocks, because buttons come only from them.
 
 - Lead with the outcome in one plain sentence, as you'd say it to them. No greeting, no "Here's...".
 - Then the rest in markdown: short paragraphs and lists, "## " headings to break up anything long, a table for any comparison or side-by-side data, links as [words](url), code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point.
-- Anything they will use goes in a fenced block named for it, where it belongs in the reply; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar...). Attributes go on the opening line as key="value":
-  ```whatsapp to="Felipe" phone="+57 300 111 2233"
-  the whole message, ready to send
-  ```
-  ```email to="ana@example.com" subject="Contract"
-  the whole email
-  ```
-  (also ```slack to="#channel"``` and ```sms phone="+1 555 0100"```)
-  ```command cwd="~/Work/houston"
-  exactly what to run
-  ```
-  ```link label="Sign in to Gmail" note="Expires in 10 minutes"
-  https://...
-  ```
-  ```event title="ECOS panel" when="2026-10-29T15:40:00-05:00" end="2026-10-29T17:00:00-05:00" where="Teatro Panorama, Bogotá"
-  any notes
-  ```
-  ```todos title="Still open"
-  - [ ] Send the C21 summary (today)
-  - [x] Twilio top-up
-  ```
-  ```contact name="Gaby Mendez" role="Quantística" phone="+57 310 555 0101" email="gaby@example.com"
-  ```
-  ```place name="Spinning Center Rosales" where="Cl. 72 #5-83, Bogotá" hours="Mon-Fri 6am-9pm"
-  ```
-  ```session id="houston-os-c21-crm"
-  what that chat is doing
-  ```
-- Lists they track (still open, waiting on, loops) go in a todos block, every time you list them.
-- Any question you ask them, a yes or no included, goes in a choices block at the end, so they answer with a tap; each option is "- Label | the full message it sends" (or just "- Label"):
-  ```choices question="Ship it to main?"
-  - Ship it | Ship it: merge to main and push
-  - Not yet
-  ```
+- Anything they will use goes in a fenced block named for it, where it belongs in the reply; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
+{blocks_guidance()}
 - A link for them to open goes in a link block; a date to keep, in an event block.
+- When your turn ends, amarchy checks your blocks: one it can't draw (a date that isn't one, a question with no options, an attribute it doesn't know) is sent back to you to fix.
 - Something live for them to look at: a dev server, register it as the chat's preview instead of starting it in your shell (`amarchy preview --run '<command>' <url>`: amarchy runs it, keeps it through your sleep, and stops it when the chat is completed); a deploy, `amarchy preview <url>`. Either puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation (it starts the server again when it isn't running). Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used go last, under "## Sources", as links.
-- The very end of every reply is this chat's goal and where it stands, in a goal block (it isn't shown in the reply: the app puts the goal under the chat's name and on its Today page, and offers to close a done chat). state is working (more to do, or under way), waiting (you need them: your choices block says what), blocked (you can't go on), or done (the goal is reached: built and shipped, answered, sent; nothing is left for this chat). When it's done, give them a link block to see or check the result (the page, the deploy, the PR, the document) whenever there is one. The goal is one short sentence of what they want from this chat, the same every reply unless it changed:
-  ```goal state="working"
-  Make Today the app's home screen
-  ```
+{goal_guidance()}
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 
@@ -13268,6 +13559,8 @@ def human_message(text):
     the summary a compacted conversation goes on from."""
     t = text.lstrip()
     if re.match(r"<(task-notification|cross-session-message|system-reminder|local-command|command-|bash-)", t):
+        return False
+    if t.startswith(HOOK_FEEDBACK):
         return False
     return not t.startswith("This session is being continued from a previous conversation")
 

@@ -57,6 +57,15 @@
   --tile-on: var(--success);
   --chart-bg: var(--control-selected);
   --chart-on: var(--success);
+  /* A chart block's series (chat.js chartView), in this order, never cycled:
+     eight hues validated together for color-blind readers (the dataviz
+     method's reference palette, dark steps; theme.css gives a light theme
+     the light ones). One series wears the accent. */
+  --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
+  --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767;
+  --chart-single: var(--accent);
+  --chart-grid: var(--border-faint);
+  --chart-axis: var(--border);
   /* One size for every control, wherever it is: a button on a card, a tab,
      the search, a tool, New chat, the buttons over a chat and in its side
      panel, the composer's menus. A finger's on a touch screen. */
