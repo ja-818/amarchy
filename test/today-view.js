@@ -138,7 +138,10 @@ const LOOPS = [
   { key: "chat1", kind: "due", what: "Try json-render (chat proj-quiet)", who: "", due: iso(2), nudge: "", since: "", chase: "", ref: "", chat: "proj-quiet", line: "v" },
 ];
 
-async function page(browser, layout, port) {
+// notices: with the home's notice that notifications are off on this device
+// (test/push-notice.js); else a device that said no to them, so the home is
+// your chats alone.
+async function page(browser, layout, port, { notices = false } = {}) {
   const ctx = await browser.newContext({ ...LAYOUTS[layout], baseURL: `http://127.0.0.1:${port}` });
   const p = await ctx.newPage();
   p.errors = [];
@@ -151,8 +154,9 @@ async function page(browser, layout, port) {
     await p.route(`**/api/session/*/${what}`, (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: {} }); });
   }
   await p.route("**/api/today/loop", (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: {} }); });
-  await p.addInitScript(({ chats, loops }) => {
+  await p.addInitScript(({ chats, loops, notices }) => {
     Object.defineProperty(Navigator.prototype, "standalone", { get: () => true });
+    try { if (!notices && !localStorage.getItem("amarchy-push")) localStorage.setItem("amarchy-push", "no"); } catch (e) { /* no storage yet */ }
     const parse = JSON.parse;
     JSON.parse = function (text, ...rest) {
       const v = parse.call(this, text, ...rest);
@@ -171,7 +175,7 @@ async function page(browser, layout, port) {
       }
       return v;
     };
-  }, { chats: CHATS, loops: LOOPS });
+  }, { chats: CHATS, loops: LOOPS, notices });
   return p;
 }
 

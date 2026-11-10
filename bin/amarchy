@@ -6380,6 +6380,40 @@ def app_save_subscriptions(change):
             os.umask(old)
 
 
+PUSH_GONE = 200                 # ended subscriptions remembered, so a device that still holds one makes a new one
+
+
+def push_device(sub):
+    """A device in a log line: what it is (its browser's name for itself, cut
+    short) and whose push service it's on."""
+    ua = str(sub.get("device") or "")
+    system = next((name for mark, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"),
+                                           ("Macintosh", "Mac"), ("Windows", "Windows"), ("Linux", "Linux"))
+                   if mark in ua), "a device")
+    browser = next((name for mark, name in (("Edg/", "Edge"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"),
+                                            ("Safari/", "Safari")) if mark in ua), "")
+    host = urllib.parse.urlsplit(str(sub.get("endpoint") or "")).netloc
+    return f"{system}{' ' + browser if browser else ''} ({host})"
+
+
+def push_log(what, sub, why=""):
+    """Says in the app's log (journalctl --user -u amarchy-app) that a device
+    was added to or taken off the ones notified, and why: when notifications
+    stop, this is where to look."""
+    print(f"amarchy app: notifications {what}: {push_device(sub)}{', ' + why if why else ''}", file=sys.stderr, flush=True)
+
+
+def push_gone():
+    """The endpoints whose push service said they ended (404, 410): never
+    notified again, and a device that still sends one is told to make a new
+    subscription (app.js's pushRefresh)."""
+    try:
+        gone = json.loads((APP / "push-gone.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [e for e in gone if isinstance(e, str)] if isinstance(gone, list) else []
+
+
 def push_send(sub, payload):
     """Send one notification: True if the push service took it, False if
     that phone is gone for good (its subscription ended), None on any other
@@ -6423,8 +6457,16 @@ def push_all(payload):
         sent += ok is True
         if ok is False:
             gone.add(sub["endpoint"])
+            push_log("off", sub, "its push service says the subscription ended (the browser dropped it, or the app "
+                                 "was removed): it's on again once that device opens Amarchy, or with Turn on there")
     if gone:
         app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] not in gone])
+        with _push_lock:
+            old = os.umask(0o077)
+            try:
+                write_file(APP / "push-gone.json", json.dumps((push_gone() + sorted(gone))[-PUSH_GONE:]))
+            finally:
+                os.umask(old)
     return sent
 
 
@@ -12496,8 +12538,15 @@ def app_handler(st, users, address):
             if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
                 return self.error(400, "not a push subscription")
             if self.path == "/api/push/remove":
+                for sub in app_subscriptions():
+                    if sub["endpoint"] == endpoint:
+                        push_log("off", sub, "turned off on that device (Settings, or the browser took its permission back)")
                 app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint])
                 return self.send(200, {})
+            # One its push service ended: not kept (nothing sent to it would
+            # arrive). That device makes a new one (app.js's pushRefresh).
+            if endpoint in push_gone():
+                return self.send(200, {"gone": True})
             keys = data.get("keys") if isinstance(data.get("keys"), dict) else {}
             try:
                 if len(unb64u(keys["p256dh"])) != 65 or len(unb64u(keys["auth"])) != 16:
@@ -12506,6 +12555,8 @@ def app_handler(st, users, address):
                 return self.error(400, "not a push subscription")
             sub = {"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]},
                    "added": int(time.time()), "device": str(self.headers.get("User-Agent", ""))[:200]}
+            if not any(s["endpoint"] == endpoint for s in app_subscriptions()):
+                push_log("on", sub)
             app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint] + [sub])
             return self.send(200, {})
 

@@ -236,6 +236,15 @@ finished, and its flag if pinned. Your assistant's card stays on top (see
   when it asks something, whether the app was open or not. Your assistant's always
   reach you (see [Your assistant](#your-assistant)); **Settings → Tell me** says
   which of the others do.
+- **When they stop reaching a device**, the home says so, on the phone and on a
+  computer alike: a card above your chats, "Notifications are off", with **Turn
+  on** (one tap) and **Not now** (it stays away on that device). It shows where
+  notifications were never decided, and where they were on and the browser or the
+  system dropped them since; blocked in the system's settings, it says where to
+  allow them. A subscription the push service ended is made again by itself the
+  next time that device opens the app. The app's log says each time a device is
+  added, turned off or dropped, and why (`journalctl --user -u amarchy-app | grep
+  notifications`); `amarchy app --status` counts the devices notified.
 
 The phone asks whether amarchy may use the microphone the first time you dictate
 after opening the app. After a dictation it keeps the microphone, turned off, for

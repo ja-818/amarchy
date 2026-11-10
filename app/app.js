@@ -1972,18 +1972,34 @@ async function pushState() {
   return Notification.permission === "denied" ? "denied" : "off";
 }
 
-async function pushOn() {
-  const asked = Notification.requestPermission();      // first, while it's still your tap
-  if ((await asked) !== "granted") throw new Error("Notifications weren't allowed (Settings → Notifications → Amarchy).");
-  const reg = await navigator.serviceWorker.ready;
+// What this device was last known to want (PUSH_WANT): "on" (notifications
+// were on here), "no" (turned off or dismissed here), nothing (never decided).
+// Off without a "no": the home says so, with one tap to turn them on (pushNotice).
+const PUSH_WANT = "amarchy-push";
+const PUSH_AGAIN = 10 * 60 * 1000;      // ms between two checks when you come back to the app
+const push = { state: null, at: 0, busy: false };
+
+// A subscription the server takes: this device's, or a new one when its push
+// service ended the one it had (the server says gone).
+async function pushSubscribe(reg, fresh = false) {
   const key = keyBytes(app.key);
   let sub = await reg.pushManager.getSubscription();
-  if (sub && !sameKey(sub.options.applicationServerKey, key)) {
+  if (sub && (fresh || !sameKey(sub.options.applicationServerKey, key))) {
     await sub.unsubscribe();
     sub = null;
   }
   sub = sub || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-  await api("/api/push", sub.toJSON());
+  const r = await api("/api/push", sub.toJSON());
+  if (r.gone && !fresh) return pushSubscribe(reg, true);
+  if (r.gone) throw new Error("Notifications couldn't be turned on: try again in a moment.");
+}
+
+async function pushOn() {
+  const asked = Notification.requestPermission();      // first, while it's still your tap
+  if ((await asked) !== "granted") throw new Error("Notifications weren't allowed (Settings → Notifications → Amarchy).");
+  await pushSubscribe(await navigator.serviceWorker.ready);
+  store.set(PUSH_WANT, "on");
+  pushShow("on");
 }
 
 async function pushOff() {
@@ -1993,18 +2009,65 @@ async function pushOff() {
     await api("/api/push/remove", { endpoint: sub.endpoint }).catch(() => {});
     await sub.unsubscribe();
   }
+  store.set(PUSH_WANT, "no");
+  pushShow("off");
 }
 
-// The server forgets nothing on its own, but tell it again in case (a new key, a reinstall).
-async function pushRefresh() {
+// Whether notifications reach this device, checked when the app starts and
+// when you come back to it: on, the server is told again (a new key, a
+// reinstall, a subscription its push service ended: a new one is made);
+// off when they were on, the home says so (pushNotice).
+async function pushRefresh(force = false) {
+  if (push.busy || (!force && Date.now() - push.at < PUSH_AGAIN)) return;
+  push.busy = true;
+  push.at = Date.now();
   try {
-    if ((await pushState()) !== "on") return;
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    if (!sameKey(sub.options.applicationServerKey, keyBytes(app.key))) await pushOn();
-    else await api("/api/push", sub.toJSON());
+    let state = await pushState();
+    if (state === "on") {
+      try {
+        await pushSubscribe(await navigator.serviceWorker.ready);
+        store.set(PUSH_WANT, "on");
+      } catch (e) {
+        state = await pushState().catch(() => state);      // (the server out of reach: still on, told next time)
+      }
+    }
+    pushShow(state);
   } catch (e) { /* next time */ }
+  push.busy = false;
 }
+
+function pushShow(state) {
+  if (push.state === state) return;
+  push.state = state;
+  if (typeof todayRedraw === "function") todayRedraw();
+}
+
+// On the home, above your chats: notifications don't reach this device, and
+// it never said it didn't want them. Off: one tap turns them on. Blocked in
+// the system's settings (only said when they were on here): where to allow them.
+function pushNotice() {
+  const want = store.get(PUSH_WANT);
+  const off = push.state === "off" && want !== "no", blocked = push.state === "denied" && want === "on";
+  if (!(off || blocked) || !(standalone || app.desk)) return null;
+  const later = () => { store.set(PUSH_WANT, "no"); todayRedraw(); };
+  const card = uiCard({ kind: "notice", hue: "none", title: "Notifications are off",
+    pill: uiPill(blocked ? "Blocked" : "Off", "warn"), open: () => openSettings(), label: "Notifications are off on this device: Settings",
+    body: [h("p", { class: "tcard-text muted" }, blocked
+      ? (app.desk ? "This device blocks them for Amarchy: allow them in this browser's settings, or in System Settings → Notifications."
+                  : "This device blocks them for Amarchy: allow them in the phone's Settings → Notifications.")
+      : "This device isn't told when a chat needs you or is done.")],
+    actions: [uiButton(blocked ? "Dismiss" : "Not now", later, false, "quiet"),
+      blocked ? null : uiButton("Turn on", async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        try { await pushOn(); toast("Notifications on."); }
+        catch (err) { toast(err.message); b.disabled = false; pushRefresh(true); }
+      }, true)] });
+  card.todayData = `push|${push.state}|${want}`;
+  return card;
+}
+
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && app.key) pushRefresh(); });
 
 // When a session you're not using sleeps (amarchy sleep --after): its
 // Claude Code exits, freeing its memory, and comes back when you send it
@@ -2527,7 +2590,7 @@ async function start() {
   if (shareError) toast(`Couldn't share that: ${shareError}`);
   shareCheck();     // something you shared, waiting for a chat
   openList();
-  if (app.key) pushRefresh();
+  if (app.key) pushRefresh(true);
 }
 
 start();

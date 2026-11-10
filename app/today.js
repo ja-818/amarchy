@@ -867,6 +867,8 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   if (top) nodes.push(h("div", { class: "today-summary" }, only === "chats"
     ? uiFilter({ label: "Needs you", count: todayCount(v, "chats"), on: todayUI.needsOnly, title: "Only what needs you (o)", act: () => todayNeedsOnly(!todayUI.needsOnly) })
     : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
+  // Notifications don't reach this device (app.js pushNotice): said above your chats.
+  if (only !== "tasks" && typeof pushNotice === "function") nodes.push(pushNotice());
   // A chat's card, wherever it stands.
   const cardOf = (s) => s === p.main ? tk(todayChat, "assistant")(s)
     : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
