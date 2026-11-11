@@ -1,10 +1,13 @@
 // What Claude said, in a browser: the conversation is the only view. A
 // reply shows as Claude wrote it, every word in its order, rendered as
-// markdown: lists, tables (a card per row on a phone), code. Its "## "
-// sections are folded under their headings, one box of heads: a tap opens
-// one, Open all every one; one with something to use in it starts open; the
-// words are all there, folded or not. Its briefing (the brief block) is a
-// card of rows after them, what you need to do lit. In their place, the blocks it made for you to use (a draft, a link,
+// markdown: lists, tables (a card per row on a phone), code. A long reply
+// is three parts, each under its small head: Briefing (its opening and its
+// brief block's rows, one card), Action items (its actions block, what to
+// use for it, its questions; or that there's nothing for you to do) and
+// Content (its "## " sections folded under their headings, one box of
+// heads: a tap opens one, Open all every one; the words are all there,
+// folded or not).
+// In their place, the blocks it made for you to use (a draft, a link,
 // a command, an event, to-dos, a contact, a chat), open, each with its
 // buttons (a link folded: its row has Copy and Open); its questions (choices) as buttons, a tap sending the answer;
 // asked before something newer, no longer to tap. The goal block isn't
@@ -144,12 +147,27 @@ const OLD_BRIEF = {
 const REPLY = [
   "The search page works: it filters as you type, <img src=x onerror=\"window.__pwned = 1\">.",
   "",
+  "```brief",
+  "Checked: Both view tests pass, **phone and wide**",
+  "Open: Algolia isn't wired",
+  "```",
+  "",
+  "```actions",
+  "- Send the draft to the **group** (today)",
+  "- Say whether to ship it",
+  "```",
+  "",
   "It reads **120 items** and answers in under 50 ms. Draft for the group:",
   "",
   "```whatsapp to=\"C21 group\" phone=\"+57 300 123 4567\"",
   "Hola equipo, les comparto el resumen:",
   "1. Piloto PQR",
   "2. Datos por Excel",
+  "```",
+  "",
+  "```choices question=\"Ship it to main?\"",
+  "- Ship it | Ship it: merge to main and push",
+  "- Not yet",
   "```",
   "",
   "## It filters as you **type**",
@@ -215,18 +233,6 @@ const REPLY = [
   "## Sources",
   "",
   "- [Search UX guide](https://www.nngroup.com/articles/search/)",
-  "",
-  "```brief",
-  "Done: The search page filters **as you type**",
-  "Checked: Both view tests pass",
-  "Open: Algolia isn't wired",
-  "You: Say whether to ship it",
-  "```",
-  "",
-  "```choices question=\"Ship it to main?\"",
-  "- Ship it | Ship it: merge to main and push",
-  "- Not yet",
-  "```",
   "",
   "```goal state=\"waiting\"",
   "Ship the search page",
@@ -295,17 +301,19 @@ async function run(browser, base, layout) {
       said: msgs.map((m) => m.textContent.slice(0, 40)),
       order: (function name(box) { return [...box.children].map((x) => x.matches(".md") ? `md:${(x.firstElementChild || x).textContent.slice(0, 18)}`
         : x.matches(".artifacts") ? `block:${x.querySelector(".art").className.split(" ")[1]}` : x.matches(".choices") ? "choices"
+        : x.matches(".tsec") ? [`part:${x.querySelector(".tsec-title").textContent}`, ...name(x.querySelector(".tsec-cards"))]
         : x.matches(".folds") ? [...x.children].map((f) => [`${f.classList.contains("open") ? "open" : "folded"}:${f.querySelector(".fold-title").textContent}`, ...name(f.querySelector(".fold-body"))])
         : x.className); })(last),
       folds: [...last.querySelectorAll(".fold")].map((f) => ({ open: f.classList.contains("open"), said: f.querySelector(".fold-head").getAttribute("aria-expanded"),
         seen: f.querySelector(".fold-body").getBoundingClientRect().height > 0 })),
       headBold: last.querySelector(".fold-title strong")?.textContent,
       headings: last.querySelectorAll(".md h2, .md h3").length,
-      all: last.querySelector(".fold-all button")?.textContent,
-      brief: [...last.querySelectorAll(".brief .brief-rows > *")].map((x) => `${x.tagName.toLowerCase()}${x.className ? `.${x.className}` : ""}:${x.innerHTML.replace(/<\/?span>/g, "")}`),
-      briefHead: last.querySelector(".brief .brief-head")?.textContent,
-      briefAfter: !!last.querySelector(".folds ~ .brief ~ .choices") && !last.querySelector(".fold .brief, .fold .choices"),
-      youColor: (() => { const dt = last.querySelector(".brief dt.you"), other = last.querySelector(".brief dt:not(.you)"); return dt && getComputedStyle(dt).color !== getComputedStyle(other).color; })(),
+      all: last.querySelector(".today-content .tsec-head .tbtn")?.textContent,
+      lead: last.querySelector(".brief .brief-lead")?.textContent,
+      brief: [...last.querySelectorAll(".brief .brief-rows > *")].map((x) => `${x.tagName.toLowerCase()}:${x.innerHTML.replace(/<\/?span>/g, "")}`),
+      acts: [...last.querySelectorAll(".acts li")].map((li) => `${li.querySelector(".act-text").innerHTML.replace(/<\/?span>/g, "")}|${li.querySelector(".act-due")?.textContent || ""}`),
+      heads: [...last.querySelectorAll(":scope > .tsec > .tsec-head")].map((x) => `${x.querySelector(".tsec-title").textContent}:${Math.round(parseFloat(getComputedStyle(x).fontSize))}:${getComputedStyle(x).marginTop}`),
+      above: (() => { const r = (q) => last.querySelector(q).getBoundingClientRect(); return r(".brief").bottom <= r(".today-actions").top && r(".today-actions").bottom <= r(".today-content").top; })(),
       text: last.textContent,
       open: [...last.querySelectorAll(".art:not(.art-link)")].map((a) => a.classList.contains("open")),
       link: (() => { const a = msgs[0].querySelector(".art-link"); return { open: a.classList.contains("open"), row: [...a.querySelectorAll(".art-head > .art-btn")].map((b) => `${b.tagName.toLowerCase()}:${b.textContent}`),
@@ -328,19 +336,23 @@ async function run(browser, base, layout) {
   });
   check(layout, !s.switch, "one view: no Brief | Chat switch, no reply cards");
   check(layout, s.msgs === 3, `every message Claude wrote, but the one it said again after an old brief (${JSON.stringify(s.said)})`);
-  const order = ["md:The search page wo", "block:art-message", "fold-all", [
+  const order = [["part:Briefing", "brief"], ["part:Action items", "acts", "md:It reads 120 items", "block:art-message", "choices"], ["part:Content", [
     ["folded:It filters as you type", "md:Each key narrows t"],
-    ["open:How it compares", "md:OptionSpeedCostLoc", "block:art-command", "md:jsCopyconst x = se", "block:art-event", "block:art-link", "block:art-todos", "block:art-fields",
+    ["folded:How it compares", "md:OptionSpeedCostLoc", "block:art-command", "md:jsCopyconst x = se", "block:art-event", "block:art-link", "block:art-todos", "block:art-fields",
       "block:art-chart", "block:art-chart"],
-    ["folded:Sources", "md:Search UX guide"]], "brief", "choices"];
-  check(layout, JSON.stringify(s.order) === JSON.stringify(order), `in Claude's order, each block where it wrote it, its sections under their headings (${JSON.stringify(s.order)})`);
-  check(layout, JSON.stringify(s.folds) === JSON.stringify([{ open: false, said: "false", seen: false }, { open: true, said: "true", seen: true }, { open: false, said: "false", seen: false }]),
-    `a section is folded under its heading; one with something to use in it starts open (${JSON.stringify(s.folds)})`);
+    ["folded:Sources", "md:Search UX guide"]]]];
+  check(layout, JSON.stringify(s.order) === JSON.stringify(order), `three parts, in Claude's order: Briefing, Action items, Content (${JSON.stringify(s.order)})`);
+  check(layout, JSON.stringify(s.heads) === JSON.stringify(["Briefing:11:0px", "Action items:11:0px", "Content:11:0px"]) && s.above,
+    `each part under its small head, one under the other (${JSON.stringify(s.heads)})`);
+  check(layout, s.lead.startsWith("The search page works: it filters as you type, <img src=x") && JSON.stringify(s.brief) === JSON.stringify(["dt:Checked",
+    "dd:Both view tests pass, <strong>phone and wide</strong>", "dt:Open", "dd:Algolia isn't wired"]),
+    `Briefing: its opening and its rows, one card (${JSON.stringify([s.lead, s.brief])})`);
+  check(layout, JSON.stringify(s.acts) === JSON.stringify(["Send the draft to the <strong>group</strong>|today", "Say whether to ship it|"]),
+    `Action items: what's yours to do, a line each, then what to use and the question (${JSON.stringify(s.acts)})`);
+  check(layout, s.folds.length === 3 && s.folds.every((f) => !f.open && f.said === "false" && !f.seen),
+    `Content: every section folded under its heading (${JSON.stringify(s.folds)})`);
   check(layout, s.headBold === "type" && s.headings === 0 && s.text.includes("## not a heading") && s.all === "Open all",
     `a heading is its section's head, not said twice; one in code stays code; Open all (${JSON.stringify([s.headBold, s.headings, s.all])})`);
-  check(layout, s.briefHead === "Briefing" && JSON.stringify(s.brief) === JSON.stringify(["dt:Done", "dd:The search page filters <strong>as you type</strong>", "dt:Checked", "dd:Both view tests pass",
-    "dt:Open", "dd:Algolia isn't wired", "dt.you:You", "dd.you:Say whether to ship it"]) && s.briefAfter && s.youColor,
-    `its briefing: a row each, after the sections and before the question, your move lit (${JSON.stringify(s.brief)})`);
   check(layout, s.text.includes("<img src=x onerror") && s.pwned === undefined && s.text.includes("120 items") && s.text.includes("Search UX guide"),
     "every word, as text: nothing runs as markup");
   check(layout, s.open.every(Boolean) && s.pre.startsWith("Hola equipo") &&
@@ -367,27 +379,41 @@ async function run(browser, base, layout) {
   const tapFold = (n) => page.evaluate((n) => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelectorAll(".fold-head")[n].click(), n);
   const foldState = () => page.evaluate(() => { const last = [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1);
     return { open: [...last.querySelectorAll(".fold")].map((f) => f.classList.contains("open") && f.querySelector(".fold-body").getBoundingClientRect().height > 0),
-      all: last.querySelector(".fold-all button").textContent }; });
+      all: last.querySelector(".today-content .tsec-head .tbtn").textContent }; });
   await tapFold(0);
   let f = await foldState();
-  check(layout, JSON.stringify(f.open) === "[true,true,false]" && f.all === "Open all", `a tap on a heading opens its section (${JSON.stringify(f)})`);
+  check(layout, JSON.stringify(f.open) === "[true,false,false]" && f.all === "Open all", `a tap on a heading opens its section (${JSON.stringify(f)})`);
   await shot("section-open");
-  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".fold-all button").click());
+  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".today-content .tsec-head .tbtn").click());
   f = await foldState();
   check(layout, JSON.stringify(f.open) === "[true,true,true]" && f.all === "Fold all", `Open all opens every one (${JSON.stringify(f)})`);
   await page.evaluate(({ list }) => window.__chat.conversation({ reset: true, start: 0, items: list }), { list });
   f = await foldState();
   check(layout, JSON.stringify(f.open) === "[true,true,true]", `drawn again, they're as you left them (${JSON.stringify(f)})`);
-  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".fold-all button").click());
+  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".today-content .tsec-head .tbtn").click());
   f = await foldState();
   check(layout, JSON.stringify(f.open) === "[false,false,false]" && f.all === "Open all", `Fold all folds every one (${JSON.stringify(f)})`);
   await tapFold(1);
   // While it's written: as it comes, nothing folded.
   const live = await page.evaluate((t) => { const v = window.__chat.claudeView(t, "stream", true, true); return { folds: v.querySelectorAll(".fold").length, h: v.querySelectorAll(".md h3").length, brief: !!v.querySelector(".brief") }; }, REPLY);
   check(layout, live.folds === 0 && live.h === 3 && live.brief, `while it's written, its sections come open, as headings (${JSON.stringify(live)})`);
-  // You: Nothing isn't lit.
-  const none = await page.evaluate(() => { const v = window.__chat.claudeView("Done.\n\n```brief\nDone: x\nYou: Nothing.\n```", "k", false); return [...v.querySelectorAll(".brief dd")].map((d) => d.className); });
-  check(layout, JSON.stringify(none) === JSON.stringify(["", "none"]), `nothing for you to do: said quietly (${JSON.stringify(none)})`);
+  // Nothing for you to do: said. A short reply: no parts. One written the older way (its brief after its sections): as it is.
+  const shapes = await page.evaluate(() => {
+    const view = (t) => window.__chat.claudeView(t, "k", false);
+    const heads = (v) => [...v.querySelectorAll(".tsec-title")].map((x) => x.textContent);
+    const none = view("Done.\n\n```brief\nChecked: x\n```\n\n## One\n\nMore.");
+    const short = view("Done, it works.");
+    const older = view("Done.\n\n## One\n\nMore.\n\n```brief\nDone: x\nYou: Nothing.\n```\n\n```choices question=\"Q?\"\n- a\n- b\n```");
+    const asks = view("Done.\n\n```brief\nChecked: x\n```\n\n```choices question=\"Q?\"\n- a\n- b\n```");
+    return { none: [heads(none), none.querySelector(".today-actions .acts-none")?.textContent], short: [heads(short), short.textContent],
+      older: [heads(older), [...older.querySelectorAll(".brief dd")].map((d) => d.className), !!older.querySelector(".brief ~ .choices"), !!older.querySelector(".brief-lead")],
+      asks: [heads(asks), !!asks.querySelector(".today-actions .choices")], oneFold: none.querySelector(".today-content .tbtn").hidden };
+  });
+  check(layout, JSON.stringify(shapes.none) === JSON.stringify([["Briefing", "Action items", "Content"], "Nothing for you to do."]) && shapes.oneFold,
+    `nothing asked of you: Action items says so; one section, no Open all (${JSON.stringify(shapes.none)})`);
+  check(layout, JSON.stringify(shapes.short) === JSON.stringify([[], "Done, it works."]), `a short reply is just its words (${JSON.stringify(shapes.short)})`);
+  check(layout, JSON.stringify(shapes.older) === JSON.stringify([["Content"], ["", "none"], true, false]), `one written the older way, its brief after its sections: as it is (${JSON.stringify(shapes.older)})`);
+  check(layout, JSON.stringify(shapes.asks) === JSON.stringify([["Briefing", "Action items"], true]), `a question alone is your action item (${JSON.stringify(shapes.asks)})`);
 
   // Fields and charts.
   const viz = await page.evaluate(() => {
@@ -417,7 +443,9 @@ async function run(browser, base, layout) {
     `round ticks on the one axis (${viz.y.join(" ")})`);
   check(layout, JSON.stringify(viz.x) === JSON.stringify(["W1", "W3", "W5"]) && /ms/.test(viz.sub), `the first, middle and last labels; its unit in the line under its name (${viz.x}, ${viz.sub})`);
   // Under the pointer: the crosshair and every series there.
-  const plot = await page.evaluate(() => { const p = [...document.querySelectorAll(".msg.claude")].at(-1).querySelectorAll(".chart-plot")[0].getBoundingClientRect();
+  const plot = await page.evaluate(() => { const el = [...document.querySelectorAll(".msg.claude")].at(-1).querySelectorAll(".chart-plot")[0];
+    el.scrollIntoView({ block: "center" });
+    const p = el.getBoundingClientRect();
     return { x: p.left + p.width * 0.25, y: p.top + p.height / 2 }; });
   await page.mouse.move(plot.x, plot.y);
   const tip = await page.evaluate(() => { const t = [...document.querySelectorAll(".msg.claude")].at(-1).querySelector(".chart-tip"); return t.hidden ? null : t.textContent; });
@@ -437,7 +465,8 @@ async function run(browser, base, layout) {
   }
   const kinds = await page.evaluate(() => [...BLOCKS.values()].filter((b) => !b.hidden).map((b) => {
     const p = replyBlocks(`\`\`\`${b.kind} ${b.example.attrs}\n${b.example.body || "x"}\n\`\`\``)[0];
-    const drawn = b.kind === "brief" ? window.__chat.briefView(p).querySelectorAll("dt").length === 5
+    const drawn = b.kind === "brief" ? window.__chat.briefView(p).querySelectorAll("dt").length === 3
+      : b.kind === "actions" ? window.__chat.actionsView(p).querySelectorAll("li").length === 2
       : b.kind === "choices" ? !!window.__chat.choicesView({ waiting: [{ question: p.attrs.question, options: p.options }] }, "kinds")
       : p && !window.__chat.artifactParts(p).fallback;
     return `${b.kind}:${drawn ? "drawn" : "MISSING"}`;

@@ -1722,13 +1722,16 @@ class Chat {
 
   // What Claude said, as it wrote it (replyParts): its markdown, and in
   // their place the blocks it made for you to use, each with its buttons;
-  // its briefing; its questions (choices) as buttons to tap, together where
-  // the first one is. Its sections (replyOutline) are folded under their
-  // headings, which say their points: a tap opens one, Open all every one;
-  // a section with something to use in it starts open. key: the message's,
-  // for what you open, fold and answer in it. Questions that aren't the
-  // newest thing any more are past (markPast). live: still being written,
-  // so as it comes, nothing folded.
+  // its questions (choices) as buttons to tap, together where the first one
+  // is. A long reply is three parts, each under its small head (the reply
+  // format has Claude write them in this order): Briefing, its opening and
+  // its brief block's rows in one card; Action items, what's yours to do
+  // (its actions block, what to use for it, its questions), or that there's
+  // nothing; Content, its sections (replyOutline) folded under their
+  // headings, which say their points: a tap opens one, Open all every one.
+  // key: the message's, for what you open, fold and answer in it. Questions
+  // that aren't the newest thing any more are past (markPast). live: still
+  // being written, so as it comes, nothing folded or put together.
   claudeView(text, key, past, live) {
     const el = h("div", { class: "msg claude" });
     const parts = replyParts(text);
@@ -1737,6 +1740,7 @@ class Chat {
     const draw = (p) => {
       if (p.md !== undefined) return tableize(h("div", { class: "md", html: md(p.md) }));
       if (p.kind === "brief") return this.briefView(p);
+      if (p.kind === "actions") return this.actionsView(p);
       if (p.kind !== "choices") return this.blockView(p, `${key}|b${n++}`);
       if (p !== asked[0]) return null;
       const box = this.choicesView({ waiting: asked.map((q) => ({ question: q.attrs.question || "", options: q.options.slice(0, 4) })) }, `${key}|q`);
@@ -1747,43 +1751,69 @@ class Chat {
       el.append(...parts.map(draw).filter(Boolean));
       return el;
     }
+    const nodes = replyOutline(parts);
+    const isSec = (x) => x.title !== undefined;
+    const at = nodes.findIndex((x) => x.kind === "brief"), sec = nodes.findIndex(isSec);
+    let rest = nodes;
+    if (at >= 0 && (sec < 0 || at < sec)) {
+      // Briefing: what it wrote before its brief block, and the block's rows.
+      const lead = nodes.slice(0, at);
+      el.append(...lead.filter((x) => x.md === undefined).map(draw).filter(Boolean));
+      const words = lead.filter((x) => x.md !== undefined).map((x) => x.md).join("\n\n");
+      el.append(uiSection("brief", "Briefing", {}, this.briefView(nodes[at], words ? h("div", { class: "md", html: md(words) }) : null)));
+      // Action items: what comes after it, up to the first section.
+      const end = sec < 0 ? nodes.length : sec;
+      const mine = nodes.slice(at + 1, end).map(draw).filter(Boolean);
+      const you = (nodes[at].fields || []).some((f) => f.label.toLowerCase() === "you");
+      if (mine.length) el.append(uiSection("actions", "Action items", {}, ...mine));
+      else if (!you && !asked.length) el.append(uiSection("actions", "Action items", {}, h("p", { class: "acts-none" }, "Nothing for you to do.")));
+      rest = nodes.slice(end);
+    }
+    // Content: the sections, folded; what's written around them, where it is.
     const folds = [];
+    const all = uiButton("Open all", () => {
+      const on = folds.some((f) => !f.classList.contains("open"));
+      for (const f of folds) { f.set(on); this.opened.set(f.dataset.k, on); }
+      sync();
+    }, false, "quiet");
+    const sync = () => { all.textContent = folds.some((f) => !f.classList.contains("open")) ? "Open all" : "Fold all"; };
     let group = null;
-    for (const node of replyOutline(parts)) {
-      if (node.title === undefined) {
+    for (const node of rest) {
+      if (!isSec(node)) {
         const v = draw(node);
         if (v) { el.append(v); group = null; }
         continue;
       }
       const k = `${key}|s${folds.length}`;
       const fold = uiFold(h("span", { html: inline(node.title) }),
-        { open: this.isOpen(k, node.parts.some((p) => p.kind)), toggle: (on) => { this.opened.set(k, on); sync(); } },
-        ...node.parts.map(draw));
+        { open: this.isOpen(k, false), toggle: (on) => { this.opened.set(k, on); sync(); } }, ...node.parts.map(draw));
       fold.dataset.k = k;
-      if (!group) el.append(group = uiFolds());
+      if (!group) {
+        group = uiFolds();
+        el.append(folds.length ? group : uiSection("content", "Content", { extra: all }, group));
+      }
       group.append(fold);
       folds.push(fold);
     }
-    // Open all / Fold all, once there are a few.
-    const all = h("button", { type: "button", onclick: () => {
-      const on = folds.some((f) => !f.classList.contains("open"));
-      for (const f of folds) { f.set(on); this.opened.set(f.dataset.k, on); }
-      sync();
-    } });
-    const sync = () => { all.textContent = folds.some((f) => !f.classList.contains("open")) ? "Open all" : "Fold all"; };
+    all.hidden = folds.length < 2;
     sync();
-    if (folds.length > 1) folds[0].parentNode.before(h("div", { class: "fold-all" }, all));
     return el;
   }
 
-  // Its briefing (the brief block): the reply in a few rows; what you need
-  // to do lit, unless it's nothing.
-  briefView(p) {
-    return uiBrief("Briefing", (p.fields || []).map((f) => {
+  // Its briefing (the brief block): what the reply comes to (lead: its
+  // opening, when the block follows it) and its rows; in an older one, what
+  // you need to do lit, unless it's nothing.
+  briefView(p, lead = null) {
+    return uiBrief((p.fields || []).map((f) => {
       const you = f.label.toLowerCase() === "you";
       const none = you && /^(nothing|none|nada|no)\b/i.test(f.value.trim());
       return { label: f.label, value: h("span", { html: inline(f.value) }), tone: you ? (none ? "none" : "you") : "" };
-    }));
+    }), { lead });
+  }
+
+  // What's yours to do (the actions block), a line each.
+  actionsView(p) {
+    return uiActions((p.items || []).map((x) => ({ text: h("span", { html: inline(x.text) }), due: x.due, done: x.done })));
   }
 
   // The questions asked before what comes now (you or Claude said something

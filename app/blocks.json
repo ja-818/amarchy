@@ -93,20 +93,26 @@
       "example": { "attrs": "path=\"~/Work/houston/docs/proposal.pdf\"", "body": "what's in it" }
     },
     {
-      "kind": "brief", "for": "the briefing a reply of more than a few lines ends with",
+      "kind": "brief", "for": "the briefing a reply of more than a few lines opens with, right after its first sentence",
       "attrs": {},
-      "labels": { "Done": {}, "Answer": {}, "Checked": {}, "Open": {}, "Next": {}, "You": { "need": true } },
-      "needAnyLabel": ["Done", "Answer"],
+      "labels": { "Checked": {}, "Open": {}, "Next": {}, "Done": { "old": true }, "Answer": { "old": true }, "You": { "old": true } },
       "body": { "shape": "fields", "need": true },
-      "example": { "attrs": "", "body": "Done: what you did or found, in one line (Answer: instead, when they asked a question)\nChecked: how you verified it (leave the row out when there was nothing to verify)\nOpen: what's left, or what you're unsure of (leave it out when nothing)\nNext: the next step you'd take (leave it out when none)\nYou: what they need to do now, or Nothing" },
-      "rule": "The brief block is the reply in a few rows, for someone who reads nothing else: only those labels, in that order, one short line each (no lists, no detail: that's what the sections are for). It comes after the last section, before your choices and the goal."
+      "example": { "attrs": "", "body": "Checked: how you verified it, or that you didn't\nOpen: what's left, or what you're unsure of (leave the row out when nothing)\nNext: the next step you'd take (leave it out when none)" },
+      "rule": "The brief block comes right after your opening sentence: the app shows the two together on top, as the Briefing, for someone who reads nothing else. Only those labels, in that order, one short line each (no lists, no detail: that's what the sections are for)."
+    },
+    {
+      "kind": "actions", "for": "what they need to do now, right after the brief",
+      "attrs": {},
+      "body": { "shape": "todos", "need": true },
+      "example": { "attrs": "", "body": "- Open the PR and approve it\n- Say whether to ship it" },
+      "rule": "What they need to do now goes in an actions block right after the brief, a line each, starting with a verb; after it, what they'll use to do it (a link, a command, a draft) and your choices. The app shows these under the Briefing, as Action items. Nothing for them to do: no actions block."
     },
     {
       "kind": "choices", "for": "a question for them, answered with a tap",
       "attrs": { "question": { "type": "text", "need": true } },
       "body": { "shape": "options", "need": true },
       "example": { "attrs": "question=\"Ship it to main?\"", "body": "- Ship it | Ship it: merge to main and push\n- Not yet" },
-      "rule": "Any question you ask them, a yes or no included, goes in a choices block at the end, so they answer with a tap; each option (at most 4) is \"- Label | the full message it sends\" (or just \"- Label\")."
+      "rule": "Any question you ask them, a yes or no included, goes in a choices block, so they answer with a tap (with the action items in a long reply, else at the end); each option (at most 4) is \"- Label | the full message it sends\" (or just \"- Label\")."
     },
     {
       "kind": "goal", "hidden": true, "for": "this chat's goal and where it stands",

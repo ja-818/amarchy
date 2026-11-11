@@ -7,6 +7,14 @@
 .chat .msg.claude .md > :first-child { margin-top: 0; }
 .chat .msg.claude .md > :last-child { margin-bottom: 0; }
 
+/* A reply's parts (Briefing, Action items, Content: uiSection), each under its small head. */
+.chat .msg.claude > .tsec { margin-top: 18px; gap: 8px; }
+.chat .msg.claude > .tsec:first-child { margin-top: 0; }
+.chat .msg.claude .tsec-head { margin: 0; font-size: 11px; line-height: 1.3; color: var(--section-head); }
+.chat .msg.claude .today-actions > .tsec-head { color: var(--section-head-yours); }
+.chat .msg.claude .tsec-cards { gap: 12px; }
+.chat .msg.claude .acts, .chat .msg.claude .acts li { margin: 0; padding: 0; }
+
 /* A table: a real table wide; a card per row on a phone (tableize). */
 .rtable-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-item); }
 .rtable { width: 100%; border-collapse: collapse; font-size: var(--caption); }

@@ -17,8 +17,8 @@
 //   folded or not.
 // - uiFolds, uiFold: what's long, folded under heads that each say their
 //   point (a reply's sections): a tap opens one, the rest stay heads.
-// - uiBrief: something in a few rows, label by label (a reply's briefing),
-//   the row that's your move lit.
+// - uiBrief: what something comes to, and a few rows label by label (a
+//   reply's briefing). uiActions: what's yours to do, a line each.
 // - uiTabs: one of a few (Chats | Tasks), each with what's your move.
 // - uiFilter: shows only some of what's there, on or off, with how many.
 // - uiSearch: the search box.
@@ -290,12 +290,19 @@ function uiFold(title, { open = false, toggle = null } = {}, ...kids) {
   return el;
 }
 
-// A briefing: a few rows, label by label. rows: [{label, value (words or a
-// node), tone}]; tone "you": your move, lit; "none": nothing to do, quiet.
-function uiBrief(title, rows) {
-  return h("div", { class: "brief" }, title ? h("div", { class: "brief-head" }, title) : null,
-    h("dl", { class: "brief-rows" }, ...rows.flatMap((r) => [
-      h("dt", { class: r.tone || null }, r.label), h("dd", { class: r.tone || null }, r.value)])));
+// A briefing: what it comes to (lead: words or a node), then a few rows,
+// label by label. rows: [{label, value (words or a node), tone}]; tone
+// "you": your move, lit; "none": nothing to do, quiet.
+function uiBrief(rows, { lead = null } = {}) {
+  return h("div", { class: "brief" }, lead ? h("div", { class: "brief-lead" }, lead) : null,
+    rows.length ? h("dl", { class: "brief-rows" }, ...rows.flatMap((r) => [
+      h("dt", { class: r.tone || null }, r.label), h("dd", { class: r.tone || null }, r.value)])) : null);
+}
+
+// What's yours to do, a line each. items: [{text (words or a node), due, done}].
+function uiActions(items) {
+  return h("ul", { class: "acts" }, ...items.map((x) => h("li", { class: x.done ? "done" : null },
+    h("span", { class: "act-text" }, x.text), x.due ? h("span", { class: "act-due" }, x.due) : null)));
 }
 
 // Tabs: one of a few. items: [{key, label, count, title}]; on: the key

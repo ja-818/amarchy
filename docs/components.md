@@ -15,7 +15,8 @@ the change.
 | `uiButton(label, act, primary, cls)` | An action on a card or a section (`quiet`: words only; `complete`: Complete mission, its ✓, outlined like the rest). | cards, sections |
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
 | `uiFolds(...folds)`, `uiFold(title, {open, toggle}, ...kids)` | What's long, folded under heads that each say their point, one box: a tap opens one (`toggle(open)` told; `fold.set(open)` opens or folds it). | A reply's sections |
-| `uiBrief(title, rows)` | Something in a few rows, label by label (`{label, value, tone}`): tone `you` lit (your move), `none` quiet. | A reply's briefing |
+| `uiBrief(rows, {lead})` | What something comes to (`lead`), then a few rows, label by label (`{label, value, tone}`): tone `you` lit, `none` quiet. | A reply's Briefing |
+| `uiActions(items)` | What's yours to do, a line each (`{text, due, done}`), marked in the accent. | A reply's Action items |
 | `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Tavern |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
@@ -62,6 +63,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--fold-border`, `--fold-rule`, `--fold-radius`, `--fold-head`, `--fold-mark`, `--fold-hover-bg`, `--fold-press-bg` | Folds: the box, the line between two, a head, its mark, under the pointer or a finger |
 | `--brief-bg`, `--brief-border`, `--brief-radius`, `--brief-head`, `--brief-label`, `--brief-you` | A briefing: its card, its head, a row's label, your move's |
+| `--act-mark` | What's yours to do: a line's mark |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |
 | `--score-flame`, `--score-cool`, `--score-ring`, `--score-flash`, `--score-bg`, `--score-border`, `--score-radius` | Your score's flame (and cooled), its goal ring, a fast reply's flash, its button |

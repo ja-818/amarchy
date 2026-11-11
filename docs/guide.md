@@ -110,12 +110,12 @@ A chat is a conversation, and it works the same on the phone and in a browser.
 
 - **The conversation**: what you said is in bubbles. What Claude says is formatted
   text (code blocks have a **Copy** button). A long reply isn't a wall of text: it
-  opens with the outcome, then each idea is a section folded under a heading that
-  says its point (tap one to open it, **Open all** for every one; a section with
-  something to use, like a draft or a link, is open already), and it ends with a
-  **Briefing**: what was done, how it was checked, what's open, and what you need
-  to do. amarchy asks every Claude for that shape and sends back a reply that
-  doesn't have it, so no project needs its own rule for it. Its steps are folded into one line in
+  comes as three parts. **Briefing**: what it comes to, how it was checked and what's
+  open. **Action items**: what you need to do, with what you need for it (a draft, a
+  link) and Claude's questions as buttons, or "Nothing for you to do." **Content**:
+  everything else, each idea folded under a heading that says its point (tap one to
+  open it, **Open all** for every one). amarchy asks every Claude for that shape and
+  sends back a reply that doesn't have it, so no project needs its own rule for it. Its steps are folded into one line in
   words ("Read app.js, edited 2 files and ran 3 commands"): tap it to see each step,
   and a step's own detail (the command and its output, an edit's changes in red and
   green). Claude's checklist shows as one, ticked off as it goes. While Claude

@@ -50,6 +50,8 @@
   --brief-head: var(--section-head);
   --brief-label: var(--text-muted);
   --brief-you: var(--accent);
+  /* What's yours to do (uiActions). */
+  --act-mark: var(--accent);
   /* Tabs (uiTabs). */
   --tab-bg: var(--control-bg);
   --tab-border: var(--border-faint);
@@ -298,21 +300,27 @@ html.keyed .chat.writing .ui-in { outline: none; }
 .fold-body[hidden] { display: none; }
 .fold-body > * + * { margin-top: 12px; }
 @media (max-width: 600px) { .fold-body { padding-left: 12px; } }
-/* Open or fold them all: a quiet word over the box, at its right. */
-.fold-all { display: flex; justify-content: flex-end; margin-bottom: -8px; }
-.fold-all button { min-height: var(--control-h-small); padding: 2px 4px; font: inherit; font-size: var(--caption); font-weight: 700; color: var(--text-muted); background: none; border: 0; cursor: pointer; border-radius: var(--radius-control); }
-.fold-all button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-@media (hover: hover) { .fold-all button:hover { color: var(--text); } }
-
-/* A briefing: its rows, label by label; your move lit. */
-.brief { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--brief-border); border-radius: var(--brief-radius); background: var(--brief-bg); }
-.brief-head { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brief-head); }
+/* A briefing: what it comes to, then its rows, label by label. */
+.brief { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--brief-border); border-radius: var(--brief-radius); background: var(--brief-bg); }
+.brief-lead { font-weight: 700; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
+.brief-lead > * { margin: 0; }
+.brief-lead > * + * { margin-top: 8px; }
 .brief-rows { display: grid; grid-template-columns: minmax(4.5em, max-content) minmax(0, 1fr); gap: 8px 14px; margin: 0; line-height: 1.45; }
 .brief-rows dt { color: var(--brief-label); font-weight: 700; font-size: var(--caption); padding-top: 2px; }
 .brief-rows dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 .brief-rows dt.you { color: var(--brief-you); }
 .brief-rows dd.you { font-weight: 700; }
 .brief-rows dd.none { color: var(--text-muted); }
+
+/* What's yours to do: a line each, marked in the accent. */
+.acts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.acts li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; margin: 0; font-weight: 700; color: var(--text); line-height: 1.4; }
+.acts li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--act-mark); align-self: center; justify-self: center; }
+.acts li.done { color: var(--text-muted); font-weight: 400; text-decoration: line-through; }
+.acts li.done::before { background: var(--text-muted); }
+.act-text { overflow-wrap: anywhere; }
+.act-due { color: var(--text-muted); font-size: var(--caption); font-weight: 400; white-space: nowrap; }
+.acts-none { margin: 0; color: var(--text-muted); }
 
 .tsec { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .tsec-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px;
