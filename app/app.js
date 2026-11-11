@@ -346,6 +346,12 @@ const store = {
 // Safari sheet whatever the default is; only an app's own address
 // (googlechromes://…) reaches another browser. So on an iPhone or iPad the
 // settings can name one, kept on that device.
+//
+// The Dock app keeps one kind of link for itself, though: an address that
+// looks like the app's own (it's at amarchy.<tailnet>.ts.net; a preview is at
+// http://amarchy:3471) opens in a window of the app, not the browser. The
+// same page by the machine's number address (http://100.x.y.z:3471) it hands
+// over. So there a link to this machine goes by that address (macDirect).
 
 const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const macApp = !iOS && /Macintosh/.test(navigator.userAgent)
@@ -373,6 +379,20 @@ function outward(uri) {
   } catch (e) { return null; }
 }
 
+// In the Dock app, a link to something this machine serves (a preview), by
+// the machine's number address; any other link as it is. As the server's
+// preview_direct: its name, short or whole, over http.
+function macDirect(url) {
+  const host = app.host || {};
+  if (!macApp || !host.address) return url;
+  try {
+    const u = new URL(url), name = String(host.name || "").toLowerCase(), h = u.hostname.toLowerCase();
+    if (u.protocol !== "http:" || !(h === location.hostname.toLowerCase() || (name && h.split(".")[0] === name))) return url;
+    u.hostname = host.address;
+    return u.href;
+  } catch (e) { return url; }
+}
+
 function follow(href, target) {
   const a = h("a", { href, target, rel: "noopener noreferrer" });
   a.style.display = "none";
@@ -387,7 +407,7 @@ function openLink(uri, { here = false } = {}) {
   const url = here ? new URL(uri, location.href).href : outward(uri);
   if (!url) return;
   const b = linkBrowser();
-  if (!b) return follow(url, macApp && !here ? "_self" : "_blank");
+  if (!b) return follow(here ? url : macDirect(url), macApp && !here ? "_self" : "_blank");
   follow(b[2](url));
   // Nothing answers when the app isn't there: still here a moment later, say so.
   setTimeout(() => {
@@ -399,7 +419,16 @@ document.addEventListener("click", (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest && e.target.closest("a[href]");
   if (!a || !a.isConnected || !outward(a.href)) return;
-  if (macApp) { a.removeAttribute("target"); return; }                          // in place: macOS gives it to the default browser
+  if (macApp) {                                                                 // in place: macOS gives it to the default browser
+    const direct = macDirect(a.href);
+    a.removeAttribute("target");
+    if (direct !== a.href) {                                                    // this machine's: by its number address, for this click
+      const was = a.getAttribute("href");
+      a.setAttribute("href", direct);
+      setTimeout(() => a.setAttribute("href", was));
+    }
+    return;
+  }
   if (!linkBrowser()) return;                                                    // the system's way: the link as it is
   e.preventDefault();
   openLink(a.href);
@@ -2568,6 +2597,7 @@ async function start() {
       : d.error || "Amarchy didn't answer.");
     app.key = d.key;
     app.user = d.user;
+    app.host = d.host || null;
     app.nerd = !!d.nerd;
     if (d.sessions) app.view = d;
   } catch (e) {

@@ -898,6 +898,22 @@ def preview_local(url):
     return (bind if bind and host not in ("localhost", "127.0.0.1", "::1", "0.0.0.0") else "127.0.0.1", port)
 
 
+def preview_direct(url):
+    """A preview's address by this machine's number address (http://100.x.y.z:port)
+    when it's served here under the machine's name, else None. A Mac's Dock
+    app keeps a link to a name like the app's own in a window of the app; one
+    to a number address it gives to the default browser."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        where = preview_local(url)
+    except ValueError:
+        return None
+    bind = host_network()[1]
+    if not where or not bind or where[0] != bind or u.scheme != "http":
+        return None
+    return urllib.parse.urlunsplit((u.scheme, f"{bind}:{where[1]}", u.path, u.query, u.fragment))
+
+
 _preview_up = {}
 def preview_up(url):
     """Whether a chat's preview answers: its port on this machine takes a
@@ -1283,6 +1299,9 @@ def preview_info(s, lines=40):
     state = preview_state(s)
     out = {"url": p["url"], "run": p.get("run") or "", "stop": p.get("stop") or "", "ports": preview_ports(p),
            "memory_max": p.get("memory") or PREVIEW_MEMORY, "idle": p.get("idle") or PREVIEW_IDLE, "state": state}
+    direct = preview_direct(p["url"])
+    if direct:
+        out["direct"] = direct
     if p.get("run"):
         pids = preview_pids(sid)
         if pids:
@@ -11658,7 +11677,8 @@ def app_handler(st, users, address):
             if path == "/api/state":
                 with st.changed:
                     view = dict(st.view)
-                return self.send(200, {**view, "key": app_public(),
+                name, bind = host_network()
+                return self.send(200, {**view, "key": app_public(), "host": {"name": name, "address": bind},
                                        "user": self.headers.get("Tailscale-User-Login")})
             if path == "/api/events":
                 return self.list_stream()

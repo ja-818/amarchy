@@ -66,6 +66,25 @@ function pvFailed(why, log, p) {
   pvSay("The preview didn't start", `${why[0].toUpperCase()}${why.slice(1)}.`, log, [pvButton("Try again", () => pvStart(true), true), pvButton("Ask Claude to fix it", fix)]);
 }
 
+// It answers: this page turns into it. In a Mac's Dock app this page is a
+// window of the app, and the preview belongs in the default browser: macOS
+// gives it a link followed in place, by the machine's number address (one by
+// its name stays in the app: app.js's "links out"). So there it goes by that
+// address, and the page left behind says so, with a link to open it again.
+const pvMacApp = /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1)
+  && (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
+
+function pvOpen(p) {
+  if (!pvMacApp) return location.replace(p.url);
+  const url = p.direct || p.url;
+  const a = document.createElement("a");
+  a.className = "tbtn primary";
+  a.href = url;
+  a.textContent = "Open it";
+  pvSay(`${p.task ? `${p.task}'s preview` : "The preview"} is running`, `${p.url} is open in your browser. You can close this window.`, "", [a]);
+  location.href = url;
+}
+
 async function pvWatch() {
   let p;
   try {
@@ -76,7 +95,7 @@ async function pvWatch() {
     return pvSay("No preview here", e instanceof TypeError ? "Can't reach Amarchy." : e.message, "", []);
   }
   document.title = `Starting ${p.task}'s preview…`;
-  if (p.state === "up") return location.replace(p.url);
+  if (p.state === "up") return pvOpen(p);
   if (!p.run) return pvSay("Nothing answers", `${p.url} isn't answering, and amarchy has no command to start it with: ask its chat to.`, "", []);
   // Not running: started (a failed one only by Try again, once you've seen why).
   if (p.state === "stopped" && !pv.kicked) return pvStart(false);

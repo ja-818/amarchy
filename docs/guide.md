@@ -401,7 +401,10 @@ carries the count, as the home screen app's does on the phone.
 **Links** (in what Claude says, and in the terminals: click one) open in the
 default browser, where the device lets a web page get there. In a Mac's Dock
 app that's the default browser too, not Safari: the app follows the link in
-place and macOS hands it over (a new window would be a Safari one). On an iPhone or
+place and macOS hands it over (a new window would be a Safari one). A link to
+something the host serves (a preview, `http://<host>:3471`) goes there by the
+host's number address (`http://100.x.y.z:3471`): macOS keeps an address that
+looks like the app's own in a window of the app. On an iPhone or
 iPad, the Home Screen app opens them in a Safari sheet whatever the default is,
 and Settings → "Open links in" picks a browser for that device (Safari, Chrome,
 Firefox, Edge or Brave, through the browser's own address, so it has to be

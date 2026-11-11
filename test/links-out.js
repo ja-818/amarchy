@@ -70,6 +70,40 @@ async function run(browser, port, mac) {
     check(who, popups.length === before + 1, "a link the app opens is a new tab");
   }
 
+  // Something this machine serves (a preview, http://<its name>:port): the Dock
+  // app keeps a link to a name like its own in a window of the app, so there it
+  // goes by the machine's number address, which macOS hands over. The link
+  // itself keeps its address (Copy, the next click).
+  const mine = [];
+  await p.context().route(/^http:\/\/(box|100\.64\.0\.9):3471\//, (r) => {
+    let inPlace = false;
+    try { inPlace = r.request().isNavigationRequest() && r.request().frame() === p.mainFrame(); } catch (e) { /* a new window's */ }
+    mine.push({ url: r.request().url(), inPlace });
+    if (inPlace) r.fulfill({ status: 204 }); else r.fulfill({ contentType: "text/html", body: "a preview" });
+  });
+  await p.evaluate(() => {
+    app.host = { name: "box", address: "100.64.0.9" };
+    const a = document.querySelector("#out");
+    a.href = "http://box:3471/clicked?x=1";
+    a.target = "_blank";
+  });
+  const tabs = popups.length;
+  await p.mouse.click(20, 20);                 // the link (not a locator's click: it would wait on the last link, which went nowhere)
+  await sleep(500);
+  await p.evaluate(() => { document.body.addEventListener("click", () => openLink("http://box:3471/opened"), { once: true }); });
+  await p.mouse.click(5, 400);
+  await sleep(500);
+  const urls = mine.map((x) => x.url);
+  if (mac) {
+    check(who, urls.includes("http://100.64.0.9:3471/clicked?x=1") && urls.includes("http://100.64.0.9:3471/opened") && mine.every((x) => x.inPlace),
+      `a link to this machine goes by its number address, in place (${urls.join(", ")})`);
+    check(who, !urls.some((u) => u.includes("//box:")) && popups.length === tabs, "never by its name, and no new window");
+    check(who, await p.evaluate(() => document.querySelector("#out").getAttribute("href")) === "http://box:3471/clicked?x=1", "the link keeps its own address");
+    check(who, await p.evaluate(() => macDirect("https://elsewhere.example/a") === "https://elsewhere.example/a" && macDirect("http://boxes:3471/") === "http://boxes:3471/"), "any other link is left as it is");
+  } else {
+    check(who, urls.length === 2 && urls.every((u) => u.includes("//box:3471/")) && popups.length === tabs + 2, `elsewhere it opens by its name, as a new tab (${urls.join(", ")})`);
+  }
+
   // A page of the app's own (the one that starts a preview): beside the app, not in its place.
   const n = popups.length;
   await p.evaluate(() => { document.body.addEventListener("click", () => openLink("/preview.html?id=x", { here: true }), { once: true }); });
