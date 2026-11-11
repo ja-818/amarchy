@@ -287,7 +287,7 @@ async function todayResume(s) {
   todayUI.told.set(s.id, "resuming");
   todayRedraw();
   try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: RESUME_TEXT });
+    await sendTo(s.id, { text: RESUME_TEXT });
     todayUI.told.set(s.id, "resumed");
     setTimeout(() => { if (todayUI.told.get(s.id) === "resumed") { todayUI.told.delete(s.id); todayRedraw(); } }, 60000);     // cut off again later: Resume again
   } catch (e) {
@@ -302,7 +302,7 @@ async function todayNudge(s) {
   todayUI.told.set(s.id, "nudging");
   todayRedraw();
   try {
-    await api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: TODAY_NUDGE });
+    await sendTo(s.id, { text: TODAY_NUDGE });
     todayUI.told.set(s.id, "nudge");
   } catch (e) {
     todayUI.told.delete(s.id);
@@ -399,7 +399,7 @@ function todayAsk(s) {
     todayUndo(`Sent to ${s.task || "the chat"}`, () => {
       todayUI.answers.delete(s.id);
       seenNow(s.id);
-      api(`/api/session/${encodeURIComponent(s.id)}/send`, { text })
+      sendTo(s.id, { text })
         .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
     }, () => { todayUI.sent.delete(s.id); st.picks = {}; todayRedraw(); });
   };

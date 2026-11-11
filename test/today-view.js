@@ -102,6 +102,18 @@ async function until(page, fn, arg, ms = 6000) {
   try { await page.waitForFunction(fn, arg, { timeout: ms }); return true; } catch (e) { return false; }
 }
 
+// What a test sent, no Claude takes here: the chat as the server has it again
+// (the app shows it at work from the moment it's sent: app.js sendTo).
+const unsent = (p) => p.evaluate(() => {
+  for (const [id, list] of [...ahead]) {
+    const s = app.view.sessions.find((x) => x.id === id);
+    for (const a of list.filter((a) => "status" in a.patch)) if (s && a.server) Object.assign(s, a.server);
+    const left = list.filter((a) => !("status" in a.patch));
+    if (left.length) ahead.set(id, left); else ahead.delete(id);
+  }
+  refresh();
+});
+
 const LAYOUTS = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
   wide: { viewport: { width: 1280, height: 800 } },
@@ -243,8 +255,26 @@ async function sortChecks(p, where) {
   check(where, !now.includes("proj-later") && (await ids(".today-forlater")).includes("proj-later"), "a low one in For later, not in Now");
   check(where, await p.evaluate(() => !document.querySelector(".today-forlater").open), "For later starts folded");
 
-  // Working, it goes to At work; done, back in its place. Nothing else moves a card.
   const quiet = now[now.length - 1];
+  // Sent to: at work the moment you send, before the server says a word (its
+  // Claude may be waking with it); not taken, back in its place.
+  await p.evaluate((id) => {
+    const real = api;
+    api = () => new Promise((_, no) => { window.sendRefused = () => no(new Error("no")); });
+    sendTo(id, { text: "go on" }).catch(() => {});
+    api = real;
+  }, quiet);
+  check(where, await until(p, (id) => !!document.querySelector(`.today-working .tcard[data-id=${id}]`), quiet), "sent to: under At work at once");
+  await new Promise((r) => setTimeout(r, 1500));      // (the server's lists, which say idle, don't take it back)
+  check(where, (await ids(".today-working")).includes(quiet), "and it stays there while the server hasn't said so");
+  await p.evaluate(() => window.sendRefused());
+  await until(p, (id) => !!document.querySelector(`.today-now .tcard[data-id=${id}]`), quiet);
+  check(where, JSON.stringify(await ids(".today-now")) === JSON.stringify(now), "not taken: back in its place");
+  await p.evaluate((id) => { const real = api; api = () => Promise.resolve({}); sendTo(id, { text: "/model" }); api = real; }, quiet);
+  await new Promise((r) => setTimeout(r, 300));
+  check(where, !(await ids(".today-working")).includes(quiet), "a command (/model) moves nothing");
+
+  // Working, it goes to At work; done, back in its place. Nothing else moves a card.
   await change(quiet, { status: "working" });
   check(where, await until(p, (id) => !!document.querySelector(`.today-working .tcard[data-id=${id}]`), quiet), "working: under At work");
   await change(quiet, { status: "idle", unseen: true, today: { state: "done" } });
@@ -429,6 +459,7 @@ async function interrupted(p, where) {
   await p.evaluate(() => document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tbtn.resume").click());
   check(where, await until(p, () => /Resumed/.test(document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later]").textContent)), "Resume tapped: Resumed");
   check(where, p.posts.slice(sentBefore).some((x) => /proj-later\/send/.test(x.url) && x.body.text === "Carry on where you were cut off"), "it sent: Carry on where you were cut off");
+  await unsent(p);
   // Folded again, as it was (For later starts folded).
   await p.evaluate(() => { todayUI.told.delete("proj-later"); document.querySelectorAll(".today-forlater").forEach((d) => { d.open = false; }); uiState.open.delete("forlater"); todayRedraw(); });
   await p.evaluate(() => todayOpen(row("proj-later")));
@@ -441,6 +472,7 @@ async function interrupted(p, where) {
   check(where, await p.evaluate(() => { const b = [...document.querySelectorAll(".chat-dock .dock-note.interrupted .resume")].find((x) => x.offsetParent); if (b) b.click(); return !!b; }), "in the chat: Resume");
   check(where, await until(p, () => true) && p.posts.slice(before).some((x) => /proj-later\/send/.test(x.url) && x.body.text === "Carry on where you were cut off"), "the chat's Resume sent it too");
   await sleep(300);
+  await unsent(p);
   await p.evaluate(() => go("#/"));
   await until(p, () => !(app.desk ? desk.current : app.session));
   await set({ interrupted: false, sleeping: false });
@@ -496,6 +528,9 @@ async function common(p, where) {
   await sleep(4200);
   const sent = p.posts.find((x) => /proj-ask\/send/.test(x.url));
   check(where, !!sent && sent.body.text === "Submit it now", `then sent to the chat (${JSON.stringify(sent && sent.body)})`);
+  // (No Claude takes it here: idle again, and answered still, as while a real one wakes.)
+  await unsent(p);
+  await p.evaluate(() => { todayAnswered("proj-ask"); todayRedraw(); });
 
   // A permission: Allow, Undo, it comes back; Allow again, it goes.
   check(where, await click(p, ".tcard.k-ask .tbtn", "Allow"), "Allow, right on Today");
@@ -555,6 +590,7 @@ async function common(p, where) {
   check(where, await click(p, ".tcard.k-stale .tbtn", "Ask status"), "a stalled chat asked");
   await sleep(300);
   check(where, p.posts.some((x) => /proj-quiet\/send/.test(x.url) && /Where does this stand/.test(x.body.text)), "the ask goes to that chat");
+  await unsent(p);
 
   // Complete: mission accomplished, then closed (nothing to lose: no sheet), with Undo.
   check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete mission"), "a done chat's Complete mission tapped");

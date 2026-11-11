@@ -1537,7 +1537,7 @@ class Chat {
   // tells them itself (send).
   post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
+    const done = route === "send" ? sendTo(this.id, body) : api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());

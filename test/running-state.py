@@ -76,6 +76,23 @@ try:
     check(s["unseen"], "and done, as any finished turn")
     s = view([bash("runtask01", "Run the e2e")], status="working")
     check(s["status"] == "working", "working stays working, a run going or not")
+    # What you sent a sleeping chat is on its way (its Claude wakes with it):
+    # at work from then on, waking rather than asleep, not once Claude is up.
+    am.mark_asleep(sid)
+    s = view([])
+    check(s["status"] == "idle" and s["sleeping"] and not s["waking"], "asleep: idle")
+    am.write_file(am.claude_dir(sid) / "send", "carry on")
+    s = view([])
+    check(s["status"] == "working" and not s["sleeping"] and s["waking"] and not s["unseen"],
+          f"sent to, asleep: working, waking with it ({s['status']}, sleeping {s['sleeping']}, waking {s['waking']})")
+    am.clear_asleep(sid)
+    s = view([])
+    check(s["status"] == "working", "its Claude starting, the message not taken yet: working still")
+    os.utime(am.claude_dir(sid) / "send", (time.time() - am.SEND_START - 5,) * 2)
+    s = view([])
+    check(s["status"] == "idle", "never taken: idle again")
+    (am.claude_dir(sid) / "send").unlink()
+    am.mark_unseen(sid)
     s = view([bash("runtask01", "Run the e2e")], status="waiting")
     check(s["status"] == "waiting", "waiting stays waiting")
     s = view([])

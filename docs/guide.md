@@ -71,7 +71,8 @@ Start everything at once, then say what you're on. Your chats are two lists, and
 you decide what's in them:
 
 - **At work**: on top, folded, every chat Claude is working on, with how many. Once
-  it stops, a chat is back in its place in Now or For later.
+  it stops, a chat is back in its place in Now or For later. A chat goes there the
+  moment you send it something, a sleeping one too, while its Claude wakes with it.
 - **Now**: what you're working on. Every new chat starts here. **Pinned** ones (the
   flag) always stay on top: what matters most.
 - **For later**: under Now, folded. A chat you put here stays until you bring it

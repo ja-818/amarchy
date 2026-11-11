@@ -457,7 +457,7 @@ function uiPreviewGo(s) {
   const at = uiPreviewAsked.get(s.id);
   if (at && Date.now() - at < 60000) return;
   uiPreviewAsked.set(s.id, Date.now());
-  api(`/api/session/${encodeURIComponent(s.id)}/send`, { text: `The preview at ${s.preview.url} isn't answering: start it again, and register it (amarchy preview --run '<command>' ${s.preview.url}) so its Preview button starts it from now on.` })
+  sendTo(s.id, { text: `The preview at ${s.preview.url} isn't answering: start it again, and register it (amarchy preview --run '<command>' ${s.preview.url}) so its Preview button starts it from now on.` })
     .then(() => toast("Asked it to start the preview again"))
     .catch((e) => { uiPreviewAsked.delete(s.id); toast(e.message); });
 }
@@ -531,7 +531,7 @@ async function uiPreviewSheet(s) {
   };
   const fix = () => {
     const log = (p.log || "").split("\n").slice(-15).join("\n");
-    api(`/api/session/${encodeURIComponent(id)}/send`, { text: `The preview (${p.run}) stopped with an error. Its log ends:\n\n${log}\n\nFix it and start it again (amarchy preview restart).` })
+    sendTo(id, { text: `The preview (${p.run}) stopped with an error. Its log ends:\n\n${log}\n\nFix it and start it again (amarchy preview restart).` })
       .then(() => { toast("Asked Claude to fix it"); closeSheet(); }, (e) => toast(e.message));
   };
   const item = (label, value) => (value ? h("div", { class: "kv" }, h("span", { class: "k" }, label), h("span", { class: "v" }, value)) : null);
@@ -581,7 +581,7 @@ async function uiPreviewSheet(s) {
 // process on its port, what its stop command didn't stop): the chat stays
 // until it's gone. Its Claude is asked to stop it; you complete it after.
 function uiPreviewLeft(s, left) {
-  const ask = () => api(`/api/session/${encodeURIComponent(s.id)}/send`, {
+  const ask = () => sendTo(s.id, {
     text: `I want to complete this chat, but its preview is still running after amarchy stopped it:\n${left.map((x) => `- ${x}`).join("\n")}\n\nStop it (and whatever started it), check its ports are free, then tell me it's done so I can complete the chat. If it isn't this chat's, run amarchy preview --clear.` })
     .then(() => { toast("Asked Claude to stop it"); closeSheets(); }, (e) => toast(e.message));
   sheet({ key: "preview-left" }, sheetHead("Its preview is still running", "Complete it once that's stopped"),

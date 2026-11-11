@@ -4820,11 +4820,19 @@ def session_view():
         s["sleeping"] = asleep_since(s["id"]) is not None or not s["awake"]
         # Woken, and its Claude isn't up yet.
         s["waking"] = not s["sleeping"] and waking_now(s["id"])
+        # What you sent it is on its way: its Claude wakes (or starts again)
+        # with it. It's at work from the moment you sent it, not once its
+        # Claude is up and says so: a card that stays put looks broken.
+        sent = not s.get("setup") and starting(s["id"])
+        if sent and s["sleeping"]:
+            s["sleeping"], s["waking"] = False, True
         s["agent"] = agents.get(s["path"], "") if not s["sleeping"] else ""
         s["engine"] = engine(s)     # how its Claude runs: terminal (the TUI) or chat (amarchy agent)
         s.pop("prompt", None)
         if s["sleeping"] and not s.get("setup"):
             s["status"] = "idle"    # only an idle session sleeps (or one left from before)
+        if sent and s["status"] == "idle":
+            s["status"] = "working"
         s["task"] = session_task(s, titles.get(s["id"], ""))
         # Claude's whole title, so a search finds a session by any word of it.
         s["claude_title"] = "" if s.get("setup") else claude_title(s, titles.get(s["id"], ""))
@@ -13034,6 +13042,10 @@ def send_start(s, text):
     sid = s["id"]
     d = claude_dir(sid)
     since = time.time()
+    # You wrote to it: what it did before is seen. (The list says it's working
+    # while this waits for its Claude: should that never come, it's idle
+    # again, and not "done" a second time.)
+    mark_seen(sid)
     write_file(d / "send", text)
     if asleep_since(sid) is not None:
         wake(s)
@@ -14799,6 +14811,10 @@ class Agent:
             save_session(s)
         sent = take(self.dir / "send")
         first = [m for m in (prompt, sent) if m is not None and m.strip()]
+        # Taken, and Claude takes a few seconds to start: the chat is working
+        # on it all along (the list said so while the message waited here).
+        if first:
+            agent_status(self.sid, "working")
         if sys.stdin.isatty():
             sh("stty", "sane", "-echoctl")      # raw from the sleep loop's wait for a key; a paste's end unseen
             print("\033[H\033[2J\033[3J", end="")

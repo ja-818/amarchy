@@ -242,6 +242,20 @@ function aheadOn(v) {
   }
 }
 
+// Sent: the chat is at work at once (its card under At work, awake or
+// waking with it), until the server's list says how it stands: working, or
+// what you said in its conversation (a turn that was over before a list
+// came). A command (/model) starts no turn: it stays where it is.
+function sendTo(id, body) {
+  const done = api(`/api/session/${encodeURIComponent(id)}/send`, body);
+  const s = app.view && app.view.sessions.find((x) => x.id === id);
+  if (!s || s.setup || String((body && body.text) || "").trimStart().startsWith("/")) return done;
+  const you = (r) => (r.today || {}).you_at || 0;
+  const was = you(s);
+  return aheadOf(id, { status: "working", ...(s.sleeping ? { sleeping: false, waking: true } : {}) },
+    (r) => r.status !== "idle" || you(r) > was, done, { quiet: true });
+}
+
 // Seen: off what's new at once.
 function seenNow(id) {
   const s = app.view && app.view.sessions.find((x) => x.id === id);
@@ -1915,7 +1929,7 @@ function shareSheet(s) {
           const img = await claudeImage(f).catch(() => { throw new Error("This browser can't read that picture: open the chat on the phone"); });
           images.push({ type: img.type, data: await base64Of(img) });
         }
-        const r = await api(`/api/session/${encodeURIComponent(x.id)}/send`, { text: s.text || "", ...(images.length ? { images } : {}) });
+        const r = await sendTo(x.id, { text: s.text || "", ...(images.length ? { images } : {}) });
         toast(r.waking ? "Sent: waking Claude with it…" : `Sent to ${x.task || "the chat"}`);
       } else {
         shareInbox = { id: x.id, files, text: s.text || "" };
