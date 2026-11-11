@@ -2298,7 +2298,8 @@ def create(repo, name, prompt=None, model=None, images=None):
     STATUS.mkdir(parents=True, exist_ok=True)
     (STATE / "failed" / sid).unlink(missing_ok=True)
     # "setup" until the worktree is there. Working meanwhile, so the list
-    # spins on it; Claude's SessionStart hook settles it.
+    # spins on it: until its Claude is up with nothing to do (idle, and not
+    # done), or through its first message's turn (Agent.run, session_started).
     s = {"id": sid, "repo": repo, "name": name, "branch": name, "base": default_base(repo_dir),
          "path": str(WORKTREES / repo / name), "created": int(time.time()), "setup": True, "engine": "chat"}
     if prompt is not None:
@@ -2528,6 +2529,11 @@ def cmd_claude(sid):
     prompt = s.pop("prompt", None)
     if prompt is not None:
         save_session(s)
+        # It starts on it: working all along, not idle (and "done") in between (session_started).
+        write_file(claude_dir(sid) / "first", "")
+        set_status(sid, "working")
+    else:
+        (claude_dir(sid) / "first").unlink(missing_ok=True)
     prefill = take(claude_dir(sid) / "draft") or ""     # what was typed in the sleeping session's prompt
     path = Path(s["path"])
     os.chdir(path)
@@ -4389,7 +4395,8 @@ def cmd_hook(sid, state):
     kind = event.get("notification_type") if isinstance(event, dict) else None
     if state == "waiting" and kind and kind not in NEEDS_YOU:
         return
-    if state == "start":
+    started = state == "start"
+    if started:
         # SessionStart: Claude is ready (idle), and learns where it is. Its
         # Bash commands source the project's secrets, as they are at each one.
         env_file = os.environ.get("CLAUDE_ENV_FILE")
@@ -4443,7 +4450,27 @@ def cmd_hook(sid, state):
     if state == "idle" and event.get("hook_event_name") == "Stop" and claude_format_version() != FORMAT_VERSION:
         detach([ENTRY, "claude-reload", sid])
 
+    if started:
+        return session_started(s, event)
     set_status(sid, state)
+
+
+def session_started(s, event):
+    """Claude started (SessionStart): it's ready, idle, and hasn't finished a
+    turn, so nothing is done or new to see: a new chat, working while it was
+    set up, isn't "done" before its first message. Unless that's on its way:
+    it stays working (the chat engine's broker says how it stands itself:
+    Agent.run; the classic terminal's Claude starts with it: cmd_claude). Nor
+    when the conversation was only compacted, mid-turn: it works on."""
+    sid = s["id"]
+    if isinstance(event, dict) and event.get("source") == "compact":
+        return
+    if engine(s) == "chat":
+        return
+    if take(claude_dir(sid) / "first") is not None:
+        set_status(sid, "working")
+    else:
+        set_status(sid, "idle", done=False)
 
 
 def set_status(sid, state, done=True):
@@ -4464,6 +4491,16 @@ def set_status(sid, state, done=True):
 def unseen(sid):
     """Whether the session finished a turn you haven't looked at yet."""
     return (UNSEEN / sid).exists()
+
+
+def finished_now(sid):
+    """Whether the session's last change of status was a turn finishing (idle
+    and done: set_status marks it unseen then), and you haven't seen it.
+    Not a Claude that only started, a turn you stopped, or one that failed."""
+    try:
+        return (UNSEEN / sid).stat().st_mtime >= (STATUS / sid).stat().st_mtime
+    except OSError:
+        return False
 
 
 def mark_unseen(sid):
@@ -5073,9 +5110,10 @@ def cmd_alerts(args):
 
 def alert_kind(s, state, prev):
     """Whether a session that went on to need you (waiting) or finished (idle
-    after working) tells you so: "assistant" for your assistant, which always
+    after working, its turn done: not one that only started, or that you
+    stopped) tells you so: "assistant" for your assistant, which always
     does, "session" for another one when amarchy alerts lets it, else None."""
-    if not (state == "waiting" or (state == "idle" and prev == "working")):
+    if not (state == "waiting" or (state == "idle" and prev == "working" and finished_now(s["id"]))):
         return None
     if assistant_role(s) == "main":
         return "assistant"
@@ -14033,6 +14071,12 @@ class Agent:
     def deliver(self, message, priority=None):
         with self.lock:
             self.busy = True
+        # Claude's hook says working when it takes it (UserPromptSubmit), a
+        # moment later: said now, so the chat is never idle (or "done") with
+        # your message on its way. Not one taken into a turn under way: that
+        # one says how it stands (working, or waiting for your answer).
+        if priority is None:
+            agent_status(self.sid, "working")
         self.write({"type": "user", "message": {"role": "user", "content": message["content"]},
                     "parent_tool_use_id": None, "session_id": "", "uuid": message["uuid"],
                     **({"priority": priority} if priority else {})})
@@ -14693,11 +14737,18 @@ class Agent:
                 self.live.update(account=r.get("account"), version=r.get("claude_code_version"),
                                  permission_mode=r.get("current_permission_mode"), state="idle")
             self.restore()
-            agent_status(self.sid, "idle")
         else:
             with self.lock:
                 self.live.update(state="idle", error=info.get("error"))
             self.out(f"  {info.get('error')}", dim=True)
+        # Started, it hasn't finished a turn: idle, with nothing done (a new
+        # chat was working while it was set up). With a message to start on
+        # (its first prompt, what you sent while it slept), or one that came
+        # in meanwhile, it's working all along: deliver says so.
+        with self.lock:
+            starts = bool(first or self.queue or self.busy)
+        if not starts:
+            agent_status(self.sid, "idle", done=False)
         self.changed(True)
         for text in first:
             self.send(text)

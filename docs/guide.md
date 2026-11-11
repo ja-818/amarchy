@@ -648,6 +648,10 @@ With `needs-you`, a chat that asks a question or a permission notifies you; one
 that's done doesn't, and is marked done in the list (the filled check) until you
 open it. **Settings → Tell me** in the app is the same setting.
 
+Done is a turn that ended on its own. A new chat is at work from the moment you
+make it until its first turn ends; one that only started, or that you stopped,
+isn't done, and says nothing.
+
 `sounds/CREDITS` says where amarchy's come from; `sounds/make.py` makes its own
 ones again.
 
