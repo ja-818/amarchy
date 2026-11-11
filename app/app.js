@@ -339,12 +339,17 @@ const store = {
 //
 // A page can't ask which browser is the default. A Mac's web app (Safari's
 // Add to Dock) gives a link to another site to the default browser itself,
-// but only one clicked as a link: window.open keeps it in the web app. An
-// iPhone's home-screen app shows it in a Safari sheet whatever the default
-// is; only an app's own address (googlechromes://…) reaches another browser.
-// So on an iPhone or iPad the settings can name one, kept on that device.
+// but only one followed in place, as the app going there: one that asks for
+// a new window (target="_blank", window.open) gets a Safari window instead.
+// So in the Dock app a link out is followed in place; macOS hands it over
+// and the app stays where it is. An iPhone's home-screen app shows it in a
+// Safari sheet whatever the default is; only an app's own address
+// (googlechromes://…) reaches another browser. So on an iPhone or iPad the
+// settings can name one, kept on that device.
 
 const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const macApp = !iOS && /Macintosh/.test(navigator.userAgent)
+  && (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
 
 const BROWSERS = [
   ["", "As iOS does", null],
@@ -382,7 +387,7 @@ function openLink(uri, { here = false } = {}) {
   const url = here ? new URL(uri, location.href).href : outward(uri);
   if (!url) return;
   const b = linkBrowser();
-  if (!b) return follow(url, "_blank");
+  if (!b) return follow(url, macApp && !here ? "_self" : "_blank");
   follow(b[2](url));
   // Nothing answers when the app isn't there: still here a moment later, say so.
   setTimeout(() => {
@@ -393,7 +398,9 @@ function openLink(uri, { here = false } = {}) {
 document.addEventListener("click", (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest && e.target.closest("a[href]");
-  if (!a || !a.isConnected || !outward(a.href) || !linkBrowser()) return;      // the system's way: the link as it is
+  if (!a || !a.isConnected || !outward(a.href)) return;
+  if (macApp) { a.removeAttribute("target"); return; }                          // in place: macOS gives it to the default browser
+  if (!linkBrowser()) return;                                                    // the system's way: the link as it is
   e.preventDefault();
   openLink(a.href);
 }, true);

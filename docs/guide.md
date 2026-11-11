@@ -398,7 +398,9 @@ dot, red for one that needs you; installed (Add to Dock, Install), the app's ico
 carries the count, as the home screen app's does on the phone.
 
 **Links** (in what Claude says, and in the terminals: click one) open in the
-default browser, where the device lets a web page get there. On an iPhone or
+default browser, where the device lets a web page get there. In a Mac's Dock
+app that's the default browser too, not Safari: the app follows the link in
+place and macOS hands it over (a new window would be a Safari one). On an iPhone or
 iPad, the Home Screen app opens them in a Safari sheet whatever the default is,
 and Settings → "Open links in" picks a browser for that device (Safari, Chrome,
 Firefox, Edge or Brave, through the browser's own address, so it has to be
