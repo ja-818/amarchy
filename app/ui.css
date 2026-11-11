@@ -348,6 +348,9 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
    the one you're on, lit. */
 .ui-tabs { flex: none; display: flex; gap: 2px; }
 .ui-tabs .control { font-size: var(--body); padding: 0 12px; }
+/* One of many (a new chat's projects): one row, scrolling sideways. */
+.ui-tabs.scroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.ui-tabs.scroll::-webkit-scrollbar { display: none; }
 .tab-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--tab-count-bg); color: var(--on-accent);
              font-size: var(--caption); line-height: 18px; text-align: center; }
 

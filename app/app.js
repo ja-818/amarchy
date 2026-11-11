@@ -1556,9 +1556,11 @@ function swipeToClose(back, card) {
 
 // The bar under the list, as omalauncher's: the project on its left (tap it
 // for another), and what the new session's Claude should do.
-// The new chat: "What do you want to do?", typed or dictated, and under it
-// the project it starts in: the one you pick, else one that what you wrote
-// names ("…in jaken…"), else the last one you used; and the model it starts
+// The new chat: first the project it starts in, your projects in a row
+// over the box (a tap picks one; in the box, Tab is the next one and
+// Shift+Tab the one before): the one you pick, else one that what you wrote
+// names ("…in jaken…"), else the last one you used. Then "What do you want
+// to do?", typed or dictated, and under it the model it starts
 // on, the host's for every new chat (Opus until you pick another here, for
 // this chat and the ones after, on every device). Under the list on the
 // phone; on a computer, the middle of the window (wide: desk.js's
@@ -1573,9 +1575,13 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   let repo = store.get("last-project");
   let picked = false;       // you picked the project for this one: no guessing
   let guessed = false;      // what you wrote named it
-  const name = h("b", { class: "name" });
-  const pick = h("button", { class: "pick", type: "button", "aria-label": "Project: where Claude works on it", "aria-haspopup": "menu",
-                             onclick: () => pickProject() }, h("span", { class: "in" }, "in"), name, glyph("down"));
+  // Your projects, in your order: the one it starts in is lit. A tap on one
+  // leaves the keyboard where it was (in the box).
+  const picks = uiTabs([], repo, (p) => choose(p), null, "Project: where Claude works on it", { scroll: true });
+  picks.addEventListener("mousedown", (e) => e.preventDefault());
+  const addProject = uiTool("plus", "New project", () => (app.desk ? newProject() : newProjectSheet(use)),
+    { title: app.desk ? "New project (Ctrl+Alt+P)" : "New project", cls: "new-project" });
+  const row = h("div", { class: "new-projects" }, picks, addProject);
   const why = h("span", { class: "why" }, "named in what you wrote");
   const modelLabel = h("b", { class: "name" });
   const modelPick = h("button", { class: "pick model", type: "button", "aria-label": "Model: which Claude answers", "aria-haspopup": "menu",
@@ -1586,6 +1592,11 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
                                 onkeydown: (e) => {
                                   // Dictating: Enter or Escape stops it, the words stay here (dictate.js), unsent.
                                   if (dictate.keyStops(e)) { e.preventDefault(); e.stopPropagation(); return; }
+                                  // Tab: the next project (Shift+Tab, the one before), the keys still in the box.
+                                  if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing && projects().length > 1) {
+                                    e.preventDefault(); e.stopPropagation();
+                                    return step(e.shiftKey ? -1 : 1);
+                                  }
                                   // A computer's: Enter starts it (Shift+Enter, a new line); Escape, back to the chat you were in.
                                   if (!wide || e.isComposing) return;
                                   if (e.key === "Enter" && !e.shiftKey && !e.altKey) { e.preventDefault(); start(); }
@@ -1639,9 +1650,9 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); } });
   const box = h("div", { class: "prompt new" }, field, imgBtn, micBtn, wide ? null : send);
-  const under = h("div", { class: "new-under" }, pick, why, modelPick, wide ? h("span", { class: "hint" }, "Enter starts it · Shift+Enter, a new line · paste a screenshot") : null, wide ? send : null);
+  const under = h("div", { class: "new-under" }, modelPick, why, wide ? h("span", { class: "hint" }, "Tab, the next project · Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
-    wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, trayEl, box, under);
+    wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, row, trayEl, box, under);
   // Dropped on it: the pictures go with it too.
   const files = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
   el.addEventListener("dragover", (e) => { if (files(e)) { e.preventDefault(); el.classList.add("dropping"); } });
@@ -1677,6 +1688,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     send.disabled = none || !field.value.trim() || dictate.on() || tray.some((a) => !a.data);
     imgBtn.hidden = none;
     under.hidden = none;
+    row.hidden = none;
     micBtn.hidden = none || !dictate.available();
     micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
     box.classList.toggle("listening", saying !== null);
@@ -1687,7 +1699,8 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     const ps = projects();
     if (added && ps.some((p) => p.name === added)) added = null;      // the list has it now
     if (ps.length && !added && !ps.some((p) => p.name === repo)) { repo = ps[0].name; guessed = false; }
-    name.textContent = projectName(repo);
+    uiTabs(ps.map((p) => ({ key: p.name, label: projectName(p.name), title: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : null })),
+      repo, (p) => choose(p), picks);
     why.hidden = !guessed;
     modelLabel.textContent = modelName(model(), models()) || model();
     modelPick.title = "Which Claude answers: every new chat starts on it, until you pick another";
@@ -1731,16 +1744,10 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       main.length && others.length ? rest : null);
   };
   const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
-  const pickProject = () => {
-    if (app.desk) return picker({ title: "Where should Claude work on it?", placeholder: "Project", items: [
-      ...projects().map((p) => ({ label: projectName(p.name), icon: p.name === repo ? "check" : "project",
-                                  detail: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : "", act: () => choose(p.name) })),
-      { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", always: true, act: () => newProject() }] });
-    sheet(sheetHead("Project", "Where Claude works on it"),
-      h("div", { class: "menu" }, ...projects().map((p) =>
-        h("button", { class: `menu-item${p.name === repo ? " on" : ""}`, onclick: () => { closeSheets(); choose(p.name); } },
-          projectName(p.name), p.name === repo ? glyph("check", "val") : null))),
-      h("button", { class: "control wide", onclick: () => newProjectSheet(use) }, "New project…"));
+  // Tab's: the project after this one in the row (before it), round the ends.
+  const step = (by) => {
+    const ps = projects().map((p) => p.name), at = ps.indexOf(repo);
+    choose(ps[(Math.max(at, 0) + by + ps.length) % ps.length]);
   };
   // A project just added: the next chat starts there (once the list has it).
   let added = null;

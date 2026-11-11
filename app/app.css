@@ -439,11 +439,15 @@ th { font-weight: 700; }
 .send:disabled { color: var(--text-muted); opacity: 0.6; }
 .send:active:not(:disabled), .stop:active { background: var(--selected-bg); }
 
-/* The new chat (newChat): "What do you want to do?", and under it the
-   project it starts in ("in amarchy ▾", and why, when what you wrote named it). */
+/* The new chat (newChat): the project it starts in, first (your projects
+   in a row, the one it starts in lit; + adds one), then "What do you want
+   to do?", and under it its model (and why that project, when what you
+   wrote named it). */
 .start-chat { display: flex; flex-direction: column; gap: 4px; }
 .start-chat.busy { opacity: 0.6; }
 .start-chat .prompt.new { padding-left: 14px; }
+.new-projects { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.new-projects[hidden] { display: none; }
 .new-under {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   min-height: 34px; padding: 0 2px;
@@ -460,7 +464,6 @@ th { font-weight: 700; }
 .new-under .pick .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link); font-weight: 700; }
 .new-under .pick .glyph { font-size: 14px; }
 .new-under .why { font-style: italic; }
-.new-under .pick.model { max-width: 50%; }
 .menu-item .label small { display: block; font-size: var(--caption); color: var(--text-muted); font-weight: 400; }
 .menu-item .label:has(small) { flex-direction: column; align-items: flex-start; gap: 1px; }
 

@@ -308,12 +308,23 @@ function uiActions(items) {
 // Tabs: one of a few. items: [{key, label, count, title}]; on: the key
 // that's on; pick(key). Each says its count (what's your move there) in a
 // badge. Into el if given (drawn again, the keys kept), else a new one.
-function uiTabs(items, on, pick, el = null, label = "") {
-  const box = el || h("div", { class: "seg ui-tabs", role: "tablist", "aria-label": label || null });
+// scroll: one of many (a new chat's projects), in one row that scrolls
+// sideways, the one that's on brought into view when it changes.
+function uiTabs(items, on, pick, el = null, label = "", { scroll = false } = {}) {
+  const box = el || h("div", { class: `seg ui-tabs${scroll ? " scroll" : ""}`, role: "tablist", "aria-label": label || null });
   const kids = items.map((t) => h("button", { class: `control${t.key === on ? " on" : ""}`, type: "button", role: "tab", "data-tab": t.key,
                                               title: t.title || null, "aria-selected": String(t.key === on), onclick: () => pick(t.key) },
     t.label, t.count ? h("span", { class: "tab-count" }, String(t.count)) : ""));
   uiSwap(box, kids);
+  if (box.classList.contains("scroll") && box.dataset.shown !== String(on) && box.clientWidth) {
+    const at = box.querySelector(".control.on");
+    if (at) {
+      const r = at.getBoundingClientRect(), v = box.getBoundingClientRect();
+      if (r.left < v.left) box.scrollLeft += r.left - v.left - 8;
+      else if (r.right > v.right) box.scrollLeft += r.right - v.right + 8;
+      box.dataset.shown = String(on);
+    }
+  }
   return box;
 }
 

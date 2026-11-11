@@ -85,14 +85,15 @@ put it for later; on a computer `p` pins and `f` puts it for later, and again pu
 it back in Now. Every chat still notifies you, wherever it is.
 
 Your projects come in the order you choose, not alphabetically: in the list
-grouped by project, and in the picker of a new chat. **Order projects…** (in
+grouped by project, and in the row over a new chat's box. **Order projects…** (in
 Settings, or the menu) puts them in order one at a time: up, down, to the top or
 bottom, or right before another one. A project you haven't placed comes after the
 ones you have, by name.
 
 **New chat**: pick a project, say what you want, and send. The chat starts in the
-project shown under the box ("in amarchy ▾"): the one you tap to pick, else one
-that what you wrote names ("fix the login page in jaken" starts in jaken, and says
+project lit in the row over the box (your projects, in your order; **+** adds
+one): the one you tap, or step to with **Tab** in the box (**Shift+Tab**, the one
+before), else one that what you wrote names ("fix the login page in jaken" starts in jaken, and says
 so), else the last one you used. The chat shows up at once in the list, with a
 spinning row while it sets up: it fetches the latest of the base branch, makes the
 worktree, and starts Claude. If that fails (say, a bad base branch), it says why
@@ -214,10 +215,10 @@ finished, and its flag if pinned. Your assistant's card stays on top (see
   with it.
 - **Settings** (the gear) picks the chimes, your assistant, your projects, the
   look, the sleep time, what tells you, dictation, secrets, the terminals and the
-  links. **New project…** is there too, and the project picker under the list.
+  links. **New project…** is there too, and the **+** by a new chat's projects.
 - **The box under the list**, **What do you want to do?**, starts a new chat: say
-  it, typed or dictated with its mic, and send. Under it, the project it starts in
-  (**in amarchy ▾**) and the model (**on Opus 5.5 ▾**): the model you pick there
+  it, typed or dictated with its mic, and send. Over it, your projects in a row,
+  the one it starts in lit (tap another); under it, the model (**on Opus 5.5 ▾**): the model you pick there
   stays the one every new chat starts on, on every phone and browser of yours,
   until you pick another (Opus until you do; a chat's own model is still its
   composer's to change). With no project yet, the app opens on a welcome: what it
