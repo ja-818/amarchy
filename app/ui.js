@@ -15,6 +15,10 @@
 // - uiButton: an action on a card or a section.
 // - uiSection: a small head with a count (an action at its end), its cards;
 //   folded or not.
+// - uiFolds, uiFold: what's long, folded under heads that each say their
+//   point (a reply's sections): a tap opens one, the rest stay heads.
+// - uiBrief: something in a few rows, label by label (a reply's briefing),
+//   the row that's your move lit.
 // - uiTabs: one of a few (Chats | Tasks), each with what's your move.
 // - uiFilter: shows only some of what's there, on or off, with how many.
 // - uiSearch: the search box.
@@ -259,6 +263,39 @@ function uiSection(kind, title, { count = null, fold = null, extra = null } = {}
     h("summary", { "aria-label": `${title}, ${count}` }, head), h("div", { class: "tsec-cards" }, ...kids));
   d.addEventListener("toggle", () => uiState.open.set(kind, d.open));
   return d;
+}
+
+// Folds, one under the other in one box (uiFold each).
+function uiFolds(...folds) {
+  return h("div", { class: "folds" }, ...folds.flat().filter(Boolean));
+}
+
+// A fold: a head that says the point, what's under it open or folded. title:
+// words or a node; toggle(open): told when you open or fold it. set(open)
+// on it opens or folds it without telling.
+function uiFold(title, { open = false, toggle = null } = {}, ...kids) {
+  const body = h("div", { class: "fold-body" }, ...kids.flat().filter(Boolean));
+  const head = h("button", { class: "fold-head", type: "button" }, h("span", { class: "fold-title" }, title));
+  const el = h("section", { class: "fold" }, head, body);
+  el.set = (on) => {
+    el.classList.toggle("open", on);
+    head.setAttribute("aria-expanded", String(on));
+    body.hidden = !on;
+  };
+  el.set(open);
+  head.onclick = () => {
+    el.set(!el.classList.contains("open"));
+    if (toggle) toggle(el.classList.contains("open"));
+  };
+  return el;
+}
+
+// A briefing: a few rows, label by label. rows: [{label, value (words or a
+// node), tone}]; tone "you": your move, lit; "none": nothing to do, quiet.
+function uiBrief(title, rows) {
+  return h("div", { class: "brief" }, title ? h("div", { class: "brief-head" }, title) : null,
+    h("dl", { class: "brief-rows" }, ...rows.flatMap((r) => [
+      h("dt", { class: r.tone || null }, r.label), h("dd", { class: r.tone || null }, r.value)])));
 }
 
 // Tabs: one of a few. items: [{key, label, count, title}]; on: the key

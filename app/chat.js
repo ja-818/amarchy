@@ -838,6 +838,38 @@ function replyParts(text, all) {
   return parts;
 }
 
+// What Claude said, as it folds (bin/amarchy reply_outline): its parts in
+// order, those under a "# " or "## " heading together as a section ({title,
+// parts}), the rest loose. A section ends at the next heading, or at the
+// briefing or a question: those are never folded away.
+const SECTION_HEAD = /^#{1,2}\s+(.+?)\s*#*\s*$/;
+function replyOutline(parts) {
+  const out = [];
+  let sec = null;
+  const put = (p) => (sec ? sec.parts : out).push(p);
+  for (const p of parts) {
+    if (p.md === undefined) {
+      if (p.kind === "brief" || p.kind === "choices") sec = null;
+      put(p);
+      continue;
+    }
+    let buf = [], code = false;
+    const flush = () => {
+      if (buf.join("\n").trim()) put({ md: buf.join("\n").trim() });
+      buf = [];
+    };
+    for (const l of p.md.split("\n")) {
+      if (code ? /^\s*```\s*$/.test(l) : /^\s*```/.test(l)) code = !code;
+      const m = code ? null : l.match(SECTION_HEAD);
+      if (!m) { buf.push(l); continue; }
+      flush();
+      out.push(sec = { title: m[1], parts: [] });
+    }
+    flush();
+  }
+  return out;
+}
+
 // Where the chat stands, in the goal block each reply ends with: its goal
 // and its state. Not shown as words: under the chat's name, on Today, and
 // as the strip that offers to close a done chat.
@@ -1690,24 +1722,68 @@ class Chat {
 
   // What Claude said, as it wrote it (replyParts): its markdown, and in
   // their place the blocks it made for you to use, each with its buttons;
-  // its questions (choices) as buttons to tap, together where the first
-  // one is. key: the message's, for what you open, fold and answer in it.
-  // Questions that aren't the newest thing any more are past (markPast).
-  claudeView(text, key, past) {
+  // its briefing; its questions (choices) as buttons to tap, together where
+  // the first one is. Its sections (replyOutline) are folded under their
+  // headings, which say their points: a tap opens one, Open all every one;
+  // a section with something to use in it starts open. key: the message's,
+  // for what you open, fold and answer in it. Questions that aren't the
+  // newest thing any more are past (markPast). live: still being written,
+  // so as it comes, nothing folded.
+  claudeView(text, key, past, live) {
     const el = h("div", { class: "msg claude" });
     const parts = replyParts(text);
     const asked = parts.filter((p) => p.kind === "choices" && p.options.length);
     let n = 0;
-    for (const p of parts) {
-      if (p.md !== undefined) el.append(tableize(h("div", { class: "md", html: md(p.md) })));
-      else if (p.kind !== "choices") el.append(this.blockView(p, `${key}|b${n++}`));
-      else if (p === asked[0]) {
-        const box = this.choicesView({ waiting: asked.map((q) => ({ question: q.attrs.question || "", options: q.options.slice(0, 4) })) }, `${key}|q`);
-        if (box) el.append(box);
-        if (box && past) this.markPast(box);
-      }
+    const draw = (p) => {
+      if (p.md !== undefined) return tableize(h("div", { class: "md", html: md(p.md) }));
+      if (p.kind === "brief") return this.briefView(p);
+      if (p.kind !== "choices") return this.blockView(p, `${key}|b${n++}`);
+      if (p !== asked[0]) return null;
+      const box = this.choicesView({ waiting: asked.map((q) => ({ question: q.attrs.question || "", options: q.options.slice(0, 4) })) }, `${key}|q`);
+      if (box && past) this.markPast(box);
+      return box;
+    };
+    if (live) {
+      el.append(...parts.map(draw).filter(Boolean));
+      return el;
     }
+    const folds = [];
+    let group = null;
+    for (const node of replyOutline(parts)) {
+      if (node.title === undefined) {
+        const v = draw(node);
+        if (v) { el.append(v); group = null; }
+        continue;
+      }
+      const k = `${key}|s${folds.length}`;
+      const fold = uiFold(h("span", { html: inline(node.title) }),
+        { open: this.isOpen(k, node.parts.some((p) => p.kind)), toggle: (on) => { this.opened.set(k, on); sync(); } },
+        ...node.parts.map(draw));
+      fold.dataset.k = k;
+      if (!group) el.append(group = uiFolds());
+      group.append(fold);
+      folds.push(fold);
+    }
+    // Open all / Fold all, once there are a few.
+    const all = h("button", { type: "button", onclick: () => {
+      const on = folds.some((f) => !f.classList.contains("open"));
+      for (const f of folds) { f.set(on); this.opened.set(f.dataset.k, on); }
+      sync();
+    } });
+    const sync = () => { all.textContent = folds.some((f) => !f.classList.contains("open")) ? "Open all" : "Fold all"; };
+    sync();
+    if (folds.length > 1) folds[0].parentNode.before(h("div", { class: "fold-all" }, all));
     return el;
+  }
+
+  // Its briefing (the brief block): the reply in a few rows; what you need
+  // to do lit, unless it's nothing.
+  briefView(p) {
+    return uiBrief("Briefing", (p.fields || []).map((f) => {
+      const you = f.label.toLowerCase() === "you";
+      const none = you && /^(nothing|none|nada|no)\b/i.test(f.value.trim());
+      return { label: f.label, value: h("span", { html: inline(f.value) }), tone: you ? (none ? "none" : "you") : "" };
+    }));
   }
 
   // The questions asked before what comes now (you or Claude said something
@@ -2371,7 +2447,7 @@ class Chat {
       this.streamEl.replaceChildren(...s.parts);
     }
     // (What's written whole, as the conversation will show it: its blocks drawn, not to tap yet.)
-    if (head !== s.head) { s.head = head; s.parts[0].replaceChildren(...(head ? this.claudeView(head, "stream", true).childNodes : [])); }
+    if (head !== s.head) { s.head = head; s.parts[0].replaceChildren(...(head ? this.claudeView(head, "stream", true, true).childNodes : [])); }
     s.parts[1].innerHTML = md(tail || " ");
     this.streamEl.classList.toggle("done", s.done);
     // The caret, at the end of the last line written (in a list's last item, not under it).

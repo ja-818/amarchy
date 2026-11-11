@@ -1,5 +1,5 @@
 {
-  "about": "The blocks Claude writes in a reply for the app to draw with buttons: one catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), the app that draws them (chat.js replyParts, artifactParts) and the check when a turn ends (bin/amarchy reply_issues). A block is a fenced block named for its kind, its attributes key=\"value\" on the opening line, its body under it. Attribute types: text, phone, email, datetime (ISO 8601 with a time and an offset), url, path, session (a chat's id), one of a list (enum). Body shapes: text, code, url (its first line), todos (- [ ] lines), options (- Label | message), fields (Label: value lines), series (Label: number lines, or a markdown table: labels, then a column of numbers per series).",
+  "about": "The blocks Claude writes in a reply for the app to draw with buttons: one catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), the app that draws them (chat.js replyParts, artifactParts) and the check when a turn ends (bin/amarchy reply_issues). A block is a fenced block named for its kind, its attributes key=\"value\" on the opening line, its body under it. Attribute types: text, phone, email, datetime (ISO 8601 with a time and an offset), url, path, session (a chat's id), one of a list (enum). Body shapes: text, code, url (its first line), todos (- [ ] lines), options (- Label | message), fields (Label: value lines; a block with labels takes only those), series (Label: number lines, or a markdown table: labels, then a column of numbers per series).",
   "blocks": [
     {
       "kind": "whatsapp", "for": "a WhatsApp message to send",
@@ -91,6 +91,15 @@
       "attrs": { "path": { "type": "path", "need": true } },
       "body": { "shape": "text" },
       "example": { "attrs": "path=\"~/Work/houston/docs/proposal.pdf\"", "body": "what's in it" }
+    },
+    {
+      "kind": "brief", "for": "the briefing a reply of more than a few lines ends with",
+      "attrs": {},
+      "labels": { "Done": {}, "Answer": {}, "Checked": {}, "Open": {}, "Next": {}, "You": { "need": true } },
+      "needAnyLabel": ["Done", "Answer"],
+      "body": { "shape": "fields", "need": true },
+      "example": { "attrs": "", "body": "Done: what you did or found, in one line (Answer: instead, when they asked a question)\nChecked: how you verified it (leave the row out when there was nothing to verify)\nOpen: what's left, or what you're unsure of (leave it out when nothing)\nNext: the next step you'd take (leave it out when none)\nYou: what they need to do now, or Nothing" },
+      "rule": "The brief block is the reply in a few rows, for someone who reads nothing else: only those labels, in that order, one short line each (no lists, no detail: that's what the sections are for). It comes after the last section, before your choices and the goal."
     },
     {
       "kind": "choices", "for": "a question for them, answered with a tap",

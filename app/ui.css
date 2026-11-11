@@ -35,6 +35,21 @@
   /* A section's head (uiSection). */
   --section-head: var(--text-muted);
   --section-head-yours: var(--accent);
+  /* Folds (uiFolds, uiFold): a reply's sections. */
+  --fold-border: var(--border);
+  --fold-rule: var(--border-faint);
+  --fold-radius: var(--radius-item);
+  --fold-head: var(--text);
+  --fold-mark: var(--text-muted);
+  --fold-hover-bg: var(--control-hover);
+  --fold-press-bg: var(--control-pressed);
+  /* A briefing (uiBrief). */
+  --brief-bg: var(--control-bg);
+  --brief-border: var(--border);
+  --brief-radius: var(--radius-item);
+  --brief-head: var(--section-head);
+  --brief-label: var(--text-muted);
+  --brief-you: var(--accent);
   /* Tabs (uiTabs). */
   --tab-bg: var(--control-bg);
   --tab-border: var(--border-faint);
@@ -266,6 +281,39 @@ html.keyed .chat.writing .ui-in { outline: none; }
 .today-more { align-self: flex-start; }
 
 /* ---- a section: a small head and its count, folded (a chevron) or not */
+/* Folds: heads one under the other in one box, each opening what's under it. */
+.folds { display: flex; flex-direction: column; border: 1px solid var(--fold-border); border-radius: var(--fold-radius); overflow: hidden; }
+.fold + .fold { border-top: 1px solid var(--fold-rule); }
+.fold-head {
+  width: 100%; display: flex; align-items: flex-start; gap: 10px; min-height: 48px; padding: 13px 12px; box-sizing: border-box;
+  font: inherit; font-weight: 700; line-height: 1.35; text-align: left; color: var(--fold-head); background: none; border: 0; border-radius: 0; cursor: pointer;
+}
+.fold-head::before { content: "›"; flex: none; width: 12px; text-align: center; color: var(--fold-mark); transition: transform .15s; }
+.fold.open > .fold-head::before { transform: rotate(90deg); }
+.fold-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fold-head:active { background: var(--fold-press-bg); }
+.fold-head:focus-visible, .keyed .fold-head.ui-in { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) { .fold-head:hover { background: var(--fold-hover-bg); } }
+.fold-body { padding: 0 12px 14px 34px; min-width: 0; }
+.fold-body[hidden] { display: none; }
+.fold-body > * + * { margin-top: 12px; }
+@media (max-width: 600px) { .fold-body { padding-left: 12px; } }
+/* Open or fold them all: a quiet word over the box, at its right. */
+.fold-all { display: flex; justify-content: flex-end; margin-bottom: -8px; }
+.fold-all button { min-height: var(--control-h-small); padding: 2px 4px; font: inherit; font-size: var(--caption); font-weight: 700; color: var(--text-muted); background: none; border: 0; cursor: pointer; border-radius: var(--radius-control); }
+.fold-all button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (hover: hover) { .fold-all button:hover { color: var(--text); } }
+
+/* A briefing: its rows, label by label; your move lit. */
+.brief { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--brief-border); border-radius: var(--brief-radius); background: var(--brief-bg); }
+.brief-head { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brief-head); }
+.brief-rows { display: grid; grid-template-columns: minmax(4.5em, max-content) minmax(0, 1fr); gap: 8px 14px; margin: 0; line-height: 1.45; }
+.brief-rows dt { color: var(--brief-label); font-weight: 700; font-size: var(--caption); padding-top: 2px; }
+.brief-rows dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.brief-rows dt.you { color: var(--brief-you); }
+.brief-rows dd.you { font-weight: 700; }
+.brief-rows dd.none { color: var(--text-muted); }
+
 .tsec { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .tsec-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px;
              font-size: var(--caption); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--section-head); }

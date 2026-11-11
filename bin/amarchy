@@ -4425,8 +4425,9 @@ def cmd_hook(sid, state):
         live = agent_live(sid)
         if live.get("pending") and live.get("state") not in ("exited", None):
             return
-    # A turn ended with a reply whose blocks can't be drawn, or without its
-    # goal block: sent back to Claude to fix (reply_fix), once (the second
+    # A turn ended with a reply whose blocks can't be drawn, a long one that
+    # isn't in sections with its brief, or one without its goal block: sent
+    # back to Claude to fix (reply_fix), once (the second
     # stop is stop_hook_active), and the session stays working meanwhile.
     # Only a Claude that has the current format: it knows what's asked.
     if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
@@ -8195,7 +8196,7 @@ def user_item(text):
         return {"kind": "note", "text": "Interrupted"}
     if text.startswith(HOOK_FEEDBACK):
         # amarchy's own (reply_fix): not shown; another hook's, a quiet line.
-        return None if FIX_MARK in text or GOAL_MARK in text else {"kind": "note", "text": text}
+        return None if any(m in text for m in FIX_MARKS) or GOAL_MARK in text else {"kind": "note", "text": text}
     return {"kind": "user", "text": text}
 
 
@@ -10537,6 +10538,21 @@ def block_issues(b, chat_exists=None):
             out.append(f"{name} has lines that aren't \"Label: value\": {b['bad'][0]!r}.")
         elif need and not b["fields"]:
             out.append(f"{name} has no \"Label: value\" lines.")
+        elif d.get("labels"):
+            labels = {k.lower(): k for k in d["labels"]}
+            have = [f["label"].lower() for f in b["fields"]]
+            other = [f["label"] for f in b["fields"] if f["label"].lower() not in labels]
+            if other:
+                out.append(f"{name} takes no {', '.join(repr(k) for k in other)} row (its rows: {', '.join(d['labels'])}).")
+            for k, spec in d["labels"].items():
+                if spec.get("need") and k.lower() not in have:
+                    out.append(f"{name} needs its \"{k}: ...\" row.")
+            if d.get("needAnyLabel") and not any(k.lower() in have for k in d["needAnyLabel"]):
+                rows = " or ".join(f'"{k}: ..."' for k in d["needAnyLabel"])
+                out.append(f"{name} needs its {rows} row.")
+            long = [f["label"] for f in b["fields"] if len(f["value"]) > BRIEF_ROW_MAX]
+            if long:
+                out.append(f"{name}'s {', '.join(long)} row is over {BRIEF_ROW_MAX} characters: one short line each (the detail goes in a section).")
     elif shape == "series":
         if b["bad"]:
             out.append(f"{name} has rows that aren't a label and numbers: {b['bad'][0]!r}.")
@@ -10548,11 +10564,87 @@ def block_issues(b, chat_exists=None):
 
 
 HOOK_FEEDBACK = "Stop hook feedback:"
-FIX_MARK = "amarchy: some blocks in your reply can't be drawn"
+FIX_MARK = "amarchy: your reply can't be shown as it is"
+FIX_MARKS = (FIX_MARK, "amarchy: some blocks in your reply can't be drawn")      # (the second: what it said until 2026-11-10)
 GOAL_MARK = "amarchy: your reply doesn't end with its goal block"
-FIX_ASK = (FIX_MARK + ", so their buttons won't work:\n{issues}\nWrite your whole reply again with them fixed, "
+FIX_ASK = (FIX_MARK + ":\n{issues}\nWrite your whole reply again with them fixed, "
            "as if for the first time (don't mention the fix): the person sees it in place of the one you wrote.")
 GOAL_ASK = (GOAL_MARK + ". Send only that block now, nothing else: it's added to the reply you wrote.")
+
+# A reply's shape (reply_shape, the reply format's own numbers): what makes it
+# read at a glance instead of a wall of text.
+REPLY_LONG = 80         # words of prose; over it, a reply has sections and a brief
+REPLY_LEAD = 40         # words before the first heading, at most, in such a reply
+SECTION_MAX = 120       # words under one heading, at most
+HEADING_MAX = 70        # characters in a heading, at most
+BRIEF_ROW_MAX = 200     # characters in a brief's row, at most
+SECTION_HEAD = re.compile(r"^#{1,2}\s+(.+?)\s*#*\s*$")      # (the app's too: chat.js replyOutline)
+
+
+def reply_outline(text):
+    """A reply's shape, as the app folds it (chat.js replyOutline): {lead:
+    the words of prose before its first "# " or "## " heading, sections:
+    [{title, words, line}], brief: the line its brief block starts on (or
+    None), after: the headings written after the brief}. Prose: what's read
+    as running text, so not a block, code, a table or a heading."""
+    out = {"lead": 0, "sections": [], "brief": None, "after": []}
+    lines = without_goal(text or "").replace("\r", "").split("\n")
+    i = 0
+    while i < len(lines):
+        l = lines[i]
+        m = FENCE_OPEN.match(l)
+        if m:
+            if (m.group(1) or "").lower() == "brief" and out["brief"] is None:
+                out["brief"] = i + 1
+            i += 1
+            while i < len(lines) and not FENCE_CLOSE.match(lines[i]):
+                i += 1
+            i += 1
+            continue
+        i += 1
+        m = SECTION_HEAD.match(l)
+        if m:
+            out["sections"].append({"title": m.group(1), "words": 0, "line": i})
+            if out["brief"] is not None:
+                out["after"].append(m.group(1))
+            continue
+        if re.match(r"^\s*\|", l) or re.match(r"^#{3,6}\s", l):
+            continue
+        words = len(re.findall(r"\w[\w'’.-]*", l))
+        if out["sections"]:
+            out["sections"][-1]["words"] += words
+        else:
+            out["lead"] += words
+    return out
+
+
+def reply_shape(text):
+    """What's wrong with a reply's shape, in words for Claude to fix ([] when
+    nothing): a long one (over REPLY_LONG words of prose) leads with its
+    outcome, has every idea under a heading and ends with its brief; a
+    section is short, its heading too; nothing but choices comes after the
+    brief."""
+    o = reply_outline(text)
+    total = o["lead"] + sum(s["words"] for s in o["sections"])
+    out = []
+    if total > REPLY_LONG:
+        if not o["sections"]:
+            out.append(f"Your reply is {total} words in one piece. Open with the outcome in a sentence or two, then put every idea "
+                       f"under its own \"## \" heading that states its point (the app folds each section under its heading).")
+        elif o["lead"] > REPLY_LEAD:
+            out.append(f"{o['lead']} words come before your first \"## \" heading: open with the outcome in a sentence or two "
+                       f"(at most {REPLY_LEAD} words) and put the rest under headings.")
+        if o["brief"] is None:
+            out.append("Your reply doesn't end with its brief block (after the last section: Done or Answer, Checked, Open, Next, You).")
+    for s in o["sections"]:
+        if s["words"] > SECTION_MAX:
+            out.append(f"The section \"{s['title'][:60]}\" is {s['words']} words: at most {SECTION_MAX}. Cut it, or split it into "
+                       f"sections that each make one point.")
+        if len(s["title"]) > HEADING_MAX:
+            out.append(f"The heading \"{s['title'][:40]}...\" is {len(s['title'])} characters: at most {HEADING_MAX}, its point in a few words.")
+    if o["after"]:
+        out.append(f"The section \"{o['after'][0][:60]}\" comes after your brief block: the brief goes after the last section.")
+    return out
 
 
 def fix_feedback(r):
@@ -10560,7 +10652,7 @@ def fix_feedback(r):
     be written again (FIX_ASK; Claude Code records it as its own, isMeta)."""
     content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
     texts = [content] if isinstance(content, str) else [b.get("text") or "" for b in content or [] if isinstance(b, dict) and b.get("type") == "text"]
-    return any(t.startswith(HOOK_FEEDBACK) and FIX_MARK in t for t in texts)
+    return any(t.startswith(HOOK_FEEDBACK) and any(m in t for m in FIX_MARKS) for t in texts)
 
 
 def turn_reply(path, tail=2_000_000):
@@ -10587,8 +10679,8 @@ def turn_reply(path, tail=2_000_000):
 
 def reply_fix(event):
     """What a turn's reply needs fixed, as the Stop hook asks Claude (FIX_ASK,
-    GOAL_ASK), or None: its blocks the app can't draw (reply_issues), else a
-    missing goal block. Nothing for a turn that ended without words."""
+    GOAL_ASK), or None: its blocks the app can't draw and a shape that reads
+    as a wall of text (reply_issues), else a missing goal block. Nothing for a turn that ended without words."""
     text = event.get("last_assistant_message") if isinstance(event.get("last_assistant_message"), str) else None
     if not text:
         text = turn_reply(event.get("transcript_path"))
@@ -10601,10 +10693,10 @@ def reply_fix(event):
 
 
 def reply_issues(text, chat_exists=None):
-    """A reply's blocks checked (block_issues), and whether it has its goal
-    block: (issues, has_goal)."""
+    """A reply's blocks checked (block_issues) and its shape (reply_shape),
+    and whether it has its goal block: (issues, has_goal)."""
     blocks = reply_blocks(text)
-    issues = [i for b in blocks for i in block_issues(b, chat_exists)]
+    issues = [i for b in blocks for i in block_issues(b, chat_exists)] + reply_shape(text)
     return issues, any(b["kind"] == "goal" for b in blocks)
 
 
@@ -13519,17 +13611,20 @@ def goal_guidance():
     return "\n".join([f"- {b['rule']}", *[f"  {line}" for line in [f"```goal {b['example']['attrs']}", b["example"]["body"], "```"]]])
 
 
-REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rendered as markdown, on their phone or computer: every word, in your order, nothing summarized or folded away. Write each reply (your final message of a turn, not your working notes in between) to be read there. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and use these blocks, because buttons come only from them.
+REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rendered as markdown, on their phone or computer: every word, in your order, nothing summarized or moved (a long reply's sections fold under their headings). Write each reply (your final message of a turn, not your working notes in between) to be read there. It holds whatever else says how to end or style a reply (a persona, a project's closing line): keep that voice and content, and use these blocks, because buttons come only from them.
 
 - Lead with the outcome in one plain sentence, as you'd say it to them. No greeting, no "Here's...".
-- Then the rest in markdown: short paragraphs and lists, "## " headings to break up anything long, a table for any comparison or side-by-side data, links as [words](url), code in fenced blocks. Every finding, number, name, link and caveat they need, and the reason behind each point.
+- A reply that fits in a few lines (under {REPLY_LONG} words) is just that: the outcome, and what they need with it.
+- Anything longer is read at a glance or not at all, so give it this shape, every time. After the opening (at most {REPLY_LEAD} words), every idea goes under its own "## " heading, and nothing sits between sections without one. The heading states the point itself in a few words ("## Tests pass on phone and wide", not "## Testing"): the app shows the headings folded, one under the other, and they open the ones they want, so the headings alone must tell the story. Under each, only what backs that point: short bullets or two or three short sentences (at most {SECTION_MAX} words; split a longer one), a table for any comparison or side-by-side data, links as [words](url), code in fenced blocks. Every finding, number, name, link and caveat they need is in some section, with its reason.
 - Anything they will use goes in a fenced block named for it, where it belongs in the reply; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
 {blocks_guidance()}
 - A link for them to open goes in a link block; a date to keep, in an event block.
 - When your turn ends, amarchy checks your blocks: one it can't draw (a date that isn't one, a question with no options, an attribute it doesn't know) is sent back to you to fix.
 - Something live for them to look at: a dev server, register it as the chat's preview instead of starting it in your shell (`amarchy preview --run '<command>' <url>`: amarchy runs it, keeps it through your sleep, and stops it when the chat is completed); a deploy, `amarchy preview <url>`. Either puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation (it starts the server again when it isn't running). Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
-- Sources you used go last, under "## Sources", as links.
+- Sources you used are the last section, "## Sources", as links.
 {goal_guidance()}
+- The order of a long reply: the outcome, its sections, the brief block, your choices, the goal block.
+- When your turn ends, amarchy checks that shape too: a long reply in one piece, a section that runs on, or a missing brief block is sent back to you to write again.
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 

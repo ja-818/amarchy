@@ -28,7 +28,7 @@ def check(ok, what):
 cat = am.block_catalog()["blocks"]
 kinds = [b["kind"] for b in cat]
 check({"whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "fields", "chart", "contact", "place", "session", "file",
-       "choices", "goal"} == set(kinds), f"the catalog's blocks ({kinds})")
+       "brief", "choices", "goal"} == set(kinds), f"the catalog's blocks ({kinds})")
 check(all(f"```{k}" in am.REPLY_FORMAT for k in kinds), "the guidance shows every block")
 check(all(b["rule"] in am.REPLY_FORMAT for b in cat if b.get("rule")), "and every block's rule")
 check(am.REPLY_FORMAT.startswith("amarchy shows"), "it starts as a Claude's format is recognized by (claude_format_version)")
@@ -95,6 +95,37 @@ check(am.reply_issues("```choices question=\"Q?\"\n- a\n- b\n- c\n- d\n- e\n```"
 check(am.reply_issues("```event title=\"x\" when=\"2026-10-29T15:40:00-05:00\" end=\"2026-10-29T14:00:00-05:00\"\n```")[0] == ["The event block ends before it starts."], "an event ending before it starts")
 check(am.reply_issues("```whatsapp\nhola")[0] == ["The whatsapp block isn't closed with ```."], "a block not closed")
 
+# A reply's shape: a long one leads with its outcome, has every idea under a
+# heading and ends with its brief; a short one is let be.
+GOAL = '\n\n```goal state="done"\nX\n```'
+BRIEF = '\n\n```brief\nDone: The search page filters as you type\nChecked: Both view tests pass\nYou: Nothing\n```'
+words = lambda n: " ".join(["word"] * n) + "."
+shape = lambda text: "\n".join(am.reply_issues(text + GOAL)[0])
+check(shape("Done, it works. " + words(60)) == "", "a short reply: no sections, no brief asked")
+wall = shape("Done. " + words(100))
+check("in one piece" in wall and "brief block" in wall, f"a long reply in one piece: sections and a brief asked ({wall[:60]})")
+good = "Done, it works.\n\n## It filters as you type\n\n" + words(70) + "\n\n## Tests pass on phone and wide\n\n- " + words(50) + "\n\n## Sources\n\n- [a](https://a.b)" + BRIEF
+check(shape(good) == "", f"the outcome, its sections, its brief: nothing to fix ({shape(good)})")
+check("brief block" in shape(good.replace(BRIEF, "")), "sections but no brief: asked for it")
+lead = shape(words(60) + "\n\n## One\n\n" + words(40) + BRIEF)
+check("60 words come before your first" in lead, f"a long opening: said ({lead[:50]})")
+long = shape("Done.\n\n## One point\n\n" + words(130) + BRIEF)
+check('The section "One point" is 130 words' in long, f"a section that runs on: said ({long[:50]})")
+check("characters: at most 70" in shape("Done.\n\n## " + "A heading that goes on and on " * 4 + "\n\nShort." + BRIEF), "a heading that isn't a few words: said")
+check("comes after your brief block" in shape("Done." + BRIEF + "\n\n## Sources\n\n- [a](https://a.b)"), "a section after the brief: said")
+table = "Done.\n\n## Numbers\n\n" + "\n".join(["| a b c d e f g h | 1 |"] * 40) + "\n\n```js\n" + words(300) + "\n```\n\n```whatsapp to=\"A\"\n" + words(300) + "\n```"
+check(shape(table) == "", f"a table, code and a draft aren't prose: not counted ({shape(table)[:60]})")
+check(shape("Done.\n\n```js\n## not a heading\n" + words(10) + "\n```") == "" and am.reply_outline("```js\n## x\n```")["sections"] == [], "a heading in code isn't one")
+o = am.reply_outline(good)
+check([s["title"] for s in o["sections"]] == ["It filters as you type", "Tests pass on phone and wide", "Sources"] and o["lead"] == 3 and o["brief"], f"its outline ({o})")
+brief = lambda body: "\n".join(am.reply_issues(f"```brief\n{body}\n```")[0])
+check(brief("Done: x\nYou: Nothing") == "" and brief("Answer: x\nChecked: y\nOpen: z\nNext: w\nYou: Tap Ship") == "", "a brief's rows")
+check('needs its "You: ..." row' in brief("Done: x"), "a brief without You: said")
+check('needs its "Done: ..." or "Answer: ..." row' in brief("You: Nothing"), f"a brief without Done or Answer: said ({brief('You: Nothing')})")
+check("takes no 'Summary' row" in brief("Summary: x\nDone: x\nYou: Nothing"), "a row it doesn't take: said")
+check("over 200 characters" in brief("Done: " + words(60) + "\nYou: Nothing"), "a row that runs on: said")
+check("aren't \"Label: value\"" in brief("Done: x\n- and more\nYou: Nothing"), "a line that isn't a row: said")
+
 # When a turn ends: sent back, asked for its goal, or let be.
 def turn(*records):
     f = Path(home) / f"t{len(os.listdir(home))}.jsonl"
@@ -111,8 +142,13 @@ check(am.turn_reply(turn(you, step, result, said("Part one."), said(bad))) == "P
 check(am.reply_fix({"transcript_path": turn(you, said("Done."))}) == am.GOAL_ASK, "no goal block: asked for it alone")
 check(am.reply_fix({"last_assistant_message": 'Done.\n\n```goal state="done"\nX\n```'}) is None, "a good reply: let be")
 check(am.reply_fix({"transcript_path": turn(you, step)}) is None, "a turn that ended without words: let be")
+ask = am.reply_fix({"last_assistant_message": "Done. " + words(100) + GOAL})
+check(ask and ask.startswith(am.FIX_MARK) and "in one piece" in ask, f"a wall of text: sent back ({ask and ask[:70]})")
+old_fb = {"type": "user", "isMeta": True, "message": {"role": "user", "content": f"{am.HOOK_FEEDBACK}\namarchy: some blocks in your reply can't be drawn, so their buttons won't work:\n- x"}}
+check(am.fix_feedback(old_fb) and am.user_item(old_fb["message"]["content"]) is None, "what the hook said before is still known as its own")
 
 # The reply sent back isn't shown, nor the hook's words, and they aren't yours.
+ask = am.reply_fix({"transcript_path": turn(you, step, result, said(bad))})
 feedback = {"type": "user", "uuid": "f", "isMeta": True, "message": {"role": "user", "content": f"{am.HOOK_FEEDBACK}\n{ask}"}}
 fixed = said('Done.\n\n```event title="x" when="2026-10-29T15:40:00-05:00"\n```\n\n```goal state="done"\nX\n```')
 items = am.app_items([you, step, result, said("Part one."), said(bad), feedback, fixed], {"id": "x", "path": home})

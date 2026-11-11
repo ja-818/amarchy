@@ -1,7 +1,10 @@
 // What Claude said, in a browser: the conversation is the only view. A
 // reply shows as Claude wrote it, every word in its order, rendered as
-// markdown: its "## " sections, lists, tables (a card per row on a phone),
-// code. In their place, the blocks it made for you to use (a draft, a link,
+// markdown: lists, tables (a card per row on a phone), code. Its "## "
+// sections are folded under their headings, one box of heads: a tap opens
+// one, Open all every one; one with something to use in it starts open; the
+// words are all there, folded or not. Its briefing (the brief block) is a
+// card of rows after them, what you need to do lit. In their place, the blocks it made for you to use (a draft, a link,
 // a command, an event, to-dos, a contact, a chat), open, each with its
 // buttons; its questions (choices) as buttons, a tap sending the answer;
 // asked before something newer, no longer to tap. The goal block isn't
@@ -149,6 +152,15 @@ const REPLY = [
   "2. Datos por Excel",
   "```",
   "",
+  "## It filters as you **type**",
+  "",
+  "- Each key narrows the list, with no button to press.",
+  "- An empty search shows everything.",
+  "",
+  "```js",
+  "## not a heading",
+  "```",
+  "",
   "## How it compares",
   "",
   "| Option | Speed | Cost |",
@@ -203,6 +215,13 @@ const REPLY = [
   "## Sources",
   "",
   "- [Search UX guide](https://www.nngroup.com/articles/search/)",
+  "",
+  "```brief",
+  "Done: The search page filters **as you type**",
+  "Checked: Both view tests pass",
+  "Open: Algolia isn't wired",
+  "You: Say whether to ship it",
+  "```",
   "",
   "```choices question=\"Ship it to main?\"",
   "- Ship it | Ship it: merge to main and push",
@@ -274,15 +293,26 @@ async function run(browser, base, layout) {
       switch: !!document.querySelector(".view-switch, .vs-btn, .reply, .screen-stage"),
       msgs: msgs.length,
       said: msgs.map((m) => m.textContent.slice(0, 40)),
-      order: [...last.children].map((x) => x.matches(".md") ? `md:${(x.querySelector("h2") || x.firstElementChild || x).textContent.slice(0, 18)}`
-        : x.matches(".artifacts") ? `block:${x.querySelector(".art").className.split(" ")[1]}` : x.matches(".choices") ? "choices" : x.className),
+      order: (function name(box) { return [...box.children].map((x) => x.matches(".md") ? `md:${(x.firstElementChild || x).textContent.slice(0, 18)}`
+        : x.matches(".artifacts") ? `block:${x.querySelector(".art").className.split(" ")[1]}` : x.matches(".choices") ? "choices"
+        : x.matches(".folds") ? [...x.children].map((f) => [`${f.classList.contains("open") ? "open" : "folded"}:${f.querySelector(".fold-title").textContent}`, ...name(f.querySelector(".fold-body"))])
+        : x.className); })(last),
+      folds: [...last.querySelectorAll(".fold")].map((f) => ({ open: f.classList.contains("open"), said: f.querySelector(".fold-head").getAttribute("aria-expanded"),
+        seen: f.querySelector(".fold-body").getBoundingClientRect().height > 0 })),
+      headBold: last.querySelector(".fold-title strong")?.textContent,
+      headings: last.querySelectorAll(".md h2, .md h3").length,
+      all: last.querySelector(".fold-all button")?.textContent,
+      brief: [...last.querySelectorAll(".brief .brief-rows > *")].map((x) => `${x.tagName.toLowerCase()}${x.className ? `.${x.className}` : ""}:${x.innerHTML.replace(/<\/?span>/g, "")}`),
+      briefHead: last.querySelector(".brief .brief-head")?.textContent,
+      briefAfter: !!last.querySelector(".folds ~ .brief ~ .choices") && !last.querySelector(".fold .brief, .fold .choices"),
+      youColor: (() => { const dt = last.querySelector(".brief dt.you"), other = last.querySelector(".brief dt:not(.you)"); return dt && getComputedStyle(dt).color !== getComputedStyle(other).color; })(),
       text: last.textContent,
       open: [...last.querySelectorAll(".art")].map((a) => a.classList.contains("open")),
       wa: last.querySelector(".art-message .art-actions a")?.getAttribute("href"),
       pre: last.querySelector(".art-message .art-pre")?.textContent,
       gcal: last.querySelector(".art-event .art-actions a")?.getAttribute("href"),
       unsafe: [...last.querySelectorAll("a")].some((a) => /^javascript/i.test(a.getAttribute("href") || "")),
-      code: last.querySelector(".md .code code")?.textContent,
+      code: [...last.querySelectorAll(".md .code code")].map((c) => c.textContent),
       table: [...last.querySelectorAll(".md table.rtable tbody tr")].map((tr) => [...tr.children].map((td) => `${td.dataset.label || ""}=${td.textContent}`).join(",")),
       todos: [...last.querySelectorAll(".art-todos li")].map((li) => `${li.className}|${li.querySelector(".t").textContent}`),
       qs: [...last.querySelectorAll(".choices .bq-opt")].map((b) => `${b.textContent}${b.disabled ? "(off)" : ""}`),
@@ -296,15 +326,26 @@ async function run(browser, base, layout) {
   });
   check(layout, !s.switch, "one view: no Brief | Chat switch, no reply cards");
   check(layout, s.msgs === 3, `every message Claude wrote, but the one it said again after an old brief (${JSON.stringify(s.said)})`);
-  check(layout, JSON.stringify(s.order) === JSON.stringify(["md:The search page wo", "block:art-message", "md:How it compares", "block:art-command", "md:jsCopyconst x = se", "block:art-event",
-    "block:art-link", "block:art-todos", "block:art-fields", "block:art-chart", "block:art-chart", "md:Sources", "choices"]), `in Claude's order, each block where it wrote it (${JSON.stringify(s.order)})`);
+  const order = ["md:The search page wo", "block:art-message", "fold-all", [
+    ["folded:It filters as you type", "md:Each key narrows t"],
+    ["open:How it compares", "md:OptionSpeedCostLoc", "block:art-command", "md:jsCopyconst x = se", "block:art-event", "block:art-link", "block:art-todos", "block:art-fields",
+      "block:art-chart", "block:art-chart"],
+    ["folded:Sources", "md:Search UX guide"]], "brief", "choices"];
+  check(layout, JSON.stringify(s.order) === JSON.stringify(order), `in Claude's order, each block where it wrote it, its sections under their headings (${JSON.stringify(s.order)})`);
+  check(layout, JSON.stringify(s.folds) === JSON.stringify([{ open: false, said: "false", seen: false }, { open: true, said: "true", seen: true }, { open: false, said: "false", seen: false }]),
+    `a section is folded under its heading; one with something to use in it starts open (${JSON.stringify(s.folds)})`);
+  check(layout, s.headBold === "type" && s.headings === 0 && s.text.includes("## not a heading") && s.all === "Open all",
+    `a heading is its section's head, not said twice; one in code stays code; Open all (${JSON.stringify([s.headBold, s.headings, s.all])})`);
+  check(layout, s.briefHead === "Briefing" && JSON.stringify(s.brief) === JSON.stringify(["dt:Done", "dd:The search page filters <strong>as you type</strong>", "dt:Checked", "dd:Both view tests pass",
+    "dt:Open", "dd:Algolia isn't wired", "dt.you:You", "dd.you:Say whether to ship it"]) && s.briefAfter && s.youColor,
+    `its briefing: a row each, after the sections and before the question, your move lit (${JSON.stringify(s.brief)})`);
   check(layout, s.text.includes("<img src=x onerror") && s.pwned === undefined && s.text.includes("120 items") && s.text.includes("Search UX guide"),
     "every word, as text: nothing runs as markup");
   check(layout, s.open.every(Boolean) && s.pre.startsWith("Hola equipo") &&
     s.wa === "https://wa.me/573001234567?text=Hola%20equipo%2C%20les%20comparto%20el%20resumen%3A%0A1.%20Piloto%20PQR%0A2.%20Datos%20por%20Excel",
     `the blocks open: the whole draft and Open in WhatsApp (${s.wa})`);
   check(layout, /dates=20261029T204000Z\/20261029T220000Z/.test(s.gcal || "") && !s.unsafe, `an event's Add to Google Calendar; a javascript: link isn't made (${s.gcal})`);
-  check(layout, s.code === "const x = search(\"a\");", "a code block stays code");
+  check(layout, JSON.stringify(s.code) === JSON.stringify(["## not a heading", "const x = search(\"a\");"]), `a code block stays code (${JSON.stringify(s.code)})`);
   check(layout, JSON.stringify(s.table) === JSON.stringify(["=Local index,Speed=50 ms,Cost=free", "=Algolia,Speed=20 ms,Cost=$29/mo"]), `a table, its cells named for the phone's cards (${JSON.stringify(s.table)})`);
   check(layout, JSON.stringify(s.todos) === JSON.stringify(["|Send the C21 summary", "done|Twilio top-up"]), `to-dos (${JSON.stringify(s.todos)})`);
   check(layout, !s.goalShown && s.goal === "Ship the search page", `the goal block isn't shown, it's the chat's (${s.goal})`);
@@ -317,6 +358,32 @@ async function run(browser, base, layout) {
   await shot("reply-top");
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("reply-end");
+
+  // A tap on a heading opens its section, another folds it; Open all, Fold all; kept when it's drawn again.
+  const tapFold = (n) => page.evaluate((n) => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelectorAll(".fold-head")[n].click(), n);
+  const foldState = () => page.evaluate(() => { const last = [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1);
+    return { open: [...last.querySelectorAll(".fold")].map((f) => f.classList.contains("open") && f.querySelector(".fold-body").getBoundingClientRect().height > 0),
+      all: last.querySelector(".fold-all button").textContent }; });
+  await tapFold(0);
+  let f = await foldState();
+  check(layout, JSON.stringify(f.open) === "[true,true,false]" && f.all === "Open all", `a tap on a heading opens its section (${JSON.stringify(f)})`);
+  await shot("section-open");
+  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".fold-all button").click());
+  f = await foldState();
+  check(layout, JSON.stringify(f.open) === "[true,true,true]" && f.all === "Fold all", `Open all opens every one (${JSON.stringify(f)})`);
+  await page.evaluate(({ list }) => window.__chat.conversation({ reset: true, start: 0, items: list }), { list });
+  f = await foldState();
+  check(layout, JSON.stringify(f.open) === "[true,true,true]", `drawn again, they're as you left them (${JSON.stringify(f)})`);
+  await page.evaluate(() => [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1).querySelector(".fold-all button").click());
+  f = await foldState();
+  check(layout, JSON.stringify(f.open) === "[false,false,false]" && f.all === "Open all", `Fold all folds every one (${JSON.stringify(f)})`);
+  await tapFold(1);
+  // While it's written: as it comes, nothing folded.
+  const live = await page.evaluate((t) => { const v = window.__chat.claudeView(t, "stream", true, true); return { folds: v.querySelectorAll(".fold").length, h: v.querySelectorAll(".md h3").length, brief: !!v.querySelector(".brief") }; }, REPLY);
+  check(layout, live.folds === 0 && live.h === 3 && live.brief, `while it's written, its sections come open, as headings (${JSON.stringify(live)})`);
+  // You: Nothing isn't lit.
+  const none = await page.evaluate(() => { const v = window.__chat.claudeView("Done.\n\n```brief\nDone: x\nYou: Nothing.\n```", "k", false); return [...v.querySelectorAll(".brief dd")].map((d) => d.className); });
+  check(layout, JSON.stringify(none) === JSON.stringify(["", "none"]), `nothing for you to do: said quietly (${JSON.stringify(none)})`);
 
   // Fields and charts.
   const viz = await page.evaluate(() => {
@@ -366,7 +433,8 @@ async function run(browser, base, layout) {
   }
   const kinds = await page.evaluate(() => [...BLOCKS.values()].filter((b) => !b.hidden).map((b) => {
     const p = replyBlocks(`\`\`\`${b.kind} ${b.example.attrs}\n${b.example.body || "x"}\n\`\`\``)[0];
-    const drawn = b.kind === "choices" ? !!window.__chat.choicesView({ waiting: [{ question: p.attrs.question, options: p.options }] }, "kinds")
+    const drawn = b.kind === "brief" ? window.__chat.briefView(p).querySelectorAll("dt").length === 5
+      : b.kind === "choices" ? !!window.__chat.choicesView({ waiting: [{ question: p.attrs.question, options: p.options }] }, "kinds")
       : p && !window.__chat.artifactParts(p).fallback;
     return `${b.kind}:${drawn ? "drawn" : "MISSING"}`;
   }));

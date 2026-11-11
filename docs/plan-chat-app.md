@@ -192,6 +192,21 @@ the places Claude put them:
   tables for comparisons, links, code), and fenced blocks named for what
   they hold. The format holds over any other reply style (a persona's, a
   project's closing line). Nothing is rewritten, summarized or moved.
+- **Read at a glance, not a wall of text.** Shown whole, a long reply
+  wasn't read at all. So a reply over 80 words of prose has a shape: the
+  outcome (at most 40 words), then every idea under its own `## ` heading
+  that states its point ("Tests pass on phone and wide", not "Testing"), at
+  most 120 words under each, and a **briefing** after the last one (the
+  `brief` block: `Done` or `Answer`, `Checked`, `Open`, `Next`, `You`, one
+  short line each; the completion report projects used to ask for in their
+  own CLAUDE.md). The app folds each section under its heading
+  (`replyOutline`, `uiFolds` / `uiFold`): one box of heads that tell the
+  story, a tap opens one, **Open all** every one; a section with something
+  to use in it (a draft, a link, a chart) starts open, and what you opened
+  stays open. The briefing is a card of rows (`briefView`, `uiBrief`), the
+  row that's your move lit; it and the questions are never folded. While a
+  reply is written it comes as it is, nothing folded. Every word is still
+  there, in its order: folding hides, it doesn't cut or move.
 - **Blocks, where it wrote them** (`replyParts`, `claudeView`,
   `blockView` in app/chat.js): `whatsapp`, `email`, `slack`, `sms` (a draft:
   Copy, Open in WhatsApp / mail / Messages, filled in), `command` (Copy),
@@ -234,7 +249,12 @@ the places Claude put them:
   that isn't numbers, a chat id that isn't one, an address not to open, a
   block not closed) sends the reply back to Claude with what's wrong, to
   write it again whole; the chat stays Working meanwhile, and the reply
-  sent back isn't shown (`fix_feedback`: its words go aside). A reply
+  sent back isn't shown (`fix_feedback`: its words go aside). So does a
+  shape that reads as a wall of text (`reply_shape`, `reply_outline`): a
+  long reply in one piece or with a long opening, a section over 120 words,
+  a heading over 70 characters, no brief block (or one with rows it doesn't
+  take, without `You`, or a row over 200 characters), a section after the
+  brief. Blocks, code and tables aren't counted as prose. A reply
   without its goal block gets asked for that block alone, added to it.
   Once a turn (`stop_hook_active`), and only for a Claude that has the
   current format. The hook's words aren't something you said.
