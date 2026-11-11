@@ -12048,6 +12048,10 @@ def app_handler(st, users, address):
                 return self.sound(data)
             if self.path in ("/api/assistant", "/api/assistant/picture"):
                 return self.assistant(None, data)
+            if self.path == "/api/links/seen":      # a Mac's app says how it opens a link (to find why one stays in the app)
+                self.changed_nothing = True
+                print("amarchy app: links: " + json.dumps(data)[:1500], file=sys.stderr, flush=True)
+                return self.send(200, {})
             if self.path == "/api/dictate/log":
                 return self.dictate_logged(data)
             if self.path == "/api/missions/goal":     # your daily goal: {goal} (0: none)

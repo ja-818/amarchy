@@ -393,6 +393,18 @@ function macDirect(url) {
   } catch (e) { return url; }
 }
 
+// A Mac says how it opens a link, to the server's log: which app it takes
+// itself for, and where each link out went. (To find why one stays in the app.)
+function linkSeen(what, more) {
+  if (iOS || !/Macintosh/.test(navigator.userAgent)) return;
+  const mode = ["standalone", "minimal-ui", "fullscreen", "browser", "window-controls-overlay"].filter((m) => window.matchMedia(`(display-mode: ${m})`).matches);
+  try {
+    fetch("/api/links/seen", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ what, ...more, macApp, mode, standalone: navigator.standalone, host: app.host || null, build: app.build || null,
+                             ua: navigator.userAgent.slice(0, 200) }) }).catch(() => {});
+  } catch (e) { /* never in a link's way */ }
+}
+
 function follow(href, target) {
   const a = h("a", { href, target, rel: "noopener noreferrer" });
   a.style.display = "none";
@@ -407,7 +419,10 @@ function openLink(uri, { here = false } = {}) {
   const url = here ? new URL(uri, location.href).href : outward(uri);
   if (!url) return;
   const b = linkBrowser();
-  if (!b) return follow(here ? url : macDirect(url), macApp && !here ? "_self" : "_blank");
+  if (!b) {
+    linkSeen("opened", { url, to: here ? url : macDirect(url), here });
+    return follow(here ? url : macDirect(url), macApp && !here ? "_self" : "_blank");
+  }
   follow(b[2](url));
   // Nothing answers when the app isn't there: still here a moment later, say so.
   setTimeout(() => {
@@ -419,6 +434,7 @@ document.addEventListener("click", (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest && e.target.closest("a[href]");
   if (!a || !a.isConnected || !outward(a.href)) return;
+  linkSeen("clicked", { url: a.href, to: macDirect(a.href), target: a.target, trusted: e.isTrusted });
   if (macApp) {                                                                 // in place: macOS gives it to the default browser
     const direct = macDirect(a.href);
     a.removeAttribute("target");
@@ -2598,6 +2614,7 @@ async function start() {
     app.key = d.key;
     app.user = d.user;
     app.host = d.host || null;
+    setTimeout(() => linkSeen("started", {}), 3000);
     app.nerd = !!d.nerd;
     if (d.sessions) app.view = d;
   } catch (e) {
