@@ -255,7 +255,8 @@ Environment:
 
 ~/.config/amarchy/host (KEY=value lines): NAME= and BIND= (how your devices reach what a session serves,
 else this machine's Tailscale name and address), APP_USERS= (the Tailscale logins the app lets in, else
-this machine's owner), APP_PORT= and APP_HTTPS= (the app's ports), AUTO_UPDATE=off.
+this machine's owner), APP_PORT= and APP_HTTPS= (the app's ports), APP_LINKS= (the port a
+Mac's links out go through, 7398), AUTO_UPDATE=off.
 
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
@@ -902,7 +903,8 @@ def preview_direct(url):
     """A preview's address by this machine's number address (http://100.x.y.z:port)
     when it's served here under the machine's name, else None. A Mac's Dock
     app keeps a link to a name like the app's own in a window of the app; one
-    to a number address it gives to the default browser."""
+    to a number address it gives to the default browser. (What the app does
+    when links_out isn't there to send the link on.)"""
     try:
         u = urllib.parse.urlsplit(url)
         where = preview_local(url)
@@ -1299,7 +1301,7 @@ def preview_info(s, lines=40):
     state = preview_state(s)
     out = {"url": p["url"], "run": p.get("run") or "", "stop": p.get("stop") or "", "ports": preview_ports(p),
            "memory_max": p.get("memory") or PREVIEW_MEMORY, "idle": p.get("idle") or PREVIEW_IDLE, "state": state}
-    direct = preview_direct(p["url"])
+    direct = links_out(p["url"]) or preview_direct(p["url"])
     if direct:
         out["direct"] = direct
     if p.get("run"):
@@ -11678,7 +11680,7 @@ def app_handler(st, users, address):
                 with st.changed:
                     view = dict(st.view)
                 name, bind = host_network()
-                return self.send(200, {**view, "key": app_public(), "host": {"name": name, "address": bind},
+                return self.send(200, {**view, "key": app_public(), "host": {"name": name, "address": bind, "out": _links_out},
                                        "user": self.headers.get("Tailscale-User-Login")})
             if path == "/api/events":
                 return self.list_stream()
@@ -12743,6 +12745,89 @@ def app_server_class():
     return AppServer
 
 
+LINKS_PORT = 7398                           # on the host's own address; APP_LINKS= in ~/.config/amarchy/host
+_links_out = None                           # http://<address>:<port>/<token>/ once it listens (this process: the app's)
+
+
+def links_token():
+    """What a link out carries, so only the app's own pages get a link sent
+    on: from the app's key, so it stays the same across restarts (a page
+    loaded before one still opens its links)."""
+    import hashlib
+    return hashlib.sha256(app_key().read_bytes() + b"links-out").hexdigest()[:32]
+
+
+def links_out(url):
+    """A link out, as a Mac's Dock app opens it: this machine's address for
+    it, which sends the browser on to it. None when that isn't listening."""
+    if not _links_out or not re.match(r"https?://", url or "", re.I):
+        return None
+    return _links_out + url.encode().hex()
+
+
+def links_handler(token):
+    """What sends a Mac's links on: GET /<token>/<the address, in hex> answers
+    with the address to go to. A Mac's Dock app (Safari's Add to Dock) keeps
+    for itself a link that reads like a sign-in page (…/login) and one to a
+    name like the app's own, whatever is done with it; one to a plain number
+    address it gives to the default browser. So there every link out goes to
+    this one, which reads like nothing (hex), and the browser is sent on."""
+    import http.server
+
+    class Links(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):
+            pass
+
+        def answer(self, code, headers=()):
+            self.send_response(code)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+
+        def do_GET(self):
+            m = re.fullmatch(r"/([0-9a-f]+)/([0-9a-f]{2,8000})", self.path)
+            url = None
+            if m and hmac.compare_digest(m.group(1), token):
+                try:
+                    url = bytes.fromhex(m.group(2)).decode()
+                except ValueError:
+                    url = None
+            if not url or not re.fullmatch(r"https?://[^\s\x00-\x1f\x7f]+", url, re.I):
+                return self.answer(404)
+            self.answer(302, [("Location", urllib.parse.quote(url, safe="%/:=&?~#+!$,;'@()*[]"))])
+
+        do_HEAD = do_GET
+    return Links
+
+
+def links_serve():
+    """Listen for a Mac's links out, on this machine's own address (your
+    tailnet only). Not listening (no address, the port taken): the app opens
+    them as it did."""
+    global _links_out
+    bind = host_network()[1]
+    if not bind:
+        return None
+    try:
+        port = int(host_setting("APP_LINKS") or LINKS_PORT)
+    except ValueError:
+        port = LINKS_PORT
+    token = links_token()
+    try:
+        server = app_server_class()((bind, port), links_handler(token))
+    except OSError as e:
+        print(f"amarchy app: links out aren't sent on ({bind}:{port}: {e})", file=sys.stderr, flush=True)
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _links_out = f"http://{bind}:{server.server_address[1]}/{token}/"
+    return server
+
+
 def app_serve():
     """Run the app's server (what amarchy-app.service runs) until amarchy is
     updated, when systemd starts the new one."""
@@ -12759,6 +12844,7 @@ def app_serve():
     st = AppState()
     st.transcriber = Transcriber()      # dictation on the host
     server = app_server_class()(("127.0.0.1", app_port()), app_handler(st, users, address))
+    links_serve()                       # a Mac's links out (see links_handler)
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     version = os.stat(SELF).st_mtime_ns

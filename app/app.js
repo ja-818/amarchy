@@ -347,11 +347,14 @@ const store = {
 // (googlechromes://…) reaches another browser. So on an iPhone or iPad the
 // settings can name one, kept on that device.
 //
-// The Dock app keeps one kind of link for itself, though: an address that
-// looks like the app's own (it's at amarchy.<tailnet>.ts.net; a preview is at
-// http://amarchy:3471) opens in a window of the app, not the browser. The
-// same page by the machine's number address (http://100.x.y.z:3471) it hands
-// over. So there a link to this machine goes by that address (macDirect).
+// The Dock app keeps some links for itself, though, however they're followed:
+// one that reads like a sign-in page (…/login), and one to a name like the
+// app's own (it's at amarchy.<tailnet>.ts.net; a preview is at
+// http://amarchy:3471). Those open in the app's window, in its place. A link
+// to a plain number address it always hands over. So there every link out
+// goes to the host's own (http://100.x.y.z:7398/<token>/<the link, in hex>:
+// bin/amarchy's links_handler), which reads like nothing and sends the
+// browser on to the link (macDirect).
 
 const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const macApp = !iOS && /Macintosh/.test(navigator.userAgent)
@@ -379,15 +382,19 @@ function outward(uri) {
   } catch (e) { return null; }
 }
 
-// In the Dock app, a link to something this machine serves (a preview), by
-// the machine's number address; any other link as it is. As the server's
-// preview_direct: its name, short or whole, over http.
+// In the Dock app, a link out as macOS hands it to the default browser: the
+// host's address that sends the browser on to it. Should the host not be
+// listening for them, a link to something it serves (a preview) by its number
+// address, as the server's preview_direct; any other link as it is.
 function macDirect(url) {
   const host = app.host || {};
-  if (!macApp || !host.address) return url;
+  if (!macApp) return url;
   try {
-    const u = new URL(url), name = String(host.name || "").toLowerCase(), h = u.hostname.toLowerCase();
-    if (u.protocol !== "http:" || !(h === location.hostname.toLowerCase() || (name && h.split(".")[0] === name))) return url;
+    const u = new URL(url);
+    if (host.out && /^https?:$/.test(u.protocol) && !u.href.startsWith(host.out))
+      return host.out + Array.from(new TextEncoder().encode(u.href), (b) => b.toString(16).padStart(2, "0")).join("");
+    const name = String(host.name || "").toLowerCase(), h = u.hostname.toLowerCase();
+    if (!host.address || u.protocol !== "http:" || !(h === location.hostname.toLowerCase() || (name && h.split(".")[0] === name))) return url;
     u.hostname = host.address;
     return u.href;
   } catch (e) { return url; }
@@ -438,7 +445,7 @@ document.addEventListener("click", (e) => {
   if (macApp) {                                                                 // in place: macOS gives it to the default browser
     const direct = macDirect(a.href);
     a.removeAttribute("target");
-    if (direct !== a.href) {                                                    // this machine's: by its number address, for this click
+    if (direct !== a.href) {                                                    // by the host's address that sends it on, for this click
       const was = a.getAttribute("href");
       a.setAttribute("href", direct);
       setTimeout(() => a.setAttribute("href", was));

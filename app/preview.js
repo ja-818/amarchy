@@ -68,9 +68,10 @@ function pvFailed(why, log, p) {
 
 // It answers: this page turns into it. In a Mac's Dock app this page is a
 // window of the app, and the preview belongs in the default browser: macOS
-// gives it a link followed in place, by the machine's number address (one by
-// its name stays in the app: app.js's "links out"). So there it goes by that
-// address, and the page left behind says so, with a link to open it again.
+// gives it a link followed in place, to the host's address that sends the
+// browser on (one by its name, or to a sign-in page, stays in the app:
+// app.js's "links out"). So there it goes by that address (the preview's
+// "direct"), and the page left behind says so, with a link to open it again.
 const pvMacApp = /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1)
   && (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
 

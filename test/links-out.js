@@ -70,38 +70,53 @@ async function run(browser, port, mac) {
     check(who, popups.length === before + 1, "a link the app opens is a new tab");
   }
 
-  // Something this machine serves (a preview, http://<its name>:port): the Dock
-  // app keeps a link to a name like its own in a window of the app, so there it
-  // goes by the machine's number address, which macOS hands over. The link
-  // itself keeps its address (Copy, the next click).
+  // The Dock app keeps some links whatever is done with them: one that reads
+  // like a sign-in page (…/login), one to a name like the app's own (a
+  // preview, http://<host>:3471). So there every link out goes to the host's
+  // address that sends the browser on (its number address, the link in hex),
+  // which macOS hands over. The link itself keeps its address (Copy, the
+  // next click). Without it (the host isn't listening), a link to the host
+  // goes by its number address.
+  const hex = (u) => Buffer.from(u).toString("hex");
+  const BOUNCE = "http://100.64.0.9:7398/tok/";
   const mine = [];
-  await p.context().route(/^http:\/\/(box|100\.64\.0\.9):3471\//, (r) => {
+  await p.context().route(/^http:\/\/(box|100\.64\.0\.9):\d+\//, (r) => {
     let inPlace = false;
     try { inPlace = r.request().isNavigationRequest() && r.request().frame() === p.mainFrame(); } catch (e) { /* a new window's */ }
     mine.push({ url: r.request().url(), inPlace });
     if (inPlace) r.fulfill({ status: 204 }); else r.fulfill({ contentType: "text/html", body: "a preview" });
   });
-  await p.evaluate(() => {
-    app.host = { name: "box", address: "100.64.0.9" };
-    const a = document.querySelector("#out");
-    a.href = "http://box:3471/clicked?x=1";
-    a.target = "_blank";
-  });
   const tabs = popups.length;
-  await p.mouse.click(20, 20);                 // the link (not a locator's click: it would wait on the last link, which went nowhere)
-  await sleep(500);
-  await p.evaluate(() => { document.body.addEventListener("click", () => openLink("http://box:3471/opened"), { once: true }); });
-  await p.mouse.click(5, 400);
-  await sleep(500);
+  const tap = async (href) => {
+    await p.evaluate((u) => { const a = document.querySelector("#out"); a.href = u; a.target = "_blank"; }, href);
+    await p.mouse.click(20, 20);                 // the link (not a locator's click: it would wait on the last link, which went nowhere)
+    await sleep(500);
+  };
+  const open = async (href) => {
+    await p.evaluate((u) => { document.body.addEventListener("click", () => openLink(u), { once: true }); }, href);
+    await p.mouse.click(5, 400);
+    await sleep(500);
+  };
+  await p.evaluate((out) => { app.host = { name: "box", address: "100.64.0.9", out }; }, BOUNCE);
+  await tap("http://box:3471/login?x=1");
+  await open("https://elsewhere.example/sign-in");
+  await p.evaluate(() => { app.host = { name: "box", address: "100.64.0.9", out: null }; });
+  await tap("http://box:3471/clicked?x=1");
+  await open("http://box:3471/opened");
   const urls = mine.map((x) => x.url);
   if (mac) {
-    check(who, urls.includes("http://100.64.0.9:3471/clicked?x=1") && urls.includes("http://100.64.0.9:3471/opened") && mine.every((x) => x.inPlace),
-      `a link to this machine goes by its number address, in place (${urls.join(", ")})`);
-    check(who, !urls.some((u) => u.includes("//box:")) && popups.length === tabs, "never by its name, and no new window");
+    check(who, urls.includes(BOUNCE + hex("http://box:3471/login?x=1")) && urls.includes(BOUNCE + hex("https://elsewhere.example/sign-in")),
+      `a link out goes to the host's address that sends it on (${urls.join(", ")})`);
+    check(who, urls.includes("http://100.64.0.9:3471/clicked?x=1") && urls.includes("http://100.64.0.9:3471/opened"),
+      "without it, a link to this machine goes by its number address");
+    check(who, mine.every((x) => x.inPlace) && !urls.some((u) => u.includes("//box:")) && popups.length === tabs
+      && !asked.some((x) => x.url.endsWith("sign-in")), "all in place: never by its name, never the link itself, no new window");
     check(who, await p.evaluate(() => document.querySelector("#out").getAttribute("href")) === "http://box:3471/clicked?x=1", "the link keeps its own address");
-    check(who, await p.evaluate(() => macDirect("https://elsewhere.example/a") === "https://elsewhere.example/a" && macDirect("http://boxes:3471/") === "http://boxes:3471/"), "any other link is left as it is");
+    check(who, await p.evaluate(() => macDirect("https://elsewhere.example/a") === "https://elsewhere.example/a" && macDirect("http://boxes:3471/") === "http://boxes:3471/"
+      && macDirect("mailto:a@b.c") === "mailto:a@b.c"), "without it, any other link is left as it is");
   } else {
-    check(who, urls.length === 2 && urls.every((u) => u.includes("//box:3471/")) && popups.length === tabs + 2, `elsewhere it opens by its name, as a new tab (${urls.join(", ")})`);
+    check(who, urls.length === 3 && urls.every((u) => u.includes("//box:3471/")) && popups.length === tabs + 4
+      && asked.some((x) => x.url.endsWith("sign-in") && !x.inPlace), `elsewhere a link opens as it is, as a new tab (${urls.join(", ")})`);
   }
 
   // A page of the app's own (the one that starts a preview): beside the app, not in its place.
