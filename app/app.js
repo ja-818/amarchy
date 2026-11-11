@@ -2615,6 +2615,7 @@ async function start() {
     app.user = d.user;
     app.host = d.host || null;
     setTimeout(() => linkSeen("started", {}), 3000);
+    window.addEventListener("pagehide", () => linkSeen("left", {}));      // a link took the app's place: it wasn't handed over
     app.nerd = !!d.nerd;
     if (d.sessions) app.view = d;
   } catch (e) {
