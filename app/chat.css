@@ -608,8 +608,11 @@
 /* The one lit (.nav-sel): with keys at hand (.keyed), and not while you
    write; whatever a click did with the browser's focus. */
 .chat .nav-item { outline: none; }
+/* Round Claude's words, which have no box of their own: the ring stands off
+   them (--nav-ring-gap), in the room between messages and beside the column. */
+.chat { --nav-ring-gap: 6px; }
 .chat .nav-item:focus-visible, .keyed .chat:not(.writing) .nav-sel {
-  outline: 2px solid var(--card-focus-border); outline-offset: -2px; border-radius: var(--radius-card); }
+  outline: 2px solid var(--card-focus-border); outline-offset: var(--nav-ring-gap); border-radius: var(--radius-card); }
 /* A message of yours: its bubble lit, not the row it sits on the right of. */
 .chat .nav-item:focus-visible:is(.msg.user, :has(.msg.user .bubble)), .keyed .chat:not(.writing) .nav-sel:is(.msg.user, :has(.msg.user .bubble)) { outline: none; }
 .chat .nav-item:focus-visible.msg.user .bubble, .keyed .chat:not(.writing) .nav-sel.msg.user .bubble {

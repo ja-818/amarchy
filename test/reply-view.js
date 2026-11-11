@@ -538,6 +538,27 @@ async function run(browser, base, layout) {
   await page.evaluate(() => { const sc = window.__chat.scroller; sc.scrollTop = sc.scrollHeight; });
   await shot("work");
 
+  // The message the keys are on: its ring stands off Claude's words (they
+  // have no box of their own), clear of the messages round it and inside the page.
+  const ring = await page.evaluate(() => {
+    const c = window.__chat;
+    document.documentElement.classList.add("keyed");
+    c.el.classList.remove("writing");
+    const msg = [...c.conv.querySelectorAll(":scope > .msg.claude")].at(-1);
+    c.navPick(msg);
+    const cs = getComputedStyle(msg), r = msg.getBoundingClientRect(), v = c.scroller.getBoundingClientRect();
+    const out = parseFloat(cs.outlineOffset) + parseFloat(cs.outlineWidth);
+    const near = [msg.previousElementSibling, msg.nextElementSibling].filter((x) => x && x.getClientRects().length).map((x) => x.getBoundingClientRect());
+    msg.scrollIntoView({ block: "center" });
+    return { lit: msg.classList.contains("nav-sel"), style: cs.outlineStyle, gap: parseFloat(cs.outlineOffset), out,
+      inside: r.left - out >= v.left && r.right + out <= v.right,
+      clear: near.every((n) => n.bottom <= r.top - out || n.top >= r.bottom + out) };
+  });
+  check(layout, ring.lit && ring.style === "solid" && ring.gap >= 4 && ring.inside && ring.clear,
+    `the ring round Claude's message stands off its words, inside the page and clear of the next message (${JSON.stringify(ring)})`);
+  await shot("ring");
+  await page.evaluate(() => document.documentElement.classList.remove("keyed"));
+
   // Settings: no Replies choice any more.
   await page.evaluate(() => openSettings());
   await page.waitForSelector(".sheet-back.settings");
