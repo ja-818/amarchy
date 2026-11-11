@@ -2283,9 +2283,11 @@ def auto_name(repo):
     """A free branch name like "wobbly-bakunin", so a session needs no naming up front."""
     taken = set(sh("git", "branch", "--format=%(refname:short)", cwd=WORK / repo).stdout.split())
     taken |= {s["name"] for s in sessions() if s["repo"] == repo}
+    # Not a closed chat's name either (Claude Code still has its conversations,
+    # under its worktree's folder): a new chat isn't taken for an old one.
     for _ in range(100):
         name = f"{random.choice(ADJECTIVES)}-{random.choice(ANARCHISTS)}"
-        if name not in taken:
+        if name not in taken and not has_conversation(WORKTREES / repo / name):
             return name
     return f"session-{int(time.time())}"
 
@@ -2452,6 +2454,23 @@ def projects_dir(path):
 def has_conversation(path):
     """Whether Claude Code has a saved conversation for this folder."""
     return any(projects_dir(path).glob("*.jsonl"))
+
+
+def latest_conversation(s):
+    """The file of the latest conversation in the session's folder that is
+    its own: written since the session was made. A closed chat's
+    conversations stay in Claude Code's folder for its worktree, and a new
+    chat given the same name (so the same folder) isn't that old chat: not
+    its conversation, its title, or what it said."""
+    since, logs = s.get("created") or 0, []
+    for f in projects_dir(s["path"]).glob("*.jsonl"):
+        try:
+            at = f.stat().st_mtime
+        except OSError:
+            continue
+        if at >= since:
+            logs.append((at, f))
+    return max(logs)[1] if logs else None
 
 
 def claude_dir(sid):
@@ -3774,10 +3793,7 @@ def conversation_lines(s, width):
     """The conversation as an asleep pane shows it: what you said, what
     Claude answered, a line for each tool it used. The latest part of it, as
     much as fits in the scrollback."""
-    f = transcript(s)
-    if not f:
-        logs = sorted(projects_dir(s["path"]).glob("*.jsonl"), key=lambda x: x.stat().st_mtime)
-        f = logs[-1] if logs else None
+    f = transcript(s) or latest_conversation(s)
     if not f:
         return ["", "  \033[2mNo conversation yet.\033[0m"]
     records = conversation_records(f, tail=8_000_000)
@@ -4625,12 +4641,9 @@ TITLES = STATE / "titles.json"  # what saved_title() read last, so it only reads
 
 def saved_title(s):
     """The title Claude Code gave the session's conversation (for sessions
-    whose Claude isn't running): the one it's in, else the latest in its
-    folder. Conversations only grow, so only what's new since last time is read."""
-    f = transcript(s)
-    if not f:
-        logs = sorted(projects_dir(s["path"]).glob("*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)
-        f = logs[0] if logs else None
+    whose Claude isn't running): the one it's in, else the latest of its own
+    in its folder. Conversations only grow, so only what's new since last time is read."""
+    f = transcript(s) or latest_conversation(s)
     if not f:
         return ""
     try:
@@ -13666,11 +13679,19 @@ def agent_call(sid, request, timeout=40):
 
 def claude_resume(s):
     """How a session's Claude picks its conversation back up: the one it was
-    in, else the latest in its folder (sessions from before amarchy kept
-    track), else none."""
+    in, else the latest of its own in its folder (sessions from before amarchy
+    kept track), else none."""
     if transcript(s):
         return ["--resume", conversation_id(s["id"])]
-    return ["--continue"] if has_conversation(s["path"]) else []
+    # (Claude's --continue takes the folder's latest: only when that one is its own.)
+    mine, logs = latest_conversation(s), list(projects_dir(s["path"]).glob("*.jsonl"))
+    if not mine:
+        return []
+    try:
+        newest = max(logs, key=lambda f: f.stat().st_mtime)
+    except (OSError, ValueError):
+        return []
+    return ["--continue"] if newest == mine else ["--resume", mine.stem]
 
 
 def agent_argv(s):
