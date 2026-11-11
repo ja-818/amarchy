@@ -152,6 +152,15 @@
 .fold.open > .fold-steps { display: block; }
 /* One step alone isn't folded: it's its own line. */
 .fold.single > .fold-head { display: none; }
+/* A turn's work (chat.js intoWork): one line once Claude is done, what it did
+   and said on the way a tap away; all there while it works (live), or when
+   it's one run of steps and nothing else (plain). */
+.work { display: flex; flex-direction: column; }
+.work-body { display: none; flex-direction: column; gap: 14px; min-width: 0; }
+.work.open > .work-body { display: flex; margin: 10px 0 0 16px; padding-left: 10px; border-left: 1px solid var(--border); }
+.work.open > .work-head .chev { transform: rotate(90deg); }
+.work.live > .work-body, .work.plain > .work-body { display: flex; margin: 0; padding: 0; border: 0; }
+.work.live > .work-head, .work.plain > .work-head { display: none; }
 .fold.single > .fold-steps { display: block; margin: 0; padding: 0; border: 0; }
 .step.failed > .step-head .what { color: var(--danger); }
 .step.running > .step-head .what { color: var(--text); }

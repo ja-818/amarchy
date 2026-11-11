@@ -1134,6 +1134,8 @@ class Chat {
     this.steps = new Map();     // tool call id -> its step
     this.keys = new Set();      // items shown already
     this.fold = null;           // the steps being added to, until Claude says something
+    this.work = null;           // the turn's work: what Claude did and said on the way to its reply
+    this.loose = null;          // what Claude said last this turn, not in its work (its reply, unless a step follows)
     this.todo = null;           // the newest checklist
     this.tasks = new Map();     // Claude's tasks (TaskCreate, TaskUpdate), and their checklist
     this.taskCard = null;
@@ -1578,6 +1580,22 @@ class Chat {
     else requestAnimationFrame(go);
   }
 
+  // Where a chat you open (or a turn that just ended) lands: on the top of
+  // Claude's reply, its Briefing, when the reply is the last thing and
+  // doesn't fit the screen; else the bottom. Not while Claude works.
+  toReply() {
+    if (this.working()) return this.toBottom();
+    this.stuck = true;
+    requestAnimationFrame(() => {
+      const s = this.scroller, last = this.tail.previousElementSibling;
+      const bottom = s.scrollHeight - s.clientHeight;
+      const top = last && last.matches(".msg.claude") ? last.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 12 : bottom;
+      s.scrollTop = Math.max(0, Math.min(bottom, top));
+      this.stuck = this.measureBottom();
+      this.latest.hidden = true;
+    });
+  }
+
   // ---- the conversation
 
   conversation(d) {
@@ -1642,7 +1660,8 @@ class Chat {
       this.infoTimer = setTimeout(() => this.loadInfo(), 1500);
     }
     if (this.screen && this.screen.dialog) this.renderDock();     // the card may be about what came in
-    if (stick) this.toBottom();
+    if (stick && (d.reset || d.items.some((i) => i.kind === "claude"))) this.toReply();
+    else if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
     if (back !== null) {
       // Now, and after the frame: a bottom asked for while the conversation was
@@ -1663,8 +1682,10 @@ class Chat {
       if (!(d.items || []).length) { this.start = d.start || 0; if (this.start <= 0) this.earlierBtn.remove(); return; }
       this.keepItems(d.items, true);
       // Its own folds: what came before doesn't join the ones after it.
-      const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard };
+      const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard, work: this.work, loose: this.loose };
       this.fold = null;
+      this.work = null;
+      this.loose = null;
       this.todo = null;
       this.tasks = new Map();
       this.taskCard = null;
@@ -1725,9 +1746,9 @@ class Chat {
   // its questions (choices) as buttons to tap, together where the first one
   // is. A long reply is three parts, each under its small head (the reply
   // format has Claude write them in this order): Briefing, its opening and
-  // its brief block's rows in one card; Action items, what's yours to do
-  // (its actions block, what to use for it, its questions), or that there's
-  // nothing; Content, its sections (replyOutline) folded under their
+  // its brief block's rows in one card, what you need to do among them;
+  // Action items, what to tap (its questions, what to use: a link, a
+  // draft), when there's something; Content, its sections (replyOutline) folded under their
   // headings, which say their points: a tap opens one, Open all every one.
   // key: the message's, for what you open, fold and answer in it. Questions
   // that aren't the newest thing any more are past (markPast). live: still
@@ -1756,17 +1777,20 @@ class Chat {
     const at = nodes.findIndex((x) => x.kind === "brief"), sec = nodes.findIndex(isSec);
     let rest = nodes;
     if (at >= 0 && (sec < 0 || at < sec)) {
-      // Briefing: what it wrote before its brief block, and the block's rows.
+      // Briefing: what it wrote before its brief block, the block's rows, and
+      // what's yours to do (an older reply's actions block).
       const lead = nodes.slice(0, at);
       el.append(...lead.filter((x) => x.md === undefined).map(draw).filter(Boolean));
       const words = lead.filter((x) => x.md !== undefined).map((x) => x.md).join("\n\n");
-      el.append(uiSection("brief", "Briefing", {}, this.briefView(nodes[at], words ? h("div", { class: "md", html: md(words) }) : null)));
-      // Action items: what comes after it, up to the first section.
       const end = sec < 0 ? nodes.length : sec;
-      const mine = nodes.slice(at + 1, end).map(draw).filter(Boolean);
-      const you = (nodes[at].fields || []).some((f) => f.label.toLowerCase() === "you");
-      if (mine.length) el.append(uiSection("actions", "Action items", {}, ...mine));
-      else if (!you && !asked.length) el.append(uiSection("actions", "Action items", {}, h("p", { class: "acts-none" }, "Nothing for you to do.")));
+      const after = nodes.slice(at + 1, end);
+      el.append(uiSection("brief", "Briefing", {}, this.briefView(nodes[at], words ? h("div", { class: "md", html: md(words) }) : null,
+        after.filter((x) => x.kind === "actions"))));
+      // Action items: what to tap, up to the first section: its questions, what to use.
+      const mine = after.filter((x) => x.kind !== "actions");
+      const drawn = mine.map(draw).filter(Boolean);
+      if (mine.some((x) => x.kind)) el.append(uiSection("actions", "Action items", {}, ...drawn));
+      else el.append(...drawn);
       rest = nodes.slice(end);
     }
     // Content: the sections, folded; what's written around them, where it is.
@@ -1801,17 +1825,21 @@ class Chat {
   }
 
   // Its briefing (the brief block): what the reply comes to (lead: its
-  // opening, when the block follows it) and its rows; in an older one, what
-  // you need to do lit, unless it's nothing.
-  briefView(p, lead = null) {
-    return uiBrief((p.fields || []).map((f) => {
+  // opening, when the block follows it) and its rows; what you need to do
+  // (its You row; an older reply's actions blocks, a line each) lit, unless
+  // it's nothing.
+  briefView(p, lead = null, actions = []) {
+    const rows = (p.fields || []).map((f) => {
       const you = f.label.toLowerCase() === "you";
       const none = you && /^(nothing|none|nada|no)\b/i.test(f.value.trim());
       return { label: f.label, value: h("span", { html: inline(f.value) }), tone: you ? (none ? "none" : "you") : "" };
-    }), { lead });
+    });
+    const items = actions.flatMap((a) => a.items || []);
+    if (items.length) rows.push({ label: "You", value: this.actionsView({ items }), tone: "you" });
+    return uiBrief(rows, { lead });
   }
 
-  // What's yours to do (the actions block), a line each.
+  // What's yours to do, a line each (an older reply's actions block).
   actionsView(p) {
     return uiActions((p.items || []).map((x) => ({ text: h("span", { html: inline(x.text) }), due: x.due, done: x.done })));
   }
@@ -2049,6 +2077,7 @@ class Chat {
     if (it.kind === "tool") return this.tool(it, where, earlier);
     this.fold = null;       // anything else ends the steps before it
     if (it.kind === "user") {
+      this.endWork();         // what came before you (or what was put in your name) stays as it is
       if (it.turn && !earlier) this.pastQuestions(where);
       // A message's pictures and its words are items of their own (keyed
       // "<its record>:<n>"): one bubble.
@@ -2088,6 +2117,7 @@ class Chat {
       if (view.childElementCount) {
         if (!earlier) this.pastQuestions(where);
         where.append(view);
+        this.loose = view;
       }
       if (!earlier) {
         // What Claude was writing is in the conversation now.
@@ -2140,7 +2170,7 @@ class Chat {
       if (this.todo) this.todo.classList.remove("open");
       step.el.classList.add("open");
       this.todo = step.el;
-      where.append(step.el);
+      this.intoWork(where, step.el);
       return;
     }
     if (it.name === "TaskCreate" || it.name === "TaskUpdate") {
@@ -2151,25 +2181,80 @@ class Chat {
     }
     if (it.name === "AskUserQuestion") {
       this.fold = null;
+      this.endWork();
       step.el = this.askedCard(step);
       where.append(step.el);
       return;
     }
     if (it.name === "ExitPlanMode") {
       this.fold = null;
+      this.endWork();
       step.el = this.planCard(step);
       where.append(step.el);
       return;
     }
     if (!this.fold) {
       this.fold = this.newFold();
-      where.append(this.fold.el);
+      this.intoWork(where, this.fold.el);
     }
     this.fold.steps.push(step);
     step.fold = this.fold;
+    step.work = this.work;
+    this.work.steps.push(step);
     step.el = this.stepRow(step);
     this.fold.list.append(step.el);
     this.drawFold(this.fold);
+    this.drawWork(this.work);
+  }
+
+  // A turn's work: Claude's steps and what it said between them, on the way
+  // to its reply. While Claude works it's all there, as it comes (live);
+  // after, it folds to one line (how long, how many steps) over the reply,
+  // a tap away, so a chat you open shows the reply, not how it got there.
+  // What Claude said is its reply until a step follows it: then it was a
+  // word on the way, and goes in with the steps. One run of steps and
+  // nothing said between: no line of its own (plain).
+  intoWork(where, el) {
+    if (!this.work) {
+      const body = h("div", { class: "work-body" });
+      const head = h("button", { class: "fold-head work-head", type: "button", "aria-expanded": "false" });
+      const box = h("div", { class: "work" }, head, body);
+      head.addEventListener("click", () => head.setAttribute("aria-expanded", String(box.classList.toggle("open"))));
+      for (const live of this.conv.querySelectorAll(".work.live")) live.classList.remove("live");
+      this.work = { el: box, head, body, steps: [] };
+      if (this.loose && this.loose.parentNode) this.loose.before(box);
+      else where.append(box);
+    }
+    if (this.loose && this.loose.parentNode) this.work.body.append(this.loose);
+    this.loose = null;
+    this.work.body.append(el);
+    this.drawWork(this.work);
+  }
+
+  endWork() {
+    if (this.work) this.work.el.classList.remove("live");
+    this.work = null;
+    this.loose = null;
+  }
+
+  // Its line: how long it took, how many steps.
+  drawWork(work) {
+    if (!work) return;
+    const steps = work.steps;
+    const times = steps.flatMap((s) => [s.at, s.result && s.result.at]).filter(Boolean).map((x) => Date.parse(x)).filter((x) => !isNaN(x));
+    const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
+    const failed = steps.filter((s) => s.result && s.result.error && !DENIED.test(String(s.result.text || ""))).length;
+    work.el.classList.toggle("plain", work.body.children.length < 2);
+    work.head.replaceChildren(...[
+      steps.some((s) => !s.result) ? spinner() : icon("check", "ok"),
+      h("span", { class: "what" }, `Worked${took >= 5000 ? ` ${duration(took)}` : ""} · ${steps.length} step${steps.length === 1 ? "" : "s"}`),
+      failed ? h("span", { class: "chip bad" }, `${failed} didn't work`) : null,
+      icon("chevron", "chev")].filter(Boolean));
+  }
+
+  // The work under way is all there while Claude works; folded once it isn't.
+  syncWork() {
+    if (this.work) this.work.el.classList.toggle("live", this.working());
   }
 
   result(it) {
@@ -2189,6 +2274,7 @@ class Chat {
       step.el.replaceWith(row);
       step.el = row;
       this.drawFold(step.fold);
+      this.drawWork(step.work);
     }
   }
 
@@ -2207,7 +2293,7 @@ class Chat {
     if (this.taskCard && this.taskCard.parentNode) this.taskCard.replaceWith(card);
     else {
       this.fold = null;
-      this.where.append(card);
+      this.intoWork(this.where, card);
     }
     this.taskCard = card;
   }
@@ -2341,6 +2427,11 @@ class Chat {
   renderTail() {
     const live = this.engine === "chat" ? this.live : null;
     const stick = this.atBottom();
+    // The turn's work: all there while Claude works, one line once it's done
+    // (and then, at the bottom, you're on the reply's top).
+    const working = this.working(), ended = this.wasWorking && !working;
+    this.wasWorking = working;
+    this.syncWork();
     this.streamTo(live && this.working() ? live.partial || "" : "");
     // What it's doing, in words, unless that's the step spinning just above,
     // or the words it's writing say so already.
@@ -2358,7 +2449,8 @@ class Chat {
     }
     const kids = [this.streamEl, this.workingEl].filter(Boolean);
     if (kids.length !== this.tail.children.length || kids.some((k, i) => this.tail.children[i] !== k)) this.tail.replaceChildren(...kids);
-    if (stick) this.toBottom();
+    if (stick && ended) this.toReply();
+    else if (stick) this.toBottom();
   }
 
   // The line under the conversation: what Claude is doing now, or null.

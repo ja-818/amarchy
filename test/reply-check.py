@@ -29,7 +29,7 @@ cat = am.block_catalog()["blocks"]
 kinds = [b["kind"] for b in cat]
 check({"whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "fields", "chart", "contact", "place", "session", "file",
        "brief", "actions", "choices", "goal"} == set(kinds), f"the catalog's blocks ({kinds})")
-check(all(f"```{k}" in am.REPLY_FORMAT for k in kinds), "the guidance shows every block")
+check(all(f"```{b['kind']}" in am.REPLY_FORMAT for b in cat if not b.get("old")) and "```actions" not in am.REPLY_FORMAT, "the guidance shows every block it asks for")
 check(all(b["rule"] in am.REPLY_FORMAT for b in cat if b.get("rule")), "and every block's rule")
 check(am.REPLY_FORMAT.startswith("amarchy shows"), "it starts as a Claude's format is recognized by (claude_format_version)")
 for b in cat:
@@ -98,8 +98,8 @@ check(am.reply_issues("```whatsapp\nhola")[0] == ["The whatsapp block isn't clos
 # A reply's shape: a long one opens with its outcome and its brief, then what
 # they need to do, then every idea under a heading; a short one is let be.
 GOAL = '\n\n```goal state="done"\nX\n```'
-BRIEF = '\n\n```brief\nChecked: Both view tests pass\nOpen: Algolia isn\'t wired\n```'
-ACTS = '\n\n```actions\n- Say whether to ship it\n```\n\n```choices question="Ship it?"\n- Ship it\n- Not yet\n```'
+BRIEF = '\n\n```brief\nChecked: Both view tests pass\nOpen: Algolia isn\'t wired\nYou: Say whether to ship it\n```'
+ACTS = '\n\n```choices question="Ship it?"\n- Ship it\n- Not yet\n```\n\n```link label="PR"\nhttps://github.com/x/1\n```'
 words = lambda n: " ".join(["word"] * n) + "."
 shape = lambda text: "\n".join(am.reply_issues(text + GOAL)[0])
 check(shape("Done, it works. " + words(60)) == "", "a short reply: no sections, no brief asked")
@@ -108,8 +108,8 @@ wall = shape("Done. " + words(100))
 check("in one piece" in wall and "brief block" in wall, f"a long reply in one piece: sections and a brief asked ({wall[:60]})")
 body = "\n\n## It filters as you type\n\n" + words(70) + "\n\n## Tests pass on phone and wide\n\n- " + words(50) + "\n\n## Sources\n\n- [a](https://a.b)"
 good = "Done, it works." + BRIEF + ACTS + body
-check(shape(good) == "", f"the outcome and its brief, what's yours to do, its sections: nothing to fix ({shape(good)})")
-check(shape("Done, it works." + BRIEF + body) == "", "nothing for them to do: no actions block")
+check(shape(good) == "", f"the outcome and its brief, what to tap, its sections: nothing to fix ({shape(good)})")
+check(shape("Done, it works." + BRIEF + body) == "", "nothing to tap: the brief, then the sections")
 check("no brief block" in shape("Done, it works." + body), "sections but no brief: asked for it")
 check("no opening sentence" in shape(BRIEF.strip() + body), "a brief with no opening before it: asked for it")
 lead = shape(words(60) + BRIEF + "\n\n## One\n\n" + words(40))
@@ -118,21 +118,22 @@ long = shape("Done." + BRIEF + "\n\n## One point\n\n" + words(130))
 check('The section "One point" is 130 words' in long, f"a section that runs on: said ({long[:50]})")
 check("characters: at most 70" in shape("Done." + BRIEF + "\n\n## " + "A heading that goes on and on " * 4 + "\n\nShort."), "a heading that isn't a few words: said")
 late = shape("Done, it works." + body + BRIEF + ACTS)
-check(all(f"Your {k} block comes after" in late for k in ("brief", "actions", "choices")), f"the brief, the action items or a question after a heading: said ({late[:60]})")
+check(all(f"Your {k} block comes after" in late for k in ("brief", "choices")) and "link" not in late, f"the brief or a question after a heading: said ({late[:60]})")
 table = "Done.\n\n## Numbers\n\n" + "\n".join(["| a b c d e f g h | 1 |"] * 40) + "\n\n```js\n" + words(300) + "\n```\n\n```whatsapp to=\"A\"\n" + words(300) + "\n```"
 check(shape(table) == "", f"a table, code and a draft aren't prose: not counted ({shape(table)[:60]})")
 check(shape("Done.\n\n```js\n## not a heading\n" + words(10) + "\n```") == "" and am.reply_outline("```js\n## x\n```")["sections"] == [], "a heading in code isn't one")
 o = am.reply_outline(good)
 check([s["title"] for s in o["sections"]] == ["It filters as you type", "Tests pass on phone and wide", "Sources"] and o["lead"] == 3 and o["brief"] == 3 and not o["late"], f"its outline ({o})")
 brief = lambda body: "\n".join(am.reply_issues(f"```brief\n{body}\n```")[0])
-check(brief("Checked: x") == "" and brief("Checked: y\nOpen: z\nNext: w") == "" and brief("Done: x\nYou: Nothing") == "", "a brief's rows (an older one's too)")
-check("takes no 'Summary' row (its rows: Checked, Open, Next)" in brief("Summary: x\nChecked: x"), f"a row it doesn't take: said ({brief('Summary: x')})")
-check("over 200 characters" in brief("Checked: " + words(60)), "a row that runs on: said")
-check("aren't \"Label: value\"" in brief("Checked: x\n- and more"), "a line that isn't a row: said")
+check(brief("You: Nothing") == "" and brief("Checked: y\nOpen: z\nNext: w\nYou: Tap Ship") == "" and brief("Done: x\nYou: Nothing") == "", "a brief's rows (an older one's too)")
+check('needs its "You: ..." row' in brief("Checked: x"), "a brief without You: said")
+check("takes no 'Summary' row (its rows: Checked, Open, Next, You)" in brief("Summary: x\nYou: x"), f"a row it doesn't take: said ({brief('Summary: x')})")
+check("over 200 characters" in brief("Checked: " + words(60) + "\nYou: Nothing"), "a row that runs on: said")
+check("aren't \"Label: value\"" in brief("You: x\n- and more"), "a line that isn't a row: said")
 check("is empty" in brief(""), "an empty brief: said")
 acts = am.reply_blocks("```actions\n- Open the PR (today)\n- [x] Pay\n```")[0]
 check(acts["items"] == [{"text": "Open the PR", "due": "today", "done": False}, {"text": "Pay", "due": "", "done": True}] and am.reply_issues("```actions\n```")[0] == ["The actions block is empty."],
-      f"what's yours to do: a line each ({acts['items']})")
+      f"an older reply's actions block is still read ({acts['items']})")
 
 # When a turn ends: sent back, asked for its goal, or let be.
 def turn(*records):

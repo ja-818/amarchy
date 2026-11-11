@@ -284,22 +284,22 @@ html.keyed .chat.writing .ui-in { outline: none; }
 
 /* ---- a section: a small head and its count, folded (a chevron) or not */
 /* Folds: heads one under the other in one box, each opening what's under it. */
-.folds { display: flex; flex-direction: column; border: 1px solid var(--fold-border); border-radius: var(--fold-radius); overflow: hidden; }
-.fold + .fold { border-top: 1px solid var(--fold-rule); }
-.fold-head {
+.ufolds { display: flex; flex-direction: column; border: 1px solid var(--fold-border); border-radius: var(--fold-radius); overflow: hidden; }
+.ufold + .ufold { border-top: 1px solid var(--fold-rule); }
+.ufold-head {
   width: 100%; display: flex; align-items: flex-start; gap: 10px; min-height: 48px; padding: 13px 12px; box-sizing: border-box;
   font: inherit; font-weight: 700; line-height: 1.35; text-align: left; color: var(--fold-head); background: none; border: 0; border-radius: 0; cursor: pointer;
 }
-.fold-head::before { content: "›"; flex: none; width: 12px; text-align: center; color: var(--fold-mark); transition: transform .15s; }
-.fold.open > .fold-head::before { transform: rotate(90deg); }
-.fold-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.fold-head:active { background: var(--fold-press-bg); }
-.fold-head:focus-visible, .keyed .fold-head.ui-in { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-@media (hover: hover) { .fold-head:hover { background: var(--fold-hover-bg); } }
-.fold-body { padding: 0 12px 14px 34px; min-width: 0; }
-.fold-body[hidden] { display: none; }
-.fold-body > * + * { margin-top: 12px; }
-@media (max-width: 600px) { .fold-body { padding-left: 12px; } }
+.ufold-head::before { content: "›"; flex: none; width: 12px; text-align: center; color: var(--fold-mark); transition: transform .15s; }
+.ufold.open > .ufold-head::before { transform: rotate(90deg); }
+.ufold-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ufold-head:active { background: var(--fold-press-bg); }
+.ufold-head:focus-visible, .keyed .ufold-head.ui-in { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) { .ufold-head:hover { background: var(--fold-hover-bg); } }
+.ufold-body { padding: 0 12px 14px 34px; min-width: 0; }
+.ufold-body[hidden] { display: none; }
+.ufold-body > * + * { margin-top: 12px; }
+@media (max-width: 600px) { .ufold-body { padding-left: 12px; } }
 /* A briefing: what it comes to, then its rows, label by label. */
 .brief { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--brief-border); border-radius: var(--brief-radius); background: var(--brief-bg); }
 .brief-lead { font-weight: 700; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
@@ -320,7 +320,6 @@ html.keyed .chat.writing .ui-in { outline: none; }
 .acts li.done::before { background: var(--text-muted); }
 .act-text { overflow-wrap: anywhere; }
 .act-due { color: var(--text-muted); font-size: var(--caption); font-weight: 400; white-space: nowrap; }
-.acts-none { margin: 0; color: var(--text-muted); }
 
 .tsec { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .tsec-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px;

@@ -16,7 +16,7 @@ the change.
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
 | `uiFolds(...folds)`, `uiFold(title, {open, toggle}, ...kids)` | What's long, folded under heads that each say their point, one box: a tap opens one (`toggle(open)` told; `fold.set(open)` opens or folds it). | A reply's sections |
 | `uiBrief(rows, {lead})` | What something comes to (`lead`), then a few rows, label by label (`{label, value, tone}`): tone `you` lit, `none` quiet. | A reply's Briefing |
-| `uiActions(items)` | What's yours to do, a line each (`{text, due, done}`), marked in the accent. | A reply's Action items |
+| `uiActions(items)` | What's yours to do, a line each (`{text, due, done}`), marked in the accent. | In a Briefing, an older reply's list of things to do |
 | `uiTabs(items, on, pick, el)` | One of a few, each with its count (what's your move there). | the board's Chats \| Tasks \| Tavern |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |

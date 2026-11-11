@@ -10544,6 +10544,10 @@ def block_issues(b, chat_exists=None):
             if other:
                 rows = ", ".join(k for k, spec in d["labels"].items() if not spec.get("old"))
                 out.append(f"{name} takes no {', '.join(repr(k) for k in other)} row (its rows: {rows}).")
+            have = [f["label"].lower() for f in b["fields"]]
+            for k, spec in d["labels"].items():
+                if spec.get("need") and k.lower() not in have:
+                    out.append(f"{name} needs its \"{k}: ...\" row.")
             long = [f["label"] for f in b["fields"] if len(f["value"]) > BRIEF_ROW_MAX]
             if long:
                 out.append(f"{name}'s {', '.join(long)} row is over {BRIEF_ROW_MAX} characters: one short line each (the detail goes in a section).")
@@ -10633,7 +10637,7 @@ def reply_shape(text):
         elif not o["lead"]:
             out.append("Your reply has no opening sentence: say the outcome first, in one plain sentence, before the brief block.")
         if o["brief"] is None:
-            out.append("Your reply has no brief block (right after your opening sentence: Checked, Open, Next).")
+            out.append("Your reply has no brief block (right after your opening sentence: Checked, Open, Next, You).")
     for s in o["sections"]:
         if s["words"] > SECTION_MAX:
             out.append(f"The section \"{s['title'][:60]}\" is {s['words']} words: at most {SECTION_MAX}. Cut it, or split it into "
@@ -10641,8 +10645,8 @@ def reply_shape(text):
         if len(s["title"]) > HEADING_MAX:
             out.append(f"The heading \"{s['title'][:40]}...\" is {len(s['title'])} characters: at most {HEADING_MAX}, its point in a few words.")
     for kind in o["late"]:
-        out.append(f"Your {kind} block comes after a \"## \" heading: the brief, the action items and your choices go before the "
-                   f"sections, which the app shows folded.")
+        out.append(f"Your {kind} block comes after a \"## \" heading: the brief, then your choices and what they'll use, go before "
+                   f"the sections, which the app shows folded.")
     return out
 
 
@@ -13591,7 +13595,7 @@ def blocks_guidance():
         head = f"```{b['kind']}{' ' + ex['attrs'] if ex.get('attrs') else ''}"
         body = [f"  {line}" for line in (ex.get("body") or "").split("\n") if ex.get("body")]
         return [f"  {head}", *body, "  ```"]
-    shown = [b for b in block_catalog()["blocks"] if not b.get("hidden")]
+    shown = [b for b in block_catalog()["blocks"] if not b.get("hidden") and not b.get("old")]      # (old: still drawn, no longer asked for)
     out = []
     for b in shown:
         if not b.get("short"):
@@ -13616,7 +13620,7 @@ REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rend
 - A reply that fits in a few lines (under {REPLY_LONG} words) is just that: the outcome, and what they need with it.
 - Anything longer is read at a glance or not at all, so give it this shape, every time, in this order. The app shows it as three parts: Briefing, Action items, Content.
   1. Your opening sentence (at most {REPLY_LEAD} words), then the brief block.
-  2. What they need to do: the actions block, what they'll use for it (a link, a command, a draft) and your choices. Nothing for them to do: nothing here.
+  2. What they act on, as buttons: your choices (every decision they have to make is one) and what they'll use (a link, a command, a draft). What they need to do, in words, is the brief's You row, not a list here. Nothing to tap: nothing here.
   3. The content: every idea under its own "## " heading, nothing without one. The app shows only the headings, folded, and they open the ones they want: so the heading states the point itself in a few words ("## Tests pass on phone and wide", not "## Testing"), and the headings alone tell the story. Under each, only what backs that point: short bullets or two or three short sentences (at most {SECTION_MAX} words; split a longer one), a table for any comparison or side-by-side data, links as [words](url), code in fenced blocks. Every finding, number, name, link and caveat they need is in some section, with its reason. What they must see or do never goes only in a section: it's folded.
 - Anything they will use goes in a fenced block named for it, where it belongs in the reply; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
 {blocks_guidance()}
@@ -13625,7 +13629,7 @@ REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rend
 - Something live for them to look at: a dev server, register it as the chat's preview instead of starting it in your shell (`amarchy preview --run '<command>' <url>`: amarchy runs it, keeps it through your sleep, and stops it when the chat is completed); a deploy, `amarchy preview <url>`. Either puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation (it starts the server again when it isn't running). Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used are the last section, "## Sources", as links.
 {goal_guidance()}
-- When your turn ends, amarchy checks that shape too: a long reply in one piece, a section that runs on, a missing brief block, or a brief, actions or choices block after a heading is sent back to you to write again.
+- When your turn ends, amarchy checks that shape too: a long reply in one piece, a section that runs on, a missing brief block, or a brief or choices block after a heading is sent back to you to write again.
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 

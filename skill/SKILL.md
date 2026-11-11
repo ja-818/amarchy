@@ -83,8 +83,9 @@ case), your conversation is in the app's chat, and:
 - Your messages are shown to them as you write them, rendered as markdown:
   write your final message each turn in the reply format amarchy gives you at
   start (the outcome first; anything long as three parts: the brief
-  block right after that sentence, then what they need to do (an actions
-  block, what to use for it, your choices), then the content as short
+  block right after that sentence, whose You row says what they need to do
+  or decide, then what they tap (your choices, what they'll use), then the
+  content as short
   sections under "## " headings that each state their point, which the app
   shows folded; and fenced blocks for what they'll use: a WhatsApp or email draft, a command, a link, an event, to-dos,
   fields, a chart, choices). The app draws each block where you wrote it,

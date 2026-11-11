@@ -95,17 +95,16 @@
     {
       "kind": "brief", "for": "the briefing a reply of more than a few lines opens with, right after its first sentence",
       "attrs": {},
-      "labels": { "Checked": {}, "Open": {}, "Next": {}, "Done": { "old": true }, "Answer": { "old": true }, "You": { "old": true } },
+      "labels": { "Checked": {}, "Open": {}, "Next": {}, "You": { "need": true }, "Done": { "old": true }, "Answer": { "old": true } },
       "body": { "shape": "fields", "need": true },
-      "example": { "attrs": "", "body": "Checked: how you verified it, or that you didn't\nOpen: what's left, or what you're unsure of (leave the row out when nothing)\nNext: the next step you'd take (leave it out when none)" },
-      "rule": "The brief block comes right after your opening sentence: the app shows the two together on top, as the Briefing, for someone who reads nothing else. Only those labels, in that order, one short line each (no lists, no detail: that's what the sections are for)."
+      "example": { "attrs": "", "body": "Checked: how you verified it, or that you didn't\nOpen: what's left, or what you're unsure of (leave the row out when nothing)\nNext: the next step you'd take (leave it out when none)\nYou: what they need to do or decide now, or Nothing" },
+      "rule": "The brief block comes right after your opening sentence: the app shows the two together on top, as the Briefing, the first and maybe the only thing they read. Only those labels, in that order, one short line each (no lists, no detail: that's what the sections are for)."
     },
     {
-      "kind": "actions", "for": "what they need to do now, right after the brief",
+      "kind": "actions", "old": true, "for": "what they need to do now (until 2026-11-10: the brief's You row since)",
       "attrs": {},
       "body": { "shape": "todos", "need": true },
-      "example": { "attrs": "", "body": "- Open the PR and approve it\n- Say whether to ship it" },
-      "rule": "What they need to do now goes in an actions block right after the brief, a line each, starting with a verb; after it, what they'll use to do it (a link, a command, a draft) and your choices. The app shows these under the Briefing, as Action items. Nothing for them to do: no actions block."
+      "example": { "attrs": "", "body": "- Open the PR and approve it\n- Say whether to ship it" }
     },
     {
       "kind": "choices", "for": "a question for them, answered with a tap",

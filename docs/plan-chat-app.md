@@ -196,21 +196,32 @@ the places Claude put them:
   wasn't read at all. So a reply over 80 words of prose is written, and
   shown, as three parts, each under its small head (`uiSection`):
   **Briefing**, its opening sentence (at most 40 words) and its `brief`
-  block's rows (`Checked`, `Open`, `Next`, one short line each) in one card
-  (`briefView`, `uiBrief`): the completion report projects used to ask for
-  in their own CLAUDE.md. **Action items**, what's yours to do: its
-  `actions` block (a line each: `actionsView`, `uiActions`), what to use
-  for it (a link, a draft, a command) and its questions; with none of
-  those, "Nothing for you to do." **Content**, every idea under its own
-  `## ` heading that states its point ("Tests pass on phone and wide", not
-  "Testing"), at most 120 words under each, all folded (`replyOutline`,
-  `uiFolds` / `uiFold`): one box of heads that tell the story, a tap opens
-  one, **Open all** every one, and what you opened stays open. Claude
-  writes them in that order, so nothing is moved; every word is still
-  there, folding hides, it doesn't cut. While a reply is written it comes
-  as it is, nothing folded. A reply written the way of 2026-11-10's first
-  hours (its brief after its sections, with `Done` and `You` rows) shows as
-  it was written.
+  block's rows (`Checked`, `Open`, `Next`, `You`, one short line each) in
+  one card (`briefView`, `uiBrief`), what you need to do or decide (`You`)
+  lit: the completion report projects used to ask for in their own
+  CLAUDE.md. **Action items**, what to tap, when there's something: its
+  questions (every decision is one) and what to use (a link, a draft, a
+  command). **Content**, every idea under its own `## ` heading that
+  states its point ("Tests pass on phone and wide", not "Testing"), at
+  most 120 words under each, all folded (`replyOutline`, `uiFolds` /
+  `uiFold`): one box of heads that tell the story, a tap opens one, **Open
+  all** every one, and what you opened stays open. Claude writes them in
+  that order, so nothing is moved; every word is still there, folding
+  hides, it doesn't cut. While a reply is written it comes as it is,
+  nothing folded. Replies written in the format's first hours (2026-11-10:
+  the brief after the sections; an `actions` block, a list of things to
+  do, now the brief's `You`) show as they were written, that list in the
+  Briefing.
+- **You open a chat on the Briefing.** A turn's work (`intoWork`,
+  `drawWork`), Claude's steps and what it said between them on the way to
+  its reply, is all there as it comes while Claude works, and folds to one
+  line once it's done ("Worked 6 min · 14 steps", a tap opens it), so
+  nothing but that line is over the reply. What Claude says is its reply
+  until a step follows it: then it was a word on the way and goes in with
+  the steps. One run of steps with nothing said between keeps its own line
+  only. A chat you open, and a turn that just ended while you were at the
+  bottom, land on the top of the reply (`toReply`) when it doesn't fit the
+  screen, not on its end.
 - **Blocks, where it wrote them** (`replyParts`, `claudeView`,
   `blockView` in app/chat.js): `whatsapp`, `email`, `slack`, `sms` (a draft:
   Copy, Open in WhatsApp / mail / Messages, filled in), `command` (Copy),
@@ -256,8 +267,8 @@ the places Claude put them:
   sent back isn't shown (`fix_feedback`: its words go aside). So does a
   shape that reads as a wall of text (`reply_shape`, `reply_outline`): a
   long reply in one piece, with a long opening or none, without its brief
-  block (or one with rows it doesn't take, or a row over 200 characters), a
-  section over 120 words, a heading over 70 characters, a brief, actions or
+  block (or one with rows it doesn't take, without `You`, or a row over 200 characters), a
+  section over 120 words, a heading over 70 characters, a brief or
   choices block after a heading (it would be under the folds). Blocks, code
   and tables aren't counted as prose. A reply
   without its goal block gets asked for that block alone, added to it.
