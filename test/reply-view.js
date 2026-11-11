@@ -6,7 +6,7 @@
 // words are all there, folded or not. Its briefing (the brief block) is a
 // card of rows after them, what you need to do lit. In their place, the blocks it made for you to use (a draft, a link,
 // a command, an event, to-dos, a contact, a chat), open, each with its
-// buttons; its questions (choices) as buttons, a tap sending the answer;
+// buttons (a link folded: its row has Copy and Open); its questions (choices) as buttons, a tap sending the answer;
 // asked before something newer, no longer to tap. The goal block isn't
 // shown (it's the chat's). An old reply written with update_brief shows as
 // the text it held (bin/amarchy brief_text). Nothing runs as markup, only
@@ -307,7 +307,9 @@ async function run(browser, base, layout) {
       briefAfter: !!last.querySelector(".folds ~ .brief ~ .choices") && !last.querySelector(".fold .brief, .fold .choices"),
       youColor: (() => { const dt = last.querySelector(".brief dt.you"), other = last.querySelector(".brief dt:not(.you)"); return dt && getComputedStyle(dt).color !== getComputedStyle(other).color; })(),
       text: last.textContent,
-      open: [...last.querySelectorAll(".art")].map((a) => a.classList.contains("open")),
+      open: [...last.querySelectorAll(".art:not(.art-link)")].map((a) => a.classList.contains("open")),
+      link: (() => { const a = msgs[0].querySelector(".art-link"); return { open: a.classList.contains("open"), row: [...a.querySelectorAll(".art-head > .art-btn")].map((b) => `${b.tagName.toLowerCase()}:${b.textContent}`),
+        address: !!a.querySelector(".art-pre") }; })(),
       wa: last.querySelector(".art-message .art-actions a")?.getAttribute("href"),
       pre: last.querySelector(".art-message .art-pre")?.textContent,
       gcal: last.querySelector(".art-event .art-actions a")?.getAttribute("href"),
@@ -344,6 +346,8 @@ async function run(browser, base, layout) {
   check(layout, s.open.every(Boolean) && s.pre.startsWith("Hola equipo") &&
     s.wa === "https://wa.me/573001234567?text=Hola%20equipo%2C%20les%20comparto%20el%20resumen%3A%0A1.%20Piloto%20PQR%0A2.%20Datos%20por%20Excel",
     `the blocks open: the whole draft and Open in WhatsApp (${s.wa})`);
+  check(layout, !s.link.open && !s.link.address && JSON.stringify(s.link.row) === JSON.stringify(["button:Copy", "a:Open"]),
+    `a link is its row, folded: Copy and Open at hand (${JSON.stringify(s.link)})`);
   check(layout, /dates=20261029T204000Z\/20261029T220000Z/.test(s.gcal || "") && !s.unsafe, `an event's Add to Google Calendar; a javascript: link isn't made (${s.gcal})`);
   check(layout, JSON.stringify(s.code) === JSON.stringify(["## not a heading", "const x = search(\"a\");"]), `a code block stays code (${JSON.stringify(s.code)})`);
   check(layout, JSON.stringify(s.table) === JSON.stringify(["=Local index,Speed=50 ms,Cost=free", "=Algolia,Speed=20 ms,Cost=$29/mo"]), `a table, its cells named for the phone's cards (${JSON.stringify(s.table)})`);
@@ -450,6 +454,15 @@ async function run(browser, base, layout) {
   const folded = await page.evaluate(() => { const a = [...document.querySelectorAll(".msg.claude")].at(-1).querySelector(".art-message");
     return { open: a.classList.contains("open"), quick: a.querySelector(".art-head > .art-btn")?.textContent }; });
   check(layout, !folded.open && folded.quick === "Copy", "a block folds to its row, its Copy at hand");
+  await page.evaluate(() => document.querySelector(".chat-conv > .msg.claude .art-link .art-head > button.art-btn").click());
+  await page.waitForTimeout(100);
+  const linkCopied = await page.evaluate(() => window.__copied);
+  await page.evaluate(() => document.querySelector(".chat-conv > .msg.claude .art-link .art-toggle").click());
+  const linkOpen = await page.evaluate(() => { const a = document.querySelector(".chat-conv > .msg.claude .art-link"); return { open: a.classList.contains("open"), address: a.querySelector(".art-pre")?.textContent, more: a.querySelectorAll(".art-actions .art-btn").length }; });
+  check(layout, linkCopied === "https://example.com/mock" && linkOpen.open && linkOpen.address === "https://example.com/mock" && linkOpen.more === 0,
+    `a link's Copy copies its address; a tap on its row shows it, no more buttons under it (${JSON.stringify([linkCopied, linkOpen])})`);
+  await page.evaluate(() => document.querySelector(".chat-conv > .msg.claude").scrollIntoView());
+  await shot("link");
   const before = posts.filter((p) => p.url.endsWith("/send")).length;
   await page.evaluate(() => [...document.querySelectorAll(".msg.claude")].at(-1).querySelector(".choices .bq-opt").click());
   await page.waitForTimeout(300);

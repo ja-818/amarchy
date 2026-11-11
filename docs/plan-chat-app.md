@@ -210,7 +210,7 @@ the places Claude put them:
 - **Blocks, where it wrote them** (`replyParts`, `claudeView`,
   `blockView` in app/chat.js): `whatsapp`, `email`, `slack`, `sms` (a draft:
   Copy, Open in WhatsApp / mail / Messages, filled in), `command` (Copy),
-  `link` (Open), `event` (Add to Google Calendar, Map), `todos`, `fields`,
+  `link` (folded to its row: Copy and Open; its address a tap away), `event` (Add to Google Calendar, Map), `todos`, `fields`,
   `chart`, `contact`
   (Call, WhatsApp, Email), `place` (Map, Call, Website), `session` (Open the
   chat), `file` (its path). Each is a row (its kind, name, quick action) with

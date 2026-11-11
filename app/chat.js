@@ -1801,11 +1801,12 @@ class Chat {
   }
 
   // A block Claude made for you to use (replyBlock), where it wrote it: a row
-  // with its kind, its name, what it is and its quick action (Copy, Open);
-  // under it all of it and every action that fits. Open, unless you fold it.
+  // with its kind, its name, what it is and its quick actions (Copy, Open);
+  // under it all of it and every action that fits. Open, unless you fold it
+  // (a link starts folded: its row is all of it).
   blockView(a, key) {
-    const on = this.isOpen(key, true);
     const v = this.artifactParts(a);
+    const on = this.isOpen(key, !v.folded);
     const toggle = () => {
       this.opened.set(key, !on);
       const next = this.blockView(a, key);
@@ -1819,7 +1820,7 @@ class Chat {
           h("span", { class: "art-ic" }, icon(v.icon)),
           h("span", { class: "art-text" }, h("span", { class: "art-title" }, v.title), v.sub ? h("span", { class: "art-sub" }, v.sub) : null),
           icon("chevron", "chev")),
-        v.quick || null));
+        ...[v.quick].flat().filter(Boolean)));
     if (on) li.append(h("div", { class: "art-body" }, ...v.body.filter(Boolean),
       v.actions.filter(Boolean).length ? h("div", { class: "art-actions" }, ...v.actions.filter(Boolean)) : null,
       a.attrs.note ? h("div", { class: "art-note", html: inline(String(a.attrs.note)) }) : null));
@@ -1865,8 +1866,9 @@ class Chat {
         const href = artifactHref(a.url);
         let host = "";
         try { host = new URL(a.url).host; } catch { /* not a URL */ }
-        return { icon: "web", title: str(at.label) || title || host || "Link", sub: host, quick: href ? open(href, "Open", true) : null,
-          body: [pre(str(a.url))], actions: [href ? copy(href, "Copy the link") : null] };
+        // A link is its row: Copy and Open at hand, its address a tap away.
+        return { folded: true, icon: "web", title: str(at.label) || title || host || "Link", sub: host,
+          quick: href ? [copy(href), open(href, "Open", true)] : null, body: [pre(str(a.url))], actions: [] };
       }
       case "command":
         return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),

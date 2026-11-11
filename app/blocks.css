@@ -30,6 +30,7 @@
 .artifacts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-item); overflow: hidden; }
 .art + .art { border-top: 1px solid var(--border-faint); }
 .art-head { display: flex; align-items: center; gap: 8px; padding-right: 10px; }
+.art-head > .art-btn + .art-btn { margin-left: -2px; }
 .art-toggle {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 4px 8px 12px; box-sizing: border-box;
   font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer;
