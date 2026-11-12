@@ -875,11 +875,12 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
   // Your chats: your assistant, what's at work (its own list, folded, so what
   // you can act on starts right under it), then Now and For later, as you put
-  // them (todaySort). Done working, a chat is back in its place there.
+  // them (todaySort). Done working, a chat is back in its place there; one
+  // put for later that has something new for you is in Now until you see it.
   if (only === "chats") {
     const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
     const on = todayUI.needsOnly;
-    const later = (s) => s.priority === "low" && s.assistant !== "main";
+    const later = (s) => s.priority === "low" && s.assistant !== "main" && !p.fresh.includes(s);
     const free = ss.filter((s) => !p.working.includes(s) && (on || s !== p.main));
     const nowAll = free.filter((s) => !later(s)), laterAll = free.filter(later);
     const show = (list) => (on ? list.filter(needing) : list);

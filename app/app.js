@@ -877,6 +877,8 @@ function prioritySeg(s) {
 
 // Its priority, its name: drawn now (aheadOf), told to the server.
 function priorityNow(s, level) {
+  // A new one put for later: seen, so it goes there (else, new, it stays in Now).
+  if (level === "low" && typeof todayUnseen === "function" && todayUnseen(s)) todaySeen(s);
   return aheadOf(s.id, { priority: level }, (r) => (r.priority || "normal") === level,
                  api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level }));
 }

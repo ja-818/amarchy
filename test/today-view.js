@@ -289,6 +289,13 @@ async function sortChecks(p, where) {
   const count = await text(p, ".ui-filter .tab-count");
   check(where, Number(count) >= 1, `Needs you counts it (${count})`);
   await change("proj-later", { status: "idle", asks: "" });
+  // New (it answered, unseen): up in Now until you see it, then back in For later.
+  await change("proj-later", { unseen: true, today: { state: "done" } });
+  check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-later]")), "one in For later, new: up in Now");
+  check(where, !(await ids(".today-forlater")).includes("proj-later"), "and not in For later too");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-later-new.png`), fullPage: true });
+  await change("proj-later", { unseen: false, today: { state: "" } });
+  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-later]")), "seen: back in For later");
   const moved = now[now.length - 2];
   await change(moved, { today: { you_at: Math.floor(Date.now() / 1000) } });
   const wrote = await ids(".today-now");
@@ -323,6 +330,10 @@ async function sortChecks(p, where) {
   await p.screenshot({ path: path.join(SHOTS, `${where}-for-later.png`), fullPage: true });
   await key("proj-done2", "f");
   check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2]")), "f again: back in Now");
+  await change("proj-done2", { priority: "normal", unseen: true });
+  await key("proj-done2", "f");
+  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "f on a new one: seen, so in For later");
+  await change("proj-done2", { priority: "normal", unseen: false });
   await p.unroute("**/priority");
   await p.evaluate(() => { document.querySelector(".today-forlater").open = false; uiState.open.delete("forlater"); });
   // Back as the test's chats are.
