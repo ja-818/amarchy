@@ -285,7 +285,10 @@ html.keyed .chat.writing .ui-in { outline: none; }
 /* ---- a section: a small head and its count, folded (a chevron) or not */
 /* Folds: heads one under the other in one box, each opening what's under it. */
 .ufolds { display: flex; flex-direction: column; border: 1px solid var(--fold-border); border-radius: var(--fold-radius); overflow: hidden; }
-.ufold + .ufold { border-top: 1px solid var(--fold-rule); }
+.ufold { position: relative; isolation: isolate; }
+/* The rule between two: drawn over the row, so its hover (painted from the
+   row's very top) never covers it, whatever the browser rounds a pixel to. */
+.ufold + .ufold::before { content: ""; position: absolute; inset: 0 0 auto; height: 1px; background: var(--fold-rule); pointer-events: none; z-index: 1; }
 .ufold-head {
   width: 100%; display: flex; align-items: flex-start; gap: 10px; min-height: 48px; padding: 13px 12px; box-sizing: border-box;
   font: inherit; font-weight: 700; line-height: 1.35; text-align: left; color: var(--fold-head); background: none; border: 0; border-radius: 0; cursor: pointer;

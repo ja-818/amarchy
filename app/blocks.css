@@ -36,7 +36,9 @@
 
 /* A block to use (blockView): a row with its kind, name and quick action; open, all of it and its actions. */
 .artifacts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-item); overflow: hidden; }
-.art + .art { border-top: 1px solid var(--border-faint); }
+.art { position: relative; isolation: isolate; }
+/* The rule between two, drawn over the row: its hover never covers it (ui.css .ufold). */
+.art + .art::before { content: ""; position: absolute; inset: 0 0 auto; height: 1px; background: var(--border-faint); pointer-events: none; z-index: 1; }
 .art-head { display: flex; align-items: center; gap: 8px; padding-right: 10px; }
 .art-head > .art-btn + .art-btn { margin-left: -2px; }
 .art-toggle {
