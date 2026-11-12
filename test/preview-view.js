@@ -1,7 +1,8 @@
 // A chat's Preview, in a browser, both layouts: on its card and over the open
-// chat, one tap opens it; registered and not running, Start preview opens the
-// page that starts it and turns into it once it answers (no message to
-// Claude); failed, Preview failed opens its sheet (what it wrote, Try again,
+// chat, one tap opens it; registered and not running, Start preview starts it
+// where you are (nothing opens, no message to Claude): the button turns and
+// says Starting…, and a toast says when it's ready (a tap on it opens it), or
+// that it didn't start; failed, Preview failed opens its sheet (what it wrote, Try again,
 // Ask Claude to fix it); an address only, nothing answering, Restart preview
 // asks its Claude (once); none set, no button. Complete with its preview
 // still holding a port: the chat stays, and its Claude can be asked to stop
@@ -49,15 +50,47 @@ async function run(browser, port, layout) {
   check(layout, await p.evaluate(() => !location.hash.includes("/s/") && !desk.current), "and doesn't open the chat");
   check(layout, await p.evaluate((s) => !document.querySelector(`${s} .ui-preview`), card("proj-done")), "a card without one: no button");
 
-  // Registered, not running: Start preview opens the page that starts it, and nothing goes to Claude.
+  // Registered, not running: Start preview starts it here, the button turning, and nothing opens or goes to Claude.
   const stopped = `${card("proj-quiet")} button.ui-preview`;
+  const starts = [];
+  await p.route("**/api/session/proj-quiet/preview", (r) => { starts.push(r.request().postDataJSON()); r.fulfill({ json: { preview: {} } }); });
   check(layout, (await p.locator(stopped).innerText()).includes("Start preview"), "registered, not running: Start preview");
   await p.screenshot({ path: path.join(SHOTS, `${layout}-board.png`) });
   await p.evaluate(() => { window.__opened.length = 0; });
   await p.locator(stopped).click();
-  check(layout, await until(p, () => window.__opened.some((u) => /\/preview\.html\?id=proj-quiet$/.test(u))), "a tap opens the page that starts it");
+  check(layout, await until(p, (s) => { const b = document.querySelector(s); return b && /Starting…/.test(b.innerText) && !!b.querySelector(".spinner") && b.getAttribute("aria-busy") === "true"; }, stopped),
+        "a tap: the button turns and says Starting…");
+  check(layout, await until(p, () => true) && starts.length === 1 && starts[0].action === "start", "it starts it, once");
+  await p.screenshot({ path: path.join(SHOTS, `${layout}-starting.png`) });
   await sleep(150);
+  check(layout, await p.evaluate(() => !window.__opened.length && !location.hash.includes("/s/") && !document.querySelector(".sheet")), "nothing opens: you stay where you are");
   check(layout, !p.posts.some((x) => /proj-quiet\/send/.test(x.url)), "and doesn't message its Claude");
+  // It answers: the button is Preview, and a toast says so; a tap on it opens it.
+  const stands = (state, id = "proj-quiet") => p.evaluate(({ chats, state, id }) => {
+    ahead.clear();
+    app.view = { ...app.view, sessions: chats.map((c) => (c.id === id ? { ...c, preview_state: state, preview_up: state === "up" } : { ...c })) };
+    refresh();
+  }, { chats: CHATS, state, id });
+  await stands("starting");
+  check(layout, await p.evaluate((s) => /Starting…/.test(document.querySelector(s).innerText) && !document.querySelector(".toast"), stopped), "still starting: it keeps turning, no toast");
+  await stands("up");
+  check(layout, await until(p, () => { const t = document.querySelector(".toast.act"); return t && /Eval: json-render's preview is ready/.test(t.innerText) && /Open/.test(t.innerText); }),
+        "it answers: a toast says it's ready");
+  await p.screenshot({ path: path.join(SHOTS, `${layout}-ready.png`) });
+  await p.locator(".toast.act").click();
+  check(layout, await until(p, (u) => window.__opened.includes(u), URL_STOPPED), "a tap on it opens it");
+  check(layout, await p.evaluate(() => !document.querySelector(".toast")), "and it's gone");
+  // Started, and it stops with an error: the toast says so, and opens its sheet.
+  await stands("stopped");
+  await p.locator(stopped).click();
+  await until(p, (s) => /Starting…/.test(document.querySelector(s).innerText), stopped);
+  await stands("failed");
+  check(layout, await until(p, () => { const t = document.querySelector(".toast.act"); return t && /preview didn't start/.test(t.innerText) && /See why/.test(t.innerText); }),
+        "it fails: a toast says it didn't start");
+  check(layout, (await p.locator(stopped).innerText()).includes("Preview failed"), "and the button says Preview failed");
+  await p.evaluate(() => document.querySelectorAll(".toast").forEach((t) => t.remove()));
+  await p.unroute("**/api/session/proj-quiet/preview");
+  await stands("stopped");
 
   // Failed: its sheet, what it wrote, and its Claude asked to fix it.
   await p.route("**/api/session/proj-later/preview", (r) => r.fulfill({ json: FAILED }));
@@ -118,6 +151,13 @@ async function run(browser, port, layout) {
   await p.evaluate(() => { window.__opened.length = 0; });
   await p.evaluate(() => [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent).click());
   check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "a tap there opens it");
+  // Starting: it turns there too, in the same place.
+  await stands("starting", "proj-fresh");
+  check(layout, await until(p, () => { const b = [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent); return b && !!b.querySelector(".spinner") && b.getAttribute("aria-label") === "Starting…"; }),
+        "starting: its button over the chat turns");
+  await p.screenshot({ path: path.join(SHOTS, `${layout}-chat-starting.png`) });
+  await stands("up", "proj-fresh");
+  await until(p, () => { const b = [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent); return b && !b.querySelector(".spinner"); });
   const crowded = await p.evaluate(() => {
     const bar = [...document.querySelectorAll(".head-btns")].find((b) => b.offsetParent);
     return bar.getBoundingClientRect().right > innerWidth + 1 || document.documentElement.scrollWidth > innerWidth;
@@ -158,29 +198,6 @@ async function run(browser, port, layout) {
   }
   check(layout, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
 
-  // The page Start preview opens: it starts it, says so, and becomes it once it answers.
-  const w = await p.context().newPage();
-  const asked = { start: 0, reads: 0 };
-  await w.route("**/api/session/proj-quiet/preview", (r) => {
-    if (r.request().method() === "POST") { asked.start++; asked.body = r.request().postDataJSON(); return r.fulfill({ json: { preview: {} } }); }
-    asked.reads++;
-    const state = !asked.start ? "stopped" : asked.reads < 4 ? "starting" : "up";
-    r.fulfill({ json: { url: URL_STOPPED, run: "pnpm dev --port 5174", state, log: "VITE ready in 312 ms", task: "Eval: json-render", id: "proj-quiet", ports: [5174], memory_max: "2G", idle: 10800 } });
-  });
-  await w.route(URL_STOPPED, (r) => r.fulfill({ contentType: "text/html", body: "<title>the app itself</title>" }));
-  await w.goto("/preview.html?id=proj-quiet");
-  check(layout, await until(w, () => /Starting Eval: json-render's preview/.test(document.body.innerText)), "the page: starting, which chat's");
-  await w.screenshot({ path: path.join(SHOTS, `${layout}-preview-page.png`) });
-  check(layout, asked.start === 1 && asked.body.action === "start", "it starts it, once");
-  check(layout, await until(w, (u) => location.href === u, URL_STOPPED, 10000), "and turns into it once it answers");
-  await w.close();
-  const f = await p.context().newPage();
-  await f.route("**/api/session/proj-later/preview", (r) => r.fulfill({ json: FAILED }));
-  await f.goto("/preview.html?id=proj-later");
-  check(layout, await until(f, () => /didn't start/.test(document.body.innerText) && /Cannot find module/.test(document.body.innerText) && /Try again/.test(document.body.innerText)),
-        "failed: the page says so, with what it wrote, and Try again");
-  await f.screenshot({ path: path.join(SHOTS, `${layout}-preview-page-failed.png`) });
-  await f.close();
   await p.context().close();
 }
 

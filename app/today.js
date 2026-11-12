@@ -945,7 +945,7 @@ function todayKey(v) {
 function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission, (s.secret_asks || []).length, s.assistant,
-    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : ""]);
+    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : "", s.preview ? [s.preview.url, uiPreviewOf(s)] : ""]);
 }
 
 // The times a chat's card says ("5 min ago", "Stalled 3d") and where they

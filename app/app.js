@@ -336,12 +336,15 @@ function releaseAudio(el) {
 }
 
 let toastTimer = null;
-function toast(text) {
+// With something to do about it ({label, act}): the whole toast is the tap,
+// and it stays long enough to reach.
+function toast(text, { label = "", act = null } = {}) {
   document.querySelectorAll(".toast:not(.stay)").forEach((t) => t.remove());
-  const t = h("div", { class: "toast", role: "status" }, text);
+  const t = act ? h("div", { class: "toast act", role: "status", onclick: () => { t.remove(); act(); } }, h("span", {}, text), h("b", {}, label))
+                : h("div", { class: "toast", role: "status" }, text);
   document.body.append(t);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 3200);
+  toastTimer = setTimeout(() => t.remove(), act ? 8000 : 3200);
 }
 
 const store = {
@@ -423,12 +426,11 @@ function follow(href, target) {
 }
 
 // Called from a click (or a key), so the browser lets it open something.
-// here: a page of this app's (preview.html), opened as a link elsewhere is.
-function openLink(uri, { here = false } = {}) {
-  const url = here ? new URL(uri, location.href).href : outward(uri);
+function openLink(uri) {
+  const url = outward(uri);
   if (!url) return;
   const b = linkBrowser();
-  if (!b) return follow(here ? url : macDirect(url), macApp && !here ? "_self" : "_blank");
+  if (!b) return follow(macDirect(url), macApp ? "_self" : "_blank");
   follow(b[2](url));
   // Nothing answers when the app isn't there: still here a moment later, say so.
   setTimeout(() => {
@@ -724,8 +726,10 @@ function openList() {
 
 // The list changed: the board (tasks.js), on a computer under its chat (desk.js).
 function refresh() {
+  uiPreviewSettle();     // a preview started from here answers, or stopped (ui.js)
   if (app.desk) { deskList(); boardRefresh(); }
   else if (!app.session) renderHome();
+  else uiWhenStill(`head-${app.session.id}`, () => { if (app.session) app.session.renderHeader(); });      // its preview, as the list has it
   keptListScroll();
 }
 
@@ -1052,7 +1056,11 @@ class SessionView {
   // Over the chat: its head (ui.js uiChatHead), as a computer's. Back: from a
   // terminal to the chat, from the chat to the board.
   renderHeader() {
-    const r = this.row || { id: this.id, repo: "", task: "…" };
+    // Its preview as the list has it: started from its button, it says so
+    // ahead of the server (ui.js uiPreviewStart), and of the chat's own word.
+    const listed = rowOf(this.id);
+    const r = { ...(this.row || { id: this.id, repo: "", task: "…" }),
+                ...(listed ? { preview: listed.preview, preview_state: listed.preview_state, preview_up: listed.preview_up } : {}) };
     if (r.assistant === "main") this.chat.setPlaceholder(`Message ${r.assistant_name || "Assistant"}`);
     uiSwap(this.titleEl, uiChatHead(r, {
       back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },

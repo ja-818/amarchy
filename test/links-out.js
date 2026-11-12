@@ -119,12 +119,6 @@ async function run(browser, port, mac) {
       && asked.some((x) => x.url.endsWith("sign-in") && !x.inPlace), `elsewhere a link opens as it is, as a new tab (${urls.join(", ")})`);
   }
 
-  // A page of the app's own (the one that starts a preview): beside the app, not in its place.
-  const n = popups.length;
-  await p.evaluate(() => { document.body.addEventListener("click", () => openLink("/preview.html?id=x", { here: true }), { once: true }); });
-  await p.mouse.click(5, 400);
-  await sleep(500);
-  check(who, popups.length === n + 1 && await p.evaluate(() => location.pathname === "/"), "a page of the app's own opens beside it");
   check(who, p.errors.length === 0, `no errors${p.errors.length ? `: ${p.errors.join("; ")}` : ""}`);
   await p.context().close();
 }

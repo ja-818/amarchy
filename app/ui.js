@@ -434,13 +434,16 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
 
 // A chat's live preview (amarchy preview): the same on its head and its card,
 // there as soon as its Claude registers it. Answering, a tap opens it. Not
-// running, a tap starts it (the server runs its command, no message to
-// Claude) and opens the page that waits for it (preview.html), which turns
-// into it once it answers. Failed, a tap opens its sheet (what it wrote, Try
-// again, Ask Claude to fix it). One registered as an address only (from
-// before), nothing answering: a tap asks its Claude to start it, and to
-// register it, as a message (once a minute at most).
+// running, a tap starts it where you are (the server runs its command, no
+// message to Claude, nothing opens): the button turns and says Starting…
+// until it answers, then a toast says it's ready (a tap on it opens it) and
+// the button is Preview. Starting, a tap opens its sheet (what it writes).
+// Failed, a tap opens its sheet (what it wrote, Try again, Ask Claude to fix
+// it). One registered as an address only (from before), nothing answering: a
+// tap asks its Claude to start it, and to register it, as a message (once a
+// minute at most).
 const uiPreviewAsked = new Map();     // chat -> when: asked, for the moment it takes
+const uiPreviewStarted = new Set();   // chats: started from here, until it answers or stops
 
 const UI_PREVIEW_WORDS = { up: "Preview", starting: "Starting…", stopped: "Start preview", failed: "Preview failed", down: "Restart preview" };
 
@@ -448,12 +451,37 @@ function uiPreviewOf(s) {
   return s.preview_state || (s.preview_up ? "up" : s.preview && s.preview.run ? "stopped" : "down");
 }
 
+// Start it, in the background: its button says so at once (ahead of the
+// server's list, app.js aheadOf), and nothing opens.
+function uiPreviewStart(s) {
+  const id = s.id;
+  if (uiPreviewStarted.has(id)) return;
+  uiPreviewStarted.add(id);
+  const done = api(`/api/session/${encodeURIComponent(id)}/preview`, { action: "start" });
+  done.catch(() => uiPreviewStarted.delete(id));      // it didn't start: aheadOf says why
+  aheadOf(id, { preview_state: "starting", preview_up: false }, (r) => r.preview_state !== "stopped", done).catch(() => {});
+}
+
+// With each list (app.js refresh): one started from here answers, or stopped.
+function uiPreviewSettle() {
+  for (const id of [...uiPreviewStarted]) {
+    const s = rowOf(id);
+    const state = s && s.preview ? uiPreviewOf(s) : "";
+    if (state === "starting") continue;
+    uiPreviewStarted.delete(id);
+    if (!state) continue;
+    const name = s.task ? `${s.task}'s preview` : "The preview";
+    if (state === "up") toast(`${name} is ready`, { label: "Open", act: () => openLink(s.preview.url) });
+    else toast(state === "failed" ? `${name} didn't start` : `${name} stopped on its own`, { label: "See why", act: () => uiPreviewSheet(s) });
+  }
+}
+
 function uiPreviewGo(s) {
   if (!s || !s.preview) return toast("No preview in this chat yet");
   const state = uiPreviewOf(s);
   if (state === "up") return openLink(s.preview.url);
-  if (state === "failed") return uiPreviewSheet(s);
-  if (state === "stopped" || state === "starting") return openLink(new URL(`/preview.html?id=${encodeURIComponent(s.id)}`, location.href).href, { here: true });
+  if (state === "failed" || state === "starting") return uiPreviewSheet(s);
+  if (state === "stopped") return uiPreviewStart(s);
   const at = uiPreviewAsked.get(s.id);
   if (at && Date.now() - at < 60000) return;
   uiPreviewAsked.set(s.id, Date.now());
@@ -468,8 +496,8 @@ function uiPreview(s, { head = false } = {}) {
   if (state !== "down") uiPreviewAsked.delete(s.id);
   const asked = state === "down" && Date.now() - (uiPreviewAsked.get(s.id) || 0) < 60000;
   const words = asked ? "Restarting…" : UI_PREVIEW_WORDS[state];
-  const title = { up: `Open ${s.preview.url}`, starting: `${s.preview.url} is starting: open it once it answers`,
-                  stopped: `Start ${s.preview.url} and open it`, failed: `${s.preview.url} stopped with an error: see why`,
+  const title = { up: `Open ${s.preview.url}`, starting: `${s.preview.url} is starting: see what it writes`,
+                  stopped: `Start ${s.preview.url}`, failed: `${s.preview.url} stopped with an error: see why`,
                   down: `${s.preview.url} isn't answering: ask its Claude to start it again` }[state];
   const go = (e) => {
     e.stopPropagation();
@@ -481,11 +509,12 @@ function uiPreview(s, { head = false } = {}) {
       (b.querySelector(".label") || b).textContent = "Restarting…";
     }
   };
-  const cls = `ui-preview${state === "failed" ? " bad" : ""}`;
-  if (head) return h("button", { class: `control ui-action ${cls}`, type: "button", title, "aria-label": words,
-                                 disabled: asked || null, onclick: go }, glyph("preview"), h("span", { class: "label" }, words));
+  const busy = state === "starting";
+  const cls = `ui-preview${state === "failed" ? " bad" : ""}${busy ? " busy" : ""}`;
+  if (head) return h("button", { class: `control ui-action ${cls}`, type: "button", title, "aria-label": words, "aria-busy": busy ? "true" : null,
+                                 disabled: asked || null, onclick: go }, busy ? spinner() : glyph("preview"), h("span", { class: "label" }, words));
   if (state === "up") return h("a", { class: `tbtn ${cls}`, href: s.preview.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
-  return h("button", { class: `tbtn ${cls}`, type: "button", title, disabled: asked || null, onclick: go }, words);
+  return h("button", { class: `tbtn ${cls}`, type: "button", title, "aria-busy": busy ? "true" : null, disabled: asked || null, onclick: go }, busy ? spinner() : null, words);
 }
 
 // Its size, as said: 412 MB, 1.4 GB.
@@ -508,7 +537,8 @@ function uiPreviewStatus(p) {
 }
 
 // A chat's preview, whole: where it stands, what runs it, what it wrote,
-// and Open, Start, Restart, Stop (Ask Claude to fix it, when it failed). Its
+// and Open, Start, Restart, Stop (Ask Claude to fix it, when it failed):
+// started here, it says so as it comes up, and Open it once it answers. Its
 // sheet, on the phone and the computer; the chat's menu opens it.
 async function uiPreviewSheet(s) {
   const id = s.id;
@@ -521,7 +551,6 @@ async function uiPreviewSheet(s) {
     try {
       const d = await api(`/api/session/${encodeURIComponent(id)}/preview`, { action });
       p = d.preview || p;
-      if (action !== "stop") openLink(new URL(`/preview.html?id=${encodeURIComponent(id)}`, location.href).href, { here: true });
     } catch (e) {
       toast(e.message);
       if (e.data && e.data.preview) p = e.data.preview;

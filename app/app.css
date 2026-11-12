@@ -646,6 +646,9 @@ body.desk .sheet .head::before { display: none; }
   animation: fade 0.15s ease-out;
 }
 
+.toast.act { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.toast.act b { flex: none; color: var(--accent); }
+
 @keyframes fade { from { opacity: 0; } }
 @keyframes up { from { transform: translateY(24px); opacity: 0.6; } }
 

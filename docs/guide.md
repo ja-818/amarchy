@@ -536,8 +536,8 @@ head and its card, and stays whichever reply you're on:
 | It says | When | A tap |
 | --- | --- | --- |
 | **Preview** | it answers | opens it |
-| **Start preview** | it isn't running (stopped, the machine restarted) | starts it, and opens a page that turns into it once it answers |
-| **Starting…** | its service runs, nothing answers yet | the same page |
+| **Start preview** | it isn't running (stopped, the machine restarted) | starts it where you are: the button turns and says **Starting…**, and a toast says when it's ready (a tap on it opens it) |
+| **Starting…** | its service runs, nothing answers yet | its sheet: what it writes as it comes up |
 | **Preview failed** | it stopped with an error | its sheet: what it wrote, **Try again**, **Ask Claude to fix it** |
 | **Restart preview** | an address only (registered before, or a deploy) and nothing answers | asks its Claude to start it (and register it) |
 

@@ -11761,7 +11761,7 @@ def app_handler(st, users, address):
                 self.wfile.write(found[1])
                 return
             m = re.fullmatch(r"/api/session/([^/]+)/preview", path)
-            if m:       # a chat's preview, whole (its sheet, the page that waits for it)
+            if m:       # a chat's preview, whole (its sheet)
                 s = self.session(m.group(1))
                 if not s:
                     return
