@@ -133,8 +133,9 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         JPEG or WebP, cut to a round square: the middle of it, or the square
                                         at x,y of that size in its pixels), or amarchy's own again
   amarchy sound --assistant [name|off]  its chime (herald until you pick one); prints it without one
-  amarchy missions [--goal <n>]         what you've completed: today, your streak, best day, all of them,
-                                        your replies and badges; --goal sets how many a day you aim for
+  amarchy missions [--goal <n>]         what you've merged (only merges count): today, your streak, best day,
+                  [--reset]             all of them, your replies and badges; --goal sets how many a day you
+                                        aim for; --reset starts from 0 (the old score kept in a backup)
                                         (0: none)
   amarchy alerts [all|needs-you|assistant]
                                         what the other sessions tell you about on your phones: when they
@@ -695,7 +696,7 @@ def save_session(s):
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
                "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission",
-               "preview_up", "preview_state")
+               "preview_up", "preview_state", "merged")
 
 
 def own_session_id():
@@ -3936,21 +3937,293 @@ def mission_log(rec):
 
 
 def mission_done(s):
-    """A chat closed is a mission completed: written down, from the app or
-    amarchy close alike (your assistant's and a worktree still being set up
-    aren't missions). The app's streak, best day and combos count them."""
+    """A chat closed (completed), from the app or amarchy close alike: written
+    down, with how many merges of its work there were. Only merges count
+    toward your score (merge_scan writes each down as it happens); a chat
+    completed without one closes without counting. Your assistant's, and a
+    worktree still being set up, aren't missions at all."""
     if s.get("setup") or assistant_role(s) == "main":
         return
     try:
         task = session_task(s, "")
     except Exception:
         task = s.get("title") or ""
-    mission_log({"id": s["id"], "repo": s.get("repo", ""), "task": task, "created": s.get("created")})
+    try:
+        merge_scan([{**s, "task": task}], use_gh=False)       # one just merged here, before it's gone
+    except Exception as e:
+        print(f"amarchy: couldn't look for its merges: {e}", file=sys.stderr)
+    n = len((merges_read().get(s["id"]) or {}).get("merges") or [])
+    mission_log({"id": s["id"], "repo": s.get("repo", ""), "task": task, "created": s.get("created"), "merged": n})
+
+
+# ---- merges: what counts
+#
+# A mission counts once its change is merged: the chat's branch merged into
+# its project's main (amarchy's "ship it": a merge commit "Merge branch
+# '<branch>'", or a fast-forward of a commit seen unmerged before), or a
+# GitHub pull request from it merged (gh pr list). Every open chat is looked
+# at each minute (app_merges, GitHub every two), a closing one once more
+# before its worktree goes (reap). Each merge is kept per chat in MERGES (the
+# chat's "Merged ✓", in session_view) and, from MISSIONS_SINCE on, written to
+# MISSIONS as kind "merge": your score.
+
+MERGES = STATE / "merges.json"                 # chat id -> {merges: [...], pending, branches, since, key}
+MERGES_LOCK = STATE / "merges.lock"
+MISSIONS_SINCE = STATE / "missions-since"      # merges from then on count (a reset starts it again)
+MERGE_EVERY = 60            # each open chat looked at this often
+MERGE_GH_EVERY = 120        # its GitHub pull requests this often
+MERGE_RE = re.compile(r"^Merge (?:remote-tracking )?branch '(?:origin/)?([^']+)'")
+_merge_gh = {}              # repo -> (when, [merged pull requests])
+_merges_seen = {}
+
+
+def missions_since():
+    """When merges started counting: the last reset, else the first look."""
+    try:
+        return int(MISSIONS_SINCE.read_text().strip())
+    except (OSError, ValueError):
+        now = int(time.time())
+        try:
+            write_file(MISSIONS_SINCE, f"{now}\n")
+        except OSError:
+            pass
+        return now
+
+
+def merges_read():
+    """MERGES as it is (read again only when it changed)."""
+    try:
+        st = MERGES.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return {}
+    if _merges_seen.get("stamp") != stamp:
+        try:
+            d = json.loads(MERGES.read_text())
+        except (OSError, ValueError):
+            d = {}
+        _merges_seen.update(stamp=stamp, data=d if isinstance(d, dict) else {})
+    return _merges_seen["data"]
+
+
+def merge_branches(s, path, entry):
+    """Every name the chat's work went by: its branch, the one its worktree
+    is on now, the ones it moved between (its HEAD's reflog), and those seen
+    before (a branch made for a pull request: os-159-sidebar)."""
+    names = {s.get("branch") or "", *(entry.get("branches") or [])}
+    now = sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
+    names.add(now)
+    for line in sh("git", "reflog", "-n", "200", "--format=%gs", cwd=path).stdout.splitlines():
+        m = re.match(r"checkout: moving from (\S+) to (\S+)$", line)
+        if m:
+            names.update(m.groups())
+    return sorted(n for n in names if n and n != "HEAD" and not re.fullmatch(r"[0-9a-f]{7,40}", n))
+
+
+def merge_targets(repo_dir, s):
+    """What a chat's work merges into, here: its project's main (local and
+    origin's) and the base it was made from, those that are there: [(ref, sha)]."""
+    base = default_base(repo_dir)
+    refs = [base.removeprefix("origin/"), base, s.get("base") or ""]
+    out, seen = [], set()
+    for ref in refs:
+        if not ref or ref == "HEAD" or ref in seen:
+            continue
+        seen.add(ref)
+        sha = sh("git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=repo_dir).stdout.strip()
+        if sha:
+            out.append((ref, sha))
+    return out
+
+
+def is_ancestor(a, b, cwd):
+    return bool(a and b) and sh("git", "merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
+
+
+def merge_prs(repo_dir, repo, fresh=False):
+    """The project's GitHub pull requests merged lately (gh), every two
+    minutes at most (fresh: now): [{number, url, mergedAt, headRefName,
+    headRefOid, baseRefName}]. None of them where gh can't tell."""
+    was = _merge_gh.get(repo)
+    if was and not fresh and time.time() - was[0] < MERGE_GH_EVERY:
+        return was[1]
+    url = sh("git", "remote", "get-url", "origin", cwd=repo_dir).stdout.strip()
+    prs = []
+    if "github.com" in url and shutil.which("gh"):
+        try:
+            r = subprocess.run(["gh", "pr", "list", "--state", "merged", "--limit", "60", "--json",
+                                "number,url,mergedAt,headRefName,headRefOid,baseRefName"],
+                               cwd=repo_dir, capture_output=True, text=True, timeout=20)
+            prs = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            prs = was[1] if was else []
+    _merge_gh[repo] = (time.time(), prs if isinstance(prs, list) else [])
+    return _merge_gh[repo][1]
+
+
+def gh_time(t):
+    try:
+        return int(datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp())
+    except (AttributeError, ValueError):
+        return 0
+
+
+def merge_found(s, path, repo_dir, entry, use_gh, fresh):
+    """What's new of one chat's merges: [{at, tip, via, into, sha?, pr?, url?}],
+    and entry brought up to date (its branches, the commit waiting to be
+    merged, how many commits since the last merge)."""
+    created = int(s.get("created") or 0)
+    head = sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=path).stdout.strip()
+    if not head:
+        return []
+    branches = merge_branches(s, path, entry)
+    entry["branches"] = branches[-20:]
+    targets = merge_targets(repo_dir, s)
+    known = entry.setdefault("merges", [])
+    tips = {m.get("tip") for m in known}
+    found = []
+
+    def covered(tip):
+        return tip in tips or any(is_ancestor(tip, t, path) for t in tips if t)
+
+    key = json.dumps([head, targets, branches])
+    if key != entry.get("key"):
+        # Merge commits into main naming its branch, since it was made.
+        shas = set()
+        for ref, sha in targets:
+            log = sh("git", "log", "--merges", "--first-parent", f"--since=@{max(0, created - 60)}",
+                     "--format=%H%x00%P%x00%ct%x00%s", sha, "-n", "200", cwd=repo_dir).stdout
+            for line in log.splitlines():
+                parts = line.split("\0")
+                if len(parts) != 4 or parts[0] in shas:
+                    continue
+                m = MERGE_RE.match(parts[3])
+                parents = parts[1].split()
+                if not m or m.group(1) not in branches or len(parents) < 2:
+                    continue
+                shas.add(parts[0])
+                tip = parents[1]
+                if any(k.get("sha") == parts[0] for k in known) or tip in tips:
+                    continue
+                found.append({"at": int(parts[2]), "tip": tip, "via": "local", "into": ref, "sha": parts[0]})
+                tips.add(tip)
+        # A commit seen unmerged before, in main now: merged (a fast-forward).
+        pending = entry.get("pending")
+        if pending and any(is_ancestor(pending, sha, repo_dir) for _, sha in targets):
+            if not covered(pending):
+                into = next(ref for ref, sha in targets if is_ancestor(pending, sha, repo_dir))
+                found.append({"at": int(time.time()), "tip": pending, "via": "local", "into": into})
+                tips.add(pending)
+            entry["pending"] = None
+        # Its work not in main: waiting to be merged.
+        if targets and not any(is_ancestor(head, sha, repo_dir) for _, sha in targets):
+            entry["pending"] = head
+        entry["key"] = key
+    # Its pull requests merged on GitHub.
+    if use_gh and has_origin(repo_dir):
+        for pr in merge_prs(repo_dir, s["repo"], fresh=fresh):
+            if not isinstance(pr, dict) or pr.get("headRefName") not in branches:
+                continue
+            at = gh_time(pr.get("mergedAt"))
+            if at < created - 300 or any(k.get("url") == pr.get("url") for k in known + found):
+                continue
+            rec = {"at": at, "tip": pr.get("headRefOid") or "", "via": "pr", "into": pr.get("baseRefName") or "",
+                   "pr": pr.get("number"), "url": pr.get("url") or ""}
+            same = next((k for k in known + found if k.get("tip") and k["tip"] == rec["tip"]), None)
+            if same:        # seen merged here already (a fast-forward fetched): the same merge, now its PR's
+                same.update(via="pr", pr=rec["pr"], url=rec["url"], into=rec["into"])
+                continue
+            found.append(rec)
+    every = known + found
+    last = max(reversed(every), key=lambda m: m["at"], default=None)      # (the same second: the newer)
+    if last and last.get("tip"):
+        n = sh("git", "rev-list", "--count", f"{last['tip']}..HEAD", cwd=path).stdout.strip()
+        entry["since"] = int(n) if n.isdigit() else 0
+    return found
+
+
+def merge_scan(ss, use_gh=True, fresh=False):
+    """Look at these chats' merges (merge_found), keep what's new (MERGES),
+    and write each new one from MISSIONS_SINCE on to MISSIONS: a mission
+    counted. Returns the new ones, as written."""
+    floor = missions_since()
+    MERGES_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    out = []
+    with open(MERGES_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            d = json.loads(MERGES.read_text())
+            d = d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            d = {}
+        before = json.dumps(d, sort_keys=True)
+        for s in ss:
+            if s.get("setup") or s.get("assistant") == "main":
+                continue
+            path, repo_dir = Path(s.get("path") or ""), WORK / s.get("repo", "")
+            if not path.is_dir() or not repo_dir.is_dir():
+                continue
+            entry = d.setdefault(s["id"], {})
+            try:
+                found = merge_found(s, path, repo_dir, entry, use_gh, fresh)
+            except Exception as e:
+                print(f"amarchy: couldn't look at {s['id']}'s merges: {e}", file=sys.stderr)
+                continue
+            for m in sorted(found, key=lambda m: m["at"]):
+                m["counted"] = m["at"] >= floor
+                entry["merges"].append(m)
+                if m["counted"]:
+                    rec = {"kind": "merge", "at": m["at"], "id": s["id"], "repo": s.get("repo", ""),
+                           "task": s.get("task") or "", "created": s.get("created"), "via": m["via"],
+                           "into": m.get("into", "")}
+                    if m.get("url"):
+                        rec.update(pr=m.get("pr"), url=m["url"])
+                    mission_log(rec)
+                    out.append(rec)
+        # Chats closed a week ago: forgotten.
+        live = {s["id"] for s in ss}
+        for sid in list(d):
+            e = d[sid]
+            last = max([m.get("at", 0) for m in e.get("merges") or []] + [e.get("seen", 0)])
+            if sid in live:
+                e["seen"] = int(time.time())
+            elif time.time() - last > 7 * 86400:
+                d.pop(sid)
+        if json.dumps(d, sort_keys=True) != before:
+            write_file(MERGES, json.dumps(d))
+    return out
+
+
+def chat_merged(sid, merges=None):
+    """A chat's merges, for the app: {at (the last one's), n, via, url, pr,
+    since (commits after it)}, or None."""
+    e = (merges_read() if merges is None else merges).get(sid) or {}
+    ms = e.get("merges") or []
+    if not ms:
+        return None
+    last = max(reversed(ms), key=lambda m: m.get("at", 0))
+    return {"at": last.get("at"), "n": len(ms), "via": last.get("via"), "url": last.get("url") or "",
+            "pr": last.get("pr"), "into": last.get("into") or "", "since": e.get("since") or 0}
+
+
+def app_merges(st):
+    """Each minute, every open chat's merges (merge_scan): a merge is on its
+    chat and on your score within a minute of it; GitHub's every two."""
+    time.sleep(5)
+    while True:
+        began = time.time()
+        try:
+            ss = [s for s in list(st.view.get("sessions") or []) if not s.get("setup")]
+            if merge_scan(ss):
+                st.poke.set()
+        except Exception as e:
+            print(f"amarchy app: merges: {e}", file=sys.stderr)
+        time.sleep(max(5, MERGE_EVERY - (time.time() - began)))
 
 
 _missions = {}
 
-MISSION_COMBO = 15 * 60       # completed this soon after the one before: the same combo
+MISSION_COMBO = 15 * 60       # merged this soon after the one before: the same combo
 MISSION_GOAL = STATE / "missions-goal"      # how many a day you aim for (0: none)
 MISSION_BADGES = STATE / "missions-badges.json"     # badges earned outside the log (five at once): key -> when
 MISSION_TOLD = STATE / "missions-told.json"         # the streak's reminder and the week's recap: the day each was last sent
@@ -3958,14 +4231,53 @@ MISSION_FAST = 120            # a question or permission answered this soon: a f
 MISSION_GOAL_DEFAULT = 5
 
 # The badges: key, name, how it's earned. Earned once, kept (when, in missions_view).
-BADGES = (("speedrun", "Speedrun", "A chat completed within 10 minutes of starting it"),
-          ("combo5", "Combo ×5", "Five missions in a row, each within 15 minutes"),
-          ("ten", "Ten in a day", "Ten missions in one day"),
-          ("night", "Night owl", "A mission completed between midnight and 5"),
-          ("clean", "Clean week", "All clear five days in a row"),
-          ("five", "Five at once", "Five chats at work at the same time"),
-          ("quick", "Quick draw", "Ten fast replies in a row (each within 2 minutes)"),
-          ("century", "Century", "A hundred missions"))
+BADGES = (
+    # Milestones
+    ("first", "First merge", "Your first merge"),
+    ("merges10", "Ten merges", "10 merges in all"),
+    ("merges50", "Fifty merges", "50 merges in all"),
+    ("century", "Century", "100 merges in all"),
+    ("merges250", "Two-fifty", "250 merges in all"),
+    ("merges500", "Five hundred", "500 merges in all"),
+    ("pr1", "Pull request", "Your first GitHub pull request merged"),
+    ("pr25", "Reviewed and in", "25 GitHub pull requests merged"),
+    ("polyglot", "Polyglot", "Merges in 5 different projects"),
+    # Big days
+    ("hat", "Hat trick", "3 merges in a day"),
+    ("high5", "High five", "5 merges in a day"),
+    ("ten", "Ten in a day", "10 merges in a day"),
+    ("twenty", "Twenty in a day", "20 merges in a day"),
+    ("goal", "Goal hit", "Your daily goal reached"),
+    ("goal2", "Double goal", "Twice your daily goal in a day"),
+    ("repos2", "Two fronts", "Merges in 2 projects in a day"),
+    ("repos3", "Three fronts", "Merges in 3 projects in a day"),
+    # Streaks
+    ("streak3", "On a roll", "A merge 3 days in a row"),
+    ("streak7", "Week streak", "A merge 7 days in a row"),
+    ("streak14", "Fortnight", "A merge 14 days in a row"),
+    ("streak30", "Month streak", "A merge 30 days in a row"),
+    ("fullweek", "Full week", "A merge every day, Monday to Sunday"),
+    ("weekend", "Weekend warrior", "A merge on Saturday and on Sunday"),
+    ("goalweek", "Goal week", "Your daily goal 5 days in a row"),
+    ("comeback", "Comeback", "A merge after 3 days or more without one"),
+    # Time of day
+    ("dawn", "Dawn patrol", "A merge between 5 and 7am"),
+    ("early", "Early bird", "A merge before 9am"),
+    ("lunch", "Lunch break", "A merge between noon and 1pm"),
+    ("lastcall", "Last call", "A merge after 10pm"),
+    ("night", "Night owl", "A merge between midnight and 5am"),
+    # Speed and combos
+    ("speedrun", "Speedrun", "Merged within 10 minutes of opening the chat"),
+    ("quickfix", "Quick fix", "Merged within an hour of opening the chat"),
+    ("combo3", "Combo ×3", "3 merges in a row, each within 15 minutes"),
+    ("combo5", "Combo ×5", "5 merges in a row, each within 15 minutes"),
+    ("combo10", "Combo ×10", "10 merges in a row, each within 15 minutes"),
+    ("marathon", "Marathon", "A chat merged more than a day after it opened"),
+    ("iterate", "Iterate", "One chat merged 3 times"),
+    # The rest of how you work
+    ("five", "Five at once", "Five chats at work at the same time"),
+    ("quick", "Quick draw", "Ten fast replies in a row (each within 2 minutes)"),
+    ("clean", "Clean week", "All clear five days in a row"))
 
 
 def mission_goal():
@@ -4002,10 +4314,30 @@ def mission_days_in_a_row(days, today):
     return n
 
 
+def missions_lines():
+    """MISSIONS read: its records, in the order they happened (a pull
+    request's merge is written down when it's seen, after its time)."""
+    try:
+        lines = MISSIONS.read_text().splitlines()
+    except OSError:
+        lines = []
+    out = []
+    for line in lines:
+        try:
+            r = json.loads(line)
+            r["at"] = int(r["at"])
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        out.append(r)
+    out.sort(key=lambda r: r["at"])
+    return out
+
+
 def missions_view():
-    """What you've completed, for the app's score (the same on the phone and
-    the computer): today's (id, when, its title, how long it took, a task or
-    a chat), the streak (days in a row with one at least, today's or up to
+    """Your score, for the app (the same on the phone and the computer): only
+    merges count (merge_scan writes them down). Today's merges (chat id,
+    when, its title, how long after the chat opened, a pull request's
+    link), the streak (days in a row with a merge, today's or up to
     yesterday's while today has none yet), the best day before today, the
     last seven days, all of them; your daily goal; your replies today (how
     many, how many fast, the fast ones in a row); the badges (each, when
@@ -4021,23 +4353,18 @@ def missions_view():
     stamp = tuple(stamp)
     if _missions.get("stamp") == stamp:
         return _missions["view"]
-    days, clears, mine, ats, earned = {}, {}, [], [], dict(mission_badges_kept())
+    goal = mission_goal()
+    days, clears, goals, mine, ats, earned = {}, {}, {}, [], [], dict(mission_badges_kept())
+    day_repos, repos, per_chat = {}, set(), {}
     replies = {"n": 0, "fast": 0, "streak": 0, "best": 0}
-    run = 0
-    try:
-        lines = MISSIONS.read_text().splitlines() if stamp[1] else []
-    except OSError:
-        lines = []
+    run = prs = 0
+    one = datetime.timedelta(days=1)
 
     def earn(key, at):
         earned.setdefault(key, at)
 
-    for line in lines:
-        try:
-            r = json.loads(line)
-            at = int(r["at"])
-        except (ValueError, KeyError, TypeError):
-            continue
+    for r in missions_lines() if stamp[1] else []:
+        at = r["at"]
         d = datetime.date.fromtimestamp(at)
         kind = r.get("kind") or "chat"
         if kind == "clear":
@@ -4055,58 +4382,112 @@ def missions_view():
                 replies["n"] += 1
                 replies["fast"] += fast
             continue
-        if kind not in ("chat", "task"):
+        if kind != "merge":         # a chat completed, a task done: kept, not counted
             continue
+        before = max(days, default=None)
         days[d] = days.get(d, 0) + 1
+        n = days[d]
+        repo = r.get("repo") or ""
+        day_repos.setdefault(d, set()).add(repo)
+        repos.add(repo)
+        sid = r.get("id") or ""
+        per_chat[sid] = per_chat.get(sid, 0) + 1
+        ats.append(at)
+        total = len(ats)
         took = at - int(r["created"]) if isinstance(r.get("created"), (int, float)) else None
         took = took if took and took > 0 else None
-        if kind == "chat" and took and took <= 600:
-            earn("speedrun", at)
-        if datetime.datetime.fromtimestamp(at).hour < 5:
+        hour = datetime.datetime.fromtimestamp(at).hour
+        # Milestones
+        earn("first", at)
+        for k, x in (("merges10", 10), ("merges50", 50), ("century", 100), ("merges250", 250), ("merges500", 500)):
+            if total >= x:
+                earn(k, at)
+        if r.get("via") == "pr":
+            prs += 1
+            earn("pr1", at)
+            if prs >= 25:
+                earn("pr25", at)
+        if len(repos) >= 5:
+            earn("polyglot", at)
+        # Big days
+        for k, x in (("hat", 3), ("high5", 5), ("ten", 10), ("twenty", 20)):
+            if n >= x:
+                earn(k, at)
+        if goal and n >= goal:
+            earn("goal", at)
+            goals[d] = True
+            if mission_days_in_a_row(goals, d) >= 5:
+                earn("goalweek", at)
+        if goal and n >= 2 * goal:
+            earn("goal2", at)
+        if len(day_repos[d]) >= 2:
+            earn("repos2", at)
+        if len(day_repos[d]) >= 3:
+            earn("repos3", at)
+        # Streaks
+        streak = mission_days_in_a_row(days, d)
+        for k, x in (("streak3", 3), ("streak7", 7), ("streak14", 14), ("streak30", 30)):
+            if streak >= x:
+                earn(k, at)
+        monday = d - datetime.timedelta(days=d.weekday())
+        if all(days.get(monday + datetime.timedelta(days=i)) for i in range(7)):
+            earn("fullweek", at)
+        if (d.weekday() == 5 and days.get(d + one)) or (d.weekday() == 6 and days.get(d - one)):
+            earn("weekend", at)
+        if before and before < d and (d - before).days >= 4:
+            earn("comeback", at)
+        # Time of day
+        if hour < 5:
             earn("night", at)
-        if days[d] >= 10:
-            earn("ten", at)
-        ats.append(at)
+        if 5 <= hour < 7:
+            earn("dawn", at)
+        if hour < 9:
+            earn("early", at)
+        if hour == 12:
+            earn("lunch", at)
+        if hour >= 22:
+            earn("lastcall", at)
+        # Speed and combos
+        if took and took <= 600:
+            earn("speedrun", at)
+        if took and took <= 3600:
+            earn("quickfix", at)
+        if took and took > 86400:
+            earn("marathon", at)
         k = 1
         while k < len(ats) and ats[-k] - ats[-k - 1] <= MISSION_COMBO:
             k += 1
-        if k >= 5:
-            earn("combo5", at)
-        if len(ats) >= 100:
-            earn("century", at)
+        for key, x in (("combo3", 3), ("combo5", 5), ("combo10", 10)):
+            if k >= x:
+                earn(key, at)
+        if per_chat[sid] >= 3:
+            earn("iterate", at)
         if d == today:
-            mine.append({"id": r.get("id", ""), "at": at, "task": r.get("task", ""), "repo": r.get("repo", ""),
-                         "took": took, "kind": kind})
+            mine.append({"id": sid, "at": at, "task": r.get("task", ""), "repo": repo, "took": took,
+                         "kind": "merge", "via": r.get("via") or "local", "url": r.get("url") or ""})
     replies["streak"] = run
     view = {"today": mine[-200:], "streak": mission_days_in_a_row(days, today),
             "best": max((n for k, n in days.items() if k != today), default=0),
             "week": [days.get(today - datetime.timedelta(days=i), 0) for i in range(6, -1, -1)],
-            "total": sum(days.values()), "combo": MISSION_COMBO, "goal": mission_goal(),
+            "total": sum(days.values()), "combo": MISSION_COMBO, "goal": goal,
             "clear_streak": mission_days_in_a_row(clears, today), "replies": replies, "fast": MISSION_FAST,
+            "since": missions_since(),
             "badges": [{"key": k, "name": n, "about": a, "at": earned.get(k)} for k, n, a in BADGES]}
     _missions.update(stamp=stamp, view=view)
     return view
 
 
 def missions_last_week(today=None):
-    """Monday to Sunday before this week: {n, best: (day, n), replies fast}."""
+    """Monday to Sunday before this week: {n merges, best: (day, n), replies fast}."""
     today = today or datetime.date.today()
     start = today - datetime.timedelta(days=today.weekday() + 7)
     days, fast = {}, 0
-    try:
-        lines = MISSIONS.read_text().splitlines()
-    except OSError:
-        lines = []
-    for line in lines:
-        try:
-            r = json.loads(line)
-            d = datetime.date.fromtimestamp(int(r["at"]))
-        except (ValueError, KeyError, TypeError):
-            continue
+    for r in missions_lines():
+        d = datetime.date.fromtimestamp(r["at"])
         if not start <= d < start + datetime.timedelta(days=7):
             continue
         kind = r.get("kind") or "chat"
-        if kind in ("chat", "task"):
+        if kind == "merge":
             days[d] = days.get(d, 0) + 1
         elif kind == "reply" and isinstance(r.get("wait"), (int, float)) and r["wait"] <= MISSION_FAST:
             fast += 1
@@ -4129,7 +4510,7 @@ def missions_nudge(now=None):
     v = missions_view()
     if 20 <= now.hour < 23 and told.get("reminder") != today.isoformat() and v["streak"] and not v["today"]:
         which = "reminder"
-        payload = {"title": f"Your {v['streak']}-day streak", "body": "Complete one mission today to keep it going.",
+        payload = {"title": f"Your {v['streak']}-day streak", "body": "Merge one today to keep it going.",
                    "tag": "amarchy-streak", "url": "/"}
     elif now.weekday() == 0 and 9 <= now.hour < 21 and told.get("recap") != today.isoformat():
         week = missions_last_week(today)
@@ -4137,7 +4518,7 @@ def missions_nudge(now=None):
         if week["n"]:
             mine = assistant()
             day, n = week["best"]
-            body = f"{week['n']} mission{'s' if week['n'] != 1 else ''} last week · best day {day.strftime('%A')}, {n}"
+            body = f"{week['n']} merge{'s' if week['n'] != 1 else ''} last week · best day {day.strftime('%A')}, {n}"
             if week["fast"]:
                 body += f" · {week['fast']} fast repl{'ies' if week['fast'] != 1 else 'y'}"
             if v["streak"]:
@@ -4294,6 +4675,13 @@ def cmd_reap(sid):
     # What its Claude started in the background (a dev server) outlives its
     # tmux, and would go on running from a worktree that's gone.
     stop_leftovers(path, scopes)
+    # One more look at its merges, GitHub's too (a pull request merged a
+    # moment before you completed it), while its worktree is still there.
+    if not s.get("setup") and assistant_role(s) != "main":
+        try:
+            merge_scan([{**s, "task": session_task(s, "")}], fresh=True)
+        except Exception as e:
+            print(f"amarchy: couldn't look at {sid}'s merges: {e}", file=sys.stderr)
     removed = sh("git", "worktree", "remove", *(["--force"] if force else []), str(path), cwd=repo_dir)
     sh("git", "worktree", "prune", cwd=repo_dir)
     if path.exists() and removed.returncode != 0:
@@ -4822,6 +5210,7 @@ def session_view():
     agents = claude_agents()
     ss = sessions()
     background = all_background_sessions()
+    merges = merges_read()
     # Your assistant's picture ("" for amarchy's own): its hash, for the
     # phone's and the browser's lists.
     sig = picture_sig(PICTURE)
@@ -4873,6 +5262,8 @@ def session_view():
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and not s["interrupted"] and unseen(s["id"])
         # The secrets its Claude asks you for (amarchy secret ask): a card each.
         s["secret_asks"] = secret_asks(s["id"])
+        # Its work merged (merge_scan): when last, how many times, what's new since.
+        s["merged"] = chat_merged(s["id"], merges)
     mine = assistant()
     for s in ss:
         s["assistant"] = assistant_role(s, mine)
@@ -5112,8 +5503,33 @@ def alerts():
     return value if value in ALERTS else ALERTS_DEFAULT
 
 
+def missions_reset(today=None):
+    """Your score from 0: MISSIONS, the badges and what was told kept in
+    missions-backup-<date>/ (never deleted; a second one the same day gets
+    -2, -3...), then emptied, and merges counting from now. Your goal stays.
+    Returns the backup's folder."""
+    day = (today or datetime.date.today()).isoformat()
+    to, n = STATE / f"missions-backup-{day}", 1
+    while to.exists():
+        n += 1
+        to = STATE / f"missions-backup-{day}-{n}"
+    to.mkdir(parents=True)
+    for f in (MISSIONS, MISSION_BADGES, MISSION_GOAL, MISSION_TOLD, MISSIONS_SINCE, MERGES):
+        if f.exists():
+            shutil.copy2(f, to / f.name)
+    write_file(MISSIONS, "")
+    write_file(MISSION_BADGES, "{}")
+    write_file(MISSIONS_SINCE, f"{int(time.time())}\n")
+    _missions.clear()
+    return to
+
+
 def cmd_missions(args):
-    """amarchy missions [--goal <n>]: your score, as the app shows it; or your daily goal set."""
+    """amarchy missions [--goal <n>] [--reset]: your score, as the app shows it;
+    your daily goal set; or your score back to 0 (kept in a backup first)."""
+    if "--reset" in args:
+        to = missions_reset()
+        print(f"Your score starts from 0 now; what you had is kept in {to}")
     if "--goal" in args:
         i = args.index("--goal")
         try:
@@ -5125,17 +5541,17 @@ def cmd_missions(args):
         write_file(MISSION_GOAL, f"{g}\n")
     v = missions_view()
     n = len(v["today"])
-    print(f"today        {n}" + (f" of {v['goal']}" if v["goal"] else ""))
-    print(f"streak       {v['streak']} day{'s' if v['streak'] != 1 else ''}" + (" (complete one today to keep it)" if v["streak"] and not n else ""))
+    print(f"merged today {n}" + (f" of {v['goal']}" if v["goal"] else ""))
+    print(f"streak       {v['streak']} day{'s' if v['streak'] != 1 else ''}" + (" (merge one today to keep it)" if v["streak"] and not n else ""))
     print(f"best day     {v['best']}")
-    print(f"all time     {v['total']}")
+    print(f"all time     {v['total']}  (counting since {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['since']))})")
     print(f"this week    {' '.join(str(x) for x in v['week'])}")
     r = v["replies"]
     print(f"replies      {r['n']} today, {r['fast']} fast; {r['streak']} fast in a row (best {r['best']})")
     got = [b["name"] for b in v["badges"] if b["at"]]
-    print(f"badges       {', '.join(got) if got else 'none yet'}")
+    print(f"badges       {len(got)}/{len(v['badges'])}: {', '.join(got) if got else 'none yet'}")
     for m in v["today"]:
-        print(f"  {time.strftime('%H:%M', time.localtime(m['at']))}  {m['task'] or m['id']}")
+        print(f"  {time.strftime('%H:%M', time.localtime(m['at']))}  {m['task'] or m['id']}" + (f"  {m['url']}" if m.get("url") else ""))
     return 0
 
 
@@ -12864,6 +13280,7 @@ def app_serve():
     links_serve()                       # a Mac's links out (see links_handler)
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
+    threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
     version = os.stat(SELF).st_mtime_ns
 
     def updated():
@@ -15148,7 +15565,7 @@ OPTIONS = {
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "alerts": (set(), set(), set()),
-    "missions": ({"--goal"}, {"--goal"}, set()),
+    "missions": ({"--goal", "--reset"}, {"--goal"}, set()),
     "update": ({"--auto"}, set(), set()),
     "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),

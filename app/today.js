@@ -165,7 +165,7 @@ function todayParts(v) {
   // Finished a turn you haven't opened: it needs you too (to see what it did).
   const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && !todayBusy(s) && todayUnseen(s));
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isMain(s));
-  const done = rest.filter((s) => !todayBusy(s) && (s.today || {}).state === "done");
+  const done = rest.filter((s) => !todayBusy(s) && ((s.today || {}).state === "done" || todayMergedAll(s)));
   const quietFor = (s) => now - ((s.today || {}).at || 0);
   const stale = rest.filter((s) => !done.includes(s) && !todayBusy(s) && (s.today || {}).at && quietFor(s) > TODAY_STALE)
     .sort((a, b) => quietFor(b) - quietFor(a));
@@ -175,6 +175,11 @@ function todayParts(v) {
   // Ready: every other chat, stalled ones among them (as the list orders them).
   const ready = rest.filter((s) => !done.includes(s) && !working.includes(s));
   return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle, ready, someday };
+}
+
+// Its work merged, and nothing since (merge_scan): done, to complete.
+function todayMergedAll(s) {
+  return !!(s.merged && !s.merged.since && s.assistant !== "main");
 }
 
 // What's your move: the count on Today's tab, the switch, the page's top.
@@ -239,7 +244,8 @@ function todayCloseNow(ss, said = "") {
   todayRedraw();
   missionComplete(ss, ss.length === 1 ? ss[0].task || "Your chat" : `${ss.length} chats`);
   const back = () => { ss.forEach((s) => todayUI.closing.delete(s.id)); missionUndo(ss); };
-  const what = said || (ss.length === 1 ? `Mission complete: ${ss[0].task || "the chat"}` : `Mission complete: ${ss.length} chats`);
+  const merged = ss.filter((s) => (rowOf(s.id) || s).merged).length;
+  const what = said || (ss.length === 1 ? `${merged ? "Mission complete" : "Closed, not merged"}: ${ss[0].task || "the chat"}` : `Completed ${ss.length} chats`);
   todayUndo(what, async () => {
     const failed = [];
     for (const s of ss) {
@@ -509,12 +515,14 @@ function todayChat(s, kind) {
   const told = todayUI.told.get(s.id);
   // Running (its turn over, what it started still at it): not finished yet, whatever its goal block says.
   const running = s.status === "running";
-  const finished = t.state === "done" && !running;
+  const merged = !main && s.merged && !running && !todayBusy(s) ? s.merged : null;
+  const finished = (t.state === "done" || todayMergedAll(s)) && !running;
   const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
   const pill = running ? todayRunningPill(s)
     : s.interrupted ? todayInterruptedPill()
-    : kind === "fresh" ? uiPill(finished ? "Done · new" : "New", "new")
-    : kind === "done" ? uiPill("Done", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
+    : kind === "fresh" ? uiPill(merged ? `${uiMergedWords(merged)} · new` : finished ? "Done · new" : "New", "new")
+    : merged ? uiPill(uiMergedWords(merged), "done")
+    : kind === "done" ? uiPill("Done · not merged", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
     : kind === "working" || s.status === "working" ? uiPill("Working", "working")
     : main ? uiPill(statusWords(s), "quiet") : t.at ? uiPill(autoPast(t.at), "quiet") : null;
   const said = (boardOn() || kind === "fresh") && !main && s.said ? s.said : "";
@@ -550,7 +558,9 @@ function todaySeen(s) {
 // lost, else asked).
 async function todayComplete(s) {
   // Still running something: asked first (todayClose), not celebrated yet.
-  if ((rowOf(s.id) || s).status === "running") return todayClose(s, `Mission complete: ${s.task || "the chat"}`);
+  // Only a merge counts: said so in its Undo.
+  const said = `${(rowOf(s.id) || s).merged ? "Mission complete" : "Closed, not merged"}: ${s.task || "the chat"}`;
+  if ((rowOf(s.id) || s).status === "running") return todayClose(s, said);
   // What closing it would lose, asked now: the server answers while its card celebrates.
   const asked = todayClosing(s);
   asked.catch(() => {});
@@ -558,10 +568,10 @@ async function todayComplete(s) {
   const card = [...document.querySelectorAll(`.tcard[data-id="${CSS.escape(s.id)}"]`)].find((c) => c.offsetParent);
   if (card) {
     card.classList.add("completing");
-    card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, "Mission complete")));
+    card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, (rowOf(s.id) || s).merged ? "Mission complete" : "Closed")));
     await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 650));
   }
-  todayClose(s, `Mission complete: ${s.task || "the chat"}`, asked);
+  todayClose(s, said, asked);
 }
 
 // ---- mission complete: what closing a chat feels like
@@ -584,26 +594,17 @@ async function todayComplete(s) {
 const MISSION_HUES = ["--red", "--yellow", "--green", "--blue", "--magenta", "--cyan", "--orange", "--accent"];
 const MISSION_RANKS = [[0, "Cadet"], [10, "Ensign"], [25, "Pilot"], [50, "Lieutenant"], [100, "Commander"],
                        [250, "Captain"], [500, "Admiral"], [1000, "Legend"]];
-const missionPending = new Map();     // completed here, not in the server's list yet: id -> {id, at, task, repo, took, kind}
-const missionUI = { flash: null, replies: null, queue: [] };
+const missionUI = { flash: null, replies: null, queue: [], merges: null };
 
-// Your missions now: the server's, and the ones completed here it doesn't have yet.
+// Your missions now: the server's (only merges count, missions_view).
 function missionsNow() {
   const m = (app.view && app.view.missions) || {};
-  const mine = m.today || [];
-  const known = new Set(mine.map((x) => x.id));
-  // In the server's list by now, or never to be (its close went another way): forgotten here.
-  const late = Date.now() / 1000 - TODAY_UNDO_CLOSE / 1000 - 60;
-  for (const [id, x] of [...missionPending]) if (known.has(id) || x.at < late) missionPending.delete(id);
-  const extra = [...missionPending.values()];
-  const today = [...mine, ...extra].sort((a, b) => a.at - b.at);
+  const today = (m.today || []).slice().sort((a, b) => a.at - b.at);
   // A combo: how many in a row, each within its minutes of the one before, up to the last.
   let combo = today.length ? 1 : 0;
   for (let i = today.length - 1; i > 0 && today[i].at - today[i - 1].at <= (m.combo || 900); i--) combo++;
-  const week = (m.week || [0, 0, 0, 0, 0, 0, 0]).slice();
-  week[week.length - 1] += extra.length;
-  return { today, n: today.length, streak: (m.streak || 0) + (extra.length && !mine.length ? 1 : 0),
-           best: m.best || 0, week, total: (m.total || 0) + extra.length, combo, goal: m.goal || 0,
+  return { today, n: today.length, streak: m.streak || 0, best: m.best || 0, week: (m.week || [0, 0, 0, 0, 0, 0, 0]).slice(),
+           total: m.total || 0, combo, goal: m.goal || 0,
            replies: m.replies || { n: 0, fast: 0, streak: 0, best: 0 }, badges: m.badges || [], fast: m.fast || 120 };
 }
 
@@ -634,9 +635,8 @@ function missionTook(sec) {
 
 const missionOrdinal = (k) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][k % 10] || "th"}`;
 
-// Undone (its Undo, or its close failed): not completed after all.
-function missionUndo(ss) {
-  ss.forEach((s) => missionPending.delete(s.id));
+// Undone (its Undo, or its close failed): not completed after all (its merges count either way).
+function missionUndo() {
   todayRedraw();
 }
 
@@ -708,43 +708,46 @@ function missionMoment({ cls = "", mark = "check", kicker, title, earned = [], e
 }
 
 // ss: what was completed (chats' rows, or a task as {id: "task:<key>", task}); title: what to call them.
+// Only merges count (they're on your score as they happen): a merged chat
+// completed is a mission complete, its moment with your day's merges; one
+// closed without a merge, and a task done, only a quiet one saying it doesn't count.
 function missionComplete(ss, title, { task = false } = {}) {
-  const before = missionsNow();
-  const now = Date.now() / 1000;
-  const rescued = task ? 0 : ss.filter((s) => missionIsStalled(rowOf(s.id) || s)).length;
-  for (const s of ss) {
-    missionPending.set(s.id, { id: s.id, at: now, task: s.task || "", repo: s.repo || "", kind: task ? "task" : "chat",
-                               took: !task && s.created ? Math.max(0, Math.round(now - s.created)) : null });
-  }
   const m = missionsNow();
+  const rows = ss.map((s) => rowOf(s.id) || s);
+  const merged = task ? [] : rows.filter((s) => s.merged);
   const left = app.view ? Math.max(0, todayCount(app.view, typeof board !== "undefined" && boardOn() ? "chats" : null)) : 0;
   // Done ones still to complete count too: all clear is nothing needs you and nothing's left to complete.
   const gone = new Set(ss.map((s) => s.id));
   const more = app.view ? todayParts(app.view).done.filter((s) => !gone.has(s.id) && s.assistant !== "main").length : 0;
   const clear = !task && left === 0 && more === 0;
   if (clear) api("/api/missions/clear").catch(() => {});
-  const goal = m.goal && before.n < m.goal && m.n >= m.goal;
-  missionSound(2 ** (Math.min(m.combo - 1, 6) * 2 / 12));
+  const after = left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you";
+  if (!merged.length) {
+    if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) { /* not here */ }
+    missionMoment({ cls: "unmerged", kicker: task ? "Task done" : "Closed", title, bits: 0, stay: 2200,
+      stats: [task ? "Tasks don't count: only merges do" : ss.length > 1 ? "Not merged: they don't count" : "Not merged: it doesn't count", after].join(" · "),
+      next: left || more ? "Next mission →" : "Keep going →" });
+    return todayRedraw();
+  }
+  const goal = m.goal && m.n >= m.goal;
+  missionSound(2 ** (Math.min(Math.max(m.combo, 1) - 1, 6) * 2 / 12));
   if (navigator.vibrate) try { navigator.vibrate(m.combo > 1 || clear || goal ? [30, 40, 30] : 30); } catch (e) { /* not here */ }
-  // What it earned, each a pill: a combo, a record, the goal, the streak's day, a rank, a rescue.
+  // What your merges today earned, each a pill: a combo, a record, the goal, the streak's day, your rank.
   const earned = [];
   if (m.combo > 1) earned.push(uiPill(`Combo ×${m.combo}`, "ask"));
-  if (m.best && m.n > m.best) earned.push(uiPill(before.n <= m.best ? "New record" : `Record · ${m.n}`, "done"));
+  if (m.best && m.n > m.best) earned.push(uiPill(`Record · ${m.n}`, "done"));
   if (goal) earned.push(uiPill(`Goal ${m.n}/${m.goal}`, "done"));
-  if (!before.n && m.streak > 1) earned.push(uiPill(`Day ${m.streak} streak`, "warn"));
-  const was = missionRank(before.total), is = missionRank(m.total);
-  if (is.name !== was.name) earned.push(uiPill(`Promoted · ${is.name}`, "accent"));
-  else if (Math.floor(m.total / 1000) > Math.floor(before.total / 1000)) earned.push(uiPill(`${missionOrdinal(Math.floor(m.total / 1000) * 1000)} mission`, "accent"));
-  if (rescued) earned.push(uiPill(rescued > 1 ? `${rescued} rescues` : "Rescue", "late"));
+  if (m.streak > 1) earned.push(uiPill(`Day ${m.streak} streak`, "warn"));
+  earned.push(uiPill(missionRank(m.total).name, "accent"));
   const blocks = Math.min(14, Math.max(m.n + left, m.goal || 0));
   const bar = h("div", { class: "mission-bar", "aria-hidden": "true" },
     ...Array.from({ length: blocks }, (_, i) => h("span", { class: `${i < Math.min(m.n, blocks) ? "on" : ""}${m.goal && i === m.goal - 1 ? " goal" : ""}` })));
-  const took = ss.length === 1 && missionPending.get(ss[0].id) ? missionTook(missionPending.get(ss[0].id).took) : "";
+  const one = merged.length === 1 ? merged[0] : null;
+  const took = one && one.created && one.merged.at ? missionTook(Math.max(0, one.merged.at - one.created)) : "";
   missionMoment({
     cls: [clear ? "clear" : "", m.combo > 1 ? "combo" : "", goal ? "goal" : ""].filter(Boolean).join(" "),
-    kicker: clear ? "All clear" : goal ? "Daily goal" : task ? "Task done" : "Mission complete", title, earned, extra: bar,
-    stats: [`${missionOrdinal(m.n)} today`, took ? `done in ${took}` : "",
-            left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you"].filter(Boolean).join(" · "),
+    kicker: clear ? "All clear" : "Mission complete", title, earned, extra: bar,
+    stats: [`${m.n} merged today`, took ? `merged ${took} in` : "", after].filter(Boolean).join(" · "),
     next: left || more ? "Next mission →" : "Keep going →",
     go: (calm) => {
       const next = document.querySelector(".today:not([hidden]) .today-yours .today-go")
@@ -754,6 +757,22 @@ function missionComplete(ss, title, { task = false } = {}) {
     bits: clear || goal ? 160 : Math.min(150, 90 + (m.combo - 1) * 15), far: clear || goal ? 60 : 42,
   });
   todayRedraw();
+}
+
+// A merge just seen (missionsWatch): a flash by your score, its chime; the
+// one that reaches your daily goal, a moment of its own.
+function missionMerged(fresh, m) {
+  const x = fresh[fresh.length - 1];
+  const goal = m.goal && m.n >= m.goal && m.n - fresh.length < m.goal;
+  missionSound(2 ** (Math.min(Math.max(m.combo, 1) - 1, 6) * 2 / 12));
+  if (goal) {
+    return missionMoment({ cls: "goal", kicker: "Daily goal", title: x.task || "Merged",
+      earned: [uiPill(`Goal ${m.n}/${m.goal}`, "done"), m.streak > 1 ? uiPill(`Day ${m.streak} streak`, "warn") : null].filter(Boolean),
+      stats: `${m.n} merged today`, bits: 160, far: 60 });
+  }
+  missionUI.flash = { text: fresh.length > 1 ? `${fresh.length} merged` : m.combo > 1 ? `Merged · combo ×${m.combo}` : "Merged ✓", until: Date.now() + 3200 };
+  todayRedraw();
+  setTimeout(() => { if (missionUI.flash && missionUI.flash.until <= Date.now()) { missionUI.flash = null; todayRedraw(); } }, 3300);
 }
 
 // A badge earned: its own moment, once (on each device that's open then; a
@@ -777,9 +796,9 @@ function missionsWatch() {
   const now = Date.now() / 1000;
   let shown;
   try { shown = new Set(JSON.parse(store.get("badges-shown") || "[]")); } catch (e) { shown = new Set(); }
-  const fresh = (m.badges || []).filter((b) => b.at && now - b.at < 300 && !shown.has(b.key));
+  const fresh = (m.badges || []).filter((b) => b.at && now - b.at < 300 && !shown.has(`${b.key}:${b.at}`));
   if (fresh.length) {
-    fresh.forEach((b) => { shown.add(b.key); missionUI.queue.push(b); });
+    fresh.forEach((b) => { shown.add(`${b.key}:${b.at}`); missionUI.queue.push(b); });
     store.set("badges-shown", JSON.stringify([...shown]));
     missionNextBadge();
   }
@@ -790,6 +809,13 @@ function missionsWatch() {
     setTimeout(() => { if (missionUI.flash && missionUI.flash.until <= Date.now()) { missionUI.flash = null; todayRedraw(); } }, 2700);
   }
   missionUI.replies = r;
+  // A merge new since the last look (not those there when the page opened).
+  const keys = (m.today || []).map((x) => `${x.id}:${x.at}`);
+  if (missionUI.merges) {
+    const fresh = (m.today || []).filter((x) => !missionUI.merges.has(`${x.id}:${x.at}`) && now - x.at < 900);
+    if (fresh.length) missionMerged(fresh, missionsNow());
+  }
+  missionUI.merges = new Set(keys);
 }
 
 // Your score, by the summary: the streak's flame, today's missions (to your
@@ -798,8 +824,8 @@ function missionScore() {
   const m = missionsNow();
   const risk = m.streak > 0 && !m.n;
   const cool = missionStalled(app.view).length;
-  const title = [risk ? `Complete one today to keep your ${m.streak}-day streak` : m.streak ? `${m.streak}-day streak` : "",
-                 m.goal ? `${m.n} of ${m.goal} today` : `${m.n} completed today`,
+  const title = [risk ? `Merge one today to keep your ${m.streak}-day streak` : m.streak ? `${m.streak}-day streak` : "",
+                 m.goal ? `${m.n} of ${m.goal} merged today` : `${m.n} merged today`,
                  cool ? `${cool} stalled chat${cool === 1 ? "" : "s"} cool${cool === 1 ? "s" : ""} your flame` : ""].filter(Boolean).join(" · ");
   const flash = missionUI.flash && missionUI.flash.until > Date.now() ? missionUI.flash.text : "";
   return uiScore({ streak: m.streak, today: m.n, goal: m.goal, risk, cool: !!cool, flash, title,
@@ -817,14 +843,16 @@ function missionsSheet() {
     return { n: m.week[i] || 0, label: i === 6 ? "Today" : d.toLocaleDateString([], { weekday: "short" }) };
   });
   const record = m.best && m.n > m.best;
-  const meta = m.streak && !m.n ? `Complete one today to keep your ${m.streak}-day streak`
-    : record ? "Your best day yet" : m.goal && m.n >= m.goal ? "Daily goal reached" : m.n ? `${m.n} completed today` : "Complete a chat to start your streak";
+  const meta = m.streak && !m.n ? `Merge one today to keep your ${m.streak}-day streak`
+    : record ? "Your best day yet" : m.goal && m.n >= m.goal ? "Daily goal reached" : m.n ? `${m.n} merged today` : "Only merges count: merge one to start your streak";
   const rank = missionRank(m.total);
   const r = m.replies;
   const earned = m.badges.filter((b) => b.at).length;
   const list = m.today.slice().reverse().map((x) => h("li", { class: "missions-row" },
-    h("span", { class: `tcard-chip ph-${x.kind === "task" ? "due" : todayHue(x.repo)}` }, x.kind === "task" ? "Task" : projectName(x.repo || "")),
+    h("span", { class: `tcard-chip ph-${todayHue(x.repo)}` }, projectName(x.repo || "")),
     h("span", { class: "missions-task" }, x.task || "A chat"),
+    x.url ? h("a", { class: "missions-pr", href: x.url, target: "_blank", rel: "noopener",
+                     onclick: (e) => { if (typeof openLink === "function") { e.preventDefault(); openLink(x.url); } } }, "PR") : null,
     h("span", { class: "missions-when" }, [missionTook(x.took), new Date(x.at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · "))));
   const setGoal = async (g) => {
     try { await api("/api/missions/goal", { goal: g }); } catch (e) { return toast(e.message); }
@@ -837,7 +865,7 @@ function missionsSheet() {
                  note: rank.next ? `${rank.next[0] - m.total} to ${rank.next[1]}` : "the top rank" }),
     uiTiles([{ n: m.goal ? `${m.n}/${m.goal}` : m.n, label: "today", on: record || (m.goal && m.n >= m.goal) },
              { n: m.streak, label: m.streak === 1 ? "day streak" : "days streak" },
-             { n: m.best, label: "best day" }, { n: m.total, label: "all time" }]),
+             { n: m.best, label: "best day" }, { n: m.total, label: "merged in all" }]),
     uiChart(days),
     uiStepper({ label: "Daily goal", value: m.goal, min: 0, max: 50, show: (g) => (g ? String(g) : "None"), set: setGoal }),
     uiSection("missions-replies", "Replies today", { count: r.n },
@@ -845,7 +873,7 @@ function missionsSheet() {
     uiSection("missions-badges", "Badges", { count: `${earned}/${m.badges.length}` },
       uiBadges(m.badges.map((b) => ({ name: b.name, about: b.about, on: !!b.at,
                                       when: b.at ? `Earned ${new Date(b.at * 1000).toLocaleDateString([], { day: "numeric", month: "short" })}` : "" })))),
-    list.length ? uiSection("missions-done", "Completed today", { count: list.length }, h("ol", { class: "missions-list" }, ...list)) : null));
+    list.length ? uiSection("missions-done", "Merged today", { count: list.length }, h("ol", { class: "missions-list" }, ...list)) : null));
 }
 
 // Today, as nodes. top: with its count line (Tasks, a computer's middle; the
@@ -945,7 +973,7 @@ function todayKey(v) {
 // keeps it, but for what it shows that changed).
 function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
-    { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.permission, (s.secret_asks || []).length, s.assistant,
+    { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
     s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : "", s.preview ? [s.preview.url, uiPreviewOf(s)] : ""]);
 }
 

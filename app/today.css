@@ -156,6 +156,10 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 @keyframes mission-earn { from { transform: scale(.4); opacity: 0; } }
 /* Nothing else needs you: ALL CLEAR (your daily goal, DAILY GOAL), a bigger burst, the kicker a touch bigger. */
 .mission.clear .mission-kicker, .mission.goal .mission-kicker { font-size: calc(var(--title) * 2); }
+/* Closed without a merge (or a task done): it doesn't count, so quieter: no burst, the tick and words muted. */
+.mission.unmerged .mission-card { border-color: var(--border); }
+.mission.unmerged .mission-tick { background: var(--control-bg); color: var(--text-muted); }
+.mission.unmerged .mission-kicker { color: var(--text-muted); text-shadow: none; }
 /* A badge unlocked: its medal in the badge's gold. */
 .mission.badge .mission-card { border-color: var(--badge-on); }
 .mission.badge .mission-tick { background: var(--badge-on); }
@@ -167,6 +171,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .missions-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-width: 0;
                 background: var(--card-bg); border: var(--card-border-width) solid var(--card-border); border-radius: var(--card-radius); }
 .missions-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.missions-pr { flex: none; font-size: var(--caption); color: var(--accent); text-decoration: none; }
 .missions-when { flex: none; font-size: var(--caption); color: var(--text-muted); }
 @media (prefers-reduced-motion: reduce) {
   .mission, .mission-card, .mission-tick, .mission-bar span, .mission-earned .tpill { animation: none !important; }

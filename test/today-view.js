@@ -165,6 +165,7 @@ async function page(browser, layout, port, { notices = false } = {}) {
   for (const what of ["send", "close", "answer", "interrupt", "keys"]) {
     await p.route(`**/api/session/*/${what}`, (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: {} }); });
   }
+  await p.route("**/api/missions/clear", (r) => { p.posts.push({ url: r.request().url(), body: null }); r.fulfill({ json: {} }); });
   await p.route("**/api/today/loop", (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: {} }); });
   await p.addInitScript(({ chats, loops, notices }) => {
     Object.defineProperty(Navigator.prototype, "standalone", { get: () => true });
@@ -173,15 +174,17 @@ async function page(browser, layout, port, { notices = false } = {}) {
     JSON.parse = function (text, ...rest) {
       const v = parse.call(this, text, ...rest);
       if (v && typeof v === "object" && Array.isArray(v.sessions) && "share" in v) {
-        v.sessions = chats.map((c) => ({ ...c }));
+        v.sessions = chats.map((c) => ({ ...c, ...((window.__rows || {})[c.id] || {}) }));
         v.projects = [{ name: "proj", sessions: 5 }, { name: "me", sessions: 1 }];
         v.today = { loops, source: "/home/x/loops.md", error: "", sent: {}, assistant: { id: "me-jaken", name: "Jaken" } };
         v.needs = 2;
         // What you completed, the server's: three days in a row up to
         // yesterday, none today yet; a best day of 1, nine in all.
         // Your goal stays the server's (the test sets it).
+        // Merges today: what the test says came (window.__merges).
         const goal = v.missions ? v.missions.goal : 5;
-        v.missions = { today: [], streak: 3, best: 1, week: [0, 0, 0, 0, 2, 1, 0], total: 9, combo: 900, goal, fast: 120,
+        const merges = window.__merges || [];
+        v.missions = { today: merges, streak: 3 + (merges.length ? 1 : 0), best: 1, week: [0, 0, 0, 0, 2, 1, merges.length], total: 9 + merges.length, combo: 900, goal, fast: 120,
                        replies: { n: 2, fast: 1, streak: 1, best: 4 },
                        badges: [{ key: "speedrun", name: "Speedrun", about: "Fast", at: 1700000000 }, { key: "night", name: "Night owl", about: "Late", at: window.__nightAt || null }] };
       }
@@ -563,9 +566,8 @@ async function common(p, where) {
   check(where, await until(p, () => { const x = document.querySelector(".today:not([hidden]) .ui-score.risk.cool"); return x && /3/.test(x.innerText) && /0\/5/.test(x.innerText); }),
         `the score: a 3-day streak at risk, 0/5, cooled by a stalled chat (${await p.evaluate(() => { const x = document.querySelector(".today:not([hidden]) .ui-score"); return x && x.className + " " + JSON.stringify(x.innerText) + " " + JSON.stringify(app.view.missions.goal); })})`);
   check(where, await tapIn("per-minute", "Done"), "a loop's Done tapped");
-  check(where, await until(p, () => /Task done/i.test((document.querySelector(".mission-kicker") || {}).innerText || "")), "a task done: celebrated, TASK DONE");
-  const taskEarned = await p.evaluate(() => [...document.querySelectorAll(".mission-earned .tpill")].map((x) => x.innerText.trim()));
-  check(where, taskEarned.includes("Day 4 streak") && taskEarned.includes("Promoted · Ensign"), `the streak's day, a rank (${taskEarned.join(", ")})`);
+  check(where, await until(p, () => /Task done/i.test((document.querySelector(".mission-kicker") || {}).innerText || "")), "a task done: TASK DONE");
+  check(where, /Tasks don't count/.test(await text(p, ".mission-stats")) && !(await p.$(".mission-earned")), "it doesn't count: only merges do");
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   await sleep(300);
   const done = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "done");
@@ -603,44 +605,69 @@ async function common(p, where) {
   check(where, p.posts.some((x) => /proj-quiet\/send/.test(x.url) && /Where does this stand/.test(x.body.text)), "the ask goes to that chat");
   await unsent(p);
 
-  // Complete: mission accomplished, then closed (nothing to lose: no sheet), with Undo.
-  check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete mission"), "a done chat's Complete mission tapped");
+  // A merge comes (the server saw it): a flash by the score, which counts it; its card says Merged ✓.
+  const mergedAt = Math.floor(Date.now() / 1000) - 30;
+  await p.evaluate((at) => {
+    window.__merges = [{ id: "proj-done", at, task: "Study: T3 vs amarchy", repo: "proj", took: 1800, kind: "merge", via: "pr", url: "https://github.com/x/y/pull/1" }];
+    window.__rows = { "proj-done": { merged: { at, n: 1, via: "pr", url: "https://github.com/x/y/pull/1", pr: 1, into: "dev", since: 0 } } };
+    const m = app.view.missions;
+    app.view = { ...app.view, sessions: app.view.sessions.map((x) => ({ ...x, ...(window.__rows[x.id] || {}) })),
+                 missions: { ...m, today: window.__merges, streak: 4, week: [...m.week.slice(0, 6), 1], total: 10 } };
+    refresh();
+    missionsWatch();
+  }, mergedAt);
+  check(where, await until(p, () => /Merged ✓/.test((document.querySelector(".today:not([hidden]) .ui-score-flash") || {}).innerText || ""), null, 8000), "a merge: Merged ✓ flashes by the score");
+  check(where, await until(p, () => { const x = document.querySelector(".today:not([hidden]) .ui-score"); return x && !x.matches(".risk") && /4/.test(x.innerText) && /1\/5/.test(x.innerText); }),
+        "the score counts it: a 4-day streak, 1/5");
+  check(where, /Merged ✓/.test(await text(p, ".tcard[data-id=proj-done] .tpill")), "its card: Merged ✓ and when");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-merged-card.png`) });
+
+  // Its chat says so too: Merged ✓, its pull request, and Complete, one tap.
+  await p.evaluate(() => todayOpen(rowOf("proj-done")));
+  check(where, await until(p, () => { const d = [...document.querySelectorAll(".done-strip.merged")].find((x) => x.offsetParent); return d && /Merged ✓/.test(d.innerText) && /#1/.test(d.innerText) && /Complete/.test(d.innerText); }),
+        "its chat: Merged ✓, #1, Complete");
+  await sleep(400);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-merged-chat.png`) });
+  await p.evaluate(() => { if (desk.current) boardBack(true); else go("#/today"); });
+  await until(p, () => !desk.current && !/^#\/s\//.test(here()) && !!document.querySelector(".today:not([hidden])"));
+  await tab(p, "chats");
+
+  // Complete a merged one: mission complete, then closed (nothing to lose: no sheet), with Undo.
+  check(where, await click(p, ".tcard[data-id=proj-done] .tbtn", "Complete mission"), "a merged chat's Complete mission tapped");
   check(where, await until(p, () => !!document.querySelector(".tcard.completing .tcard-complete")), "Mission complete, on its card");
-  check(where, await until(p, () => !!document.querySelector(".mission .mission-kicker") && /2nd today/.test(document.querySelector(".mission-stats").innerText)),
-        "then the celebration: MISSION COMPLETE, the 2nd today (the task was the 1st)");
-  check(where, /1 more to complete/.test(await text(p, ".mission-stats")) && !(await p.evaluate(() => !!document.querySelector(".mission.clear"))),
-        "another done one left: not all clear, it's still to complete");
+  check(where, await until(p, () => !!document.querySelector(".mission .mission-kicker") && /Mission complete/i.test(document.querySelector(".mission-kicker").innerText)
+                                    && /1 merged today/.test(document.querySelector(".mission-stats").innerText)),
+        "then the celebration: MISSION COMPLETE, 1 merged today");
+  check(where, /1 more to complete/.test(await text(p, ".mission-stats")), "another done one left: it's still to complete");
   const earned = () => p.evaluate(() => [...document.querySelectorAll(".mission-earned .tpill")].map((x) => x.innerText.trim()));
   const got2 = await earned();
-  check(where, got2.includes("Combo ×2") && got2.includes("New record"), `a combo and a record (${got2.join(", ")})`);
+  check(where, got2.includes("Day 4 streak") && got2.includes("Ensign"), `the streak's day, the rank (${got2.join(", ")})`);
   await sleep(700);
   await p.screenshot({ path: path.join(SHOTS, `${where}-complete.png`) });
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   check(where, await until(p, () => !!document.querySelector(".undo-toast") && /Mission complete/.test(document.querySelector(".undo-toast").innerText) && !document.querySelector(".sheet")), "then closed, with Undo");
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-done\/close/.test(x.url)), "closed once Undo's gone");
-  check(where, await until(p, () => { const x = document.querySelector(".today:not([hidden]) .ui-score"); return x && !x.matches(".risk") && /4/.test(x.innerText) && /2\/5/.test(x.innerText); }),
-        "the score after it: a 4-day streak, 2/5");
+  check(where, /1\/5/.test(await text(p, ".today:not([hidden]) .ui-score")), "the score as it was: completing doesn't count again");
 
-  // A stalled one completed: a rescue; nothing stalled, the flame's warm again.
+  // One not merged: closed, said not to count; the stalled flame warm again.
   check(where, await click(p, ".tcard[data-id=proj-quiet] .tbtn", "Complete mission"), "the stalled one completed");
-  check(where, await until(p, () => /3rd today/.test((document.querySelector(".mission-stats") || {}).innerText || "")), "celebrated, the 3rd today");
-  let got = await earned();
-  check(where, got.includes("Rescue") && got.includes("Combo ×3"), `a rescue, combo ×3 (${got.join(", ")})`);
+  check(where, await until(p, () => /Closed/i.test((document.querySelector(".mission-kicker") || {}).innerText || "") && /doesn't count/.test(document.querySelector(".mission-stats").innerText)),
+        "not merged: CLOSED, it doesn't count");
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   check(where, await until(p, () => !document.querySelector(".today:not([hidden]) .ui-score.cool")), "nothing stalled: the flame's warm again");
+  check(where, /Done · not merged/.test(await text(p, ".tcard[data-id=proj-done2] .tpill")), "a done chat not merged says so");
 
-  // The last done one: ALL CLEAR, a bigger combo.
+  // The last done one, not merged: all clear told, quietly.
   check(where, await click(p, ".tcard[data-id=proj-done2] .tbtn", "Complete mission"), "the last done one completed");
-  check(where, await until(p, () => !!document.querySelector(".mission.clear") && /All clear/i.test(document.querySelector(".mission-kicker").innerText)), "ALL CLEAR");
-  got = await earned();
-  check(where, got.includes("Combo ×4") && got.includes("Record · 4"), `combo ×4, record 4 (${got.join(", ")})`);
-  await sleep(700);
-  await p.screenshot({ path: path.join(SHOTS, `${where}-combo.png`) });
+  check(where, await until(p, () => /Closed/i.test((document.querySelector(".mission-kicker") || {}).innerText || "")), "CLOSED");
+  await sleep(300);
+  check(where, p.posts.some((x) => /missions\/clear/.test(x.url)), "nothing left: all clear told");
+  await sleep(500);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-closed.png`) });
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
-  // Undone: not completed after all.
   await p.evaluate(() => [...document.querySelectorAll(".undo-toast .text-btn")].pop().click());
-  check(where, await until(p, () => /3\/5/.test(document.querySelector(".today:not([hidden]) .ui-score").innerText)), "Undo takes it off the score");
+  check(where, await until(p, () => /1\/5/.test(document.querySelector(".today:not([hidden]) .ui-score").innerText)), "Undo: the score as it was");
 
   // A fast reply: a flash by the score.
   await p.evaluate(() => { app.view.missions = { ...app.view.missions, replies: { n: 3, fast: 2, streak: 2, best: 4 } }; missionsWatch(); });
@@ -669,16 +696,16 @@ async function common(p, where) {
     rows: [...document.querySelectorAll(".sheet .missions-row")].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
   }));
   let says = await sheetSays();
-  check(where, /Ensign/.test(says.rank) && /13 to Pilot/.test(says.rank), `the rank, how far to the next (${says.rank.replace(/\s+/g, " ")})`);
-  check(where, says.tiles.join("|") === "3/5 today|4 days streak|1 best day|12 all time", `its numbers (${says.tiles.join("|")})`);
+  check(where, /Ensign/.test(says.rank) && /15 to Pilot/.test(says.rank), `the rank, how far to the next (${says.rank.replace(/\s+/g, " ")})`);
+  check(where, says.tiles.join("|") === "1/5 today|4 days streak|1 best day|10 merged in all", `its numbers (${says.tiles.join("|")})`);
   check(where, says.bars === 7, "the week, in bars");
   check(where, says.badges.join() === "true,true", `the badges, earned lit (${says.badges})`);
-  check(where, says.rows.length === 3 && /Eval: json-render/.test(says.rows[0]) && /Task/.test(says.rows[2]), `what was completed today, the last first (${says.rows.join(" / ")})`);
+  check(where, says.rows.length === 1 && /Study: T3 vs amarchy/.test(says.rows[0]) && /PR/.test(says.rows[0]), `what was merged today, its PR (${says.rows.join(" / ")})`);
   await p.screenshot({ path: path.join(SHOTS, `${where}-missions.png`), fullPage: true });
   // Your goal: one more, kept by the server; then back.
   await p.evaluate(() => document.querySelector('.sheet [aria-label="More: Daily goal"]').click());
   check(where, await until(p, () => (document.querySelector(".sheet .ui-stepper-value") || {}).innerText === "6"), "the daily goal raised to 6");
-  check(where, await until(p, () => /3\/6/.test(document.querySelector(".today:not([hidden]) .ui-score").innerText)), "the score says 3/6");
+  check(where, await until(p, () => /1\/6/.test(document.querySelector(".today:not([hidden]) .ui-score").innerText)), "the score says 1/6");
   await p.evaluate(() => document.querySelector('.sheet [aria-label="Less: Daily goal"]').click());
   check(where, await until(p, () => (document.querySelector(".sheet .ui-stepper-value") || {}).innerText === "5"), "and back to 5");
   await p.evaluate(() => closeSheets());
@@ -962,8 +989,8 @@ async function wide(browser, port) {
   await until(p, () => desk.current === "proj-quiet");
   await p.evaluate(() => desk.chat.input.focus());
   await p.keyboard.press("Control+Alt+KeyX");
-  check(where, await until(p, () => !desk.current && !!document.querySelector(".undo-toast") && /Mission complete: Eval/.test(document.querySelector(".undo-toast").innerText)),
-        "Ctrl+Alt+X: the open chat's mission completes, with Undo");
+  check(where, await until(p, () => !desk.current && !!document.querySelector(".undo-toast") && /Closed, not merged: Eval/.test(document.querySelector(".undo-toast").innerText)),
+        "Ctrl+Alt+X: the open chat completes (not merged: said so), with Undo");
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-quiet\/close/.test(x.url)), "closed once Undo's gone");

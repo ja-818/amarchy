@@ -243,6 +243,18 @@ function uiPill(text, tone, { long = false, title = null } = {}) {
     wheel, long ? h("span", { class: "tpill-text" }, text) : text);
 }
 
+// A chat's work merged (its row's merged: {at, n, via, url, pr, since}), in
+// words: "Merged ✓ 3:42 PM", "Merged ✓ yesterday 9:10 AM", "Merged ✓ ×3 · Fri 6:05 PM".
+function uiMergedWords(m) {
+  if (!m || !m.at) return "";
+  const d = new Date(m.at * 1000), now = new Date();
+  const clock = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+  const when = days <= 0 ? clock : days === 1 ? `yesterday ${clock}`
+    : days < 7 ? `${d.toLocaleDateString([], { weekday: "short" })} ${clock}` : d.toLocaleDateString([], { day: "numeric", month: "short" });
+  return `Merged ✓ ${m.n > 1 ? `×${m.n} · ` : ""}${when}`;
+}
+
 // A button: primary (filled, the one thing to do), or a class of its own
 // (quiet: words only; complete: Complete mission's).
 function uiButton(label, act, primary = false, cls = "") {

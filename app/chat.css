@@ -594,7 +594,7 @@
 .bg-dot { flex: none; }
 .bg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The chat reached its goal: Done, and Close chat (chat.js renderDone). */
+/* The chat's work merged (Merged ✓ and when), or its goal reached: Complete (chat.js renderDone). */
 .done-strip { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border);
               border-left: 3px solid var(--success); border-radius: var(--radius-item); background: var(--control-bg);
               font-size: var(--caption); color: var(--text-muted); }
@@ -602,7 +602,9 @@
 .done-strip .done-mark { color: var(--success); flex: none; }
 .done-strip .done-words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .done-strip .done-words b { color: var(--text); font-weight: 600; }
-.done-strip .text-btn { flex: none; }
+.done-strip .text-btn, .done-strip .tbtn { flex: none; }
+.done-strip .done-link { color: var(--accent); text-decoration: none; }
+@media (hover: hover) { .done-strip .done-link:hover { text-decoration: underline; } }
 
 /* ---- the keys on a message (j / k, chat.js navKey): lit as the board's card is */
 /* The one lit (.nav-sel): with keys at hand (.keyed), and not while you

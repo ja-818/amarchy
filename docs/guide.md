@@ -295,28 +295,49 @@ host's chats without anything else installed.
   further out, someday), each with **Follow up** (your assistant drafts the
   message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
   about it) and **Done**.
-- **Missions**: completing a chat (closing it, from the board, its head or
-  `amarchy close`) or a task's **Done** is a mission complete: confetti in your
-  theme's colors, its sound (a step higher for each in a combo: one within 15
-  minutes of the one before), and what it earned (**Combo ×3**, **New record**
-  for a day, **Goal 5/5**, **Day 5 streak**, **Promoted · Pilot**, **Rescue** for
-  a stalled chat); **Daily goal** when it gets you to your goal, **All clear**
-  when nothing else needs you or waits to be completed.
-  - **Your score**, by the summary: the streak's flame (dim and pulsing while today
-    has none yet: complete one to keep it; cooled while chats are stalled) and
-    today's missions, a ring filling to your daily goal. Answering a question or
-    permission within 2 minutes is a **fast reply**: a flash by the score.
+- **Missions count once they're merged.** amarchy looks at every open chat each
+  minute: its branch merged into its project's main (a merge commit naming the
+  branch, or a fast-forward: amarchy's own "ship it"), or a GitHub pull request
+  from it merged (`gh`, every two minutes; a branch the chat moved to counts
+  too). Each merge is on your score as it happens, with its time: a flash by the
+  score, **Merged ✓**, and **Daily goal** when it gets you there. A closing chat
+  is looked at once more before its worktree goes. Chats with no code (your
+  assistant, research, call notes) and a task's **Done** don't count.
+  - **Merged ✓ 3:42 PM** on its card (and in its chat, over the box you type in,
+    with its pull request's link and **Complete**, one tap); a chat merged with
+    nothing new since is done. Newer commits not merged yet are said there too.
+  - **Complete** a merged chat: confetti in your theme's colors, its sound (a
+    step higher for each in a combo: merges within 15 minutes of each other),
+    your day's merges and what they earned (**Combo ×3**, **Record**, **Goal
+    5/5**, **Day 5 streak**, your rank); **All clear** when nothing else needs
+    you. Completing one that wasn't merged closes it quietly, **Closed**: it
+    doesn't count.
+  - **Your score**, by the summary: the streak's flame (days in a row with a
+    merge: dim and pulsing while today has none yet; cooled while chats are
+    stalled) and today's merges, a ring filling to your daily goal. Answering a
+    question or permission within 2 minutes is a **fast reply**: a flash by the
+    score.
   - **Your missions** (a tap on the score): your rank (Cadet, Ensign, Pilot,
-    Lieutenant, Commander, Captain, Admiral, Legend, by all you've completed) and
-    how far to the next; today, the streak, the best day, all of them; the week in
-    bars; your **daily goal** (− and +; `amarchy missions --goal 8`); your replies;
-    your **badges** (Speedrun, Combo ×5, Ten in a day, Night owl, Clean week, Five
-    at once, Quick draw, Century: each has its own moment when earned); and what
-    you completed today, with how long each took.
+    Lieutenant, Commander, Captain, Admiral, Legend, by all your merges) and how
+    far to the next; today, the streak, the best day, all of them; the week in
+    bars; your **daily goal** (− and +; `amarchy missions --goal 8`); your
+    replies; your **40 badges**, each with its own moment when earned:
+    milestones (First merge, 10, 50, Century, 250, 500; your first pull request,
+    25 of them; Polyglot: 5 projects), big days (Hat trick, High five, Ten and
+    Twenty in a day, Goal hit, Double goal, Two and Three fronts: projects in a
+    day), streaks (3, 7, 14 and 30 days; Full week, Weekend warrior, Goal week,
+    Comeback), the time of day (Dawn patrol, Early bird, Lunch break, Last call,
+    Night owl), speed (Speedrun: merged within 10 minutes of opening the chat,
+    Quick fix: within the hour, Combo ×3, ×5, ×10, Marathon: over a day,
+    Iterate: one chat merged 3 times) and how you work (Five at once, Quick
+    draw, Clean week); and what you merged today, with how long each took and
+    its pull request.
   - Your phones are told at **8pm** when your streak is at risk, and on **Monday**
     morning your assistant sends last week's recap.
-  - It's all written down on the server (`~/.local/state/amarchy/missions.jsonl`):
-    the same on the phone and the computer. `amarchy missions` prints it.
+  - It's all written down on the server (`~/.local/state/amarchy/missions.jsonl`,
+    each chat's merges in `merges.json`): the same on the phone and the computer.
+    `amarchy missions` prints it; `amarchy missions --reset` starts from 0, the
+    old score kept in `missions-backup-<date>/`.
 - **A card** is one surface: it lights as a whole under the pointer, and under the
   keys. A click anywhere on it opens the chat; its buttons do their own thing.
 - **One card is always lit**, the one the keys are on: the first as the board

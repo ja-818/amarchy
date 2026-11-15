@@ -2625,9 +2625,9 @@ class Chat {
     this.renderQueue();
     this.renderBackground();
     this.drawPills();
+    this.renderDone();      // (its own key: merged a moment ago, done, at work again)
     if (key === this.cardKey) { this.sendButtons(); return; }
     this.cardKey = key;
-    this.renderDone();
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
@@ -2707,25 +2707,34 @@ class Chat {
   // (subagents) and commands, as one line over the box that opens to name
   // each and say for how long. Shown whatever Claude itself is doing, as
   // they go on after its turn ends.
-  // The chat reached its goal (its newest goal block says done) and Claude
-  // isn't at work: a strip over the box you type in that says so, and
-  // offers to close it (app.js confirmClose, which says what would be lost).
-  // A chat exists to reach its goal and be closed. Not your assistant's: it
-  // stays.
+  // The chat's work merged (row.merged: its branch into main, or its pull
+  // request on GitHub), or its goal reached (its newest goal block says
+  // done), and Claude isn't at work: a strip over the box you type in that
+  // says so, Merged ✓ and when, and Complete, one tap (today.js
+  // todayComplete: Undo, and what would be lost asked). Only a merge counts
+  // on your score: a chat done but not merged says it won't. Not your
+  // assistant's: it stays.
   renderDone() {
     if (!this.doneEl) return;
     const r = this.row || {};
-    const show = this.goalState === "done" && !["working", "waiting", "running"].includes(r.status) && r.assistant !== "main"
-      && typeof confirmClose === "function";
-    const key = show ? `${this.goal}|${r.id}` : "";
+    const m = r.merged || null;
+    const show = (this.goalState === "done" || !!m) && !["working", "waiting", "running"].includes(r.status) && r.assistant !== "main"
+      && !r.setup && typeof confirmClose === "function";
+    const key = show ? JSON.stringify([this.goal, r.id, m, this.goalState, Math.floor(Date.now() / 60000)]) : "";
     if (key === this.doneKey) return;
     this.doneKey = key;
     this.doneEl.hidden = !show;
+    this.doneEl.classList.toggle("merged", !!m);
     if (!show) return this.doneEl.replaceChildren();
-    this.doneEl.replaceChildren(glyph("check", "done-mark"),
-      h("span", { class: "done-words" }, h("b", {}, "Done"), this.goal ? ` · ${this.goal}` : ""),
-      h("button", { class: "text-btn", type: "button", title: "The goal is reached: close the chat",
-                    onclick: () => (typeof todayComplete === "function" ? todayComplete(this.row || { id: this.id }) : confirmClose(this.row || { id: this.id })) }, "Complete mission ✓"));
+    const complete = () => (typeof todayComplete === "function" ? todayComplete(this.row || { id: this.id }) : confirmClose(this.row || { id: this.id }));
+    const head = m ? uiMergedWords(m) : "Done";
+    const link = m && m.url ? h("a", { href: m.url, target: "_blank", rel: "noopener", class: "done-link",
+      onclick: (e) => { if (typeof openLink === "function") { e.preventDefault(); openLink(m.url); } } }, m.pr ? `#${m.pr}` : "PR") : null;
+    const note = m ? (m.since ? ` · ${m.since} newer commit${m.since === 1 ? "" : "s"} not merged` : this.goal ? ` · ${this.goal}` : "")
+      : " · not merged, won't count";
+    this.doneEl.replaceChildren(...[m ? null : glyph("check", "done-mark"),       // (Merged ✓ has its own)
+      h("span", { class: "done-words" }, h("b", {}, head), link ? " " : "", link, note),
+      uiButton("Complete", complete, !!m, "complete done-complete")].filter(Boolean));
   }
 
   renderBackground() {
