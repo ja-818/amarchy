@@ -4036,6 +4036,36 @@ def merge_targets(repo_dir, s):
     return out
 
 
+# What in a worktree's reflog is a commit it made: a commit, an amend, a
+# merge it made, a rebase's or cherry-pick's new commit (not a fast-forward,
+# a reset or a checkout: those are commits made elsewhere).
+OWN_COMMIT = re.compile(r"^(commit( \([a-z]+\))?|rebase( -i)? \((pick|continue|squash|fixup|reword|edit)\)|cherry-pick|revert|"
+                        r"(merge|pull)\b[^:]*: Merge made)")
+
+
+def merge_own(path, created):
+    """The commits a chat made itself since it opened, oldest first."""
+    out, seen = [], set()
+    log = sh("git", "reflog", "-n", "500", "--format=%H%x00%gs%x00%ct", "HEAD", cwd=path).stdout
+    for line in reversed(log.splitlines()):
+        parts = line.split("\0")
+        if len(parts) == 3 and parts[0] not in seen and OWN_COMMIT.match(parts[1]) and parts[2].isdigit() \
+                and int(parts[2]) >= created - 60:
+            seen.add(parts[0])
+            out.append(parts[0])
+    return out
+
+
+def merge_when(repo_dir, ref, sha, created):
+    """When ref first had sha (its reflog), else now."""
+    log = sh("git", "reflog", "show", "-n", "300", "--date=unix", "--format=%H %gd", ref, cwd=repo_dir).stdout
+    for line in reversed(log.splitlines()):
+        m = re.match(r"([0-9a-f]+) .*@\{(\d+)\}$", line)
+        if m and int(m.group(2)) >= created - 60 and is_ancestor(sha, m.group(1), repo_dir):
+            return int(m.group(2))
+    return int(time.time())
+
+
 def is_ancestor(a, b, cwd):
     return bool(a and b) and sh("git", "merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
 
@@ -4107,6 +4137,21 @@ def merge_found(s, path, repo_dir, entry, use_gh, fresh):
                     continue
                 found.append({"at": int(parts[2]), "tip": tip, "via": "local", "into": ref, "sha": parts[0]})
                 tips.add(tip)
+        # Commits the chat made itself (its worktree's reflog), in main now:
+        # merged (a fast-forward), when main took them (main's reflog). Each
+        # time main took some, one merge; seen or not before (the app away).
+        groups = {}
+        for sha in merge_own(path, created):
+            if covered(sha):
+                continue
+            into = next((ref for ref, t in targets if is_ancestor(sha, t, repo_dir)), None)
+            if into:
+                groups.setdefault((into, merge_when(repo_dir, into, sha, created)), []).append(sha)
+        for (into, at), shas in sorted(groups.items(), key=lambda g: g[0][1]):
+            if any(k.get("into") == into and k["at"] == at for k in found):
+                continue
+            found.append({"at": at, "tip": shas[-1], "via": "local", "into": into})
+            tips.add(shas[-1])
         # A commit seen unmerged before, in main now: merged (a fast-forward).
         pending = entry.get("pending")
         if pending and any(is_ancestor(pending, sha, repo_dir) for _, sha in targets):

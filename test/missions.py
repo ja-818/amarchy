@@ -198,6 +198,20 @@ check(len(new) == 1 and am.chat_merged("proj-feat")["n"] == 2 and am.chat_merged
 v = am.missions_view()
 check(v["total"] == 2 and all(x["id"] == "proj-feat" for x in v["today"]), f"both on the score ({v['total']})")
 
+# Shipped twice by fast-forward while nobody looked (the app restarting):
+# both found at the first look, each when main took it.
+wt5 = Path(home) / "wt" / "unseen"
+git("worktree", "add", "-q", "-b", "unseen", str(wt5), "main", cwd=repo)
+unseen = {**chat, "id": "proj-unseen", "branch": "unseen", "path": str(wt5)}
+for name in ("u1", "u2"):
+    (wt5 / name).write_text(name); git("add", ".", cwd=wt5); git("commit", "-qm", name, cwd=wt5)
+    git("merge", "-q", "--ff-only", "unseen", cwd=repo)
+    time.sleep(1.1)
+new = am.merge_scan([unseen])
+check(len(new) == 2 and new[0]["at"] < new[1]["at"] and am.chat_merged("proj-unseen")["since"] == 0,
+      f"fast-forwards never seen before: found, each its own ({new})")
+check(am.merge_scan([unseen]) == [], "and not twice")
+
 # Rebased on a newer main with nothing of its own: not a merge.
 wt2 = Path(home) / "wt" / "idle"
 git("worktree", "add", "-q", "-b", "idle", str(wt2), "main", cwd=repo)
