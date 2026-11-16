@@ -4251,19 +4251,34 @@ def chat_merged(sid, merges=None):
             "pr": last.get("pr"), "into": last.get("into") or "", "since": e.get("since") or 0}
 
 
+MERGE_TURN_EVERY = 5        # how often a chat's turn ending is looked for
+
+
 def app_merges(st):
     """Each minute, every open chat's merges (merge_scan): a merge is on its
-    chat and on your score within a minute of it; GitHub's every two."""
+    chat and on your score within a minute of it; GitHub's every two. A chat
+    whose turn just ended (working or running, now idle) is looked at within
+    seconds, GitHub too: the turn that merged its pull request or shipped it
+    ends on Merged ✓, not on "not merged" for minutes."""
     time.sleep(5)
+    last, was = 0.0, {}
     while True:
-        began = time.time()
         try:
             ss = [s for s in list(st.view.get("sessions") or []) if not s.get("setup")]
-            if merge_scan(ss):
+            now = {s["id"]: s.get("status") or "" for s in ss}
+            ended = [s for s in ss if now[s["id"]] == "idle" and was.get(s["id"]) in ("working", "running")]
+            was = now
+            found = False
+            if time.time() - last >= MERGE_EVERY:
+                last = time.time()
+                found = merge_scan(ss)
+            for s in ended:
+                found = merge_scan([s], fresh=True) or found
+            if found:
                 st.poke.set()
         except Exception as e:
             print(f"amarchy app: merges: {e}", file=sys.stderr)
-        time.sleep(max(5, MERGE_EVERY - (time.time() - began)))
+        time.sleep(MERGE_TURN_EVERY)
 
 
 _missions = {}

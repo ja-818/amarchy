@@ -255,6 +255,31 @@ am.mission_done({**chat, "title": "Feat: it"})
 last = json.loads(am.MISSIONS.read_text().splitlines()[-1])
 check(last["id"] == "proj-feat" and last["merged"] == 2 and am.missions_view()["total"] == before, f"completed: its merges said, not counted again ({last})")
 
+# The app's loop: a chat whose turn just ended is looked at within seconds,
+# GitHub too (fresh), not only at the next minute's look at every chat.
+class Stop(Exception):
+    pass
+calls, ticks = [], []
+class St:
+    view = {"sessions": [{"id": "a", "status": "working", "repo": "p"}, {"id": "b", "status": "idle", "repo": "p"}]}
+    class poke:
+        set = staticmethod(lambda: calls.append("poke"))
+def fake_sleep(_):
+    ticks.append(1)
+    if len(ticks) == 2:
+        St.view = {"sessions": [{"id": "a", "status": "idle", "repo": "p"}, {"id": "b", "status": "idle", "repo": "p"}]}
+    if len(ticks) == 4:
+        raise Stop
+was_scan, was_sleep = am.merge_scan, am.time.sleep
+am.merge_scan = lambda ss, use_gh=True, fresh=False: calls.append(([s["id"] for s in ss], fresh)) or ([1] if fresh else [])
+am.time.sleep = fake_sleep
+try:
+    am.app_merges(St())
+except Stop:
+    pass
+am.merge_scan, am.time.sleep = was_scan, was_sleep
+check(calls == [(["a", "b"], False), (["a"], True), "poke"], f"a turn ended: that chat looked at now, GitHub fresh ({calls})")
+
 # A reset: everything kept in a backup first, then from 0; a second one the same day kept apart.
 am.write_file(am.MISSION_BADGES, json.dumps({"five": 1}))
 to = am.missions_reset(datetime.date(2026, 11, 15))
