@@ -650,19 +650,40 @@ function uiBrand(act, title = "Amarchy menu (m, Ctrl+Alt+M)") {
 }
 
 // A menu: items [{label, detail, icon, key, act, group: () => ({title,
-// items}), desk: only on a computer}]. On a computer the keyboard's card
-// (desk.js picker); on the phone a sheet, a group opening one of its own.
-function uiMenu(title, items) {
+// items}), desk: only on a computer, on: the one lit (the keys start on
+// it), always: shown whatever you look for}]. On a computer the keyboard's
+// card (desk.js picker); on the phone a sheet, a group opening one of its
+// own. search: a box over it that narrows it (its placeholder), on both.
+function uiMenu(title, items, { search = "" } = {}) {
   items = items.filter((it) => it && (app.desk || !it.desk));
-  if (app.desk && typeof picker === "function") return picker({ title, items });
-  const row = (it) => h("button", { class: `menu-item${it.danger ? " danger" : ""}`, type: "button", onclick: async () => {
+  if (app.desk && typeof picker === "function") return picker({ title, items, placeholder: search || undefined });
+  const row = (it) => h("button", { class: `menu-item${it.danger ? " danger" : ""}${it.on ? " on" : ""}`, type: "button", onclick: async () => {
     if (it.group) { const g = await it.group(); return uiMenu(g.title, g.items); }
     closeSheets();
     if (it.act) it.act("");
   } }, h("span", { class: "label" }, it.icon ? glyph(it.icon, "icon") : null,
          h("span", { class: "ui-menu-text" }, it.label, it.detail ? h("small", {}, it.detail) : null)),
     it.group ? h("span", { class: "val" }, "›") : null);
-  return sheet(sheetHead(title), h("div", { class: "menu ui-menu" }, ...items.map(row)));
+  const rows = items.map((it) => Object.assign(row(it), { item: it }));
+  const menu = h("div", { class: "menu ui-menu" }, ...rows);
+  if (!search) return sheet(sheetHead(title), menu);
+  // What you type narrows it; Enter picks the first one left.
+  const box = uiSearch({ placeholder: search, label: search, key: "", cls: "ui-menu-search", input: { enterkeyhint: "go" } });
+  const shown = () => rows.filter((r) => !r.hidden);
+  box.field.addEventListener("input", () => {
+    const q = box.field.value.trim().toLowerCase();
+    for (const r of rows) r.hidden = !!q && !r.item.always && !`${r.item.label} ${r.item.detail || ""}`.toLowerCase().includes(q);
+  });
+  box.field.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing) return;
+    e.preventDefault();
+    const first = shown()[0];
+    if (first) first.click();
+  });
+  const back = sheet(sheetHead(title), box, menu);
+  const on = rows.find((r) => r.item.on);
+  if (on) requestAnimationFrame(() => uiReveal(on, { scroller: back.querySelector(".sheet"), block: "center" }));
+  return back;
 }
 
 // ---- pictures: a thumbnail (uiShot) and full screen (uiPhoto)

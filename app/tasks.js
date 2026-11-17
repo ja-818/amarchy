@@ -44,7 +44,7 @@ function boardBuild() {
       uiBrand(() => deskMenu()),
       board.switchEl,
       boardSearchBox(),
-      uiAction("plus", "New chat", () => boardCompose(), { title: "New chat (n, Ctrl+Alt+N)", key: "N", cls: "board-new-btn" })));
+      uiAction("plus", "New chat", () => boardNew(), { title: "New chat (n, Ctrl+Alt+N)", key: "N", cls: "board-new-btn" })));
   board.slot = h("div", { class: "board-new", hidden: true });
   board.box = h("div", { class: "today board-today" });
   board.startingEl = h("div", { class: "board-starting", hidden: true });
@@ -241,7 +241,7 @@ function boardKeys(e) {
   else if (k === "g" || k === "Home") to(0);
   else if (k === "G" || k === "End") to(stops.length - 1);
   else if (k === "/") { e.preventDefault(); board.search.focus(); board.search.select(); }
-  else if (k === "n") { e.preventDefault(); boardCompose(); }
+  else if (k === "n") { e.preventDefault(); boardNew(); }
   else if (k === "?") { e.preventDefault(); showKeys(); }
   else if (k === "m") { e.preventDefault(); deskMenu(); }
   else if (k === "o") {
@@ -404,6 +404,24 @@ function boardSent(id) {
 function boardSentToast(id) {
   const left = [...board.box.querySelectorAll(".today-yours .ticket")].filter((t) => t.dataset.id !== id).length;
   toast(left ? `Sent. ${left} more for you` : "Sent. Nothing else waits on you");
+}
+
+// New chat: first where it works. Your projects, in your order, the last
+// one you used lit: Enter (or a tap) and you're in the box, in that one,
+// to say what to do. Type to narrow them; a new project from here too.
+// One project (or none yet): straight to the box.
+function boardNew() {
+  const ps = (app.view && app.view.projects) || [];
+  if (ps.length < 2) return boardCompose();
+  const last = (desk.newChat && desk.newChat.repo()) || store.get("last-project");
+  const lit = ps.some((p) => p.name === last) ? last : ps[0].name;
+  uiMenu("New chat: which project?", [
+    ...ps.map((p) => ({ label: projectName(p.name), icon: "project", on: p.name === lit,
+                        detail: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : "",
+                        act: () => newChatIn(p.name) })),
+    { label: "New project…", icon: "plus", always: true,
+      act: () => (app.desk ? newProject() : newProjectSheet((p) => newChatIn(p))) }],
+  { search: "Project" });
 }
 
 // The new chat's box at the top of the board (what you were writing stays).

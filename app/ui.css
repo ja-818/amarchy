@@ -417,6 +417,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 /* A menu on the phone (uiMenu): its icon, its words and under them what it does. */
 .ui-menu .menu-item .label { flex-direction: row; align-items: center; gap: 10px; }
 .ui-menu-text { display: flex; flex-direction: column; min-width: 0; }
+.ui-menu-search { margin: 0 0 10px; }
 @media (hover: hover) { .ui-brand.ui-action:hover { color: var(--accent); } }
 /* The bar's one thing to do: outlined, its key beside its words. */
 .ui-action {

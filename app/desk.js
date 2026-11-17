@@ -1345,7 +1345,7 @@ const DESK_KEYS = {
   KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
   KeyL: () => classicTerminal(),
   KeyR: () => uiPreviewGo(row(keyedId())),
-  KeyN: () => newSession(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => boardBack(),
+  KeyN: () => boardNew(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => boardBack(),
   ArrowUp: () => keyedId() && setPriority(row(keyedId()), "up"),
   ArrowDown: () => keyedId() && setPriority(row(keyedId()), "down"),
   KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(),
@@ -1468,7 +1468,8 @@ function classicTerminal() {
 // ---- pickers: a menu card, for everything amarchy asks
 
 // items: [{label, detail, icon, key, group (a function giving items), act,
-// keep}], or text (a field to type in, value its start). Typing filters;
+// keep, on (the one it starts on), always}], or text (a field to type in,
+// value its start). Typing filters;
 // ↑/↓ move, ↵ picks, → opens a group, ← and Esc go back.
 function picker(opts) {
   const stack = [];
@@ -1490,7 +1491,8 @@ function picker(opts) {
     titleEl.hidden = !o.title;
     input.value = o.value || "";
     input.placeholder = o.placeholder || (o.text ? "" : "Search");
-    at = 0;
+    const all = Array.isArray(o.items) ? o.items : [];
+    at = Math.max(all.findIndex((it) => it.on), 0);
     draw();
     input.focus();
   };
@@ -1643,7 +1645,7 @@ async function closeCurrent() {
 function deskMenu() {
   const s = app.desk ? row(keyedId()) : null;
   uiMenu("Amarchy", [
-    { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardCompose() },
+    { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardNew() },
     s && s.preview ? { label: "Open the preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", act: () => uiPreviewGo(s) } : null,
     { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
     desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,

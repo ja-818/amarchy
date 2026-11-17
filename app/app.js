@@ -1906,7 +1906,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     if (starting) starting(job, false);
   };
   requestAnimationFrame(() => { grow(); guess(); update(); });
-  return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field, addFiles, tray: () => tray };
+  return { el, update, use, dictate, focus: () => field.focus({ preventScroll: true }), field, addFiles, tray: () => tray, repo: () => repo };
 }
 
 // ---- what you shared into amarchy (bin/amarchy's "sharing into amarchy")

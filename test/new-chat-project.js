@@ -140,7 +140,37 @@ async function run(browser, layout, port) {
   }, { chats: CHATS, projects: PROJECTS });
   await page.goto("/");
   await until(page, () => window.app && app.view && app.view.sessions && app.view.sessions.length);
+
+  // ---- New: first, which project (the last one you used lit)
+  const menu = layout === "wide" ? ".picker" : ".sheet .ui-menu";
+  const rowSel = layout === "wide" ? ".picker-row" : ".sheet .ui-menu .menu-item";
+  const pickerLit = () => page.evaluate((sel) => [...document.querySelectorAll(`${sel}.on`)].filter((r) => !r.hidden).map((r) => (r.querySelector(".ui-menu-text") || r.querySelector(".label")).firstChild.textContent).join("|"), rowSel);
   await page.evaluate(() => document.querySelector(".board-new-btn").click());
+  check(where, await until(page, (m) => !!document.querySelector(m), menu), "New: a project picker opens first");
+  check(where, await page.evaluate(() => !board.composing), "the box isn't open yet");
+  const names = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((r) => (r.querySelector(".ui-menu-text") || r.querySelector(".label")).firstChild.textContent), rowSel);
+  check(where, names.length === 13 && names[0] === "Amarchy" && names[12] === "New project…", `every project, in your order, then New project… (${names.length})`);
+  check(where, await pickerLit() === "Jaken", `the last one you used is lit (${await pickerLit()})`);
+  await sleep(300);
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-picker.png`) });
+  if (layout === "wide") {
+    check(where, await page.evaluate(() => document.activeElement && document.activeElement.matches(".picker input")), "the keys are in its search");
+    await page.keyboard.press("Enter");
+  } else await page.click(`${rowSel}.on`);
+  check(where, await until(page, () => board.composing && !document.querySelector(".picker, .sheet-back")), "Enter (a tap): the picker goes, the box opens");
+  check(where, await until(page, () => (document.querySelector(".start-chat .new-projects .control.on") || {}).dataset?.tab === "jaken"), "in that project");
+  check(where, await page.evaluate(() => document.activeElement && document.activeElement.matches(".start-chat textarea")), "the keys in the box, to say what to do");
+
+  // ---- typing narrows it; Enter takes the first one left
+  await page.evaluate(() => { board.composing = false; boardComposeShow(); });
+  await page.evaluate(() => document.querySelector(".board-new-btn").click());
+  await until(page, (m) => !!document.querySelector(m), menu);
+  await page.fill(layout === "wide" ? ".picker input" : ".sheet .ui-menu-search input", "tax");
+  const left = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((r) => !r.hidden).map((r) => (r.querySelector(".ui-menu-text") || r.querySelector(".label")).firstChild.textContent).join("|"), rowSel);
+  check(where, left === "Taxflow|New project…", `"tax": Taxflow, and New project… (${left})`);
+  await page.keyboard.press("Enter");
+  check(where, await until(page, () => board.composing && (document.querySelector(".start-chat .new-projects .control.on") || {}).dataset?.tab === "taxflow"), "Enter: the box, in Taxflow");
+  await page.evaluate(() => desk.newChat.use("jaken"));
   await page.waitForSelector(".start-chat .new-projects .ui-tabs .control");
   await sleep(400);
 
@@ -195,7 +225,7 @@ async function run(browser, layout, port) {
   // ---- what you wrote names one: lit, and it says why (until you pick)
   await page.reload();
   await until(page, () => window.app && app.view && app.view.sessions && app.view.sessions.length);
-  await page.evaluate(() => document.querySelector(".board-new-btn").click());
+  await page.evaluate(() => boardCompose());
   await page.waitForSelector(".start-chat .new-projects .ui-tabs .control");
   await page.fill(".start-chat textarea", "Fix the login page in taxflow");
   check(where, await until(page, () => (document.querySelector(".start-chat .new-projects .control.on") || {}).dataset.tab === "taxflow"
@@ -214,7 +244,7 @@ async function run(browser, layout, port) {
   check(where, started.length === 1 && started[0].repo === "felipe-crm", `the chat starts in it (${JSON.stringify(started[0] || {})})`);
 
   // ---- +: New project
-  await page.evaluate(() => { if (!board.composing) document.querySelector(".board-new-btn").click(); });
+  await page.evaluate(() => { if (!board.composing) boardCompose(); });
   await page.waitForSelector(".start-chat .new-project");
   await page.click(".start-chat .new-project");
   check(where, await until(page, () => /New project|GitHub|empty/i.test((document.querySelector(".picker, .sheet") || {}).innerText || "")), "+: New project");

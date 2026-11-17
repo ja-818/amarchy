@@ -793,14 +793,19 @@ async function phone(browser, port) {
                                         return s.top >= r.bottom - 1 && s.width > 300 && document.documentElement.scrollWidth <= innerWidth; }),
         "its bar fits the phone: the search on a row of its own, nothing wider than the screen");
   check(where, await p.evaluate(() => getComputedStyle(document.querySelector(".board-search input")).fontSize === "16px"), "the search at 16px: iOS doesn't zoom in on it");
-  // + : the new chat's box at the top of the board, its keyboard up; Not now: away.
+  // + : first which project (the last one you used lit); a tap on it: the new chat's box at the top of the board, its keyboard up; Not now: away.
   await p.evaluate(() => document.querySelector(".board-new-btn").click());
+  check(where, await until(p, () => /which project/.test((document.querySelector(".sheet") || {}).innerText || "") && !!document.querySelector(".sheet .ui-menu .menu-item.on")),
+        "+: which project first, one lit");
+  await p.click(".sheet .ui-menu .menu-item.on");
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "+: the new chat's box, its keyboard up");
   await p.evaluate(() => document.querySelector(".board-new-close").click());
   check(where, await until(p, () => document.querySelector(".board-new").hidden), "Not now: away again");
   // Started: you stay on the board (it shows there once it's done), as after sending any chat something.
   await p.route("**/api/new", (r) => r.fulfill({ json: { id: "proj-work" } }));
   await p.evaluate(() => document.querySelector(".board-new-btn").click());
+  await p.click(".sheet .ui-menu .menu-item.on");
+  await until(p, () => document.activeElement === document.querySelector(".board-new textarea"));
   await p.keyboard.type("Look into the search page");
   await p.evaluate(() => document.querySelector(".board-new .start-chat .send").click());
   await sleep(500);
@@ -1061,6 +1066,8 @@ async function wide(browser, port) {
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
   await p.keyboard.press("n");
+  check(where, await until(p, () => !!document.querySelector(".picker-row.on") && /which project/.test(document.querySelector(".picker").innerText)), "n: which project first, one lit");
+  await p.keyboard.press("Enter");
   check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "n: a new chat, its box at the top");
   await p.keyboard.press("Escape");
   check(where, await until(p, () => document.querySelector(".board-new").hidden), "Esc: away again");
@@ -1074,6 +1081,8 @@ async function wide(browser, port) {
   const made = [];
   await p.route("**/api/new", (r) => { made.push(r.request().postDataJSON()); r.fulfill({ json: { id: "proj-work" } }); });
   await p.keyboard.press("n");
+  await until(p, () => !!document.querySelector(".picker-row.on"));
+  await p.keyboard.press("Enter");
   await until(p, () => document.activeElement === document.querySelector(".board-new textarea"));
   await p.keyboard.type("Fix what this shows");
   await p.evaluate(async () => {
