@@ -25,6 +25,8 @@ the change.
 | `uiAction(icon, label, act, {title, key, cls})` | A bar's one thing to do, outlined (its key beside its words; an icon alone on a phone). | New chat, Complete |
 | `uiBrand(act)` | The Ⓐ: the Amarchy menu, as Omarchy's mark opens its own; its dot, an automation that failed. | the board's bar |
 | `uiMenu(title, items)` | A menu: a keyboard's card on a computer (type to find, ↑ ↓ ↵), a sheet on the phone; items `{label, detail, icon, key, act, group, desk}`. | the Amarchy menu |
+| `uiShot({src, label, alt, cls, shots, lazy})` | A picture's thumbnail, its label on it ("Image 1", as the words name it: `[Image #1]`); a tap opens it full screen with the others of its group (`shots()`). `uiShotLabel(b, label)` labels it again. | a message's pictures, the box's tray, a new chat's |
+| `uiPhoto(shots, at)` | Pictures full screen on black (`[{src, label}]`): its label at the top, ✕ at the top right; ‹ ›, ← → or a swipe between several; ✕, Esc, a tap beside it or a swipe down closes it. | a tap on any thumbnail |
 | `.ui-bar` | One bar, as Omarchy's: where you are on the left, what you look at in the middle, icons in slots of one size and one outlined action on the right. | the board's bar, an open chat's (both layouts) |
 | `uiScore({streak, today, goal, risk, cool, flash, title, act})` | Your score in a button (square, as every control): the streak's flame (dim and pulsing while it's at risk, cooled while chats are stalled), today's merges with a ring to your goal; `flash`, a moment's pill by it (a fast reply, a merge). A tap opens the rest. | the board's summary line |
 | `uiProgress({label, value, max, note})` | Progress to something: its name, a bar, a note. | Your missions' rank |

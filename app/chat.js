@@ -1195,7 +1195,8 @@ class Chat {
   buildComposer() {
     this.input = h("textarea", { rows: 1, placeholder: this.placeholder, enterkeyhint: "enter", "aria-label": "Message",
                                  "aria-autocomplete": "list", oninput: () => this.typed() });
-    this.input.value = store.get(`draft:${this.id}`) || "";
+    // (The pictures aren't kept with the draft: nor their names in it.)
+    this.input.value = renumberImages(store.get(`draft:${this.id}`) || "", null);
     // A picture or a file pasted into the box goes with the message (text
     // pasted is text, even when an image of it comes along, as from a sheet).
     this.input.addEventListener("paste", (e) => {
@@ -2086,14 +2087,12 @@ class Chat {
       const same = prev && prev.matches(".msg.user") && prev.dataset.rec === rec ? prev.querySelector(".bubble") : null;
       if (typeof it.image === "number") {
         const url = `/api/session/${encodeURIComponent(this.id)}/image/${encodeURIComponent(rec)}/${it.image}`;
-        const shot = h("button", { class: "shot", type: "button", "aria-label": "Show the picture",
-                                   onclick: () => sheet(sheetHead("Your picture"), h("img", { class: "shot-full", src: url, alt: "A picture you sent" })) },
-                       h("img", { src: url, alt: "A picture you sent", loading: "lazy" }));
         const bubble = same || h("div", { class: "bubble" });
         let shots = bubble.querySelector(".shots");
         if (!shots) bubble.prepend(shots = h("div", { class: "shots" }));
-        shots.append(shot);
-        bubble.querySelectorAll(".chip.image").forEach((c) => c.remove());      // [Image #1]: the picture's here
+        shots.append(uiShot({ src: url, alt: "A picture you sent", cls: "shot", lazy: true, shots: () => shotsIn(bubble) }));
+        bubble.querySelectorAll(".chip.image:not([data-n])").forEach((c) => c.remove());      // [image]: the picture's here
+        labelShots(bubble);
         if (!same) where.append(h("div", { class: "msg user", "data-rec": rec }, bubble));
         return;
       }
@@ -2101,8 +2100,10 @@ class Chat {
       if (said.note) where.append(h("div", { class: "msg note" }, said.note));
       else if (said.summary) where.append(h("details", { class: "msg note long" }, h("summary", {}, said.summary), h("pre", {}, said.text)));
       else if (same) {
-        const parts = same.querySelector(".shots") ? said.parts.filter((p) => !(p instanceof Node && p.matches(".chip.image"))) : said.parts;
+        // Its pictures there: a bare [image] is one of them; [Image #2] names one, its chip stays.
+        const parts = same.querySelector(".shots") ? said.parts.filter((p) => !(p instanceof Node && p.matches(".chip.image:not([data-n])"))) : said.parts;
         same.append(h("div", { class: "said" }, ...parts));
+        labelShots(same);
       } else where.append(h("div", { class: "msg user", "data-rec": rec || null }, h("div", { class: "bubble" }, ...said.parts)));
     } else if (it.kind === "command") {
       where.append(h("div", { class: "msg command" }, h("span", { class: "chip" }, it.text)));
@@ -2142,13 +2143,15 @@ class Chat {
     if (/^This session is being continued from a previous conversation/.test(t))
       return { summary: "Continued from an earlier conversation", text: t };
     const parts = [];
-    const re = /\[(?:image|Image #\d+)\]|<pasted_content[^>]*>([\s\S]*?)<\/pasted_content>|^\[File: ([^\]\n]+)\]$/gm;
+    const re = /\[(?:image|Image #(\d+))\]|<pasted_content[^>]*>([\s\S]*?)<\/pasted_content>|^\[File: ([^\]\n]+)\]$/gm;
     let at = 0, m;
     while ((m = re.exec(t))) {
       if (m.index > at) parts.push(t.slice(at, m.index));
       // A file you gave Claude (the composer names it so): its name, where it is.
-      parts.push(m[2] ? h("span", { class: "chip file", title: m[2] }, icon("file"), baseName(m[2]))
-                 : m[0].startsWith("<") ? h("span", { class: "pasted" }, m[1].trim())
+      // A picture named in the words ([Image #2]): "Image 2", as its thumbnail says.
+      parts.push(m[3] ? h("span", { class: "chip file", title: m[3] }, icon("file"), baseName(m[3]))
+                 : m[0].startsWith("<") ? h("span", { class: "pasted" }, m[2].trim())
+                 : m[1] ? h("span", { class: "chip image", "data-n": m[1] }, icon("image"), imageLabel(m[1]))
                  : h("span", { class: "chip image" }, icon("image"), "Image"));
       at = m.index + m[0].length;
     }
@@ -2815,16 +2818,19 @@ class Chat {
   // images on the tray.
   restore(content) {
     const text = content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    const back = [];
     for (const b of content) {
       if (b.type !== "image" || !b.source || !b.source.data) continue;
       const bin = atob(b.source.data);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const blob = new Blob([bytes], { type: b.source.media_type });
-      this.tray.push({ kind: "image", type: blob.type, data: b.source.data, url: URL.createObjectURL(blob), name: "image" });
+      back.push({ kind: "image", type: blob.type, data: b.source.data, url: URL.createObjectURL(blob), name: "image", state: "ready", n: back.length + 1 });
     }
-    const now = this.input.value.trim();
-    if (text) this.input.value = now ? `${text}\n${now}` : text;
+    // Its words and pictures before what's in the box: those counted after its.
+    const now = this.shiftImages(this.input.value.trim(), back);
+    this.tray = [...back, ...this.tray];
+    this.input.value = text && now ? `${text}\n${now}` : text || now;
     this.drawTray();
     this.typed();
     this.input.focus();
@@ -3266,7 +3272,9 @@ class Chat {
       this.sending = true;
       this.sendButtons();
       try {
-        await this.pasteIntoTerminal(images, message);
+        // Its prompt names each picture as it's pasted ([Image #3], counted
+        // over the conversation): the box's names would be other numbers.
+        await this.pasteIntoTerminal(images, renumberImages(message, null));
         this.sentOff(tray);
       } catch (e) {
         toast(e.message);
@@ -3324,8 +3332,9 @@ class Chat {
   outgo(message, text, tray) {
     const shots = tray.filter((a) => a.kind === "image" && a.url);
     const said = this.userView(message);
+    const group = shots.map((a) => ({ src: a.url, label: imageLabel(a.n) }));
     const bubble = h("div", { class: "bubble" },
-      shots.length ? h("div", { class: "shots" }, ...shots.map((a) => h("span", { class: "shot" }, h("img", { src: a.url, alt: "" })))) : null,
+      shots.length ? h("div", { class: "shots" }, ...group.map((g) => uiShot({ ...g, cls: "shot", shots: () => group }))) : null,
       ...(said.parts || [said.note || said.summary || ""]));
     tray.forEach((a) => { a.taken = false; });
     // (What the conversation had then: after it comes again in full, not one of those.)
@@ -3381,7 +3390,8 @@ class Chat {
     }
     // Several that didn't go: back in the order they were sent, before what you wrote since.
     const kept = this.takenBack && this.input.value.startsWith(this.takenBack) ? this.takenBack : "";
-    const rest = this.input.value.slice(kept.length).trim();
+    // Its pictures first: what's on the tray now (and named in what you wrote since) counted after them.
+    const rest = this.shiftImages(this.input.value.slice(kept.length).trim(), tray);
     this.takenBack = kept ? `${kept}\n${text}` : text;
     this.input.value = rest ? `${this.takenBack}\n${rest}` : this.takenBack;
     this.tray = [...tray, ...this.tray];
@@ -3455,6 +3465,10 @@ class Chat {
       return toast(`${IMAGES_MAX} images at most in one message`);
     const a = { kind: "image", name: file.name || "image", state: "reading" };
     this.tray.push(a);
+    // Named where you type, as Claude Code does: [Image #1], and "Image 1" on it in the tray.
+    a.n = this.tray.filter((x) => x.kind === "image").length;
+    placeImageName(this.input, a.n);
+    this.typed();
     this.drawTray();
     try {
       const img = await claudeImage(file);
@@ -3463,9 +3477,10 @@ class Chat {
       this.drawTray();
     } catch (e) {
       // An image the browser can't read (HEIC on a computer...): a file then.
+      if (a.removed) return;
       this.tray = this.tray.filter((x) => x !== a);
-      if (!a.removed) this.upload(file);
-      else this.drawTray();
+      this.renumber(a);
+      this.upload(file);
     }
   }
 
@@ -3492,6 +3507,7 @@ class Chat {
   unattach(a) {
     a.removed = true;
     this.tray = this.tray.filter((x) => x !== a);
+    if (a.kind === "image") this.renumber(a);
     if (a.url) URL.revokeObjectURL(a.url);
     // Uploaded and not sent: out of the worktree again.
     if (a.kind === "file" && a.path) this.post("upload", { remove: a.path }).catch(() => {});
@@ -3499,14 +3515,35 @@ class Chat {
     this.input.focus({ preventScroll: true });
   }
 
+  // A picture taken off the tray (gone): its name out of the words, and
+  // the ones after it counted again (Image 3 is Image 2 now), in the words too.
+  renumber(gone) {
+    const map = new Map([[gone.n, null]]);
+    this.tray.filter((x) => x.kind === "image").forEach((x, i) => { if (x.n !== i + 1) map.set(x.n, i + 1); x.n = i + 1; });
+    const was = this.input.value;
+    this.input.value = renumberImages(was, map);
+    if (this.input.value !== was) this.typed();
+  }
+
+  // Pictures coming back before the tray's (a message that didn't go, one
+  // taken off the queue): the tray's counted after them, in the words (text)
+  // that name them too.
+  shiftImages(text, before) {
+    const k = before.filter((x) => x.kind === "image").length;
+    const map = new Map();
+    if (k) for (const x of this.tray) if (x.kind === "image") { map.set(x.n, x.n + k); x.n += k; }
+    return map.size ? renumberImages(text, map) : text;
+  }
+
   drawTray() {
     this.trayEl.hidden = !this.tray.length;
+    const shots = () => this.tray.filter((x) => x.kind === "image" && x.url).map((x) => ({ src: x.url, label: imageLabel(x.n) }));
     this.trayEl.replaceChildren(...this.tray.map((a) => {
-      const x = h("button", { class: "att-x", type: "button", "aria-label": `Take ${a.name} off`, title: "Take it off",
+      const x = h("button", { class: "att-x", type: "button", "aria-label": `Take ${a.n ? imageLabel(a.n) : a.name} off`, title: "Take it off",
                               onclick: () => this.unattach(a) }, icon("failed"));
       if (a.kind === "image")
-        return h("div", { class: `att image${a.url ? "" : " busy"}`, title: a.name },
-                 a.url ? h("img", { src: a.url, alt: a.name }) : spinner(), x);
+        return h("div", { class: `att image${a.url ? "" : " busy"}`, title: a.n ? imageLabel(a.n) : a.name },
+                 a.url ? uiShot({ src: a.url, label: imageLabel(a.n), alt: a.name, shots }) : spinner(), x);
       const where = a.state === "uploading" ? "Uploading…" : a.state === "failed" ? a.error || "Didn't upload" : `Saved in the project: ${a.path}`;
       return h("div", { class: `att file ${a.state}`, title: a.path || a.name },
         a.state === "uploading" ? spinner() : icon(a.state === "failed" ? "failed" : "file", a.state === "failed" ? "bad" : ""),
@@ -3802,7 +3839,44 @@ class Chat {
 
 // ---- the composer's helpers
 
-const IMAGES_MAX = 20;              // images in one message (the server's limit)
+const IMAGES_MAX = 20;
+// ---- the pictures of a message, by name: [Image #1] in its words (as Claude
+// Code names a pasted one), "Image 1" on its thumbnail.
+function imageLabel(n) { return `Image ${n}`; }
+
+// [Image #n] where the caret is in a field, a space either side of it.
+function placeImageName(field, n) {
+  const v = field.value;
+  const at = field.selectionStart == null ? v.length : field.selectionStart;
+  const end = field.selectionEnd == null ? at : field.selectionEnd;
+  const before = v.slice(0, at), after = v.slice(end);
+  const put = `${before && !/\s$/.test(before) ? " " : ""}[Image #${n}]${/^\s/.test(after) ? "" : " "}`;
+  field.value = before + put + after;
+  const caret = before.length + put.length;
+  field.setSelectionRange(caret, caret);
+}
+
+// The words with their pictures counted again: map, old number -> new (null:
+// gone from them, and a space by it); no map: every name gone.
+function renumberImages(text, map) {
+  return String(text || "").replace(/( ?)\[Image #(\d+)\]( ?)/g, (m, a, n, b) => {
+    const to = map ? map.get(+n) : null;
+    if (map && to === undefined) return m;
+    return to === null ? (a && b ? " " : "") : `${a}[Image #${to}]${b}`;
+  });
+}
+
+// A message's thumbnails, labelled as its words name them: the n-th one
+// as the n-th [Image #k] (Claude's terminal counts them over the whole
+// conversation), else by its place (Image 1, Image 2...).
+function labelShots(bubble) {
+  const named = Array.from(bubble.querySelectorAll(".chip.image[data-n]"), (c) => c.dataset.n);
+  bubble.querySelectorAll(".shots .ui-shot").forEach((b, i) => uiShotLabel(b, imageLabel(named[i] || i + 1)));
+}
+
+function shotsIn(el) {
+  return Array.from(el.querySelectorAll(".ui-shot"), (b) => ({ src: b.dataset.src, label: b.dataset.label || "" }));
+}              // images in one message (the server's limit)
 const IMAGE_EDGE = 2000;            // px: a bigger picture is made this size (Claude sees no more)
 const IMAGE_BYTES = 3_700_000;      // a picture bigger than this is made smaller (Claude takes 5 MB, in base64)
 const UPLOAD_MAX = 50_000_000;      // bytes of a file you upload

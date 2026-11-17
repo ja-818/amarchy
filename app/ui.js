@@ -40,6 +40,9 @@
 // - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
 // - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
 //   find, ↑ ↓ ↵), a sheet on the phone; the same items.
+// - uiShot: a picture's thumbnail (in a message, in the box), its label on
+//   it (Image 1, as its [Image #1] in the words); a tap: uiPhoto.
+// - uiPhoto: pictures full screen, one at a time, ✕ at the top right.
 //
 // The two bars (the board's, an open chat's) are one bar (.ui-bar), as
 // Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
@@ -660,6 +663,88 @@ function uiMenu(title, items) {
          h("span", { class: "ui-menu-text" }, it.label, it.detail ? h("small", {}, it.detail) : null)),
     it.group ? h("span", { class: "val" }, "›") : null);
   return sheet(sheetHead(title), h("div", { class: "menu ui-menu" }, ...items.map(row)));
+}
+
+// ---- pictures: a thumbnail (uiShot) and full screen (uiPhoto)
+//
+// A thumbnail of a picture, its label on it ("Image 1": what the words call
+// it, [Image #1]), and a tap opens it full screen with the others of its
+// group (shots(): [{src, label}], as they are then, and which one this is).
+function uiShot({ src, label = "", alt = "", cls = "", shots = null, lazy = false }) {
+  const b = h("button", { class: `ui-shot${cls ? ` ${cls}` : ""}`, type: "button", "data-src": src, onclick: (e) => {
+    e.stopPropagation();
+    const all = shots ? shots() : [{ src, label: b.dataset.label }];
+    uiPhoto(all, Math.max(0, all.findIndex((x) => x.src === src)));
+  } }, h("img", { src, alt: alt || label || "A picture", ...(lazy ? { loading: "lazy" } : {}), draggable: "false" }));
+  uiShotLabel(b, label);
+  return b;
+}
+
+// A thumbnail's label, now (Image 2, once the words say so).
+function uiShotLabel(b, label) {
+  b.dataset.label = label || "";
+  b.title = label ? `${label}: show it` : "Show the picture";
+  b.setAttribute("aria-label", label ? `Show ${label}` : "Show the picture");
+  let tag = b.querySelector(".ui-shot-label");
+  if (!label) { if (tag) tag.remove(); return; }
+  if (!tag) b.append(tag = h("span", { class: "ui-shot-label", "aria-hidden": "true" }));
+  tag.textContent = label;
+}
+
+// Pictures full screen ([{src, label}], from the one at at): fit to the
+// screen on black, its label at the top, the ✕ at the top right. It goes as
+// a sheet does (✕, Esc, a tap around the picture, a swipe down on the
+// phone); several: ‹ ›, the arrow keys, or a swipe sideways between them.
+function uiPhoto(shots, at = 0) {
+  shots = (shots || []).filter((x) => x && x.src);
+  if (!shots.length) return null;
+  let i = Math.min(Math.max(0, at), shots.length - 1);
+  const img = h("img", { class: "ui-photo-img", alt: "", draggable: "false" });
+  const label = h("div", { class: "ui-photo-label" });
+  const many = shots.length > 1;
+  const show = (to) => {
+    i = (to + shots.length) % shots.length;
+    img.src = shots[i].src;
+    img.alt = shots[i].label || "A picture";
+    label.textContent = [shots[i].label, many ? `${i + 1} of ${shots.length}` : ""].filter(Boolean).join(" · ");
+    label.hidden = !label.textContent;
+  };
+  const step = (by) => (e) => { if (e) e.stopPropagation(); show(i + by); };
+  const prev = many ? h("button", { class: "ui-photo-go prev", type: "button", "aria-label": "The picture before", title: "Before (←)", onclick: step(-1) }, "‹") : null;
+  const next = many ? h("button", { class: "ui-photo-go next", type: "button", "aria-label": "The next picture", title: "Next (→)", onclick: step(1) }, "›") : null;
+  const stage = h("div", { class: "ui-photo-stage" }, img);
+  const back = sheet({ key: "photo", cls: "photo" }, h("div", { class: "head" }, label), stage, prev, next);
+  const card = back.querySelector(".sheet");
+  card.setAttribute("aria-label", "Picture");
+  // Around the picture is the shade: a tap there closes it (the picture
+  // fills the screen as it fits: beside it is still around it).
+  const onPicture = (e) => {
+    const r = img.getBoundingClientRect();
+    const k = Math.min(r.width / (img.naturalWidth || r.width), r.height / (img.naturalHeight || r.height));
+    const w = (img.naturalWidth || r.width) * k, ht = (img.naturalHeight || r.height) * k;
+    const x = e.clientX - r.left - (r.width - w) / 2, y = e.clientY - r.top - (r.height - ht) / 2;
+    return x >= 0 && y >= 0 && x <= w && y <= ht;
+  };
+  card.addEventListener("click", (e) => {
+    if (e.target === card || e.target === stage || (e.target === img && !onPicture(e))) closeSheet();
+  });
+  // ← →: the one before, the next (before the sheet's keys move between its buttons).
+  back.addEventListener("keydown", (e) => {
+    if (!many || e.altKey || e.ctrlKey || e.metaKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    e.preventDefault(); e.stopPropagation();
+    show(i + (e.key === "ArrowRight" ? 1 : -1));
+  }, true);
+  // A swipe sideways: the next or the one before (down closes it: the sheet's).
+  let from = null;
+  stage.addEventListener("touchstart", (e) => { from = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+  stage.addEventListener("touchend", (e) => {
+    if (!from || !many) return;
+    const t = e.changedTouches[0], dx = t.clientX - from.x, dy = t.clientY - from.y;
+    from = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) show(i + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+  show(i);
+  return back;
 }
 
 // ---- a pirate at their crew's table (the board's Tavern, tavern.js)

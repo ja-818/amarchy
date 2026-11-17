@@ -1090,7 +1090,7 @@ async function wide(browser, port) {
   await sleep(400);
   check(where, await p.evaluate(() => !desk.current && getComputedStyle(document.querySelector(".tasks-board")).display !== "none"
                                    && /Started in Proj/.test((document.querySelector(".toast") || {}).innerText || "")), "and you stay on the board, on with the rest");
-  check(where, made.length === 1 && made[0].prompt === "Fix what this shows" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
+  check(where, made.length === 1 && made[0].prompt === "Fix what this shows [Image #1]" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
         `the picture goes with it (${JSON.stringify(made.map((x) => ({ ...x, images: (x.images || []).length })))})`);
   check(where, await p.evaluate(() => !document.querySelector(".board-new .tray .att")), "and the box is empty again");
   // Ctrl+Alt+H: the board; Ctrl+Alt+A: any chat, by its name.

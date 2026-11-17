@@ -1518,7 +1518,7 @@ function sheet(...kids) {
   // The shade closes it: a tap that began on it as well as ended there (not
   // the end of the long press that opened it, nor a swipe out of the card).
   let downOnShade = false;
-  const back = h("div", { class: `sheet-back${same >= 0 ? " again" : under ? " over" : ""}`,
+  const back = h("div", { class: `sheet-back${opts.cls ? ` ${opts.cls}` : ""}${same >= 0 ? " again" : under ? " over" : ""}`,
                           onpointerdown: (e) => { downOnShade = e.target === back; },
                           onclick: (e) => { if (e.target === back && downOnShade) closeSheet(); downOnShade = false; } }, card);
   // A finger moving on the shade moves nothing: not the page under it (in
@@ -1662,19 +1662,33 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
                                   if (e.key === "Enter" && !e.shiftKey && !e.altKey) { e.preventDefault(); start(); }
                                   else if (e.key === "Escape" && !field.value.trim() && typeof leaveNewChat === "function") { e.preventDefault(); leaveNewChat(); }
                                 } });
-  field.value = store.get("draft:new") || "";
+  field.value = renumberImages(store.get("draft:new") || "", null);      // (its pictures aren't kept: nor their names)
   // Pictures that go with it (a screenshot pasted, dropped, or picked): its
   // first message's, as a chat's tray has them (chat.js).
   let tray = [];
   const trayEl = h("div", { class: "tray", hidden: true });
   const drawTray = () => {
     trayEl.hidden = !tray.length;
-    trayEl.replaceChildren(...tray.map((a) => h("div", { class: `att image${a.url ? "" : " busy"}`, title: a.name },
-      a.url ? h("img", { src: a.url, alt: a.name }) : spinner(),
-      h("button", { class: "att-x", type: "button", "aria-label": `Take ${a.name} off`, title: "Take it off",
-                    onclick: () => { a.removed = true; tray = tray.filter((x) => x !== a); if (a.url) URL.revokeObjectURL(a.url); drawTray(); field.focus(); } },
+    const shots = () => tray.filter((x) => x.url).map((x) => ({ src: x.url, label: imageLabel(x.n) }));
+    trayEl.replaceChildren(...tray.map((a) => h("div", { class: `att image${a.url ? "" : " busy"}`, title: imageLabel(a.n) },
+      a.url ? uiShot({ src: a.url, label: imageLabel(a.n), alt: a.name, shots }) : spinner(),
+      h("button", { class: "att-x", type: "button", "aria-label": `Take ${imageLabel(a.n)} off`, title: "Take it off",
+                    onclick: () => { takeOff(a); field.focus(); } },
         icon("failed")))));
     buttons();
+  };
+  // Named where you type ([Image #1]), as in a chat's box; one taken off:
+  // its name out of the words, the ones after it counted again.
+  const named = () => { store.set("draft:new", field.value); grow(); buttons(); };
+  const takeOff = (a) => {
+    a.removed = true;
+    tray = tray.filter((x) => x !== a);
+    if (a.url) URL.revokeObjectURL(a.url);
+    const map = new Map([[a.n, null]]);
+    tray.forEach((x, i) => { if (x.n !== i + 1) map.set(x.n, i + 1); x.n = i + 1; });
+    field.value = renumberImages(field.value, map);
+    named();
+    drawTray();
   };
   const addFiles = (files) => {
     for (const f of files) {
@@ -1683,11 +1697,14 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       if (tray.length >= IMAGES_MAX) { toast(`${IMAGES_MAX} pictures at most`); break; }
       const a = { name: f.name || "image" };
       tray.push(a);
+      a.n = tray.length;
+      placeImageName(field, a.n);
+      named();
       claudeImage(f).then(async (img) => {
         if (a.removed) return;
         Object.assign(a, { type: img.type, data: await base64Of(img), url: URL.createObjectURL(img) });
         drawTray();
-      }).catch(() => { tray = tray.filter((x) => x !== a); drawTray(); toast(`This browser can't read ${a.name}`); });
+      }).catch(() => { if (!a.removed) takeOff(a); toast(`This browser can't read ${a.name}`); });
     }
     drawTray();
   };
@@ -1845,7 +1862,10 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     // (not over a chat you opened meanwhile: kept for your next New chat).
     const back = (why) => {
       if (starting) starting(job, false);
-      const now = field.value.trim();
+      // Its pictures first: the tray's now counted after them, in the words too.
+      const map = new Map();
+      for (const x of tray) { map.set(x.n, x.n + job.pics.length); x.n += job.pics.length; }
+      const now = renumberImages(field.value.trim(), map);
       field.value = now ? `${job.text}\n${now}` : job.text;
       store.set("draft:new", field.value);
       tray = [...job.pics, ...tray];
@@ -1874,7 +1894,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     });
     let d;
     try {
-      d = await api("/api/new", { repo: job.repo, prompt: job.text, model: job.model, ...(images.length ? { images } : {}) });
+      d = await api("/api/new", { repo: job.repo, prompt: job.text.replace(/\s+$/, ""), model: job.model, ...(images.length ? { images } : {}) });
     } catch (e) {
       return back(`Didn't start: ${e.message}`);
     }
