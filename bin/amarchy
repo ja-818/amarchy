@@ -9628,6 +9628,8 @@ def composer_info(s):
         live = agent_live(sid)
         model, mode = live.get("model") or "", live.get("permission_mode") or ""
         effort = live.get("effort") or ""
+        if not effort and agent_up(sid):
+            effort = asked_effort(sid)      # a broker from before efforts: Claude says
         if not agent_up(sid):       # asleep: it wakes in what you chose last
             try:
                 chosen = json.loads((claude_dir(sid) / "chosen.json").read_text())
@@ -9645,6 +9647,17 @@ def composer_info(s):
     models = models_of(told)
     return {"engine": "chat" if chat else "terminal", "commands": commands, "models": models,
             "model": model, "effort": effort, "mode": mode, "up": agent_up(sid) if chat else None}
+
+
+def asked_effort(sid):
+    """The effort a session's Claude thinks at, asked of it (get_settings),
+    for a broker that doesn't keep it in live.json; "" if it doesn't say."""
+    try:
+        r = agent_call(sid, {"op": "control", "request": {"subtype": "get_settings"}, "timeout": 5}, timeout=8)
+    except OSError:
+        return ""
+    e = ((r.get("response") or {}).get("applied") or {}).get("effort") if r.get("ok") else None
+    return e if e in EFFORTS else ""
 
 
 def upload_name(name):
@@ -12886,6 +12899,14 @@ def app_handler(st, users, address):
                 request = {"op": "control", "request": {"subtype": "set_permission_mode", "mode": data["mode"]}}
             try:
                 r = agent_call(sid, request)
+                if request["op"] == "effort" and str(r.get("error") or "").startswith("unknown op"):
+                    # A broker from before efforts (it started before amarchy
+                    # knew them): set on its Claude all the same, and kept.
+                    r = agent_call(sid, {"op": "control", "request": {"subtype": "apply_flag_settings", "settings": {
+                        "effortLevel": data["effort"] if data["effort"] in EFFORTS else None}}})
+                    if r.get("ok"):
+                        agent_remember(sid, effort=data["effort"])
+                        r["response"] = {"effort": data["effort"]} if data["effort"] in EFFORTS else None
             except OSError as e:
                 return self.error(500, f"Claude's broker didn't answer: {e}")
             if not r.get("ok"):

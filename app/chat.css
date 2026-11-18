@@ -484,7 +484,8 @@
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-control);
 }
-.pills .pill:first-child { flex-shrink: 0; }
+.pills .pill:first-child, .pills .pill.effort { flex-shrink: 0; }
+.pill[hidden] { display: none; }
 .pill .k { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill .ic { width: 14px; height: 14px; flex: none; }
 .pill .chev { transform: rotate(-90deg); width: 12px; height: 12px; }

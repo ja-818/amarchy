@@ -459,6 +459,7 @@ th { font-weight: 700; }
   border-radius: var(--radius-control);
   color: var(--text-muted);
 }
+.new-under .pick[hidden] { display: none; }
 .new-under .pick:active { background: var(--control-hover); }
 @media (hover: hover) { .new-under .pick:hover { background: var(--control-hover); } }
 .new-under .pick .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link); font-weight: 700; }

@@ -1646,6 +1646,9 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   const modelLabel = h("b", { class: "name" });
   const modelPick = h("button", { class: "pick model", type: "button", "aria-label": "Model: which Claude answers", "aria-haspopup": "menu",
                                   onclick: () => pickModel() }, h("span", { class: "in" }, "on"), modelLabel, glyph("down"));
+  const effortLabel = h("b", { class: "name" });
+  const effortPick = h("button", { class: "pick effort", type: "button", "aria-label": "Effort: how hard Claude thinks", "aria-haspopup": "menu",
+                                   onclick: () => pickEffort() }, effortLabel, glyph("down"));
   const field = h("textarea", { rows: wide ? 3 : 1, placeholder: "What do you want to do?", enterkeyhint: wide ? "go" : "enter",
                                 "aria-label": "What do you want to do?",
                                 oninput: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
@@ -1727,7 +1730,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); } });
   const box = h("div", { class: "prompt new" }, field, imgBtn, micBtn, wide ? null : send);
-  const under = h("div", { class: "new-under" }, modelPick, why, wide ? h("span", { class: "hint" }, "Tab, the next project · Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
+  const under = h("div", { class: "new-under" }, modelPick, effortPick, why, wide ? h("span", { class: "hint" }, "Tab, the next project · Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
     wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, row, trayEl, box, under);
   // Dropped on it: the pictures go with it too.
@@ -1779,8 +1782,11 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     uiTabs(ps.map((p) => ({ key: p.name, label: projectName(p.name), title: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : null })),
       repo, (p) => choose(p), picks);
     why.hidden = !guessed;
-    modelLabel.textContent = modelEffort(modelName(model(), models()) || model(), effort());
-    modelPick.title = "Which Claude answers, and how hard it thinks: every new chat starts on them, until you pick others";
+    modelLabel.textContent = modelName(model(), models()) || model();
+    modelPick.title = "Which Claude answers: every new chat starts on it, until you pick another";
+    effortPick.hidden = !effortsOf(modelOf(model(), models())).length;
+    effortLabel.textContent = effortName(effort()) || "Auto";
+    effortPick.title = "How hard Claude thinks: every new chat starts on it, until you pick another";
     buttons();
   };
   // The models Claude said there are (the newest Claude's), else the short list.
@@ -1824,35 +1830,36 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       toast(e.message);
     }
   };
-  // The main ones (opus, sonnet...: each its latest), the dated versions
-  // under "Other versions…", then how hard it thinks (the model's levels).
+  // The main ones (opus, sonnet...: each its latest), the dated versions under "Other versions…".
   const pickModel = () => {
     const list = models(), on = modelOf(model(), list);
     const main = list.filter((x) => !/^claude-/.test(x.value));
     const others = list.filter((x) => !main.includes(x));
-    const levels = effortsOf(on).length ? [...effortsOf(on), "auto"] : [];
     const row = (x) => ({ label: x.displayName || x.value, detail: x.description || "", icon: on && on.value === x.value ? "check" : "",
                           act: () => setModel(x) });
-    const effortRow = (e) => ({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about, icon: newEffort() === e ? "check" : "",
-                                on: newEffort() === e, act: () => setEffort(e) });
     if (app.desk) return picker({ title: "Which Claude answers? New chats start on it", placeholder: "Model", items: [
       ...(main.length ? main : list).map(row),
-      ...(main.length && others.length ? [{ label: "Other versions…", always: true, group: () => ({ title: "Other versions", items: others.map(row) }) }] : []),
-      ...(levels.length ? [{ label: `Effort: ${effortName(effort()) || "Auto"}`, detail: "How hard it thinks", icon: "", always: true,
-                                 group: () => ({ title: "How hard it thinks? New chats start on it", items: levels.map(effortRow) }) }] : [])] });
+      ...(main.length && others.length ? [{ label: "Other versions…", always: true, group: () => ({ title: "Other versions", items: others.map(row) }) }] : [])] });
     const item = (x) => h("button", { class: `menu-item${on && on.value === x.value ? " on" : ""}`, onclick: () => { closeSheets(); setModel(x); } },
       h("span", { class: "label" }, x.displayName || x.value, x.description ? h("small", {}, x.description) : null),
       on && on.value === x.value ? glyph("check", "val") : null);
-    const effortItem = (e) => h("button", { class: `menu-item${newEffort() === e ? " on" : ""}`, onclick: () => { closeSheets(); setEffort(e); } },
-      h("span", { class: "label" }, EFFORT_WORDS[e].label, h("small", {}, EFFORT_WORDS[e].about)),
-      newEffort() === e ? glyph("check", "val") : null);
     const rest = h("div", { class: "menu", hidden: true }, ...others.map(item));
     sheet(sheetHead("Model", "Which Claude answers: new chats start on it"),
       h("div", { class: "menu" }, ...(main.length ? main : list).map(item)),
       main.length && others.length ? h("button", { class: "control wide", onclick: (e) => { rest.hidden = false; e.currentTarget.remove(); } }, "Other versions…") : null,
-      main.length && others.length ? rest : null,
-      levels.length ? h("div", { class: "section" }, "Effort: how hard it thinks") : null,
-      levels.length ? h("div", { class: "menu" }, ...levels.map(effortItem)) : null);
+      main.length && others.length ? rest : null);
+  };
+  // How hard it thinks: the levels the model takes, and Auto (the model's own).
+  const pickEffort = () => {
+    const levels = [...effortsOf(modelOf(model(), models())), "auto"];
+    const now = newEffort();
+    if (app.desk) return picker({ title: "How hard Claude thinks? New chats start on it", placeholder: "Effort",
+      items: levels.map((e) => ({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about, icon: now === e ? "check" : "", on: now === e,
+                                  act: () => setEffort(e) })) });
+    sheet(sheetHead("Effort", "How hard Claude thinks: new chats start on it"),
+      h("div", { class: "menu" }, ...levels.map((e) => h("button", { class: `menu-item${now === e ? " on" : ""}`, onclick: () => { closeSheets(); setEffort(e); } },
+        h("span", { class: "label" }, EFFORT_WORDS[e].label, h("small", {}, EFFORT_WORDS[e].about)),
+        now === e ? glyph("check", "val") : null))));
   };
   const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
   // Tab's: the project after this one in the row (before it), round the ends.

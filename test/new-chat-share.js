@@ -183,9 +183,12 @@ async function run(browser, layout, port, home) {
   await sleep(500);
   await page.screenshot({ path: path.join(SHOTS, `${layout}-new-chat.png`) });
   const pill = () => page.evaluate(() => (document.querySelector(".start-chat .pick.model .name") || {}).textContent);
-  // How hard it thinks, beside it: Opus's own (auto), as a chat was last seen on it.
-  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5 · High"),
-        `the new chat starts on Opus 5.5, at its own effort (${await pill()})`);
+  const effortPill = () => page.evaluate(() => (document.querySelector(".start-chat .pick.effort .name") || {}).textContent);
+  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5"),
+        `the new chat starts on Opus 5.5 (${await pill()})`);
+  // How hard it thinks, its own pick beside it: Opus's own (auto), as a chat was last seen on it.
+  check(where, await until(page, () => (document.querySelector(".start-chat .pick.effort .name") || {}).textContent === "High"),
+        `and its effort beside it: Opus's own (${await effortPill()})`);
   await page.click(".start-chat .pick.model");
   const menu = layout === "wide" ? ".picker-row" : ".sheet .menu-item";
   await page.waitForSelector(menu);
@@ -211,18 +214,16 @@ async function run(browser, layout, port, home) {
   await page.locator(menu, { hasText: "Opus 5.5" }).first().click();
   check(where, await until(page, () => app.view.new_model === "opus"), "back on Opus 5.5");
 
-  // ---- the new chat's effort: in the model's menu, kept on the host, sent with the chat
-  await page.click(".start-chat .pick.model");
-  await page.waitForSelector(menu);
-  if (layout === "wide") await page.locator(".picker-row", { hasText: "Effort: High" }).first().click();
+  // ---- the new chat's effort: its own menu, kept on the host, sent with the chat
+  await page.click(".start-chat .pick.effort");
   await page.waitForSelector(`${menu}:has-text("Extra high")`);
   await sleep(500);
   await page.screenshot({ path: path.join(SHOTS, `${layout}-effort-menu.png`) });
   const levels = await page.$$eval(menu, (xs) => xs.filter((x) => x.offsetParent !== null).map((x) => x.querySelector(".label").firstChild.textContent));
-  check(where, ["Low", "Medium", "High", "Extra high", "Max", "Auto"].every((l) => levels.includes(l)), `every effort Opus takes, and Auto (${levels.join(", ")})`);
+  check(where, levels.join(",") === "Low,Medium,High,Extra high,Max,Auto", `only the efforts Opus takes, and Auto (${levels.join(", ")})`);
   await page.locator(menu, { hasText: /^Max/ }).first().click();
-  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5 · Max"),
-        `picked: Max beside the model (${await pill()})`);
+  check(where, await until(page, () => (document.querySelector(".start-chat .pick.effort .name") || {}).textContent === "Max"),
+        `picked: Max (${await effortPill()})`);
   await sleep(300);
   const keptEffort = fs.readFileSync(path.join(home, "state", "amarchy", "new-effort"), "utf8").trim();
   check(where, keptEffort === "max", `kept on the host for every new chat (${keptEffort})`);
@@ -302,21 +303,24 @@ async function run(browser, layout, port, home) {
   await page.screenshot({ path: path.join(SHOTS, `${layout}-in-the-box.png`) });
   check(where, sent.length === 1, "and nothing sent until you send it");
 
-  // ---- the chat's model pill: how hard it thinks beside the model, picked in its menu (and /effort)
-  const chatPill = () => page.evaluate(() => (app.desk ? desk.chat : app.session.chat).modelPill.textContent);
-  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · High"),
-        `the chat's pill: the model and its effort (${await chatPill()})`);
-  await page.evaluate(() => (app.desk ? desk.chat : app.session.chat).modelPill.click());
+  // ---- the chat's effort: its own pill beside the model's, its own menu (and /effort)
+  const chatPill = () => page.evaluate(() => { const c = app.desk ? desk.chat : app.session.chat; return `${c.modelPill.textContent} | ${c.effortPill.textContent}`; });
+  check(where, await until(page, () => { const c = app.desk ? desk.chat : app.session.chat;
+    return c.modelPill.textContent === "Opus 5.5" && c.effortPill.textContent === "High" && !c.effortPill.hidden; }),
+        `the chat's pills: the model, then its effort (${await chatPill()})`);
+  await page.evaluate(() => (app.desk ? desk.chat : app.session.chat).effortPill.click());
   await page.waitForSelector('.cm-item:has-text("Extra high")');
   await sleep(300);
-  await page.screenshot({ path: path.join(SHOTS, `${layout}-chat-model-menu.png`) });
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-chat-effort-menu.png`) });
+  const offeredE = await page.$$eval(".cm-item", (xs) => xs.filter((x) => x.offsetParent !== null).map((x) => x.textContent));
+  check(where, !offeredE.some((t) => t.startsWith("Opus") || t.startsWith("Sonnet")), `no models in it (${offeredE.length} items)`);
   const lit = await page.$$eval(".cm-item.on", (xs) => xs.map((x) => x.textContent));
-  check(where, lit.some((t) => t.startsWith("Opus 5.5")) && lit.some((t) => t.startsWith("High")), `its model and effort lit (${lit.join(" | ")})`);
+  check(where, lit.length === 1 && lit[0].startsWith("High"), `its effort lit (${lit.join(" | ")})`);
   await page.locator(".cm-item", { hasText: /^Max/ }).first().click();
-  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · Max"),
+  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).effortPill.textContent === "Max"),
         `picked: Max, for this chat (${efforts.join(",")}; ${await chatPill()})`);
   await page.evaluate(() => { const c = app.desk ? desk.chat : app.session.chat; c.tray.slice().forEach((a) => c.unattach(a)); c.input.value = "/effort low"; c.typed(); c.send(); });
-  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · Low"),
+  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).effortPill.textContent === "Low"),
         `/effort low: the same (${efforts.join(",")})`);
   check(where, efforts.join(",") === "max,low" && sent.length === 1, "set on the chat, not sent to Claude as words");
   await page.screenshot({ path: path.join(SHOTS, `${layout}-chat-pill.png`) });

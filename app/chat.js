@@ -1239,8 +1239,9 @@ class Chat {
     // Over it: the model and the mode, and the menu that's open (+, /, a pill's).
     this.info = null;           // /composer: the commands, the models, the model and mode
     this.modelPill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("model") });
+    this.effortPill = h("button", { class: "pill effort", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("effort") });
     this.modePill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("mode") });
-    this.pills = h("div", { class: "pills" }, this.modelPill, this.modePill);
+    this.pills = h("div", { class: "pills" }, this.modelPill, this.effortPill, this.modePill);
     this.menuEl = h("div", { class: "cmenu", role: "menu", tabindex: "-1", hidden: true });
     menuKeys(this.menuEl, { close: () => this.closeMenu(true) });
     this.box = h("div", { class: "composer-wrap" }, this.menuEl, this.pills, this.composer);
@@ -3262,12 +3263,12 @@ class Chat {
       const m = modelOf(model[1], s.models) || { value: model[1], displayName: modelName(model[1], s.models) };
       return this.setModel(m);
     }
-    // /effort too: its level, or the model's menu where it's picked.
+    // /effort too: its level, or its menu.
     const effort = this.engine === "chat" && !tray.length && text.trim().match(/^\/effort(?:\s+(\S+))?$/i);
     if (effort && (!effort[1] || EFFORT_WORDS[effort[1].toLowerCase()])) {
       this.input.value = "";
       this.typed();
-      return effort[1] ? this.setEffort(effort[1].toLowerCase()) : this.openMenu("model");
+      return effort[1] ? this.setEffort(effort[1].toLowerCase()) : this.openMenu("effort");
     }
     const files = tray.filter((a) => a.kind === "file").map((a) => `[File: ${a.path}]`);
     const message = files.length ? `${text.replace(/\s+$/, "")}${text.trim() ? "\n\n" : ""}${files.join("\n")}` : text;
@@ -3612,13 +3613,16 @@ class Chat {
     const sig = JSON.stringify([s.model, s.effort, mode, s.mode, this.engine, this.menu && this.menu.name]);
     if (sig === this.pillsSig) return;
     this.pillsSig = sig;
-    this.modelPill.replaceChildren(h("span", { class: "k" }, modelEffort(modelName(s.model, s.models) || "Default model", s.effort)),
-                                   icon("chevron", "chev"));
-    this.modelPill.title = s.effort ? `Which Claude answers, and how hard it thinks (${effortName(s.effort)})` : "Which Claude answers";
+    this.modelPill.replaceChildren(h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
+    this.modelPill.title = "Which Claude answers";
+    // How hard it thinks: its own pill, on the chat engine, for a model that takes an effort.
+    this.effortPill.hidden = this.engine !== "chat" || !effortsOf(modelOf(s.model, s.models)).length;
+    this.effortPill.replaceChildren(h("span", { class: "k" }, effortName(s.effort) || "Effort"), icon("chevron", "chev"));
+    this.effortPill.title = s.effort ? `How hard Claude thinks: ${EFFORT_WORDS[s.effort].about.toLowerCase()}` : "How hard Claude thinks";
     this.modePill.replaceChildren(icon("shield"), h("span", { class: "k" }, mode || "How Claude asks"), icon("chevron", "chev"));
     this.modePill.title = s.mode ? modeWords(s.mode).about || "" : "How Claude asks before it changes things";
     this.modePill.classList.toggle("off", this.engine !== "chat");
-    for (const [p, n] of [[this.modelPill, "model"], [this.modePill, "mode"]])
+    for (const [p, n] of [[this.modelPill, "model"], [this.effortPill, "effort"], [this.modePill, "mode"]])
       p.setAttribute("aria-expanded", String(!!this.menu && this.menu.name === n));
   }
 
@@ -3677,12 +3681,12 @@ class Chat {
   openMenu(name) {
     this.menu = { name, at: 0, all: false };
     this.menuEl.hidden = false;
-    this.menuEl.setAttribute("aria-label", { add: "Add", slash: "Commands", model: "Model", mode: "Mode" }[name]);
+    this.menuEl.setAttribute("aria-label", { add: "Add", slash: "Commands", model: "Model", effort: "Effort", mode: "Mode" }[name]);
     if (!this.outside) {
       this.outside = (e) => { if (this.menu && !this.box.contains(e.target)) this.closeMenu(); };
       document.addEventListener("pointerdown", this.outside, true);
     }
-    if ((name === "slash" || name === "model") && (!this.info || Date.now() - (this.infoAt || 0) > 30000)) this.loadInfo();
+    if ((name === "slash" || name === "model" || name === "effort") && (!this.info || Date.now() - (this.infoAt || 0) > 30000)) this.loadInfo();
     this.drawMenu();
     this.drawPills();
     if (name !== "slash") menuFocus(this.menuEl);
@@ -3699,7 +3703,7 @@ class Chat {
     if (this.outside) document.removeEventListener("pointerdown", this.outside, true);
     this.outside = null;
     this.drawPills();
-    if (back) ({ add: this.attachBtn, model: this.modelPill, mode: this.modePill }[was] || this.input).focus({ preventScroll: true });
+    if (back) ({ add: this.attachBtn, model: this.modelPill, effort: this.effortPill, mode: this.modePill }[was] || this.input).focus({ preventScroll: true });
   }
 
   drawMenu() {
@@ -3729,14 +3733,13 @@ class Chat {
       kids = [head("Model"), ...list.map((x) => item({ label: x.displayName || x.value, detail: x.description, disabled: !chat,
                                                          on: current && current.value === x.value, act: () => this.setModel(x) }))];
       if (list !== s.models) kids.push(item({ label: "Other versions…", act: () => { m.all = true; this.drawMenu(); menuFocus(this.menuEl); } }));
-      const levels = chat ? effortsOf(current) : [];
-      if (levels.length) {
-        kids.push(head("Effort: how hard it thinks"),
-                  ...levels.map((e) => item({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about, on: s.effort === e,
-                                              act: () => this.setEffort(e) })),
-                  item({ label: EFFORT_WORDS.auto.label, detail: EFFORT_WORDS.auto.about, act: () => this.setEffort("auto") }));
-      }
       if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself. Here you change it for this chat only."));
+    } else if (m.name === "effort") {
+      const s = this.settings();
+      kids = [head("How hard Claude thinks"),
+              ...effortsOf(modelOf(s.model, s.models)).map((e) => item({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about,
+                                                                          on: s.effort === e, act: () => this.setEffort(e) })),
+              item({ label: EFFORT_WORDS.auto.label, detail: EFFORT_WORDS.auto.about, act: () => this.setEffort("auto") })];
     } else if (m.name === "mode") {
       const now = this.settings().mode;
       const modes = ["default", "acceptEdits", "plan", "auto", ...(["default", "acceptEdits", "plan", "auto"].includes(now) || !now ? [] : [now])];
@@ -3923,7 +3926,7 @@ const CORE_COMMANDS = [
   { name: "model", label: "Change the model", about: "Which Claude answers", menu: "model" },
   { name: "mode", label: "Change how Claude asks", about: "Before changes, never, or plan first", menu: "mode" },
   { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max",
-    chatMenu: "model" },
+    chatMenu: "effort" },
   { name: "usage", label: "How much of your plan is used", about: "This chat's and this week's share of your Claude plan", run: true },
   { name: "init", label: "Write notes about this project", about: "Claude studies the project and writes a CLAUDE.md for itself", run: true },
 ];
@@ -3982,11 +3985,6 @@ function effortsOf(m) {
   if (m && m.supportsEffort === false) return [];
   const told = m && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels.filter((e) => EFFORTS.includes(e)) : [];
   return told.length ? told : EFFORTS;
-}
-// "Opus 5.5 · Medium": the model, and how hard it thinks when that's known.
-function modelEffort(name, effort) {
-  const e = effortName(effort);
-  return name && e ? `${name} · ${e}` : name || "";
 }
 
 // A mode in words (MODE_WORDS, shared with the plan card).
