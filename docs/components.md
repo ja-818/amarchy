@@ -10,7 +10,6 @@ the change.
 | Component | What it draws | Used by |
 | --- | --- | --- |
 | `uiCard({kind, hue, lead, chip, title, pill, body, actions, open, id, unseen})` | One card for everything: a chat, a task, what a search found. Its head (project or who, name, pill), its body, its actions. The whole card opens it; a chat's card held down (a right click, the menu key) opens its menu. `unseen`: a chat that answered and you haven't opened since (by default its chat's own, whether it asks you something or not), lit (its ground washed in `--unseen`, a bar down its edge, a glow that breathes, its name bold). | today.js (every card), tasks.js (search results) |
-| `uiPirate({id, hue, look, pose, mark, say, title, pill, open, cheer})` | A chat as one of the crew at their crew's table: ten pirates drawn as a noir comic (`uiCrewArt`, `UI_CREW`), the same one for a chat every time (`uiLook(id).kind`), their vest and lapels their crew's color, posed as it stands (`idle`, `work`, `ask`, `run`, `fresh`, `done`, `blocked`, `sleep`, `stale`, `arrive`, `empty`), a mark over their head, what they say in a bubble under the pointer, their name and status under them at one height (what's for you is on the table's card: a `uiCard`, tavern.js). A card underneath (`.tcard`, the chat's id, a `.today-go` head): the board's keys work on it. | tavern.js (the Tavern) |
 | `uiPill(text, tone, {long, title})` | Where something stands: `ask`, `late`, `done`, `working`, `running` (these two spin), `accent`, `warn`, `quiet`, `new` (filled in `--unseen`, a dot beating in it: what you haven't seen). `long` cuts its words short with … where they don't fit. | every card's state |
 | `uiMergedWords(merged)` | A chat's merge in words: "Merged ✓ 3:42 PM", "Merged ✓ ×3 · Fri 6:05 PM". | a merged chat's pill, its chat's strip |
 | `uiButton(label, act, primary, cls)` | An action on a card or a section (`quiet`: words only; `complete`: Complete mission, its ✓, outlined like the rest). | cards, sections |
@@ -18,7 +17,7 @@ the change.
 | `uiFolds(...folds)`, `uiFold(title, {open, toggle}, ...kids)` | What's long, folded under heads that each say their point, one box: a tap opens one (`toggle(open)` told; `fold.set(open)` opens or folds it). | A reply's sections |
 | `uiBrief(rows, {lead})` | What something comes to (`lead`), then a few rows, label by label (`{label, value, tone}`): tone `you` lit, `none` quiet. | A reply's Briefing |
 | `uiActions(items)` | What's yours to do, a line each (`{text, due, done}`), marked in the accent. | In a Briefing, an older reply's list of things to do |
-| `uiTabs(items, on, pick, el, label, {scroll})` | One of a few, each with its count (what's your move there). `scroll`: one of many, in a row that scrolls sideways, the one that's on kept in view. | the board's Chats \| Tasks \| Tavern, a new chat's projects |
+| `uiTabs(items, on, pick, el, label, {scroll})` | One of a few, each with its count (what's your move there). `scroll`: one of many, in a row that scrolls sideways, the one that's on kept in view. | the board's Chats \| Tasks, a new chat's projects |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
 | `uiPreview(s, {head})` | A chat's live preview (`amarchy preview`): opens it, or asks its Claude to start it again when nothing answers. | Over a chat, on its card |
@@ -74,8 +73,6 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
 | `--chart-1` … `--chart-8`, `--chart-single`, `--chart-grid`, `--chart-axis` | A chart block's series, in that order (validated together for color-blind readers; a light theme gets their light steps), one series' color, its gridlines and its zero line |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
-| `--tavern-ink`, `--tavern-bone`, `--tavern-gold`, `--tavern-flame` | The Tavern's darkest shadow, its bone (the Jolly Roger, words in the dark), gold, a flame's heart |
-| `--tavern-wood`, `--tavern-wood-dark`, `--tavern-plank`, `--tavern-light`, `--tavern-sea`, `--tavern-radius`, `--tavern-seat-w`, `--tavern-scene-h` | Its tables, walls and floor, lantern and candle light, the sea in a porthole, a pirate's portrait's width (`--tavern-seat-w`, its height 1.2 times it) |
 | `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
 
 ## Keeping the phone and the computer together

@@ -8,20 +8,20 @@
 // works on that, and the next that's your move is lit, Enter to open it.
 //
 // The bar: the Ⓐ (the Amarchy menu: Automations, the look,
-// Settings, Keys), Chats | Tasks | Tavern (what's your move on Chats and Tasks), the search,
+// Settings, Keys), Chats | Tasks (what's your move on each), the search,
 // New chat.
 //
 // Everything has its key (? shows them): j / k (or the arrows) from card
 // to card, l / h into a card along its buttons and back out, Enter opens
 // (or presses), 1-4 picks an answer, x completes its mission (with Undo), r
-// opens what a done chat made, s marks one seen, Tab Chats, Tasks or the Tavern, / searches, n starts a new chat, m the menu, p pins a chat, f puts it for later, o shows only what needs you.
+// opens what a done chat made, s marks one seen, Tab Chats or Tasks, / searches, n starts a new chat, m the menu, p pins a chat, f puts it for later, o shows only what needs you.
 
-const BOARD_TABS = ["chats", "tasks", "tavern"];
+const BOARD_TABS = ["chats", "tasks"];
 const board = {
   el: null, box: null, head: null, slot: null, scroll: null,
   composing: false,  // the new chat's box at the top
   waitFor: null,     // a chat its address asks for that the list hasn't yet: opened once it has
-  tab: "chats",      // Chats (your chats), Tasks (your loops) or the Tavern (your chats as pirates): the one you were on (boardBuild)
+  tab: "chats",      // Chats (your chats) or Tasks (your loops): the one you were on (boardBuild)
   query: "",         // what the search box has: the board shows what it finds instead of Today
   found: null,       // the server's answer for it: {q, results}
   from: null,        // where the board was scrolled when a chat opened
@@ -33,9 +33,10 @@ function shown(el) { return el.checkVisibility ? el.checkVisibility() : !el.clos
 
 function boardBuild() {
   if (board.el) return board.el;
-  const tab = store.get("board-tab") === "office" ? "tavern" : store.get("board-tab");      // (the Office, before it was the Tavern)
-  board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
-  board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats, tasks or the tavern" });
+  for (const k of ["tavern-seats", "office-seats"]) store.set(k, "");      // (where the Tavern, gone, kept its pirates)
+  const tab = store.get("board-tab");
+  board.tab = BOARD_TABS.includes(tab) ? tab : "chats";      // (the Tavern's, gone: Chats)
+  board.switchEl = h("div", { class: "seg ui-tabs board-switch", role: "tablist", "aria-label": "Chats or tasks" });
   // The bar (ui.css .ui-bar), as an open chat's: where you are (the Ⓐ, its
   // menu: Automations, the look, Settings, Keys…; Chats |
   // Tasks), what you look for (the search), and the one thing to start.
@@ -165,7 +166,7 @@ function boardMarkIn(nodes) {
 // What j / k go through: each card in sight (its head), and the head of a
 // group that folds (Enter unfolds it).
 function boardStops() {
-  return [...board.box.querySelectorAll(".tcard > .today-go, details.tsec > summary")].filter((x) => shown(x) && !x.closest(".tv-say"));      // (a pirate's card: the pirate is the stop, tavern.js)
+  return [...board.box.querySelectorAll(".tcard > .today-go, details.tsec > summary")].filter(shown);
 }
 
 // The keys to a card (its head), in sight.
@@ -209,13 +210,12 @@ function boardKeys(e) {
   const focused = at >= 0;
   if (!focused) at = stops.indexOf(boardSel());
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
-  const to = (i) => { e.preventDefault(); const stop = stops[Math.max(0, Math.min(stops.length - 1, i))]; boardFocus(stop); if (board.tab === "tavern") tavernFollow(stop); };
-  const body = tavernBody(card);      // (a pirate's buttons are on the table's card)
-  const press = (sel) => { const b = body && [...body.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
+  const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
+  const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
   const k = e.key;
   // A card is a row: l (→) goes into it, along its buttons; h (←) back,
   // out of it from its first; Esc out at once. Enter presses the one you're on.
-  const inside = cardInside(body);
+  const inside = cardInside(card);
   // On a button in it, or the focus off it: the one lit in it (uiInner).
   let on = inside.indexOf(document.activeElement);
   if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(card, inside));
@@ -231,7 +231,7 @@ function boardKeys(e) {
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
-  // Tab: Chats | Tasks | Tavern, the next one (Shift+Tab, the one before).
+  // Tab: Chats | Tasks, the other one (Shift+Tab too).
   if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
   // Enter on the card lit, the focus off it: it opens (on a button, a tab,
   // the browser presses that).
@@ -251,7 +251,7 @@ function boardKeys(e) {
   }
   else if (!card) return;
   else if (/^[1-9]$/.test(k)) {
-    const o = body.querySelectorAll(".today-opt")[Number(k) - 1];
+    const o = card.querySelectorAll(".today-opt")[Number(k) - 1];
     if (o) { e.preventDefault(); o.click(); }
   } else if (k === "x") {
     const s = card.dataset.id && row(card.dataset.id);
@@ -280,16 +280,14 @@ function boardEsc(e) {
   boardBack();
 }
 
-// The board's tabs, Chats and Tasks, each with what's your move; and the
-// Tavern, your chats as pirates, a crew per project (tavern.js).
+// The board's tabs, Chats and Tasks, each with what's your move.
 function modeButtons() {
   if (!app.view || !board.switchEl) return;
   uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (Tab)" },
-          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" },
-          { key: "tavern", label: "Tavern", title: "Tavern: your chats as pirates, a crew per project (Tab)" }], board.tab, boardTab, board.switchEl);
+          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" }], board.tab, boardTab, board.switchEl);
 }
 
-// Chats, Tasks or the Tavern on the board, kept for the next time.
+// Chats or Tasks on the board, kept for the next time.
 function boardTab(tab) {
   board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   store.set("board-tab", board.tab);
