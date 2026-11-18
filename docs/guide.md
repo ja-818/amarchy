@@ -1140,6 +1140,8 @@ amarchy new <project> [name]          create a session (a name like wobbly-bakun
 amarchy new <project> [name] --prompt <text|->   the same, with the first thing its Claude is asked (- reads stdin)
 amarchy new <project> [name] --model <model>     on that model (opus, sonnet, haiku, a model id) instead of the
                                       new chat's default (the app's new chat picks it; Opus until you do)
+amarchy new <project> [name] --effort <effort>   thinking that hard (low, medium, high, xhigh, max, auto) instead
+                                      of the new chat's (the app's new chat picks it, beside the model)
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]   a message for its Claude, once Claude is free
 amarchy list [--compact]              sessions as JSON, in list order (task, age, agent, engine...)
 amarchy close [id] [--force]          close a session (the current one if no id); --force discards uncommitted changes

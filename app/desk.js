@@ -1167,6 +1167,7 @@ class DeskDetails {
       // The model and the mode, changed in the composer's own menus (chat.js).
       h("div", { class: "kv-hook", "data-hook": "model-mode" },
         item("Model", d.model ? modelWords(d.model) : "As Claude Code's default", pillButton("model")),
+        chat ? item("Effort", d.effort ? `${effortName(d.effort)}: ${EFFORT_WORDS[d.effort].about.toLowerCase()}` : null, d.effort ? pillButton("model") : null) : null,
         item("Mode", d.mode ? (MODE_WORDS[d.mode] || { label: d.mode }).label : "As Claude Code's default", chat ? pillButton("mode") : null)),
       item("State", statusWords(s)),
     ];

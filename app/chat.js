@@ -3262,6 +3262,13 @@ class Chat {
       const m = modelOf(model[1], s.models) || { value: model[1], displayName: modelName(model[1], s.models) };
       return this.setModel(m);
     }
+    // /effort too: its level, or the model's menu where it's picked.
+    const effort = this.engine === "chat" && !tray.length && text.trim().match(/^\/effort(?:\s+(\S+))?$/i);
+    if (effort && (!effort[1] || EFFORT_WORDS[effort[1].toLowerCase()])) {
+      this.input.value = "";
+      this.typed();
+      return effort[1] ? this.setEffort(effort[1].toLowerCase()) : this.openMenu("model");
+    }
     const files = tray.filter((a) => a.kind === "file").map((a) => `[File: ${a.path}]`);
     const message = files.length ? `${text.replace(/\s+$/, "")}${text.trim() ? "\n\n" : ""}${files.join("\n")}` : text;
     const images = tray.filter((a) => a.kind === "image").map((a) => ({ type: a.type, data: a.data }));
@@ -3589,6 +3596,7 @@ class Chat {
     const info = this.info || {};
     const fresh = info.engine === this.engine;
     return { model: (live && live.model) || (fresh && info.model) || "", mode: (live && live.permission_mode) || (fresh && info.mode) || "",
+             effort: this.engine === "chat" ? (live && live.effort) || (fresh && info.effort) || "" : "",
              models: info.models && info.models.length ? info.models : FALLBACK_MODELS };
   }
 
@@ -3601,11 +3609,12 @@ class Chat {
     const mode = s.mode ? modeWords(s.mode).label : "";
     // The same as drawn: left as it is (each update of Claude's state would
     // take the pill from under a finger on its way to tap it).
-    const sig = JSON.stringify([s.model, mode, s.mode, this.engine, this.menu && this.menu.name]);
+    const sig = JSON.stringify([s.model, s.effort, mode, s.mode, this.engine, this.menu && this.menu.name]);
     if (sig === this.pillsSig) return;
     this.pillsSig = sig;
-    this.modelPill.replaceChildren(h("span", { class: "k" }, modelName(s.model, s.models) || "Default model"), icon("chevron", "chev"));
-    this.modelPill.title = "Which Claude answers";
+    this.modelPill.replaceChildren(h("span", { class: "k" }, modelEffort(modelName(s.model, s.models) || "Default model", s.effort)),
+                                   icon("chevron", "chev"));
+    this.modelPill.title = s.effort ? `Which Claude answers, and how hard it thinks (${effortName(s.effort)})` : "Which Claude answers";
     this.modePill.replaceChildren(icon("shield"), h("span", { class: "k" }, mode || "How Claude asks"), icon("chevron", "chev"));
     this.modePill.title = s.mode ? modeWords(s.mode).about || "" : "How Claude asks before it changes things";
     this.modePill.classList.toggle("off", this.engine !== "chat");
@@ -3623,6 +3632,23 @@ class Chat {
       if (this.info) this.info.model = m.value;
       if (this.live && this.engine === "chat") this.live.model = m.resolvedModel || m.value;
       this.drawPills();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  async setEffort(effort) {
+    this.closeMenu(true);
+    const words = effort === "auto" ? "Claude's own effort for the model" : `${effortName(effort)} effort`;
+    try {
+      const r = await this.post("effort", { effort });
+      toast(r.later ? `${words} once Claude wakes` : `Now on ${words}`);
+      // What Claude thinks at now (auto: the model's own, which the server knows).
+      const now = (r.response && r.response.effort) || (effort === "auto" ? "" : effort);
+      if (now && this.info) this.info.effort = now;
+      if (now && this.live) this.live.effort = now;
+      this.drawPills();
+      if (!now) this.loadInfo();
     } catch (e) {
       toast(e.message);
     }
@@ -3703,6 +3729,13 @@ class Chat {
       kids = [head("Model"), ...list.map((x) => item({ label: x.displayName || x.value, detail: x.description, disabled: !chat,
                                                          on: current && current.value === x.value, act: () => this.setModel(x) }))];
       if (list !== s.models) kids.push(item({ label: "Other versions…", act: () => { m.all = true; this.drawMenu(); menuFocus(this.menuEl); } }));
+      const levels = chat ? effortsOf(current) : [];
+      if (levels.length) {
+        kids.push(head("Effort: how hard it thinks"),
+                  ...levels.map((e) => item({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about, on: s.effort === e,
+                                              act: () => this.setEffort(e) })),
+                  item({ label: EFFORT_WORDS.auto.label, detail: EFFORT_WORDS.auto.about, act: () => this.setEffort("auto") }));
+      }
       if (!chat) kids.push(h("div", { class: "cm-note" }, "Claude's classic terminal changes this itself. Here you change it for this chat only."));
     } else if (m.name === "mode") {
       const now = this.settings().mode;
@@ -3811,10 +3844,10 @@ class Chat {
 
   slashPick(c) {
     this.closeMenu();
-    if (c.menu) {           // the model, the mode: their menus
+    if (c.menu || (c.chatMenu && this.engine === "chat")) {     // the model, the mode, the effort: their menus
       this.input.value = "";
       this.typed();
-      this.openMenu(c.menu);
+      this.openMenu(c.menu || c.chatMenu);
       return;
     }
     this.input.value = `/${c.name}${c.run ? "" : " "}`;
@@ -3889,7 +3922,8 @@ const CORE_COMMANDS = [
   { name: "context", label: "How full is the conversation?", about: "What fills Claude's memory of this chat", run: true },
   { name: "model", label: "Change the model", about: "Which Claude answers", menu: "model" },
   { name: "mode", label: "Change how Claude asks", about: "Before changes, never, or plan first", menu: "mode" },
-  { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max" },
+  { name: "effort", label: "How hard Claude thinks", about: "More is slower, and better at hard things", argHelp: "low, medium, high, xhigh or max",
+    chatMenu: "model" },
   { name: "usage", label: "How much of your plan is used", about: "This chat's and this week's share of your Claude plan", run: true },
   { name: "init", label: "Write notes about this project", about: "Claude studies the project and writes a CLAUDE.md for itself", run: true },
 ];
@@ -3926,6 +3960,33 @@ function modelName(id, models) {
   if (m) return m.displayName || m.value;
   const r = String(id || "").match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i);
   return r ? `${r[1][0].toUpperCase()}${r[1].slice(1)} ${r[2]}${r[3] ? `.${r[3]}` : ""}${r[4] ? " (1M)" : ""}` : String(id || "");
+}
+
+// How hard Claude thinks (Claude Code's effort), in words: beside the
+// model on its pill, and picked in the model's menu. auto: Claude Code's
+// default for the model.
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_WORDS = {
+  low: { label: "Low", about: "Fastest, for simple things" },
+  medium: { label: "Medium", about: "Quick, and good for most work" },
+  high: { label: "High", about: "Thinks more on hard things" },
+  xhigh: { label: "Extra high", about: "Thinks longer still" },
+  max: { label: "Max", about: "As hard as it can: slowest" },
+  auto: { label: "Auto", about: "What Claude picks for the model" },
+};
+function effortName(e) {
+  return (EFFORT_WORDS[e] || {}).label || "";
+}
+// The efforts a model takes (Claude Code says), else every one.
+function effortsOf(m) {
+  if (m && m.supportsEffort === false) return [];
+  const told = m && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels.filter((e) => EFFORTS.includes(e)) : [];
+  return told.length ? told : EFFORTS;
+}
+// "Opus 5.5 · Medium": the model, and how hard it thinks when that's known.
+function modelEffort(name, effort) {
+  const e = effortName(effort);
+  return name && e ? `${name} · ${e}` : name || "";
 }
 
 // A mode in words (MODE_WORDS, shared with the plan card).

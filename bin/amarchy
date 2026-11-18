@@ -31,6 +31,9 @@ Sessions:
   amarchy new <project> [name] --model <model>
                                         on that model (opus, sonnet, haiku, a model id) instead of the new
                                         chat's default (the app's new chat picks it; Opus until you do)
+  amarchy new <project> [name] --effort <effort>
+                                        thinking that hard (low, medium, high, xhigh, max, or auto: Claude
+                                        Code's default) instead of the new chat's (the app's new chat picks it)
   amarchy new <project> [name] --prompt <text|-> --attach <image>...
                                         with pictures (PNG, JPEG, GIF or WebP files) going with that first
                                         message (the app's new chat: a screenshot pasted into it)
@@ -242,6 +245,7 @@ Plumbing:
                                         answer what Claude asks (--json <response> for a question's answers)
   amarchy agent interrupt <id> [--all]  Stop (--all: and drop what's queued)
   amarchy agent mode|model <id> <value> switch the permission mode or the model
+  amarchy agent effort <id> <effort>    how hard it thinks: low, medium, high, xhigh, max, or auto
   amarchy agent control <id> <json>     any other control request, e.g. '{"subtype": "get_context_usage"}'
   amarchy app serve                     the app's server (amarchy-app.service runs it)
   amarchy migrate                       bring the state from before (a desktop's) up to date, once (the app's
@@ -2131,6 +2135,49 @@ def new_model():
     return m if re.fullmatch(MODEL_RE, m) else NEW_MODEL
 
 
+# How hard Claude thinks (Claude Code's effort): beside the model on every
+# pill, and picked in the model's menu. The new chat's is the host's too
+# (new-effort), "auto" (Claude Code's default for the model) until you pick
+# one. A chat's own lives in its chosen.json, and its Claude wakes in it.
+
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+NEW_EFFORT_FILE = STATE / "new-effort"      # one of EFFORTS, or "auto"
+
+
+def effort_choice(e):
+    """e if it's an effort you can pick (EFFORTS, or "auto"), else None."""
+    return e if isinstance(e, str) and (e in EFFORTS or e == "auto") else None
+
+
+def new_effort():
+    try:
+        e = NEW_EFFORT_FILE.read_text().strip()
+    except OSError:
+        e = ""
+    return effort_choice(e) or "auto"
+
+
+# The effort each model starts on when nobody picked one (Claude Code's
+# default: what a chat on "auto" was last seen on), for the new chat's pill.
+DEFAULT_EFFORTS = STATE / "default-efforts.json"    # {resolved model: effort}
+
+
+def default_efforts():
+    try:
+        d = json.loads(DEFAULT_EFFORTS.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(k, str) and v in EFFORTS} if isinstance(d, dict) else {}
+
+
+def saw_default_effort(model, effort):
+    if not (isinstance(model, str) and model and effort in EFFORTS):
+        return
+    had = default_efforts()
+    if had.get(model) != effort:
+        write_file(DEFAULT_EFFORTS, json.dumps({**had, model: effort}))
+
+
 _known_models = [None, []]      # (the agent.json read, its mtime), its models
 
 
@@ -2155,7 +2202,8 @@ def known_models():
 def models_of(told):
     """The models in what a Claude said (agent.json), as the app has them."""
     told = told if isinstance(told, dict) else {}
-    return [{k: m.get(k) for k in ("value", "resolvedModel", "displayName", "description", "supportsAutoMode")}
+    return [{k: m.get(k) for k in ("value", "resolvedModel", "displayName", "description", "supportsAutoMode",
+                                   "supportsEffort", "supportedEffortLevels")}
             for m in told.get("models") or [] if isinstance(m, dict) and m.get("value")]
 
 
@@ -2293,11 +2341,12 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name, prompt=None, model=None, images=None):
+def create(repo, name, prompt=None, model=None, images=None, effort=None):
     """Start a session: its row in the list right away, and its Claude in
     tmux, which makes the worktree first (setup_session) and is then Claude,
     asked prompt first if given (images, Claude's image blocks, going with
-    it), on model (else the new chat's, new_model). Returns the session id,
+    it), on model and effort (else the new chat's: new_model, new_effort).
+    Returns the session id,
     or None, having said why not."""
     repo_dir = WORK / repo
     name = slug(name)
@@ -2333,7 +2382,7 @@ def create(repo, name, prompt=None, model=None, images=None):
         chat_attach_later(sid, images)      # with that first message (Agent.load_attached), before its Claude starts
     # Its Claude starts on it (Agent.restore, before the first message; the
     # classic terminal's first start: claude_argv) and wakes in it.
-    agent_remember(sid, model=model or new_model())
+    agent_remember(sid, model=model or new_model(), effort=effort_choice(effort) or new_effort())
     (STATUS / sid).write_text("working")
     host_start(s)       # its tmux sets it up and becomes Claude
     return sid
@@ -2517,7 +2566,9 @@ def claude_argv(s, prefill="", prompt=None):
     first = ["--", prompt] if prompt is not None else []
     # A new session's first start: on the model it was made with (create).
     model = chosen_model(s["id"]) if prompt is not None else None
-    return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []), *claude_resume(s),
+    effort = chosen_effort(s["id"]) if prompt is not None else None
+    return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []),
+            *(["--effort", effort] if effort in EFFORTS else []), *claude_resume(s),
             *(["--prefill", prefill] if prefill and prompt is None else []),
             *reply_format_args(), "--settings", hook_settings(s["id"]), *first]
 
@@ -2592,12 +2643,13 @@ def cmd_claude(sid):
 
 def cmd_new(args):
     """amarchy new <project> [name] [--prompt <text>|-] [--attach <image>]
-    [--model <model>]: the new session's id on stdout. --prompt is the first
-    thing its Claude is asked (- reads it from stdin), each --attach a
-    picture going with it; --model the model it's on (else the new chat's:
-    new_model). --no-jump, from when a desktop showed the new session, is
+    [--model <model>] [--effort <effort>]: the new session's id on stdout.
+    --prompt is the first thing its Claude is asked (- reads it from stdin),
+    each --attach a picture going with it; --model the model it's on and
+    --effort how hard it thinks (else the new chat's: new_model,
+    new_effort). --no-jump, from when a desktop showed the new session, is
     still taken, and changes nothing: nothing opens anywhere."""
-    prompt, model, rest, attach = None, None, [], []
+    prompt, model, effort, rest, attach = None, None, None, [], []
     it = iter(args)
     for a in it:
         if a == "--no-jump":
@@ -2617,8 +2669,12 @@ def cmd_new(args):
             model = a.split("=", 1)[1] if "=" in a else next(it, None)
             if not model or not re.fullmatch(MODEL_RE, model):
                 return fail("--model needs a model: opus, sonnet, haiku, or a model id (claude-opus-5-5)")
+        elif a == "--effort" or a.startswith("--effort="):
+            effort = a.split("=", 1)[1] if "=" in a else next(it, None)
+            if not effort_choice(effort):
+                return fail(f"--effort needs one of {', '.join(EFFORTS)}, or auto")
         elif a.startswith("--"):
-            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach and --model)")
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach, --model and --effort)")
         else:
             rest.append(a)
     if not rest or len(rest) > 2:
@@ -2644,7 +2700,7 @@ def cmd_new(args):
     if isinstance(blocks, str):
         return fail(f"--attach: {blocks}")
     repo = rest[0]
-    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks)
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks, effort)
     if not sid:
         return 1
     print(sid)
@@ -9227,6 +9283,7 @@ def app_details(s):
     if engine(s) == "chat":
         live = agent_live(s["id"])
         out["model"], out["mode"] = live.get("model") or "", live.get("permission_mode") or ""
+        out["effort"] = live.get("effort") or ""
         out["live"] = {k: live.get(k) for k in ("state", "tasks", "rate_limits", "cost_usd", "turns", "version")}
     else:
         out["model"], out["mode"] = transcript_settings(s)
@@ -9570,6 +9627,7 @@ def composer_info(s):
     if chat:
         live = agent_live(sid)
         model, mode = live.get("model") or "", live.get("permission_mode") or ""
+        effort = live.get("effort") or ""
         if not agent_up(sid):       # asleep: it wakes in what you chose last
             try:
                 chosen = json.loads((claude_dir(sid) / "chosen.json").read_text())
@@ -9577,11 +9635,16 @@ def composer_info(s):
                 chosen = {}
             model = chosen.get("model") or model if isinstance(chosen, dict) else model
             mode = chosen.get("mode") or mode if isinstance(chosen, dict) else mode
+            picked = chosen.get("effort") if isinstance(chosen, dict) else None
+            if picked in EFFORTS:
+                effort = picked
+            elif picked == "auto":      # the model's own: as last seen on it
+                effort = default_efforts().get(live.get("model") or "") or effort
     else:
-        model, mode = transcript_settings(s)
+        (model, mode), effort = transcript_settings(s), ""
     models = models_of(told)
     return {"engine": "chat" if chat else "terminal", "commands": commands, "models": models,
-            "model": model, "mode": mode, "up": agent_up(sid) if chat else None}
+            "model": model, "effort": effort, "mode": mode, "up": agent_up(sid) if chat else None}
 
 
 def upload_name(name):
@@ -10800,7 +10863,8 @@ def app_watch(st):
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
                     "sleep_after": "off" if sleep_after() is None else sleep_after(),
                     "dictation": dictate_status(), "show_terminals": show_terminals(),
-                    "new_model": new_model(), "models": known_models(), "share": share_state(),
+                    "new_model": new_model(), "new_effort": new_effort(),
+                    "default_efforts": default_efforts(), "models": known_models(), "share": share_state(),
                     "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss),
                     "missions": missions_view()}
         except Exception as e:      # a half-written file, say: the next second will do
@@ -12591,6 +12655,11 @@ def app_handler(st, users, address):
                     return self.error(400, "which model")
                 write_file(NEW_MODEL_FILE, model + "\n")
                 return self.send(200, {"new_model": new_model()})
+            if self.path == "/api/new/effort":    # how hard every new chat thinks, from now on
+                if not effort_choice(data.get("effort")):
+                    return self.error(400, "which effort")
+                write_file(NEW_EFFORT_FILE, data["effort"] + "\n")
+                return self.send(200, {"new_effort": new_effort()})
             if self.path == "/api/add":
                 return self.add(data)
             if self.path in ("/api/push", "/api/push/remove", "/api/push/test"):
@@ -12642,7 +12711,7 @@ def app_handler(st, users, address):
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
-            m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|mode|unqueue|engine|classic)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|effort|mode|unqueue|engine|classic)", self.path)
             if m:
                 s = self.session(m.group(1))
                 return self.chat(s, m.group(2), data) if s else None
@@ -12773,11 +12842,12 @@ def app_handler(st, users, address):
                 return self.send(200, {"agent": told, "live": chat_live(agent_live(sid))})
             st.seen[sid] = time.time()
             st.looking(sid)
-            if what in ("model", "mode") and not agent_up(sid):
+            if what in ("model", "effort", "mode") and not agent_up(sid):
                 # Asleep: it wakes in it.
                 value = data.get(what)
                 if what == "mode" and value not in AGENT_MODES or what == "model" and not (
-                        isinstance(value, str) and re.fullmatch(MODEL_RE, value)):
+                        isinstance(value, str) and re.fullmatch(MODEL_RE, value)) \
+                        or what == "effort" and not effort_choice(value):
                     return self.error(400, f"which {what}")
                 agent_remember(sid, **{what: value})
                 return self.send(200, {"ok": True, "later": True})
@@ -12806,6 +12876,10 @@ def app_handler(st, users, address):
                 if not isinstance(model, str) or not re.fullmatch(MODEL_RE, model):
                     return self.error(400, "which model")
                 request = {"op": "control", "request": {"subtype": "set_model", "model": model}}
+            elif what == "effort":
+                if not effort_choice(data.get("effort")):
+                    return self.error(400, f"effort is one of {', '.join(EFFORTS)}, or auto")
+                request = {"op": "effort", "effort": data["effort"]}
             else:   # mode
                 if data.get("mode") not in AGENT_MODES:
                     return self.error(400, f"mode is one of {', '.join(AGENT_MODES)}")
@@ -13083,7 +13157,7 @@ def app_handler(st, users, address):
             return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
 
         def new(self, data):
-            """{repo, prompt, model, images: [{type, data (base64)}]}: a new
+            """{repo, prompt, model, effort, images: [{type, data (base64)}]}: a new
             chat, the pictures (a screenshot pasted) going with its prompt."""
             repo, prompt, model = data.get("repo"), data.get("prompt"), data.get("model")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])} \
@@ -13093,6 +13167,10 @@ def app_handler(st, users, address):
             if model is not None and not (isinstance(model, str) and re.fullmatch(MODEL_RE, model)):
                 return self.error(400, "which model")
             on = ["--model", model] if model else []
+            effort = data.get("effort")
+            if effort is not None and not effort_choice(effort):
+                return self.error(400, "which effort")
+            on += ["--effort", effort] if effort else []
             images = chat_images(data.get("images"))
             if isinstance(images, str):
                 return self.error(400, images)
@@ -14390,6 +14468,15 @@ def chosen_model(sid):
     return m if isinstance(m, str) and re.fullmatch(MODEL_RE, m) else None
 
 
+def chosen_effort(sid):
+    """The effort chosen for a session (chosen.json: one of EFFORTS, or
+    "auto"), or None."""
+    try:
+        return effort_choice(json.loads((claude_dir(sid) / "chosen.json").read_text()).get("effort"))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def agent_remember(sid, **chosen):
     """The permission mode and model you chose (or that a plan approved left)
     outlive the session's Claude on the chat engine: it sleeps when idle, and
@@ -14507,7 +14594,7 @@ class Agent:
         self.dir = claude_dir(self.sid)
         self.sock_path = agent_socket(self.sid)
         self.live = {"pid": os.getpid(), "claude_pid": None, "state": "starting", "since": time.time(),
-                     "conversation": conversation_id(self.sid) or None, "model": None, "permission_mode": None,
+                     "conversation": conversation_id(self.sid) or None, "model": None, "effort": None, "permission_mode": None,
                      "pending": [], "partial": "", "thinking": False, "activity": None, "tasks": [],
                      "queue": [], "attachments": 0, "rate_limits": {}, "turns": 0, "cost_usd": 0.0,
                      "last_result": None, "account": None, "version": None, "socket": str(self.sock_path),
@@ -14760,7 +14847,8 @@ class Agent:
         try:
             chosen = json.loads((self.dir / "chosen.json").read_text())
         except (OSError, ValueError):
-            return
+            chosen = {}
+        chosen = chosen if isinstance(chosen, dict) else {}
         if chosen.get("mode") in AGENT_MODES and chosen["mode"] != self.live["permission_mode"]:
             if self.control({"subtype": "set_permission_mode", "mode": chosen["mode"]}).get("subtype") == "success":
                 with self.lock:
@@ -14769,6 +14857,39 @@ class Agent:
             res = self.control({"subtype": "set_model", "model": chosen["model"]})
             if res.get("subtype") == "success":
                 self.live["model"] = (res.get("response") or {}).get("model") or chosen["model"]
+        if chosen.get("effort") in EFFORTS:
+            self.control({"subtype": "apply_flag_settings", "settings": {"effortLevel": chosen["effort"]}})
+        self.read_effort()
+
+    def read_effort(self):
+        """The effort Claude thinks at now (live["effort"]), as Claude Code
+        applies it: what you picked, else its default for the model. Asked
+        (get_settings) when it starts, after a turn (a /effort Claude took
+        itself) and when the model or the effort changes. Not from the
+        thread that reads Claude: it waits on what that reads."""
+        res = self.control({"subtype": "get_settings"}, timeout=15)
+        if res.get("subtype") != "success":
+            return
+        applied = (res.get("response") or {}).get("applied") or {}
+        effort = applied.get("effort") if applied.get("effort") in EFFORTS else None
+        if effort and effort_choice(chosen_effort(self.sid)) in (None, "auto"):
+            saw_default_effort(applied.get("model") or self.live.get("model"), effort)
+        with self.lock:
+            if self.live.get("effort") == effort:
+                return
+            self.live["effort"] = effort
+        self.changed(True)
+
+    def set_effort(self, effort):
+        """effort (EFFORTS, or "auto": Claude Code's default) for this chat,
+        from now on and when it wakes."""
+        res = self.control({"subtype": "apply_flag_settings",
+                            "settings": {"effortLevel": effort if effort in EFFORTS else None}})
+        ok = res.get("subtype") == "success"
+        if ok:
+            self.remember(effort=effort)
+            self.read_effort()
+        return {"ok": ok, "response": {"effort": self.live.get("effort")} if ok else None, "error": res.get("error")}
 
     # ---- what claude says
 
@@ -14868,6 +14989,7 @@ class Agent:
             self.changed()
         elif kind == "result":
             self.on_result(o)
+            threading.Thread(target=self.read_effort, daemon=True).start()
 
     def on_request(self, o):
         req = o.get("request") or {}
@@ -15215,7 +15337,12 @@ class Agent:
                     self.live["model"] = (res.get("response") or {}).get("model") or request.get("model")
                 self.remember(model=request.get("model"))
                 self.changed(True)
+                self.read_effort()       # another model may think at another effort
             return {"ok": ok, "response": res.get("response"), "error": res.get("error")}
+        if op == "effort":
+            if not effort_choice(r.get("effort")):
+                return {"ok": False, "error": f"effort is one of {', '.join(EFFORTS)}, or auto"}
+            return self.set_effort(r["effort"])
         if op == "stop":
             threading.Thread(target=self.stop, daemon=True).start()
             return {"ok": True}
@@ -15500,7 +15627,7 @@ def cmd_agent(args):
     if not args:
         print(usage("agent"), file=sys.stderr)
         return 1
-    commands = ("engine", "state", "send", "answer", "interrupt", "mode", "model", "watch", "control")
+    commands = ("engine", "state", "send", "answer", "interrupt", "mode", "model", "effort", "watch", "control")
     if args[0] not in commands:
         if len(args) != 1:
             print(usage("agent"), file=sys.stderr)
@@ -15582,6 +15709,10 @@ def cmd_agent(args):
         if len(rest) != 1:
             return fail("amarchy agent model <id> <model>")
         request = {"op": "control", "request": {"subtype": "set_model", "model": rest[0]}}
+    elif cmd == "effort":
+        if len(rest) != 1 or not effort_choice(rest[0]):
+            return fail(f"amarchy agent effort <id> {'|'.join(EFFORTS)}|auto")
+        request = {"op": "effort", "effort": rest[0]}
     else:   # control
         try:
             request = {"op": "control", "request": json.loads(rest[0])}
@@ -15605,7 +15736,7 @@ def cmd_agent(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt", "--no-jump", "--model", "--attach"}, {"--prompt", "--model", "--attach"}, set()),
+    "new": ({"--prompt", "--no-jump", "--model", "--effort", "--attach"}, {"--prompt", "--model", "--effort", "--attach"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact"}, set(), set()),

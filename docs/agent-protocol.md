@@ -125,7 +125,9 @@ answered by a `control_response` with the same `request_id`, `subtype`
 | `set_model` | ✓ | `{"model": "sonnet"}`: the next turn runs on it; response names the full id |
 | `set_permission_mode` | ✓ | `{"mode": "default|acceptEdits|plan|auto|dontAsk|bypassPermissions"}`: applies to the next tool call, no restart |
 | `get_context_usage` | ✓ | what `/context` shows, as data: categories, `maxTokens`, `autoCompactThreshold`... |
-| `set_max_thinking_tokens`, `get_settings`, `apply_flag_settings`, `rename_session`, `stop_task`, `rewind_files`, `get_plan` | schema | there, not used yet |
+| `get_settings` | ✓ | the settings by source, and `applied`: `{model, effort, ...}`, the effort Claude thinks at now (what was picked, else Claude Code's default for the model). The broker asks it when Claude starts, after each turn and when the model or effort changes: `live.effort` |
+| `apply_flag_settings` | ✓ | `{"settings": {"effortLevel": "high"}}`: merged into the flag settings (the hooks stay), from the next turn; `null` takes it back to the model's default. How a chat's effort is set (`/effort` route, `amarchy agent effort`), kept in `chosen.json` and set again by `restore` |
+| `set_max_thinking_tokens`, `rename_session`, `stop_task`, `rewind_files`, `get_plan` | schema | there, not used yet |
 
 ## Control requests Claude sends us
 
@@ -354,6 +356,9 @@ phase B2) uses the live state directly.
 | `POST /api/clip` with `paste` | for a chat session, the image is attached to the next message (what Ctrl+V does in the TUI) |
 | `GET .../agent` | `agent.json` (commands, models, account) and the live state, for the `/` menu and the pickers |
 | `POST /api/new` with `model` | the new chat's model (`amarchy new --model`): kept in its `chosen.json` before its Claude starts, so `restore` sets it before the first message (the classic terminal's first start: `--model`). Without one, the default: `new_model` |
+| `POST .../effort` | `{effort: low\|medium\|high\|xhigh\|max\|auto}`: how hard this chat thinks (`apply_flag_settings`), kept in its `chosen.json`; asleep, it wakes in it. `/composer` has it as `effort`, the live state as `effort`. The pill shows it beside the model ("Opus 5.5 · High") |
+| `POST /api/new` with `effort` | the new chat's effort (`amarchy new --effort`), kept in its `chosen.json` like the model. Without one, `new_effort` |
+| `POST /api/new/effort` | `{effort}`: how hard every new chat thinks from now on (`new-effort`; `auto`, the model's own, until set). `/api/state` has `new_effort`, and `default_efforts` (`{model id: effort}`, as chats on auto were last seen) for the pill |
 | `POST /api/new/model` | `{model}`: the model every new chat starts on from now on (`new-model` in the state; Opus until set). `/api/state` has it as `new_model`, with `models`: the newest `agent.json`'s, for the new chat's picker |
 | `POST /api/share` | something shared into amarchy (see bin/amarchy's "sharing into amarchy"): a picture as the body (an iPhone's Shortcut, at the address with `?key=`, the share key: it sends no Origin) or a form (Android's share sheet, the manifest's `share_target`; Sec-Fetch-Site `none` or `same-origin`). Refused from a page elsewhere. `/api/state`'s `share`: `{id, pictures, text, at}` until a chat takes it |
 | `GET /api/share/<n>?id=`, `GET /api/share/key`, `POST /api/share/clear` | a picture of the share; the Shortcut's address (Settings); `{id}`: taken, or let go |

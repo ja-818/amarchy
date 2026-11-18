@@ -1779,13 +1779,36 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     uiTabs(ps.map((p) => ({ key: p.name, label: projectName(p.name), title: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : null })),
       repo, (p) => choose(p), picks);
     why.hidden = !guessed;
-    modelLabel.textContent = modelName(model(), models()) || model();
-    modelPick.title = "Which Claude answers: every new chat starts on it, until you pick another";
+    modelLabel.textContent = modelEffort(modelName(model(), models()) || model(), effort());
+    modelPick.title = "Which Claude answers, and how hard it thinks: every new chat starts on them, until you pick others";
     buttons();
   };
   // The models Claude said there are (the newest Claude's), else the short list.
   const models = () => (app.view && app.view.models && app.view.models.length ? app.view.models : FALLBACK_MODELS);
   const model = () => (app.view && app.view.new_model) || "opus";
+  // How hard it thinks: the one picked for new chats, else the model's own
+  // (auto: as Claude was last seen on it), else unknown ("").
+  const newEffort = () => (app.view && app.view.new_effort) || "auto";
+  const effort = () => {
+    if (newEffort() !== "auto") return newEffort();
+    const m = modelOf(model(), models());
+    return ((app.view && app.view.default_efforts) || {})[(m && m.resolvedModel) || model()] || "";
+  };
+  const setEffort = async (e) => {
+    const was = newEffort();
+    if (app.view) app.view.new_effort = e;
+    update();
+    field.focus({ preventScroll: true });
+    if (e === was) return;
+    try {
+      await api("/api/new/effort", { effort: e });
+      toast(e === "auto" ? "New chats think as Claude picks for the model" : `New chats think at ${effortName(e)}`);
+    } catch (err) {
+      if (app.view) app.view.new_effort = was;
+      update();
+      toast(err.message);
+    }
+  };
   const setModel = async (m) => {
     const was = model();
     if (app.view) app.view.new_model = m.value;
@@ -1801,24 +1824,35 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       toast(e.message);
     }
   };
-  // The main ones (opus, sonnet...: each its latest), the dated versions under "Other versions…".
+  // The main ones (opus, sonnet...: each its latest), the dated versions
+  // under "Other versions…", then how hard it thinks (the model's levels).
   const pickModel = () => {
     const list = models(), on = modelOf(model(), list);
     const main = list.filter((x) => !/^claude-/.test(x.value));
     const others = list.filter((x) => !main.includes(x));
+    const levels = effortsOf(on).length ? [...effortsOf(on), "auto"] : [];
     const row = (x) => ({ label: x.displayName || x.value, detail: x.description || "", icon: on && on.value === x.value ? "check" : "",
                           act: () => setModel(x) });
+    const effortRow = (e) => ({ label: EFFORT_WORDS[e].label, detail: EFFORT_WORDS[e].about, icon: newEffort() === e ? "check" : "",
+                                on: newEffort() === e, act: () => setEffort(e) });
     if (app.desk) return picker({ title: "Which Claude answers? New chats start on it", placeholder: "Model", items: [
       ...(main.length ? main : list).map(row),
-      ...(main.length && others.length ? [{ label: "Other versions…", always: true, group: () => ({ title: "Other versions", items: others.map(row) }) }] : [])] });
+      ...(main.length && others.length ? [{ label: "Other versions…", always: true, group: () => ({ title: "Other versions", items: others.map(row) }) }] : []),
+      ...(levels.length ? [{ label: `Effort: ${effortName(effort()) || "Auto"}`, detail: "How hard it thinks", icon: "", always: true,
+                                 group: () => ({ title: "How hard it thinks? New chats start on it", items: levels.map(effortRow) }) }] : [])] });
     const item = (x) => h("button", { class: `menu-item${on && on.value === x.value ? " on" : ""}`, onclick: () => { closeSheets(); setModel(x); } },
       h("span", { class: "label" }, x.displayName || x.value, x.description ? h("small", {}, x.description) : null),
       on && on.value === x.value ? glyph("check", "val") : null);
+    const effortItem = (e) => h("button", { class: `menu-item${newEffort() === e ? " on" : ""}`, onclick: () => { closeSheets(); setEffort(e); } },
+      h("span", { class: "label" }, EFFORT_WORDS[e].label, h("small", {}, EFFORT_WORDS[e].about)),
+      newEffort() === e ? glyph("check", "val") : null);
     const rest = h("div", { class: "menu", hidden: true }, ...others.map(item));
     sheet(sheetHead("Model", "Which Claude answers: new chats start on it"),
       h("div", { class: "menu" }, ...(main.length ? main : list).map(item)),
       main.length && others.length ? h("button", { class: "control wide", onclick: (e) => { rest.hidden = false; e.currentTarget.remove(); } }, "Other versions…") : null,
-      main.length && others.length ? rest : null);
+      main.length && others.length ? rest : null,
+      levels.length ? h("div", { class: "section" }, "Effort: how hard it thinks") : null,
+      levels.length ? h("div", { class: "menu" }, ...levels.map(effortItem)) : null);
   };
   const choose = (p) => { repo = p; picked = true; guessed = false; store.set("last-project", repo); update(); field.focus(); };
   // Tab's: the project after this one in the row (before it), round the ends.
@@ -1844,7 +1878,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   const start = async () => {
     if (!field.value.trim() || !repo) return;
     if (tray.some((a) => !a.data)) return toast("A picture is still on its way: a moment");
-    const job = { repo, text: field.value, pics: tray.slice(), model: model() };
+    const job = { repo, text: field.value, pics: tray.slice(), model: model(), effort: newEffort() };
     const images = job.pics.map((a) => ({ type: a.type, data: a.data }));
     tray = [];
     drawTray();
@@ -1894,7 +1928,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     });
     let d;
     try {
-      d = await api("/api/new", { repo: job.repo, prompt: job.text.replace(/\s+$/, ""), model: job.model, ...(images.length ? { images } : {}) });
+      d = await api("/api/new", { repo: job.repo, prompt: job.text.replace(/\s+$/, ""), model: job.model, effort: job.effort, ...(images.length ? { images } : {}) });
     } catch (e) {
       return back(`Didn't start: ${e.message}`);
     }

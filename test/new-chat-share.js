@@ -1,7 +1,8 @@
 // The new chat's model and what you share into amarchy, in a browser.
 // Checked: the new chat's model pill (Opus until you pick another, the
 // models Claude said there are, the pick kept on the host for every new chat
-// and sent with the chat it starts); POST /api/share as an iPhone's Shortcut
+// and sent with the chat it starts), and its effort beside it (the model's
+// own until you pick one in the same menu, kept and sent the same way); POST /api/share as an iPhone's Shortcut
 // sends it (the key in its address, no Origin), refused without the key and
 // from a page elsewhere; the share sheet on every screen ("Send" sends the
 // pictures and words to that chat, a chat tapped opens with them in its box),
@@ -58,9 +59,11 @@ server.serve_forever()
 `;
 
 // What Claude said there are (an agent.json), as on this account.
+const LEVELS = ["low", "medium", "high", "xhigh", "max"];
 const MODELS = [
   { value: "default", resolvedModel: "claude-haiku-5-5", displayName: "Default (recommended)", description: "Claude Code's choice" },
-  { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", description: "For complex work" },
+  { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", description: "For complex work",
+    supportsEffort: true, supportedEffortLevels: LEVELS },
   { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet 5.5", description: "For everyday tasks" },
   { value: "haiku", resolvedModel: "claude-haiku-5-5", displayName: "Haiku 5.5", description: "Fastest" },
   { value: "claude-opus-4-8", resolvedModel: "claude-opus-4-8", displayName: "Opus 4.8", description: "" },
@@ -153,7 +156,10 @@ async function run(browser, layout, port, home) {
   await page.route("**/api/session/*/send", (r) => { sent.push({ url: r.request().url(), body: r.request().postDataJSON() }); r.fulfill({ json: { ok: true } }); });
   // A stream that ends and comes back later (a 404 would close the chat).
   await page.route("**/api/session/*/stream", (r) => r.fulfill({ status: 200, contentType: "text/event-stream", body: "retry: 600000\n\n" }));
-  await page.route("**/api/session/*/composer", (r) => r.fulfill({ json: { engine: "chat", commands: [], models: MODELS, model: "opus", mode: "default" } }));
+  await page.route("**/api/session/*/composer", (r) => r.fulfill({ json: { engine: "chat", commands: [], models: MODELS, model: "opus", effort: "high", mode: "default" } }));
+  const efforts = [];
+  await page.route("**/api/session/*/effort", (r) => { efforts.push(r.request().postDataJSON().effort);
+                                                       r.fulfill({ json: { ok: true, response: { effort: r.request().postDataJSON().effort } } }); });
   await page.route("**/api/new", (r) => { started.push(r.request().postDataJSON()); r.fulfill({ status: 500, json: { error: "not here" } }); });
   // Chats in the list (the server under test has none).
   await page.addInitScript((chats) => {
@@ -177,8 +183,9 @@ async function run(browser, layout, port, home) {
   await sleep(500);
   await page.screenshot({ path: path.join(SHOTS, `${layout}-new-chat.png`) });
   const pill = () => page.evaluate(() => (document.querySelector(".start-chat .pick.model .name") || {}).textContent);
-  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5"),
-        `the new chat starts on Opus 5.5 (${await pill()})`);
+  // How hard it thinks, beside it: Opus's own (auto), as a chat was last seen on it.
+  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5 · High"),
+        `the new chat starts on Opus 5.5, at its own effort (${await pill()})`);
   await page.click(".start-chat .pick.model");
   const menu = layout === "wide" ? ".picker-row" : ".sheet .menu-item";
   await page.waitForSelector(menu);
@@ -203,6 +210,31 @@ async function run(browser, layout, port, home) {
   await page.waitForSelector(menu);
   await page.locator(menu, { hasText: "Opus 5.5" }).first().click();
   check(where, await until(page, () => app.view.new_model === "opus"), "back on Opus 5.5");
+
+  // ---- the new chat's effort: in the model's menu, kept on the host, sent with the chat
+  await page.click(".start-chat .pick.model");
+  await page.waitForSelector(menu);
+  if (layout === "wide") await page.locator(".picker-row", { hasText: "Effort: High" }).first().click();
+  await page.waitForSelector(`${menu}:has-text("Extra high")`);
+  await sleep(500);
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-effort-menu.png`) });
+  const levels = await page.$$eval(menu, (xs) => xs.filter((x) => x.offsetParent !== null).map((x) => x.querySelector(".label").firstChild.textContent));
+  check(where, ["Low", "Medium", "High", "Extra high", "Max", "Auto"].every((l) => levels.includes(l)), `every effort Opus takes, and Auto (${levels.join(", ")})`);
+  await page.locator(menu, { hasText: /^Max/ }).first().click();
+  check(where, await until(page, () => (document.querySelector(".start-chat .pick.model .name") || {}).textContent === "Opus 5.5 · Max"),
+        `picked: Max beside the model (${await pill()})`);
+  await sleep(300);
+  const keptEffort = fs.readFileSync(path.join(home, "state", "amarchy", "new-effort"), "utf8").trim();
+  check(where, keptEffort === "max", `kept on the host for every new chat (${keptEffort})`);
+  await page.fill(".start-chat textarea", "Make it faster");
+  await page.click(layout === "wide" ? ".start-chat .cta.go" : ".start-chat .send");
+  await sleep(300);
+  check(where, started.length === 2 && started[1].effort === "max" && started[1].model === "opus",
+        `the chat it starts thinks at it (${JSON.stringify(started[1] || {})})`);
+  const back = await page.evaluate(async () => (await fetch("/api/new/effort", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                                                 body: JSON.stringify({ effort: "auto" }) })).status);
+  check(where, back === 200, "back on Auto");
+  await page.evaluate(() => { app.view.new_effort = "auto"; });
   await page.fill(".start-chat textarea", "");
 
   // ---- sharing: refused from a page elsewhere, and without the key
@@ -270,6 +302,25 @@ async function run(browser, layout, port, home) {
   await page.screenshot({ path: path.join(SHOTS, `${layout}-in-the-box.png`) });
   check(where, sent.length === 1, "and nothing sent until you send it");
 
+  // ---- the chat's model pill: how hard it thinks beside the model, picked in its menu (and /effort)
+  const chatPill = () => page.evaluate(() => (app.desk ? desk.chat : app.session.chat).modelPill.textContent);
+  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · High"),
+        `the chat's pill: the model and its effort (${await chatPill()})`);
+  await page.evaluate(() => (app.desk ? desk.chat : app.session.chat).modelPill.click());
+  await page.waitForSelector('.cm-item:has-text("Extra high")');
+  await sleep(300);
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-chat-model-menu.png`) });
+  const lit = await page.$$eval(".cm-item.on", (xs) => xs.map((x) => x.textContent));
+  check(where, lit.some((t) => t.startsWith("Opus 5.5")) && lit.some((t) => t.startsWith("High")), `its model and effort lit (${lit.join(" | ")})`);
+  await page.locator(".cm-item", { hasText: /^Max/ }).first().click();
+  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · Max"),
+        `picked: Max, for this chat (${efforts.join(",")}; ${await chatPill()})`);
+  await page.evaluate(() => { const c = app.desk ? desk.chat : app.session.chat; c.tray.slice().forEach((a) => c.unattach(a)); c.input.value = "/effort low"; c.typed(); c.send(); });
+  check(where, await until(page, () => (app.desk ? desk.chat : app.session.chat).modelPill.textContent === "Opus 5.5 · Low"),
+        `/effort low: the same (${efforts.join(",")})`);
+  check(where, efforts.join(",") === "max,low" && sent.length === 1, "set on the chat, not sent to Claude as words");
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-chat-pill.png`) });
+
   // Closed without a chat: let go.
   await page.evaluate(() => go(document.body.classList.contains("desk") ? "#/new" : "#/"));
   await post(port, `/api/share?key=${key}`, PNG, { "Content-Type": "image/png" });
@@ -294,6 +345,7 @@ async function run(browser, layout, port, home) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "new-chat-share-home-"));
   fs.mkdirSync(path.join(home, "state", "amarchy", "claude", "x-y"), { recursive: true });
   fs.writeFileSync(path.join(home, "state", "amarchy", "claude", "x-y", "agent.json"), JSON.stringify({ models: MODELS }));
+  fs.writeFileSync(path.join(home, "state", "amarchy", "default-efforts.json"), JSON.stringify({ "claude-opus-5-5": "high" }));
   const port = await freePort();
   const server = await startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
