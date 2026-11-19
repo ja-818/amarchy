@@ -272,6 +272,7 @@ async function mount(page, list) {
 async function run(browser, base, layout) {
   console.log(`\n${layout}`);
   const ctx = await browser.newContext({ ...LAYOUTS[layout], extraHTTPHeaders: { "Tailscale-User-Login": "tester@test" } });
+  await ctx.addInitScript(() => localStorage.setItem("tour", "1"));      // (the tour opens by itself over an empty board)
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
