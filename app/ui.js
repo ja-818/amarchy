@@ -164,6 +164,23 @@ function uiReveal(el, { scroller = null, block = "nearest", smooth = false, pad 
   if (Math.abs(by) >= 1) box.scrollBy({ top: by, behavior: smooth ? "smooth" : "auto" });
 }
 
+// A box you write in (a textarea) as tall as its words, up to max px (plus
+// extra). Measured with no height of its own for an instant (auto) while
+// what holds it keeps the height it has, so nothing around it moves: let go,
+// the conversation over the box grew by the box's height for that instant,
+// and Safari (no scroll anchoring to put it back) pulled what you read at
+// its end up by that much, on every key of a long message. Its words'
+// height, measured.
+function uiFitField(field, { max = Infinity, extra = 0 } = {}) {
+  const around = field.parentElement, held = around ? around.style.minHeight : "";
+  if (around) around.style.minHeight = `${around.offsetHeight}px`;
+  field.style.height = "auto";
+  const tall = field.scrollHeight;
+  field.style.height = `${Math.min(tall + extra, max)}px`;
+  if (around) around.style.minHeight = held;
+  return tall;
+}
+
 // box's children made nodes, unless they'd look the same (then it keeps its
 // own, under your finger and in focus). True when it changed.
 function uiSwap(box, nodes) {

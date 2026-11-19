@@ -1747,10 +1747,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     field.focus();
   });
   const projects = () => (app.view && app.view.projects) || [];
-  const grow = () => {
-    field.style.height = "auto";
-    field.style.height = `${Math.min(field.scrollHeight + 2, window.innerHeight * 0.4)}px`;
-  };
+  const grow = () => uiFitField(field, { max: window.innerHeight * 0.4, extra: 2 });
   // A project what you wrote names, as a word of its own ("the jaken app",
   // "houston os"): the longest name that fits, so "houston-os" beats "houston".
   const guess = () => {

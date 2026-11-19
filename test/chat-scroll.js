@@ -7,7 +7,12 @@
 // while you only watch still lands on its reply's top. On a phone and on a
 // wide screen, with screenshots.
 //
-//   node test/chat-scroll.js          both layouts
+// Each layout runs twice: as Chrome, and as Safari, which has no scroll
+// anchoring to put back a view the page moved for an instant (Chrome's hid
+// the box pulling the view up on each key of a long message, which Safari,
+// on a Mac and an iPhone, showed).
+//
+//   node test/chat-scroll.js          both layouts, as both browsers
 //   node test/chat-scroll.js phone    one layout (phone | wide)
 //
 // Needs what test/today-view.js needs (Chromium, playwright-core). It starts
@@ -41,7 +46,10 @@ const ITEMS = [
   { kind: "claude", text: REPLY, key: "c5:0", at: "" },
 ];
 
-async function run(browser, layout, port) {
+const ENGINES = ["chrome", "safari"];
+
+async function run(browser, layout, engine, port) {
+  const as = `${layout} as ${engine}`;
   const ctx = await browser.newContext({ ...LAYOUTS[layout], extraHTTPHeaders: { "Tailscale-User-Login": "tester@test" } });
   await ctx.addInitScript(() => localStorage.setItem("tour", "1"));
   const page = await ctx.newPage();
@@ -51,10 +59,12 @@ async function run(browser, layout, port) {
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForSelector("#look", { state: "attached" });
   await page.evaluate(() => document.fonts.ready);
-  const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${layout}-${name}.png`) });
+  const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${layout}-${engine}-${name}.png`) });
 
   // The chat, as reply-view.js mounts it: its own column, the whole page.
-  const mount = () => page.evaluate((items) => {
+  // As Safari: no scroll anchoring anywhere.
+  const mount = () => page.evaluate(({ items, safari }) => {
+    if (safari) document.head.append(Object.assign(document.createElement("style"), { textContent: "* { overflow-anchor: none !important; }" }));
     document.body.innerHTML = "";
     const box = document.createElement("div");
     box.id = "box";
@@ -66,7 +76,7 @@ async function run(browser, layout, port) {
     window.__chat.live = { state: "idle" };
     box.append(window.__chat.el);
     window.__chat.conversation({ reset: true, start: 0, items });
-  }, ITEMS);
+  }, { items: ITEMS, safari: engine === "safari" });
   // Where the view is: its scroll, how far from the bottom, the last reply's top on the screen, the words at its top and bottom edges.
   const at = () => page.evaluate(() => {
     const c = window.__chat, s = c.scroller, v = s.getBoundingClientRect();
@@ -79,15 +89,16 @@ async function run(browser, layout, port) {
   const scrollTo = (fromBottom) => page.evaluate((n) => { const s = window.__chat.scroller; s.scrollTop = s.scrollHeight - s.clientHeight - n; }, fromBottom);
   const keep = () => page.evaluate(() => { window.__reply = [...document.querySelectorAll(".chat-conv > .msg.claude")].at(-1); });
   const box = () => page.locator(".chat-dock textarea");
-  const clearBox = async () => { await box().fill(""); await page.evaluate(() => document.activeElement && document.activeElement.blur()); };
+  // (Then a moment, for the view to take the room the box gave back.)
+  const clearBox = async () => { await box().fill(""); await page.evaluate(() => document.activeElement && document.activeElement.blur()); await sleep(100); };
 
   await mount();
   await sleep(300);
   let a = await at();
-  check(layout, a.replyTop >= 0 && a.replyTop <= 24, `a chat you open lands on the top of Claude's reply (${a.replyTop}px from the top)`);
+  check(as, a.replyTop >= 0 && a.replyTop <= 24, `a chat you open lands on the top of Claude's reply (${a.replyTop}px from the top)`);
 
   // Typing: the view stays on the words you read, at the end and higher up.
-  for (const up of [0, 700]) {
+  for (const up of [0, 160, 700]) {
     await scrollTo(up);
     await sleep(100);
     const was = await at();
@@ -95,14 +106,27 @@ async function run(browser, layout, port) {
     await page.keyboard.type("I read it all, and");
     await sleep(150);
     let now = await at();
-    check(layout, Math.abs(now.top - was.top) <= 2 && now.first === was.first,
+    check(as, Math.abs(now.top - was.top) <= 2 && now.first === was.first,
       `${up ? "reading higher up" : "at the end"}, typing in the box doesn't move the view (${was.top} → ${now.top})`);
     await page.keyboard.press("Shift+Enter");
     await page.keyboard.type("a second line");
     await sleep(150);
     now = await at();
-    check(layout, Math.abs(now.edge - was.edge) <= 2 && now.last === was.last,
+    check(as, Math.abs(now.edge - was.edge) <= 2 && now.last === was.last,
       `${up ? "reading higher up" : "at the end"}, the box taking another line keeps the lines over it (bottom edge ${was.edge} → ${now.edge})`);
+    // A long message, the box many lines tall: each key on its last line
+    // measures the box again, and that doesn't pull the view up.
+    for (let i = 3; i <= 9; i++) { await page.keyboard.press("Shift+Enter"); await page.keyboard.type(`line ${i}`); }
+    await page.keyboard.press("Shift+Enter");
+    await sleep(150);
+    const tall = await at();
+    for (const ch of "and more") { await page.keyboard.type(ch); await sleep(30); }
+    await sleep(150);
+    now = await at();
+    const boxTall = await page.evaluate(() => window.__chat.input.offsetHeight);
+    check(as, boxTall > 200 && Math.abs(now.edge - tall.edge) <= 2 && now.last === tall.last && (up > 0 || now.fromBottom <= 2),
+      `${up ? "reading higher up" : "at the end"}, typing on the last line of a box ${boxTall}px tall doesn't move the view (bottom edge ${tall.edge} → ${now.edge}, ${now.fromBottom}px from the end)`);
+    if (!up) await shot("long-message");
     await clearBox();
   }
 
@@ -114,14 +138,14 @@ async function run(browser, layout, port) {
   await page.evaluate(() => { document.getElementById("box").style.height = "calc(100dvh - 300px)"; });
   await sleep(200);
   const up = await at();
-  check(layout, Math.abs(up.edge - before.edge) <= 2 && up.last === before.last,
+  check(as, Math.abs(up.edge - before.edge) <= 2 && up.last === before.last,
     `the keyboard coming up: the words over the box are still over it ("${before.last}" → "${up.last}")`);
   await page.keyboard.type("my answer");
   await shot("keyboard-writing");
   await page.evaluate(() => { document.getElementById("box").style.height = "100dvh"; });
   await sleep(200);
   const down = await at();
-  check(layout, Math.abs(down.edge - before.edge) <= 2, `and going: still there (bottom edge ${before.edge} → ${down.edge})`);
+  check(as, Math.abs(down.edge - before.edge) <= 2, `and going: still there (bottom edge ${before.edge} → ${down.edge})`);
   await clearBox();
 
   // The stream comes back with its window moved on (a long conversation read
@@ -133,15 +157,15 @@ async function run(browser, layout, port) {
   await page.evaluate((items) => window.__chat.conversation({ reset: true, start: 5000, items: items.slice(2) }), ITEMS);
   await sleep(200);
   let now = await at();
-  check(layout, now.sameReply && Math.abs(now.top - was.top) <= 2 && now.first === was.first,
+  check(as, now.sameReply && Math.abs(now.top - was.top) <= 2 && now.first === was.first,
     `the stream back from a later start, reading mid-reply: not drawn again, the same words in sight (${was.top} → ${now.top})`);
-  check(layout, await page.evaluate(() => window.__chat.start === 0 && !!document.querySelector(".chat-conv > .msg.claude")), "what was there before that stays");
+  check(as, await page.evaluate(() => window.__chat.start === 0 && !!document.querySelector(".chat-conv > .msg.claude")), "what was there before that stays");
   await scrollTo(0);
   await sleep(100);
   await page.evaluate((items) => window.__chat.conversation({ reset: true, start: 9000, items: items.slice(3) }), ITEMS);
   await sleep(200);
   now = await at();
-  check(layout, now.fromBottom <= 2, `the same at the end: still at the end (${now.fromBottom}px from it)`);
+  check(as, now.fromBottom <= 2, `the same at the end: still at the end (${now.fromBottom}px from it)`);
 
   // Drawn all over again (it reaches back further than what's here): the same message, at the same place.
   await scrollTo(900);
@@ -152,7 +176,7 @@ async function run(browser, layout, port) {
     items: [{ kind: "user", text: "Earlier", turn: true, key: "u0:0", at: "" }, ...items] }), ITEMS);
   await sleep(200);
   now = await at();
-  check(layout, !now.sameReply && Math.abs(now.replyTop - was.replyTop) <= 2 && now.first === was.first,
+  check(as, !now.sameReply && Math.abs(now.replyTop - was.replyTop) <= 2 && now.first === was.first,
     `drawn all over again, reading mid-reply: the same words in sight (reply's top ${was.replyTop} → ${now.replyTop}px)`);
   await scrollTo(0);
   await sleep(100);
@@ -160,7 +184,7 @@ async function run(browser, layout, port) {
     items: [{ kind: "user", text: "Earlier still", turn: true, key: "u00:0", at: "" }, ...items] }), ITEMS);
   await sleep(200);
   now = await at();
-  check(layout, now.fromBottom <= 2, `drawn all over again at the end: still at the end (${now.fromBottom}px from it)`);
+  check(as, now.fromBottom <= 2, `drawn all over again at the end: still at the end (${now.fromBottom}px from it)`);
   // Another conversation altogether, read from mid-reply: its reply's top, as a chat you open.
   await scrollTo(900);
   await sleep(100);
@@ -168,7 +192,7 @@ async function run(browser, layout, port) {
     items: items.map((it) => ({ ...it, key: `new-${it.key}`, ...(it.text ? { text: `Another one. ${it.text}` } : {}) })) }), ITEMS);
   await sleep(300);
   now = await at();
-  check(layout, now.replyTop >= 0 && now.replyTop <= 24, `another conversation altogether: on its reply's top (${now.replyTop}px)`);
+  check(as, now.replyTop >= 0 && now.replyTop <= 24, `another conversation altogether: on its reply's top (${now.replyTop}px)`);
 
   // A turn ends while you write at the end: you stay on its end.
   const turn = async () => {
@@ -183,17 +207,17 @@ async function run(browser, layout, port) {
   await box().click();
   await page.keyboard.type("Looks good, now");
   now = await turn();
-  check(layout, now.fromBottom <= 2, `a turn ending while you write: you stay at the end (${now.fromBottom}px from it, reply's top ${now.replyTop}px)`);
+  check(as, now.fromBottom <= 2, `a turn ending while you write: you stay at the end (${now.fromBottom}px from it, reply's top ${now.replyTop}px)`);
   await shot("turn-ended-writing");
   // While you only watch: on its reply's top, as before.
   await clearBox();
   await scrollTo(0);
   await sleep(100);
   now = await turn();
-  check(layout, now.replyTop >= 0 && now.replyTop <= 24, `a turn ending while you watch: on its reply's top (${now.replyTop}px)`);
+  check(as, now.replyTop >= 0 && now.replyTop <= 24, `a turn ending while you watch: on its reply's top (${now.replyTop}px)`);
   await shot("turn-ended-watching");
 
-  check(layout, !errors.length, `no page errors ${errors.join(" | ")}`);
+  check(as, !errors.length, `no page errors ${errors.join(" | ")}`);
   await ctx.close();
 }
 
@@ -206,8 +230,10 @@ async function run(browser, layout, port) {
   try {
     for (const layout of Object.keys(LAYOUTS)) {
       if (ONLY && ONLY !== layout) continue;
-      console.log(layout);
-      await run(browser, layout, port).catch((e) => check(layout, false, `crashed: ${e.stack}`));
+      for (const engine of ENGINES) {
+        console.log(`${layout} as ${engine}`);
+        await run(browser, layout, engine, port).catch((e) => check(`${layout} as ${engine}`, false, `crashed: ${e.stack}`));
+      }
     }
   } finally {
     await browser.close();

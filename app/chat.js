@@ -3298,14 +3298,13 @@ class Chat {
     this.slashCheck();
   }
 
-  // Its height to what's in it: measured again only when what's in it (or
-  // the window) changed, not by every update of Claude's that draws the dock.
+  // Its height to what's in it (uiFitField: the conversation over it doesn't
+  // move meanwhile): measured again only when what's in it (or the window)
+  // changed, not by every update of Claude's that draws the dock.
   grow() {
     const now = `${this.input.value}\u0000${window.innerWidth}x${window.innerHeight}`;
     if (now === this.grownFor) return;
-    this.input.style.height = "auto";
-    const tall = this.input.scrollHeight;
-    this.input.style.height = `${Math.min(tall, window.innerHeight * 0.4)}px`;
+    const tall = uiFitField(this.input, { max: window.innerHeight * 0.4 });
     this.grownFor = this.input.isConnected && tall ? now : null;      // (not in the page yet: measured again once it is)
   }
 

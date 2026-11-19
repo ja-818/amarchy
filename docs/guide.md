@@ -132,8 +132,8 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   open it, **Open all** for every one). A chat you open shows that Briefing first:
   what Claude did and said on the way is one line over it ("Worked 6 min · 14
   steps"), a tap away. After that, the conversation stays on what you're reading:
-  the keyboard coming up, the app reconnecting (the phone woke, amarchy restarted)
-  or a turn ending while you write don't move it. amarchy asks every Claude for that shape and sends back a
+  the keyboard coming up, typing a long message, the app reconnecting (the phone
+  woke, amarchy restarted) or a turn ending while you write don't move it. amarchy asks every Claude for that shape and sends back a
   reply that doesn't have it, so no project needs its own rule for it. Its steps are folded into one line in
   words ("Read app.js, edited 2 files and ran 3 commands"): tap it to see each step,
   and a step's own detail (the command and its output, an edit's changes in red and
