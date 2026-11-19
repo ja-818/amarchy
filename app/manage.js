@@ -1,8 +1,8 @@
 // What amarchy's own commands let you change, from the app, on the phone and
 // in a computer's browser alike: a session's name (amarchy rename), its saved
-// commands (amarchy run --set/--save/--forget), your assistant (amarchy
-// assistant: which session, its name, its picture), the chimes (amarchy
-// sound, and --assistant), a new project (amarchy add), an image pasted into
+// commands (amarchy run --set/--save/--forget), your assistant and your
+// agents (amarchy assistant, amarchy agents: which sessions, their names,
+// pictures and chimes), the chimes (amarchy sound), a new project (amarchy add), an image pasted into
 // Claude from the phone (the web clipboard: amarchy paste), and what needs
 // you, on the tab and the app's icon. Each is a sheet. Loaded before app.js,
 // whose helpers it uses.
@@ -11,6 +11,18 @@
 function sid(s) { return encodeURIComponent(s.id); }
 function rowOf(id) { return (app.view && app.view.sessions.find((x) => x.id === id)) || null; }
 function mainAssistant() { return (app.view && app.view.sessions.find((x) => x.assistant === "main")) || null; }
+// Your assistant and your agents, as the list orders them (your assistant first).
+function agentsOf(v) {
+  const team = ((v && v.sessions) || []).filter(isAgent);
+  return [...team.filter((s) => s.assistant === "main"), ...team.filter((s) => s.assistant !== "main")];
+}
+// One of their chimes (its row's, else for your assistant the view's).
+function agentChime(s) { return s.chime || (s.assistant === "main" ? (app.view || {}).assistant_sound : "") || "herald"; }
+// Its line in a chat's menu.
+function agentMenuLabel(s) {
+  return s.assistant === "main" ? `${s.assistant_name || "Assistant"}: name, picture, chime…`
+    : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent: name, picture, chime…` : "Make it an agent…";
+}
 
 // A text field in a sheet, ↵ doing what its sheet's button does.
 function field(attrs, onEnter) {
@@ -126,7 +138,7 @@ function commandForm(s, name, command, opened) {
   (named || name ? cmdIn : nameIn).focus();
 }
 
-// ---- the chimes (amarchy sound, and --assistant)
+// ---- the chimes (amarchy sound, --assistant, and amarchy agents <id> --sound)
 //
 // Each plays as you pick it, and as the keys land on it. They ring in the
 // browser on a computer (desk.js's chime); a
@@ -140,7 +152,8 @@ function previewSound(name) {
   previewing = playSound(`/sound/${encodeURIComponent(name)}`);
 }
 
-async function soundSheet(forAssistant) {
+// whose: null for the chats', else the id of your assistant or an agent.
+async function soundSheet(whose) {
   let d;
   try {
     const r = await fetch("/api/sounds");
@@ -148,13 +161,20 @@ async function soundSheet(forAssistant) {
     if (!r.ok) throw new Error(d.error || "Amarchy didn't answer");
   } catch (e) { return toast(e instanceof TypeError ? "Can't reach Amarchy" : e.message); }
   const body = h("div", {});
-  const helper = mainAssistant();
-  const who = (helper && helper.assistant_name) || "Your assistant";
+  const team = agentsOf(app.view);
+  if (!team.some((x) => x.id === whose)) whose = null;
+  const of = (id) => team.find((x) => x.id === id) || null;
+  const nameOf = (x) => x.assistant_name || (x.assistant === "main" ? "Your assistant" : "Agent");
+  const chimeOf = (id) => { const x = of(id); return !x ? d.sound : x.assistant === "main" ? d.assistant_sound : (d.agent_sounds || {})[id] || agentChime(x); };
   const pick = async (name) => {
     previewSound(name);
+    const x = of(whose);
     try {
-      d = await api("/api/sound", { name, assistant: forAssistant });
-      if (app.view) Object.assign(app.view, { sound: d.sound, assistant_sound: d.assistant_sound });
+      d = await api("/api/sound", { name, ...(x && x.assistant === "main" ? { assistant: true } : x ? { agent: x.id } : {}) });
+      if (app.view) {
+        Object.assign(app.view, { sound: d.sound, assistant_sound: d.assistant_sound });
+        for (const r of agentsOf(app.view)) r.chime = r.assistant === "main" ? d.assistant_sound : (d.agent_sounds || {})[r.id] || r.chime;
+      }
       draw();
     } catch (e) { toast(e.message); }
   };
@@ -169,7 +189,8 @@ async function soundSheet(forAssistant) {
     } catch (e) { toast(e.message); }
   };
   const draw = () => {
-    const now = forAssistant ? d.assistant_sound : d.sound;
+    const now = chimeOf(whose);
+    const x = of(whose);
     const row = (name, label, detail) => h("button", {
       class: `menu-item${now === name ? " on" : ""}`, "data-sound": name,
       onclick: () => pick(name), onfocus: () => { if (lastInput.keys) previewSound(name); } },
@@ -177,10 +198,10 @@ async function soundSheet(forAssistant) {
       now === name ? glyph("check", "val") : null);
     keepFocus(body.parentNode || body, () => body.replaceChildren(
       h("div", { class: "seg" },
-        h("button", { class: `control${forAssistant ? "" : " on"}`, onclick: () => { forAssistant = false; draw(); } }, "Chats"),
-        h("button", { class: `control${forAssistant ? " on" : ""}`, onclick: () => { forAssistant = true; draw(); } }, who)),
-      h("p", {}, forAssistant ? `${who} rings with its own, whatever the chats do.`
-                              : "When a chat needs you or is done (as Settings → Tell me says)."),
+        h("button", { class: `control${x ? "" : " on"}`, onclick: () => { whose = null; draw(); } }, "Chats"),
+        ...team.map((t) => h("button", { class: `control${whose === t.id ? " on" : ""}`, onclick: () => { whose = t.id; draw(); } }, nameOf(t)))),
+      h("p", {}, x ? `${nameOf(x)} rings with its own, whatever the chats do.`
+                   : "When a chat needs you or is done (as Settings → Tell me says)."),
       h("div", { class: "menu" }, ...d.sounds.map((x) => row(x.name, x.label, x.mine ? "yours" : "")), row("off", "Off", "silent")),
       h("button", { class: "control wide", onclick: add }, "Add your own…")));
   };
@@ -189,37 +210,48 @@ async function soundSheet(forAssistant) {
   menuFocus(body.parentNode);
 }
 
-// ---- your assistant (amarchy assistant)
+// ---- your assistant and your agents (amarchy assistant, amarchy agents)
+//
+// A chat that's neither: make it an agent (or your assistant, in place of the
+// one you have). One of them: its name, its picture, its chime, and back to
+// a chat like the others.
 
-function assistantSheet(s) {
+function agentSheet(s) {
   const helper = mainAssistant();
-  const mine = s.assistant === "main";
-  if (!mine) {
-    const name = field({ placeholder: projectName(s.repo), maxlength: "40" }, () => make());
-    const make = async () => {
+  const role = s.assistant === "main" || s.assistant === "agent" ? s.assistant : "";
+  if (!role) {
+    const name = field({ placeholder: projectName(s.repo), maxlength: "40" }, () => make(false));
+    const make = async (main) => {
+      const called = name.value.trim();
       try {
-        await api(`/api/session/${sid(s)}/assistant`, name.value.trim() ? { name: name.value.trim() } : {});
+        await api(`/api/session/${sid(s)}/${main ? "assistant" : "agent"}`, called ? { name: called } : {});
         closeSheets();
-        toast(`${name.value.trim() || "It"} is your assistant now`);
+        toast(main ? `${called || "It"} is your assistant now` : `${called || projectName(s.repo)} is an agent now`);
       } catch (e) { toast(e.message); }
     };
-    sheet(sheetHead("Make it your assistant?", where(s)),
-      h("p", {}, "Your assistant keeps your day rather than writing code: at the top of the list with its picture, "
-                 + "the other chats of its project under it, and it always tells you when it needs you or is done."
-                 + (helper ? ` It takes the place of ${helper.assistant_name || "the one you have"}.` : "")),
+    sheet(sheetHead("Make it an agent?", where(s)),
+      h("p", {}, "An agent lives on rather than finishing: on top of the list next to your assistant, with its own picture "
+                 + "and chime. It always tells you when it needs you or is done, and is never a mission to complete."),
       h("div", { class: "section" }, "Its name"), name,
-      h("button", { class: "control wide accent", onclick: make }, "Make it my assistant"));
+      h("button", { class: "control wide accent", onclick: () => make(false) }, "Make it an agent"),
+      h("div", { class: "section" }, "Or your assistant"),
+      h("p", {}, "Your assistant is the agent that keeps your day: your tasks go to it, and the other chats of its project sit under it."
+                 + (helper ? ` It takes the place of ${helper.assistant_name || "the one you have"}.` : "")),
+      h("button", { class: "control wide", onclick: () => make(true) }, "Make it my assistant"));
     return;
   }
-  const who = s.assistant_name || "Assistant";
+  const main = role === "main";
+  const who = s.assistant_name || (main ? "Assistant" : "Agent");
   const name = field({ value: who, maxlength: "40" }, () => rename());
   const rename = async () => {
     if (!name.value.trim()) return toast("What should it be called?");
-    try { await api("/api/assistant", { name: name.value.trim() }); closeSheets(); }
-    catch (e) { toast(e.message); }
+    try {
+      await api(main ? "/api/assistant" : `/api/session/${sid(s)}/agent`, { name: name.value.trim() });
+      closeSheets();
+    } catch (e) { toast(e.message); }
   };
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");
-  sheet(sheetHead(who, `Your assistant · ${where(s)}`),
+  sheet(sheetHead(who, `${main ? "Your assistant" : "An agent"} · ${where(s)}`),
     h("div", { class: "section" }, "Name"), name,
     h("button", { class: "control wide accent", onclick: rename }, "Save the name"),
     h("div", { class: "section" }, "Picture"),
@@ -227,15 +259,21 @@ function assistantSheet(s) {
       h("div", { class: "row-btns" },
         h("button", { class: "control", onclick: () => pictureSheet(s) }, own ? "Change…" : "Choose…"),
         own ? h("button", { class: "control", onclick: async () => {
-          try { await api("/api/assistant/picture", { off: true }); closeSheets(); } catch (e) { toast(e.message); }
-        } }, "Amarchy's own") : null)),
+          try { await api(pictureApi(s), { off: true }); closeSheets(); } catch (e) { toast(e.message); }
+        } }, main ? "Amarchy's own" : "Its initial") : null)),
     h("div", { class: "section" }, "Chime"),
-    h("button", { class: "control wide", onclick: () => soundSheet(true) }, "Its chime…"),
+    h("button", { class: "control wide", onclick: () => soundSheet(s.id) }, "Its chime…"),
     h("button", { class: "control wide danger", onclick: async () => {
-      try { await api(`/api/session/${sid(s)}/assistant`, { off: true }); closeSheets(); toast("No assistant: it's a chat like the others again"); }
-      catch (e) { toast(e.message); }
-    } }, "Not my assistant any more"));
+      try {
+        await api(`/api/session/${sid(s)}/${main ? "assistant" : "agent"}`, { off: true });
+        closeSheets();
+        toast(main ? "No assistant: it's a chat like the others again" : `${who} is a chat like the others again`);
+      } catch (e) { toast(e.message); }
+    } }, main ? "Not my assistant any more" : "Not an agent any more"));
 }
+
+// Where its picture goes: your assistant's, or an agent's.
+function pictureApi(s) { return s.assistant === "main" ? "/api/assistant/picture" : `/api/session/${sid(s)}/agent/picture`; }
 
 // A picture of yours, cut to the round square the lists show: drag it into
 // place, and zoom with the slider, the wheel or two fingers. What's in the
@@ -308,7 +346,7 @@ async function pictureSheet(s) {
     c.getContext("2d").drawImage(bmp, cx - sd / 2, cy - sd / 2, sd, sd, 0, 0, out, out);
     try {
       const png = await new Promise((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("couldn't cut it"))), "image/png"));
-      await api("/api/assistant/picture", { data: await base64Of(png) });
+      await api(pictureApi(s), { data: await base64Of(png) });
       closeSheets();
       toast("Its new picture is on every list");
     } catch (e) {

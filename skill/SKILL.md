@@ -262,8 +262,9 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   `--force` without explicit approval: it discards them.
 - `amarchy automations run|pause|resume <timer>`: run a job now, or pause it
   (until resumed, even across restarts) and resume it.
-- `amarchy alerts`, `amarchy sound`, `amarchy theme`, `amarchy assistant`:
-  what the user hears and sees in the app. Change them only when asked.
+- `amarchy alerts`, `amarchy sound`, `amarchy theme`, `amarchy assistant`,
+  `amarchy agents`: what the user hears and sees in the app. Change them only
+  when asked (`amarchy agents` alone, listing them, you can run freely).
 
 ### Never on your own
 
@@ -393,7 +394,9 @@ input, and their list shows your state live. Don't add notifications of your own
 for that. `amarchy notify "<title>" "<body>" [--session <id>] [--urgent]` pushes a
 notification of your own to the user's phones (on a host with the app on); only
 send one when the user asked for it (a reminder, a brief). The user's assistant
-session (`amarchy assistant` names it; `assistant: "main"` in `amarchy list`) is
-the exception: its notifications always reach them, under its name. `amarchy
-alerts` decides what the other sessions' do; only change it, or the assistant,
-when the user asks.
+session (`amarchy assistant` names it; `assistant: "main"` in `amarchy list`) and
+their agents (`amarchy agents` lists them; `assistant: "agent"`) are the
+exception: their notifications always reach them, each under its own name and
+picture. `amarchy alerts` decides what the other sessions' do; only change it,
+the assistant or the agents, when the user asks. If you are one of the user's
+agents, you live on: you're never a chat to complete or close.

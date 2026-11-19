@@ -152,8 +152,8 @@ const LOOPS = [
 
 // notices: with the home's notice that notifications are off on this device
 // (test/push-notice.js); else a device that said no to them, so the home is
-// your chats alone.
-async function page(browser, layout, port, { notices = false } = {}) {
+// your chats alone. chats: the list the host sends (test/agents-view.js's own).
+async function page(browser, layout, port, { notices = false, chats = CHATS } = {}) {
   const ctx = await browser.newContext({ ...LAYOUTS[layout], baseURL: `http://127.0.0.1:${port}` });
   const p = await ctx.newPage();
   p.errors = [];
@@ -190,7 +190,7 @@ async function page(browser, layout, port, { notices = false } = {}) {
       }
       return v;
     };
-  }, { chats: CHATS, loops: LOOPS, notices });
+  }, { chats, loops: LOOPS, notices });
   return p;
 }
 
@@ -1123,7 +1123,7 @@ async function wide(browser, port) {
   await p.context().close();
 }
 
-module.exports = { loadPlaywright, freePort, startServer, findChrome, page, ready, until, sleep, check, failures, CHATS };
+module.exports = { loadPlaywright, freePort, startServer, findChrome, page, ready, until, sleep, check, failures, CHATS, T, NOW };
 
 if (require.main === module) (async () => {
   const pw = loadPlaywright();

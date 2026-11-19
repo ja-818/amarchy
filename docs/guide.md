@@ -223,13 +223,14 @@ with a current browser works). It opens on [Today](#today): what to do now. Its
 groups and sort as a computer: each one's name, its state in words and its
 project, then what it asks you ("Asks: Which theme should be the default?") or the
 last thing its Claude wrote; its time, a dot while you haven't read what it
-finished, and its flag if pinned. Your assistant's card stays on top (see
-[Your assistant](#your-assistant)). The search reads names, projects and branches.
+finished, and its flag if pinned. Your assistant's card stays on top, and your
+agents' right under it (see [Your assistant](#your-assistant) and
+[Your agents](#your-agents)). The search reads names, projects and branches.
 
-- **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, add a picture or a secret, make it your assistant, or close
+- **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, add a picture or a secret, make it an agent or your assistant, or close
   it. Closing asks first, as on a computer, and says if uncommitted work would go
   with it.
-- **Settings** (the gear) picks the chimes, your assistant, your projects, the
+- **Settings** (the gear) picks the chimes, your assistant and agents, your projects, the
   look, the sleep time, what tells you, dictation, secrets, the terminals and the
   links. **New project…** is there too, and the **+** by a new chat's projects.
 - **The box under the list**, **What do you want to do?**, starts a new chat: say
@@ -259,9 +260,9 @@ finished, and its flag if pinned. Your assistant's card stays on top (see
   chime: "Asks: …", "Wants to run a command: Install the packages", "Needs your
   OpenAI API key: to run the tests", "Has a plan for you to approve", or "Done:" and
   the start of its answer, then its project. Tapped, it opens that chat, on the card
-  when it asks something, whether the app was open or not. Your assistant's always
-  reach you (see [Your assistant](#your-assistant)); **Settings → Tell me** says
-  which of the others do.
+  when it asks something, whether the app was open or not. Your assistant's and
+  your agents' always reach you (see [Your assistant](#your-assistant)); **Settings
+  → Tell me** says which of the others do.
 - **When they stop reaching a device**, the home says so, on the phone and on a
   computer alike: a card above your chats, "Notifications are off", with **Turn
   on** (one tap) and **Not now** (it stays away on that device). It shows where
@@ -666,7 +667,7 @@ to it as you, but anything running as you there can drive the chats anyway.
 The chime plays in a computer's browser, while the app is open, when a chat needs
 you or is done. A phone's notifications ring with the phone's own sound. Pick the
 chime in the app: **Settings → Sound**, which plays each sound as you tap it, or as
-the keys land on it. The host keeps the pick, for the chats or your assistant, and
+the keys land on it. The host keeps the pick, for the chats, your assistant or each agent, and
 **Add your own…** there uploads a file from the phone or the computer into
 `~/.config/amarchy/sounds/`.
 
@@ -688,7 +689,7 @@ WAV for it once (Safari plays no Ogg).
 ```sh
 amarchy alerts needs-you   # the default: a chat tells you only when it asks you something
 amarchy alerts all         # when one needs you and when one is done
-amarchy alerts assistant   # nothing but your assistant
+amarchy alerts assistant   # nothing but your assistant and your agents
 ```
 
 With `needs-you`, a chat that asks a question or a permission notifies you; one
@@ -823,7 +824,7 @@ to be): your theme's colors burst over your wallpaper, a tick lands, **MISSION
 COMPLETE**, how many you've completed today against what still needs you, a short
 fanfare (not when your chimes are off), and **Next mission**. Undo stays under it.
 
-Your assistant is a line on top. What you answer, allow or close goes after a few
+Your assistant is a line on top, and each of your agents a line under it. What you answer, allow or close goes after a few
 seconds with **Undo** at the bottom of the screen, so a slip costs nothing. A chat you
 open from the board comes back to the board once you send it something. Held down
 on the phone (a right click on a computer), a chat's card opens its menu: pin, for later,
@@ -961,6 +962,52 @@ imp, or **Not my assistant any more**. **Choose…** a picture from the phone's 
 the computer, drag it into the circle and zoom (the slider, the wheel, two fingers, or
 the arrows and `+`/`-`), and the page cuts it there and sends the host what's in the
 circle. **Settings** has your assistant too.
+
+## Your agents
+
+Your assistant isn't the only chat that should live on. One that keeps your social
+media, one that watches your inbox for a client: each has a job of its own that never
+finishes, and each would get lost among the coding chats just as your assistant would.
+Make them **agents**:
+
+```sh
+amarchy agents <id> [--name <name>]          # this chat is an agent (named after its project unless you name it)
+amarchy agents                               # your assistant, then your agents: id and name
+amarchy agents --json                        # with each one's role, chime and picture
+amarchy agents <id> --picture <file> [--crop x,y,size] | --picture off
+amarchy agents <id> --sound <name>|off       # its chime
+amarchy agents <id> off                      # a chat like the others again (its picture deleted)
+```
+
+An agent has everything your assistant has but your tasks (Today's loops and their
+**Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay your
+assistant's):
+
+- **Its place**, on top of every list, right under your assistant, in the order you
+  made them, whatever its priority. Its card shows its picture and name, as your
+  assistant's does, and the other chats of its project wear its name.
+- **Its picture**: yours (cut round, kept in `~/.config/amarchy/agents/`), else its
+  initial on its project's color, so two agents never look alike.
+- **Its chime**: one of its own, picked as it's made from the chimes nothing else
+  rings with (the chats', your assistant's, your other agents'), and yours to change.
+- **It always tells you** when it needs you or is done, under its name and picture,
+  whatever `amarchy alerts` lets through of the others (`assistant` there means your
+  assistant and your agents alone). What it sends with `amarchy notify` goes under its
+  name too.
+- **It's never a mission**: no **Complete** on its card, its bar, its menu or its
+  keys, no Done strip in its chat, never **Stalled** or new for **Needs you**, and its
+  merges don't count on your score. Asking you something, it's your move like any chat.
+  It sleeps when idle like every chat, and wakes when you or a timer write to it.
+
+`amarchy agents <id>` takes your assistant's id too: its name, picture and chime set
+the same way (`--name`, `--picture`, `--sound`). An agent you make your assistant
+(`amarchy assistant <id>`) keeps its name and is no longer an agent.
+
+In the app: a chat's menu, **Make it an agent…** (or your assistant, in place of the
+one you have); on an agent, **name, picture, chime…**: rename it, choose its picture
+(cut in the circle as your assistant's is), pick its chime, or **Not an agent any
+more**. **Settings → Agents** lists them, your assistant first, and **Settings →
+Sound** has a tab for each.
 
 ## From scripts and agents
 
@@ -1143,12 +1190,16 @@ amarchy sound [--show]                print the chime
 amarchy sound <name> | off            set it (one of --list, or off)
 amarchy sound --list [--json]         every sound: amarchy's, then yours
 
-Your assistant and alerts:
+Your assistant, your agents and alerts:
 amarchy assistant                     which session it is, or none
 amarchy assistant <id> [--name <name>]   make a session your assistant
 amarchy assistant off                 no assistant: a session like the others again
 amarchy assistant --picture <file>|off [--crop x,y,size]   its picture
 amarchy sound --assistant [name|off]  its chime
+amarchy agents [--json]               your assistant, then your agents
+amarchy agents <id> [--name <name>] [--picture <file>|off [--crop x,y,size]] [--sound <name>|off]
+                                      make a session an agent, or change one (your assistant too)
+amarchy agents <id> off               not an agent any more
 amarchy alerts [all|needs-you|assistant]   what the other sessions tell you about (prints it without one)
 
 Dictation:
