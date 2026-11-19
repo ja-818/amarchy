@@ -572,3 +572,108 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @media (hover: hover) { .ui-photo-go:hover { background: rgba(255, 255, 255, 0.18); } }
 /* A phone: a swipe sideways goes between them; the arrows stay out of the picture's way. */
 @media (pointer: coarse) { .ui-photo-go { width: 40px; height: 52px; font-size: 28px; background: rgba(0, 0, 0, 0.25); } }
+
+/* ---- pixel art (uiPixels): crisp squares in the theme's own colors. A
+   capital letter blinks, each letter at its own beat; .bob bobs (d1-d3: a
+   beat later), .flicker flickers. Still when the system asks for less motion. */
+.ui-px { display: inline-block; line-height: 0; flex: none; }
+.ui-px svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.px-a { fill: var(--accent); }
+.px-t { fill: var(--text); }
+.px-m { fill: var(--text-muted); }
+.px-k { fill: var(--surface-sunken); }
+.px-s { fill: var(--surface-raised); }
+.px-x { fill: var(--border); }
+.px-r { fill: var(--red); }
+.px-o { fill: var(--orange, var(--yellow)); }
+.px-y { fill: var(--yellow); }
+.px-g { fill: var(--green); }
+.px-c { fill: var(--cyan); }
+.px-b { fill: var(--blue); }
+.px-p { fill: var(--magenta); }
+@media (prefers-reduced-motion: no-preference) {
+  .px-blink { animation: ui-px-blink 1.6s step-end infinite; }
+  .px-G { animation-delay: .35s; }
+  .px-Y { animation-delay: .7s; }
+  .px-R { animation-delay: 1.05s; }
+  .px-P, .px-C { animation-delay: .5s; }
+  .px-O { animation-duration: .5s; }
+  .ui-px.bob { animation: ui-px-bob 1.1s steps(2, jump-none) infinite; }
+  .ui-px.flicker { animation: ui-px-flicker .6s steps(2, jump-none) infinite; transform-origin: 50% 100%; }
+  .ui-px.d1 { animation-delay: .25s; }
+  .ui-px.d2 { animation-delay: .5s; }
+  .ui-px.d3 { animation-delay: .75s; }
+}
+@keyframes ui-px-blink { 0% { opacity: 1; } 70% { opacity: .2; } 100% { opacity: .2; } }
+@keyframes ui-px-bob { 50% { transform: translateY(-8%); } }
+@keyframes ui-px-flicker { 50% { transform: scaleY(.92) scaleX(1.04); } }
+
+/* ---- confetti (uiBurst), in the theme's hues, from the middle of its box */
+.ui-burst { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.ui-burst i { position: absolute; left: 50%; top: 46%; width: 9px; height: 16px; border-radius: 2px; background: var(--c);
+              animation: ui-burst-fly var(--d) cubic-bezier(.12, .75, .3, 1) forwards; }
+.ui-burst i.round { width: 10px; height: 10px; border-radius: 50%; }
+@keyframes ui-burst-fly {
+  0% { transform: translate(-50%, -50%) rotate(0) scale(.4); opacity: 1; }
+  75% { opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--rot)) scale(1); opacity: 0; }
+}
+
+/* ---- slides (uiSlides): a tour, one slide at a time. The whole screen on
+   a phone (the shade's band over it, to tap it away), a big card in the
+   middle on a computer. Over it, a bar of segments (where you are) and the
+   ✕; under it, Back, n of all and Next, always in reach. */
+.sheet-back.slides { align-items: stretch; padding: calc(var(--top) + 14px) 8px calc(var(--bottom) + 8px); }
+.sheet-back.slides .sheet { display: flex; flex-direction: column; height: 100%; max-height: none; padding: 0; overflow: hidden; }
+.sheet-back.slides .sheet .head { position: relative; flex: none; margin: 0; padding: 16px 52px 6px 16px; background: none; }
+.sheet-back.slides .sheet-close { top: 6px; right: 4px; }
+.ui-slides-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ui-slides-bar { display: flex; gap: 4px; }
+.ui-slides-seg { flex: 1 1 0; min-width: 0; height: 28px; padding: 0; display: flex; align-items: center; border: 0; background: none; cursor: pointer; }
+.ui-slides-seg i { display: block; width: 100%; height: 4px; border-radius: 2px; background: var(--control-selected); transition: background .2s; }
+.ui-slides-seg.past i { background: color-mix(in srgb, var(--accent) 50%, var(--control-selected)); }
+.ui-slides-seg.on i { background: var(--accent); }
+.ui-slides-seg:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 2px; }
+.ui-slides-stage { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+                   -webkit-overflow-scrolling: touch; padding: 4px 20px 20px; display: flex; flex-direction: column; }
+.ui-slide { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 560px; margin: auto; }
+.ui-slide-art { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 12px 18px;
+                min-height: 110px; margin-bottom: 4px; }
+.ui-slide-kicker { font-size: var(--caption); font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.ui-slide-title { margin: -4px 0 2px; font-size: var(--display); line-height: 1.15; font-weight: 800; color: var(--text); text-wrap: balance; }
+.ui-slide-line { margin: 0; font-size: var(--body); line-height: 1.5; color: var(--text); text-wrap: pretty; }
+.ui-slide-line b { font-weight: 800; }
+.ui-slide-line code { font-size: .9em; }
+.ui-slide-aside { margin: 0; font-size: var(--caption); line-height: 1.5; color: var(--text-muted); }
+.ui-slide-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ui-slides-stage .code { margin: 0; }
+.ui-slides-stage .code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ui-slides-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--border-faint); }
+.ui-slides-count { flex: 1; text-align: center; font-size: var(--caption); font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ui-slides-back, .ui-slides-next { min-width: 104px; }
+.ui-slides-back[disabled] { visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .ui-slide.fwd { animation: ui-slide-fwd .22s ease-out both; }
+  .ui-slide.bwd { animation: ui-slide-bwd .22s ease-out both; }
+}
+@keyframes ui-slide-fwd { from { opacity: 0; transform: translateX(28px); } }
+@keyframes ui-slide-bwd { from { opacity: 0; transform: translateX(-28px); } }
+body.desk .sheet-back.slides { align-items: center; padding: 24px; }
+body.desk .sheet-back.slides .sheet { max-width: 760px; height: min(800px, 100%); }
+body.desk .ui-slides-stage { padding: 8px 40px 28px; }
+/* In a slide: a row that scrolls sideways (the themes), keys as keycaps, a pill that says where you are. */
+.ui-slide-row { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+                padding: 4px 3px 8px; margin: 0 -3px; scrollbar-width: thin; }
+.ui-slide-row > * { flex: 0 0 128px; scroll-snap-align: start; }
+.ui-slide-status { display: flex; }
+.ui-slide-status .tpill { white-space: normal; }
+.ui-keycaps { display: flex; gap: 10px; align-items: flex-end; }
+.ui-keycap { display: grid; place-items: center; width: 56px; height: 56px; font: inherit; font-size: 24px; font-weight: 800; color: var(--accent);
+             background: var(--control-bg); border: 2px solid var(--control-border); border-bottom-width: 6px; border-radius: var(--radius-control); }
+@media (prefers-reduced-motion: no-preference) {
+  .ui-keycap { animation: ui-keycap 2.4s steps(1) infinite; }
+  .ui-keycap:nth-child(2) { animation-delay: .6s; }
+  .ui-keycap:nth-child(3) { animation-delay: 1.2s; }
+  .ui-keycap:nth-child(4) { animation-delay: 1.8s; }
+}
+@keyframes ui-keycap { 0% { transform: translateY(4px); border-bottom-width: 2px; color: var(--text); } 25% { transform: none; border-bottom-width: 6px; } }

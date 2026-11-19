@@ -591,7 +591,6 @@ async function todayComplete(s) {
 // earned has a moment of its own (missionBadge); a fast reply, a flash by the
 // score (missionsWatch).
 
-const MISSION_HUES = ["--red", "--yellow", "--green", "--blue", "--magenta", "--cyan", "--orange", "--accent"];
 const MISSION_RANKS = [[0, "Cadet"], [10, "Ensign"], [25, "Pilot"], [50, "Lieutenant"], [100, "Commander"],
                        [250, "Captain"], [500, "Admiral"], [1000, "Legend"]];
 const missionUI = { flash: null, replies: null, queue: [], merges: null };
@@ -674,18 +673,7 @@ for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, missionSoundWa
 function missionMoment({ cls = "", mark = "check", kicker, title, earned = [], extra = null, stats = "", next = "Keep going →", go = null, bits = 90, far = 42, stay = 3400 }) {
   document.querySelectorAll(".mission").forEach((x) => x.remove());
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const burst = h("div", { class: "mission-burst", "aria-hidden": "true" });
-  if (!calm) for (let i = 0; i < bits; i++) {
-    const bit = h("i");
-    const angle = Math.random() * Math.PI * 2, d = 18 + Math.random() * far;
-    bit.style.setProperty("--dx", `${Math.cos(angle) * d}vw`);
-    bit.style.setProperty("--dy", `${Math.sin(angle) * d * 0.8 + 12 + Math.random() * 20}vh`);
-    bit.style.setProperty("--rot", `${Math.round(Math.random() * 1080 - 540)}deg`);
-    bit.style.setProperty("--d", `${1.1 + Math.random() * (far > 42 ? 1.4 : 0.9)}s`);
-    bit.style.setProperty("--c", `var(${MISSION_HUES[i % MISSION_HUES.length]})`);
-    if (i % 3 === 0) bit.classList.add("round");
-    burst.append(bit);
-  }
+  const burst = uiBurst({ bits, far });      // (ui.js: none when the system asks for less motion)
   const done = () => { el.remove(); if (go) go(calm); missionNextBadge(); };
   const nextBtn = h("button", { class: "tbtn primary mission-next", type: "button", onclick: (e) => { e.stopPropagation(); done(); } }, next);
   const el = h("div", { class: `mission${cls ? ` ${cls}` : ""}`, role: "status", "aria-live": "polite", onclick: () => { el.remove(); missionNextBadge(); } }, burst,
@@ -996,6 +984,9 @@ function todayFill(box, force) {
   // Under a computer's open chat the board isn't in sight: drawn once it's
   // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
   if (board && !force && typeof desk !== "undefined" && desk.current) return;
+  // An empty amarchy's board is the welcome (tasks.js boardFill): not an
+  // empty Today in its place whenever something here asks for a redraw.
+  if (board && box.dataset.key === "welcome" && typeof boardEmpty === "function" && boardEmpty()) return;
   const only = board ? boardTabNow() : null;
   const key = `${only}|${todayKey(app.view)}`;
   if (!force && box.dataset.key === key) return;

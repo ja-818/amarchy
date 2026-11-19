@@ -1657,6 +1657,7 @@ function deskMenu() {
     { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(false) },
     { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", act: () => (app.desk ? newProject() : newProjectSheet()) },
     { label: "Settings", icon: "gear", act: () => openSettings() },
+    { label: "Tour", icon: "tour", detail: "amarchy in 100 seconds", act: () => tourShow() },
     { label: "Keys", icon: "keys", key: "?", desk: true, act: () => showKeys() },
   ]);
 }

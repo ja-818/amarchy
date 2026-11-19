@@ -63,6 +63,7 @@ function boardBuild() {
   // them where they were (a button clicked isn't focused), even in a box
   // that's gone, and j / k stopped working until the app was opened again.
   board.box.addEventListener("click", (e) => {
+    if (document.querySelector(".sheet-back, .picker-back")) return;      // what it opened has the keys now (a sheet, the tour)
     const b = e.target.closest("button, a[href], summary");
     const go = b && board.box.contains(b) ? b : (e.target.closest(".tcard") || {}).querySelector?.(":scope > .today-go");
     if (go && document.activeElement !== go && go.isConnected && shown(go)) go.focus({ preventScroll: true });
@@ -304,12 +305,18 @@ function boardTab(tab) {
   if (go) uiReveal(go, { scroller: board.scroll });
 }
 
+// An empty amarchy: no project and no chat yet (the board is the welcome).
+function boardEmpty(v = app.view) {
+  return !!v && !v.sessions.length && !(v.projects || []).length;
+}
+
 // The board drawn: Today's queue, or with no project yet the welcome.
 function boardFill(force) {
   const v = app.view;
-  if (v && !v.sessions.length && !(v.projects || []).length) {
+  if (boardEmpty(v)) {
     if (board.box.dataset.key !== "welcome") board.box.replaceChildren(welcome((p) => newChatIn(p)));
     board.box.dataset.key = "welcome";
+    tourAuto();      // the first time on this device: the tour, over it (tour.js)
     return;
   }
   todayFill(board.box, force);

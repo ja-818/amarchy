@@ -48,6 +48,7 @@ const ICONS = {
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   medal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3l-3 6M16 3l3 6M9 3h6"/><circle cx="12" cy="15" r="6"/><path d="M12 12.5l.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3z" fill="currentColor" stroke-width="1"/></svg>',
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2L4 13.5h6.5L9.5 22 20 9.5h-6.5z"/></svg>',
+  tour: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z" fill="currentColor"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 3.2 2.4 4.9 4 6.6 1.6 1.7 3 3.5 3 6.1A7 7 0 0 1 5 15.2c0-2.3 1-4.2 2.6-5.6.2 1.7.9 2.9 2.2 3.6-.5-3.9.6-7.6 2.2-10.7z"/></svg>',
 };
 
@@ -776,7 +777,8 @@ function welcome(added) {
     h("p", { class: "muted" }, "Claude works in a project: a folder of your work. Add one of your GitHub repos, or start an empty folder for something new."),
     h("div", { class: "welcome-actions" },
       h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),
-      h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project")));
+      h("button", { class: "cta", onclick: () => add("empty") }, "Start an empty project"),
+      uiButton("New here? Take the tour", () => tourShow(), false, "quiet welcome-tour")));
 }
 
 // Move a project ("before" or "after" another, "up", "down", "top", "bottom")
@@ -2308,6 +2310,8 @@ async function openSettings() {
     kids.push(h("div", { class: "section" }, "Look"),
       h("p", {}, `${look.name || "Tokyo Night"}, on every phone and browser of yours.`),
       h("button", { class: "control wide", onclick: () => openLook() }, "Theme, font, wallpaper…"),
+      h("div", { class: "section" }, "Help"),
+      h("button", { class: "control wide", onclick: () => tourShow() }, "Take the tour: amarchy in 100 seconds"),
       h("div", { class: "section" }, "Host"),
       h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
                  "Reachable only on your tailnet."));
@@ -2331,6 +2335,33 @@ async function openSettings() {
 // repository: one drawn for it until then), picked here for every phone and
 // browser of yours: they're kept on the host (amarchy theme there does the
 // same).
+
+// The look the host now has (/api/look's answer), worn here at once; every
+// other device takes it from the list in a moment.
+function lookWorn(info) {
+  if (app.view) app.view.look = info.look;
+  app.nerd = !!info.nerd;
+  wearLook(info.look);
+  refresh();
+}
+
+// A theme as a card in its own colors (/api/look's themes: {key, name,
+// colors, wallpaper}): its wallpaper, its hues as dots, its name. on: the
+// one worn; act(click): picking it.
+function themeCard(t, on, act) {
+  const el = h("button", { class: `theme-card${on ? " on" : ""}`, type: "button", "aria-label": t.name, "aria-pressed": on ? "true" : "false", onclick: act },
+    h("span", { class: "thumb" }),
+    h("span", { class: "dots" }, ...t.colors.slice(2).map((c) => {
+      const d = h("i", {});
+      d.style.setProperty("--dot", c);
+      return d;
+    })),
+    h("span", { class: "name" }, t.name));
+  el.style.setProperty("--card-bg", t.colors[0]);
+  el.style.setProperty("--card-fg", t.colors[1]);
+  if (t.wallpaper) el.style.setProperty("--thumb", `url("${t.wallpaper}")`);
+  return el;
+}
 
 async function openLook() {
   const body = h("div", {}, h("p", {}, "…"));
@@ -2396,29 +2427,9 @@ async function openLook() {
     draw();
   } });
   // Worn here at once; every other device takes it from the list in a moment.
-  const wearIt = () => {
-    if (app.view) app.view.look = info.look;
-    app.nerd = !!info.nerd;
-    wearLook(info.look);
-    refresh();
-  };
+  const wearIt = () => lookWorn(info);
   const draw = () => {
-    const card = (t) => {
-      const el = h("button", { class: `theme-card${t.key === now("theme") ? " on" : ""}`, "aria-label": t.name,
-                               "aria-pressed": t.key === now("theme") ? "true" : "false",
-                               onclick: (e) => { if (t.key !== now("theme")) pick({ theme: t.key }, e.currentTarget); } },
-        h("span", { class: "thumb" }),
-        h("span", { class: "dots" }, ...t.colors.slice(2).map((c) => {
-          const d = h("i", {});
-          d.style.setProperty("--dot", c);
-          return d;
-        })),
-        h("span", { class: "name" }, t.name));
-      el.style.setProperty("--card-bg", t.colors[0]);
-      el.style.setProperty("--card-fg", t.colors[1]);
-      if (t.wallpaper) el.style.setProperty("--thumb", `url("${t.wallpaper}")`);
-      return el;
-    };
+    const card = (t) => themeCard(t, t.key === now("theme"), (e) => { if (t.key !== now("theme")) pick({ theme: t.key }, e.currentTarget); });
     const fonts = info.fonts.map((f) => h("button", { class: `control${f.key === now("font") ? " on" : ""}`,
       onclick: (e) => pick({ font: f.key }, e.currentTarget) }, f.name));
     // The wallpapers: Omarchy's for the theme worn (a theme of yours, its

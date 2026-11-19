@@ -67,6 +67,8 @@ leaves your projects and chats alone.
 - **Chat | Terminal**: the project's own terminal, where you run it (`npm run dev`, say). On a
   computer it's a panel beside the chat.
 - **Settings**: sleep, sounds, notifications, the look, dictation, secrets and the terminals.
+- **The tour**: amarchy in 100 seconds, with pixel art. It opens by itself the first time
+  you open an empty amarchy on a device; after that it's **Tour** in the Amarchy menu (the **Ⓐ**).
 
 ## The keys that matter
 

@@ -119,15 +119,7 @@ body:not(.desk) .toast { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px
 .mission.leaving { animation: mission-out .4s ease-in both; }
 @keyframes mission-in { from { opacity: 0; } }
 @keyframes mission-out { to { opacity: 0; } }
-.mission-burst { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.mission-burst i { position: absolute; left: 50%; top: 46%; width: 9px; height: 16px; border-radius: 2px; background: var(--c);
-                   animation: mission-fly var(--d) cubic-bezier(.12, .75, .3, 1) forwards; }
-.mission-burst i.round { width: 10px; height: 10px; border-radius: 50%; }
-@keyframes mission-fly {
-  0% { transform: translate(-50%, -50%) rotate(0) scale(.4); opacity: 1; }
-  75% { opacity: 1; }
-  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--rot)) scale(1); opacity: 0; }
-}
+/* (Its confetti: ui.css .ui-burst.) */
 .mission-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
                 min-width: min(420px, 86vw); max-width: 86vw; padding: 28px 32px 24px; cursor: default;
                 background: var(--surface); border: var(--popup-border-width) solid var(--success); border-radius: var(--radius-card);

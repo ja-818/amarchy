@@ -40,6 +40,19 @@ GitHub repos, any git URL, or starts an empty one.
 Update with `amarchy update` (it also does it by itself every few minutes). To
 remove amarchy, run `install.sh --uninstall`; your projects and chats are left alone.
 
+### The tour
+
+**amarchy in 100 seconds**: what amarchy is, how to set it up, how to make it an
+app from Safari (on an iPhone and on a Mac), how it works, the chat, the board, the
+moves that get the most out of it, the themes and the keys, as eleven slides with
+pixel art in your theme's own colors. It opens by itself the first time an empty
+amarchy (no project, no chat yet) is opened on a device, over the welcome; any time
+after, it's **Tour** in the Amarchy menu (the **Ⓐ**), **Take the tour** on the
+welcome, and **Settings → Help**. Next, Back, a swipe sideways, the arrow keys or a
+tap on the bar at its top go along it; Esc, its ✕ or a swipe down close it. Its
+themes slide wears a theme the moment you tap it, on every phone and browser of
+yours, as the Look sheet does.
+
 ## How it works
 
 Every chat is its own git worktree and branch, made from the latest `main` of
@@ -222,7 +235,8 @@ finished, and its flag if pinned. Your assistant's card stays on top (see
   the one it starts in lit (tap another); under it, the model (**on Opus 5.5 ▾**): the model you pick there
   stays the one every new chat starts on, on every phone and browser of yours,
   until you pick another (Opus until you do; a chat's own model is still its
-  composer's to change). With no project yet, the app opens on a welcome: what it
+  composer's to change). With no project yet, the app opens on a welcome (and, the first time on that
+  phone, [the tour](#the-tour) over it): what it
   does in a sentence, and **Add a project from GitHub** or **Start an empty
   project**.
 - **Opening the app is for something new**: back after 10 minutes or more away,
@@ -280,7 +294,7 @@ host's chats without anything else installed.
   outlined action on the right. On the board: the **Ⓐ** (`m`, `Ctrl+Alt+M`),
   the **Amarchy menu**: New chat, Automations (a dot on
   the Ⓐ when one failed), theme, font and wallpaper, sound, a new project,
-  Settings, Keys; then **Chats** or **Tasks** (each with what's your move); the
+  Settings, the [Tour](#the-tour), Keys; then **Chats** or **Tasks** (each with what's your move); the
   **search** (`/`: a chat by its name or anything said in it, and your tasks,
   every word found, the lines that have them lit; `Enter` opens the first, `Esc`
   empties it); and **New chat** (`n`). On the phone the same, the search under

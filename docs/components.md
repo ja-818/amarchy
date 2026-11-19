@@ -33,6 +33,9 @@ the change.
 | `uiBadges([{name, about, on, when}])` | Badges: the earned lit, the rest dim with how to earn them. | Your missions |
 | `uiTiles([{n, label, on}])` | A few big numbers in one row, each its word under it (`on`: lit, a record). | Your missions |
 | `uiChart([{n, label}])` | A few days' counts as bars, the last (today) lit. | Your missions |
+| `uiSlides(slides, {key, label, start, done, shown, closed})` | Slides one at a time over everything (`[{kicker, title, art, body, extra, actions, burst}]`, each drawn as it comes): a bar of segments on top (where you are; a tap goes there) and the ✕, Back · n of all · Next at the bottom (the last one's says `done`). → ← (Space, PageUp/Down), a swipe sideways or the buttons go along; Esc, ✕, the shade or a swipe down close it. A line's words take `**bold**` and `` `code` ``; `burst`: confetti as it comes; `.ui-slides-own-keys` on a part that takes its own arrows. | the tour (tour.js) |
+| `uiPixels(rows, {scale, cls, label})`, `uiPixmap(w, h)` | Pixel art in the theme's own colors: rows of letters, one a pixel (`a` accent, `t` text, `m` muted, `k`/`s` the sunken and raised surfaces, `x` a rule, `r o y g c b p` the hues; a capital blinks), as crisp SVG squares; `cls` `bob` (`d1`–`d3` later), `flicker`. `uiPixmap` draws one with `line`, `box`, `frame`, `put`. | the tour's pictures |
+| `uiBurst({bits, far})` | Confetti in the theme's hues, from the middle of its box (none with less motion asked for). | Mission complete, the tour's last slide |
 | `uiSwap(box, nodes)`, `uiPatch(box, nodes)` | Drawing a box again without disturbing what's under a finger: `uiSwap` keeps all of it when nothing would change; `uiPatch` changes only the parts that differ, a part that differs only in which is on (its classes, `aria-pressed`) in place, so a tap already on it isn't lost to a redraw. | the queue over a chat's box, the Look sheet |
 
 ## Snappy

@@ -90,12 +90,12 @@
 .chat li.task-item.checked { color: var(--text-muted); }
 
 /* Code: its language and a copy button over it. */
-.chat .code { border: 1px solid var(--code-border); border-radius: var(--radius-item); background: var(--code-bg); overflow: hidden; }
-.chat .code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 0 12px; min-height: 30px; }
-.chat .code-head .lang { font-size: var(--caption); color: var(--text-muted); }
-.chat .code .copy { min-height: 28px; padding: 2px 8px; font-size: var(--caption); font-weight: 700; color: var(--link); border-radius: var(--radius-control); }
-.chat .code .copy:active { background: var(--control-pressed); }
-.chat .code pre { margin: 0; border: 0; border-radius: 0; background: none; padding: 2px 12px 10px; }
+:is(.chat, .ui-slides-stage) .code { border: 1px solid var(--code-border); border-radius: var(--radius-item); background: var(--code-bg); overflow: hidden; }
+:is(.chat, .ui-slides-stage) .code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 0 12px; min-height: 30px; }
+:is(.chat, .ui-slides-stage) .code-head .lang { font-size: var(--caption); color: var(--text-muted); }
+:is(.chat, .ui-slides-stage) .code .copy { min-height: 28px; padding: 2px 8px; font-size: var(--caption); font-weight: 700; color: var(--link); border-radius: var(--radius-control); }
+:is(.chat, .ui-slides-stage) .code .copy:active { background: var(--control-pressed); }
+:is(.chat, .ui-slides-stage) .code pre { margin: 0; border: 0; border-radius: 0; background: none; padding: 2px 12px 10px; }
 
 /* Quiet lines: a note ("Conversation compacted"), a command you ran. */
 .chat .msg.note, .chat .msg.command { align-self: center; text-align: center; max-width: 90%; color: var(--text-muted); font-size: var(--caption); white-space: pre-wrap; }

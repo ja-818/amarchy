@@ -41,6 +41,10 @@
 // - uiShot: a picture's thumbnail (in a message, in the box), its label on
 //   it (Image 1, as its [Image #1] in the words); a tap: uiPhoto.
 // - uiPhoto: pictures full screen, one at a time, ✕ at the top right.
+// - uiSlides: slides one at a time over everything (the tour), a bar of
+//   where you are on top, Back and Next under it.
+// - uiPixels, uiPixmap: pixel art in the theme's own colors.
+// - uiBurst: confetti in the theme's hues (a mission complete, the tour's end).
 //
 // The two bars (the board's, an open chat's) are one bar (.ui-bar), as
 // Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
@@ -764,4 +768,182 @@ function uiPhoto(shots, at = 0) {
   }, { passive: true });
   show(i);
   return back;
+}
+
+// ---- pixel art (uiPixels), confetti (uiBurst) and slides (uiSlides)
+//
+// Pixel art in the theme's own colors: a picture is rows of letters, one a
+// pixel ("." none; a accent, t text, m muted, k the sunken surface, s the
+// raised one, x a rule, r o y g c b p the theme's hues). A capital letter
+// is the same color, blinking (each letter at its own beat). Drawn as an
+// SVG of crisp squares, so a theme changes every picture with the rest.
+// rows: [strings], or a picture made with uiPixmap. scale: a pixel's size
+// in CSS pixels. cls: its own classes (bob: it bobs; d1-d3: a beat later).
+const UI_PX = "atmksxroygcbp";
+function uiPixels(rows, { scale = 6, cls = "", label = "" } = {}) {
+  if (rows && rows.rows) rows = rows.rows();
+  const w = Math.max(...rows.map((r) => r.length)), ht = rows.length;
+  let rects = "";
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length;) {
+      const c = row[x];
+      let run = 1;
+      while (row[x + run] === c) run++;
+      if (UI_PX.includes(c.toLowerCase())) rects += `<rect x="${x}" y="${y}" width="${run}" height="1" class="px-${c.toLowerCase()}${c === c.toUpperCase() ? ` px-blink px-${c}` : ""}"/>`;
+      x += run;
+    }
+  });
+  const el = h("span", { class: `ui-px${cls ? ` ${cls}` : ""}`, ...(label ? { role: "img", "aria-label": label } : { "aria-hidden": "true" }) });
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${ht}" width="${w * scale}" height="${ht * scale}" shape-rendering="crispEdges">${rects}</svg>`;
+  return el;
+}
+
+// A picture drawn with lines and boxes rather than typed (uiPixels takes
+// it): set(x, y, c), line(x0, y0, x1, y1, c) (straight or at 45°),
+// box(x, y, w, h, c), frame(x, y, w, h, c), put(x, y, rows) (a small
+// picture over it, its dots see-through), rows().
+function uiPixmap(w, ht) {
+  const grid = Array.from({ length: ht }, () => Array(w).fill("."));
+  const m = {
+    set(x, y, c) { if (x >= 0 && y >= 0 && x < w && y < ht) grid[y][x] = c; return m; },
+    line(x0, y0, x1, y1, c) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let i = 0; i <= n; i++) m.set(x0 + Math.sign(x1 - x0) * i, y0 + Math.sign(y1 - y0) * i, c);
+      return m;
+    },
+    box(x, y, bw, bh, c) { for (let j = 0; j < bh; j++) for (let i = 0; i < bw; i++) m.set(x + i, y + j, c); return m; },
+    frame(x, y, bw, bh, c) { m.line(x, y, x + bw - 1, y, c).line(x, y + bh - 1, x + bw - 1, y + bh - 1, c); return m.line(x, y, x, y + bh - 1, c).line(x + bw - 1, y, x + bw - 1, y + bh - 1, c); },
+    put(x, y, rows) { rows.forEach((row, j) => [...row].forEach((c, i) => { if (c !== ".") m.set(x + i, y + j, c); })); return m; },
+    rows: () => grid.map((r) => r.join("")),
+  };
+  return m;
+}
+
+// Confetti in the theme's own hues, flying out from the middle of what it's
+// put in (it fills it, and lets every click through). bits: how many; far:
+// how far they fly (in the screen's widths, %). None when the system asks
+// for less motion.
+const UI_HUES = ["--red", "--yellow", "--green", "--blue", "--magenta", "--cyan", "--orange", "--accent"];
+function uiBurst({ bits = 90, far = 42 } = {}) {
+  const burst = h("div", { class: "ui-burst", "aria-hidden": "true" });
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return burst;
+  for (let i = 0; i < bits; i++) {
+    const bit = h("i");
+    const angle = Math.random() * Math.PI * 2, d = 18 + Math.random() * far;
+    bit.style.setProperty("--dx", `${Math.cos(angle) * d}vw`);
+    bit.style.setProperty("--dy", `${Math.sin(angle) * d * 0.8 + 12 + Math.random() * 20}vh`);
+    bit.style.setProperty("--rot", `${Math.round(Math.random() * 1080 - 540)}deg`);
+    bit.style.setProperty("--d", `${1.1 + Math.random() * (far > 42 ? 1.4 : 0.9)}s`);
+    bit.style.setProperty("--c", `var(${UI_HUES[i % UI_HUES.length]})`);
+    if (i % 3 === 0) bit.classList.add("round");
+    burst.append(bit);
+  }
+  return burst;
+}
+
+// Slides, one at a time, over everything (a tour). slides: [{kicker, title,
+// art, body: [lines: words, or nodes], extra, actions, burst}], each drawn
+// when it comes (art, body, extra and actions may be functions that make
+// them then). A line's words take **bold** and `code`.
+// At the top, a bar of segments: where you are (a tap goes to that one) and
+// the ✕; at the bottom Back, n of all, and Next (the last one's: done, which
+// closes it). → / ← (Space, Shift+Space; PageDown, PageUp), a swipe
+// sideways, or the buttons go along; Esc, the ✕, the shade or a swipe down
+// close it, as any sheet. burst: confetti as that one comes.
+// opts: key (the sheet's), label, start (the first one shown), done (the
+// last one's button), shown(i) (told as each comes), closed(i, finished).
+function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = "Done", shown = null, closed = null } = {}) {
+  let at = -1, finished = false;
+  const made = (x) => (typeof x === "function" ? x() : x);
+  const words = (text) => {
+    const out = h("span", {});
+    for (const part of String(text).split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+      if (!part) continue;
+      if (part.startsWith("**")) out.append(h("b", {}, part.slice(2, -2)));
+      else if (part.startsWith("`")) out.append(h("code", {}, part.slice(1, -1)));
+      else out.append(part);
+    }
+    return out;
+  };
+  const segs = slides.map((s, n) => h("button", { class: "ui-slides-seg", type: "button", "aria-label": `${n + 1} of ${slides.length}: ${s.kicker || s.title}`,
+                                                  onclick: () => go(n) }, h("i")));
+  const bar = h("div", { class: "ui-slides-bar" }, ...segs);
+  const stage = h("div", { class: "ui-slides-stage", "aria-live": "polite" });
+  const count = h("span", { class: "ui-slides-count" });
+  const back = uiButton("Back", () => go(at - 1), false, "quiet ui-slides-back");
+  const next = uiButton("Next", () => (at < slides.length - 1 ? go(at + 1) : finish()), true, "ui-slides-next");
+  const foot = h("div", { class: "ui-slides-foot" }, back, count, next);
+  const el = sheet({ key, cls: "slides" }, h("div", { class: "head" }, h("h2", { class: "ui-slides-label" }, label), bar), stage, foot);
+  const card = el.querySelector(".sheet");
+  const finish = () => { finished = true; closeSheet(); };
+  const go = (n) => {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    if (n === at) return;
+    const forward = n > at;
+    at = n;
+    const s = slides[n];
+    const body = (made(s.body) || []).filter(Boolean).map((line) => (line instanceof Node ? line : h("p", { class: "ui-slide-line" }, words(line))));
+    const slide = h("article", { class: `ui-slide${s.cls ? ` ${s.cls}` : ""} ${forward ? "fwd" : "bwd"}` },
+      s.art ? h("div", { class: "ui-slide-art" }, made(s.art)) : null,
+      s.kicker ? h("div", { class: "ui-slide-kicker" }, s.kicker) : null,
+      h("h3", { class: "ui-slide-title" }, s.title),
+      ...body,
+      made(s.extra) || null,
+      s.actions ? h("div", { class: "ui-slide-actions" }, ...(made(s.actions) || []).filter(Boolean)) : null);
+    stage.replaceChildren(slide);
+    if (s.burst) stage.append(uiBurst({ bits: 120, far: 50 }));
+    stage.scrollTop = 0;
+    segs.forEach((b, i) => {
+      b.classList.toggle("on", i === n);
+      b.classList.toggle("past", i < n);
+      if (i === n) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
+    });
+    count.textContent = `${n + 1} / ${slides.length}`;
+    back.disabled = n === 0;
+    next.textContent = n === slides.length - 1 ? done : "Next";
+    next.classList.toggle("primary", !(n === slides.length - 1 && s.actions));      // the last one's own action is the one thing to do
+    if (shown) shown(n);
+  };
+  // The keys: along the slides (not in a box you type in, nor a row that
+  // takes its own arrows: a slide's themes). Wherever the keys are while
+  // it's the one on top (the page under it, after a click that left them
+  // there): Esc closes it there too, as its own keys would.
+  const keys = (e) => {
+    if (!el.isConnected) return window.removeEventListener("keydown", keys, true);
+    if (el.hidden || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.target.matches("input, textarea")) return;
+    const inside = el.contains(e.target);
+    if (!inside && [...document.querySelectorAll(".sheet-back:not([hidden]), .picker-back")].pop() !== el) return;      // another over it has them
+    if (!inside && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); return closeSheet(); }
+    const by = { ArrowRight: 1, ArrowLeft: -1, PageDown: 1, PageUp: -1 }[e.key]
+      ?? (e.key === " " && !e.target.matches("button") ? (e.shiftKey ? -1 : 1) : 0);
+    if (!by || (e.key.startsWith("Arrow") && e.target.closest(".ui-slides-own-keys"))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (by > 0 && at === slides.length - 1) return finish();
+    go(at + by);
+  };
+  window.addEventListener("keydown", keys, true);
+  // A swipe sideways: the next one, or the one before (down: the sheet's, it closes).
+  let from = null;
+  stage.addEventListener("touchstart", (e) => {
+    from = e.touches.length === 1 && !e.target.closest(".ui-slides-own-keys") ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  stage.addEventListener("touchend", (e) => {
+    if (!from) return;
+    const t = e.changedTouches[0], dx = t.clientX - from.x, dy = t.clientY - from.y;
+    from = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(at + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+  // Gone (however it went): said, with where it was and whether it got to its end.
+  new MutationObserver((_, obs) => {
+    if (el.isConnected) return;
+    obs.disconnect();
+    if (closed) closed(at, finished);
+  }).observe(document.body, { childList: true });
+  go(start);
+  if (app.desk || lastInput.keys) next.focus({ preventScroll: true });
+  card.setAttribute("aria-label", label);
+  el.go = go;
+  el.at = () => at;
+  return el;
 }
