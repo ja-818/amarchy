@@ -45,6 +45,7 @@
 //   where you are on top, Back and Next under it.
 // - uiPixels, uiPixmap: pixel art in the theme's own colors.
 // - uiBurst: confetti in the theme's hues (a mission complete, the tour's end).
+// - uiScrollRow: a row that scrolls sideways, ‹ › at its ends, the wheel too.
 //
 // The two bars (the board's, an open chat's) are one bar (.ui-bar), as
 // Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
@@ -770,6 +771,49 @@ function uiPhoto(shots, at = 0) {
   return back;
 }
 
+// ---- a row that scrolls sideways (uiScrollRow)
+//
+// A row wider than its room (a slide's themes), with ‹ › at its ends: each
+// a page of it along, shown only while there's more that way. A mouse's
+// wheel scrolls it sideways too (a trackpad's sideways swipe already does;
+// at its end, the wheel scrolls the page again), and the keys move along it
+// as in any row of buttons. row: the row itself (it scrolls); its box, with
+// the arrows over its ends, is what's returned (box.update(): the arrows
+// again, after its contents changed by other means than a redraw).
+function uiScrollRow(row, { label = "" } = {}) {
+  row.classList.add("ui-scroll-row");
+  const page = (dir) => () => {
+    const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    row.scrollBy({ left: dir * Math.max(120, row.clientWidth * 0.8), behavior: calm ? "auto" : "smooth" });
+  };
+  const arrow = (dir) => h("button", { class: `ui-scroll-go ${dir < 0 ? "prev" : "next"}`, type: "button", tabindex: "-1",
+                                      "aria-label": `${dir < 0 ? "Back" : "More"}${label ? `: ${label}` : ""}`, title: dir < 0 ? "Back" : "More",
+                                      onclick: page(dir) }, glyph(dir < 0 ? "back" : "next"));
+  const prev = arrow(-1), next = arrow(1);
+  const box = h("div", { class: "ui-scroll" }, row, prev, next);
+  const update = () => {
+    const max = row.scrollWidth - row.clientWidth;
+    // (A few pixels from an end is at it: a card snapped to the row's padding.)
+    prev.hidden = row.scrollLeft <= 4;
+    next.hidden = row.scrollLeft >= max - 4;
+  };
+  row.addEventListener("scroll", update, { passive: true });
+  row.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;      // sideways already: the row's own
+    const max = row.scrollWidth - row.clientWidth;
+    const by = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? row.clientWidth : 1);
+    const to = Math.max(0, Math.min(max, row.scrollLeft + by));
+    if (max <= 0 || Math.abs(to - row.scrollLeft) < 1) return;      // nothing that way: the page scrolls
+    e.preventDefault();
+    row.scrollLeft = to;
+  }, { passive: false });
+  new ResizeObserver(update).observe(row);
+  new MutationObserver(() => requestAnimationFrame(update)).observe(row, { childList: true });
+  box.update = update;
+  requestAnimationFrame(update);
+  return box;
+}
+
 // ---- pixel art (uiPixels), confetti (uiBurst) and slides (uiSlides)
 //
 // Pixel art in the theme's own colors: a picture is rows of letters, one a
@@ -848,8 +892,9 @@ function uiBurst({ bits = 90, far = 42 } = {}) {
 // At the top, a bar of segments: where you are (a tap goes to that one) and
 // the ✕; at the bottom Back, n of all, and Next (the last one's: done, which
 // closes it). → / ← (Space, Shift+Space; PageDown, PageUp), a swipe
-// sideways, or the buttons go along; Esc, the ✕, the shade or a swipe down
-// close it, as any sheet. burst: confetti as that one comes.
+// sideways, or the buttons go along (not in a row that scrolls sideways:
+// uiScrollRow, or a part marked .ui-slides-own-keys; those take their own);
+// Esc, the ✕, the shade or a swipe down close it, as any sheet. burst: confetti as that one comes.
 // opts: key (the sheet's), label, start (the first one shown), done (the
 // last one's button), shown(i) (told as each comes), closed(i, finished).
 function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = "Done", shown = null, closed = null } = {}) {
@@ -916,7 +961,7 @@ function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = 
     if (!inside && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); return closeSheet(); }
     const by = { ArrowRight: 1, ArrowLeft: -1, PageDown: 1, PageUp: -1 }[e.key]
       ?? (e.key === " " && !e.target.matches("button") ? (e.shiftKey ? -1 : 1) : 0);
-    if (!by || (e.key.startsWith("Arrow") && e.target.closest(".ui-slides-own-keys"))) return;
+    if (!by || (e.key.startsWith("Arrow") && e.target.closest(".ui-slides-own-keys, .ui-scroll"))) return;
     e.preventDefault();
     e.stopPropagation();
     if (by > 0 && at === slides.length - 1) return finish();
@@ -926,7 +971,7 @@ function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = 
   // A swipe sideways: the next one, or the one before (down: the sheet's, it closes).
   let from = null;
   stage.addEventListener("touchstart", (e) => {
-    from = e.touches.length === 1 && !e.target.closest(".ui-slides-own-keys") ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+    from = e.touches.length === 1 && !e.target.closest(".ui-slides-own-keys, .ui-scroll") ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
   }, { passive: true });
   stage.addEventListener("touchend", (e) => {
     if (!from) return;

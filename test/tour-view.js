@@ -132,6 +132,46 @@ async function run(browser, port, layout) {
     return c ? c.getAttribute("aria-label") : "";
   }, before.theme);
   check(where, await p.evaluate(() => document.querySelectorAll(".ui-slide-row .theme-card.on").length === 1), "  the one worn lit");
+  // ‹ ›: a page of them along each, shown only while there's more that way;
+  // the wheel scrolls them sideways too.
+  const row = () => p.evaluate(() => {
+    const r = document.querySelector(".ui-slide-row"), box = r.closest(".ui-scroll");
+    return { left: r.scrollLeft, max: r.scrollWidth - r.clientWidth, prev: !box.querySelector(".ui-scroll-go.prev").hidden, next: !box.querySelector(".ui-scroll-go.next").hidden };
+  });
+  // (As it comes, the row puts the theme worn in its middle: after that, to its start.)
+  await sleep(500);
+  check(where, await p.evaluate(() => {
+    const r = document.querySelector(".ui-slide-row"), on = r.querySelector(".theme-card.on").getBoundingClientRect(), box = r.getBoundingClientRect();
+    return on.left >= box.left - 1 && on.right <= box.right + 1;
+  }), "  the one worn in sight as it comes");
+  await p.evaluate(() => { document.querySelector(".ui-slide-row").scrollLeft = 0; });
+  await sleep(200);
+  let r = await row();
+  check(where, r.max > 0 && !r.prev && r.next, `  at their start: only › (${JSON.stringify(r)})`);
+  await p.click(".ui-scroll-go.next");
+  await sleep(700);
+  const paged = await row();
+  check(where, paged.left > 100 && paged.prev, `  ›: a page along, ‹ back (${paged.left}px)`);
+  check(where, await at(p) === 8, "  and still the themes slide (not the next slide)");
+  for (let i = 0; i < 12 && (await row()).next; i++) { await p.click(".ui-scroll-go.next"); await sleep(500); }
+  r = await row();
+  check(where, Math.abs(r.left - r.max) <= 2 && !r.next && r.prev, "  at their end: only ‹");
+  await p.click(".ui-scroll-go.prev");
+  await sleep(700);
+  check(where, (await row()).left < r.left - 100, "  ‹: back a page");
+  if (layout === "wide") {
+    await p.evaluate(() => { document.querySelector(".ui-slide-row").scrollLeft = 0; });
+    const box = await p.evaluate(() => { const b = document.querySelector(".ui-slide-row").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.wheel(0, 300);
+    await sleep(300);
+    check(where, (await row()).left > 100, "  a mouse's wheel: sideways along them");
+  }
+  // The keys: along the cards (not the slides).
+  await p.evaluate(() => document.querySelector(".ui-slide-row .theme-card").focus());
+  await p.keyboard.press("ArrowRight");
+  check(where, await p.evaluate(() => document.activeElement === document.querySelectorAll(".ui-slide-row .theme-card")[1]) && await at(p) === 8,
+        "  → on a card: the next card, still the themes slide");
   await p.evaluate((name) => [...document.querySelectorAll(".ui-slide-row .theme-card")].find((x) => x.getAttribute("aria-label") === name).click(), other);
   check(where, await until(p, (b) => app.view.look.theme !== b, before.theme, 8000), `  tapped (${other}): worn`);
   check(where, await until(p, (s) => getComputedStyle(document.documentElement).getPropertyValue("--surface").trim() !== s, before.surface, 8000),

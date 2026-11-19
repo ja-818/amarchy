@@ -1368,7 +1368,7 @@ function menuItems(box, fields) {
   const sel = fields ? "button, [tabindex='0'], textarea, input" : "button, [tabindex='0']";
   // A menu's ✕ is Tab's, not the arrows': they start on what it's for.
   return Array.from(box.querySelectorAll(sel)).filter((el) => !el.disabled && el.getClientRects().length
-    && (fields || !el.matches(".sheet-close, .menu-close")));
+    && (fields || !el.matches(".sheet-close, .menu-close, .ui-scroll-go")));
 }
 
 // The line an item is on: its row of buttons side by side, or itself.

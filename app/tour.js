@@ -246,7 +246,7 @@ function tourLook() {
 // every phone and browser of yours (as the Look sheet: the last one tapped
 // is the one kept). All of it: Theme, font and wallpaper….
 function tourThemes() {
-  const row = h("div", { class: "ui-slide-row row-btns ui-slides-own-keys", role: "group", "aria-label": "Themes" });
+  const row = h("div", { class: "ui-slide-row row-btns", role: "group", "aria-label": "Themes" });
   let picks = Promise.resolve(), want = null;
   const draw = () => {
     const info = tour.look;
@@ -276,7 +276,7 @@ function tourThemes() {
   if (!tour.look) tourLook().then(() => { if (!tour.look) row.replaceChildren(h("p", { class: "ui-slide-aside" }, "The themes didn't come: Theme, font and wallpaper… has them all.")); else draw(); });
   draw();
   row.redraw = draw;
-  return row;
+  return uiScrollRow(row, { label: "themes" });
 }
 
 // Where you are now: in the app, or in a browser's tab.
