@@ -31,6 +31,7 @@ When one of them asks you something or finishes, you know.
 - **Previews that stay up.** What a chat serves for you to look at (a dev server) runs as the
   chat's own service, capped in memory: a sleeping Claude doesn't take it down, its Preview
   button starts it again in one tap, and completing the chat stops it and checks it's gone.
+  Two or more (an app and its storybook)? The button is Previews: pick one from its dropdown.
 - **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
   working while your laptop or phone sleeps.
 - **On your phone and in your browser.** An app you add to your home screen, and the same
@@ -82,7 +83,7 @@ On a computer's browser:
 | `Ctrl+Alt+S` | Search chats |
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |
-| `Ctrl+Alt+R` | Open the chat's preview |
+| `Ctrl+Alt+R` | Open the chat's preview (of several: pick one) |
 | `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned |
 | `Ctrl+Alt+A` | Go to a chat, by its name |
 | `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |

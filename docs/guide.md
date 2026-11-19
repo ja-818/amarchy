@@ -476,7 +476,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+L` | Claude's classic terminal in the side panel; again, back to the chat's terminal. |
 | `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
-| `Ctrl+Alt+R` | Open the chat's preview. |
+| `Ctrl+Alt+R` | Open the chat's preview (of several: its dropdown, to pick one). |
 | `Ctrl+Alt+N` / `P` | New chat ("What do you want to do?") / new project. |
 | `Ctrl+Alt+H` | The board (from a chat: back to it). |
 | `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned. |
@@ -580,13 +580,24 @@ head and its card, and stays whichever reply you're on:
 | **Preview failed** | it stopped with an error | its sheet: what it wrote, **Try again**, **Ask Claude to fix it** |
 | **Restart preview** | an address only (registered before, or a deploy) and nothing answers | asks its Claude to start it (and register it) |
 
-The chat's menu has **Preview…**: its sheet, with where it stands (memory, since
-when), its command and ports, what it wrote, and Start, Restart and Stop. Details
-shows it too, and **Automations** lists every preview running with its memory.
+**Several.** A chat can serve more than one thing to look at (an app and its
+admin, a storybook): its Claude registers each with a name (`--name Storybook`),
+and each runs as a service of its own (`amarchy-preview-<chat>--<name>`), with
+its own ports and log. The button is then **Previews ▾**: a tap opens a dropdown
+under it, each preview by its name with where it stands (**Open**, **Not running:
+start it**, **Starting…**, **Failed: see why**), and a tap on one does what its own
+button would. It turns while one starts and is red when one failed. A tap outside
+or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+R`,
+Enter on it) it opens with its first one lit, ↑ ↓ to move, ↵ to open.
+
+The chat's menu has **Preview…** (**Previews…** with several: pick one): its sheet,
+with where it stands (memory, since when), its command and ports, what it wrote, and
+Start, Restart and Stop. Details shows each too, and **Automations** lists every
+preview running with its memory.
 
 It stops by itself after **3 hours unused** (`--idle`): nobody had its page open,
-and the chat sat idle. **Complete** stops it (its `--stop` command too) and checks
-it's really gone: its service, and every one of its ports free. If something still
+and the chat sat idle. **Complete** stops it (every one, with several; its `--stop`
+command too) and checks it's really gone: its service, and every one of its ports free. If something still
 holds one, the chat stays open and says what: **Ask Claude to stop it**, then
 complete it. A preview served elsewhere (a deploy) is an address only:
 `amarchy preview <url>`. `Ctrl+Alt+R` (`r` on the board) opens it.

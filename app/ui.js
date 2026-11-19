@@ -31,13 +31,15 @@
 // - uiChart: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat, as its card's head: Back, its project
 //   and name (a tap: rename), its pill; its menu, Complete.
-// - uiPreview: a chat's live preview, a tap away, on its head and its card;
-//   uiPreviewSheet, all of it (start, stop, its log); uiPreviewLeft, what
-//   Complete found still running.
+// - uiPreview: a chat's live preview, a tap away, on its head and its card
+//   (several: Previews, a dropdown of them); uiPreviewSheet, all of one (start,
+//   stop, its log); uiPreviewLeft, what Complete found still running.
 // - uiAction: a bar's one thing to do (New chat, Complete), outlined.
 // - uiBrand: the Ⓐ that opens the Amarchy menu, as Omarchy's own mark does.
 // - uiMenu: a menu of things to do: a keyboard's card on a computer (type to
 //   find, ↑ ↓ ↵), a sheet on the phone; the same items.
+// - uiDropdown: a few things to pick, under the button that opened it (the
+//   same on both).
 // - uiShot: a picture's thumbnail (in a message, in the box), its label on
 //   it (Image 1, as its [Image #1] in the words); a tap: uiPhoto.
 // - uiPhoto: pictures full screen, one at a time, ✕ at the top right.
@@ -60,6 +62,7 @@
 
 const uiState = {
   open: new Map(),      // a section you opened or closed: its key -> open (kept across redraws)
+  dropdown: null,       // the dropdown open now (uiDropdown)
   down: 0,              // when a finger (or the mouse button) went down on the page, while it's down
   up: 0,                // when it lifted (or the page last scrolled)
   later: new Map(),     // what waits for it to lift: key -> fn
@@ -498,77 +501,137 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
   ];
 }
 
-// A chat's live preview (amarchy preview): the same on its head and its card,
-// there as soon as its Claude registers it. Answering, a tap opens it. Not
-// running, a tap starts it where you are (the server runs its command, no
-// message to Claude, nothing opens): the button turns and says Starting…
-// until it answers, then a toast says it's ready (a tap on it opens it) and
-// the button is Preview. Starting, a tap opens its sheet (what it writes).
-// Failed, a tap opens its sheet (what it wrote, Try again, Ask Claude to fix
-// it). One registered as an address only (from before), nothing answering: a
-// tap asks its Claude to start it, and to register it, as a message (once a
-// minute at most).
-const uiPreviewAsked = new Map();     // chat -> when: asked, for the moment it takes
-const uiPreviewStarted = new Set();   // chats: started from here, until it answers or stops
+// A chat's live previews (amarchy preview): the same on its head and its
+// card, there as soon as its Claude registers one. Answering, a tap opens
+// it. Not running, a tap starts it where you are (the server runs its
+// command, no message to Claude, nothing opens): the button turns and says
+// Starting… until it answers, then a toast says it's ready (a tap on it opens
+// it) and the button is Preview. Starting, a tap opens its sheet (what it
+// writes). Failed, a tap opens its sheet (what it wrote, Try again, Ask
+// Claude to fix it). One registered as an address only (from before),
+// nothing answering: a tap asks its Claude to start it, and to register it,
+// as a message (once a minute at most). A chat with several (an app and its
+// admin, a storybook) has one button, Previews: a dropdown of them by name,
+// each doing what its own button would.
+const uiPreviewAsked = new Map();     // chat + key -> when: asked, for the moment it takes
+const uiPreviewStarted = new Map();   // chat + key -> {id, key}: started from here, until it answers or stops
 
 const UI_PREVIEW_WORDS = { up: "Preview", starting: "Starting…", stopped: "Start preview", failed: "Preview failed", down: "Restart preview" };
+// Each in the dropdown: where it stands, and what a tap does.
+const UI_PREVIEW_ROW = { up: "Open", starting: "Starting…", stopped: "Not running: start it", failed: "Failed: see why", down: "Not answering: ask Claude" };
 
-function uiPreviewOf(s) {
-  return s.preview_state || (s.preview_up ? "up" : s.preview && s.preview.run ? "stopped" : "down");
+// A chat's previews, as the list has them: [{key, name, label, url, run, state}].
+function uiPreviews(s) { return (s && s.previews) || []; }
+function uiPreviewAt(id, p) { return `${id}\n${(p && p.key) || ""}`; }
+function uiPreviewFind(s, key) { return uiPreviews(s).find((p) => (p.key || "") === (key || "")) || null; }
+
+function uiPreviewOf(p) {
+  return (p && p.state) || (p && p.run ? "stopped" : "down");
+}
+
+// What it's called in a toast: the chat's preview, or (of several) its name.
+function uiPreviewName(s, p) {
+  const several = uiPreviews(s).length > 1 && p && p.label;
+  if (several) return s && s.task ? `${s.task}'s ${p.label}` : p.label;
+  return s && s.task ? `${s.task}'s preview` : "The preview";
 }
 
 // Start it, in the background: its button says so at once (ahead of the
 // server's list, app.js aheadOf), and nothing opens.
-function uiPreviewStart(s) {
-  const id = s.id;
-  if (uiPreviewStarted.has(id)) return;
-  uiPreviewStarted.add(id);
-  const done = api(`/api/session/${encodeURIComponent(id)}/preview`, { action: "start" });
-  done.catch(() => uiPreviewStarted.delete(id));      // it didn't start: aheadOf says why
-  aheadOf(id, { preview_state: "starting", preview_up: false }, (r) => r.preview_state !== "stopped", done).catch(() => {});
+function uiPreviewStart(s, p) {
+  const id = s.id, key = p.key || "", at = uiPreviewAt(id, p);
+  if (uiPreviewStarted.has(at)) return;
+  uiPreviewStarted.set(at, { id, key });
+  const done = api(`/api/session/${encodeURIComponent(id)}/preview`, { action: "start", key });
+  done.catch(() => uiPreviewStarted.delete(at));      // it didn't start: aheadOf says why
+  const previews = uiPreviews(rowOf(id) || s).map((x) => ((x.key || "") === key ? { ...x, state: "starting" } : x));
+  aheadOf(id, { previews }, (r) => { const q = uiPreviewFind(r, key); return !q || q.state !== "stopped"; }, done).catch(() => {});
+  uiDropdownRedraw();
 }
 
 // With each list (app.js refresh): one started from here answers, or stopped.
 function uiPreviewSettle() {
-  for (const id of [...uiPreviewStarted]) {
+  for (const [at, { id, key }] of [...uiPreviewStarted]) {
     const s = rowOf(id);
-    const state = s && s.preview ? uiPreviewOf(s) : "";
+    const p = uiPreviewFind(s, key);
+    const state = p ? uiPreviewOf(p) : "";
     if (state === "starting") continue;
-    uiPreviewStarted.delete(id);
+    uiPreviewStarted.delete(at);
     if (!state) continue;
-    const name = s.task ? `${s.task}'s preview` : "The preview";
-    if (state === "up") toast(`${name} is ready`, { label: "Open", act: () => openLink(s.preview.url) });
-    else toast(state === "failed" ? `${name} didn't start` : `${name} stopped on its own`, { label: "See why", act: () => uiPreviewSheet(s) });
+    const name = uiPreviewName(s, p);
+    if (state === "up") toast(`${name} is ready`, { label: "Open", act: () => openLink(p.url) });
+    else toast(state === "failed" ? `${name} didn't start` : `${name} stopped on its own`, { label: "See why", act: () => uiPreviewSheet(s, p) });
   }
+  uiDropdownRedraw();
 }
 
-function uiPreviewGo(s) {
-  if (!s || !s.preview) return toast("No preview in this chat yet");
-  const state = uiPreviewOf(s);
-  if (state === "up") return openLink(s.preview.url);
-  if (state === "failed" || state === "starting") return uiPreviewSheet(s);
-  if (state === "stopped") return uiPreviewStart(s);
-  const at = uiPreviewAsked.get(s.id);
-  if (at && Date.now() - at < 60000) return;
-  uiPreviewAsked.set(s.id, Date.now());
-  sendTo(s.id, { text: `The preview at ${s.preview.url} isn't answering: start it again, and register it (amarchy preview --run '<command>' ${s.preview.url}) so its Preview button starts it from now on.` })
-    .then(() => toast("Asked it to start the preview again"))
-    .catch((e) => { uiPreviewAsked.delete(s.id); toast(e.message); });
+// Open it (or start it, or say why it can't): one of a chat's previews; with
+// none named and several, the one you pick (under the button you tapped, or a
+// menu from the keys).
+function uiPreviewGo(s, p = null, anchor = null) {
+  const ps = uiPreviews(s);
+  if (!ps.length) return toast("No preview in this chat yet");
+  if (!p && ps.length > 1) {
+    // From the keys: under its Previews button when it's on screen (the chat's head, its card), else a menu.
+    anchor = anchor || [...document.querySelectorAll(`[data-dropdown="previews:${CSS.escape(s.id)}"]`)].find((b) => b.offsetParent) || null;
+    return anchor ? uiPreviewDropdown(s, anchor) : uiMenu("Previews", uiPreviewItems(s, (q) => uiPreviewGo(s, q)));
+  }
+  p = p || ps[0];
+  const state = uiPreviewOf(p);
+  if (state === "up") return openLink(p.url);
+  if (state === "failed" || state === "starting") return uiPreviewSheet(s, p);
+  if (state === "stopped") return uiPreviewStart(s, p);
+  const at = uiPreviewAt(s.id, p);
+  const asked = uiPreviewAsked.get(at);
+  if (asked && Date.now() - asked < 60000) return;
+  uiPreviewAsked.set(at, Date.now());
+  const named = p.name ? ` --name '${p.name.replace(/'/g, "")}'` : "";
+  sendTo(s.id, { text: `The preview at ${p.url} isn't answering: start it again, and register it (amarchy preview --run '<command>' ${p.url}${named}) so its Preview button starts it from now on.` })
+    .then(() => toast(ps.length > 1 ? `Asked it to start ${p.label} again` : "Asked it to start the preview again"))
+    .catch((e) => { uiPreviewAsked.delete(at); toast(e.message); });
+  uiDropdownRedraw();
+}
+
+// Asked to start one again, a moment ago: it waits.
+function uiPreviewAsking(s, p) {
+  return uiPreviewOf(p) === "down" && Date.now() - (uiPreviewAsked.get(uiPreviewAt(s.id, p)) || 0) < 60000;
+}
+
+// A chat's previews as a menu's items (the dropdown, uiMenu): each by its
+// name, where it stands under it; act(p) when it's picked.
+function uiPreviewItems(s, act) {
+  return uiPreviews(s).map((p) => {
+    const state = uiPreviewOf(p);
+    const asked = uiPreviewAsking(s, p);
+    return { label: p.label || p.url, detail: asked ? "Asked Claude…" : `${UI_PREVIEW_ROW[state]} · ${p.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
+             icon: state === "starting" ? "" : "preview", lead: state === "starting" ? spinner() : null, bad: state === "failed",
+             tone: state, disabled: asked, act: () => act(p) };
+  });
+}
+
+// Previews, its dropdown: a tap on one does what its own button would.
+function uiPreviewDropdown(s, anchor) {
+  const id = s.id;
+  return uiDropdown(anchor, () => uiPreviewItems(rowOf(id) || s, (p) => uiPreviewGo(rowOf(id) || s, p)),
+                    { label: "Previews", key: `previews:${id}` });
 }
 
 function uiPreview(s, { head = false } = {}) {
-  if (!s.preview) return null;
-  const state = uiPreviewOf(s);
-  if (state !== "down") uiPreviewAsked.delete(s.id);
-  const asked = state === "down" && Date.now() - (uiPreviewAsked.get(s.id) || 0) < 60000;
+  const ps = uiPreviews(s);
+  if (!ps.length) return null;
+  if (ps.length > 1) return uiPreviewsButton(s, ps, head);
+  const p = ps[0];
+  const state = uiPreviewOf(p);
+  if (state !== "down") uiPreviewAsked.delete(uiPreviewAt(s.id, p));
+  const asked = uiPreviewAsking(s, p);
   const words = asked ? "Restarting…" : UI_PREVIEW_WORDS[state];
-  const title = { up: `Open ${s.preview.url}`, starting: `${s.preview.url} is starting: see what it writes`,
-                  stopped: `Start ${s.preview.url}`, failed: `${s.preview.url} stopped with an error: see why`,
-                  down: `${s.preview.url} isn't answering: ask its Claude to start it again` }[state];
+  const title = { up: `Open ${p.url}`, starting: `${p.url} is starting: see what it writes`,
+                  stopped: `Start ${p.url}`, failed: `${p.url} stopped with an error: see why`,
+                  down: `${p.url} isn't answering: ask its Claude to start it again` }[state];
   const go = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    uiPreviewGo(s);
+    uiPreviewGo(s, p);
     if (state === "down") {
       const b = e.currentTarget;
       b.disabled = true;
@@ -579,8 +642,29 @@ function uiPreview(s, { head = false } = {}) {
   const cls = `ui-preview${state === "failed" ? " bad" : ""}${busy ? " busy" : ""}`;
   if (head) return h("button", { class: `control ui-action ${cls}`, type: "button", title, "aria-label": words, "aria-busy": busy ? "true" : null,
                                  disabled: asked || null, onclick: go }, busy ? spinner() : glyph("preview"), h("span", { class: "label" }, words));
-  if (state === "up") return h("a", { class: `tbtn ${cls}`, href: s.preview.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
+  if (state === "up") return h("a", { class: `tbtn ${cls}`, href: p.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
   return h("button", { class: `tbtn ${cls}`, type: "button", title, "aria-busy": busy ? "true" : null, disabled: asked || null, onclick: go }, busy ? spinner() : null, words);
+}
+
+// Several: Previews, and a tap opens the dropdown of them. It turns while
+// one starts, and says when one failed.
+function uiPreviewsButton(s, ps, head) {
+  const states = ps.map(uiPreviewOf);
+  const busy = states.includes("starting"), bad = states.includes("failed");
+  const title = `${ps.length} previews: ${ps.map((p) => p.label).join(", ")}`;
+  const open = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const b = e.currentTarget;
+    if (uiDropdownOpen(`previews:${s.id}`, b)) return uiDropdownClose();
+    uiPreviewDropdown(s, b);
+  };
+  const cls = `ui-preview ui-previews${bad ? " bad" : ""}${busy ? " busy" : ""}`;
+  const attrs = { type: "button", title, "aria-label": "Previews", "aria-haspopup": "menu", "aria-expanded": "false",
+                  "aria-busy": busy ? "true" : null, "data-dropdown": `previews:${s.id}`, onclick: open };
+  if (head) return h("button", { class: `control ui-action ${cls}`, ...attrs }, busy ? spinner() : glyph("preview"),
+                     h("span", { class: "label" }, "Previews"), glyph("down", "ui-drop-mark"));
+  return h("button", { class: `tbtn ${cls}`, ...attrs }, busy ? spinner() : null, "Previews", glyph("down", "ui-drop-mark"));
 }
 
 // Its size, as said: 412 MB, 1.4 GB.
@@ -602,20 +686,31 @@ function uiPreviewStatus(p) {
   }
 }
 
-// A chat's preview, whole: where it stands, what runs it, what it wrote,
-// and Open, Start, Restart, Stop (Ask Claude to fix it, when it failed):
-// started here, it says so as it comes up, and Open it once it answers. Its
-// sheet, on the phone and the computer; the chat's menu opens it.
-async function uiPreviewSheet(s) {
+// Manage one of a chat's previews (the chat's menu, Details): its sheet; of
+// several, the one you pick first.
+function uiPreviewManage(s) {
+  const ps = uiPreviews(s);
+  if (ps.length > 1) return uiMenu("Previews", uiPreviewItems(s, (p) => uiPreviewSheet(s, p)));
+  return uiPreviewSheet(s, ps[0] || null);
+}
+
+// One of a chat's previews, whole: where it stands, what runs it, what it
+// wrote, and Open, Start, Restart, Stop (Ask Claude to fix it, when it
+// failed): started here, it says so as it comes up, and Open it once it
+// answers. Its sheet, on the phone and the computer; the chat's menu opens
+// it. Of several, its name heads it.
+async function uiPreviewSheet(s, which = null) {
   const id = s.id;
+  const key = which ? which.key || "" : null;
+  const several = uiPreviews(rowOf(id) || s).length > 1;
   const body = h("div", { class: "preview-one" }, h("p", { class: "hint" }, "…"));
-  const back = sheet({ key: "preview" }, sheetHead("Preview", s.task || ""), body);
+  const back = sheet({ key: "preview" }, sheetHead(several && which ? which.label || "Preview" : "Preview", s.task || ""), body);
   let p = null, busy = "";
   const act = async (action) => {
     busy = action;
     draw();
     try {
-      const d = await api(`/api/session/${encodeURIComponent(id)}/preview`, { action });
+      const d = await api(`/api/session/${encodeURIComponent(id)}/preview`, { action, key: p.key || "" });
       p = d.preview || p;
     } catch (e) {
       toast(e.message);
@@ -626,7 +721,8 @@ async function uiPreviewSheet(s) {
   };
   const fix = () => {
     const log = (p.log || "").split("\n").slice(-15).join("\n");
-    sendTo(id, { text: `The preview (${p.run}) stopped with an error. Its log ends:\n\n${log}\n\nFix it and start it again (amarchy preview restart).` })
+    const again = p.name && several ? ` --name '${p.name.replace(/'/g, "")}'` : "";
+    sendTo(id, { text: `The preview${several ? ` ${p.label}` : ""} (${p.run}) stopped with an error. Its log ends:\n\n${log}\n\nFix it and start it again (amarchy preview restart${again}).` })
       .then(() => { toast("Asked Claude to fix it"); closeSheet(); }, (e) => toast(e.message));
   };
   const item = (label, value) => (value ? h("div", { class: "kv" }, h("span", { class: "k" }, label), h("span", { class: "v" }, value)) : null);
@@ -655,7 +751,7 @@ async function uiPreviewSheet(s) {
   };
   const load = async () => {
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(id)}/preview`);
+      const r = await fetch(`/api/session/${encodeURIComponent(id)}/preview${key !== null ? `?key=${encodeURIComponent(key)}` : ""}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Couldn't read it");
       p = d;
@@ -672,7 +768,7 @@ async function uiPreviewSheet(s) {
   }, 2000);
 }
 
-// Complete stopped its preview, and something of it is still there (a
+// Complete stopped its previews, and something of one is still there (a
 // process on its port, what its stop command didn't stop): the chat stays
 // until it's gone. Its Claude is asked to stop it; you complete it after.
 function uiPreviewLeft(s, left) {
@@ -736,6 +832,119 @@ function uiMenu(title, items, { search = "" } = {}) {
   if (on) requestAnimationFrame(() => uiReveal(on, { scroller: back.querySelector(".sheet"), block: "center" }));
   return back;
 }
+
+// A dropdown: a few things to pick, under the button that opened it (over
+// it when there's no room under), the same on the phone and the computer.
+// items() (drawn again with uiDropdownRedraw, as what they say changes):
+// [{label, detail, icon (a glyph's name), lead (a node instead), bad,
+// disabled, act}]. A tap picks one; ↑ ↓ (j k) move, ↵ picks, Esc, Tab or a
+// tap outside close it. Its button says it's open (aria-expanded); key: which
+// one it is, to find its button again when the list draws it anew.
+function uiDropdown(anchor, items, { label = "", key = "" } = {}) {
+  uiDropdownClose();
+  const list = typeof items === "function" ? items : () => items;
+  const menu = h("div", { class: "ui-dropdown", role: "menu", "aria-label": label || null });
+  const dd = { el: menu, anchor, key, redraw: null, close: null, keyed: !!(lastInput && lastInput.keys) };
+  const rows = () => [...menu.querySelectorAll(".ui-drop-row:not(:disabled)")];
+  // Drawn again only when what it says changed, and never under a finger
+  // (uiWhenStill): the row you're tapping stays the row you tap.
+  const sig = (all) => JSON.stringify(all.map((it) => [it.label, it.detail, it.icon, !!it.lead, it.bad, it.tone, it.disabled]));
+  const draw = (all = list()) => {
+    dd.sig = sig(all);
+    const had = rows().indexOf(document.activeElement);
+    menu.replaceChildren(...all.map((it) => h("button", {
+      class: `ui-drop-row${it.bad ? " bad" : ""}${it.tone ? ` t-${it.tone}` : ""}`, type: "button", role: "menuitem", disabled: it.disabled || null,
+      onclick: (e) => { e.stopPropagation(); close(); if (it.act) it.act(); } },
+    it.lead || (it.icon ? glyph(it.icon, "ui-drop-icon") : h("span", { class: "ui-drop-icon" })),
+    h("span", { class: "ui-drop-text" }, h("b", {}, it.label), it.detail ? h("small", {}, it.detail) : null))));
+    if (had >= 0 && rows()[had]) rows()[had].focus({ preventScroll: true });
+  };
+  // Under its button, its right edge on the button's when that's on the
+  // right half of the screen (the head's), else its left; over it when
+  // there's no room under; never off the screen.
+  const place = () => {
+    if (!dd.anchor.isConnected) {
+      const again = key && [...document.querySelectorAll(`[data-dropdown="${CSS.escape(key)}"]`)].find((b) => b.offsetParent);
+      if (!again) return close();
+      dd.anchor = again;
+      again.setAttribute("aria-expanded", "true");
+    }
+    const r = dd.anchor.getBoundingClientRect(), pad = 8, gap = 6;
+    menu.style.minWidth = `${Math.round(Math.max(r.width, 220))}px`;
+    const w = menu.offsetWidth, ht = menu.offsetHeight;
+    let left = r.left + r.width / 2 > innerWidth / 2 ? r.right - w : r.left;
+    left = Math.max(pad, Math.min(left, innerWidth - w - pad));
+    let top = r.bottom + gap;
+    if (top + ht > innerHeight - pad && r.top - gap - ht >= pad) top = r.top - gap - ht;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(Math.max(pad, top))}px`;
+  };
+  // A tap outside closes it, and only that: what's under it isn't pressed too
+  // (a card would open), as a menu of the system's.
+  const outside = (e) => {
+    if (menu.contains(e.target) || dd.anchor.contains(e.target)) return;
+    close();
+    const swallow = (c) => { c.preventDefault(); c.stopPropagation(); };
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener("click", swallow, true), 600);
+  };
+  const keys = (e) => {
+    if (e.ctrlKey && e.altKey) return close();      // amarchy's keys: it closes, they go on
+    const all = rows(), at = all.indexOf(document.activeElement);
+    const to = (i) => { if (all.length) all[(i + all.length) % all.length].focus({ preventScroll: true }); };
+    const k = e.key;
+    // Writing in a box (the chat's, still focused): the keys are its own, but Esc closes it.
+    const box = document.activeElement && !menu.contains(document.activeElement) && document.activeElement.closest("textarea, input, select, [contenteditable]");
+    if (box && k !== "Escape") return;
+    if (k === "Escape" || k === "Tab") {
+      if (k === "Escape") e.preventDefault();
+      e.stopPropagation();
+      const back = dd.anchor;
+      close();
+      if (k === "Escape" && back.isConnected) back.focus({ preventScroll: true });
+    } else if (k === "ArrowDown" || k === "j") { e.preventDefault(); e.stopPropagation(); to(at + 1); }
+    else if (k === "ArrowUp" || k === "k") { e.preventDefault(); e.stopPropagation(); to(at < 0 ? -1 : at - 1); }
+    else if (k === "Home") { e.preventDefault(); e.stopPropagation(); to(0); }
+    else if (k === "End") { e.preventDefault(); e.stopPropagation(); to(-1); }
+    else if ((k === "Enter" || k === " ") && at >= 0) { e.preventDefault(); e.stopPropagation(); all[at].click(); }
+  };
+  const moved = (e) => { if (!menu.contains(e.target)) place(); };
+  const close = () => {
+    if (!menu.isConnected) return;
+    menu.remove();
+    if (uiState.dropdown === dd) uiState.dropdown = null;
+    document.removeEventListener("pointerdown", outside, true);
+    window.removeEventListener("keydown", keys, true);
+    window.removeEventListener("resize", place);
+    document.removeEventListener("scroll", moved, true);
+    for (const b of document.querySelectorAll(`[aria-expanded="true"][data-dropdown]`)) b.setAttribute("aria-expanded", "false");
+  };
+  dd.redraw = () => {
+    if (!menu.isConnected) return;
+    const all = list();
+    if (sig(all) === dd.sig) return place();
+    uiWhenStill("dropdown", () => { if (menu.isConnected) { draw(); place(); } });
+  };
+  dd.close = close;
+  draw();
+  document.body.append(menu);
+  anchor.setAttribute("aria-expanded", "true");
+  place();
+  uiState.dropdown = dd;
+  document.addEventListener("pointerdown", outside, true);
+  window.addEventListener("keydown", keys, true);
+  window.addEventListener("resize", place);
+  document.addEventListener("scroll", moved, true);
+  // Opened from the keys: they're on its first one.
+  if (dd.keyed) { const first = rows()[0]; if (first) first.focus({ preventScroll: true }); }
+  return menu;
+}
+
+// The dropdown open now, drawn again (what its items say changed); closed.
+function uiDropdownRedraw() { if (uiState.dropdown) uiState.dropdown.redraw(); }
+function uiDropdownClose() { if (uiState.dropdown) uiState.dropdown.close(); }
+// Whether that one is open (its button tapped again: it closes).
+function uiDropdownOpen(key) { return !!(uiState.dropdown && uiState.dropdown.key === key && uiState.dropdown.el.isConnected); }
 
 // ---- pictures: a thumbnail (uiShot) and full screen (uiPhoto)
 //

@@ -532,7 +532,7 @@ function todayChat(s, kind) {
     : main ? uiPill(statusWords(s), "quiet") : t.at ? uiPill(autoPast(t.at), "quiet") : null;
   const said = (boardOn() || kind === "fresh") && !main && s.said ? s.said : "";
   // Done: Review (where to see what it made, from its reply) and Complete.
-  const link = (t.links || []).find((l) => !s.preview || l.url !== s.preview.url);      // (not its Preview, twice)
+  const link = (t.links || []).find((l) => !uiPreviews(s).some((p) => p.url === l.url));      // (not its Preview, twice)
   const review = finished && link ? h("a", { class: "tbtn", href: link.url, target: "_blank", rel: "noopener",
     title: link.label || link.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(link.url); } } },
     glyph("next"), link.label && link.label.length <= 24 ? link.label : "Review") : null;
@@ -971,7 +971,7 @@ function todayKey(v) {
 function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
-    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : "", s.preview ? [s.preview.url, uiPreviewOf(s)] : ""]);
+    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : "", uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)])]);
 }
 
 // The times a chat's card says ("5 min ago", "Stalled 3d") and where they

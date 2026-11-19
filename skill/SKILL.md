@@ -177,8 +177,20 @@ command's usage without running it (an option it doesn't know fails instead).
     runs, through your sleep; a restart loses it, as any restart would.
   - Something on one of its ports already: one of this chat's own old servers is
     stopped for it; anyone else's makes it refuse, saying whose (pick another port).
+  - **Two or more to look at** (an app and its admin, a storybook, an API's docs):
+    register each with a name, `--name '<what it is>'` (a word or two the user
+    knows it by: `App`, `Storybook`). Each runs as a service of its own, with its own
+    ports and log, and the button is **Previews**, a dropdown of them by name. The
+    one you registered first without a name stays (it shows as its address): name
+    it too, `amarchy preview --rename '<what it is>'`, which restarts nothing.
+  - With several, `--name <name>` says which one a command is about (`amarchy
+    preview restart --name API`, `log --name API`); without it, `start`, `stop`,
+    `restart`, `log`, `status` and `--clear` are about all of them, and registering
+    again needs `--name` (else it asks which). With one, everything is as above:
+    registering again changes it.
 - `amarchy preview <url>`: a deploy or anything served elsewhere: an address only,
-  on the same button. `amarchy preview --clear` stops it and takes it off.
+  on the same button (`--name` for one of several). `amarchy preview --clear` stops
+  it and takes it off.
 - `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key or
   password from the user without it going through the chat (see "Secrets"
   below).

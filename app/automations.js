@@ -163,11 +163,14 @@ function autoRow(a, byId) {
     glyph("next", "go"));
 }
 
-// A chat's preview running: its chat, its address, its memory; a tap, its sheet.
+// A chat's preview running: its chat (and its name, of several), its
+// address, its memory; a tap, its sheet.
 function previewRow(p) {
-  return h("button", { class: "auto-row running", type: "button", "data-id": p.id, onclick: () => uiPreviewSheet({ id: p.id, preview: { url: p.url, run: p.run } }) },
+  const s = (typeof rowOf === "function" && rowOf(p.id)) || { id: p.id, task: p.task, previews: [p] };
+  const several = uiPreviews(s).length > 1;
+  return h("button", { class: "auto-row running", type: "button", "data-id": p.id, "data-key": p.key || "", onclick: () => uiPreviewSheet(s, p) },
     h("span", { class: "auto-mark running", "aria-hidden": "true" }),
-    h("span", { class: "text" }, h("b", {}, p.task), h("span", { class: "about" }, p.url), h("small", {}, uiPreviewStatus(p))),
+    h("span", { class: "text" }, h("b", {}, several && p.name ? `${p.task} · ${p.label}` : p.task), h("span", { class: "about" }, p.url), h("small", {}, uiPreviewStatus(p))),
     glyph("next", "go"));
 }
 

@@ -934,8 +934,10 @@ async function confirmClose(s, known) {
   // What it runs that hasn't ended (a test run, a helper) stops halfway: said whole.
   const runs = c.running || [];
   const stops = runs.length ? h("p", { class: "close-stops" }, `Stops what's still running: ${runs[0]}${runs.length > 1 ? ` (and ${runs.length - 1} more)` : ""}.`) : null;
-  // Its preview stops with it (and is checked gone).
-  const preview = c.preview ? h("p", { class: "close-stops" }, `Stops its preview, ${c.preview}.`) : null;
+  // Its previews stop with it (and are checked gone).
+  const ups = c.previews || [];
+  const preview = ups.length ? h("p", { class: "close-stops" }, ups.length > 1 ? `Stops its ${ups.length} previews, ${ups.slice(0, -1).join(", ")} and ${ups[ups.length - 1]}.`
+                                                                               : `Stops its preview, ${ups[0]}.`) : null;
   const yes = h("button", { class: "control wide danger", onclick: async () => {
     yes.disabled = true;
     try {
@@ -1049,11 +1051,10 @@ class SessionView {
   // Over the chat: its head (ui.js uiChatHead), as a computer's. Back: from a
   // terminal to the chat, from the chat to the board.
   renderHeader() {
-    // Its preview as the list has it: started from its button, it says so
+    // Its previews as the list has them: one started from its button says so
     // ahead of the server (ui.js uiPreviewStart), and of the chat's own word.
     const listed = rowOf(this.id);
-    const r = { ...(this.row || { id: this.id, repo: "", task: "…" }),
-                ...(listed ? { preview: listed.preview, preview_state: listed.preview_state, preview_up: listed.preview_up } : {}) };
+    const r = { ...(this.row || { id: this.id, repo: "", task: "…" }), ...(listed ? { previews: listed.previews } : {}) };
     if (this.row) this.chat.setPlaceholder(composerPlaceholder(r));
     uiSwap(this.titleEl, uiChatHead(r, {
       back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
@@ -1101,7 +1102,8 @@ class SessionView {
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
-      row.preview ? h("button", { class: "control wide", onclick: () => { closeSheets(); uiPreviewSheet({ ...row, id: this.id }); } }, "Preview…") : null,
+      uiPreviews(row).length ? h("button", { class: "control wide", onclick: () => { closeSheets(); uiPreviewManage({ ...row, id: this.id }); } },
+                                 uiPreviews(row).length > 1 ? "Previews…" : "Preview…") : null,
       ...sessionActions({ ...row, id: this.id }),
       agent ? null : closeButton({ ...row, id: this.id }),
       h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);

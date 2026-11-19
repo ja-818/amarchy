@@ -92,6 +92,14 @@
   /* A post on X (the xpost block, xpost.js): X's own look, not the theme's,
      so it's seen as it will be on X. Its dark one ("Lights out"); theme.css
      gives a light theme X's light one. */
+  /* A dropdown (uiDropdown): a popup's ground and rule, as the menu card's. */
+  --dropdown-bg: var(--surface);
+  --dropdown-border: var(--border-popup);
+  --dropdown-border-width: var(--popup-border-width);
+  --dropdown-radius: var(--radius-card);
+  --dropdown-shadow: var(--shadow-popup);
+  --dropdown-row-hover: var(--control-hover);
+  --dropdown-row-on: var(--selected-bg);
   --xpost-bg: #000000;
   --xpost-text: #e7e9ea;
   --xpost-muted: #71767b;
@@ -551,6 +559,11 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .tbtn.ui-preview { display: inline-flex; align-items: center; gap: 6px; }
 .ui-preview .spinner { color: currentColor; }
 .ui-preview.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--button-border)); }
+/* Several: Previews ▾, a dropdown of them. Narrow, its icon and its ▾. */
+.ui-drop-mark { display: inline-grid; place-items: center; }
+.ui-drop-mark svg { width: 14px; height: 14px; }
+.ui-action.ui-previews { gap: 6px; }
+@media (max-width: 719px) { .ui-action.ui-previews { padding: 0 6px; gap: 2px; } }
 .preview-state { margin: 0 0 8px; font-weight: 700; }
 .preview-state.failed { color: var(--danger); }
 .preview-state.up { color: var(--success); }
@@ -711,3 +724,30 @@ body.desk .ui-slides-stage .ui-scroll { margin-inline: calc(-1 * (var(--control-
   .ui-keycap:nth-child(4) { animation-delay: 1.8s; }
 }
 @keyframes ui-keycap { 0% { transform: translateY(4px); border-bottom-width: 2px; color: var(--text); } 25% { transform: none; border-bottom-width: 6px; } }
+
+/* ---- a dropdown (uiDropdown): under the button that opened it, a few rows
+   to pick, each its icon, its name and under it what a tap does. */
+.ui-dropdown {
+  position: fixed; z-index: 15; box-sizing: border-box;
+  max-width: min(360px, calc(100vw - 16px)); max-height: min(60vh, 420px); overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border: var(--dropdown-border-width) solid transparent; border-radius: var(--dropdown-radius);
+  background: linear-gradient(var(--dropdown-bg), var(--dropdown-bg)) padding-box, var(--dropdown-border) border-box;
+  box-shadow: var(--dropdown-shadow);
+  animation: fade 0.1s ease-out;
+}
+.ui-drop-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--control-h); padding: 6px 10px; box-sizing: border-box;
+  border: 1px solid transparent; border-radius: var(--radius-control); background: none; color: var(--text); text-align: left; font: inherit;
+}
+@media (hover: hover) { .ui-drop-row:hover { background: var(--dropdown-row-hover); } }
+.ui-drop-row:focus-visible { outline: none; background: var(--dropdown-row-on); border-color: var(--selected-border); }
+.ui-drop-row:active { background: var(--button-press-bg); }
+.ui-drop-row:disabled { opacity: .6; }
+.ui-drop-icon, .ui-drop-row > .spinner { flex: none; width: 18px; display: inline-grid; place-items: center; color: var(--text-muted); }
+.ui-drop-icon svg { width: 16px; height: 16px; }
+.ui-drop-text { display: flex; flex-direction: column; min-width: 0; }
+.ui-drop-text b, .ui-drop-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-drop-text small { color: var(--text-muted); font-size: var(--caption); }
+.ui-drop-row.t-up .ui-drop-icon { color: var(--success); }
+.ui-drop-row.bad .ui-drop-icon, .ui-drop-row.bad small { color: var(--danger); }

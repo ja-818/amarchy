@@ -63,7 +63,7 @@ function boardBuild() {
   // them where they were (a button clicked isn't focused), even in a box
   // that's gone, and j / k stopped working until the app was opened again.
   board.box.addEventListener("click", (e) => {
-    if (document.querySelector(".sheet-back, .picker-back")) return;      // what it opened has the keys now (a sheet, the tour)
+    if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown")) return;      // what it opened has the keys now (a sheet, the tour)
     const b = e.target.closest("button, a[href], summary");
     const go = b && board.box.contains(b) ? b : (e.target.closest(".tcard") || {}).querySelector?.(":scope > .today-go");
     if (go && document.activeElement !== go && go.isConnected && shown(go)) go.focus({ preventScroll: true });
@@ -198,7 +198,7 @@ function cardInside(card) {
 // The board's keys (none while you type, or a sheet is up).
 function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
+  if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
   // A box you type in, if it's still there to type in: Safari keeps the
   // keys in the chat's box after it closed (sent, back on the board).
   const typing = e.target.closest("textarea, input, select, [contenteditable]");
@@ -262,7 +262,7 @@ function boardKeys(e) {
     // Pinned or For later; again, back in Now.
     const s = card.dataset.id && row(card.dataset.id), level = k === "p" ? "high" : "low";
     if (s && !isAgent(s)) { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
-  } else if (k === "r") press("a.tbtn");
+  } else if (k === "r") press("a.tbtn") || press(".tbtn.ui-previews");     // what it made: its Review, else its Preview (of several: pick one)
   else if (k === "s") press(".tbtn.seen");
 }
 
@@ -271,7 +271,7 @@ function boardKeys(e) {
 // dictation, close a menu or a sheet; and in a terminal, Esc is the terminal's.
 function boardEsc(e) {
   if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (document.querySelector(".sheet-back, .picker-back, .mission")) return;
+  if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
   if (e.target.closest && e.target.closest(".term-box")) return;
   const c = desk.chat;
   if (c && (c.talk.on() || c.menu)) return;

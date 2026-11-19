@@ -445,6 +445,6 @@ function tourAuto() {
   if (tour.auto || store.get("tour")) return;
   tour.auto = true;
   setTimeout(() => {
-    if (boardEmpty() && !document.querySelector(".sheet-back, .picker-back, .mission")) tourShow();
+    if (boardEmpty() && !document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) tourShow();
   }, 500);
 }

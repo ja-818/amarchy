@@ -7,8 +7,12 @@
 // asks its Claude (once); none set, no button. Complete with its preview
 // still holding a port: the chat stays, and its Claude can be asked to stop
 // it. Automations lists the previews running. The Run shortcuts are gone
-// from the menus, the terminal keeps Run and its saved commands. With
-// screenshots.
+// from the menus, the terminal keeps Run and its saved commands. A chat with
+// several: one button, Previews, a dropdown of them by name under it (on its
+// card and over the chat), each doing what its own button would; a tap
+// outside closes it and presses nothing else, Esc too (the chat stays open);
+// the keys open it and move in it; the chat's menu picks one to manage;
+// Complete says it stops them all. With screenshots.
 //
 //   node test/preview-view.js          both layouts
 //   node test/preview-view.js phone    one layout (phone | wide)
@@ -25,11 +29,15 @@ const ONLY = process.argv[2];
 const URL_UP = "http://amarchy:5173/";
 
 const URL_STOPPED = "http://amarchy:5174/";
+const URL_APP = "http://amarchy:5180/", URL_BOOK = "http://amarchy:6006/";
+const one = (url, extra) => [{ key: "", label: url.replace(/^http:\/\//, "").replace(/\/$/, ""), url, ...extra }];
 for (const c of CHATS) {
-  if (c.id === "proj-fresh") Object.assign(c, { preview: { url: URL_UP, run: "pnpm dev" }, preview_up: true, preview_state: "up" });
-  if (c.id === "proj-quiet") Object.assign(c, { preview: { url: URL_STOPPED, run: "pnpm dev --port 5174" }, preview_up: false, preview_state: "stopped" });
-  if (c.id === "proj-later") Object.assign(c, { preview: { url: "http://amarchy:5175/", run: "pnpm dev --port 5175" }, preview_up: false, preview_state: "failed" });
-  if (c.id === "proj-done2") Object.assign(c, { preview: { url: "http://amarchy:5176/" }, preview_up: false, preview_state: "down" });
+  if (c.id === "proj-fresh") c.previews = one(URL_UP, { run: "pnpm dev", state: "up" });
+  if (c.id === "proj-quiet") c.previews = one(URL_STOPPED, { run: "pnpm dev --port 5174", state: "stopped" });
+  if (c.id === "proj-later") c.previews = one("http://amarchy:5175/", { run: "pnpm dev --port 5175", state: "failed" });
+  if (c.id === "proj-done2") c.previews = one("http://amarchy:5176/", { state: "down" });
+  if (c.id === "proj-done") c.previews = [{ key: "", name: "App", label: "App", url: URL_APP, run: "pnpm dev --port 5180", state: "up" },
+                                          { key: "storybook", name: "Storybook", label: "Storybook", url: URL_BOOK, run: "pnpm storybook -p 6006", state: "stopped" }];
 }
 const FAILED = { url: "http://amarchy:5175/", run: "pnpm dev --port 5175", stop: "", ports: [5175, 24678], memory_max: "2G", idle: 10800,
                  state: "failed", log: "Error: Cannot find module 'vite'\n    at boom (x.js:1:1)", task: "Refund: old order", id: "proj-later" };
@@ -48,7 +56,7 @@ async function run(browser, port, layout) {
   await p.locator(`${card("proj-fresh")} a.ui-preview`).click();
   check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "a tap opens it");
   check(layout, await p.evaluate(() => !location.hash.includes("/s/") && !desk.current), "and doesn't open the chat");
-  check(layout, await p.evaluate((s) => !document.querySelector(`${s} .ui-preview`), card("proj-done")), "a card without one: no button");
+  check(layout, await p.evaluate((s) => !document.querySelector(`${s} .ui-preview`), card("proj-work")), "a card without one: no button");
 
   // Registered, not running: Start preview starts it here, the button turning, and nothing opens or goes to Claude.
   const stopped = `${card("proj-quiet")} button.ui-preview`;
@@ -66,11 +74,12 @@ async function run(browser, port, layout) {
   check(layout, await p.evaluate(() => !window.__opened.length && !location.hash.includes("/s/") && !document.querySelector(".sheet")), "nothing opens: you stay where you are");
   check(layout, !p.posts.some((x) => /proj-quiet\/send/.test(x.url)), "and doesn't message its Claude");
   // It answers: the button is Preview, and a toast says so; a tap on it opens it.
-  const stands = (state, id = "proj-quiet") => p.evaluate(({ chats, state, id }) => {
+  const stands = (state, id = "proj-quiet", key = "") => p.evaluate(({ chats, state, id, key }) => {
     ahead.clear();
-    app.view = { ...app.view, sessions: chats.map((c) => (c.id === id ? { ...c, preview_state: state, preview_up: state === "up" } : { ...c })) };
+    const now = new Map((app.view.sessions || []).map((s) => [s.id, s.previews]));
+    app.view = { ...app.view, sessions: chats.map((c) => ({ ...c, previews: (now.get(c.id) || c.previews || []).map((x) => (c.id === id && (x.key || "") === key ? { ...x, state } : { ...x })) })) };
     refresh();
-  }, { chats: CHATS, state, id });
+  }, { chats: CHATS, state, id, key });
   await stands("starting");
   check(layout, await p.evaluate((s) => /Starting…/.test(document.querySelector(s).innerText) && !document.querySelector(".toast"), stopped), "still starting: it keeps turning, no toast");
   await stands("up");
@@ -92,8 +101,99 @@ async function run(browser, port, layout) {
   await p.unroute("**/api/session/proj-quiet/preview");
   await stands("stopped");
 
+  // Several: one button, Previews, and a dropdown of them by name under it.
+  const many = `${card("proj-done")} button.ui-previews`;
+  check(layout, await until(p, (s) => { const b = document.querySelector(s); return b && /Previews/.test(b.innerText) && b.getAttribute("aria-haspopup") === "menu" && !!b.querySelector(".ui-drop-mark"); }, many),
+        "a card with several: one button, Previews ▾");
+  check(layout, await p.evaluate((s) => document.querySelectorAll(`${s} .ui-preview`).length === 1, card("proj-done")), "and only that one");
+  await p.evaluate(() => { window.__opened.length = 0; });
+  await p.locator(many).click();
+  const drop = () => p.evaluate((s) => {
+    const m = document.querySelector(".ui-dropdown"), b = document.querySelector(s);
+    if (!m) return null;
+    const r = m.getBoundingClientRect(), a = b.getBoundingClientRect();
+    return { rows: [...m.querySelectorAll(".ui-drop-row")].map((x) => x.innerText.replace(/\s+/g, " ").trim()), expanded: b.getAttribute("aria-expanded"),
+             under: r.top >= a.bottom - 1 || r.bottom <= a.top + 1, near: Math.abs(r.right - a.right) < 2 || Math.abs(r.left - a.left) < 2 || r.left <= 9 || r.right >= innerWidth - 9,
+             inside: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight };
+  }, many);
+  const d1 = await drop();
+  check(layout, d1 && d1.rows.length === 2 && /^App Open · amarchy:5180/.test(d1.rows[0]) && /^Storybook Not running: start it · amarchy:6006/.test(d1.rows[1]),
+        `a tap: the dropdown, each by name, where it stands (${d1 && d1.rows.join(" | ")})`);
+  check(layout, d1 && d1.expanded === "true" && d1.under && d1.near && d1.inside, "under its button, on the screen, and the button says it's open");
+  check(layout, await p.evaluate(() => !location.hash.includes("/s/") && !desk.current && !document.querySelector(".sheet")), "the chat doesn't open");
+  await sleep(200);
+  await p.screenshot({ path: path.join(SHOTS, `${layout}-previews-card.png`) });
+  await p.locator(".ui-dropdown .ui-drop-row").first().click();
+  check(layout, await until(p, (u) => window.__opened.includes(u), URL_APP), "one that answers: a tap opens it");
+  check(layout, await p.evaluate(() => !document.querySelector(".ui-dropdown") && !desk.current), "and the dropdown goes, the chat still closed");
+  // One not running: it starts where you are, the button turning.
+  const bookStarts = [];
+  await p.route("**/api/session/proj-done/preview", (r) => { bookStarts.push(r.request().postDataJSON()); r.fulfill({ json: { preview: {} } }); });
+  await p.locator(many).click();
+  await p.locator(".ui-dropdown .ui-drop-row").nth(1).click();
+  check(layout, await until(p, () => true) && bookStarts.length === 1 && bookStarts[0].action === "start" && bookStarts[0].key === "storybook", "Storybook: started, by its key");
+  check(layout, await until(p, (s) => { const b = document.querySelector(s); return b && !!b.querySelector(".spinner") && b.getAttribute("aria-busy") === "true"; }, many),
+        "the button turns while it starts");
+  await p.locator(many).click();
+  const d2 = await drop();
+  check(layout, d2 && /^Storybook Starting…/.test(d2.rows[1]), `its row says Starting… (${d2 && d2.rows[1]})`);
+  await p.keyboard.press("Escape");
+  check(layout, await until(p, () => !document.querySelector(".ui-dropdown")), "Esc closes it");
+  await stands("starting", "proj-done", "storybook");
+  await stands("up", "proj-done", "storybook");
+  check(layout, await until(p, () => { const t = document.querySelector(".toast.act"); return t && /Study: T3 vs amarchy's Storybook is ready/.test(t.innerText); }),
+        "it answers: a toast says which one is ready");
+  await p.evaluate(() => document.querySelectorAll(".toast").forEach((t) => t.remove()));
+  await p.unroute("**/api/session/proj-done/preview");
+  await stands("stopped", "proj-done", "storybook");
+  // A tap outside closes it, and presses nothing under it.
+  await p.locator(many).click();
+  await until(p, () => !!document.querySelector(".ui-dropdown"));
+  const box = await p.locator(card("proj-quiet")).boundingBox();
+  await p.mouse.click(box.x + 12, box.y + 12);
+  await sleep(200);
+  check(layout, await p.evaluate(() => !document.querySelector(".ui-dropdown") && !desk.current && !location.hash.includes("/s/")),
+        "a tap outside: it closes, and the card under it doesn't open");
+  // Keys: Enter on the button opens it, the first row lit; ↓ the next; ↵ picks.
+  if (layout === "wide") {
+    await p.locator(many).focus();
+    await p.keyboard.press("Enter");
+    check(layout, await until(p, () => document.activeElement && document.activeElement.matches(".ui-dropdown .ui-drop-row")), "from the keys: on its first row");
+    await p.keyboard.press("ArrowDown");
+    check(layout, await p.evaluate(() => /Storybook/.test(document.activeElement.innerText)), "↓ the next");
+    await p.keyboard.press("ArrowDown");
+    check(layout, await p.evaluate(() => /App/.test(document.activeElement.innerText)), "and round to the first");
+    await p.evaluate(() => { window.__opened.length = 0; });
+    await p.keyboard.press("Enter");
+    check(layout, await until(p, (u) => window.__opened.includes(u), URL_APP) && await p.evaluate(() => !document.querySelector(".ui-dropdown")), "↵ picks it");
+    // r on its card (what it made): with no Review, its Previews.
+    await p.evaluate(() => { const s = rowOf("proj-done"); s.today = { ...s.today, links: [] }; todayRedraw(); });
+    await until(p, () => !document.querySelector(".tcard[data-id=proj-done] a.tbtn"));
+    await p.evaluate(() => boardFocus(document.querySelector(".tcard[data-id=proj-done] .today-go")));
+    await p.keyboard.press("r");
+    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "r on its card: its dropdown");
+    await p.keyboard.press("Escape");
+    await stands("stopped", "proj-done", "storybook");
+  }
+  // Open, and the list comes again with nothing new: the same rows (a tap lands where it was aimed).
+  await p.locator(many).click();
+  await until(p, () => !!document.querySelector(".ui-dropdown .ui-drop-row"));
+  const kept = await p.evaluate(async () => {
+    const first = document.querySelector(".ui-dropdown .ui-drop-row");
+    refresh();
+    await new Promise((r) => setTimeout(r, 100));
+    return document.querySelector(".ui-dropdown .ui-drop-row") === first;
+  });
+  check(layout, kept, "the list again, nothing new: the same rows");
+  await stands("failed", "proj-done", "storybook");
+  check(layout, await until(p, () => { const r = document.querySelectorAll(".ui-dropdown .ui-drop-row")[1]; return r && /Failed: see why/.test(r.innerText) && r.matches(".bad"); }),
+        "one fails while it's open: its row says so");
+  check(layout, await p.evaluate((s) => document.querySelector(s).matches(".bad"), many), "and the button is marked");
+  await p.keyboard.press("Escape");
+  await stands("stopped", "proj-done", "storybook");
+
   // Failed: its sheet, what it wrote, and its Claude asked to fix it.
-  await p.route("**/api/session/proj-later/preview", (r) => r.fulfill({ json: FAILED }));
+  await p.route("**/api/session/proj-later/preview*", (r) => r.fulfill({ json: FAILED }));
   const failed = `${card("proj-later")} button.ui-preview`;
   check(layout, (await p.locator(failed).innerText()).includes("Preview failed"), "failed: Preview failed");
   await p.locator(failed).click();
@@ -123,8 +223,12 @@ async function run(browser, port, layout) {
   // Complete, its preview still holding a port: the chat stays, its Claude can be asked to stop it.
   await p.route("**/api/session/proj-done/close", (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() });
     r.fulfill({ status: 409, json: { error: "Its preview is still running", preview_left: ["port 5173: node vite (pid 4242)"], changes: 0 } }); });
-  await p.evaluate(() => confirmClose(rowOf("proj-done"), { changes: 0, running: [], preview: "http://amarchy:5173/" }));
+  await p.evaluate(() => confirmClose(rowOf("proj-fresh"), { changes: 0, running: [], previews: ["http://amarchy:5173/"] }));
   check(layout, await until(p, () => /Stops its preview, http:\/\/amarchy:5173\//.test([...document.querySelectorAll(".sheet")].pop().innerText)), "Complete says it stops its preview");
+  await p.evaluate(() => closeSheets());
+  await p.evaluate(() => confirmClose(rowOf("proj-done"), { changes: 0, running: [], previews: ["http://amarchy:5180/", "http://amarchy:6006/"] }));
+  check(layout, await until(p, () => /Stops its 2 previews, http:\/\/amarchy:5180\/ and http:\/\/amarchy:6006\//.test([...document.querySelectorAll(".sheet")].pop().innerText)),
+        "with several, that it stops them all");
   await p.evaluate(() => [...[...document.querySelectorAll(".sheet")].pop().querySelectorAll("button")].find((b) => /Complete/.test(b.innerText)).click());
   check(layout, await until(p, () => { const s = [...document.querySelectorAll(".sheet")].pop(); return s && /Its preview is still running/.test(s.innerText) && /pid 4242/.test(s.innerText); }),
         "still running after the stop: says what, and the chat stays");
@@ -195,6 +299,49 @@ async function run(browser, port, layout) {
     const items = await p.evaluate(() => [...document.querySelectorAll(".sheet")].pop().innerText);
     check(layout, !/Run…/.test(items), "the chat's menu: no Run…");
     check(layout, /Preview…/.test(items), "the chat's menu: Preview…");
+  }
+  // Over the open chat, with several: Previews in the same place, its dropdown under it.
+  await p.evaluate(() => closeSheets());
+  await p.evaluate(() => todayOpen(rowOf("proj-done")));
+  check(layout, await until(p, () => [...document.querySelectorAll(".head-btns .ui-previews")].some((b) => b.offsetParent)), "over the chat: Previews");
+  const head2 = await p.evaluate(() => {
+    const bar = [...document.querySelectorAll(".head-btns")].find((b) => b.offsetParent);
+    const name = [...document.querySelectorAll(".head-title")].find((b) => b.offsetParent).getBoundingClientRect().width;
+    return { order: [...bar.children].map((c) => (c.matches(".more") ? "more" : c.matches(".ui-preview") ? "preview" : c.matches(".complete") ? "complete" : "state")).join(" "),
+             fits: bar.getBoundingClientRect().right <= innerWidth + 1 && document.documentElement.scrollWidth <= innerWidth, name };
+  });
+  check(layout, head2.order === "state more preview complete" && head2.fits && head2.name >= 100, `in its place, the head fits, its name keeps its room (${head2.order}, ${Math.round(head2.name)}px)`);
+  await p.evaluate(() => [...document.querySelectorAll(".head-btns .ui-previews")].find((b) => b.offsetParent).click());
+  const d3 = await p.evaluate(() => {
+    const m = document.querySelector(".ui-dropdown"), b = [...document.querySelectorAll(".head-btns .ui-previews")].find((x) => x.offsetParent);
+    if (!m) return null;
+    const r = m.getBoundingClientRect(), a = b.getBoundingClientRect();
+    return { n: m.querySelectorAll(".ui-drop-row").length, under: r.top >= a.bottom - 1, inside: r.left >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight };
+  });
+  check(layout, d3 && d3.n === 2 && d3.under && d3.inside, "a tap: its dropdown, under it, on the screen");
+  await sleep(200);
+  await p.screenshot({ path: path.join(SHOTS, `${layout}-previews-chat.png`) });
+  await p.keyboard.press("Escape");
+  check(layout, await until(p, () => !document.querySelector(".ui-dropdown")) && await p.evaluate(() => !!document.querySelector(".head-btns .ui-previews") && (desk.current === "proj-done" || (app.session && app.session.id === "proj-done"))),
+        "Esc closes it, and the chat stays open");
+  if (layout === "wide") {
+    await p.keyboard.press("Control+Alt+KeyR");
+    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "Ctrl+Alt+R: its dropdown, from the keys");
+    await p.keyboard.press("Escape");
+    await p.evaluate(() => sessionMenu(rowOf("proj-done")));
+    await until(p, () => !!document.querySelector(".picker"));
+    check(layout, await p.evaluate(() => [...document.querySelectorAll(".picker-row")].some((r) => /^Previews/.test(r.innerText) && r.querySelector(".chev"))), "the chat's menu: Previews ›");
+    await p.keyboard.press("Escape");
+  } else {
+    await p.locator(".head-btns .more").filter({ visible: true }).click();
+    await until(p, () => !!document.querySelector(".sheet"));
+    await p.route("**/api/session/proj-done/preview?key=storybook", (r) => r.fulfill({ json: { key: "storybook", name: "Storybook", label: "Storybook", url: URL_BOOK, run: "pnpm storybook -p 6006", stop: "", ports: [6006], memory_max: "2G", idle: 10800, state: "stopped", log: "", id: "proj-done", task: "Study: T3 vs amarchy" } }));
+    await p.evaluate(() => [...[...document.querySelectorAll(".sheet")].pop().querySelectorAll("button")].find((b) => /^Previews…$/.test(b.innerText)).click());
+    check(layout, await until(p, () => { const s = [...document.querySelectorAll(".sheet")].pop(); return s && /App/.test(s.innerText) && /Storybook/.test(s.innerText); }), "the chat's menu: Previews…, each");
+    await p.evaluate(() => [...[...document.querySelectorAll(".sheet")].pop().querySelectorAll(".menu-item")].find((b) => /Storybook/.test(b.innerText)).click());
+    check(layout, await until(p, () => { const s = [...document.querySelectorAll(".sheet")].pop(); return s && /^Storybook/.test(s.querySelector("h2").innerText) && /pnpm storybook/.test(s.innerText); }),
+          "one picked: its sheet, its name on it");
+    await p.evaluate(() => closeSheets());
   }
   check(layout, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
 

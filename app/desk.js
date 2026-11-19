@@ -1180,12 +1180,14 @@ class DeskDetails {
       kids.push(use(lim.five_hour, "Plan, 5 hours"), use(lim.seven_day, "Plan, this week"),
         live.turns ? item("This run", `${live.turns} turn${live.turns === 1 ? "" : "s"}${live.cost_usd ? ` · $${live.cost_usd.toFixed(2)} at API prices` : ""}`) : null);
     }
-    // Its preview (amarchy preview): where it stands; all of it in its sheet.
-    const p = d.preview;
-    if (p) kids.push(h("div", { class: "section" }, "Preview"),
-      item("Address", h("code", {}, p.url), h("button", { class: "text-btn", type: "button", onclick: () => uiPreviewSheet({ ...s, id: d.id, preview: s.preview || p }) }, "Open its sheet")),
-      item("State", uiPreviewStatus(p)),
-      item("Command", p.run ? h("code", {}, p.run) : null));
+    // Its previews (amarchy preview): where each stands; all of one in its sheet.
+    const ps = d.previews || [];
+    if (ps.length) kids.push(h("div", { class: "section" }, ps.length > 1 ? `Previews · ${ps.length}` : "Preview"));
+    for (const p of ps)
+      kids.push(ps.length > 1 ? item("Name", h("b", {}, p.label)) : null,
+        item("Address", h("code", {}, p.url), h("button", { class: "text-btn", type: "button", onclick: () => uiPreviewSheet({ ...s, id: d.id, previews: s.previews || ps }, p) }, "Open its sheet")),
+        item("State", uiPreviewStatus(p)),
+        item("Command", p.run ? h("code", {}, p.run) : null));
     const tasks = Array.isArray(live.tasks) ? live.tasks : [];
     const bg = d.background || [];
     kids.push(h("div", { class: "section" }, "In the background"));
@@ -1227,7 +1229,7 @@ function typeToChat(e) {
   const fresh = !c && board.composing && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
   if ((!c && !fresh) || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
   const at = document.activeElement;
-  if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .card")))
+  if (at && at !== document.body && (at.matches("input, textarea, [contenteditable], select") || at.closest(".term-box, .sheet-back, .picker-back, .ui-dropdown, .card")))
     return;
   if (c && c.navHere()) return;      // on its messages, the keys are commands (i to write)
   if (e.key === " " && at && at.matches("button, a, summary, [role]")) return;     // Space presses what's focused
@@ -1653,7 +1655,8 @@ function deskMenu() {
   const s = app.desk ? row(keyedId()) : null;
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardNew() },
-    s && s.preview ? { label: "Open the preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", act: () => uiPreviewGo(s) } : null,
+    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", act: () => uiPreviewGo(s) } : null,
     { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
     desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
@@ -1691,7 +1694,8 @@ function sessionItems(s) {
     { label: "Add a picture or a file…", detail: "it goes with your next message",
       act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
     { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo }) },
-    ...(s.preview ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s) }] : []),
+    ...(uiPreviews(s).length > 1 ? [{ label: "Previews", icon: "preview", detail: "start, stop, what each wrote", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewSheet(s, p)) }) }]
+      : uiPreviews(s).length ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s, uiPreviews(s)[0]) }] : []),
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent…` : "Make it an agent…",

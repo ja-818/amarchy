@@ -1481,7 +1481,7 @@ class Chat {
   navKey(e) {
     if (this.closed || !this.el.isConnected || !this.el.getClientRects().length) return false;
     if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return false;
-    if (document.querySelector(".sheet-back, .picker-back, .mission")) return false;
+    if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return false;
     const a = document.activeElement;
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
