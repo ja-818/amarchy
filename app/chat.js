@@ -148,6 +148,7 @@ const CHAT_ICONS = {
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  xlogo: `<path fill="currentColor" stroke="none" d="${XPOST_ICONS.logo}"/>`,
 };
 
 function icon(name, cls) {
@@ -1967,6 +1968,10 @@ class Chat {
     return box;
   }
 
+  // Where a block's picture or video comes from (a path here, or an https
+  // address): the server, the only place the page takes pictures from.
+  mediaUrl(src) { return `/api/session/${encodeURIComponent(this.id)}/media?src=${encodeURIComponent(src)}`; }
+
   // A block's parts (a reply's block: replyParts): its icon, title, the line
   // under it, its quick action, what it shows open and the actions there;
   // look: its class, when it's not its kind's (a message's channels share one).
@@ -2068,9 +2073,30 @@ class Chat {
         return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${id}`, "Open") : null,
           body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
       }
-      case "file":
-        return { icon: "file", title: title || baseName(str(at.path)) || "File", sub: str(at.path), quick: copy(str(at.path), "Copy path"),
-          body: [body ? pre(body) : null], actions: [] };
+      case "file": {
+        // A picture: shown (from the server: a file in your home or /tmp), a tap away from full screen.
+        const where = str(at.path), pic = /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(where);
+        let shot = null;
+        if (pic) {
+          shot = uiShot({ src: this.mediaUrl(where), alt: baseName(where), cls: "art-shot" });
+          shot.querySelector("img").addEventListener("error", () => shot.remove());
+        }
+        return { icon: pic ? "image" : "file", title: title || baseName(where) || "File", sub: where, quick: copy(where, "Copy path"),
+          body: [shot, body ? pre(body) : null], actions: [] };
+      }
+      case "xpost": {
+        // The post as X will show it (xpost.js); under it, how X counts it and its draft's id, and Copy for its exact text.
+        const v = xpostView(a, (src) => this.mediaUrl(src));
+        const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
+        const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
+        return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
+          sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
+          body: [v.card, h("div", { class: "xpost-foot" },
+            h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
+            str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
+            copy(String(a.body || ""), "Copy"))],
+          actions: [] };
+      }
       default:
         return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
           body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };

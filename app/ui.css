@@ -89,6 +89,18 @@
   --chart-single: var(--accent);
   --chart-grid: var(--border-faint);
   --chart-axis: var(--border);
+  /* A post on X (the xpost block, xpost.js): X's own look, not the theme's,
+     so it's seen as it will be on X. Its dark one ("Lights out"); theme.css
+     gives a light theme X's light one. */
+  --xpost-bg: #000000;
+  --xpost-text: #e7e9ea;
+  --xpost-muted: #71767b;
+  --xpost-border: #2f3336;
+  --xpost-link: #1d9bf0;
+  --xpost-fill: #333639;      /* behind an avatar or a picture while it comes */
+  --xpost-over: rgba(244, 33, 46, 0.32);     /* behind what goes past X's 280 */
+  --xpost-radius: 16px;
+  --xpost-font: "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   /* One size for every control, wherever it is: a button on a card, a tab,
      the search, a tool, New chat, the buttons over a chat and in its side
      panel, the composer's menus. A finger's on a touch screen. */

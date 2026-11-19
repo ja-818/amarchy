@@ -228,7 +228,8 @@ the places Claude put them:
   `link` (folded to its row: Copy and Open; its address a tap away), `event` (Add to Google Calendar, Map), `todos`, `fields`,
   `chart`, `contact`
   (Call, WhatsApp, Email), `place` (Map, Call, Website), `session` (Open the
-  chat), `file` (its path). Each is a row (its kind, name, quick action) with
+  chat), `file` (its path; a picture shown, a tap from full screen), `xpost`
+  (a post as X will show it, below). Each is a row (its kind, name, quick action) with
   all of it open under it; a tap folds it. Links open only on the web, mail,
   a call, a text message or a chat of yours. Any other fence is code, with
   its Copy.
@@ -284,6 +285,28 @@ the places Claude put them:
   (`--chart-1..8` in ui.css, light steps from theme.css on a light theme;
   one series wears the accent); under the pointer or the finger, a
   crosshair and every series' value; *Numbers* shows it as a table.
+- **Posts for X** (`xpost`, app/xpost.js): a draft shown the way X's
+  timeline will show it, so it's approved by seeing it. The body is the
+  exact text (newlines kept; Copy copies it); `handle` (needed), `name`,
+  `avatar`, `media` (up to 4, comma-separated: X's grid, one at its own
+  shape no taller than 4:5, two side by side, three with the first tall,
+  four in a square; a tap on a picture shows them full screen, a video has
+  X's play button and its length), `reply_to` ("Replying to @user") and
+  `quote` (a quoted post's frame with its address: X's own words aren't
+  fetched), `id` (the draft's, under it). X's look, not the theme's: its
+  font, 15px on 20px, a 40px round avatar, links, @mentions, #tags and
+  $cashtags in X's blue (twitter-text's rules; a link shortened as X does),
+  the action row only drawn; X's dark colors, or its light ones on a light
+  theme (`--xpost-*`, ui.css; theme.css). Under it the count X keeps
+  (twitter-text's parseTweet: a link 23, an emoji 2, CJK 2), red past 280,
+  the part past it marked as X's composer marks it. Pictures and videos
+  come from the server (`/api/session/<id>/media?src=`): a file in your
+  home or /tmp that is one (by its first bytes; Range for Safari's video),
+  or an https picture fetched there from a public address only and kept a
+  day, as the page takes pictures only from its own server (APP_CSP). The
+  Stop hook checks the handle, the addresses, and that each picture is
+  there and is one. test/xpost-view.js draws it on a phone and wide, dark
+  and light; test/reply-check.py has the checks.
 
 ### The conversation
 

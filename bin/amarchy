@@ -7597,6 +7597,8 @@ def look_stamp(look=None):
 
 
 CHART_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
+XPOST_LIGHT = {"bg": "#ffffff", "text": "#0f1419", "muted": "#536471", "border": "#cfd9de", "link": "#1d9bf0", "fill": "#cfd9de",
+               "over": "rgba(244, 33, 46, 0.16)"}      # X's (ui.css --xpost-*: its dark)
 
 
 def app_theme_css():
@@ -7612,6 +7614,7 @@ def app_theme_css():
     out.append(f"  color-scheme: {'light' if look.get('mode') == 'light' else 'dark'};")
     if look.get("mode") == "light":     # a chart's series, stepped for a light ground (ui.css --chart-*)
         out.append("  " + " ".join(f"--chart-{i}: {c};" for i, c in enumerate(CHART_LIGHT, 1)))
+        out.append("  " + " ".join(f"--xpost-{k}: {c};" for k, c in XPOST_LIGHT.items()))     # a post on X, in X's light look
     term = look["terminal"]
     if isinstance(term.get("size"), (int, float)):      # points, as a terminal has them: 96 dpi
         out.append(f"  --term-size: {round(term['size'] * 4 / 3, 2)}px;")
@@ -10973,6 +10976,168 @@ BLOCK_URL = re.compile(r"^(https?://\S+|mailto:\S+|tel:\S+|sms:\S+)$")
 BLOCK_NUMBER = re.compile(r"^[^\d\-+.]{0,3}([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*[%a-zA-Z/]*$")
 BLOCK_FIELD = re.compile(r"^\s*(?:[-*]\s+)?([^:]{1,60}?)\s*:\s+(.+?)\s*$")
 BLOCK_SERIES_MAX = 8
+BLOCK_HANDLE = re.compile(r"^@?\w{1,15}$")         # an X handle (an xpost's), its @ or not
+BLOCK_POST = re.compile(r"^https://(?:www\.|mobile\.)?(?:x|twitter)\.com/(?:\w{1,15}|i(?:/web)?)/status(?:es)?/\d{1,20}(?:[/?#]\S*)?$", re.I)
+
+
+# ---- a block's pictures and videos (an xpost's avatar and media): a file on
+# this machine, served to the app (/api/session/<id>/media?src=...), or a
+# picture on the web, fetched here (the app's pages take pictures only from
+# this server: APP_CSP).
+
+MEDIA_TYPES = "PNG, JPEG, GIF, WebP, MP4, MOV or WebM"
+MEDIA_FETCH_MAX = 20_000_000        # bytes of a picture fetched from the web (X takes 5 MB)
+MEDIA_CACHE = STATE / "media"       # those fetched, by their address's hash
+MEDIA_KEEP = 86400                  # seconds one is kept before it's fetched again (gone after a week)
+
+
+def media_type(head):
+    """A picture's or a video's media type, read off its first 16 bytes; None
+    for anything else (a file's name says nothing)."""
+    for magic, kind in ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"),
+                        (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif")):
+        if head.startswith(magic):
+            return kind
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand in (b"heic", b"heix", b"heim", b"heis", b"hevc", b"mif1", b"msf1"):
+            return "image/heic"
+        if brand in (b"avif", b"avis"):
+            return "image/avif"
+        if brand.startswith((b"M4A", b"M4B", b"M4P")):
+            return None     # sound only
+        return "video/quicktime" if brand == b"qt  " else "video/mp4"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
+    return None
+
+
+def media_list(value, many=None):
+    """An attribute's pictures (media="a.png, b.png": up to many)."""
+    v = (value or "").strip()
+    return [x.strip() for x in v.split(",") if x.strip()] if many else [v] if v else []
+
+
+def media_path(src, base=None):
+    """A picture or video on this machine, as a block names it (~/..., a full
+    path, or one in base, the chat's folder): (its file, its media type), or
+    (None, why not, in words). Only in your home or /tmp, only a picture or a
+    video, by what the file starts with."""
+    v = (src or "").strip()
+    if not v or re.match(r"^[a-z][a-z0-9+.-]*:", v, re.I):
+        return None, "isn't a path on this machine"
+    p = Path(v).expanduser()
+    if not p.is_absolute():
+        if not base:
+            return None, "isn't a full path (~/... or /...)"
+        p = Path(base) / p
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None, "isn't a file here"
+    if not any(p.is_relative_to(r) for r in {HOME.resolve(), Path("/tmp").resolve()}):
+        return None, "isn't in your home folder or /tmp"
+    if not p.is_file():
+        return None, "isn't a file here"
+    try:
+        with open(p, "rb") as fh:
+            kind = media_type(fh.read(16))
+    except OSError:
+        return None, "can't be read"
+    return (p, kind) if kind else (None, f"isn't a picture or a video ({MEDIA_TYPES})")
+
+
+def media_issue(src, base=None):
+    """Why a block's picture or video can't be shown (a word for Claude to
+    fix), or None: an https address (fetched only when it's shown), or a file
+    here that is one."""
+    if re.match(r"^https://\S+$", src, re.I):
+        return None
+    if re.match(r"^http://", src, re.I):
+        return "isn't https: give its https address, or a path on this machine"
+    found, why = media_path(src, base)
+    return None if found else why
+
+
+def public_host(host):
+    """Whether every address a host name has is on the public internet (not
+    this machine, its network or the tailnet), so a picture fetched from it
+    can't reach anything private."""
+    import ipaddress
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return False
+    try:
+        return bool(infos) and all(ipaddress.ip_address(i[4][0].split("%")[0]).is_global for i in infos)
+    except ValueError:
+        return False
+
+
+def media_fetch(url):
+    """A picture on the web a block shows (an avatar, a post's picture):
+    (its file, kept here a day, its media type), or (None, why not). Only
+    https, only from a public address (each redirect too), only a picture,
+    at most MEDIA_FETCH_MAX bytes."""
+    import urllib.error
+    import urllib.request
+    f = MEDIA_CACHE / hashlib.sha1(url.encode()).hexdigest()
+    kept = None         # the copy kept, if there's one: still shown when the site can't be reached
+    try:
+        with open(f, "rb") as fh:
+            kind = media_type(fh.read(16))
+        if kind and kind.startswith("image/"):
+            kept = (f, kind)
+            if time.time() - f.stat().st_mtime < MEDIA_KEEP:
+                return kept
+    except OSError:
+        pass
+    try:
+        u = urllib.parse.urlsplit(url)
+        host = u.hostname
+    except ValueError:
+        return None, "not an address"
+    if u.scheme.lower() != "https" or not host:
+        return None, "only https"
+    if not public_host(host):
+        return kept or (None, "not a public address")
+
+    class Hop(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            try:
+                to = urllib.parse.urlsplit(newurl)
+                ok = to.scheme.lower() == "https" and to.hostname and public_host(to.hostname)
+            except ValueError:
+                ok = False
+            if not ok:
+                raise urllib.error.URLError("it sends elsewhere than a public https address")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "amarchy", "Accept": "image/*"})
+        with urllib.request.build_opener(Hop).open(req, timeout=15) as r:
+            data = r.read(MEDIA_FETCH_MAX + 1)
+    except urllib.error.HTTPError as e:
+        return kept or (None, f"the site said {e.code}")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return kept or (None, f"couldn't fetch it: {getattr(e, 'reason', None) or e}")
+    kind = media_type(data[:16])
+    if len(data) > MEDIA_FETCH_MAX:
+        return None, "too big"
+    if not kind or not kind.startswith("image/"):
+        return None, "not a picture"
+    try:
+        MEDIA_CACHE.mkdir(parents=True, exist_ok=True)
+        for old in MEDIA_CACHE.iterdir():       # a week unused: gone
+            if time.time() - old.stat().st_mtime > MEDIA_KEEP * 7:
+                old.unlink(missing_ok=True)
+        tmp = f.with_name(f".{f.name}.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_bytes(data)
+        os.replace(tmp, f)
+    except OSError:
+        return None, "couldn't keep it here"
+    return f, kind
 
 
 def block_catalog():
@@ -11145,8 +11310,20 @@ def block_issues(b, chat_exists=None):
                 out.append(f"{name}'s {key} {v!r} isn't a date and time (ISO 8601 with its offset: \"2026-10-29T15:40:00-05:00\").")
         elif kind == "session" and chat_exists and not chat_exists(v):
             out.append(f"{name}'s {key} {v!r} isn't a chat's id (amarchy list --compact has them).")
-    if d.get("needAny") and not any(b["attrs"].get(k, "").strip() for k in d["needAny"]):
-        out.append(f"{name} needs {' or '.join(d['needAny'])}.")
+        elif kind == "handle" and not BLOCK_HANDLE.match(v):
+            out.append(f"{name}'s {key} {v!r} isn't an X handle (up to 15 letters, digits or _, as \"ja818_\").")
+        elif kind == "post" and not BLOCK_POST.match(v):
+            out.append(f"{name}'s {key} {v!r} isn't a post's address on X (https://x.com/<user>/status/<id>).")
+        elif kind == "media":
+            items, most = media_list(v, spec.get("many")), spec.get("many") or 1
+            if len(items) > most:
+                out.append(f"{name} has {len(items)} in {key}: at most {most}.")
+            for x in items:
+                why = media_issue(x, os.getcwd())
+                if why:
+                    out.append(f"{name}'s {key} {x!r} {why}.")
+    if d.get("needAny") and not any((b["body"] if k == "body" else b["attrs"].get(k, "")).strip() for k in d["needAny"]):
+        out.append(f"{name} needs {' or '.join('its text' if k == 'body' else k for k in d['needAny'])}.")
     if b["kind"] == "event" and b["attrs"].get("end") and b["attrs"].get("when"):
         try:
             when, end = (datetime.datetime.fromisoformat(b["attrs"][k].replace("Z", "+00:00")) for k in ("when", "end"))
@@ -11928,6 +12105,50 @@ def app_handler(st, users, address):
         def error(self, code, why):
             self.send(code, {"error": why})
 
+        def send_media(self, f, kind, cache):
+            """A picture or video (a file), whole or the bytes asked for (Range:
+            Safari plays a video only that way); not again when the browser has
+            this one (its ETag)."""
+            try:
+                info = f.stat()
+            except OSError:
+                return self.error(404, "gone")
+            size, tag = info.st_size, f'"{info.st_mtime_ns:x}-{info.st_size:x}"'
+            if self.headers.get("If-None-Match") == tag:
+                self.head(304, kind, [("ETag", tag)], cache=cache)
+                self.end_headers()
+                return
+            start, end, code = 0, size - 1, 200
+            want = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+            if want and (want.group(1) or want.group(2)):
+                if want.group(1):
+                    start = int(want.group(1))
+                    end = min(int(want.group(2)), size - 1) if want.group(2) else size - 1
+                else:
+                    start = max(0, size - int(want.group(2)))
+                if start >= size or start > end:
+                    self.head(416, kind, [("Content-Range", f"bytes */{size}"), ("Content-Length", "0")], cache=cache)
+                    self.end_headers()
+                    return
+                code = 206
+            extra = [("Content-Length", str(end - start + 1)), ("Accept-Ranges", "bytes"), ("ETag", tag)]
+            if code == 206:
+                extra.append(("Content-Range", f"bytes {start}-{end}/{size}"))
+            self.head(code, kind, extra, cache=cache)
+            self.end_headers()
+            try:
+                with open(f, "rb") as fh:
+                    fh.seek(start)
+                    left = end - start + 1
+                    while left > 0:
+                        chunk = fh.read(min(left, 1 << 20))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        left -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass        # the browser had enough (a video it plays from elsewhere in it)
+
         def allowed(self, write=False):
             """Only you, through tailscale serve, at this machine's address;
             changes only from the app's own pages."""
@@ -12313,6 +12534,21 @@ def app_handler(st, users, address):
                 self.end_headers()
                 self.wfile.write(found[1])
                 return
+            m = re.fullmatch(r"/api/session/([^/]+)/media", path)
+            if m:       # a block's picture or video (an xpost's avatar, its media): ?src=<a path here, or an https address>
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                src = (args.get("src") or [""])[0]
+                if re.match(r"^https://", src, re.I):
+                    found, kind = media_fetch(src)
+                    cache = "private, max-age=86400"
+                else:
+                    found, kind = media_path(src, s.get("path"))
+                    cache = "private, no-cache"     # a draft's picture may change under the same name
+                if not found:
+                    return self.error(404, f"no picture or video there ({kind})")
+                return self.send_media(found, kind, cache)
             m = re.fullmatch(r"/api/session/([^/]+)/preview", path)
             if m:       # a chat's preview, whole (its sheet)
                 s = self.session(m.group(1))

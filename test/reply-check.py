@@ -28,7 +28,7 @@ def check(ok, what):
 cat = am.block_catalog()["blocks"]
 kinds = [b["kind"] for b in cat]
 check({"whatsapp", "email", "slack", "sms", "command", "link", "event", "todos", "fields", "chart", "contact", "place", "session", "file",
-       "brief", "actions", "choices", "goal"} == set(kinds), f"the catalog's blocks ({kinds})")
+       "xpost", "brief", "actions", "choices", "goal"} == set(kinds), f"the catalog's blocks ({kinds})")
 check(all(f"```{b['kind']}" in am.REPLY_FORMAT for b in cat if not b.get("old")) and "```actions" not in am.REPLY_FORMAT, "the guidance shows every block it asks for")
 check(all(b["rule"] in am.REPLY_FORMAT for b in cat if b.get("rule")), "and every block's rule")
 check(am.REPLY_FORMAT.startswith("amarchy shows"), "it starts as a Claude's format is recognized by (claude_format_version)")
@@ -94,6 +94,46 @@ check(am.reply_issues("```chart title=\"x\"\nMon: 1\n```\n```goal state=\"done\"
 check(am.reply_issues("```choices question=\"Q?\"\n- a\n- b\n- c\n- d\n- e\n```")[0] == ["The choices block has 5 options: at most 4 (one question per block)."], "at most 4 options")
 check(am.reply_issues("```event title=\"x\" when=\"2026-10-29T15:40:00-05:00\" end=\"2026-10-29T14:00:00-05:00\"\n```")[0] == ["The event block ends before it starts."], "an event ending before it starts")
 check(am.reply_issues("```whatsapp\nhola")[0] == ["The whatsapp block isn't closed with ```."], "a block not closed")
+
+# A post for X (xpost): its handle, its pictures here (only pictures and
+# videos, in your home or /tmp, at most 4), a reply's or quote's address on X,
+# its text or a picture.
+media = Path(home) / "media"
+media.mkdir()
+(media / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+(media / "b.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\0" * 32)
+(media / "clip.mp4").write_bytes(b"\0\0\0\x20ftypisom" + b"\0" * 32)
+(media / "song.m4a").write_bytes(b"\0\0\0\x20ftypM4A " + b"\0" * 32)
+(media / "notes.txt").write_text("hola")
+xp = lambda attrs, body="Hola": "\n".join(am.reply_issues(f"```xpost {attrs}\n{body}\n```")[0])
+check(xp(f'handle="ja818_" name="Julian" avatar="{media}/b.jpg" media="{media}/a.png, ~/media/clip.mp4" reply_to="https://x.com/vercel/status/1628832338187636740" id="fs-007"') == "",
+      "a post with its avatar, a picture and a video here, a reply's address: nothing to fix")
+check(xp('handle="@ja818_" media="https://pbs.twimg.com/media/x.jpg" quote="https://twitter.com/i/web/status/123456"', "") == "",
+      "@ or not; a picture on the web (https); a quote of x.com/i/web/status; no text with a picture")
+check("isn't an X handle" in xp('handle="Julian Arango"') and "needs handle=" in xp('name="x"'), "a handle, as X has them, and always one")
+check("isn't a post's address on X" in xp('handle="a" reply_to="https://example.com/status/1"') and "isn't a post's address on X" in xp('handle="a" quote="1628832338187636740"'),
+      "a reply or a quote: an x.com status address")
+check("isn't a file here" in xp(f'handle="a" media="{media}/gone.png"'), "a picture that isn't there")
+check("isn't a picture or a video" in xp(f'handle="a" media="{media}/notes.txt"') and "isn't a picture or a video" in xp(f'handle="a" media="{media}/song.m4a"'),
+      "a file that isn't a picture or a video (by what it starts with), sound only included")
+check("isn't in your home folder or /tmp" in xp('handle="a" avatar="/etc/hostname"'), "nothing outside your home or /tmp")
+check("isn't https" in xp('handle="a" avatar="http://example.com/a.png"') and "isn't a path on this machine" in xp('handle="a" avatar="ftp://x/a.png"'),
+      "a picture on the web only by https")
+check("has 5 in media: at most 4" in xp(f'handle="a" media="{media}/a.png,{media}/a.png,{media}/a.png,{media}/a.png,{media}/a.png"'), "at most 4 pictures")
+check("needs its text or media" in xp('handle="a"', ""), "its text, or a picture")
+check(am.media_type(b"\x89PNG\r\n\x1a\n") == "image/png" and am.media_type(b"GIF89a") == "image/gif" and am.media_type(b"RIFF\0\0\0\0WEBPVP8 ") == "image/webp"
+      and am.media_type(b"\0\0\0\x14ftypqt  ") == "video/quicktime" and am.media_type(b"\x1a\x45\xdf\xa3") == "video/webm" and am.media_type(b"%PDF-1.7") is None,
+      "pictures and videos known by their first bytes")
+# A picture from the web: only https, only from a public address; one kept here is shown without fetching it again.
+check(am.media_fetch("http://example.com/a.png") == (None, "only https"), "fetched only by https")
+check(am.media_fetch("https://127.0.0.1/a.png") == (None, "not a public address") and am.media_fetch("https://localhost/a.png")[0] is None
+      and am.media_fetch("https://10.1.2.3/a.png")[0] is None and am.media_fetch("https://100.89.29.4/a.png")[0] is None and am.media_fetch("https://[::1]/a.png")[0] is None,
+      "never from this machine, its network or the tailnet")
+kept_url = "https://pbs.twimg.com/profile_images/1/me_400x400.jpg"
+am.MEDIA_CACHE.mkdir(parents=True, exist_ok=True)
+(am.MEDIA_CACHE / am.hashlib.sha1(kept_url.encode()).hexdigest()).write_bytes(b"\xff\xd8\xff\xe0" + b"\0" * 32)
+found, kind = am.media_fetch(kept_url)
+check(found is not None and kind == "image/jpeg", f"a picture fetched before: kept a day, shown at once ({kind})")
 
 # A reply's shape: a long one opens with its outcome and its brief, then what
 # they need to do, then every idea under a heading; a short one is let be.

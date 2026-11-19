@@ -127,7 +127,8 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   text (code blocks have a **Copy** button). A long reply isn't a wall of text: it
   comes as three parts. **Briefing**: what it comes to, how it was checked, what's
   open, and what you need to do or decide. **Action items**: what to tap, when there
-  is something: Claude's questions as buttons, a draft, a link. **Content**:
+  is something: Claude's questions as buttons, a draft, a link (a post for X shows
+  the way X will show it, with X's count and **Copy**). **Content**:
   everything else, each idea folded under a heading that says its point (tap one to
   open it, **Open all** for every one). A chat you open shows that Briefing first:
   what Claude did and said on the way is one line over it ("Worked 6 min · 14

@@ -77,6 +77,8 @@
   padding: 10px 12px; border-radius: var(--radius-item); background: var(--code-bg); max-height: 22em; overflow-y: auto;
 }
 .art-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.art-shot { align-self: flex-start; max-width: 100%; }
+.art-shot img { width: auto; height: auto; max-width: 100%; max-height: 320px; }
 .art-note { font-size: var(--caption); color: var(--text-muted); }
 .art-field { display: flex; gap: 8px; font-size: var(--caption); overflow-wrap: anywhere; }
 .art-field .k { flex: none; min-width: 4.5em; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; padding-top: 1px; }
@@ -180,3 +182,81 @@
 .chart-x span.last { transform: translateX(-100%); }
 .chart-numbers { align-self: flex-start; }
 .chart-table[hidden] { display: none; }
+
+/* A post on X (the xpost block, xpost.js), as X's timeline draws one: its
+   font, sizes, spacing and colors (--xpost-*, ui.css: X's dark or light,
+   with the theme), at most X's column wide. Under it, how X counts it, its
+   draft's id and Copy. */
+.xpost {
+  display: flex; gap: 8px; max-width: 600px; box-sizing: border-box; padding: 12px 16px; overflow: hidden;
+  font-family: var(--xpost-font); font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: normal; text-align: left;
+  color: var(--xpost-text); background: var(--xpost-bg); border: 1px solid var(--xpost-border); border-radius: var(--xpost-radius);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.xpost * { box-sizing: border-box; }
+.xpost-side { flex: none; width: 40px; }
+.xpost-avatar { position: relative; display: block; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: var(--xpost-fill); }
+.xpost-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.xpost-initial { display: grid; place-items: center; width: 100%; height: 100%; font-size: 17px; font-weight: 700; }
+.xpost-main { flex: 1; min-width: 0; }
+.xpost-head { display: flex; align-items: flex-start; gap: 4px; min-width: 0; white-space: nowrap; }
+.xpost-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+.xpost-meta { flex: 0 100 auto; min-width: 0; display: flex; gap: 4px; overflow: hidden; color: var(--xpost-muted); }
+.xpost-handle { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.xpost-dot, .xpost-time { flex: none; }
+.xpost-ic { display: inline-flex; flex: none; }
+.xpost-ic svg { display: block; width: 18.75px; height: 18.75px; fill: currentColor; }
+.xpost-more { margin-left: auto; padding-left: 8px; color: var(--xpost-muted); }
+.xpost-replying { margin-top: 2px; color: var(--xpost-muted); overflow-wrap: anywhere; }
+.xpost-text { white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; }
+.xpost-replying + .xpost-text { margin-top: 4px; }
+.xpost-over { background: var(--xpost-over); border-radius: 2px; }
+.chat .msg.claude .xpost a.xpost-link, .xpost a.xpost-link { color: var(--xpost-link); text-decoration: none; }
+@media (hover: hover) { .chat .msg.claude .xpost a.xpost-link:hover { text-decoration: underline; } }
+/* Its pictures and videos: X's grid, 2px apart, its corners round. */
+.xpost-media {
+  margin-top: 12px; display: grid; gap: 2px; aspect-ratio: 16 / 9; overflow: hidden;
+  border: 1px solid var(--xpost-border); border-radius: var(--xpost-radius); background: var(--xpost-bg);
+}
+.xpost-media.n2, .xpost-media.n3, .xpost-media.n4 { grid-template-columns: 1fr 1fr; }
+.xpost-media.n3, .xpost-media.n4 { grid-template-rows: 1fr 1fr; }
+.xpost-media.n3 > :first-child { grid-row: span 2; }
+.xpost-tile { position: relative; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; background: var(--xpost-fill); cursor: zoom-in; font: inherit; color: inherit; }
+.xpost-tile:focus-visible { outline: 2px solid var(--xpost-link); outline-offset: -2px; }
+.xpost-tile img, .xpost-tile video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.xpost-tile.video { cursor: default; }
+.xpost-tile video { background: #000; }
+.xpost-media.n1 .xpost-tile video { object-fit: contain; }
+/* A video's play button and length, as X draws them over its first frame. */
+.xpost-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center;
+  width: 56px; height: 56px; margin: 0; padding: 0 0 0 4px; border: 4px solid #fff; border-radius: 50%; background: var(--xpost-link); color: #fff; cursor: pointer;
+}
+.xpost-play svg { width: 26px; height: 26px; fill: currentColor; }
+.xpost-play:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.xpost-duration {
+  position: absolute; left: 12px; bottom: 12px; padding: 0 4px; border-radius: 4px; background: rgba(0, 0, 0, 0.77);
+  color: #fff; font-size: 13px; line-height: 16px; font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.xpost-duration[hidden] { display: none; }
+.xpost-tile.missing { cursor: default; }
+.xpost-missing { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; color: var(--xpost-muted); font-size: 13px; line-height: 16px; text-align: center; overflow-wrap: anywhere; }
+/* A quoted post: its frame, who wrote it and its address (X's own words aren't fetched). */
+.chat .msg.claude .xpost a.xpost-quote, .xpost a.xpost-quote {
+  display: block; margin-top: 12px; padding: 12px; color: inherit; text-decoration: none;
+  border: 1px solid var(--xpost-border); border-radius: var(--xpost-radius);
+}
+.xpost-quote-head { display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.xpost-quote-avatar { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-right: 2px; border-radius: 50%; background: var(--xpost-fill); }
+.xpost-quote-avatar svg { width: 11px; height: 11px; }
+.xpost-quote .xpost-handle { color: var(--xpost-muted); }
+.xpost-quote-link { display: block; margin-top: 2px; color: var(--xpost-link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Reply, repost, like, views, and bookmark and share at the end: only drawn. */
+.xpost-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--xpost-muted); }
+.xpost-end { display: flex; gap: 12px; }
+.xpost-foot { display: flex; align-items: center; gap: 10px; max-width: 600px; font-size: var(--caption); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.xpost-count.over { color: var(--danger); font-weight: 700; }
+.xpost-id { font-size: 11px; letter-spacing: 0.03em; }
+.xpost-foot > .art-btn { margin-left: auto; }
+.xpost-media:not(.n1) .xpost-play { width: 44px; height: 44px; border-width: 3px; }
+.xpost-media:not(.n1) .xpost-play svg { width: 20px; height: 20px; }

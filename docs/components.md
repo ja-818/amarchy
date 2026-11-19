@@ -77,6 +77,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
 | `--chart-1` … `--chart-8`, `--chart-single`, `--chart-grid`, `--chart-axis` | A chart block's series, in that order (validated together for color-blind readers; a light theme gets their light steps), one series' color, its gridlines and its zero line |
+| `--xpost-bg`, `--xpost-text`, `--xpost-muted`, `--xpost-border`, `--xpost-link`, `--xpost-fill`, `--xpost-over`, `--xpost-radius`, `--xpost-font` | A post for X (the xpost block): X's own look, not the theme's (its dark one; a light theme gets X's light one): its ground, text, grey, lines, blue, what's behind a picture while it comes, what goes past 280, its corners and its font |
 | `--control-h`, `--control-h-small` | One height for every control: a card's buttons, tabs, the search, tools, New chat, the buttons over a chat and in its side panel, the composer's menus (44px on a touch screen); words-only links in a section's head |
 | `--page-width`, `--page-pad` | One column for every page: the board's bar and cards, an open chat's head, what was said and the box you type in, centered and lined up (`--chat-column` follows it) |
 

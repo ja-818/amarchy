@@ -1,5 +1,5 @@
 {
-  "about": "The blocks Claude writes in a reply for the app to draw with buttons: one catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), the app that draws them (chat.js replyParts, artifactParts) and the check when a turn ends (bin/amarchy reply_issues). A block is a fenced block named for its kind, its attributes key=\"value\" on the opening line, its body under it. Attribute types: text, phone, email, datetime (ISO 8601 with a time and an offset), url, path, session (a chat's id), one of a list (enum). Body shapes: text, code, url (its first line), todos (- [ ] lines), options (- Label | message), fields (Label: value lines; a block with labels takes only those), series (Label: number lines, or a markdown table: labels, then a column of numbers per series).",
+  "about": "The blocks Claude writes in a reply for the app to draw with buttons: one catalog for the guidance Claude gets (bin/amarchy REPLY_FORMAT), the app that draws them (chat.js replyParts, artifactParts) and the check when a turn ends (bin/amarchy reply_issues). A block is a fenced block named for its kind, its attributes key=\"value\" on the opening line, its body under it. Attribute types: text, phone, email, datetime (ISO 8601 with a time and an offset), url, path, session (a chat's id), one of a list (enum), handle (an X handle), media (a picture or video: a path on this machine or an https URL; many: up to that many, comma-separated), post (an X post's address: https://x.com/<user>/status/<id>). needAny: at least one of those attributes (body: its body). Body shapes: text, code, url (its first line), todos (- [ ] lines), options (- Label | message), fields (Label: value lines; a block with labels takes only those), series (Label: number lines, or a markdown table: labels, then a column of numbers per series).",
   "blocks": [
     {
       "kind": "whatsapp", "for": "a WhatsApp message to send",
@@ -91,6 +91,16 @@
       "attrs": { "path": { "type": "path", "need": true } },
       "body": { "shape": "text" },
       "example": { "attrs": "path=\"~/Work/houston/docs/proposal.pdf\"", "body": "what's in it" }
+    },
+    {
+      "kind": "xpost", "for": "a post to publish on X, shown the way X will show it",
+      "attrs": { "handle": { "type": "handle", "need": true }, "name": { "type": "text" }, "avatar": { "type": "media" },
+                 "media": { "type": "media", "many": 4 }, "reply_to": { "type": "post" }, "quote": { "type": "post" },
+                 "id": { "type": "text" } },
+      "needAny": ["body", "media"],
+      "body": { "shape": "text" },
+      "example": { "attrs": "handle=\"ja818_\" name=\"Julian Arango\" id=\"fs-007\"", "body": "the post exactly as it goes out, its newlines kept" },
+      "rule": "An xpost block shows a post as X will: its body is the exact text (it's what Copy copies); avatar=\"...\" and media=\"...\" (up to 4, comma-separated) are pictures or videos, a path on this machine or an https URL; reply_to=\"...\" or quote=\"...\" an x.com post's address."
     },
     {
       "kind": "brief", "for": "the briefing a reply of more than a few lines opens with, right after its first sentence",
