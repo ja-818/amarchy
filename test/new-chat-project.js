@@ -190,7 +190,7 @@ async function run(browser, layout, port) {
              over: row.getBoundingClientRect().bottom <= box.getBoundingClientRect().top + 1,
              oneRow: new Set([...row.querySelectorAll(".ui-tabs .control")].map((b) => Math.round(b.getBoundingClientRect().top))).size === 1,
              fits: row.getBoundingClientRect().right <= document.documentElement.clientWidth + 1,
-             old: !!document.querySelector(".start-chat .new-under .pick:not(.model)") };
+             old: !!document.querySelector(".start-chat .new-under .pick:not(.model):not(.effort)") };      // (the model and its effort are its pills)
   });
   check(where, shape.names.join("|") === "Amarchy|Jaken|Houston Os|Houston|Taxflow|Felipe Crm|Academy|Games|Product|Demos|Agent Brief|Remote Omarchy",
         `your projects, in your order (${shape.names.length})`);

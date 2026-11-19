@@ -1107,6 +1107,15 @@ addEventListener("pointercancel", () => {
   chatStreamDrop();
 }, true);
 
+// A message in the conversation, known again once it's drawn again (Chat
+// place): what it is and the first of its words.
+function placeSig(el) {
+  let words = "";
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n && words.length < 80; n = walk.nextNode()) words += n.data;
+  return `${el.tagName}|${words.slice(0, 80)}`;
+}
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views).
@@ -1163,10 +1172,19 @@ class Chat {
                                 onclick: () => this.toBottom(true) }, icon("down"));
     // At the bottom, it stays there as what's under grows (a reply coming in,
     // a picture loading, the box growing): read once per scroll you make, not
-    // again by everything that draws (atBottom).
+    // again by everything that draws (atBottom). Above it, what you're
+    // reading stays where it is: the keyboard coming up (or the box taking
+    // another line) takes its room from the top, so the lines over the box
+    // are still the ones over it.
     this.stuck = true;
     this.scroller.addEventListener("scroll", () => { this.stuck = this.measureBottom(); if (this.stuck) this.latest.hidden = true; }, { passive: true });
-    this.sizes = new ResizeObserver(() => { if (this.stuck) this.scroller.scrollTop = this.scroller.scrollHeight; });
+    this.viewTall = 0;
+    this.sizes = new ResizeObserver(() => {
+      const s = this.scroller, tall = s.clientHeight, was = this.viewTall;
+      this.viewTall = tall;
+      if (this.stuck) s.scrollTop = s.scrollHeight;
+      else if (tall && was && tall !== was) s.scrollTop += was - tall;
+    });
     for (const el of [this.scroller, this.conv, this.outboxEl]) this.sizes.observe(el);
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
@@ -1570,6 +1588,61 @@ class Chat {
 
   atBottom() { return this.stuck; }
 
+  // You're writing: words in the box not sent yet, or saying them. (The box
+  // just in focus isn't: on a computer it's where the keys rest.)
+  writing() {
+    return !!this.input && (!!this.input.value.trim() || this.talk.on());
+  }
+
+  // Where you are in the conversation, to be there again once it's drawn
+  // again: at the bottom, or the message at the top of the screen (counted
+  // from the end, with the first of its words to know it by) and how far
+  // up it starts.
+  place() {
+    if (this.stuck) return { bottom: true };
+    const v = this.scroller.getBoundingClientRect();
+    const items = this.placeItems();
+    const at = items.findIndex((el) => el.getBoundingClientRect().bottom > v.top);
+    if (at < 0) return { bottom: true };
+    const el = items[at];
+    return { fromEnd: items.length - 1 - at, sig: placeSig(el), off: el.getBoundingClientRect().top - v.top };
+  }
+
+  placeItems() {
+    return [...this.conv.children].filter((el) => el !== this.tail && el !== this.earlierBtn && el !== this.emptyEl);
+  }
+
+  // Back there; false when that message isn't here any more.
+  toPlace(p) {
+    if (p.bottom) { this.toBottom(true); return true; }
+    const items = this.placeItems();
+    let el = items[items.length - 1 - p.fromEnd];
+    if (!el || placeSig(el) !== p.sig) el = items.findLast((x) => placeSig(x) === p.sig);
+    if (!el) return false;
+    const s = this.scroller;
+    s.scrollTop += el.getBoundingClientRect().top - s.getBoundingClientRect().top - p.off;
+    this.stuck = this.measureBottom();
+    if (this.stuck) this.latest.hidden = true;
+    return true;
+  }
+
+  // A reset that is the conversation drawn already, and maybe more: the
+  // more (none, if nothing's new); null when it isn't (another one, or it
+  // reaches back further than what's here). A long conversation's stream
+  // starts from its latest part, so a stream opened later can start later
+  // (or after what "Show earlier messages" brought): where the two meet, by
+  // their keys. What's here before that stays, and so does its start.
+  moreOf(d) {
+    const had = this.items, got = d.items || [];
+    if (!had.length || !got.length || had.some((it) => !it.key) || d.start < this.start) return null;
+    const at = d.start === this.start ? 0 : had.findIndex((it) => it.key === got[0].key);
+    if (at < 0) return null;
+    const same = had.length - at;
+    if (got.length < same) return null;
+    for (let i = 0; i < same; i++) if (got[i].key !== had[at + i].key) return null;
+    return got.slice(same);
+  }
+
   measureBottom() {
     const s = this.scroller;
     return s.scrollTop + s.clientHeight >= s.scrollHeight - 120;
@@ -1584,9 +1657,11 @@ class Chat {
 
   // Where a chat you open (or a turn that just ended) lands: on the top of
   // Claude's reply, its Briefing, when the reply is the last thing and
-  // doesn't fit the screen; else the bottom. Not while Claude works.
-  toReply() {
-    if (this.working()) return this.toBottom();
+  // doesn't fit the screen; else the bottom. Not while Claude works, nor,
+  // in a chat that was open already, while you write: you're reading its
+  // end, so the bottom stays.
+  toReply(opened) {
+    if (this.working() || (!opened && this.writing())) return this.toBottom();
     this.stuck = true;
     requestAnimationFrame(() => {
       const s = this.scroller, last = this.tail.previousElementSibling;
@@ -1620,10 +1695,12 @@ class Chat {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
     // view doesn't jump, nor the answers you started go.
-    if (d.reset && !d.redraw && d.start === this.start && this.items.length && d.items.length >= this.items.length &&
-        this.items.every((it, i) => it.key && d.items[i].key === it.key)) {
-      d = { items: d.items.slice(this.items.length) };
-    }
+    const more = d.reset ? this.moreOf(d) : null;
+    if (more) d = { items: more };
+    // Drawn again all the same (another conversation, or one cut shorter):
+    // where you were, kept; only a chat drawn for the first time lands on
+    // its reply.
+    const drawn = this.items.length > 0;
     if (d.reset) {
       this.items = [];
       this.itemKeys = new Set();
@@ -1636,7 +1713,8 @@ class Chat {
     this.keepItems(d.items);
     // The page after an update: its scroll, as it was (app.js keptChatScroll).
     const back = d.reset ? keptChatScroll(this.id) : null;
-    const stick = back === null && (d.reset || this.atBottom());
+    const place = d.reset && drawn && back === null ? this.place() : null;
+    const stick = back === null && !place && (d.reset || this.atBottom());
     if (d.reset) {
       this.reset();
       this.conv.replaceChildren(this.tail);
@@ -1662,7 +1740,8 @@ class Chat {
       this.infoTimer = setTimeout(() => this.loadInfo(), 1500);
     }
     if (this.screen && this.screen.dialog) this.renderDock();     // the card may be about what came in
-    if (stick && (d.reset || d.items.some((i) => i.kind === "claude"))) this.toReply();
+    if (place) { if (!this.toPlace(place)) this.toReply(true); }      // (gone: another conversation, as one you open)
+    else if (stick && (d.reset || d.items.some((i) => i.kind === "claude"))) this.toReply(d.reset);
     else if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;
     if (back !== null) {
