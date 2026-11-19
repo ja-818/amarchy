@@ -132,13 +132,16 @@ function projectChip(s) {
   return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
-// In order, as you set it: your assistant, what you pinned, then the one you
-// last wrote to (bin/amarchy last_you). What a chat does never moves its card.
+// In order, as you set it: your assistant, your agents (as the host orders
+// them: in the order you made them), what you pinned, then the one you last
+// wrote to (bin/amarchy last_you). What a chat does never moves its card.
 function todaySort(v, ss) {
   const prio = { high: 0, normal: 1, low: 2 };
   const you = (s) => (s.today || {}).you_at || s.created || 0;
-  return ss.slice().sort((a, b) => (b.assistant === "main") - (a.assistant === "main") || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1)
-    || you(b) - you(a) || (a.id < b.id ? -1 : 1));
+  const rank = (s) => (s.assistant === "main" ? 0 : s.assistant === "agent" ? 1 : 2);
+  const at = new Map(ss.map((s, i) => [s.id, i]));
+  return ss.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? at.get(a.id) - at.get(b.id) : 0)
+    || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || you(b) - you(a) || (a.id < b.id ? -1 : 1));
 }
 
 // At work: Claude working, or what it started running (status "running":
@@ -162,9 +165,11 @@ function todayParts(v) {
   const chaseNow = waitingAll.filter((l) => l.chase && todayDay(l.chase) <= 0);
   const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
   const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
+  // Your agents: each on top, next to your assistant, unless it asks you something.
+  const agents = ss.filter((s) => s.assistant === "agent" && !asks.includes(s));
   // Finished a turn you haven't opened: it needs you too (to see what it did).
-  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isMain(s) && !todayBusy(s) && todayUnseen(s));
-  const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isMain(s));
+  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isAgent(s) && !todayBusy(s) && todayUnseen(s));
+  const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isAgent(s));
   const done = rest.filter((s) => !todayBusy(s) && ((s.today || {}).state === "done" || todayMergedAll(s)));
   const quietFor = (s) => now - ((s.today || {}).at || 0);
   const stale = rest.filter((s) => !done.includes(s) && !todayBusy(s) && (s.today || {}).at && quietFor(s) > TODAY_STALE)
@@ -174,12 +179,12 @@ function todayParts(v) {
   const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
   // Ready: every other chat, stalled ones among them (as the list orders them).
   const ready = rest.filter((s) => !done.includes(s) && !working.includes(s));
-  return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, done, stale, working, idle, ready, someday };
+  return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, agents, done, stale, working, idle, ready, someday };
 }
 
 // Its work merged, and nothing since (merge_scan): done, to complete.
 function todayMergedAll(s) {
-  return !!(s.merged && !s.merged.since && s.assistant !== "main");
+  return !!(s.merged && !s.merged.since && !isAgent(s));
 }
 
 // What's your move: the count on Today's tab, the switch, the page's top.
@@ -384,7 +389,7 @@ function todayAsk(s) {
   const t = s.today || {};
   const qs = s.status !== "waiting" ? (t.asks || []).filter((q) => (q.options || []).length).slice(0, 3) : [];
   const base = { kind: "ask", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", open: () => todayOpen(s), id: s.id,
-                 lead: s.assistant === "main" ? avatar(s, "small") : null };
+                 lead: isAgent(s) ? avatar(s, "small") : null };
   if (!qs.length) {
     const secret = (s.secret_asks || []).length;
     const tone = secret ? "secret" : s.permission ? "permission" : "ask";
@@ -510,7 +515,7 @@ function todayLoop(l, v) {
 // what it last said); for one that's done or stalled, Close (and Ask status).
 function todayChat(s, kind) {
   const t = s.today || {};
-  const main = s.assistant === "main";
+  const main = isAgent(s);        // your assistant or an agent: its name and picture, never to finish
   const quiet = t.at ? Math.floor((Date.now() / 1000 - t.at) / 86400) : 0;
   const told = todayUI.told.get(s.id);
   // Running (its turn over, what it started still at it): not finished yet, whatever its goal block says.
@@ -557,6 +562,9 @@ function todaySeen(s) {
 // then it closes (as Close does: at once with Undo when nothing would be
 // lost, else asked).
 async function todayComplete(s) {
+  // Your assistant and your agents live on: never completed (none of their
+  // cards or heads offers it; a key or a stale page might still ask).
+  if (isAgent(rowOf(s.id) || s)) return toast(`${s.assistant_name || "It"} stays: ${s.assistant === "main" ? "your assistant" : "an agent"} isn't closed`);
   // Still running something: asked first (todayClose), not celebrated yet.
   // Only a merge counts: said so in its Undo.
   const said = `${(rowOf(s.id) || s).merged ? "Mission complete" : "Closed, not merged"}: ${s.task || "the chat"}`;
@@ -617,7 +625,7 @@ function missionRank(total) {
 // Chats stalled (quiet for days, not done): they cool your flame; completing one is a rescue.
 function missionIsStalled(s) {
   const t = s.today || {};
-  return s.assistant !== "main" && !s.setup && t.state !== "done" && !todayBusy(s) && !!t.at && Date.now() / 1000 - t.at > TODAY_STALE;
+  return !isAgent(s) && !s.setup && t.state !== "done" && !todayBusy(s) && !!t.at && Date.now() / 1000 - t.at > TODAY_STALE;
 }
 function missionStalled(v) {
   return v ? (v.sessions || []).filter((s) => !todayUI.closing.has(s.id) && missionIsStalled(s)) : [];
@@ -706,7 +714,7 @@ function missionComplete(ss, title, { task = false } = {}) {
   const left = app.view ? Math.max(0, todayCount(app.view, typeof board !== "undefined" && boardOn() ? "chats" : null)) : 0;
   // Done ones still to complete count too: all clear is nothing needs you and nothing's left to complete.
   const gone = new Set(ss.map((s) => s.id));
-  const more = app.view ? todayParts(app.view).done.filter((s) => !gone.has(s.id) && s.assistant !== "main").length : 0;
+  const more = app.view ? todayParts(app.view).done.filter((s) => !gone.has(s.id) && !isAgent(s)).length : 0;
   const clear = !task && left === 0 && more === 0;
   if (clear) api("/api/missions/clear").catch(() => {});
   const after = left ? `${left} still need${left === 1 ? "s" : ""} you` : more ? `${more} more to complete` : "nothing else needs you";
@@ -886,23 +894,24 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // Notifications don't reach this device (app.js pushNotice): said above your chats.
   if (only !== "tasks" && typeof pushNotice === "function") nodes.push(pushNotice());
   // A chat's card, wherever it stands.
-  const cardOf = (s) => s === p.main ? tk(todayChat, "assistant")(s)
+  const cardOf = (s) => s === p.main || p.agents.includes(s) ? tk(todayChat, "assistant")(s)
     : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
-  // Your chats: your assistant, what's at work (its own list, folded, so what
+  // Your chats: your assistant and your agents, what's at work (its own list, folded, so what
   // you can act on starts right under it), then Now and For later, as you put
   // them (todaySort). Done working, a chat is back in its place there; one
   // put for later that has something new for you is in Now until you see it.
   if (only === "chats") {
     const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
     const on = todayUI.needsOnly;
-    const later = (s) => s.priority === "low" && s.assistant !== "main" && !p.fresh.includes(s);
-    const free = ss.filter((s) => !p.working.includes(s) && (on || s !== p.main));
+    const later = (s) => s.priority === "low" && !isAgent(s) && !p.fresh.includes(s);
+    const free = ss.filter((s) => !p.working.includes(s) && (on || (s !== p.main && !p.agents.includes(s))));
     const nowAll = free.filter((s) => !later(s)), laterAll = free.filter(later);
     const show = (list) => (on ? list.filter(needing) : list);
     const now = show(nowAll), put = show(laterAll), waiting = laterAll.filter(needing).length;
     if (!on) {
       if (p.main) nodes.push(cardOf(p.main));
+      nodes.push(...p.agents.map(cardOf));
       const runs = p.working.filter((s) => s.status === "running").length, works = p.working.length - runs;
       nodes.push(uiSection("working", "At work", { count: p.working.length, fold: false,
         extra: p.working.length ? uiPill([works ? `${works} working` : "", runs ? `${runs} running` : ""].filter(Boolean).join(" · "), works ? "working" : "running") : null },

@@ -256,12 +256,12 @@ function boardKeys(e) {
     if (o) { e.preventDefault(); o.click(); }
   } else if (k === "x") {
     const s = card.dataset.id && row(card.dataset.id);
-    if (s && s.assistant !== "main") { e.preventDefault(); todayComplete(s); }
+    if (s && !isAgent(s)) { e.preventDefault(); todayComplete(s); }
     else if (!s) press(".tbtn.loop-done");      // a task: Done
   } else if (k === "p" || k === "f") {
     // Pinned or For later; again, back in Now.
     const s = card.dataset.id && row(card.dataset.id), level = k === "p" ? "high" : "low";
-    if (s && s.assistant !== "main") { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
+    if (s && !isAgent(s)) { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
   } else if (k === "r") press("a.tbtn");
   else if (k === "s") press(".tbtn.seen");
 }
@@ -554,9 +554,9 @@ function boardSearchDraw() {
   const cards = rows.map((s) => {
     const r = byId.get(s.id);
     const lines = (r && r.lines) || [];
-    const name = s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat";
+    const name = isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat";
     return boardTicket(s, uiCard({ kind: "search", hue: todayHue(s.repo), chip: todayChip(s), id: s.id,
-      title: h("span", { class: "task", html: lit(name, words) }), lead: s.assistant === "main" ? avatar(s, "small") : null,
+      title: h("span", { class: "task", html: lit(name, words) }), lead: isAgent(s) ? avatar(s, "small") : null,
       pill: todayStatePill(s), open: () => boardOpen(s.id),
       body: [r && r.hits ? h("p", { class: "tcard-text muted" }, `${r.hits} message${r.hits === 1 ? "" : "s"}${r.at ? ` · last ${autoPast(r.at)}` : ""}`) : null,
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),

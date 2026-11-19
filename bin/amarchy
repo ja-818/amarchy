@@ -136,6 +136,17 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         JPEG or WebP, cut to a round square: the middle of it, or the square
                                         at x,y of that size in its pixels), or amarchy's own again
   amarchy sound --assistant [name|off]  its chime (herald until you pick one); prints it without one
+  amarchy agents [--json]               your agents: your assistant, then the other chats that live on rather
+                                        than finish (one that keeps your social media, say), each with its id,
+                                        name, chime and picture
+  amarchy agents <id> [--name <name>] [--picture <file>|off [--crop x,y,size]] [--sound <name>|off]
+                                        make a chat one of your agents (named after its project unless you
+                                        name it), or change one's name, picture or chime (your assistant's
+                                        too). An agent has what your assistant has but your tasks: its place
+                                        on top of every list, next to your assistant; its own picture (its
+                                        initial until you give it one) and chime; it always tells you when it
+                                        needs you or is done; and it's never a mission to complete
+  amarchy agents <id> off               not an agent any more: a chat like the others again
   amarchy missions [--goal <n>]         what you've merged (only merges count): today, your streak, best day,
                   [--reset]             all of them, your replies and badges; --goal sets how many a day you
                                         aim for; --reset starts from 0 (the old score kept in a backup)
@@ -144,7 +155,8 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         what the other sessions tell you about on your phones: when they
                                         need you or are done (all), only when one needs you (needs-you,
                                         the default: a finished one is marked done in the list, quietly),
-                                        or nothing (assistant); prints it without one
+                                        or nothing (assistant: your assistant and agents alone); prints it
+                                        without one
 
 Dictation (the app's mic button: what you say, written into the box you type in, by a speech-to-text model
 on this machine that knows Spanish, English and 23 more languages and tells them apart by itself):
@@ -699,8 +711,8 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "today", "permission",
-               "preview_up", "preview_state", "merged")
+               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "chime", "today",
+               "permission", "preview_up", "preview_state", "merged")
 
 
 def own_session_id():
@@ -3996,9 +4008,10 @@ def mission_done(s):
     """A chat closed (completed), from the app or amarchy close alike: written
     down, with how many merges of its work there were. Only merges count
     toward your score (merge_scan writes each down as it happens); a chat
-    completed without one closes without counting. Your assistant's, and a
-    worktree still being set up, aren't missions at all."""
-    if s.get("setup") or assistant_role(s) == "main":
+    completed without one closes without counting. Your assistant's and
+    your agents' (they live on), and a worktree still being set up, aren't
+    missions at all."""
+    if s.get("setup") or is_agent(s):
         return
     try:
         task = session_task(s, "")
@@ -4248,6 +4261,7 @@ def merge_scan(ss, use_gh=True, fresh=False):
     and write each new one from MISSIONS_SINCE on to MISSIONS: a mission
     counted. Returns the new ones, as written."""
     floor = missions_since()
+    crew = team()
     MERGES_LOCK.parent.mkdir(parents=True, exist_ok=True)
     out = []
     with open(MERGES_LOCK, "a") as lock:
@@ -4259,7 +4273,7 @@ def merge_scan(ss, use_gh=True, fresh=False):
             d = {}
         before = json.dumps(d, sort_keys=True)
         for s in ss:
-            if s.get("setup") or s.get("assistant") == "main":
+            if s.get("setup") or is_agent(s, crew):       # your assistant's and agents' don't count
                 continue
             path, repo_dir = Path(s.get("path") or ""), WORK / s.get("repo", "")
             if not path.is_dir() or not repo_dir.is_dir():
@@ -4793,7 +4807,7 @@ def cmd_reap(sid):
     stop_leftovers(path, scopes)
     # One more look at its merges, GitHub's too (a pull request merged a
     # moment before you completed it), while its worktree is still there.
-    if not s.get("setup") and assistant_role(s) != "main":
+    if not s.get("setup") and not is_agent(s):
         try:
             merge_scan([{**s, "task": session_task(s, "")}], fresh=True)
         except Exception as e:
@@ -5086,10 +5100,14 @@ def last_you(s):
     return chat_reply(s)["you_at"] or s.get("created", 0)
 
 
-def session_order(s):
-    """In the order the board shows them: your assistant, what you pinned, Now,
-    For later; the one you last wrote to first in each."""
-    return (s.get("assistant") != "main", RANK[priority(s)], -last_you(s), s["id"])
+def session_order(s, ranks=None):
+    """In the order the board shows them: your assistant, your agents (in
+    the order you made them: ranks, {id: n}), what you pinned, Now, For
+    later; the one you last wrote to first in each."""
+    role = s.get("assistant")
+    if role in AGENT_ROLES:
+        return (0, (ranks or {}).get(s["id"], 0), 0, 0, s["id"])
+    return (1, 0, RANK[priority(s)], -last_you(s), s["id"])
 
 
 def cmd_priority(args):
@@ -5380,16 +5398,20 @@ def session_view():
         s["secret_asks"] = secret_asks(s["id"])
         # Its work merged (merge_scan): when last, how many times, what's new since.
         s["merged"] = chat_merged(s["id"], merges)
-    mine = assistant()
+    crew = team()
     for s in ss:
-        s["assistant"] = assistant_role(s, mine)
-        s["assistant_name"] = mine["name"] if s["assistant"] else ""
-        s["picture"] = sig if s["assistant"] else ""
+        # Yours (your assistant, an agent) or of one's project: under its
+        # name and picture, and one of yours with its chime.
+        s["assistant"], who = team_of(s, crew)
+        s["assistant_name"] = who["name"] if who else ""
+        s["picture"] = (sig if who["role"] == "main" else picture_sig(agent_picture(who["id"]))) if who else ""
+        s["chime"] = who["sound"] if s["assistant"] in AGENT_ROLES else ""
         if s["assistant"]:
             # What it last wrote: its notifications' body, and the list's
             # preview while you haven't read it.
             s["said"] = last_said(s)
-    ss.sort(key=session_order)
+    ranks = {a["id"]: i for i, a in enumerate(crew)}
+    ss.sort(key=lambda s: session_order(s, ranks))
     return ss
 
 
@@ -5432,12 +5454,9 @@ def assistant():
 
 
 def assistant_role(s, mine=None):
-    """"main" for your assistant, "near" for another session of its project,
-    "" for the rest (mine: assistant(), if it was read already)."""
-    mine = assistant() if mine is None else mine
-    if not mine:
-        return ""
-    return "main" if s["id"] == mine["id"] else "near" if s.get("repo") == mine["repo"] else ""
+    """"main" for your assistant, "agent" for another agent of yours,
+    "near" for another session of one's project, "" for the rest."""
+    return team_of(s)[0]
 
 
 # Its picture: amarchy's own (app/assistant.svg) unless you gave it one of
@@ -5530,13 +5549,15 @@ def picture_crop(value):
     return (int(m[1]), int(m[2]), int(m[3])) if m and int(m[3]) > 0 else None
 
 
-def set_picture(source, crop=None):
-    """Your assistant's picture from source (a file, - for stdin: the
-    picture or it in base64), or amarchy's own again ("off")."""
+def set_picture(source, crop=None, big=PICTURE, small=PICTURE_SMALL, quiet=False):
+    """Your assistant's picture (or an agent's: big and small, its files)
+    from source (a file, - for stdin: the picture or it in base64), or
+    amarchy's own again ("off"; an agent's initial)."""
     if source == "off":
-        for f in (PICTURE, PICTURE_SMALL):
+        for f in (big, small):
             f.unlink(missing_ok=True)
-        print("amarchy's own")
+        if not quiet:
+            print("amarchy's own" if big == PICTURE else "its initial")
         return 0
     try:
         raw = sys.stdin.buffer.read(APP_WALLPAPER_MAX * 4) if source == "-" else Path(source).expanduser().read_bytes()
@@ -5551,9 +5572,10 @@ def set_picture(source, crop=None):
         cut = picture_cut(raw, crop)
     except ValueError as e:
         return fail(str(e))
-    write_file(PICTURE_SMALL, cut[192])
-    write_file(PICTURE, cut[512])       # last: its hash names both
-    print(PICTURE)
+    write_file(small, cut[192])
+    write_file(big, cut[512])       # last: its hash names both
+    if not quiet:
+        print(big)
     return 0
 
 
@@ -5605,8 +5627,232 @@ def cmd_assistant(args):
             name = json.loads(ASSISTANT_FILE.read_text()).get("name") or ""
         except (OSError, ValueError, AttributeError):
             name = ""
+    # One of your agents made your assistant: it is that now, by the name it had.
+    was = next((a for a in agents_saved() if a["id"] == sid), None)
+    if was:
+        name = name if name is not None else was.get("name") or ""
+        agents_drop(sid)
     write_file(ASSISTANT_FILE, json.dumps({"id": sid, "name": name or ""}))
     print(f"{sid}\t{assistant()['name']}")
+    return 0
+
+
+# ------------------------------------------------------------------ your agents
+#
+# Besides your assistant, other chats can be your agents (`amarchy agents
+# <id>`): Claudes that live on rather than finish, each with a job of its own
+# (one that keeps your social media, say). An agent has what your assistant
+# has but your tasks (Today's loops, its Ask and Done, the week's recap: your
+# assistant's alone): a place on top of every list, next to your assistant,
+# in the order you made them; its own name, picture and chime; what it says
+# always reaches you, under its name and picture, whatever `amarchy alerts`
+# lets through; and nothing treats it as a chat to finish: no Complete, no
+# Stalled, no mission, its merges not on your score. Your assistant and your
+# agents are your team (team()).
+
+AGENTS_FILE = STATE / "agents"      # [{"id", "name", "sound"}], in the order you made them
+AGENT_PICTURES = PICTURE.parent / "agents"      # <id>.png and <id>-192.png, cut as your assistant's
+AGENT_ROLES = ("main", "agent")     # a session's role (session_view "assistant") when it's one of your team
+# An agent's chime, until you pick one: the first of these nothing else rings
+# with (the chats, your assistant, your other agents), picked as it's made.
+AGENT_CHIMES = ("elementary", "fairy", "ocean", "vibraphone", "tine", "kalimba", "herald")
+
+
+def agents_saved():
+    """The agents as written down: [{"id", "name", "sound"}], closed ones too."""
+    try:
+        d = json.loads(AGENTS_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+    return [a for a in d if isinstance(a, dict) and isinstance(a.get("id"), str)] if isinstance(d, list) else []
+
+
+def agents_write(rows):
+    write_file(AGENTS_FILE, json.dumps([{k: a.get(k) or "" for k in ("id", "name", "sound")} for a in rows]))
+
+
+def agents_drop(sid):
+    """sid no longer one of your agents (its pictures deleted)."""
+    agents_write([a for a in agents_saved() if a["id"] != sid])
+    for f in (agent_picture(sid), agent_picture(sid, small=True)):
+        f.unlink(missing_ok=True)
+
+
+def agent_picture(sid, small=False):
+    """An agent's picture file (there or not): the big one, or the phones' (192)."""
+    return AGENT_PICTURES / f"{sid}{'-192' if small else ''}.png"
+
+
+def agent_sound_name(a):
+    """An agent's chime: its name, "off", or (picked when it was made, the
+    file edited by hand since) your assistant's."""
+    picked = a.get("sound") if isinstance(a.get("sound"), str) else ""
+    if picked == "off":
+        return picked
+    return (sound_key(picked) if picked else None) or ASSISTANT_CHIME
+
+
+def agent_free_chime(but=None):
+    """The chime for a new agent: the first of AGENT_CHIMES nothing else
+    rings with (but: an agent left out, the one being made)."""
+    taken = {sound_name(), assistant_sound_name()} | {agent_sound_name(a) for a in agents_saved() if a["id"] != but}
+    return next((c for c in AGENT_CHIMES if c not in taken), AGENT_CHIMES[0])
+
+
+def agents(mine=None):
+    """Your agents here, but your assistant: [{"id", "name", "repo", "sound"}]
+    in the order you made them; closed ones left out (mine: assistant(),
+    read already)."""
+    mine = mine or assistant()
+    out, seen = [], set()
+    for a in agents_saved():
+        if a["id"] in seen or (mine and a["id"] == mine["id"]):
+            continue
+        seen.add(a["id"])
+        s = session(a["id"])
+        if not s:
+            continue        # closed (made again under its id, it's an agent again, as your assistant is)
+        name = a.get("name") if isinstance(a.get("name"), str) else ""
+        out.append({"id": a["id"], "name": name.strip() or project_name(s.get("repo", "")) or "Agent",
+                    "repo": s.get("repo", ""), "sound": agent_sound_name(a)})
+    return out
+
+
+def team():
+    """Your assistant and your agents, your assistant first: each {"id",
+    "name", "repo", "sound", "role": "main" or "agent"}."""
+    mine = assistant()
+    crew = [{**mine, "sound": assistant_sound_name(), "role": "main"}] if mine else []
+    return crew + [{**a, "role": "agent"} for a in agents(mine)]
+
+
+def team_of(s, crew=None):
+    """(role, who): "main" for your assistant, "agent" for another of your
+    agents, "near" for another chat of one's project (your assistant's
+    before an agent's), and who that is; else ("", None)."""
+    crew = team() if crew is None else crew
+    for a in crew:
+        if a["id"] == s["id"]:
+            return a["role"], a
+    for a in crew:
+        if a["repo"] and s.get("repo") == a["repo"]:
+            return "near", a
+    return "", None
+
+
+def is_agent(s, crew=None):
+    """Whether a session is your assistant or one of your agents: one that
+    lives on, never a mission to complete."""
+    return team_of(s, crew)[0] in AGENT_ROLES
+
+
+def team_icon(who):
+    """The picture by one of your team's notifications on the phones (a path of the app's)."""
+    if not who or who["role"] == "main":
+        return assistant_icon()
+    sig = picture_sig(agent_picture(who["id"]))
+    return f"/picture/{sig}-192.png" if sig and agent_picture(who["id"], small=True).is_file() else "/assistant-192.png"
+
+
+def picture_by_sig(sig, small):
+    """The picture of your team's that goes by sig (picture_sig), or None."""
+    pairs = [(PICTURE, PICTURE_SMALL)] + [(agent_picture(a["id"]), agent_picture(a["id"], small=True)) for a in agents_saved()]
+    return next(((sm if small else big) for big, sm in pairs if picture_sig(big) == sig), None)
+
+
+def cmd_agents(args):
+    """amarchy agents [--json] | <id> [--name <name>] [--picture <file>|off
+    [--crop x,y,size]] [--sound <name>|off] | <id> off: your agents (your
+    assistant first), one made, changed, or a chat again."""
+    name, picture, crop, sound, as_json, rest = None, None, None, None, False, []
+    it = iter(args)
+    for a in it:
+        if a == "--name":
+            name = next(it, None)
+            if name is None or not name.strip() or len(name.strip()) > 40:
+                return fail("--name takes what to call it (40 characters at most)")
+            name = name.strip()
+        elif a == "--picture":
+            picture = next(it, None)
+            if not picture:
+                return fail("--picture takes a picture (a PNG, JPEG or WebP), or off for none")
+        elif a == "--crop":
+            crop = picture_crop(next(it, None))
+            if not crop:
+                return fail("--crop takes x,y,size: the square of the picture to show, in its pixels")
+        elif a == "--sound":
+            sound = (next(it, None) or "").strip()
+            if not sound:
+                return fail("--sound takes a chime (amarchy sound --list), or off")
+        elif a == "--json":
+            as_json = True
+        else:
+            rest.append(a)
+    if not rest:
+        if name is not None or picture is not None or crop or sound is not None:
+            print(usage("agents"), file=sys.stderr)
+            return 1
+        crew = team()
+        if as_json:
+            print(json.dumps([{"id": a["id"], "name": a["name"], "role": a["role"], "repo": a["repo"], "sound": a["sound"],
+                               "picture": str(PICTURE if a["role"] == "main" else agent_picture(a["id"]))
+                               if (PICTURE if a["role"] == "main" else agent_picture(a["id"])).is_file() else ""}
+                              for a in crew]))
+        else:
+            for a in crew:
+                print(f"{a['id']}\t{a['name']}" + ("\t(your assistant)" if a["role"] == "main" else ""))
+            if not crew:
+                print("none")
+        return 0
+    if len(rest) > 2 or (len(rest) == 2 and rest[1] != "off") or as_json or (crop and picture in (None, "off")):
+        print(usage("agents"), file=sys.stderr)
+        return 1
+    sid, off = rest[0], rest[1:] == ["off"]
+    s = session(sid)
+    if not s:
+        return fail(f"No session {sid!r}")
+    mine = assistant()
+    if off:
+        if name is not None or picture is not None or sound is not None:
+            print(usage("agents"), file=sys.stderr)
+            return 1
+        if mine and mine["id"] == sid:
+            return fail(f"{sid} is your assistant: amarchy assistant off makes it a chat like the others again")
+        if not any(a["id"] == sid for a in agents_saved()):
+            return fail(f"{sid} isn't one of your agents")
+        agents_drop(sid)
+        print(f"{sid}\ta chat like the others again")
+        return 0
+    if sound is not None:
+        key = "off" if sound.lower() == "off" else sound_key(sound)
+        if not key:
+            return fail(f"no sound {sound!r} (see amarchy sound --list)")
+        sound = key
+    if mine and mine["id"] == sid:
+        # Your assistant: what amarchy assistant and amarchy sound --assistant set.
+        if picture is not None and set_picture(picture, crop, quiet=True):
+            return 1
+        if name is not None:
+            write_file(ASSISTANT_FILE, json.dumps({"id": sid, "name": name}))
+        if sound is not None:
+            write_file(ASSISTANT_SOUND_FILE, sound + "\n")
+        print(f"{sid}\t{assistant()['name']}\t(your assistant)")
+        return 0
+    if picture is not None and set_picture(picture, crop, agent_picture(sid), agent_picture(sid, small=True), quiet=True):
+        return 1
+    rows = agents_saved()
+    a = next((a for a in rows if a["id"] == sid), None)
+    if not a:
+        a = {"id": sid, "name": "", "sound": ""}
+        rows.append(a)
+        a["sound"] = sound or agent_free_chime(but=sid)
+    if name is not None:
+        a["name"] = name
+    if sound is not None:
+        a["sound"] = sound
+    agents_write(rows)
+    made = next(x for x in agents() if x["id"] == sid)
+    print(f"{sid}\t{made['name']}")
     return 0
 
 
@@ -5685,11 +5931,12 @@ def cmd_alerts(args):
 def alert_kind(s, state, prev):
     """Whether a session that went on to need you (waiting) or finished (idle
     after working, its turn done: not one that only started, or that you
-    stopped) tells you so: "assistant" for your assistant, which always
-    does, "session" for another one when amarchy alerts lets it, else None."""
+    stopped) tells you so: "assistant" for your assistant or one of your
+    agents, which always do, "session" for another one when amarchy alerts
+    lets it, else None."""
     if not (state == "waiting" or (state == "idle" and prev == "working" and finished_now(s["id"]))):
         return None
-    if assistant_role(s) == "main":
+    if (s["assistant"] if "assistant" in s else assistant_role(s)) in AGENT_ROLES:
         return "assistant"
     level = alerts()
     return "session" if level == "all" or (level == "needs-you" and state == "waiting") else None
@@ -10726,9 +10973,11 @@ def app_sound_file(name):
 
 
 def app_sounds():
-    """Every sound to pick from in the app, and the two picked."""
+    """Every sound to pick from in the app, and those picked: the chats',
+    your assistant's, and each agent's (agent_sounds, {id: name})."""
     return {"sounds": [{"name": name, "label": sound_label(name), "mine": name not in CHIMES} for name in sounds()],
-            "sound": sound_name(), "assistant_sound": assistant_sound_name()}
+            "sound": sound_name(), "assistant_sound": assistant_sound_name(),
+            "agent_sounds": {a["id"]: a["sound"] for a in agents()}}
 
 
 def app_add_sound(name, raw):
@@ -12016,6 +12265,7 @@ def app_moments(st, ss):
     if was is None:
         return
     waiting = needs_you(ss)       # the app's badge: what needs you (Today)
+    crew = None
     for s in ss:
         state, prev = s["status"], was.get(s["id"])
         pending = app_asking(s) if state == "waiting" else []
@@ -12038,10 +12288,12 @@ def app_moments(st, ss):
             said = s.get("said") or last_said(s)
             body = f"Done: {said}" if said and kind != "assistant" else said or "Done"
         if kind == "assistant":
-            # Under its name and picture, what it said (a brief's first words) or asks.
+            # Your assistant or an agent: under its name and picture, what it
+            # said (a brief's first words) or asks.
+            crew = team() if crew is None else crew
             payload = {"title": s.get("assistant_name") or "Your assistant", "body": body,
                        "tag": f"assistant-{s['id']}", "url": f"/#/s/{s['id']}", "waiting": waiting,
-                       "icon": assistant_icon()}
+                       "icon": team_icon(team_of(s, crew)[1])}
         else:
             # Its name, else the project it's in; under what it says, the project.
             title = s.get("task") or f"A new chat in {project_name(s['repo'])}"
@@ -12609,12 +12861,13 @@ def app_handler(st, users, address):
                 return
             if path == "/theme.css":
                 return self.send(200, app_theme_css().encode(), "text/css; charset=utf-8")
-            # Your assistant's picture (amarchy assistant --picture), by its hash.
+            # Your assistant's picture (amarchy assistant --picture), or an
+            # agent's (amarchy agents <id> --picture), by its hash.
             m = re.fullmatch(r"/picture/([0-9a-f]{12})-(512|192)\.png", path)
             if m:
-                f = PICTURE if m.group(2) == "512" else PICTURE_SMALL
+                f = picture_by_sig(m.group(1), small=m.group(2) == "192")
                 try:
-                    data = f.read_bytes() if picture_sig(PICTURE) == m.group(1) else b""
+                    data = f.read_bytes() if f else b""
                 except OSError:
                     data = b""
                 if not data:
@@ -12842,7 +13095,7 @@ def app_handler(st, users, address):
             if not self.allowed(write=True):
                 return
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
-                or bool(re.fullmatch(r"/api/session/[^/]+/send", self.path))      # images, on the chat engine
+                or bool(re.fullmatch(r"/api/session/[^/]+/(send|agent/picture)", self.path))      # images, on the chat engine; an agent's picture
             upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
             data = self.body(UPLOAD_MAX if upload else CLIP_MAX if big else 200_000)
             if upload:      # a file for Claude, into the worktree (the composer's, phase C2)
@@ -12964,7 +13217,7 @@ def app_handler(st, users, address):
             if m:
                 s = self.session(m.group(1))
                 return self.chat(s, m.group(2), data) if s else None
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|wake|sleep|preview)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|agent|agent/picture|wake|sleep|preview)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
@@ -12989,6 +13242,8 @@ def app_handler(st, users, address):
                 return self.send(200, {"preview": preview_info(s)})
             if what == "assistant":
                 return self.assistant(s, data)
+            if what in ("agent", "agent/picture"):
+                return self.agent(s, what, data)
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 st.looking(s["id"])
@@ -13360,8 +13615,46 @@ def app_handler(st, users, address):
             name = data.get("name")
             if not isinstance(name, str) or not (name == "off" or sound_key(name)):
                 return self.error(400, "no such sound")
-            r = run_amarchy("sound", *(["--assistant"] if data.get("assistant") is True else []), name)
+            agent = data.get("agent")
+            if agent is not None and not (isinstance(agent, str) and any(a["id"] == agent for a in team())):
+                return self.error(409, "It isn't one of your agents")
+            r = run_amarchy("agents", agent, "--sound", name) if agent else \
+                run_amarchy("sound", *(["--assistant"] if data.get("assistant") is True else []), name)
             return self.send(200, app_sounds()) if r.returncode == 0 else self.error(500, gist(r.stderr))
+
+        def agent(self, s, what, data):
+            """One of your agents (amarchy agents): /api/session/<id>/agent
+            makes that session one ({name} optional), renames it ({name}), or
+            makes it a chat again ({off: true}); /api/session/<id>/agent/picture
+            takes its picture ({data (base64), crop: [x, y, size]}) or none
+            again ({off: true}). Your assistant's too, but off (that's
+            /api/session/<id>/assistant)."""
+            name = data.get("name")
+            if name is not None and (not isinstance(name, str) or not name.strip() or len(name.strip()) > 40):
+                return self.error(400, "a name of 40 characters at most")
+            ours = is_agent(s)
+            if what == "agent/picture":
+                if not ours:
+                    return self.error(409, "It isn't one of your agents")
+                if data.get("off") is True:
+                    r = run_amarchy("agents", s["id"], "--picture", "off")
+                else:
+                    crop = data.get("crop")
+                    if crop is not None and not (isinstance(crop, list) and len(crop) == 3
+                                                 and all(isinstance(n, int) and n >= 0 for n in crop) and crop[2] > 0):
+                        return self.error(400, "crop: x, y and size, in the picture's pixels")
+                    pic = data.get("data")
+                    if not isinstance(pic, str) or not pic:
+                        return self.error(400, "no picture")
+                    r = run_amarchy("agents", s["id"], "--picture", "-", *(["--crop", "%d,%d,%d" % tuple(crop)] if crop else []),
+                                    input=pic, timeout=120)
+            elif data.get("off") is True:
+                if team_of(s)[0] != "agent":
+                    return self.error(409, "It isn't one of your agents")
+                r = run_amarchy("agents", s["id"], "off")
+            else:
+                r = run_amarchy("agents", s["id"], *(["--name", name.strip()] if name else []))
+            return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr or r.stdout))
 
         def assistant(self, s, data):
             """Your assistant (amarchy assistant): /api/session/<id>/assistant
@@ -14079,10 +14372,10 @@ def cmd_notify(args):
         return fail("too long for a notification (a title of 200 characters, a body of 2000)")
     if sid and not session(sid):
         return fail(f"No session {sid!r}")
-    # From your assistant (or another session of its project): under its
-    # name and picture, and a tap opens it unless it says where.
+    # From your assistant or an agent (or another session of its project):
+    # under its name and picture, and a tap opens it unless it says where.
     me = session(os.environ.get("AMARCHY_SESSION", ""))
-    mine = assistant() if me and assistant_role(me) else None
+    mine = team_of(me)[1] if me else None
     # Sent from a session: tapped, it opens that session, unless it says where.
     sid = sid or (me["id"] if me else None)
     if mine:
@@ -14098,7 +14391,7 @@ def cmd_notify(args):
     if urgent:
         payload["urgent"] = True
     if mine:
-        payload["icon"] = assistant_icon()
+        payload["icon"] = team_icon(mine)
     n = push_all(payload)
     print(f"sent to {n} of {len(app_subscriptions())}")
     return 0 if n else 1
@@ -16012,6 +16305,7 @@ OPTIONS = {
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
+    "agents": ({"--json", "--name", "--picture", "--crop", "--sound"}, {"--name", "--picture", "--crop", "--sound"}, set()),
     "alerts": (set(), set(), set()),
     "missions": ({"--goal", "--reset"}, {"--goal"}, set()),
     "update": ({"--auto"}, set(), set()),
@@ -16164,6 +16458,8 @@ def main(argv):
         return cmd_notify(args)
     elif cmd == "assistant":
         return cmd_assistant(args)
+    elif cmd == "agents":
+        return cmd_agents(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
     elif cmd == "missions":

@@ -892,20 +892,20 @@ function renameNow(s, t) {
 }
 
 function rowMenu(s) {
-  sheet(sheetHead(title(s), where(s)), prioritySeg(s),
+  // Your assistant or an agent: on top whatever its priority, and never completed.
+  sheet(sheetHead(title(s), where(s)), isAgent(s) ? null : prioritySeg(s),
     h("button", { class: "control wide", onclick: () => { closeSheets(); go(`#/s/${encodeURIComponent(s.id)}`); } },
       "Open"),
     ...sessionActions(s),
-    closeButton(s));
+    isAgent(s) ? null : closeButton(s));
 }
 
 // What else you can do to a session from its menu (manage.js): name it, make
-// it your assistant (or change yours).
+// it an agent or your assistant (or change one).
 function sessionActions(s) {
   return [
     h("button", { class: "control wide", onclick: () => renameSheet(s) }, "Rename…"),
-    h("button", { class: "control wide", onclick: () => assistantSheet(s) },
-      s.assistant === "main" ? `${s.assistant_name || "Assistant"}: name, picture, chime…` : "Make it my assistant…"),
+    h("button", { class: "control wide", onclick: () => agentSheet(s) }, agentMenuLabel(s)),
     sleepButton(s),
   ].filter(Boolean);
 }
@@ -957,17 +957,6 @@ async function confirmClose(s, known) {
   } }, n ? "Complete and discard changes" : runs.length ? "Stop it and complete" : "Complete mission ✓");
   sheet({ key: "close" }, sheetHead(`Complete ${s.task || where(s)}?`, `${detail} · ${where(s)}`), stops, preview, yes,
     h("button", { class: "control wide", onclick: closeSheet }, "Cancel"));
-}
-
-// Your assistant's picture: yours (amarchy assistant --picture), by its hash,
-// else amarchy's own (app/assistant.svg).
-// The 192 one is what the lists show (about 70 KB, not the 512's 420 KB, and
-// every row's picture is drawn again each time the list changes); the big one
-// only where it's shown big.
-function avatar(s, cls) {
-  const size = cls === "big" ? 512 : 192;
-  const src = /^[0-9a-f]{12}$/.test(s.picture || "") ? `/picture/${s.picture}-${size}.png` : "/assistant.svg";
-  return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
 }
 
 // ---- a session
@@ -1065,7 +1054,7 @@ class SessionView {
     const listed = rowOf(this.id);
     const r = { ...(this.row || { id: this.id, repo: "", task: "…" }),
                 ...(listed ? { preview: listed.preview, preview_state: listed.preview_state, preview_up: listed.preview_up } : {}) };
-    if (r.assistant === "main") this.chat.setPlaceholder(`Message ${r.assistant_name || "Assistant"}`);
+    if (this.row) this.chat.setPlaceholder(composerPlaceholder(r));
     uiSwap(this.titleEl, uiChatHead(r, {
       back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
       rename: () => { if (this.row) renameSheet(this.row); },
@@ -1106,14 +1095,15 @@ class SessionView {
       ...(this.mode === "terminal" ? [item(false, "Back to the chat", () => this.setMode("chat"))] : []),
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
       ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
+    const agent = isAgent(row);
     sheet(sheetHead(title(row), where(row)),
-      h("div", { class: "section" }, "Priority"), seg,
+      agent ? null : h("div", { class: "section" }, "Priority"), agent ? null : seg,
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
       h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
       row.preview ? h("button", { class: "control wide", onclick: () => { closeSheets(); uiPreviewSheet({ ...row, id: this.id }); } }, "Preview…") : null,
       ...sessionActions({ ...row, id: this.id }),
-      closeButton({ ...row, id: this.id }),
+      agent ? null : closeButton({ ...row, id: this.id }),
       h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);
   }
 }
@@ -2270,7 +2260,10 @@ async function openSettings() {
     }
     // What the sessions tell you about (amarchy alerts), on every phone and browser.
     const alerts = (app.view && app.view.alerts) || "needs-you";
-    const name = ((app.view && app.view.sessions.find((x) => x.assistant === "main")) || {}).assistant_name;
+    const team = agentsOf(app.view);
+    const name = team.length > 1 ? "Agents" : (team[0] || {}).assistant_name;
+    const names = team.map((x) => x.assistant_name || "Assistant");
+    const said = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
     kids.push(h("div", { class: "section" }, "Tell me"),
       h("div", { class: "seg" }, ...[["all", "All"], ["needs-you", "Needs me"], ["assistant", `${name || "Assistant"} only`]]
         .map(([value, label]) => h("button", { class: `control${alerts === value ? " on" : ""}`, onclick: async () => {
@@ -2280,20 +2273,24 @@ async function openSettings() {
       h("p", {}, alerts === "all" ? "Every chat, when it needs you and when it's done."
                : alerts === "needs-you" ? "A chat that asks you something, or needs your permission. One that's done is just marked done in the list."
                : "Nothing from the chats; their list still says how they are."),
-      h("p", {}, name ? `${name}, your assistant, always tells you: under its own name and picture, with its own chime.`
-                      : "Your assistant, once you have one (amarchy assistant <id>), always tells you."));
-    // The chimes, your assistant and your projects (manage.js), as amarchy sound,
-    // assistant and add set them on the host.
-    const helper = (app.view && app.view.sessions.find((x) => x.assistant === "main")) || null;
+      h("p", {}, team.length > 1 ? `${said}, your agents, always tell you: each under its own name and picture, with its own chime.`
+               : team.length ? `${said}, your ${team[0].assistant === "main" ? "assistant" : "agent"}, always tells you: under its own name and picture, with its own chime.`
+               : "Your assistant and agents, once you have them (a chat's menu), always tell you."));
+    // The chimes, your assistant and agents, and your projects (manage.js), as
+    // amarchy sound, assistant, agents and add set them on the host.
+    const helper = mainAssistant();
     const label = (n) => (n === "off" ? "off" : n ? n.charAt(0).toUpperCase() + n.slice(1) : "");
     kids.push(h("div", { class: "section" }, "Sound"),
-      h("button", { class: "control wide", onclick: () => soundSheet(false) },
-        `Chime: ${label(app.view && app.view.sound)}${helper ? ` · ${helper.assistant_name || "Assistant"}'s: ${label(app.view.assistant_sound)}` : ""}`),
+      h("button", { class: "control wide", onclick: () => soundSheet(null) },
+        `Chime: ${label(app.view && app.view.sound)}${team.map((x) => ` · ${x.assistant_name || "Assistant"}'s: ${label(agentChime(x))}`).join("")}`),
       h("p", {}, app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
-      h("div", { class: "section" }, "Assistant"),
-      helper ? h("button", { class: "control wide", onclick: () => assistantSheet(helper) }, `${helper.assistant_name || "Assistant"}: name, picture, chime…`)
-             : h("p", {}, "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant."),
+      h("div", { class: "section" }, "Agents"),
+      ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),
+        h("span", {}, `${x.assistant_name || "Assistant"}: name, picture, chime…`))),
+      h("p", {}, team.length ? `Chats that live on rather than finish, on top of the list${helper ? `; ${helper.assistant_name || "your assistant"} is your assistant, and your tasks go to it` : ""}. `
+                               + "Make another one an agent from its menu (⋯, or hold it in the list)."
+                             : "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant, or an agent."),
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));

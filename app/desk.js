@@ -608,6 +608,8 @@ function deskHead() {
   if (!desk.head) return;
   const s = row(desk.stepping || desk.current);      // (Ctrl+Alt+J held: the one it's on)
   if (!s) { desk.head.replaceChildren(); return; }
+  // The box calls your assistant or an agent by its name, as the phone's does.
+  if (desk.chat && desk.chat.id === s.id) desk.chat.setPlaceholder(composerPlaceholder(s));
   // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
   uiSwap(desk.head, uiChatHead(s, {
     backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
@@ -1299,7 +1301,8 @@ function deskList() {
 
 // The chime this page plays when a session needs you or is done (the one
 // you're looking at only when this window isn't), as amarchy alerts lets the
-// others: your assistant's always, with its own chime.
+// others: your assistant's and your agents' always, each with its own chime
+// (your assistant's first, when more than one rings at once).
 function chime(v) {
   if (!v) return;
   const now = Object.fromEntries(v.sessions.map((s) => [s.id, s.status]));
@@ -1312,12 +1315,13 @@ function chime(v) {
     const done = s.status === "idle" && prev === "working";
     if (!(s.status === "waiting" || done)) return false;
     if (s.id === desk.current && document.hasFocus()) return false;
-    if (s.assistant === "main") return true;
+    if (isAgent(s)) return true;
     const alerts = v.alerts || "needs-you";
     return alerts === "all" || (alerts === "needs-you" && s.status === "waiting");
   });
   if (!rings.length) return;
-  const sound = rings.some((s) => s.assistant === "main") ? v.assistant_sound || "herald" : v.sound || "kalimba";
+  const agent = rings.find(isAgent);
+  const sound = agent ? agentChime(agent) : v.sound || "kalimba";
   if (sound === "off") return;
   playSound(`/sound/${encodeURIComponent(sound)}`);      // app.js: never the Mac's Now Playing
 }
@@ -1330,7 +1334,7 @@ function chatPicker() {
   if (!v) return;
   const ss = v.sessions.filter((s) => !s.setup && !todayUI.closing.has(s.id));
   picker({ title: "Go to a chat", placeholder: "Its name or project", items: ss.map((s) => ({
-    label: s.assistant === "main" ? s.assistant_name || "Assistant" : s.task || "New chat",
+    label: isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat",
     detail: [projectName(s.repo), statusWords(s)].filter(Boolean).join(" · "),
     icon: s.id === desk.current ? "check" : s.status === "waiting" ? "waiting" : "project",
     act: () => boardOpen(s.id) })) });
@@ -1622,6 +1626,7 @@ function renameSession() {
 const LEVELS = ["low", "normal", "high"];
 async function setPriority(s, dir) {
   if (!s) return;
+  if (isAgent(s)) return toast(`${s.assistant_name || "It"} is on top already: ${s.assistant === "main" ? "your assistant" : "an agent"}`);
   const at = LEVELS.indexOf(s.priority || "normal");
   const level = LEVELS[Math.max(0, Math.min(2, at + (dir === "up" ? 1 : -1)))];
   if (level === (s.priority || "normal")) return toast(`${PRIORITY[level]} already`);
@@ -1636,6 +1641,7 @@ async function closeCurrent() {
   if (!s) return;
   // At once with Undo when nothing would be lost (today.js): then the board.
   if (s.assistant === "main") return toast("Your assistant stays: it isn't closed");
+  if (isAgent(s)) return toast(`${s.assistant_name || "An agent"} stays: an agent isn't closed`);
   todayComplete(s);
 }
 
@@ -1654,7 +1660,7 @@ function deskMenu() {
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     { label: "Automations", icon: "clock", detail: autoState.failed ? `${autoState.failed} failed last time` : "what runs by itself", act: () => automationsSheet() },
     { label: "Theme, font and wallpaper…", icon: "image", key: "Ctrl+Alt+T", act: () => openLook() },
-    { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(false) },
+    { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(null) },
     { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", act: () => (app.desk ? newProject() : newProjectSheet()) },
     { label: "Settings", icon: "gear", act: () => openSettings() },
     { label: "Tour", icon: "tour", detail: "amarchy in 100 seconds", act: () => tourShow() },
@@ -1688,17 +1694,18 @@ function sessionItems(s) {
     ...(s.preview ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s) }] : []),
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
-    { label: s.assistant === "main" ? "Your assistant…" : "Make it your assistant…", detail: s.assistant === "main" ? "name, picture, chime" : "",
-      act: () => assistantSheet(s) },
-    ...LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
+    { label: s.assistant === "main" ? "Your assistant…" : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent…` : "Make it an agent…",
+      detail: isAgent(s) ? "name, picture, chime" : "or your assistant", act: () => agentSheet(s) },
+    // Your assistant and your agents are on top whatever their priority.
+    ...(isAgent(s) ? [] : LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
-                                                act: () => priorityNow(s, p).catch(() => {}) })),
+                                                act: () => priorityNow(s, p).catch(() => {}) }))),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
       { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
-    { label: "Complete mission", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
-  ];
+    isAgent(s) ? null : { label: "Complete mission", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
+  ].filter(Boolean);
 }
 
 // A chat's ⋯: what it shows beside it (Terminal, Changes, Details, each

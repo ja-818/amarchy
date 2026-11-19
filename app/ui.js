@@ -240,9 +240,10 @@ function uiPatchPart(old, next) {
 // chat's own (today.js todayUnseen).
 function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = null }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
+  // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
-  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
+  const prio = s && !isAgent(s) && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
     lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
@@ -443,6 +444,36 @@ function uiChart(items) {
       h("span", { class: "ui-chart-label" }, b.label))));
 }
 
+// Your assistant's or an agent's picture (session_view "assistant": "main"
+// or "agent"): yours (amarchy assistant --picture, amarchy agents <id>
+// --picture), by its hash; else amarchy's own (app/assistant.svg) for your
+// assistant, and for an agent its initial on its project's color, so two of
+// them never look alike. The 192 one is what the lists show (about 70 KB, not
+// the 512's 420 KB, and every row's picture is drawn again each time the list
+// changes); the big one only where it's shown big. cls: small, big.
+function avatar(s, cls) {
+  const size = cls === "big" ? 512 : 192;
+  const own = /^[0-9a-f]{12}$/.test(s.picture || "");
+  if (!own && s.assistant === "agent") {
+    const NS = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+    const svg = el("svg", { viewBox: "0 0 100 100", class: `avatar letter ph-${todayHue(s.repo)}${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
+    const t = el("text", { x: "50", y: "50", "text-anchor": "middle", "dominant-baseline": "central" });
+    t.textContent = (Array.from(String(s.assistant_name || s.task || projectName(s.repo) || "?").trim())[0] || "?").toUpperCase();
+    svg.append(el("circle", { cx: "50", cy: "50", r: "50" }), t);
+    return svg;
+  }
+  const src = own ? `/picture/${s.picture}-${size}.png` : "/assistant.svg";
+  return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
+}
+
+// Your assistant or one of your agents: a chat that lives on, never a
+// mission to complete (no Complete, no Stalled, no priority: on top).
+function isAgent(s) { return !!s && (s.assistant === "main" || s.assistant === "agent"); }
+
+// What a chat's box says before you type: your assistant or an agent by its name.
+function composerPlaceholder(s) { return isAgent(s) ? `Message ${s.assistant_name || "Assistant"}` : "Message Claude"; }
+
 // Over an open chat, on the phone as on a computer: one row of boxes of
 // one height, neutral: Back (‹); its project (or your assistant's
 // picture) and its name (a tap: rename); where it stands (its tone a dot);
@@ -450,7 +481,7 @@ function uiChart(items) {
 // priority…); Complete, last. Returns the
 // children, for the head to hold.
 function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}) {
-  const main = s.assistant === "main";
+  const main = isAgent(s);
   return [
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
     h("button", { class: "head-title", type: "button", title: `${where(s)} · rename`, onclick: rename },

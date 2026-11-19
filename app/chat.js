@@ -2822,12 +2822,12 @@ class Chat {
   // says so, Merged ✓ and when, and Complete, one tap (today.js
   // todayComplete: Undo, and what would be lost asked). Only a merge counts
   // on your score: a chat done but not merged says it won't. Not your
-  // assistant's: it stays.
+  // assistant's or an agent's: it stays.
   renderDone() {
     if (!this.doneEl) return;
     const r = this.row || {};
     const m = r.merged || null;
-    const show = (this.goalState === "done" || !!m) && !["working", "waiting", "running"].includes(r.status) && r.assistant !== "main"
+    const show = (this.goalState === "done" || !!m) && !["working", "waiting", "running"].includes(r.status) && !isAgent(r)
       && !r.setup && typeof confirmClose === "function";
     const key = show ? JSON.stringify([this.goal, r.id, m, this.goalState, Math.floor(Date.now() / 60000)]) : "";
     if (key === this.doneKey) return;
