@@ -1177,6 +1177,8 @@ class Chat {
     // reading stays where it is: the keyboard coming up (or the box taking
     // another line) takes its room from the top, so the lines over the box
     // are still the ones over it.
+    // Just opened (landing), it stays on the top of Claude's reply instead,
+    // whatever moves around it (a card in the dock, a picture loading).
     this.stuck = true;
     this.scroller.addEventListener("scroll", () => { this.stuck = this.measureBottom(); if (this.stuck) this.latest.hidden = true; }, { passive: true });
     this.viewTall = 0;
@@ -1184,9 +1186,17 @@ class Chat {
       const s = this.scroller, tall = s.clientHeight, was = this.viewTall;
       this.viewTall = tall;
       if (this.stuck) s.scrollTop = s.scrollHeight;
+      else if (this.landing) this.landOnReply();
       else if (tall && was && tall !== was) s.scrollTop += was - tall;
     });
     for (const el of [this.scroller, this.conv, this.outboxEl]) this.sizes.observe(el);
+    // A chat you open lands on its latest message (toReply), and stays
+    // landed there until you move: what comes in meanwhile lands it again.
+    // Opened again, it's drawn at once as you left it, and its stream's
+    // newer messages come a moment on: without this they came under a view
+    // still on the reply you read last time. A finger, the wheel, a click
+    // or a key is you moving (open's keys: onNavKey).
+    this.landing = false;
     this.dock = h("div", { class: "dock chat-dock" });
     this.buildComposer();
     // The message the keys are on, lit (navMark), kept by the chat whatever
@@ -1207,6 +1217,8 @@ class Chat {
     new MutationObserver(() => { if (!marking) marking = requestAnimationFrame(() => { marking = 0; this.navMark(); }); })
       .observe(this.scroller, { childList: true, subtree: true });
     this.el = h("div", { class: "chat" }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    const moved = () => { this.landing = false; };
+    for (const type of ["pointerdown", "touchstart", "wheel"]) this.el.addEventListener(type, moved, { capture: true, passive: true });
     this.listenDrops();
     this.renderDock();
   }
@@ -1306,8 +1318,12 @@ class Chat {
 
   open() {
     this.loadInfo();
+    // Opened (its stream coming back later, reopen, isn't: you may have
+    // moved by then, and where you are stays, conversationDraw).
+    if (!this.landed) { this.landed = true; this.landing = true; this.navOpened = false; }
     // Opened before: drawn at once as it was when you left it, the stream's
-    // own then adding only what came since (conversation).
+    // own then adding only what came since (conversation), and landing on
+    // the latest of it.
     const was = chatsSeen.get(this.id);
     if (was && !this.items.length) {
       this.conversation({ reset: true, items: was.items, start: was.start });
@@ -1320,15 +1336,20 @@ class Chat {
     if (!early || !early.got.length) streamWatch(es, () => { if (this.es === es && !this.closed) this.reopen(); });
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
     window.addEventListener("amarchy-ask", this.onAskEvent);
-    this.onNavKey = this.onNavKey || ((e) => this.navKey(e));
+    this.onNavKey = this.onNavKey || ((e) => {
+      if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) this.landing = false;      // a key: you're moving (build)
+      this.navKey(e);
+    });
     window.addEventListener("keydown", this.onNavKey, true);
     this.clearNotes();
     const on = {
       session: (e) => {
+        const working = this.working();
         this.row = JSON.parse(e.data);
         if (this.opts.onSession) this.opts.onSession(this.row);
         this.renderDock();
         this.renderTail();
+        if (this.working() !== working) this.reland();
       },
       conversation: (e) => this.conversation(JSON.parse(e.data)),
       screen: (e) => {
@@ -1337,9 +1358,11 @@ class Chat {
         this.renderDock();
       },
       live: (e) => {
+        const working = this.working();
         this.live = JSON.parse(e.data);
         this.renderDock();
         this.renderTail();
+        if (this.working() !== working) this.reland();      // at work: its end; done: its reply
       },
       gone: () => { if (this.opts.onGone) this.opts.onGone(); },
     };
@@ -1391,6 +1414,7 @@ class Chat {
     const card = this.dock.querySelector(".card");
     if (!card) return;
     this.askWanted = null;
+    this.landing = false;       // the card, not the reply
     this.toBottom(true);
     (menuStart(card) || card).focus({ preventScroll: true });
     card.classList.remove("called");
@@ -1664,30 +1688,42 @@ class Chat {
   toReply(opened) {
     if (this.working() || (!opened && this.writing())) return this.toBottom();
     this.stuck = true;
-    requestAnimationFrame(() => {
-      const s = this.scroller, last = this.tail.previousElementSibling;
-      const bottom = s.scrollHeight - s.clientHeight;
-      const top = last && last.matches(".msg.claude") ? last.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 12 : bottom;
-      s.scrollTop = Math.max(0, Math.min(bottom, top));
-      this.stuck = this.measureBottom();
-      this.latest.hidden = true;
-    });
+    requestAnimationFrame(() => this.landOnReply());
+  }
+
+  // There, now (laid out): the reply's top, or the bottom.
+  landOnReply() {
+    const s = this.scroller, last = this.tail.previousElementSibling;
+    const bottom = s.scrollHeight - s.clientHeight;
+    const top = !this.working() && last && last.matches(".msg.claude")
+      ? last.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 12 : bottom;
+    s.scrollTop = Math.max(0, Math.min(bottom, top));
+    this.stuck = this.measureBottom();
+    this.latest.hidden = true;
+  }
+
+  // Opened and not moved yet: where a chat you open lands, again, with
+  // what's here now (the stream's newer messages, Claude at work or done).
+  reland() {
+    if (this.landing) this.toReply(true);
   }
 
   // ---- the conversation
 
   conversation(d) {
     this.conversationDraw(d);
-    // Opened with the keys: on the latest message, once there is one.
+    // Opened with the keys: on the latest message, once there is one (and
+    // the latest again, should newer ones come before you move).
     if (this.navWanted && Date.now() - this.navWanted < 8000 && (document.activeElement === document.body || document.activeElement === this.input)
-        && this.navLatest()) this.navWanted = 0;
+        && this.navLatest()) { this.navWanted = 0; this.navOpened = true; }
+    else if (this.landing && this.navOpened && this.navHere()) this.navLatest();
   }
 
   // The keys on the latest message, now or once the conversation's in (a
   // chat opened with the keys: Enter on its card). False when they can't be.
   navStart() {
     if (this.dock.querySelector(".card")) return false;      // what it asks you: that, first
-    if (this.navLatest()) return true;
+    if (this.navLatest()) { this.navOpened = true; return true; }
     this.navWanted = Date.now();
     return true;
   }
@@ -1713,8 +1749,12 @@ class Chat {
     }
     this.keepItems(d.items);
     // The page after an update: its scroll, as it was (app.js keptChatScroll).
+    // Else, opened and not moved yet: landed on the latest again, whatever
+    // came (the copy drawn at once was older than the stream's).
     const back = d.reset ? keptChatScroll(this.id) : null;
-    const place = d.reset && drawn && back === null ? this.place() : null;
+    if (back !== null) this.landing = false;
+    const land = this.landing;
+    const place = !land && d.reset && drawn && back === null ? this.place() : null;
     const stick = back === null && !place && (d.reset || this.atBottom());
     if (d.reset) {
       this.reset();
@@ -1741,7 +1781,8 @@ class Chat {
       this.infoTimer = setTimeout(() => this.loadInfo(), 1500);
     }
     if (this.screen && this.screen.dialog) this.renderDock();     // the card may be about what came in
-    if (place) { if (!this.toPlace(place)) this.toReply(true); }      // (gone: another conversation, as one you open)
+    if (land) this.toReply(true);
+    else if (place) { if (!this.toPlace(place)) this.toReply(true); }      // (gone: another conversation, as one you open)
     else if (stick && (d.reset || d.items.some((i) => i.kind === "claude"))) this.toReply(d.reset);
     else if (stick) this.toBottom();
     else if (d.items.some((i) => i.kind !== "result")) this.latest.hidden = false;

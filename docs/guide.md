@@ -130,9 +130,12 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   is something: Claude's questions as buttons, a draft, a link (a post for X shows
   the way X will show it, with X's count and **Copy**). **Content**:
   everything else, each idea folded under a heading that says its point (tap one to
-  open it, **Open all** for every one). A chat you open shows that Briefing first:
-  what Claude did and said on the way is one line over it ("Worked 6 min · 14
-  steps"), a tap away. After that, the conversation stays on what you're reading:
+  open it, **Open all** for every one). A chat you open shows its latest message,
+  every time: the top of Claude's last reply (that Briefing) when it's longer
+  than the screen, else the very end; the end while Claude works. Opened again,
+  it doesn't stay on the reply you read last time: what came while you were away
+  lands it on the newest. What Claude did and said on the way is one line over
+  the reply ("Worked 6 min · 14 steps"), a tap away. Once you scroll, the conversation stays on what you're reading:
   the keyboard coming up, typing a long message, the app reconnecting (the phone
   woke, amarchy restarted) or a turn ending while you write don't move it. amarchy asks every Claude for that shape and sends back a
   reply that doesn't have it, so no project needs its own rule for it. Its steps are folded into one line in
