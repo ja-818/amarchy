@@ -32,7 +32,7 @@ const ONLY = process.argv[2];
 const FIRESHIP = { id: "fireship-fireship", repo: "fireship", name: "fireship", task: "", status: "idle", engine: "chat", path: "/tmp/fs",
                    assistant: "agent", assistant_name: "Fireship", picture: "", chime: "elementary", unseen: true,
                    merged: { at: NOW - 3600, n: 1, since: 0 }, today: T({ goal: "Post every day", state: "done", at: NOW - 5 * 86400 }) };
-const SCOUT = { id: "scout-scout", repo: "scout", name: "scout", task: "Scout", status: "idle", engine: "chat", path: "/tmp/sc",
+const SCOUT = { id: "scout-scout", repo: "scout", name: "scout", task: "Scout", status: "idle", engine: "chat", path: "/tmp/sc", priority: "high",
                 assistant: "agent", assistant_name: "Scout", picture: "0123456789ab", chime: "fairy", today: T({}) };
 const NEAR = { id: "fireship-ideas", repo: "fireship", name: "ideas", task: "Ideas: next week", status: "idle", engine: "chat", path: "/tmp/fi",
                assistant: "near", assistant_name: "Fireship", today: T({ goal: "List next week's posts" }) };
@@ -73,13 +73,14 @@ async function run(browser, port, layout) {
     return { assistant: c.classList.contains("k-assistant"), title: c.querySelector(".tcard-head").innerText.includes("Fireship"),
              letter: letter ? letter.textContent : "", hue: letter ? /ph-\d/.test(letter.getAttribute("class")) : false,
              size: letter ? Math.round(letter.getBoundingClientRect().width) : 0,
-             chip: !!c.querySelector(".tcard-chip"), complete: [...c.querySelectorAll(".tbtn")].some((b) => /Complete/.test(b.innerText)),
+             chip: !!c.querySelector(".tcard-chip"), flag: !!s.querySelector(".prio"), complete: [...c.querySelectorAll(".tbtn")].some((b) => /Complete/.test(b.innerText)),
              pill: (c.querySelector(".tpill") || {}).innerText || "", words: statusWords(row("fireship-fireship")),
              pic: (s.querySelector(".tcard-head img.avatar") || {}).getAttribute ? s.querySelector(".tcard-head img.avatar").getAttribute("src") : "" };
   });
   check(where, card.assistant && card.title && !card.chip, `an agent's card: its name, as your assistant's is (${JSON.stringify(card)})`);
   check(where, card.letter === "F" && card.hue && card.size === 26, "no picture of yours: its initial, on its project's color, as big as a picture");
   check(where, card.pic === "/picture/0123456789ab-192.png", `a picture of yours: that one (${card.pic})`);
+  check(where, !card.flag, "pinned before it was an agent: no flag (it's on top whatever its priority)");
   check(where, !card.complete && card.pill === card.words && !/Stalled|New|Merged/.test(card.pill), `done, merged, quiet for days, unseen: still never to complete, its state in words as your assistant's (${card.pill})`);
   const parts = await p.evaluate(() => { const q = todayParts(app.view); const ids = (l) => l.map((s) => s.id);
     return { fresh: ids(q.fresh), done: ids(q.done), stale: ids(q.stale), ready: ids(q.ready), agents: ids(q.agents), stalled: missionIsStalled(row("fireship-fireship")) }; });

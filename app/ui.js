@@ -240,9 +240,10 @@ function uiPatchPart(old, next) {
 // chat's own (today.js todayUnseen).
 function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = null }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
+  // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
-  const prio = s && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
+  const prio = s && !isAgent(s) && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
     lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
