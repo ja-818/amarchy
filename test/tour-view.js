@@ -136,7 +136,7 @@ async function run(browser, port, layout) {
   // the wheel scrolls them sideways too.
   const row = () => p.evaluate(() => {
     const r = document.querySelector(".ui-slide-row"), box = r.closest(".ui-scroll");
-    return { left: r.scrollLeft, max: r.scrollWidth - r.clientWidth, prev: !box.querySelector(".ui-scroll-go.prev").hidden, next: !box.querySelector(".ui-scroll-go.next").hidden };
+    return { left: r.scrollLeft, max: r.scrollWidth - r.clientWidth, prev: !box.querySelector(".ui-scroll-go.prev").classList.contains("off"), next: !box.querySelector(".ui-scroll-go.next").classList.contains("off") };
   });
   // (As it comes, the row puts the theme worn in its middle: after that, to its start.)
   await sleep(500);
@@ -148,6 +148,16 @@ async function run(browser, port, layout) {
   await sleep(200);
   let r = await row();
   check(where, r.max > 0 && !r.prev && r.next, `  at their start: only › (${JSON.stringify(r)})`);
+  const placed = await p.evaluate(() => {
+    const row = document.querySelector(".ui-slide-row").getBoundingClientRect();
+    const [prev, next] = [".prev", ".next"].map((k) => document.querySelector(`.ui-scroll-go${k}`).getBoundingClientRect());
+    const title = document.querySelector(".ui-slide-title").getBoundingClientRect();
+    return { outside: prev.right <= row.left + 1 && next.left >= row.right - 1, square: [prev, next].every((b) => Math.abs(b.width - b.height) < 1 && b.width >= 30),
+             column: Math.abs(row.left + 3 - title.left) <= 2 };
+  });
+  check(where, placed.outside, "  ‹ › outside the row, either side");
+  check(where, placed.square, "  square buttons");
+  if (layout === "wide") check(where, placed.column, "  the row as wide as the words, the arrows out in the margins");
   await p.click(".ui-scroll-go.next");
   await sleep(700);
   const paged = await row();
@@ -188,6 +198,14 @@ async function run(browser, port, layout) {
         "closed: the tour back, on its themes");
   // Put back as it was, for the other layout.
   await p.evaluate((t) => api("/api/look", { theme: t }).then(lookWorn), before.theme);
+
+  // Opened straight on the themes (before they've come): their count once they have.
+  await p.evaluate(() => { closeSheets(); tourShow(8); });
+  check(where, await until(p, () => /^\d+ themes$/.test((document.querySelector(".tour-themes-count") || {}).textContent || "")),
+        "opened on the themes: how many, once they've come");
+  await p.evaluate(() => closeSheets());
+  await p.evaluate(() => tourShow(0));
+  await open(p);
 
   // Let's go: closed, and seen on this device.
   await p.click(`.ui-slides-seg:nth-child(${SLIDES})`);

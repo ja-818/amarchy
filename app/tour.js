@@ -242,6 +242,11 @@ function tourLook() {
   return tour.looking;
 }
 
+// How many themes there are, in words (until they've come: a pile of them).
+function tourThemesCount() {
+  return `${(tour.look && tour.look.themes.length) || "A pile of"} themes`;
+}
+
 // The themes, a card each in its own colors: a tap wears it, here and on
 // every phone and browser of yours (as the Look sheet: the last one tapped
 // is the one kept). All of it: Theme, font and wallpaper….
@@ -254,6 +259,8 @@ function tourThemes() {
     const worn = want || (app.view && app.view.look && app.view.look.theme) || info.theme;
     // (Patched, not redrawn: a card the keys or a finger are on stays that card.)
     const first = !row.querySelector(".theme-card");
+    const count = row.closest(".ui-slide") && row.closest(".ui-slide").querySelector(".tour-themes-count");
+    if (count) count.textContent = tourThemesCount();      // (come since the slide was drawn)
     uiPatch(row, info.themes.map((t) => themeCard(t, t.key === worn, (e) => pick(t.key, e.currentTarget))));
     // The one worn in sight, in the middle, as the row first comes.
     if (first) requestAnimationFrame(() => {
@@ -376,7 +383,8 @@ function tourSlides() {
       title: "Dark mode is a personality. Pick yours.",
       art: () => art(tourSwatches(), { scale: 7 }),
       body: () => [
-        `**${(tour.look && tour.look.themes.length) || "A pile of"} themes**, from Tokyo Night to Gruvbox to Hackerman. Pick a font, a wallpaper, or bring your own picture.`,
+        h("p", { class: "ui-slide-line" }, h("b", { class: "tour-themes-count" }, tourThemesCount()),
+          ", from Tokyo Night to Gruvbox to Hackerman. Pick a font, a wallpaper, or bring your own picture."),
         "Set it once and every phone and browser of yours wears it. Even this tour. Tap one, it's live:",
       ],
       extra: () => tourThemes(),

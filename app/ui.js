@@ -45,7 +45,7 @@
 //   where you are on top, Back and Next under it.
 // - uiPixels, uiPixmap: pixel art in the theme's own colors.
 // - uiBurst: confetti in the theme's hues (a mission complete, the tour's end).
-// - uiScrollRow: a row that scrolls sideways, ‹ › at its ends, the wheel too.
+// - uiScrollRow: a row that scrolls sideways, square ‹ › beside it, the wheel too.
 //
 // The two bars (the board's, an open chat's) are one bar (.ui-bar), as
 // Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
@@ -773,12 +773,13 @@ function uiPhoto(shots, at = 0) {
 
 // ---- a row that scrolls sideways (uiScrollRow)
 //
-// A row wider than its room (a slide's themes), with ‹ › at its ends: each
-// a page of it along, shown only while there's more that way. A mouse's
+// A row wider than its room (a slide's themes), with ‹ › beside it (square,
+// outside the row): each a page of it along, shown only while there's more
+// that way. A mouse's
 // wheel scrolls it sideways too (a trackpad's sideways swipe already does;
 // at its end, the wheel scrolls the page again), and the keys move along it
 // as in any row of buttons. row: the row itself (it scrolls); its box, with
-// the arrows over its ends, is what's returned (box.update(): the arrows
+// the arrows either side, is what's returned (box.update(): the arrows
 // again, after its contents changed by other means than a redraw).
 function uiScrollRow(row, { label = "" } = {}) {
   row.classList.add("ui-scroll-row");
@@ -790,12 +791,15 @@ function uiScrollRow(row, { label = "" } = {}) {
                                       "aria-label": `${dir < 0 ? "Back" : "More"}${label ? `: ${label}` : ""}`, title: dir < 0 ? "Back" : "More",
                                       onclick: page(dir) }, glyph(dir < 0 ? "back" : "next"));
   const prev = arrow(-1), next = arrow(1);
-  const box = h("div", { class: "ui-scroll" }, row, prev, next);
+  const box = h("div", { class: "ui-scroll" }, prev, row, next);
   const update = () => {
     const max = row.scrollWidth - row.clientWidth;
     // (A few pixels from an end is at it: a card snapped to the row's padding.)
-    prev.hidden = row.scrollLeft <= 4;
-    next.hidden = row.scrollLeft >= max - 4;
+    // Gone, its place kept: the row never moves.
+    for (const [b, off] of [[prev, row.scrollLeft <= 4], [next, row.scrollLeft >= max - 4]]) {
+      b.classList.toggle("off", off);
+      b.setAttribute("aria-hidden", String(off));
+    }
   };
   row.addEventListener("scroll", update, { passive: true });
   row.addEventListener("wheel", (e) => {
