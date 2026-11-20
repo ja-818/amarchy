@@ -148,10 +148,11 @@ tells you when it needs you or is done, under its name and picture, with a chime
   amarchy agents <id> [--name <name>] [--picture <file>|off [--crop x,y,size]] [--sound <name>|off]
                                         make a chat one of your agents (named after its project unless you
                                         name it), or change one's name, picture or chime (your assistant's
-                                        too). An agent has what your assistant has but your tasks: its place
-                                        on top of every list, next to your assistant; its own picture (its
-                                        initial until you give it one) and chime; it always tells you when it
-                                        needs you or is done; and it's never a mission to complete
+                                        too). An agent has what your assistant has but your loops file: its
+                                        place on top of every list, next to your assistant; its own picture
+                                        (its initial until you give it one) and chime; it always tells you when
+                                        it needs you or is done; tasks of its own on Tasks (amarchy task); and
+                                        it's never a mission to complete
   amarchy agents <id> off               not an agent any more: a chat like the others again
   amarchy missions [--goal <n>]         what you've merged (only merges count): today, your streak, best day,
                   [--reset]             all of them, your replies and badges; --goal sets how many a day you
@@ -211,6 +212,25 @@ state, with Close for the done ones; docs/guide.md, "Today"):
                                         since 10-23 · chase 10-27`, `- [ ] someday · what`, `- [x]` when done),
                                         or none; prints it without one. Today only reads it: its Done, Chase,
                                         Ask and New chat go to your assistant, which keeps it
+
+Your agents' tasks (cards of their own on Tasks, from your assistant or one of your agents, each with buttons
+that send it a fixed message; docs/guide.md, "Your agents' tasks"):
+  amarchy task add --title <text> [--note <text>] [--link [<label>=]<url>]...
+                                        [--button <label>[=<message>]]... [--until <when>] [--key <key>]
+                                        [--notify] [--agent <id>]
+                                        put a task on Tasks (prints its id): its agent's picture and name
+                                        (this chat's own; --agent for another of your agents), its title, a
+                                        note, links (up to 3: a button that opens the page in a new tab; the
+                                        task stays) and buttons (up to 4; none: Done). Pressed, a button sends
+                                        its message to the agent as you'd send it (amarchy send: it wakes for
+                                        it) and the task is done; with no message it sends "<label>: <title>".
+                                        --until (2026-11-19T10:12-05:00, 10:12, 45m, 2h, 1d): it goes by
+                                        itself then. --key: the same agent's task with that key is changed in
+                                        place, not added again. --notify: on your phones too (a tap opens Tasks)
+  amarchy task list [--agent <id>] [--json]
+                                        the tasks open (id, agent, until, title), or one agent's
+  amarchy task done <id>... | --agent <id>
+                                        take tasks down (all of an agent's, with --agent): nothing is sent
 
 Terminals:
   amarchy terminals [on|off]            Show terminals: whether the app shows the sessions' terminals (the
@@ -5890,8 +5910,9 @@ def cmd_assistant(args):
 # Besides your assistant, other chats can be your agents (`amarchy agents
 # <id>`): Claudes that live on rather than finish, each with a job of its own
 # (one that keeps your social media, say). An agent has what your assistant
-# has but your tasks (Today's loops, its Ask and Done, the week's recap: your
-# assistant's alone): a place on top of every list, next to your assistant,
+# has but your loops (Today's loops, their Ask and Done, the week's recap:
+# your assistant's alone; tasks of its own it has: amarchy task, cmd_task): a
+# place on top of every list, next to your assistant,
 # in the order you made them; its own name, picture and chime; what it says
 # always reaches you, under its name and picture, whatever `amarchy alerts`
 # lets through; and nothing treats it as a chat to finish: no Complete, no
@@ -12257,11 +12278,12 @@ def loops_sent(open_keys=None):
 def today_view():
     """Today's part of the app's view, beside the sessions' (each has its
     own: today): your loops, where they're from, what your assistant was
-    told, and your assistant."""
+    told, your assistant, and your agents' tasks (tasks_view)."""
     loops, source, error = read_loops()
-    mine = assistant()
+    crew = team()
+    mine = next((a for a in crew if a["role"] == "main"), None)
     return {"loops": loops, "source": source, "error": error, "sent": loops_sent({l["key"] for l in loops}),
-            "assistant": {"id": mine["id"], "name": mine["name"]} if mine else None}
+            "assistant": {"id": mine["id"], "name": mine["name"]} if mine else None, "tasks": tasks_view(crew)}
 
 
 LOOP_ASKS = {
@@ -12354,6 +12376,11 @@ def cmd_today(args):
             late = " (chase now)" if l["chase"] and l["chase"] <= today else ""
             chase = f" · chase {l['chase']}" if l["chase"] else ""
             print(f"  {l['who']}: {l['what']}{chase}{late}")
+    if t["tasks"]:
+        print("From your agents:")
+        for x in t["tasks"]:
+            until = f" (until {task_clock(x['until'])})" if x["until"] else ""
+            print(f"  {x['agent_name']}: {x['title']}{until}  [{x['id']}]")
     print("Chats:")
     for s in ss:
         r = s["today"]
@@ -12362,6 +12389,329 @@ def cmd_today(args):
         print(f"  [{state}] {s.get('task') or s['id']}{': ' + r['goal'] if r['goal'] else ''}{running}")
     if t["error"]:
         print(t["error"], file=sys.stderr)
+    return 0
+
+
+# ---- your agents' tasks
+#
+# Your loops file is yours, kept by your assistant. Your assistant and your
+# agents can also put tasks of their own on Tasks (amarchy task add): one
+# that hunts posts for you to reply to puts each one there, rather than
+# starting a chat for it. A task is a card with its agent's picture and
+# name, a title, a note, its links (a new tab: the task stays) and its
+# buttons, each with a fixed message: pressed (after its Undo), the message
+# goes to the agent as you'd send it (amarchy send: waking it) and the task
+# is done. One past its --until goes by itself. They're kept in TASKS, read
+# by the app in today_view; a button comes back through /api/tasks/press.
+
+TASKS = STATE / "tasks.json"        # [{id, agent, title, note, links: [{label, url}], buttons: [{label, send}], until, at, key}]
+TASKS_LOCK = STATE / "tasks.lock"
+TASK_GRACE = 15 * 60        # s one past its time is kept, out of sight: a button pressed just before it still goes
+TASK_MAX = 30               # tasks an agent may have open at once
+TASK_LINKS, TASK_BUTTONS = 3, 4
+TASK_LABEL = 32             # characters in a link's or a button's label
+TASK_TITLE, TASK_NOTE, TASK_SEND = 200, 2000, 4000
+TASK_ID = re.compile(r"[0-9a-f]{6}")
+_tasks_memo = {"key": None, "tasks": []}
+
+
+def tasks_read(fresh=False):
+    """Your agents' tasks as written, past their time and closed agents' too
+    (tasks_view says which are open). Read again only when the file changed,
+    unless fresh."""
+    try:
+        st = TASKS.stat()
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return []
+    if not fresh and _tasks_memo["key"] == key:
+        return [dict(t) for t in _tasks_memo["tasks"]]
+    try:
+        d = json.loads(TASKS.read_text())
+    except (OSError, ValueError):
+        return []
+    tasks = [t for t in d if isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("agent"), str)] \
+        if isinstance(d, list) else []
+    _tasks_memo.update(key=key, tasks=tasks)
+    return [dict(t) for t in tasks]
+
+
+def tasks_change(fn):
+    """Change your agents' tasks in one go, under their lock: fn(tasks)
+    changes the list in place and returns what this returns. What's long
+    gone goes too: past its time by TASK_GRACE, or its agent closed."""
+    TASKS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(TASKS_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        tasks = tasks_read(fresh=True)
+        before = json.dumps(tasks)
+        out = fn(tasks)
+        now = time.time()
+        tasks[:] = [t for t in tasks if not (t.get("until") and t["until"] + TASK_GRACE < now) and session(t["agent"])]
+        if json.dumps(tasks) != before:
+            write_file(TASKS, json.dumps(tasks))
+        return out
+
+
+def task_open(t, now=None):
+    """Not past its time."""
+    return not t.get("until") or t["until"] > (now or time.time())
+
+
+def tasks_view(crew=None):
+    """Your agents' tasks still open, as Tasks shows them: the one going
+    soonest first, then the rest, the oldest first. Only your assistant's and
+    your agents' (one that isn't an agent any more keeps its out of sight)."""
+    who = {a["id"]: a for a in (team() if crew is None else crew)}
+    now = time.time()
+    out = [{"id": t["id"], "agent": t["agent"], "agent_name": who[t["agent"]]["name"], "title": t.get("title") or "",
+            "note": t.get("note") or "", "links": t.get("links") or [], "buttons": t.get("buttons") or [],
+            "until": t.get("until") or 0, "at": t.get("at") or 0}
+           for t in tasks_read() if t["agent"] in who and task_open(t, now)]
+    return sorted(out, key=lambda t: (not t["until"], t["until"] or t["at"], t["at"], t["id"]))
+
+
+def task_clock(when):
+    """A task's time, as said here: 10:12, or Thu 10:12 when it isn't today."""
+    d = datetime.datetime.fromtimestamp(when)
+    return d.strftime("%H:%M") if d.date() == datetime.date.today() else d.strftime("%a %H:%M")
+
+
+def task_until(word, now=None):
+    """--until: when a task is no use any more. A date and time
+    (2026-11-19T10:12-05:00; this machine's zone without one), a time today
+    (10:12), or how long from now (45m, 2h, 1h30m, 1d). (when, None), or
+    (None, what's wrong)."""
+    now = now or time.time()
+    w = (word or "").strip()
+    m = re.fullmatch(r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m(?:in)?)?", w.lower())
+    if w and m and any(m.groups()):
+        d, hh, mm = (int(x or 0) for x in m.groups())
+        when = now + d * 86400 + hh * 3600 + mm * 60
+    else:
+        try:
+            if re.fullmatch(r"\d{1,2}:\d{2}", w):
+                hh, mm = map(int, w.split(":"))
+                when = datetime.datetime.fromtimestamp(now).replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
+            else:
+                when = datetime.datetime.fromisoformat(w).timestamp()
+        except ValueError:
+            return None, f"--until takes a time: 2026-11-19T10:12-05:00, 10:12 (today), or 45m, 2h, 1d from now (not {word!r})"
+    if when <= now:
+        return None, f"--until {word} is past already (it's {task_clock(now)} here)"
+    if when - now > 31 * 86400:
+        return None, "--until is a month away at most"
+    return when, None
+
+
+def task_owner(sid):
+    """Whose task it is: (your assistant or the agent, None), or (None,
+    what's wrong)."""
+    if not sid:
+        return None, "whose task: --agent <id> (from an agent's own chat, it's its own)"
+    if not session(sid):
+        return None, f"No session {sid!r}"
+    who = next((a for a in team() if a["id"] == sid), None)
+    if not who:
+        return None, (f"{sid} isn't your assistant or one of your agents, and only they have tasks "
+                      f"(amarchy agents {sid} makes it one)")
+    return who, None
+
+
+def task_link(v):
+    """--link [<label>=]<url>: {label, url}, or what's wrong."""
+    v = (v or "").strip()
+    label, url = ("Open", v) if re.match(r"https?://", v, re.I) else (x.strip() for x in v.partition("=")[::2])
+    if not re.fullmatch(r"https?://\S+", url, re.I):
+        return f"--link takes [<label>=]<url>, the url an http(s) one (not {v!r})"
+    if not label or len(label) > TASK_LABEL:
+        return f"a link's label is 1 to {TASK_LABEL} characters"
+    return {"label": label, "url": url}
+
+
+def task_button(v, title):
+    """--button <label>[=<message>]: {label, send}, or what's wrong. Without
+    a message it sends "<label>: <the task's title>"."""
+    label, _, send = (v or "").partition("=")
+    label, send = label.strip(), send.strip()
+    if not label or len(label) > TASK_LABEL:
+        return f"--button takes <label>[=<message>], the label 1 to {TASK_LABEL} characters (not {v!r})"
+    if len(send) > TASK_SEND:
+        return f"a button's message is {TASK_SEND} characters at most"
+    return {"label": label, "send": send or f"{label}: {title}"}
+
+
+def task_notify(who, t):
+    """A new task on your phones, under its agent's name and picture; a tap
+    opens Tasks. None, or why it didn't go."""
+    if not app_subscriptions():
+        return "no phone or browser has turned on notifications yet (in the app: the gear, then Turn on notifications)"
+    title = t["title"] if t["title"].lower().startswith(who["name"].lower()) else f"{who['name']}: {t['title']}"
+    n = push_all({"title": title[:200], "body": t["note"][:2000], "tag": f"amarchy-task-{t['id']}",
+                  "url": "/#/tasks", "icon": team_icon(who)})
+    return None if n else "no phone took it"
+
+
+def task_press(tid, n):
+    """Button n of a task, pressed in the app: its message to the task's
+    agent (amarchy send, waking it), and the task done. None, or what's
+    wrong (nothing sent then)."""
+    if not isinstance(tid, str) or not TASK_ID.fullmatch(tid) or not isinstance(n, int) or isinstance(n, bool):
+        return "which task (id) and which of its buttons (button)"
+
+    def press(tasks):
+        t = next((t for t in tasks if t["id"] == tid), None)
+        if not t:
+            return "That task is gone: its agent took it down, or its time ran out"
+        buttons = t.get("buttons") or []
+        if not 0 <= n < len(buttons):
+            return "That task has no such button"
+        r = run_amarchy("send", t["agent"], buttons[n]["send"], "--no-wait")
+        if r.returncode != 0:
+            return gist(r.stderr) or "Its agent didn't take it"
+        tasks.remove(t)
+        return None
+    return tasks_change(press)
+
+
+def cmd_task(args):
+    """amarchy task add | list | done: your agents' tasks (see TASKS)."""
+    sub, rest = (args[0], args[1:]) if args else ("", [])
+    if sub == "add":
+        return task_add_cmd(rest)
+    agent, as_json, ids = None, False, []
+    it = iter(rest)
+    for a in it:
+        if a == "--agent":
+            agent = next(it, None)
+            if not agent:
+                return fail("--agent takes an agent's id (amarchy agents lists them)")
+        elif a == "--json" and sub in ("list", "ls"):
+            as_json = True
+        elif a.startswith("-") or sub not in ("done", "rm"):
+            print(usage("task"), file=sys.stderr)
+            return 1
+        else:
+            ids.append(a)
+    if sub in ("list", "ls"):
+        crew = {a["id"]: a for a in team()}
+        now = time.time()
+        rows = [t for t in tasks_read() if task_open(t, now) and t["agent"] in crew and (not agent or t["agent"] == agent)]
+        rows.sort(key=lambda t: (not t.get("until"), t.get("until") or t.get("at") or 0, t.get("at") or 0))
+        if as_json:
+            print(json.dumps([{**{k: t.get(k) for k in ("id", "agent", "title", "note", "links", "buttons", "key", "at")},
+                               "agent_name": crew[t["agent"]]["name"], "until": t.get("until") or None,
+                               "until_iso": datetime.datetime.fromtimestamp(t["until"]).astimezone().isoformat(timespec="minutes")
+                               if t.get("until") else None} for t in rows]))
+        else:
+            for t in rows:
+                print(f"{t['id']}\t{t['agent']}\t{task_clock(t['until']) if t.get('until') else '-'}\t{t.get('title') or ''}")
+            if not rows:
+                print("none")
+        return 0
+    if sub in ("done", "rm"):
+        if not ids and not agent:
+            print(usage("task"), file=sys.stderr)
+            return 1
+        if ids and agent:
+            return fail("done takes the tasks' ids, or --agent <id> for all of an agent's: not both")
+
+        def done(tasks):
+            gone = [t for t in tasks if t["id"] in ids or (agent and t["agent"] == agent)]
+            for t in gone:
+                tasks.remove(t)
+            return [t["id"] for t in gone]
+        gone = tasks_change(done)
+        for tid in gone:
+            print(f"done\t{tid}")
+        missing = [tid for tid in ids if tid not in gone]
+        for tid in missing:
+            print(f"amarchy: no task {tid} (done already, or its time ran out)", file=sys.stderr)
+        if agent and not gone:
+            print(f"{agent} has no task open")
+        return 1 if missing else 0
+    print(usage("task"), file=sys.stderr)
+    return 1
+
+
+def task_add_cmd(args):
+    """amarchy task add: a task on Tasks, its id printed."""
+    agent = os.environ.get("AMARCHY_SESSION") or None
+    title = note = until_word = key = None
+    links, buttons, notify = [], [], False
+    it = iter(args)
+    for a in it:
+        if a in ("--agent", "--title", "--note", "--link", "--button", "--until", "--key"):
+            v = next(it, None)
+            if v is None:
+                return fail(f"{a} takes a value (amarchy task --help)")
+            if a == "--agent":
+                agent = v.strip()
+            elif a == "--title":
+                title = v
+            elif a == "--note":
+                note = v
+            elif a == "--link":
+                links.append(v)
+            elif a == "--button":
+                buttons.append(v)
+            elif a == "--until":
+                until_word = v
+            else:
+                key = v.strip()
+        elif a == "--notify":
+            notify = True
+        else:
+            print(usage("task"), file=sys.stderr)
+            return 1
+    title = " ".join((title or "").split())
+    if not title:
+        return fail("--title takes what the task is, in a line")
+    if len(title) > TASK_TITLE:
+        return fail(f"--title is {TASK_TITLE} characters at most")
+    note = (note or "").strip()
+    if len(note) > TASK_NOTE:
+        return fail(f"--note is {TASK_NOTE} characters at most")
+    if len(links) > TASK_LINKS or len(buttons) > TASK_BUTTONS:
+        return fail(f"a task has {TASK_LINKS} links and {TASK_BUTTONS} buttons at most")
+    links = [task_link(v) for v in links]
+    buttons = [task_button(v, title) for v in buttons] or [{"label": "Done", "send": f"Done: {title}"}]
+    bad = next((x for x in links + buttons if isinstance(x, str)), None)
+    if bad:
+        return fail(bad)
+    if key is not None and not 0 < len(key) <= 200:
+        return fail("--key is 1 to 200 characters")
+    until = None
+    if until_word is not None:
+        until, why = task_until(until_word)
+        if why:
+            return fail(why)
+    who, why = task_owner(agent)
+    if why:
+        return fail(why)
+    t = {"agent": who["id"], "title": title, "note": note, "links": links, "buttons": buttons,
+         "until": until or 0, "at": time.time(), "key": key or ""}
+
+    def add(tasks):
+        now = time.time()
+        same = next((x for x in tasks if key and x["agent"] == who["id"] and x.get("key") == key), None)
+        if same:        # the same one again: changed in place, its card where it is
+            same.update({k: v for k, v in t.items() if k != "at"})
+            return same["id"], None
+        if sum(1 for x in tasks if x["agent"] == who["id"] and task_open(x, now)) >= TASK_MAX:
+            return None, f"{who['name']} has {TASK_MAX} tasks open already: take some down first (amarchy task done)"
+        taken = {x["id"] for x in tasks}
+        tid = next(i for i in iter(lambda: os.urandom(3).hex(), None) if i not in taken)
+        tasks.append({"id": tid, **t})
+        return tid, None
+    tid, why = tasks_change(add)
+    if why:
+        return fail(why)
+    print(tid)
+    if notify:
+        why = task_notify(who, {**t, "id": tid})
+        if why:
+            print(f"amarchy: the task is up, but not on your phones: {why}", file=sys.stderr)
     return 0
 
 
@@ -13374,6 +13724,9 @@ def app_handler(st, users, address):
                 return self.send(200, {})
             if self.path == "/api/today/loop":      # Done, Chase, Ask or New chat on one of your loops: {key, action, text}, to your assistant
                 why = loop_tell(data.get("key"), data.get("action"), data.get("text") or "")
+                return self.error(409, why) if why else self.send(200, {})
+            if self.path == "/api/tasks/press":     # a button on one of your agents' tasks: {id, button}, its message to the agent
+                why = task_press(data.get("id"), data.get("button"))
                 return self.error(409, why) if why else self.send(200, {})
             if self.path == "/api/today/loops":     # your loops file: {path} ("" for none)
                 p = data.get("path")
@@ -16568,6 +16921,8 @@ OPTIONS = {
     "dictation": ({"--status", "--json"}, set(), set()),
     "automations": ({"--json"}, set(), set()),
     "today": ({"--json", "--loops"}, set(), set()),
+    "task": ({"--agent", "--title", "--note", "--link", "--button", "--until", "--key", "--notify", "--json"},
+             {"--agent", "--title", "--note", "--link", "--button", "--until", "--key"}, set()),
     "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
@@ -16730,6 +17085,8 @@ def main(argv):
         return cmd_automations(args)
     elif cmd == "today":
         return cmd_today(args)
+    elif cmd == "task":
+        return cmd_task(args)
     elif cmd == "terminals":
         return cmd_terminals(args)
     elif cmd == "protocol-check":

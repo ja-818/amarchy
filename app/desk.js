@@ -521,6 +521,7 @@ function deskRoute() {
   board.waitFor = null;
   show(null);
   if (here() === "#/new") boardCompose();
+  if (here() === "#/tasks") boardTasks();
 }
 
 // The chat over the board (id), or the board (null).

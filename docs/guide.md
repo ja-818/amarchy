@@ -312,10 +312,12 @@ host's chats without anything else installed.
   what asks you, what's blocked and what finished that you haven't opened yet. A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes
   it, with Undo.
-- **Tasks**: your own (your loops file: due now, waiting on others, this week,
-  further out, someday), each with **Follow up** (your assistant drafts the
-  message to whoever you wait on), **Ask Jaken…** (tell your assistant what to do
-  about it) and **Done**.
+- **Tasks**: your agents' tasks first (each with its agent's picture and name, how
+  long it has left, its links and its buttons: see [Your agents'
+  tasks](#your-agents-tasks)), then your own (your loops file: due now, waiting on
+  others, this week, further out, someday), each with **Follow up** (your assistant
+  drafts the message to whoever you wait on), **Ask Jaken…** (tell your assistant
+  what to do about it) and **Done**.
 - **Missions count once they're merged.** amarchy looks at every open chat each
   minute: its branch merged into its project's main (a merge commit naming the
   branch, or a fast-forward: amarchy's own "ship it"), or a GitHub pull request
@@ -819,8 +821,9 @@ first, then the one you last wrote to), and one count over it:
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission's **Allow** and
   **Deny**, a secret to give (**Answer** opens the chat at its card), a chat that's
-  blocked, the people to chase today (**Chase**: your assistant drafts the message),
-  and your commitments due by tomorrow, late ones in red. The number on the tab
+  blocked, your agents' tasks (first in Tasks: [Your agents'
+  tasks](#your-agents-tasks)), the people to chase today (**Chase**: your assistant
+  drafts the message), and your commitments due by tomorrow, late ones in red. The number on the tab
   counts them; the app's icon counts the chats asking you.
 - **Finish**: a chat exists to reach its goal and be closed. A chat whose goal is
   reached says **Done** with **Close**; one stalled two days or more offers **Ask
@@ -994,9 +997,9 @@ amarchy agents <id> --sound <name>|off       # its chime
 amarchy agents <id> off                      # a chat like the others again (its picture deleted)
 ```
 
-An agent has everything your assistant has but your tasks (Today's loops and their
-**Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay your
-assistant's):
+An agent has everything your assistant has but your loops file (Today's loops and
+their **Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay your
+assistant's); it has [tasks of its own](#your-agents-tasks) instead:
 
 - **Its place**, on top of every list, right under your assistant, in the order you
   made them, whatever its priority. Its card shows its picture and name, as your
@@ -1024,6 +1027,55 @@ one you have); on an agent, **name, picture, chime…**: rename it, choose its p
 more**. **Settings → Agents** lists them, your assistant first, and **Settings →
 Sound** has a tab for each.
 
+## Your agents' tasks
+
+An agent that finds things for you to do (a post worth replying to, a lead to call,
+a form to sign) shouldn't start a chat for each one: they'd crowd your chats, and
+each would be a mission to complete. It puts each on **Tasks** instead, as a card of
+its own with buttons that answer it:
+
+```sh
+amarchy task add --title "Reply: @levelsio's AI-reply spam list" \
+  --note "45 min old, 46 replies; worth it until 10:12" \
+  --link "Open post=https://x.com/levelsio/status/123" \
+  --button "Replied=Replied to https://x.com/levelsio/status/123" \
+  --button "Skipped=Skipped https://x.com/levelsio/status/123" \
+  --until 45m --key https://x.com/levelsio/status/123 --notify
+# prints the task's id, e.g. 3fa9c1
+
+amarchy task list [--agent <id>] [--json]     # what's open: id, agent, until, title
+amarchy task done <id>... | --agent <id>      # take it down (or all of an agent's): nothing is sent
+```
+
+- **Whose**: the agent's own, run from its chat (`$AMARCHY_SESSION`), or `--agent
+  <id>`. Only your assistant and your agents have tasks: a plain chat is refused
+  (it asks you on its own card).
+- **The card**, first in Tasks' **Now** (the one going soonest first): the agent's
+  picture and name, the title (its keyword in bold, as a chat's), how long it has
+  left (red the last ten minutes; one with no time says how old it is), the note
+  (`**bold**`, `` `code` `` and links drawn), then its links and its buttons. The
+  Tasks tab counts it. On the phone the title has a line of its own.
+- **`--link [<label>=]<url>`** (up to 3; a bare URL is **Open**): a button that opens
+  the page in a new tab. The task stays.
+- **`--button <label>[=<message>]`** (up to 4; none gives **Done**): pressed, the card
+  ticks with its words and goes, with **Undo** for a few seconds; then the message
+  goes to the agent as if you'd typed it (`amarchy send`: an agent asleep wakes for
+  it) and the task is done. Without a message it sends `<label>: <title>`. Leaving
+  the app (a link, another app) sends it at once. Keys: `1`–`4` press its buttons,
+  `r` opens its first link, the card's head opens the agent's chat.
+- **`--until`**: a date and time (`2026-11-19T10:12-05:00`; the host's zone without
+  one), a time today (`10:12`), or how long from now (`45m`, `2h`, `1h30m`, `1d`).
+  Past it, the task goes by itself (the agent isn't told: `amarchy task list` shows
+  what's left). A button pressed just before still goes.
+- **`--key`**: the same agent's task with that key is changed in place (same id,
+  same card) rather than added twice: a hunt that finds the same post again doesn't
+  double it.
+- **`--notify`**: a notification on your phones too, under the agent's name and
+  picture; a tap opens Tasks. Without it, a task is quiet.
+- An agent has 30 open at most. One that's no longer an agent keeps its tasks out of
+  sight; a closed one's go. The search finds them too (the agent, the title, the
+  note).
+
 ## From scripts and agents
 
 Two commands do what you'd do from the phone, for a script, a timer or another
@@ -1033,6 +1085,9 @@ chat's Claude (an assistant that keeps your day, say):
 amarchy send <id> "<text>"                                     # to a chat's Claude, as if typed and sent
 amarchy notify "<title>" "<body>" [--session <id>] [--urgent]  # to your phones
 ```
+
+(An agent that needs you to do something puts it on Tasks instead, with buttons
+that answer it: `amarchy task add`, see [Your agents' tasks](#your-agents-tasks).)
 
 **`amarchy send`** types the text into the chat's Claude the way the phone does
 (pasted, then Enter), `-` reading it from stdin. It waits until Claude is free: not in
@@ -1227,6 +1282,12 @@ amarchy dictation transcribe <file>   write down a recording, as a dictation wou
 Today:
 amarchy today [--json]                what needs you, what's due, who you wait on, each chat's goal and state
 amarchy today --loops [<file>|off]    your loops file, or none (prints it without one)
+
+Your agents' tasks:
+amarchy task add --title <text> [--note <text>] [--link [<label>=]<url>]... [--button <label>[=<message>]]...
+                 [--until <when>] [--key <key>] [--notify] [--agent <id>]   a card on Tasks; prints its id
+amarchy task list [--agent <id>] [--json]   what's open
+amarchy task done <id>... | --agent <id>    take tasks down (nothing is sent)
 
 Automations:
 amarchy automations [--json]          what runs by itself (systemd user timers): what, when, next, last

@@ -157,7 +157,7 @@ html { touch-action: manipulation; }
 .avatar.letter text { fill: var(--ph, var(--accent)); font-family: inherit; font-size: 54px; font-weight: 700; }
 .tcard-head .avatar { width: 26px; height: 26px; flex: none; }
 /* Under the pointer, and under the keys: the card, the whole of it. */
-@media (hover: hover) { .tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover {
+@media (hover: hover) { .tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover, .tcard.k-task:hover {
   background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--card-bg); border-color: var(--card-hover-border);
 } }
 .tcard-head:focus-visible { outline: none; }
@@ -285,6 +285,22 @@ html { touch-action: manipulation; }
 .tcard.k-due .tcard-actions, .tcard.k-chase .tcard-actions { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 @media (max-width: 559px) { .tcard.k-due .tcard-meta, .tcard.k-chase .tcard-meta { flex-basis: 100%; } }
 .tcard.k-due .tbtn, .tcard.k-chase .tbtn { padding: 5px 14px; }
+/* An agent's task (today.js todayTask): its whole title (three lines at most),
+   its agent's picture and name and its time beside the first; its links and
+   buttons under its note. The whole card opens the agent's chat. */
+.tcard.k-task { cursor: pointer; }
+.tcard.k-task > .tcard-head { align-items: flex-start; }
+.tcard.k-task > .tcard-head > .avatar, .tcard.k-task > .tcard-head > .tcard-chip, .tcard.k-task > .tcard-head > .tpill { margin-top: 1px; }
+.tcard.k-task .tcard-title .task { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.tcard.k-task .tcard-actions { align-items: center; }
+.tcard.k-task > .tcard-text { white-space: pre-line; }      /* (its note's lines as the agent wrote them) */
+/* Narrow (a phone): its agent and its time on a line, its title under them, the card's width. */
+@media (max-width: 559px) {
+  .tcard.k-task > .tcard-head { flex-wrap: wrap; align-items: center; row-gap: 6px; padding-bottom: 6px; }
+  .tcard.k-task > .tcard-head > .tcard-title { order: 1; flex-basis: 100%; }
+  .tcard.k-task > .tcard-head > .tpill { margin-left: auto; }
+  .tcard.k-task > .tcard-head > .avatar, .tcard.k-task > .tcard-head > .tcard-chip, .tcard.k-task > .tcard-head > .tpill { margin-top: 0; }
+}
 @media (hover: hover) { .tbtn:hover { background: var(--button-hover-bg); } }
 .tbtn:active { background: var(--button-press-bg); }
 .tbtn.primary:active { background: color-mix(in srgb, var(--button-primary-bg) 82%, var(--text)); }

@@ -215,6 +215,34 @@ command's usage without running it (an option it doesn't know fails instead).
   pick the project the loop belongs to, start a session for it with the whole
   brief (`amarchy new <project> [name] --prompt "<brief>"`, the note in it),
   and add `(chat <its id>)` to the loop's line: the loop then has Open chat.
+- `amarchy task add | list | done`: **if you're the user's assistant or one of
+  their agents**, what you need the user to do (a post to reply to, a form to
+  sign) goes on their **Tasks** as a card of yours, not a new chat each time
+  (only the assistant and agents have tasks; another chat is refused):
+  ```
+  amarchy task add --title "Reply: @levelsio's AI-reply spam list" \
+    --note "45 min old, 46 replies; worth it until 10:12" \
+    --link "Open post=https://x.com/levelsio/status/123" \
+    --button "Replied=Replied to https://x.com/levelsio/status/123" \
+    --button "Skipped=Skipped https://x.com/levelsio/status/123" \
+    --until 45m --key https://x.com/levelsio/status/123 --notify
+  ```
+  It prints the task's id. The card shows your picture and name, the title
+  (`Keyword: a few words`, as a chat's), how long it has left, the note, then
+  its links (up to 3, `[<label>=]<url>`: the page in a new tab, the task stays)
+  and buttons (up to 4, `<label>[=<message>]`; none gives Done). When the user
+  presses a button, its message reaches you as their own (after a few seconds of
+  Undo; you're woken for it) and the task is done: make each message say which
+  task it's about (the post's URL), since several may be open. A label alone
+  sends `<label>: <title>`. `--until` (`2026-11-19T10:12-05:00`, `10:12`, `45m`,
+  `2h`, `1d`): past it the task goes by itself, and you aren't told. `--key`:
+  the same key again changes that task in place rather than adding it twice.
+  `--notify`: a notification on their phones too (a tap opens Tasks); use it for
+  what can't wait. `--agent <id>` puts it on another agent's (default: yours,
+  `$AMARCHY_SESSION`). `amarchy task list [--agent <id>] [--json]` shows what's
+  open; `amarchy task done <id>... | --agent <id>` takes tasks down (nothing is
+  sent): do it when one no longer needs the user (they did it elsewhere, a newer
+  one replaces it). 30 open per agent at most.
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the
@@ -411,4 +439,5 @@ their agents (`amarchy agents` lists them; `assistant: "agent"`) are the
 exception: their notifications always reach them, each under its own name and
 picture. `amarchy alerts` decides what the other sessions' do; only change it,
 the assistant or the agents, when the user asks. If you are one of the user's
-agents, you live on: you're never a chat to complete or close.
+agents, you live on: you're never a chat to complete or close; what you need the
+user to do goes on their Tasks (`amarchy task add`, above), not into new chats.

@@ -170,11 +170,12 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-async function api(path, body) {
+// keepalive: it goes even if the page is put away meanwhile (a link opened on the phone).
+async function api(path, body, { keepalive = false } = {}) {
   let res;
   try {
     res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify(body || {}) });
+                              body: JSON.stringify(body || {}), ...(keepalive ? { keepalive: true } : {}) });
   } catch (e) {
     throw new Error("Can't reach Amarchy");
   }
@@ -602,11 +603,13 @@ function loadWhenSafe() {
 }
 
 // Waits while a dictation is under way, a picture or a file is on its way to a
-// message, a card has an answer begun, or a box holds words not sent. The
-// composer's and the new chat's words are no reason: they're kept as drafts
-// (chat.js, newChat) and come back with the page.
+// message, a card has an answer begun, something done waits out its Undo (an
+// answer, a close, a task's button: it would be lost with the page), or a box
+// holds words not sent. The composer's and the new chat's words are no
+// reason: they're kept as drafts (chat.js, newChat) and come back with the page.
 function reloadWait() {
   if (dictationUnderWay()) return true;
+  if (document.querySelector(".undo-toast")) return true;
   if ([app.session && app.session.chat, desk.chat].some((c) => c && c.tray.length)) return true;
   if (desk.newChat && desk.newChat.tray().length) return true;      // pictures for a new chat
   if (document.querySelector(".card .chosen, .card .opt.on, .card .q-tab.done, .tcard .today-opt.chosen")) return true;     // an answer picked, not sent
@@ -2604,6 +2607,7 @@ function route() {
     if (!app.session) app.session = new SessionView(id);
   } else {
     renderHome();
+    if (here() === "#/tasks") boardTasks();
   }
 }
 
@@ -2719,10 +2723,10 @@ async function start() {
   takeKept();
   if (kept && standalone && kept.hash) routed.hash = kept.hash;
   // Ended by iOS in the background a moment ago (not a notification's): back in the chat you were in.
-  else if (standalone && !app.desk && !asked && !/^#\/s\//.test(routed.hash || "") && placeLeft()) routed.hash = placeLeft();
+  else if (standalone && !app.desk && !asked && !/^#\/(s\/|tasks$)/.test(routed.hash || "") && placeLeft()) routed.hash = placeLeft();
   // A computer's, launched with no chat (or new chat) asked for: the board,
   // not the last chat.
-  if (app.desk && launched() && !asked && !/^#\/(s\/|new$)/.test(here())) {
+  if (app.desk && launched() && !asked && !/^#\/(s\/|new$|tasks$)/.test(here())) {
     routed.hash = "#/today";
     if (!standalone) history.replaceState(null, "", location.pathname + location.search + "#/today");
   }

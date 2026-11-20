@@ -305,6 +305,14 @@ function boardTab(tab) {
   if (go) uiReveal(go, { scroller: board.scroll });
 }
 
+// #/tasks (a task's notification, tapped): the board on Tasks, its address
+// the board's again (so the next one is a change of address too).
+function boardTasks() {
+  boardTab("tasks");
+  if (standalone) routed.hash = "#/today";
+  else history.replaceState(null, "", `${location.pathname}${location.search}#/today`);
+}
+
 // An empty amarchy: no project and no chat yet (the board is the welcome).
 function boardEmpty(v = app.view) {
   return !!v && !v.sessions.length && !(v.projects || []).length;
@@ -544,11 +552,12 @@ function boardSearchDraw() {
   const byId = new Map((found || []).map((r) => [r.id, r]));
   const rows = [...(found || []).map((r) => r.id), ...v.sessions.filter((s) => named(s) && !byId.has(s.id)).map((s) => s.id)]
     .map((id) => row(id)).filter(Boolean);
-  // Your tasks that have them too (who and what), first on the Tasks tab.
+  // Your tasks that have them too (who and what; an agent's: it, what, its note), first on the Tasks tab.
   const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
+  const theirs = todayTasks(v).filter((t) => { const x = `${t.agent_name} ${t.title} ${t.note}`.toLowerCase(); return words.every((w) => x.includes(w)); });
   // Drawn again only when what it shows changed: the list comes every
   // second while chats work, and the same cards stay as they are.
-  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops,
+  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops, theirs.map(todayTaskKey),
     ((v.today || {}).assistant || {}).name, (v.today || {}).sent, (found || []).map((r) => (r.at ? autoPast(r.at) : ""))])}`;
   if (board.box.dataset.key === key) return;
   const cards = rows.map((s) => {
@@ -562,10 +571,10 @@ function boardSearchDraw() {
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
                h("span", { html: lit(l.text, words) })))] }));
   });
-  const taskCards = loops.map((l) => todayLoop(l, v));
+  const taskCards = [...theirs.map((t) => todayTask(t)), ...loops.map((l) => todayLoop(l, v))];
   const chatsSec = cards.length ? uiSection("found-chats", "Chats", { count: cards.length }, cards) : null;
   const tasksSec = taskCards.length ? uiSection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
-  const n = rows.length + loops.length;
+  const n = rows.length + taskCards.length;
   // A count once it's the host's for what you typed: before, it isn't one yet.
   const head = h("div", { class: "today-summary" }, !answered ? `Searching “${board.query}”…`
     : board.found.error || `${n || "Nothing"} with “${board.query}”`);
