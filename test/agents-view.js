@@ -4,7 +4,7 @@
 // picture (yours, else its initial on its project's color); never a mission:
 // no Complete on its card, its head, its menu or its keys, no Stalled, no Done
 // to complete, not new for Needs you, no priority. Asking you something, it's
-// your move like any chat. Its chat: its name and picture on the bar, "Message
+// your move like any chat's, on top still (its row has the question). Its chat: its name and picture on the bar, "Message
 // Fireship" in the box, no Done strip. Its sheet (name, picture, chime, Not an
 // agent any more), the sheet that makes one, Settings' Agents and Tell me, the
 // chimes' sheet with a tab each, and its own chime when it rings. With
@@ -74,14 +74,14 @@ async function run(browser, port, layout) {
              letter: letter ? letter.textContent : "", hue: letter ? /ph-\d/.test(letter.getAttribute("class")) : false,
              size: letter ? Math.round(letter.getBoundingClientRect().width) : 0,
              chip: !!c.querySelector(".tcard-chip"), flag: !!s.querySelector(".prio"), complete: [...c.querySelectorAll(".tbtn")].some((b) => /Complete/.test(b.innerText)),
-             pill: (c.querySelector(".tpill") || {}).innerText || "", words: statusWords(row("fireship-fireship")),
+             pill: (c.querySelector(".tpill") || {}).innerText || "", sub: (c.querySelector(".tcard-sub") || {}).innerText || "",
              pic: (s.querySelector(".tcard-head img.avatar") || {}).getAttribute ? s.querySelector(".tcard-head img.avatar").getAttribute("src") : "" };
   });
   check(where, card.assistant && card.title && !card.chip, `an agent's card: its name, as your assistant's is (${JSON.stringify(card)})`);
-  check(where, card.letter === "F" && card.hue && card.size === 26, "no picture of yours: its initial, on its project's color, as big as a picture");
+  check(where, card.letter === "F" && card.hue && card.size === 46, `no picture of yours: its initial, on its project's color, as big as a picture (${card.size})`);
   check(where, card.pic === "/picture/0123456789ab-192.png", `a picture of yours: that one (${card.pic})`);
   check(where, !card.flag, "pinned before it was an agent: no flag (it's on top whatever its priority)");
-  check(where, !card.complete && card.pill === card.words && !/Stalled|New|Merged/.test(card.pill), `done, merged, quiet for days, unseen: still never to complete, its state in words as your assistant's (${card.pill})`);
+  check(where, !card.complete && !card.pill && !/Stalled|New|Merged|Done/.test(card.sub), `done, merged, quiet for days, unseen: still never to complete, no state pill, a conversation's row (${card.sub})`);
   const parts = await p.evaluate(() => { const q = todayParts(app.view); const ids = (l) => l.map((s) => s.id);
     return { fresh: ids(q.fresh), done: ids(q.done), stale: ids(q.stale), ready: ids(q.ready), agents: ids(q.agents), stalled: missionIsStalled(row("fireship-fireship")) }; });
   check(where, JSON.stringify(parts.agents) === JSON.stringify(["scout-scout", "fireship-fireship"]) && ![...parts.fresh, ...parts.done, ...parts.stale, ...parts.ready].some((id) => /scout|fireship-fireship/.test(id)) && !parts.stalled,
@@ -91,16 +91,17 @@ async function run(browser, port, layout) {
         "another chat of its project: in Now, under its name");
   await p.screenshot({ path: path.join(SHOTS, `${where}-agents.png`), fullPage: true });
 
-  // At work: still on top. Asking you something: your move, in Now, with its picture.
+  // At work: still on top, typing…. Asking you something: your move, on top still, its question and its picture.
   await set(p, "fireship-fireship", { status: "working" });
-  check(where, await until(p, () => /Working/.test((document.querySelector(".board-today > .tcard[data-id=fireship-fireship] .tpill, .board-today > * > .tcard[data-id=fireship-fireship] .tpill") || {}).innerText || "")),
-        "at work: on top still, Working");
+  check(where, await until(p, () => /typing…/.test((document.querySelector(".board-today > .tcard[data-id=fireship-fireship] .tcard-sub, .board-today > * > .tcard[data-id=fireship-fireship] .tcard-sub") || {}).innerText || "")),
+        "at work: on top still, typing…");
   check(where, await p.evaluate(() => !document.querySelector(".today-working .tcard[data-id=fireship-fireship]")), "not under At work");
   await set(p, "fireship-fireship", { status: "waiting", asks: "Claude asks to post on X" });
-  check(where, await until(p, () => { const c = document.querySelector(".today-now .tcard.k-ask[data-id=fireship-fireship]"); return !!c && !!c.querySelector(".tcard-head .avatar") && /post on X/.test(c.innerText); }),
-        "asking you: in Now, its question, its picture");
+  check(where, await until(p, () => { const c = document.querySelector(".board-today .tcard.k-assistant[data-id=fireship-fireship]"); return !!c && !c.closest(".today-now") && !!c.querySelector(".tcard-head .avatar") && /post on X/.test(c.innerText) && /asks you/.test(c.querySelector(".tcard-sub").innerText); }),
+        "asking you: on top still, its question, its picture");
+  check(where, await p.evaluate(() => todayCount(app.view, "chats") >= 1 && todayParts(app.view).asks.some((s) => s.id === "fireship-fireship")), "and counted as your move");
   await back(p);
-  await until(p, () => !document.querySelector(".today-now .tcard[data-id=fireship-fireship]"));
+  await until(p, () => !/asks you/.test((document.querySelector(".board-today .tcard[data-id=fireship-fireship] .tcard-sub") || {}).innerText || ""));
 
   // Its keys on the board: x and p do nothing to it.
   await p.evaluate(() => { const c = document.querySelector(".board-today .tcard[data-id=fireship-fireship] .tcard-head"); c.focus(); });

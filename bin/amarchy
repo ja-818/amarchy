@@ -151,8 +151,9 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         too). An agent has what your assistant has but your loops file: its
                                         place on top of every list, next to your assistant; its own picture
                                         (its initial until you give it one) and chime; it always tells you when
-                                        it needs you or is done; tasks of its own on Tasks (amarchy task); and
-                                        it's never a mission to complete
+                                        it needs you or is done; tasks of its own on Tasks (amarchy task); a
+                                        chat like a messaging app's (bubbles, typing…, unread counts), its
+                                        Claude writing as someone you text; and it's never a mission to complete
   amarchy agents <id> off               not an agent any more: a chat like the others again
   amarchy missions [--goal <n>]         what you've merged (only merges count): today, your streak, best day,
                   [--reset]             all of them, your replies and badges; --goal sets how many a day you
@@ -355,6 +356,8 @@ STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "amarchy
 SESSIONS = STATE / "sessions"
 STATUS = STATE / "status"
 UNSEEN = STATE / "unseen"       # sessions that finished while you weren't looking, until you open them
+SEEN = STATE / "seen"           # when you last looked at each session (its file's time): what came after is unread
+SENT_BY = STATE / "sent-by"     # <id>.jsonl: what a script, a timer or another chat sent a session (amarchy send), not you
 RUN = STATE / "run"             # per project: <repo> its run command, <repo>.json its other saved commands
 PROJECT_ORDER = STATE / "project-order"  # the order your projects come in, one name a line (see project_order)
 CLOSING = STATE / "closing"     # sessions closed but not yet cleaned up (see "reap")
@@ -739,8 +742,8 @@ def save_session(s):
 
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
-               "running", "serving", "unseen", "assistant", "assistant_name", "said", "picture", "chime", "today",
-               "permission", "merged")
+               "running", "serving", "unseen", "assistant", "assistant_name", "said", "said_at", "unread", "picture", "chime",
+               "today", "permission", "merged")
 
 
 def own_session_id():
@@ -2847,7 +2850,7 @@ def claude_argv(s, prefill="", prompt=None):
     return ["claude", *CLAUDE_ARGS, *(["--model", model] if model else []),
             *(["--effort", effort] if effort in EFFORTS else []), *claude_resume(s),
             *(["--prefill", prefill] if prefill and prompt is None else []),
-            *reply_format_args(), "--settings", hook_settings(s["id"]), *first]
+            *reply_format_args(s), "--settings", hook_settings(s["id"]), *first]
 
 
 def pane_loop(pane, procs):
@@ -5260,8 +5263,8 @@ def cmd_hook(sid, state):
     # stop is stop_hook_active), and the session stays working meanwhile.
     # Only a Claude that has the current format: it knows what's asked.
     if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
-            and claude_format_version() == FORMAT_VERSION:
-        ask = reply_fix(event)
+            and claude_format_version() == format_version(s):
+        ask = reply_fix(event, chat=is_agent(s))
         if ask:
             print(json.dumps({"decision": "block", "reason": ask}))
             return
@@ -5269,7 +5272,7 @@ def cmd_hook(sid, state):
     # it's started again once idle (claude_reload), the same conversation, with
     # the format amarchy gives now. (A tool's description would be kept in the
     # conversation; the format is given at start, so a new Claude has it.)
-    if state == "idle" and event.get("hook_event_name") == "Stop" and claude_format_version() != FORMAT_VERSION:
+    if state == "idle" and event.get("hook_event_name") == "Stop" and claude_format_version() != format_version(s):
         detach([ENTRY, "claude-reload", sid])
 
     if started:
@@ -5331,6 +5334,34 @@ def mark_unseen(sid):
 
 def mark_seen(sid):
     (UNSEEN / sid).unlink(missing_ok=True)
+    try:
+        SEEN.mkdir(parents=True, exist_ok=True)
+        (SEEN / sid).touch()
+    except OSError:
+        pass
+
+
+def seen_at(sid):
+    """When you last looked at a session (mark_seen), or None for never
+    since amarchy kept that."""
+    try:
+        return (SEEN / sid).stat().st_mtime
+    except OSError:
+        return None
+
+
+def unread(s, words):
+    """How many of the messages its Claude wrote last (words: last_words's
+    stamps, their times) you haven't seen: those after you last looked.
+    Never looked since amarchy kept that: those since your last message
+    while its last turn is unseen, else none (you opened it since)."""
+    stamps = words.get("stamps") or []
+    if not stamps:
+        return 0
+    at = seen_at(s["id"])
+    if at is None:
+        return words.get("after_you", 0) if unseen(s["id"]) else 0
+    return sum(1 for t in stamps if t > at)
 
 
 def cmd_seen(sid):
@@ -5677,7 +5708,14 @@ def session_view():
         if s["assistant"]:
             # What it last wrote: its notifications' body, and the list's
             # preview while you haven't read it.
-            s["said"] = last_said(s)
+            words = last_words(s, deep=s["assistant"] in AGENT_ROLES)
+            s["said"] = words["said"]
+            if s["assistant"] in AGENT_ROLES:
+                # As a messaging app's list has it: when it last wrote, and
+                # how many of its messages you haven't seen (app_watch: none
+                # while it's on a screen of yours).
+                s["said_at"] = words["said_at"]
+                s["unread"] = unread(s, words)
     ranks = {a["id"]: i for i, a in enumerate(crew)}
     ss.sort(key=lambda s: session_order(s, ranks))
     return ss
@@ -5880,6 +5918,8 @@ def cmd_assistant(args):
         return 0
     if rest == ["off"] and name is None:
         ASSISTANT_FILE.unlink(missing_ok=True)
+        if current:
+            format_changed(current["id"])
         print("none")
         return 0
     if len(rest) > 1:
@@ -5901,8 +5941,23 @@ def cmd_assistant(args):
         name = name if name is not None else was.get("name") or ""
         agents_drop(sid)
     write_file(ASSISTANT_FILE, json.dumps({"id": sid, "name": name or ""}))
+    # Its Claude writes as someone you text now (CHAT_FORMAT), and the one it
+    # replaces as a working chat again.
+    format_changed(*[x for x in (sid if not was and not (mine and mine["id"] == sid) else None,
+                                 mine["id"] if mine and mine["id"] != sid else None) if x])
     print(f"{sid}\t{assistant()['name']}")
     return 0
+
+
+def format_changed(*sids):
+    """These sessions' Claudes were given another format to write in (they
+    became your assistant or an agent, or stopped being one: reply_format):
+    each one started again once idle, the same conversation, with it
+    (claude_reload). Asleep, it wakes with it anyway."""
+    for sid in sids:
+        s = session(sid)
+        if s and asleep_since(sid) is None and host_pane(s):
+            detach([ENTRY, "claude-reload", sid])
 
 
 # ------------------------------------------------------------------ your agents
@@ -6090,6 +6145,7 @@ def cmd_agents(args):
         if not any(a["id"] == sid for a in agents_saved()):
             return fail(f"{sid} isn't one of your agents")
         agents_drop(sid)
+        format_changed(sid)
         print(f"{sid}\ta chat like the others again")
         return 0
     if sound is not None:
@@ -6111,6 +6167,7 @@ def cmd_agents(args):
         return 1
     rows = agents_saved()
     a = next((a for a in rows if a["id"] == sid), None)
+    made = not a
     if not a:
         a = {"id": sid, "name": "", "sound": ""}
         rows.append(a)
@@ -6120,6 +6177,8 @@ def cmd_agents(args):
     if sound is not None:
         a["sound"] = sound
     agents_write(rows)
+    if made:
+        format_changed(sid)     # it writes as someone you text now (CHAT_FORMAT)
     made = next(x for x in agents() if x["id"] == sid)
     print(f"{sid}\t{made['name']}")
     return 0
@@ -6233,31 +6292,49 @@ def step_input(given):
     return out
 
 
-def last_words(s, limit=240):
+UNREAD_MAX = 99         # messages counted unread, at most (the badge says 99 past it)
+
+
+def last_words(s, limit=240, deep=False):
     """From the end of the session's conversation: the last thing its Claude
-    wrote, in a line (said: the list's preview), and
-    the step it's on, if its last tool call has no result yet (step: {tool,
-    input}, or None). Read again only when the conversation has moved."""
+    wrote, in a line (said: the list's preview), when (said_at), the times
+    of the messages it wrote last (stamps, the newest last, at most
+    UNREAD_MAX: what may be unread) and how many of those came after your
+    last message (after_you), and the step it's on, if its last tool call
+    has no result yet (step: {tool, input}, or None). deep: reading further
+    back for the messages since your last one (your assistant's and your
+    agents', whose unread ones are counted). Read again only when the
+    conversation has moved."""
     f = transcript(s)
+    none = {"said": "", "said_at": 0, "stamps": [], "after_you": 0, "step": None}
     if not f:
-        return {"said": "", "step": None}
+        return none
     try:
         stamp, size = f.stat().st_mtime_ns, f.stat().st_size
     except OSError:
-        return {"said": "", "step": None}
-    if _said.get(str(f), (None,))[0] == stamp:
-        return _said[str(f)][1]
-    said, step = "", None
+        return none
+    key = f"{f}|{int(deep)}"
+    if _said.get(key, (None,))[0] == stamp:
+        return _said[key][1]
+    words = none
     # The last 64 KB has it nearly always; a long tool result can push it further back.
     for tail in (64_000, 400_000):
-        said, step, done, looking = "", None, set(), True
+        said, said_at, stamps, after_you, step, done, looking, counting, fixed = "", 0, [], 0, None, set(), True, True, False
         for r in reversed(conversation_records(f, tail=tail)):
             if not isinstance(r, dict) or r.get("isSidechain"):
                 continue
             message = r.get("message") if isinstance(r.get("message"), dict) else {}
             content = message.get("content")
-            if r.get("type") == "user" and isinstance(content, list):
-                done.update(b.get("tool_use_id") for b in content if isinstance(b, dict) and b.get("type") == "tool_result")
+            if r.get("type") == "user":
+                if isinstance(content, list):
+                    done.update(b.get("tool_use_id") for b in content if isinstance(b, dict) and b.get("type") == "tool_result")
+                # A message of yours (or sent in your name): what came before it, you'd read.
+                if counting and human_record(r):
+                    counting = False
+                # A reply sent back to be written again (reply_fix): the words
+                # just before it were replaced by the ones after it.
+                fixed = fix_feedback(r)
+                continue
             if r.get("type") != "assistant":
                 continue
             if looking and isinstance(content, list):
@@ -6266,9 +6343,19 @@ def last_words(s, limit=240):
                     looking = False
                     if uses[-1].get("id") not in done:
                         step = {"tool": uses[-1].get("name") or "", "input": step_input(uses[-1].get("input"))}
-            text = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
-                if isinstance(content, list) else content if isinstance(content, str) else ""
-            text = without_goal(text)      # where the chat stands: Today's, not words of the reply
+            texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"] \
+                if isinstance(content, list) else [content] if isinstance(content, str) else []
+            texts = [t for t in (without_goal(t).strip() for t in texts) if t]      # (its goal: Today's, not words)
+            if not texts or fixed:
+                continue
+            if len(stamps) < UNREAD_MAX:
+                n = min(len(texts), UNREAD_MAX - len(stamps))
+                stamps[:0] = [gh_time(r.get("timestamp") or "") or 0] * n
+                if counting:
+                    after_you += n
+            if said:
+                continue
+            text = " ".join(texts)
             text = re.sub(r"(?m)^ {0,3}```.*$", "", text)       # a block's fences: its words stay
             # Markdown's marks and list bullets out: words, in a line.
             # (Only emphasis marks: TEST_KEY keeps its underscore.)
@@ -6277,11 +6364,11 @@ def last_words(s, limit=240):
             text = " ".join(text.split())
             if text:
                 said = text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
-                break
-        if said or size <= tail:
+                said_at = gh_time(r.get("timestamp") or "")
+        words = {"said": said, "said_at": said_at, "stamps": stamps, "after_you": after_you, "step": step}
+        if size <= tail or (said and not (deep and counting and len(stamps) < UNREAD_MAX)):
             break
-    words = {"said": said, "step": step}
-    _said[str(f)] = (stamp, words)
+    _said[key] = (stamp, words)
     if len(_said) > 500:        # sessions long closed
         _said.clear()
     return words
@@ -9423,6 +9510,9 @@ def app_items(records, s):
     marked aside: it repeats what it said, and the app leaves it out; the
     brief itself is shown as the text it held (brief_text)."""
     out, briefed = [], False
+    # What a script, a timer or another chat sent it (amarchy send), each
+    # matched once, by its words, to the message it became: "from".
+    sent = [dict(e) for e in sent_by_read(s["id"])] if s and s.get("id") else []
     for r in records:
         if not isinstance(r, dict) or r.get("isSidechain"):
             continue
@@ -9453,6 +9543,9 @@ def app_items(records, s):
                     item = user_item(b.get("text") or "")
                     if item and item["kind"] == "user" and human_message(item["text"]):
                         item["turn"] = True     # yours: it starts a turn
+                        origin = sent_by_match(sent, item["text"], at)
+                        if origin is not None:
+                            item["from"] = origin or "script"
                     found.append(item)
                 elif b.get("type") == "image":       # shown at /api/session/<id>/image/<rec>/<n>
                     found.append({"kind": "user", "text": "[image]", "rec": rid, "turn": True,
@@ -9487,6 +9580,20 @@ def app_items(records, s):
         for i, item in enumerate(x for x in found if x):
             out.append({**item, "key": f"{rid}:{i}", "at": at})
     return out
+
+
+def sent_by_match(sent, text, at):
+    """Who sent the message text that reached Claude at at (ISO), when amarchy
+    send did (sent: sent_by_read's, each taken once): the session it ran in,
+    or "" for a script or timer; None when it's yours."""
+    if not sent:
+        return None
+    key, when = sent_hash(text), gh_time(at) or time.time()
+    for e in sent:
+        if not e.get("used") and e["hash"] == key and e["at"] <= when + 120 and when - e["at"] < 3 * 86400:
+            e["used"] = True
+            return e.get("from") or ""
+    return None
 
 
 def line_start(fh, pos):
@@ -11386,10 +11493,14 @@ def app_watch(st):
             app_words(st, ss)
             look = look_worn()
             # One finished while it was on your phone's screen: you've seen it.
+            # So are the messages your assistant or an agent writes while it's
+            # there: none unread.
             for s in ss:
-                if s["unseen"] and time.time() - st.seen.get(s["id"], 0) < APP_SEEN:
+                looked = time.time() - st.seen.get(s["id"], 0) < APP_SEEN
+                if looked and (s["unseen"] or s.get("unread")):
                     mark_seen(s["id"])
                     s["unseen"] = False
+                    s["unread"] = 0
             view = {"hostname": host_name(), "sessions": ss, "projects": ps,
                     "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "sound": sound_name(),
@@ -12007,26 +12118,28 @@ def turn_reply(path, tail=2_000_000):
     return "\n\n".join(texts)
 
 
-def reply_fix(event):
+def reply_fix(event, chat=False):
     """What a turn's reply needs fixed, as the Stop hook asks Claude (FIX_ASK,
     GOAL_ASK), or None: its blocks the app can't draw and a shape that reads
-    as a wall of text (reply_issues), else a missing goal block. Nothing for a turn that ended without words."""
+    as a wall of text (reply_issues), else a missing goal block. Nothing for a turn that ended without words.
+    chat: your assistant's or an agent's (CHAT_FORMAT): its blocks only, as
+    a message has no shape to keep and no goal."""
     text = event.get("last_assistant_message") if isinstance(event.get("last_assistant_message"), str) else None
     if not text:
         text = turn_reply(event.get("transcript_path"))
     if not text or not text.strip():
         return None
-    issues, has_goal = reply_issues(text, lambda sid: session(sid) is not None)
+    issues, has_goal = reply_issues(text, lambda sid: session(sid) is not None, chat=chat)
     if issues:
         return FIX_ASK.format(issues="\n".join(f"- {i}" for i in issues[:12]))
-    return None if has_goal else GOAL_ASK
+    return None if has_goal or chat else GOAL_ASK
 
 
-def reply_issues(text, chat_exists=None):
-    """A reply's blocks checked (block_issues) and its shape (reply_shape),
-    and whether it has its goal block: (issues, has_goal)."""
+def reply_issues(text, chat_exists=None, chat=False):
+    """A reply's blocks checked (block_issues) and its shape (reply_shape;
+    not a message's, chat), and whether it has its goal block: (issues, has_goal)."""
     blocks = reply_blocks(text)
-    issues = [i for b in blocks for i in block_issues(b, chat_exists)] + reply_shape(text)
+    issues = [i for b in blocks for i in block_issues(b, chat_exists)] + ([] if chat else reply_shape(text))
     return issues, any(b["kind"] == "goal" for b in blocks)
 
 
@@ -12154,10 +12267,17 @@ def chat_reply(s):
 def needs_you(ss):
     """How many things wait on you: a chat asking (a permission, a question,
     a secret), or one whose last reply asks you something you haven't
-    answered. The app's badge."""
+    answered. Today's count."""
     return sum(1 for s in ss if not s.get("setup") and (
         s.get("status") == "waiting" or s.get("secret_asks")
         or (s.get("status") != "working" and (s.get("today") or {}).get("asks"))))
+
+
+def app_badge(ss):
+    """The number on the app's icon: what needs you (needs_you), and the
+    messages from your assistant and your agents you haven't read, as a
+    messaging app counts them (manage.js markWaiting says the same)."""
+    return needs_you(ss) + sum(s.get("unread") or 0 for s in ss if s.get("assistant") in AGENT_ROLES)
 
 
 # ---- your loops
@@ -12318,7 +12438,7 @@ def loop_tell(key, action, text=""):
     since = f" (waiting since {loop['since']})" if loop["since"] else ""
     note = f"\n\n{text[:4000]}" if text else ""
     text = LOOP_ASKS[action].format(said=said, source=source, who=loop["who"] or "them", what=loop["what"], since=since, text=text[:4000], note=note)
-    r = run_amarchy("send", mine["id"], text, "--no-wait")
+    r = run_amarchy("send", mine["id"], text, "--no-wait", env={"AMARCHY_SENT_BY": "you"})      # (your tap: yours)
     if r.returncode != 0:
         return gist(r.stderr) or f"{mine['name']} didn't take it"
     if action == "done":
@@ -12566,7 +12686,7 @@ def task_press(tid, n):
         buttons = t.get("buttons") or []
         if not 0 <= n < len(buttons):
             return "That task has no such button"
-        r = run_amarchy("send", t["agent"], buttons[n]["send"], "--no-wait")
+        r = run_amarchy("send", t["agent"], buttons[n]["send"], "--no-wait", env={"AMARCHY_SENT_BY": "you"})
         if r.returncode != 0:
             return gist(r.stderr) or "Its agent didn't take it"
         tasks.remove(t)
@@ -12833,7 +12953,7 @@ def app_words(st, ss):
         # When it last moved, to the minute (Today says "5m ago" at most): a
         # chat at work writes every second, and the list isn't new for that.
         s["today"] = {**s["today"], "at": s["today"]["at"] // 60 * 60}
-        words = last_words(s)
+        words = last_words(s, deep=s.get("assistant") in AGENT_ROLES)      # (session_view's, kept)
         if not s.get("assistant"):
             s["said"] = words["said"]
         s["doing"] = None
@@ -12861,7 +12981,7 @@ def app_moments(st, ss):
     was, st.statuses = st.statuses, now
     if was is None:
         return
-    waiting = needs_you(ss)       # the app's badge: what needs you (Today)
+    waiting = app_badge(ss)       # the app's badge: what needs you (Today), and your team's unread messages
     crew = None
     for s in ss:
         state, prev = s["status"], was.get(s["id"])
@@ -13854,7 +13974,9 @@ def app_handler(st, users, address):
             if what == "seen":
                 st.seen[s["id"]] = time.time()
                 st.looking(s["id"])
-                self.changed_nothing = not (UNSEEN / s["id"]).exists()     # seen already: no list to read again
+                # Seen already: no list to read again (but your assistant's or an
+                # agent's unread count may change with it).
+                self.changed_nothing = not (UNSEEN / s["id"]).exists() and not is_agent(s)
                 mark_seen(s["id"])
                 return self.send(200, {})
             if what == "wake":
@@ -14946,6 +15068,11 @@ def cmd_send(args):
     if wait and sid == os.environ.get("AMARCHY_SESSION"):
         wait = False
     deadline = time.time() + minutes * 60
+    # Not you (a script, a timer, another chat), unless it's a button of
+    # yours (task_press): your assistant's and your agents' chats show it
+    # apart from what you said (app_items "from").
+    if os.environ.get("AMARCHY_SENT_BY") != "you":
+        sent_by_note(sid, text, os.environ.get("AMARCHY_SESSION", ""))
     f = send_queue(sid) / f"{time.time_ns()}-{os.getpid()}"
     write_file(f, json.dumps({"pid": os.getpid(), "text": text, "deadline": deadline}))
     if wait:
@@ -14954,6 +15081,57 @@ def cmd_send(args):
         return fail(f"{sid}: couldn't start what delivers it")
     print(f"queued for {sid}: its Claude gets it once it's free")
     return 0
+
+
+SENT_BY_KEPT = 300      # what amarchy send sent each session, remembered (the newest)
+
+
+def sent_hash(text):
+    """A message's words, whatever spacing they arrive with, as a short key."""
+    return hashlib.sha1(" ".join(str(text or "").split()).encode()).hexdigest()[:16]
+
+
+def sent_by_note(sid, text, origin):
+    """amarchy send sent a session text, not you: from origin (the session
+    it ran in), or a script or timer ("")."""
+    try:
+        SENT_BY.mkdir(parents=True, exist_ok=True)
+        f = SENT_BY / f"{sid}.jsonl"
+        with open(f, "a") as fh:
+            fh.write(json.dumps({"at": time.time(), "hash": sent_hash(text),
+                                 "from": origin if origin and session(origin) and origin != sid else ""}) + "\n")
+        if f.stat().st_size > SENT_BY_KEPT * 200:
+            lines = f.read_text().splitlines()[-SENT_BY_KEPT:]
+            write_file(f, "\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+_sent_by = {}
+
+
+def sent_by_read(sid):
+    """What amarchy send sent a session, not you: [{at, hash, from}], oldest first."""
+    f = SENT_BY / f"{sid}.jsonl"
+    try:
+        stamp = f.stat().st_mtime_ns
+    except OSError:
+        return []
+    if _sent_by.get(sid, (None,))[0] == stamp:
+        return _sent_by[sid][1]
+    out = []
+    try:
+        for line in f.read_text().splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and isinstance(e.get("at"), (int, float)) and isinstance(e.get("hash"), str):
+                out.append(e)
+    except OSError:
+        return []
+    _sent_by[sid] = (stamp, out)
+    return out
 
 
 def cmd_notify(args):
@@ -15409,7 +15587,7 @@ def claude_resume(s):
 def agent_argv(s):
     """claude -p for the session's broker: the protocol, the user's own
     claude arguments, its conversation, amarchy's hooks."""
-    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *reply_format_args(),
+    return ["claude", *AGENT_ARGS, *CLAUDE_ARGS, *claude_resume(s), *reply_format_args(s),
             "--settings", hook_settings(s["id"])]
 
 
@@ -15476,15 +15654,16 @@ BRIEF_TOOL = "mcp__amarchy__update_brief"
 # what you read, every word of it, in its order: nothing summarized, folded
 # away or moved.
 
-def blocks_guidance():
+def blocks_guidance(skip=(), rules=None):
     """The catalog's blocks, as the reply format shows them to Claude: an
-    example of each (the short ones on one line), then their rules."""
+    example of each (the short ones on one line), then their rules. skip:
+    kinds left out; rules: a kind's rule said another way (CHAT_FORMAT's)."""
     def fence(b):
         ex = b.get("example", {})
         head = f"```{b['kind']}{' ' + ex['attrs'] if ex.get('attrs') else ''}"
         body = [f"  {line}" for line in (ex.get("body") or "").split("\n") if ex.get("body")]
         return [f"  {head}", *body, "  ```"]
-    shown = [b for b in block_catalog()["blocks"] if not b.get("hidden") and not b.get("old")]      # (old: still drawn, no longer asked for)
+    shown = [b for b in block_catalog()["blocks"] if not b.get("hidden") and not b.get("old") and b["kind"] not in skip]      # (old: still drawn, no longer asked for)
     out = []
     for b in shown:
         if not b.get("short"):
@@ -15493,8 +15672,9 @@ def blocks_guidance():
     if short:
         out.append("  (also " + " and ".join(f"```{b['kind']} {b['example']['attrs']}``` for {b['for']}" for b in short) + ")")
     for b in shown:
-        if b.get("rule"):
-            out.append(f"- {b['rule']}")
+        rule = (rules or {}).get(b["kind"], b.get("rule"))
+        if rule:
+            out.append(f"- {rule}")
     return "\n".join(out)
 
 
@@ -15522,10 +15702,38 @@ REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rend
 - Never put what they need only in an earlier message: each reply stands on its own."""
 FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 
+# Your assistant's and your agents' (is_agent): the app shows their chats as a
+# messaging app does (chat.js, bubbles), not as a working chat's replies, so
+# they write as someone you text: short messages, no brief, no sections, no
+# goal (they live on: nothing to finish). Their blocks are the same.
+CHAT_FORMAT = f"""amarchy shows the person your messages in a chat that looks like WhatsApp: everything you write, at any point of your turn, reaches them as a message bubble from you, rendered as markdown, on their phone or computer. You're someone they text, not a report they read. It holds whatever else says how to talk to them (a persona, your project's own instructions): keep that voice and content.
 
-def reply_format_args():
+- Text like a person: the answer first, in plain words, short. A sentence or a few, not a document: no headings, no brief, no goal block, no greeting before the point, no "Here's...".
+- What you write between your steps reaches them too, as a message: only what you'd text a person ("On it, checking your inbox"), never your working notes. Or nothing, until you have the answer.
+- More to say: a few short paragraphs or a short list. A long report doesn't belong in a chat: say the gist, and offer the rest.
+- Anything they will use goes in a fenced block named for it, where it belongs in your message; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
+{blocks_guidance(skip=("brief",), rules={"choices": "A question with a few clear answers (a yes or no, one of three) can go in a choices block, so they answer with a tap; any other question, just ask it."})}
+- A link for them to open goes in a link block; a date to keep, in an event block; a picture you made, in a file block.
+- When your turn ends, amarchy checks your blocks: one it can't draw (a date that isn't one, a question with no options, an attribute it doesn't know) is sent back to you to fix.
+- Work that needs a chat of its own (code to write, something to build and ship): start one (`amarchy new <project> --prompt "<brief>"`), where they get the whole working view, and tell them in a line with its session block.
+- What they need to do later (a post to reply to, a form to sign) goes on their Tasks (`amarchy task add`), not in a message they'd scroll past."""
+CHAT_VERSION = hashlib.sha1(CHAT_FORMAT.encode()).hexdigest()[:10]
+
+
+def reply_format(s):
+    """The format a session's Claude writes in: CHAT_FORMAT for your
+    assistant and your agents, REPLY_FORMAT for every other chat."""
+    return CHAT_FORMAT if s and is_agent(s) else REPLY_FORMAT
+
+
+def format_version(s):
+    """The version of the format a session's Claude should have (reply_format)."""
+    return CHAT_VERSION if s and is_agent(s) else FORMAT_VERSION
+
+
+def reply_format_args(s=None):
     """The reply format, for a session's Claude (both engines)."""
-    return ["--append-system-prompt", REPLY_FORMAT]
+    return ["--append-system-prompt", reply_format(s)]
 
 
 def claude_format_version():

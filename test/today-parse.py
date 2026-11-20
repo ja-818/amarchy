@@ -116,7 +116,7 @@ check(am.search_chats("log", [s]) == [], "a tool's output isn't searched")
 told = []
 am.read_loops = lambda: (am.parse_loops("- [ ] 2026-10-29 · ECOS talk · nudge 10-27\n- [ ] waiting · adidas · refund · since 10-24"), "/x/loops.md", "")
 am.assistant = lambda: {"id": "me-jaken", "name": "Jaken"}
-am.run_amarchy = lambda *a: told.append(a) or type("R", (), {"returncode": 0, "stderr": ""})()
+am.run_amarchy = lambda *a, **kw: told.append(a) or type("R", (), {"returncode": 0, "stderr": ""})()
 ecos, adidas = am.read_loops()[0]
 check(am.loop_tell(ecos["key"], "session") is None and told[-1] == ("send", "me-jaken", "Start a session for this loop: 2026-10-29 · ECOS talk · nudge 10-27", "--no-wait"),
       f"New chat: a session for the loop, no note ({told[-1:]})")

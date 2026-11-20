@@ -241,16 +241,22 @@ function uiPatchPart(old, next) {
 // data-id for the keys); unseen: a chat that answered and you haven't opened
 // it since (lit, so it catches the eye), whatever it asks: by default its
 // chat's own (today.js todayUnseen).
-function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = [], actions = [], open, id, label, unseen = null }) {
+// sub: a line under its name (a conversation's: its last message, or what
+// it's doing), its pill and count (uiUnread) stacked at its end, as a
+// messaging app's list has them.
+function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = null, count = 0, body = [], actions = [], open, id, label, unseen = null }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
   const prio = s && !isAgent(s) && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
-  const head = h("button", { class: "tcard-head today-go", type: "button", onclick: open, "aria-label": label || null },
+  const name = h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title);
+  const two = sub !== null || count;
+  const head = h("button", { class: `tcard-head today-go${two ? " two" : ""}`, type: "button", onclick: open, "aria-label": label || null },
     lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
-    h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title), pill);
+    two ? h("span", { class: "tcard-main" }, name, sub !== null ? h("span", { class: "tcard-sub" }, sub) : null) : name,
+    two ? h("span", { class: "tcard-side" }, pill, uiUnread(count)) : pill);
   // The whole card opens it (its buttons, links and boxes do their own thing).
   const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen ? " unseen" : ""}`, "data-id": id || null,
                               onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
@@ -259,6 +265,40 @@ function uiCard({ kind, hue, lead = null, chip = "", title, pill = null, body = 
   // with the keys): its menu, priority, name, commands, Complete (app.js rowMenu).
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
   return card;
+}
+
+// How many of a chat's messages you haven't read, as a messaging app counts
+// them: a round count, filled (99+ past 99); nothing for none.
+function uiUnread(n) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (!n) return null;
+  return h("span", { class: "ui-unread", "aria-label": `${n} unread message${n === 1 ? "" : "s"}` }, n > 99 ? "99+" : String(n));
+}
+
+// When a message came (seconds), as a messaging app's list says it: its
+// time today, Yesterday, its weekday this week, else its date.
+function uiChatTime(sec, now = new Date()) {
+  if (!sec) return "";
+  const d = new Date(sec * 1000);
+  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days <= 0) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return d.toLocaleDateString([], { weekday: "long" });
+  return d.toLocaleDateString([], { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
+
+// What your assistant or an agent is up to, as a messaging app says it of
+// someone: typing… while it works, that it asks you something; else
+// nothing. tone: how it's lit (accent, ask).
+function uiPresence(s) {
+  if (!s) return null;
+  const t = s.today || {};
+  const asks = s.status === "waiting" || (s.secret_asks || []).length
+    || (s.status !== "working" && (t.asks || []).length && !(typeof todayIsAnswered === "function" && todayIsAnswered(s)));
+  if (asks) return { text: (s.secret_asks || []).length ? "asks you for a secret" : s.permission ? "asks your permission" : "asks you something", tone: "ask" };
+  if (s.status === "working" || (s.waking && !s.sleeping)) return { text: "typing…", tone: "accent" };
+  if (s.status === "running") return { text: "busy", tone: "accent" };
+  return null;
 }
 
 // A pill: its words in its tone's color (ask, late, done, working, running,
@@ -483,16 +523,22 @@ function composerPlaceholder(s) { return isAgent(s) ? `Message ${s.assistant_nam
 // ⋯ (its menu: the Terminal, Changes and Details, its name, its
 // priority…); Complete, last. Returns the
 // children, for the head to hold.
+// Your assistant's or an agent's: its picture and name, what it's up to
+// under the name (uiPresence: typing…), as a messaging app's head has them,
+// and no state box.
 function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}) {
   const main = isAgent(s);
+  const now = main ? uiPresence(s) : null;
   return [
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
-    h("button", { class: "head-title", type: "button", title: `${where(s)} · rename`, onclick: rename },
-      main ? avatar(s, "small") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-      taskText(main ? s.assistant_name || "Assistant" : s.task || "New chat", s.task || main ? "" : "untitled")),
+    h("button", { class: `head-title${main ? " who" : ""}`, type: "button", title: `${where(s)} · rename`, onclick: rename },
+      main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
+      main ? h("span", { class: "head-name" }, taskText(s.assistant_name || "Assistant"),
+               now ? h("span", { class: `head-sub t-${now.tone}`, role: "status" }, now.text) : null)
+        : taskText(s.task || "New chat", s.task ? "" : "untitled")),
     h("div", { class: "head-btns" },
       // Where it stands: a box as the buttons are, its tone a dot in it.
-      h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
+      main ? null : h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
       h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
       uiPreview(s, { head: true }),

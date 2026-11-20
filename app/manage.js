@@ -440,15 +440,19 @@ function clipText(text) {
 //
 // The number that need you, in the tab's title and on the icon (the
 // home-screen app's badge, a Mac's Dock): the home's own ("3 need you",
-// Chats' count: today.js todayCount), as you act there too (todayRedraw);
-// a dot when only finished ones you haven't opened are waiting for you.
+// Chats' count: today.js todayCount), as you act there too (todayRedraw),
+// and the messages from your assistant and your agents you haven't read,
+// as a messaging app counts them (the server's app_badge, for the phones'
+// notifications); a dot when only finished ones you haven't opened are
+// waiting for you.
 
 let titleWas = "", badgeWas = null;
 function markWaiting() {
   const v = app.view;
   if (!v) return;
-  const waiting = typeof todayCount === "function" ? todayCount(v, "chats")
-    : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length;
+  const unread = v.sessions.reduce((n, s) => n + (isAgent(s) ? s.unread || 0 : 0), 0);
+  const waiting = unread + (typeof todayCount === "function" ? todayCount(v, "chats")
+    : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length);
   const done = v.sessions.filter((s) => s.status === "idle" && s.unseen).length;
   const t = waiting ? `(${waiting}) Amarchy` : done ? "• Amarchy" : "Amarchy";
   if (t !== titleWas) { document.title = titleWas = t; markIcon(waiting ? "waiting" : done ? "done" : ""); }
