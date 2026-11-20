@@ -100,7 +100,7 @@
       "needAny": ["body", "media"],
       "body": { "shape": "text" },
       "example": { "attrs": "handle=\"ja818_\" name=\"Julian Arango\" id=\"fs-007\"", "body": "the post exactly as it goes out, its newlines kept" },
-      "rule": "An xpost block shows a post as X will: its body is the exact text (it's what Copy copies); avatar=\"...\" and media=\"...\" (up to 4, comma-separated) are pictures or videos, a path on this machine or an https URL; reply_to=\"...\" or quote=\"...\" an x.com post's address."
+      "rule": "An xpost block shows a post as X will: its body is the exact text (Copy text copies it; Copy image copies each picture, so posting it by hand is two taps); avatar=\"...\" and media=\"...\" (up to 4, comma-separated) are pictures or videos, a path on this machine or an https URL; reply_to=\"...\" or quote=\"...\" an x.com post's address."
     },
     {
       "kind": "brief", "for": "the briefing a reply of more than a few lines opens with, right after its first sentence",

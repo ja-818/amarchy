@@ -128,7 +128,9 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   comes as three parts. **Briefing**: what it comes to, how it was checked, what's
   open, and what you need to do or decide. **Action items**: what to tap, when there
   is something: Claude's questions as buttons, a draft, a link (a post for X shows
-  the way X will show it, with X's count and **Copy**). **Content**:
+  the way X will show it, with X's count, **Copy text** and **Copy image**: posting
+  it by hand is two taps, then paste each in X; several pictures: a number for
+  each). **Content**:
   everything else, each idea folded under a heading that says its point (tap one to
   open it, **Open all** for every one). A chat you open shows its latest message,
   every time: the top of Claude's last reply (that Briefing) when it's longer

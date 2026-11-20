@@ -275,7 +275,9 @@ const XPOST_VIDEO = /\.(mp4|m4v|mov|webm)(?:[?#].*)?$/i;
 
 // The post (a: the block, read by replyParts), as X shows it; media(src): the
 // address to load a picture from (a path here or an https URL, through the
-// server). {card, count, over: by how much it's over X's limit}.
+// server). {card, count, over: by how much it's over X's limit, pictures: its
+// pictures in order, not its videos ([{src, url, img, at}]: img, the one
+// drawn; at, its place in the grid, from 0)}.
 function xpostView(a, media) {
   const at = a.attrs || {};
   const text = String(a.body || "");
@@ -283,6 +285,7 @@ function xpostView(a, media) {
   const name = String(at.name || "").trim() || handle;
   const reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
   const items = String(at.media || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 4);
+  const pictures = [];
 
   // The avatar: its picture, else the name's first letter on X's grey.
   const initial = h("span", { class: "xpost-initial" }, (Array.from(name)[0] || "?").toUpperCase());
@@ -326,7 +329,7 @@ function xpostView(a, media) {
         ? h("a", { class: "xpost-link", href: `https://x.com/${reply.user}`, target: "_blank", rel: "noopener noreferrer" }, `@${reply.user}`)
         : h("a", { class: "xpost-link", href: reply.url, target: "_blank", rel: "noopener noreferrer" }, "a post")) : null,
       text ? body : null,
-      items.length ? xpostMedia(items, media) : null,
+      items.length ? xpostMedia(items, media, pictures) : null,
       quote ? h("a", { class: "xpost-quote", href: quote.url, target: "_blank", rel: "noopener noreferrer", onclick: (ev) => ev.stopPropagation() },
         h("span", { class: "xpost-quote-head" }, h("span", { class: "xpost-quote-avatar" }, xpostIcon("logo")),
           h("span", { class: "xpost-name" }, quote.user ? `@${quote.user}` : "A post"), h("span", { class: "xpost-handle" }, "· quoted")),
@@ -334,14 +337,15 @@ function xpostView(a, media) {
       h("div", { class: "xpost-actions", "aria-hidden": "true" },
         xpostIcon("reply"), xpostIcon("repost"), xpostIcon("like"), xpostIcon("views"),
         h("span", { class: "xpost-end" }, xpostIcon("bookmark"), xpostIcon("share")))));
-  return { card, count: weighed.count, over: Math.max(0, weighed.count - XPOST_LIMIT) };
+  return { card, count: weighed.count, over: Math.max(0, weighed.count - XPOST_LIMIT), pictures };
 }
 
 // Its pictures and videos, in X's grid: one at its own shape (no taller
 // than 4:5), two side by side, three with the first tall, four in a square;
 // 16:9 in all, 2px apart, its corners round. A tap on a picture shows them
-// full screen (uiPhoto); a video plays where it is.
-function xpostMedia(items, media) {
+// full screen (uiPhoto); a video plays where it is. pictures: the pictures
+// drawn go there ([{src, url, img, at}]).
+function xpostMedia(items, media, pictures = []) {
   const box = h("div", { class: `xpost-media n${items.length}` });
   const shots = items.filter((x) => !XPOST_VIDEO.test(x)).map((x) => ({ src: media(x), label: "" }));
   const shape = (w, ht) => Math.min(Math.max(ht / w, 0.25), 1.25);
@@ -351,7 +355,7 @@ function xpostMedia(items, media) {
     tile.replaceChildren(h("span", { class: "xpost-missing" }, `Can't show ${baseName(src.split("?")[0])}`));
     tile.classList.add("missing");
   };
-  for (const src of items) {
+  items.forEach((src, at) => {
     const url = media(src);
     if (XPOST_VIDEO.test(src)) {
       // A video: its first frame (#t: Safari draws none before it plays), X's
@@ -377,9 +381,10 @@ function xpostMedia(items, media) {
       });
       v.addEventListener("error", () => failed(tile, src));
       box.append(tile);
-      continue;
+      return;
     }
     const img = h("img", { src: url, alt: "", draggable: "false" });
+    pictures.push({ src, url, img, at });
     const tile = h("button", { class: "xpost-tile", type: "button", "aria-label": "Show the picture", onclick: (e) => {
       e.stopPropagation();
       if (!tile.classList.contains("missing")) uiPhoto(shots, Math.max(0, shots.findIndex((x) => x.src === url)));
@@ -389,6 +394,63 @@ function xpostMedia(items, media) {
     });
     img.addEventListener("error", () => failed(tile, src));
     box.append(tile);
-  }
+  });
   return box;
+}
+
+// ---- a post's picture, copied (Copy image, under the post: chat.js)
+//
+// The picture itself on the clipboard, so it pastes into X's composer as it
+// is. As a PNG: the one kind of picture every browser puts there (Safari,
+// Chrome, Firefox); a JPEG or a WebP is drawn to one first. It's asked for in
+// the tap itself, before the picture is here (Safari takes a copy only
+// within the tap, and forgets it after any wait), as a promise of it the
+// clipboard keeps; a browser that won't take a promise gets the picture once
+// it's here. Resolves once it's copied; rejects when it can't be (the browser
+// won't, the picture isn't there), saying why.
+const XPOST_COPY_MAX = 4096;    // pixels on its longest side, drawn: what a phone's canvas takes, and X keeps
+
+function xpostCanCopyImage() {
+  return typeof ClipboardItem === "function" && !!navigator.clipboard && typeof navigator.clipboard.write === "function";
+}
+
+async function xpostCopyImage(url) {
+  if (!xpostCanCopyImage()) throw new Error("this browser can't copy a picture");
+  const png = xpostPng(url);
+  png.catch(() => {});      // (its failure is the copy's, below)
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+  } catch (e) {
+    const blob = await png;         // the picture's own failure, when it's that
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  }
+}
+
+// A picture (its address here) as a PNG: itself when it's one (by what the
+// server read off its bytes), else drawn to one, no wider or taller than
+// XPOST_COPY_MAX, turned as it's shown (a photo's EXIF). Not a GIF: drawn,
+// it would be a still, so X would get no GIF (error.gif: it's one).
+async function xpostPng(url) {
+  const r = await fetch(url, { credentials: "same-origin" });
+  if (!r.ok) throw new Error("the picture isn't there");
+  const blob = await r.blob();
+  if (blob.type === "image/png") return blob;
+  if (blob.type === "image/gif") throw Object.assign(new Error("a GIF would copy as a still"), { gif: true });
+  if (!/^image\//.test(blob.type)) throw new Error("it isn't a picture");
+  const src = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const w = img.naturalWidth, ht = img.naturalHeight;
+    if (!w || !ht) throw new Error("the picture can't be read");
+    const k = Math.min(1, XPOST_COPY_MAX / Math.max(w, ht));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * k));
+    c.height = Math.max(1, Math.round(ht * k));
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error("the picture can't be drawn"))), "image/png"));
+  } finally {
+    URL.revokeObjectURL(src);
+  }
 }

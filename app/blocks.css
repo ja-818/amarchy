@@ -66,6 +66,8 @@
 }
 @media (hover: hover) { .art-btn:hover { background: var(--control-hover); } }
 .art-btn.primary { color: var(--primary-text); background: var(--primary-bg); border-color: var(--primary-bg); }
+/* A number alone (one of several of the same: Copy image 1 2 3): round. */
+.art-btn.num { min-width: var(--control-h); padding: 4px 0; }
 .art-btn:focus-visible, .keyed .art-btn.ui-in { outline: 2px solid var(--accent); outline-offset: 2px; }
 .art-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px 52px; min-width: 0; }
 .art-pre {
@@ -254,9 +256,13 @@
 /* Reply, repost, like, views, and bookmark and share at the end: only drawn. */
 .xpost-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--xpost-muted); }
 .xpost-end { display: flex; gap: 12px; }
-.xpost-foot { display: flex; align-items: center; gap: 10px; max-width: 600px; font-size: var(--caption); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* Under it: X's count and the draft's id; at the end, Copy text and Copy image (each picture), what posting it by hand takes. */
+.xpost-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; max-width: 600px; font-size: var(--caption); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .xpost-count.over { color: var(--danger); font-weight: 700; }
 .xpost-id { font-size: 11px; letter-spacing: 0.03em; }
-.xpost-foot > .art-btn { margin-left: auto; }
+.xpost-copies { flex: 1 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+/* Several pictures: "Copy image" and a round number for each (its place in the grid). */
+.xpost-copy-images { display: flex; align-items: center; gap: 6px; }
+.xpost-copy-label { margin: 0 2px 0 6px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .xpost-media:not(.n1) .xpost-play { width: 44px; height: 44px; border-width: 3px; }
 .xpost-media:not(.n1) .xpost-play svg { width: 20px; height: 20px; }

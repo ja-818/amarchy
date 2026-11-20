@@ -2026,6 +2026,40 @@ class Chat {
       } }, label);
       return b;
     };
+    // A picture itself on the clipboard (pictures[i]: xpostView's), to paste
+    // into X; name: what it does, num: its number alone, when it shows only
+    // that (one of several). Where the browser won't (or it's a GIF, which
+    // would be a still): full screen, to hold (or right-click) and save or
+    // copy it there. One that can't be shown has nothing to copy: its button
+    // goes (its group too, once it holds none).
+    const copyPicture = (pictures, i, name, num = "") => {
+      const label = num || name;
+      let busy = false;
+      const b = h("button", { class: `art-btn${num ? " num" : ""}`, type: "button", "data-name": name, title: name, "aria-label": name, onclick: (e) => {
+        e.stopPropagation();
+        if (busy) return;
+        busy = true;
+        b.textContent = num ? "…" : "Copying…";
+        xpostCopyImage(pictures[i].url).then(() => {
+          b.textContent = num ? "✓" : "Copied";
+          b.setAttribute("aria-label", `${name}: copied`);
+          setTimeout(() => { b.textContent = label; b.setAttribute("aria-label", name); busy = false; }, 1500);
+        }, (err) => {
+          b.textContent = label;
+          busy = false;
+          if (!b.isConnected) return;
+          const hold = matchMedia("(pointer: coarse)").matches ? "hold it" : "right-click it";
+          toast(err && err.gif ? `A GIF would copy as a still: ${hold} to save it` : `Can't copy the picture here: ${hold} to save or copy it`);
+          uiPhoto(pictures.map((p) => ({ src: p.url, label: "" })), i);
+        });
+      } }, label);
+      pictures[i].img.addEventListener("error", () => {
+        const group = b.closest(".xpost-copy-images");
+        b.remove();
+        if (group && !group.querySelector(".art-btn")) group.remove();
+      });
+      return b;
+    };
     const open = (href, label, primary) => {
       const safe = artifactHref(href);
       return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
@@ -2126,16 +2160,23 @@ class Chat {
           body: [shot, body ? pre(body) : null], actions: [] };
       }
       case "xpost": {
-        // The post as X will show it (xpost.js); under it, how X counts it and its draft's id, and Copy for its exact text.
+        // The post as X will show it (xpost.js); under it, how X counts it and its draft's id,
+        // and what posting it by hand takes: Copy text (its exact text), Copy image (each picture).
         const v = xpostView(a, (src) => this.mediaUrl(src));
         const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
         const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
+        const text = String(a.body || ""), pics = v.pictures;
         return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
           sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
           body: [v.card, h("div", { class: "xpost-foot" },
             h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
             str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
-            copy(String(a.body || ""), "Copy"))],
+            h("span", { class: "xpost-copies" }, text.trim() ? copy(text, "Copy text") : null,
+              // (Several: "Copy image" and a number for each, its place in the grid, a video's counted.)
+              pics.length > 1 ? h("span", { class: "xpost-copy-images", role: "group", "aria-label": "Copy image" },
+                h("span", { class: "xpost-copy-label", "aria-hidden": "true" }, "Copy image"),
+                ...pics.map((p, i) => copyPicture(pics, i, `Copy image ${p.at + 1}`, String(p.at + 1))))
+                : pics.length ? copyPicture(pics, 0, "Copy image") : null))],
           actions: [] };
       }
       default:

@@ -7,17 +7,27 @@
 // the first tall, four in a square), a video that plays, a picture that
 // can't be shown said so, "Replying to @user", a quoted post's frame, the
 // action row (only drawn). Under it the count X keeps (red past 280), the
-// draft's id and Copy, which copies the exact text. A tap on a picture shows
-// it full screen. A file block's picture shows too. The server serves only
-// pictures and videos, from your home or /tmp. On a phone and on a wide screen, with screenshots.
+// draft's id, Copy text, which copies the exact text, and Copy image (with
+// several pictures, "Copy image" and a number for each, its place in the
+// grid: none for a video, nor for one that can't be shown), which puts the
+// picture itself on the clipboard as a PNG
+// (read back off the real clipboard: a PNG as it is, a JPEG or a WebP drawn
+// to one, one too big made 4096 on its long side), asked for in the tap
+// itself; a GIF, or a browser that won't, says so and shows it full screen,
+// to hold and save. A tap on a picture shows it full screen. A file block's
+// picture shows too. The server serves only pictures and videos, from your
+// home or /tmp. On a phone and on a wide screen, with screenshots; then the
+// copies again in WebKit (Safari's engine), on a phone, when it's there.
 //
 //   node test/xpost-view.js            both layouts
-//   node test/xpost-view.js phone      one layout (phone | wide)
+//   node test/xpost-view.js phone      one layout (phone | wide), or webkit (its copies)
 //
 // Needs a Chromium and Playwright's `playwright-core` (PLAYWRIGHT_CORE=<its folder>
 // or on NODE_PATH; CHROME=<the chrome binary>, else the one Playwright installed,
 // found under ~/.cache/ms-playwright), and ffmpeg for the video (skipped
-// without it). It starts its own app server from this checkout's
+// without it); WebKit's checks need Playwright's WebKit (WEBKIT=<its MiniBrowser,
+// or a script that starts it>, else the one Playwright installed; skipped
+// when it doesn't start). It starts its own app server from this checkout's
 // bin/amarchy, with a home and state of its own. Screenshots go to SHOTS
 // (default: a folder under the system's temp dir). Exits 0 when every check passed.
 
@@ -224,16 +234,148 @@ const READ = () => {
       past: [...x.querySelectorAll(".xpost-text .xpost-over")].map((o) => o.textContent).join(""),
       count: art.querySelector(".xpost-count").textContent, over: art.querySelector(".xpost-count").classList.contains("over"),
       countColor: css(art.querySelector(".xpost-count"), "color"),
-      id: art.querySelector(".xpost-id")?.textContent || "", copy: art.querySelector(".xpost-foot .art-btn")?.textContent,
+      id: art.querySelector(".xpost-id")?.textContent || "", copies: [...art.querySelectorAll(".xpost-foot .art-btn")].map((b) => b.dataset.name || b.textContent),
+      shown: [...art.querySelectorAll(".xpost-foot .xpost-copy-label, .xpost-foot .art-btn")].map((b) => b.textContent).join(" "),
+      footInside: [...art.querySelectorAll(".xpost-foot .art-btn")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= window.innerWidth + 0.5; }),
       width: Math.round(r.width), inside: r.left >= 0 && r.right <= window.innerWidth + 0.5,
       headOneLine: x.querySelector(".xpost-head").getBoundingClientRect().height <= 21,
     };
   });
 };
 
+// A post whose pictures are of every kind Copy image takes: a JPEG, a WebP,
+// a GIF, and a JPEG too big for a phone's canvas.
+function kinds(m) {
+  return [
+    "Pictures of every kind.",
+    "",
+    `\`\`\`xpost handle="ja818_" media="${m}/photo.jpg, ${m}/art.webp, ${m}/anim.gif, ${m}/huge.jpg" id="fs-020"`,
+    "Four kinds.",
+    "```",
+  ].join("\n");
+}
+
+// What's on the clipboard now: its picture's type, size and the color of a
+// pixel ([x, y] of it), or why it can't be read.
+const CLIP = async ([x, y]) => {
+  try {
+    const items = await navigator.clipboard.read();
+    const it = items.find((i) => i.types.includes("image/png"));
+    if (!it) return { types: items.map((i) => i.types.join("+")).join(",") };
+    const blob = await it.getType("image/png");
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext("2d");
+    g.drawImage(bmp, 0, 0);
+    return { type: blob.type, w: bmp.width, h: bmp.height, px: [...g.getImageData(Math.round(x * bmp.width), Math.round(y * bmp.height), 1, 1).data].slice(0, 3) };
+  } catch (e) { return { error: `${e.name}: ${e.message}` }; }
+};
+// Where it can't be read: the picture the page gave the clipboard, the same way.
+const GIVEN = async ([x, y]) => {
+  try {
+    const blob = await Promise.resolve(window.__given);
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext("2d");
+    g.drawImage(bmp, 0, 0);
+    return { type: blob.type, w: bmp.width, h: bmp.height, px: [...g.getImageData(Math.round(x * bmp.width), Math.round(y * bmp.height), 1, 1).data].slice(0, 3), given: true };
+  } catch (e) { return { error: `${e.name}: ${e.message}` }; }
+};
+const near = (a, b, by = 24) => Array.isArray(a) && a.every((v, i) => Math.abs(v - b[i]) <= by);
+
+// Copy image, as a tap (a real one: the browser's, as a finger's) on the
+// post's n-th card's button of that name; what it says once it settles
+// ("Copied", or ✓ for a number; else what it said).
+async function tapCopy(page, n, name) {
+  const sel = `.xpost-foot .art-btn[data-name="${name}"]`;
+  await page.locator(".msg.claude .art-xpost").nth(n).locator(sel).click();
+  await page.waitForFunction(({ n, sel }) => !/^(…|Copying…)$/.test(document.querySelectorAll(".msg.claude .art-xpost")[n].querySelector(sel).textContent),
+    { n, sel }, { timeout: 10000 }).catch(() => {});
+  return page.evaluate(({ n, sel }) => document.querySelectorAll(".msg.claude .art-xpost")[n].querySelector(sel).textContent, { n, sel });
+}
+const copied = (t) => t === "Copied" || t === "✓";
+
+// Copy image, every way it goes: the picture itself on the clipboard, read
+// back (where reads: clip, the clipboard can be read here), asked for in
+// the tap; a GIF and a browser that won't: said, and full screen.
+async function copies(page, layout, m, { shot, clip = true } = {}) {
+  const hold = layout === "phone" ? "hold it" : "right-click it";
+  await page.evaluate(() => closeSheets());
+  await mount(page, reply(m, false));
+  await page.waitForFunction(() => [...document.querySelectorAll(".xpost img")].every((i) => i.complete), null, { timeout: 10000 });
+  // Asked for in the tap itself, a promise of the picture (Safari's rule).
+  await page.evaluate(() => {
+    window.__tap = false;
+    window.addEventListener("click", () => { window.__tap = true; setTimeout(() => { window.__tap = false; }, 0); }, true);
+    const write = navigator.clipboard.write.bind(navigator.clipboard), Item = window.ClipboardItem;
+    window.__asked = [];
+    navigator.clipboard.write = (items) => { window.__asked.push({ tap: window.__tap }); return write(items); };
+    window.ClipboardItem = function (o, opts) {
+      window.__promised = Object.values(o).every((v) => v instanceof Promise);
+      window.__given = o["image/png"];
+      return new Item(o, opts);
+    };
+    window.ClipboardItem.supports = Item.supports;
+  });
+  let after = await tapCopy(page, 0, "Copy image");
+  const asked = await page.evaluate(() => ({ asked: window.__asked, promised: window.__promised }));
+  check(layout, asked.asked.length >= 1 && asked.asked[0].tap && asked.promised, `Copy image asks for the copy in the tap, the picture as a promise (${JSON.stringify(asked)})`);
+  check(layout, after === "Copied", `Copy image: Copied (${after})`);
+  {
+    const got = await page.evaluate(clip ? CLIP : GIVEN, [0.02, 0.02]);
+    check(layout, got.type === "image/png" && got.w === 540 && got.h === 960 && near(got.px, [255, 173, 31], 8),
+      `the picture itself ${clip ? "is on the clipboard" : "is given the clipboard"}, a PNG, its size and colors (${JSON.stringify(got)})`);
+  }
+  await page.waitForTimeout(1600);
+  check(layout, (await page.evaluate(() => document.querySelectorAll(".msg.claude .art-xpost")[0].querySelectorAll(".xpost-foot .art-btn")[1].textContent)) === "Copy image",
+    "then it says Copy image again");
+
+  // Every kind: a JPEG and a WebP drawn to a PNG, one too big made 4096 on its long side.
+  await mount(page, kinds(m));
+  await page.waitForFunction(() => [...document.querySelectorAll(".xpost img")].every((i) => i.complete), null, { timeout: 10000 });
+  for (const [label, w, ht, px, what] of [["Copy image 1", 1200, 800, [240, 40, 40], "a JPEG, as a PNG"], ["Copy image 2", 640, 640, [40, 200, 90], "a WebP, as a PNG"],
+    ["Copy image 4", 4096, 819, [30, 60, 230], "one too big, 4096 on its long side"]]) {
+    after = await tapCopy(page, 0, label);
+    const got = await page.evaluate(clip ? CLIP : GIVEN, [0.02, 0.5]);
+    check(layout, after === "✓" && got.type === "image/png" && got.w === w && got.h === ht && near(got.px, px),
+      `${label}: ${what}, ✓ on its number (${after} ${JSON.stringify(got)})`);
+    await page.waitForTimeout(1600);
+  }
+  // A GIF: it would be a still, so it's said, and full screen to save it moving.
+  after = await tapCopy(page, 0, "Copy image 3");
+  await page.waitForSelector(".sheet-back.photo", { timeout: 5000 }).catch(() => {});
+  let seen = await page.evaluate(() => ({ toast: document.querySelector(".toast")?.textContent || "", label: document.querySelector(".ui-photo-label")?.textContent || "",
+    src: document.querySelector(".ui-photo-img")?.getAttribute("src") || "" }));
+  check(layout, seen.toast === `A GIF would copy as a still: ${hold} to save it` && seen.label === "3 of 4" && /anim\.gif$/.test(seen.src) && after === "3",
+    `a GIF: said, and full screen to save it moving (${JSON.stringify(seen)})`);
+  if (shot) { await page.waitForTimeout(400); await shot("copy-gif"); }
+  await page.evaluate(() => closeSheets());
+
+  // A browser that won't: said, and the picture full screen to hold and save.
+  await page.evaluate(() => { navigator.clipboard.write = () => Promise.reject(new DOMException("Not allowed", "NotAllowedError")); });
+  after = await tapCopy(page, 0, "Copy image 2");
+  await page.waitForSelector(".sheet-back.photo", { timeout: 5000 }).catch(() => {});
+  seen = await page.evaluate(() => ({ toast: document.querySelector(".toast")?.textContent || "", label: document.querySelector(".ui-photo-label")?.textContent || "",
+    src: document.querySelector(".ui-photo-img")?.getAttribute("src") || "" }));
+  check(layout, seen.toast === `Can't copy the picture here: ${hold} to save or copy it` && seen.label === "2 of 4" && /art\.webp$/.test(seen.src) && after === "2",
+    `a browser that won't copy it: said, and the picture full screen to save (${JSON.stringify(seen)})`);
+  if (shot) { await page.waitForTimeout(400); await shot("copy-refused"); }
+  await page.evaluate(() => closeSheets());
+  // One with no clipboard for pictures at all (an old browser, a page that isn't https).
+  await page.evaluate(() => { delete window.ClipboardItem; });
+  await tapCopy(page, 0, "Copy image 1");
+  await page.waitForSelector(".sheet-back.photo", { timeout: 5000 }).catch(() => {});
+  seen = await page.evaluate(() => ({ toast: document.querySelector(".toast")?.textContent || "", label: document.querySelector(".ui-photo-label")?.textContent || "" }));
+  check(layout, seen.toast === `Can't copy the picture here: ${hold} to save or copy it` && seen.label === "1 of 4", `no clipboard for pictures: the same (${JSON.stringify(seen)})`);
+  await page.evaluate(() => closeSheets());
+}
+
 async function run(browser, base, layout, home, video) {
   console.log(`\n${layout}`);
   const ctx = await browser.newContext({ ...LAYOUTS[layout], extraHTTPHeaders: { "Tailscale-User-Login": "tester@test" } });
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base.replace(/\/$/, "") });
   await ctx.addInitScript(() => localStorage.setItem("tour", "1"));
   const page = await ctx.newPage();
   const errors = [];
@@ -281,7 +423,14 @@ async function run(browser, base, layout, home, video) {
     check(where, b.textRaw.replace("github.com/ja-818/amarchy…", "https://github.com/ja-818/amarchy/pull/123") === LINKS, "every other word as written");
     check(where, b.count === "136/280", `a link counts 23, an emoji 2 (${b.count})`);
     check(where, b.replying === "Replying to @vercel" && b.title === "Reply on X" && b.sub === "@ja818_ · to @vercel", `a reply: "Replying to @vercel" (${b.replying} | ${b.title} | ${b.sub})`);
-    check(where, a.title === "Post on X" && a.sub === "@ja818_" && a.id === "fs-007" && a.copy === "Copy", `its row, its id under it and Copy (${a.title} | ${a.sub} | ${a.id})`);
+    check(where, a.title === "Post on X" && a.sub === "@ja818_" && a.id === "fs-007", `its row and its id under it (${a.title} | ${a.sub} | ${a.id})`);
+    const pics = video ? ["Copy image 1", "Copy image 4"] : ["Copy image 1", "Copy image 2", "Copy image 4"];
+    check(where, JSON.stringify(p.map((x) => x.copies)) === JSON.stringify([["Copy text", "Copy image"], ["Copy text", "Copy image 1", "Copy image 2"],
+      ["Copy text", "Copy image 1", "Copy image 2", "Copy image 3"], ["Copy text", ...pics]]),
+      `Copy text, and Copy image for each picture by its place (none for a video, nor one that can't be shown) (${JSON.stringify(p.map((x) => x.copies))})`);
+    check(where, a.shown === "Copy text Copy image" && b.shown === "Copy text Copy image 1 2" && c.shown === "Copy text Copy image 1 2 3",
+      `one picture: Copy image; several: Copy image and a number for each (${[a.shown, b.shown, c.shown].join(" | ")})`);
+    check(where, p.every((x) => x.footInside), "the buttons under it fit the page");
     check(where, c.quote && c.quote.href === "https://x.com/rauchg/status/1817981617478787443" && /@rauchg/.test(c.quote.text) && /x\.com\/rauchg\/status\/…/.test(c.quote.text) && c.title === "Quote on X",
       `a quote: its frame, who and its address (${JSON.stringify(c.quote)})`);
     check(where, c.over && c.count === "308/280" && c.countColor !== a.countColor, `over 280: the count in red (${c.count} ${c.countColor})`);
@@ -309,17 +458,21 @@ async function run(browser, base, layout, home, video) {
     check(where, file === "800x450", `a file block's picture is shown too (${file})`);
     const missing = await page.evaluate(() => document.querySelectorAll(".msg.claude .art-xpost")[3].querySelector(".xpost-missing")?.textContent);
     check(where, missing === "Can't show missing.png", `what can't be shown, by name (${missing})`);
+    const toFoot = (n) => page.evaluate((n) => document.querySelectorAll(".msg.claude .art-xpost")[n].querySelector(".xpost-foot").scrollIntoView({ block: "center" }), n);
+    await toFoot(0); await shot(`${dark ? "dark" : "light"}-foot`);
+    await toFoot(2); await shot(`${dark ? "dark" : "light"}-foot-three`);
     await toCard(0); await shot(`${dark ? "dark" : "light"}-post`);
     await toCard(1); await shot(`${dark ? "dark" : "light"}-reply`);
     await toCard(2); await shot(`${dark ? "dark" : "light"}-quote`);
     await toCard(3); await shot(`${dark ? "dark" : "light"}-four`);
   }
 
-  // Copy: the exact text.
-  await page.evaluate(() => { window.copyText = async (t) => { window.__copied = t; }; });
+  // Copy text: the exact text.
+  await page.evaluate(() => { window.__copyText = window.copyText; window.copyText = async (t) => { window.__copied = t; }; });
   await page.evaluate(() => document.querySelectorAll(".msg.claude .art-xpost")[0].querySelector(".xpost-foot .art-btn").click());
   await page.waitForTimeout(100);
-  check(layout, (await page.evaluate(() => window.__copied)) === POST, "Copy copies the exact text");
+  check(layout, (await page.evaluate(() => window.__copied)) === POST, "Copy text copies the exact text");
+  await page.evaluate(() => { window.copyText = window.__copyText; });
   // A tap on a picture: full screen, the post's pictures to go through.
   await page.evaluate(() => document.querySelectorAll(".msg.claude .art-xpost")[1].querySelectorAll(".xpost-tile")[1].click());
   await page.waitForSelector(".sheet-back.photo");
@@ -345,8 +498,37 @@ async function run(browser, base, layout, home, video) {
     `nothing that isn't a picture or a video, outside your home or /tmp, or for no chat (${got.text} | ${got.etc} | ${got.none} | ${got.other})`);
   check(layout, got.lan.startsWith("404"), `never a picture from this machine or its network (${got.lan})`);
   check(layout, /^206 image\/png bytes 0-99\/\d+$/.test(got.range), `a part of it, as Safari asks for a video's (${got.range})`);
+  // Copy image (last: it draws a post of its own).
+  await copies(page, layout, m, { shot });
   check(layout, errors.length === 0, `no page errors (${errors.join("; ") || "none"})`);
   await ctx.close();
+}
+
+// Copy image in WebKit (Safari's engine, as an iPhone's): the same, where
+// its clipboard can be read here, else what it does about it.
+async function runWebKit(pw, base, home) {
+  console.log("\nwebkit phone");
+  let browser;
+  try { browser = await pw.webkit.launch({ executablePath: process.env.WEBKIT || undefined }); } catch (e) { console.log(`  (no WebKit here: skipped: ${String(e.message).split("\n")[0]})`); return; }
+  try {
+    // (WebKit takes no clipboard permissions: whether the page may read it is seen below.)
+    const ctx = await browser.newContext({ ...LAYOUTS.phone, extraHTTPHeaders: { "Tailscale-User-Login": "tester@test" } });
+    await ctx.addInitScript(() => localStorage.setItem("tour", "1"));
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(base);
+    await page.waitForSelector("#look", { state: "attached" });
+    const m = path.join(home, "media");
+    await page.evaluate(() => navigator.clipboard.writeText("probe")).catch(() => {});
+    const clip = await page.evaluate(async () => { try { await navigator.clipboard.read(); return true; } catch (e) { return false; } });
+    if (!clip) console.log("  (WebKit's clipboard can't be read here: the copies are checked by what the page sees)");
+    await copies(page, "phone", m, { clip, shot: (name) => page.screenshot({ path: path.join(SHOTS, `webkit-${name}.png`) }) });
+    check("webkit", errors.length === 0, `no page errors (${errors.join("; ") || "none"})`);
+    await ctx.close();
+  } finally {
+    await browser.close();
+  }
 }
 
 (async () => {
@@ -371,10 +553,34 @@ async function run(browser, base, layout, home, video) {
   const base = `http://127.0.0.1:${port}/`;
   const browser = await pw.chromium.launch({ executablePath: findChrome(), args: ["--no-sandbox"] });
   try {
+    // A JPEG, a WebP and one too big, drawn by the browser; a GIF.
+    const painter = await browser.newPage();
+    const made = await painter.evaluate(async () => {
+      const draw = async (w, ht, [r, g, b], type) => {
+        const c = document.createElement("canvas");
+        c.width = w; c.height = ht;
+        const x = c.getContext("2d");
+        x.fillStyle = `rgb(${r}, ${g}, ${b})`; x.fillRect(0, 0, w, ht);
+        x.fillStyle = "#fff"; x.fillRect(w * 0.6, ht * 0.1, w * 0.3, ht * 0.3);
+        const blob = await new Promise((ok) => c.toBlob(ok, type, 0.9));
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return btoa(bin);
+      };
+      return { photo: await draw(1200, 800, [240, 40, 40], "image/jpeg"), art: await draw(640, 640, [40, 200, 90], "image/webp"),
+               huge: await draw(5000, 1000, [30, 60, 230], "image/jpeg") };
+    });
+    await painter.close();
+    fs.writeFileSync(path.join(m, "photo.jpg"), Buffer.from(made.photo, "base64"));
+    fs.writeFileSync(path.join(m, "art.webp"), Buffer.from(made.art, "base64"));
+    fs.writeFileSync(path.join(m, "huge.jpg"), Buffer.from(made.huge, "base64"));
+    fs.writeFileSync(path.join(m, "anim.gif"), Buffer.from("R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", "base64"));
     for (const layout of Object.keys(LAYOUTS)) {
       if (ONLY && ONLY !== layout) continue;
       await run(browser, base, layout, home, video);
     }
+    if (!ONLY || ONLY === "webkit") await runWebKit(pw, base, home);
   } finally {
     await browser.close();
     server.kill();

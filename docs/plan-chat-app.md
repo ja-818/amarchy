@@ -287,7 +287,7 @@ the places Claude put them:
   crosshair and every series' value; *Numbers* shows it as a table.
 - **Posts for X** (`xpost`, app/xpost.js): a draft shown the way X's
   timeline will show it, so it's approved by seeing it. The body is the
-  exact text (newlines kept; Copy copies it); `handle` (needed), `name`,
+  exact text (newlines kept; Copy text copies it); `handle` (needed), `name`,
   `avatar`, `media` (up to 4, comma-separated: X's grid, one at its own
   shape no taller than 4:5, two side by side, three with the first tall,
   four in a square; a tap on a picture shows them full screen, a video has
@@ -299,14 +299,26 @@ the places Claude put them:
   the action row only drawn; X's dark colors, or its light ones on a light
   theme (`--xpost-*`, ui.css; theme.css). Under it the count X keeps
   (twitter-text's parseTweet: a link 23, an emoji 2, CJK 2), red past 280,
-  the part past it marked as X's composer marks it. Pictures and videos
+  the part past it marked as X's composer marks it. Beside it what posting
+  it by hand takes, two taps: **Copy text** and **Copy image** (several
+  pictures: "Copy image" and a number for each, its place in the grid; none
+  for a video, nor for a picture that can't be shown). Copy image puts the
+  picture itself on the clipboard (xpostCopyImage, xpost.js): a PNG, the one
+  kind every browser takes (a JPEG or WebP drawn to one, at most 4096 on its
+  long side, what an iPhone's canvas takes), asked for in the tap itself
+  with the picture as a promise (`ClipboardItem`), as Safari requires. A GIF
+  (it would be a still) or a browser that won't: a toast says so and the
+  picture opens full screen, to hold (right-click) and save or copy it.
+  Pictures and videos
   come from the server (`/api/session/<id>/media?src=`): a file in your
   home or /tmp that is one (by its first bytes; Range for Safari's video),
   or an https picture fetched there from a public address only and kept a
   day, as the page takes pictures only from its own server (APP_CSP). The
   Stop hook checks the handle, the addresses, and that each picture is
   there and is one. test/xpost-view.js draws it on a phone and wide, dark
-  and light; test/reply-check.py has the checks.
+  and light, reads Copy image's picture back off the clipboard, and runs
+  the copies again in WebKit (Safari's engine); test/reply-check.py has the
+  checks.
 
 ### The conversation
 
