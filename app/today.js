@@ -170,8 +170,7 @@ function todayParts(v) {
   const loops = (v.today && v.today.loops) || [];
   const isMain = (s) => s.assistant === "main";
   const now = Date.now() / 1000;
-  const asks = ss.filter((s) => !todayIsAnswered(s) && (s.status === "waiting" || (s.secret_asks || []).length
-    || (s.status !== "working" && ((s.today || {}).asks || []).length)));
+  const asks = ss.filter(todayAsking);
   const blocked = ss.filter((s) => !asks.includes(s) && !todayBusy(s) && (s.today || {}).state === "blocked");
   const due = loops.filter((l) => l.kind === "due" && l.due).sort((a, b) => a.due.localeCompare(b.due));
   const dueNow = due.filter((l) => todayDay(l.due) <= 1);
@@ -180,9 +179,10 @@ function todayParts(v) {
   const waitingAll = loops.filter((l) => l.kind === "waiting").sort((a, b) => (a.chase || "9").localeCompare(b.chase || "9"));
   const chaseNow = waitingAll.filter((l) => l.chase && todayDay(l.chase) <= 0);
   const waiting = waitingAll.filter((l) => !chaseNow.includes(l));
-  const main = ss.find((s) => isMain(s) && !asks.includes(s)) || null;
-  // Your agents: each on top, next to your assistant, unless it asks you something.
-  const agents = ss.filter((s) => s.assistant === "agent" && !asks.includes(s));
+  // Your assistant and your agents: on top, as a messaging app's chats, whatever
+  // they do (asking you, its row says so and has its answers: todayAgent).
+  const main = ss.find(isMain) || null;
+  const agents = ss.filter((s) => s.assistant === "agent");
   // Finished a turn you haven't opened: it needs you too (to see what it did).
   const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isAgent(s) && !todayBusy(s) && todayUnseen(s));
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isAgent(s));
@@ -196,6 +196,13 @@ function todayParts(v) {
   // Ready: every other chat, stalled ones among them (as the list orders them).
   const ready = rest.filter((s) => !done.includes(s) && !working.includes(s));
   return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, agents, done, stale, working, idle, ready, someday, tasks: todayTasks(v) };
+}
+
+// Whether a chat asks you something you haven't answered: a question, a
+// permission, a secret, or its last reply's questions.
+function todayAsking(s) {
+  return !todayIsAnswered(s) && (s.status === "waiting" || (s.secret_asks || []).length
+    || (s.status !== "working" && ((s.today || {}).asks || []).length));
 }
 
 // Its work merged, and nothing since (merge_scan): done, to complete.
@@ -402,17 +409,23 @@ function todayFirst(key, kids, n = TODAY_SHOW) {
 // moment), a permission's Allow and Deny, else Answer (a secret, a plan,
 // Claude's own question: in the chat, at its card).
 function todayAsk(s) {
-  const t = s.today || {};
-  const qs = s.status !== "waiting" ? (t.asks || []).filter((q) => (q.options || []).length).slice(0, 3) : [];
   const base = { kind: "ask", hue: todayHue(s.repo), chip: todayChip(s), title: s.task || "New chat", open: () => todayOpen(s), id: s.id,
                  lead: isAgent(s) ? avatar(s, "small") : null };
+  return uiCard({ ...base, ...todayAskParts(s) });
+}
+
+// What a chat asks you, as its card shows it: its pill, the question (body)
+// and its answers (actions). An agent's row has them too (todayAgent).
+function todayAskParts(s) {
+  const t = s.today || {};
+  const qs = s.status !== "waiting" ? (t.asks || []).filter((q) => (q.options || []).length).slice(0, 3) : [];
   if (!qs.length) {
     const secret = (s.secret_asks || []).length;
     const tone = secret ? "secret" : s.permission ? "permission" : "ask";
-    return uiCard({ ...base, pill: uiPill(TODAY_PILLS[tone], "ask"),
+    return { pill: uiPill(TODAY_PILLS[tone], "ask"),
       body: [h("p", { class: "tcard-text" }, secret ? "Asks you for a secret" : s.asks || "Needs your answer")],
       actions: s.permission ? [uiButton("Allow", () => todayPermit(s, "allow"), false, "today-opt"), uiButton("Deny", () => todayPermit(s, "deny"), false, "today-opt"), uiButton("Open", () => todayOpen(s)), uiPreview(s)]
-                            : [uiButton("Answer", () => todayOpen(s), true), uiPreview(s)] });
+                            : [uiButton("Answer", () => todayOpen(s), true), uiPreview(s)] };
   }
   const key = JSON.stringify(qs);
   let st = todayUI.answers.get(s.id);
@@ -440,7 +453,26 @@ function todayAsk(s) {
         if (qs.every((_, j) => st.picks[j] !== undefined)) send();
         else todayRedraw();
       } }, o.label)), i === qs.length - 1 ? uiButton("Other…", () => todayOpen(s), false, "quiet") : null)));
-  return uiCard({ ...base, pill: uiPill(TODAY_PILLS.ask, "ask"), body, actions: [uiPreview(s)] });
+  return { pill: uiPill(TODAY_PILLS.ask, "ask"), body, actions: [uiPreview(s)] };
+}
+
+// Your assistant or an agent, as a messaging app lists a conversation: its
+// picture, its name, its last message under it (or that it's typing, or asks
+// you something), when it wrote, and how many of its messages you haven't
+// read. Asking you, the question and its answers under it, as any card's.
+// Never a mission: no Complete, no Done, no Stalled.
+function todayAgent(s) {
+  const n = s.unread || 0;
+  const now = uiPresence(s);
+  const ask = todayAsking(s) ? todayAskParts(s) : null;
+  const said = String(s.said || "");
+  const sub = now ? h("span", { class: `tcard-presence t-${now.tone}` }, now.text)
+    : said ? h("span", { class: "tcard-last" }, said) : h("span", { class: "tcard-last none" }, "No messages yet");
+  const time = s.said_at ? h("span", { class: `tcard-time${n ? " on" : ""}` }, uiChatTime(s.said_at)) : null;
+  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "row"), title: s.assistant_name || s.task || "Assistant",
+    sub, pill: time, count: n, id: s.id, open: () => todayOpen(s), unseen: false,
+    label: [s.assistant_name || "Assistant", now ? now.text : said ? `said: ${said}` : "", n ? `${n} unread` : ""].filter(Boolean).join(", "),
+    body: ask ? ask.body : [], actions: ask ? ask.actions : [uiPreview(s)] });
 }
 
 function todayBlocked(s) {
@@ -977,7 +1009,7 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // Notifications don't reach this device (app.js pushNotice): said above your chats.
   if (only !== "tasks" && typeof pushNotice === "function") nodes.push(pushNotice());
   // A chat's card, wherever it stands.
-  const cardOf = (s) => s === p.main || p.agents.includes(s) ? tk(todayChat, "assistant")(s)
+  const cardOf = (s) => s === p.main || p.agents.includes(s) ? tk(todayAgent)(s)
     : p.asks.includes(s) ? tk(todayAsk)(s) : p.blocked.includes(s) ? tk(todayBlocked)(s)
     : tk(todayChat, p.fresh.includes(s) ? "fresh" : p.done.includes(s) ? "done" : p.working.includes(s) ? "working" : "ready")(s);
   // Your chats: your assistant and your agents, what's at work (its own list, folded, so what
@@ -1056,7 +1088,8 @@ function todayKey(v) {
 function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
-    s.assistant_name, s.picture, s.priority, s.repo, boardOn() ? s.said : "", uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)])]);
+    s.assistant_name, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
+    uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)])]);
 }
 
 // What a task's card shows: the task, its time as said, its agent's name and picture.

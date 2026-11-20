@@ -228,8 +228,10 @@ groups and sort as a computer: each one's name, its state in words and its
 project, then what it asks you ("Asks: Which theme should be the default?") or the
 last thing its Claude wrote; its time, a dot while you haven't read what it
 finished, and its flag if pinned. Your assistant's card stays on top, and your
-agents' right under it (see [Your assistant](#your-assistant) and
-[Your agents](#your-agents)). The search reads names, projects and branches.
+agents' right under it, each as a messaging app lists a conversation (see [Your
+assistant](#your-assistant), [Your agents](#your-agents) and [Chatting with your
+assistant and your agents](#chatting-with-your-assistant-and-your-agents)). The
+search reads names, projects and branches.
 
 - **Hold a chat** (or its ••• menu) to pin it or put it for later, rename it, add a picture or a secret, make it an agent or your assistant, or close
   it. Closing asks first, as on a computer, and says if uncommitted work would go
@@ -824,7 +826,8 @@ first, then the one you last wrote to), and one count over it:
   blocked, your agents' tasks (first in Tasks: [Your agents'
   tasks](#your-agents-tasks)), the people to chase today (**Chase**: your assistant
   drafts the message), and your commitments due by tomorrow, late ones in red. The number on the tab
-  counts them; the app's icon counts the chats asking you.
+  counts them; the app's icon counts the chats asking you, plus the messages from
+  your assistant and your agents you haven't read.
 - **Finish**: a chat exists to reach its goal and be closed. A chat whose goal is
   reached says **Done** with **Close**; one stalled two days or more offers **Ask
   status** (it asks the chat where it stands, and to finish or say what it needs)
@@ -941,23 +944,24 @@ amarchy assistant                        # which one it is: id, then name
 amarchy assistant off                    # a chat like the others again
 ```
 
-- **In every list** it comes first, above the groups: bigger, with its picture (an
-  imp of a retainer with his staff of two heads, `app/assistant.svg`, or yours), its
-  name, and its state on a badge at the corner of the picture. The other chats of its
-  project (more chats for small personal things) sit under it there, at their usual
-  size, and a rule sets them apart from the rest. When it has written something you
-  haven't read, its card says **New** by its name and shows the start of what it
-  wrote. Opening it anywhere (the phone, the browser) clears it everywhere. Every
-  other chat that finished a turn you haven't opened gets the same mark, smaller: a
-  dot by its time. In the chat itself, the phone calls it by its name, and the box
-  says "Message Jaken".
+- **In every list** it comes first, above the groups, as a messaging app lists a
+  conversation: its picture (an imp of a retainer with his staff of two heads,
+  `app/assistant.svg`, or yours), its name, its last message under it (**typing…**
+  while it works, what it asks you when it does, with the answers right there), when
+  it wrote, and how many of its messages you haven't read, in a round count. Opening
+  it anywhere (the phone, the browser) clears the count everywhere. Its chat is a
+  messaging app's too: see [Chatting with your assistant and your
+  agents](#chatting-with-your-assistant-and-your-agents). The box says "Message
+  Jaken".
 - **It always tells you** when it needs you or is done, whatever `amarchy alerts`
   lets through of the others: under its name and picture (in a computer's browser it
   stays until you dismiss it), with what it said as the body (its first words),
   and with a chime of its own, `herald` (a knock of the staff and two horn notes;
   `amarchy sound --assistant <name|off>` picks another). What it sends with `amarchy
-  notify` goes under its name too, and a tap opens it. On an iPhone a notification
-  always wears the app's icon, so there its name is what sets it apart.
+  notify` goes under its name too, and a tap opens it. Chrome (Android, a computer)
+  shows its picture by the notification; an iPhone and Safari on a Mac always show
+  the app's icon instead, whatever a notification asks, so there its name is what
+  sets it apart.
 
 Its picture can be yours rather than amarchy's imp:
 
@@ -1002,8 +1006,12 @@ their **Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay
 assistant's); it has [tasks of its own](#your-agents-tasks) instead:
 
 - **Its place**, on top of every list, right under your assistant, in the order you
-  made them, whatever its priority. Its card shows its picture and name, as your
-  assistant's does, and the other chats of its project wear its name.
+  made them, whatever its priority or what it does (asking you, it stays there, with
+  the answers on its row). Its row is a conversation's, as your assistant's is (its
+  picture, its name, its last message, when, how many unread), and the other chats
+  of its project wear its name.
+- **Its chat is a messaging app's**, not a working chat's: see [Chatting with your
+  assistant and your agents](#chatting-with-your-assistant-and-your-agents).
 - **Its picture**: yours (cut round, kept in `~/.config/amarchy/agents/`), else its
   initial on its project's color, so two agents never look alike.
 - **Its chime**: one of its own, picked as it's made from the chimes nothing else
@@ -1026,6 +1034,40 @@ one you have); on an agent, **name, picture, chime…**: rename it, choose its p
 (cut in the circle as your assistant's is), pick its chime, or **Not an agent any
 more**. **Settings → Agents** lists them, your assistant first, and **Settings →
 Sound** has a tab for each.
+
+## Chatting with your assistant and your agents
+
+Your assistant and your agents are people you text, not work you review. Their
+chats look and read like a messaging app's, in your theme's colors; every other
+chat keeps the working view (the Briefing, the folded sections, the steps, the
+buttons).
+
+- **Bubbles**: what it says on the left, what you say on the right, each with its
+  time in its corner; yours with ticks (one while it's on its way, two once its
+  Claude has it). Several in a row sit close together. The day goes between them
+  (Today, Yesterday, Monday, Nov 12).
+- **Typing…**: while it works, three dots in a bubble at the end, and **typing…**
+  under its name on the bar and on its row. No state box on the bar.
+- **Its steps**: one quiet line in the middle where it worked ("Worked 2m · 14
+  steps"), a tap away, never open by themselves. What it says between them is a
+  message like any other.
+- **What it didn't get from you**: what a timer, a script or another chat sent it
+  (`amarchy send`, another Claude's message) is a quiet line in the middle,
+  **Automatic** or **From** the chat that sent it, with its first words; a tap opens
+  all of it. Your buttons (a task's, a loop's on Today) are yours: on the right.
+- **The box alone**: its model, effort and mode menus show while you write.
+- **How it writes**: amarchy starts its Claude with a format of its own (bin/amarchy
+  `CHAT_FORMAT`): text like a person, short messages, the answer first; no brief, no
+  headings, no goal block (it lives on). Its blocks are the same (a link, a draft, a
+  picture, an X post, a date), and a question with a few clear answers can still be
+  buttons. The end of a turn checks only that its blocks can be drawn. A chat you
+  make an agent (or your assistant), or one that stops being one, is started again
+  once idle, the same conversation, with the format it writes in now.
+- **Real work gets a chat of its own**: an agent that needs code written or something
+  built starts a chat for it (`amarchy new`), which has the working view; what you
+  need to do later goes on your Tasks.
+- **Unread**: its row counts the messages it wrote since you last looked (none while
+  it's on your screen), and so does the app's icon, with what needs you.
 
 ## Your agents' tasks
 

@@ -143,6 +143,9 @@ const CHAT_ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  ticks: '<path d="M2 12.5l4 4L15 7.5M10.5 15.5l1 1L21 7.5"/>',
+  tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  auto: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2M4.5 4.5l2 2"/>',
   chart: '<path d="M4 20h16M7 16v-4M12 16V7M17 16v-7"/>',
   fields: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h3M13 9h4M7 15h3M13 15h4"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
@@ -1136,6 +1139,9 @@ class Chat {
     this.opened = new Map();    // the blocks you opened or folded, by their key -> open
     this.outbox = [];           // what you sent, shown at once, until the conversation (or the queue) has it (send)
     this.answeredAsks = new Map();      // the cards you answered, off the dock at once: their id -> when (act)
+    // Your assistant's or an agent's chat: a messaging app's (bubbles, their
+    // times, the day between them, typing…), not a working chat's.
+    this.bubbles = isAgent(this.row);
     this.reset();
     this.build();
   }
@@ -1151,8 +1157,12 @@ class Chat {
     this.taskCard = null;
     this.lastStep = null;
     this.said = null;           // the last thing Claude said, as the conversation has it
+    this.lastDay = null;        // the day of the last message drawn (bubbles: a day's mark between two)
     this.endStream();
   }
+
+  // Who answers here: your assistant's or an agent's name, else Claude.
+  who() { return this.bubbles ? (this.row && this.row.assistant_name) || "Assistant" : "Claude"; }
 
   get engine() { return this.row && this.row.engine === "chat" ? "chat" : "terminal"; }
 
@@ -1216,7 +1226,7 @@ class Chat {
     let marking = 0;
     new MutationObserver(() => { if (!marking) marking = requestAnimationFrame(() => { marking = 0; this.navMark(); }); })
       .observe(this.scroller, { childList: true, subtree: true });
-    this.el = h("div", { class: "chat" }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
+    this.el = h("div", { class: `chat${this.bubbles ? " bubbles" : ""}` }, h("div", { class: "chat-main" }, this.scroller, this.latest), this.dock);
     const moved = () => { this.landing = false; };
     for (const type of ["pointerdown", "touchstart", "wheel"]) this.el.addEventListener(type, moved, { capture: true, passive: true });
     this.listenDrops();
@@ -1346,6 +1356,7 @@ class Chat {
       session: (e) => {
         const working = this.working();
         this.row = JSON.parse(e.data);
+        this.lookAgain();
         if (this.opts.onSession) this.opts.onSession(this.row);
         this.renderDock();
         this.renderTail();
@@ -1371,6 +1382,20 @@ class Chat {
     es.addEventListener("error", () => {
       if (es.readyState === EventSource.CLOSED && this.opts.onGone) this.opts.onGone("error");
     });
+  }
+
+  // Made an agent (or your assistant), or not one any more, while it's open:
+  // drawn again the other way (bubbles or a working chat's).
+  lookAgain() {
+    const b = isAgent(this.row);
+    if (b === this.bubbles) return;
+    this.bubbles = b;
+    this.el.classList.toggle("bubbles", b);
+    if (!this.items.length) return;
+    const items = this.items.slice(), start = this.start;
+    this.items = [];
+    this.itemKeys = new Set();
+    this.conversationDraw({ reset: true, items, start });
   }
 
   close() {
@@ -1763,6 +1788,8 @@ class Chat {
       this.earlierBtn = h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages");
       if (this.start > 0) this.conv.prepend(this.earlierBtn);
       this.emptyEl = d.items.length ? null
+        : this.bubbles ? h("div", { class: "chat-empty" }, avatar(this.row, "big"), h("div", { class: "big" }, `Say hi to ${this.who()}`),
+            h("div", {}, "Write below, or hold the mic and say it."))
         : h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
             h("div", {}, "Write it below, or hold the mic and say it."));
       if (this.emptyEl) this.conv.prepend(this.emptyEl);
@@ -1805,7 +1832,9 @@ class Chat {
       if (!(d.items || []).length) { this.start = d.start || 0; if (this.start <= 0) this.earlierBtn.remove(); return; }
       this.keepItems(d.items, true);
       // Its own folds: what came before doesn't join the ones after it.
-      const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard, work: this.work, loose: this.loose };
+      const kept = { fold: this.fold, todo: this.todo, lastStep: this.lastStep, tasks: this.tasks, taskCard: this.taskCard, work: this.work, loose: this.loose,
+                     lastDay: this.lastDay };
+      this.lastDay = null;
       this.fold = null;
       this.work = null;
       this.loose = null;
@@ -1815,6 +1844,9 @@ class Chat {
       const frag = document.createDocumentFragment();
       for (const item of d.items) this.add(item, frag, true);
       if (kept.todo) frag.querySelectorAll(".todo").forEach((t) => t.classList.remove("open"));
+      // The same day on both sides of the seam: its mark once, before what came first.
+      const seam = this.earlierBtn.nextElementSibling;
+      if (this.lastDay && seam && seam.matches(".msg.day") && seam.dataset.day === this.lastDay) seam.remove();
       Object.assign(this, kept);
       // What you're reading stays put: moved down by what came above it, once
       // (the browser's own scroll anchoring off meanwhile, so it isn't twice).
@@ -1891,7 +1923,9 @@ class Chat {
       if (box && past) this.markPast(box);
       return box;
     };
-    if (live) {
+    // A message (bubbles) is read as it was written, nothing folded: an old
+    // reply's brief and sections too.
+    if (live || this.bubbles) {
       el.append(...parts.map(draw).filter(Boolean));
       return el;
     }
@@ -2224,6 +2258,13 @@ class Chat {
     if (it.kind === "result") return this.result(it);
     if (it.kind === "tool") return this.tool(it, where, earlier);
     this.fold = null;       // anything else ends the steps before it
+    if (this.bubbles) this.dayMark(it, where);
+    if (it.kind === "user" && this.bubbles && this.fromElsewhere(it)) {
+      // Sent by a script, a timer or another chat, not you: a line of its own, in the middle.
+      this.endWork();
+      where.append(this.autoNote(it));
+      return;
+    }
     if (it.kind === "user") {
       this.endWork();         // what came before you (or what was put in your name) stays as it is
       if (it.turn && !earlier) this.pastQuestions(where);
@@ -2240,6 +2281,7 @@ class Chat {
         shots.append(uiShot({ src: url, alt: "A picture you sent", cls: "shot", lazy: true, shots: () => shotsIn(bubble) }));
         bubble.querySelectorAll(".chip.image:not([data-n])").forEach((c) => c.remove());      // [image]: the picture's here
         labelShots(bubble);
+        if (this.bubbles) this.stampOn(bubble, it.at, "read");
         if (!same) where.append(h("div", { class: "msg user", "data-rec": rec }, bubble));
         return;
       }
@@ -2251,7 +2293,12 @@ class Chat {
         const parts = same.querySelector(".shots") ? said.parts.filter((p) => !(p instanceof Node && p.matches(".chip.image:not([data-n])"))) : said.parts;
         same.append(h("div", { class: "said" }, ...parts));
         labelShots(same);
-      } else where.append(h("div", { class: "msg user", "data-rec": rec || null }, h("div", { class: "bubble" }, ...said.parts)));
+        if (this.bubbles) this.stampOn(same, it.at, "read");
+      } else {
+        const bubble = h("div", { class: "bubble" }, ...said.parts);
+        if (this.bubbles) this.stampOn(bubble, it.at, "read");
+        where.append(h("div", { class: "msg user", "data-rec": rec || null }, bubble));
+      }
     } else if (it.kind === "command") {
       where.append(h("div", { class: "msg command" }, h("span", { class: "chip" }, it.text)));
     } else if (it.kind === "note") {
@@ -2264,6 +2311,7 @@ class Chat {
       const view = this.claudeView(it.text, it.key || `said:${this.items.indexOf(it)}`, earlier);
       if (view.childElementCount) {
         if (!earlier) this.pastQuestions(where);
+        if (this.bubbles) this.stampOn(view, it.at);
         where.append(view);
         this.loose = view;
       }
@@ -2304,6 +2352,69 @@ class Chat {
     }
     if (at < t.length) parts.push(t.slice(at));
     return { parts: parts.map((p) => (typeof p === "string" ? p.replace(/^\s*\n|\n\s*$/g, "") : p)).filter((p) => p !== "") };
+  }
+
+  // ---- a messaging app's look (bubbles): your assistant's and your agents' chats
+
+  // The day a message came, as a mark between the days (Today, Yesterday,
+  // Monday, 12 Nov), before the first of each.
+  dayMark(it, where) {
+    if (!["user", "claude", "note", "command"].includes(it.kind)) return;
+    const d = it.at ? new Date(it.at) : null;
+    if (!d || isNaN(d)) return;
+    const day = d.toDateString();
+    if (day === this.lastDay) return;
+    this.lastDay = day;
+    where.append(h("div", { class: "msg day", "data-day": day }, h("span", {}, chatDay(d))));
+  }
+
+  // When a message came, at the end of its bubble (and, for one of yours,
+  // its ticks: read, Claude has it; sent, on its way).
+  stampOn(bubble, at, ticks = null) {
+    for (const old of bubble.querySelectorAll(":scope > .stamp")) old.remove();
+    for (const old of bubble.querySelectorAll(".stamp-room")) old.remove();
+    const d = at ? new Date(at) : ticks === "sent" ? new Date() : null;
+    const time = d && !isNaN(d) ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    if (!time && !ticks) return;
+    const stamp = h("span", { class: `stamp${ticks ? ` ${ticks}` : ""}` }, time,
+      ticks ? icon(ticks === "read" ? "ticks" : ticks === "sent" ? "tick" : "clock", "ticks") : null);
+    if (ticks) stamp.setAttribute("aria-label", `${time}${ticks === "read" ? ", read" : ", sent"}`);
+    // Room for it at the end of the last line of words, as a messaging app
+    // leaves it; a bubble that ends in something else (a block, a picture,
+    // code) makes a line's room under it.
+    const line = stampLine(bubble);
+    if (line) line.append(h("span", { class: "stamp-room", "aria-hidden": "true" }));
+    bubble.classList.toggle("stamp-low", !line);
+    bubble.append(stamp);
+  }
+
+  // Sent by a script, a timer or another chat (bin/amarchy app_items "from",
+  // or another Claude's message), not by you.
+  fromElsewhere(it) {
+    return !!it.from || /^\s*<cross-session-message\b/.test(it.text || "");
+  }
+
+  // Such a message: in the middle, quiet, who sent it and its first words;
+  // a tap opens all of it.
+  autoNote(it) {
+    const t = String(it.text || "");
+    const m = t.match(/^\s*<cross-session-message\b([^>]*)>([\s\S]*?)(?:<\/cross-session-message>\s*)?$/);
+    const attr = (k) => { const a = m && m[1].match(new RegExp(`${k}="([^"]*)"`)); return a ? a[1] : ""; };
+    const body = (m ? unescapeHTML(m[2]) : t).trim();
+    let who = "Automatic";
+    const chat = (s) => (s ? (isAgent(s) ? s.assistant_name : s.task) || s.id : "");
+    if (it.from && it.from !== "script") who = `From ${chat(typeof rowOf === "function" ? rowOf(it.from) : null) || it.from}`;
+    else if (m) {
+      const name = attr("from-name");
+      const s = name && typeof app !== "undefined" && app.view ? app.view.sessions.find((x) => x.agent === name) : null;
+      who = `From ${chat(s) || name.replace(/-[0-9a-f]{1,4}$/, "") || "another chat"}`;
+    }
+    const at = it.at ? new Date(it.at) : null;
+    const time = at && !isNaN(at) ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    return h("details", { class: "msg note auto" },
+      h("summary", {}, icon(it.from && it.from !== "script" || m ? "message" : "auto"), h("b", {}, who), h("span", { class: "auto-what" }, cut(body.split("\n")[0], 90)),
+        time ? h("span", { class: "auto-time" }, time) : null),
+      h("div", { class: "auto-body" }, body));
   }
 
   // A tool call: a step in the fold under way (a new one when Claude said
@@ -2372,10 +2483,11 @@ class Chat {
       head.addEventListener("click", () => head.setAttribute("aria-expanded", String(box.classList.toggle("open"))));
       for (const live of this.conv.querySelectorAll(".work.live")) live.classList.remove("live");
       this.work = { el: box, head, body, steps: [] };
-      if (this.loose && this.loose.parentNode) this.loose.before(box);
+      // A messaging app's: what was said stays a message, the steps one quiet line after it.
+      if (this.loose && this.loose.parentNode && !this.bubbles) this.loose.before(box);
       else where.append(box);
     }
-    if (this.loose && this.loose.parentNode) this.work.body.append(this.loose);
+    if (this.loose && this.loose.parentNode && !this.bubbles) this.work.body.append(this.loose);
     this.loose = null;
     this.work.body.append(el);
     this.drawWork(this.work);
@@ -2394,7 +2506,7 @@ class Chat {
     const times = steps.flatMap((s) => [s.at, s.result && s.result.at]).filter(Boolean).map((x) => Date.parse(x)).filter((x) => !isNaN(x));
     const took = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
     const failed = steps.filter((s) => s.result && s.result.error && !DENIED.test(String(s.result.text || ""))).length;
-    work.el.classList.toggle("plain", work.body.children.length < 2);
+    work.el.classList.toggle("plain", !this.bubbles && work.body.children.length < 2);
     work.head.replaceChildren(...[
       steps.some((s) => !s.result) ? spinner() : icon("check", "ok"),
       h("span", { class: "what" }, `Worked${took >= 5000 ? ` ${duration(took)}` : ""} · ${steps.length} step${steps.length === 1 ? "" : "s"}`),
@@ -2586,8 +2698,15 @@ class Chat {
     // What it's doing, in words, unless that's the step spinning just above,
     // or the words it's writing say so already.
     const now = this.activity(live);
-    if (now) {
-      if (!this.workingEl) {
+    if (now && this.bubbles) {
+      // A messaging app's: three dots in a bubble of its, while it works.
+      if (!this.workingEl || !this.workingEl.matches(".typing")) {
+        clearInterval(this.workingTimer);
+        this.workingEl = h("div", { class: "msg claude typing", role: "status", "aria-label": `${this.who()} is typing` },
+          h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")));
+      }
+    } else if (now) {
+      if (!this.workingEl || this.workingEl.matches(".typing")) {
         this.workingEl = h("div", { class: "working", role: "status" }, spinner(), h("span", { class: "now" }), h("span", { class: "took" }));
         this.workingTimer = setInterval(() => this.drawWorking(), 1000);
       }
@@ -2631,7 +2750,7 @@ class Chat {
   }
 
   drawWorking() {
-    if (!this.workingEl) return;
+    if (!this.workingEl || this.workingEl.matches(".typing")) return;
     const { text, since } = this.workingNow;
     this.workingEl.querySelector(".now").textContent = text;
     const took = since ? Date.now() - since : 0;
@@ -2837,7 +2956,7 @@ class Chat {
       const btn = (label, fn, aria) => h("button", { class: "text-btn", type: "button", "aria-label": aria, onclick: fn }, label);
       return h("div", { class: "queued" },
         icon("clock"), h("div", { class: "text" }, h("div", { class: "what" }, q.text || (pics ? pics.charAt(0).toUpperCase() + pics.slice(1) : "")),
-          h("div", { class: "when" }, `Will send when Claude finishes${q.text && pics ? ` · with ${pics}` : ""}`)),
+          h("div", { class: "when" }, `Will send when ${this.who()} finishes${q.text && pics ? ` · with ${pics}` : ""}`)),
         btn("Send now", () => this.sendNow(q), "Send it now"),
         btn("Edit", () => this.editQueued(q), "Edit it"),
         h("button", { class: "cbtn small", type: "button", "aria-label": "Don't send it", title: "Don't send it",
@@ -2846,7 +2965,7 @@ class Chat {
     // Sent while it works, not in the broker's queue yet: there already.
     for (const o of this.outbox) if (o.queued) kids.push(h("div", { class: "queued sending" }, icon("clock"),
       h("div", { class: "text" }, h("div", { class: "what" }, o.text || (o.shots.length === 1 ? "An image" : `${o.shots.length} images`)),
-        h("div", { class: "when" }, "Will send when Claude finishes"))));
+        h("div", { class: "when" }, `Will send when ${this.who()} finishes`))));
     const n = live && live.attachments;
     if (n) kids.push(h("div", { class: "queued images" }, icon("image"),
       h("div", { class: "text" }, h("div", { class: "what" }, n === 1 ? "An image goes with your next message" : `${n} images go with your next message`))));
@@ -3491,6 +3610,7 @@ class Chat {
       ...(said.parts || [said.note || said.summary || ""]));
     tray.forEach((a) => { a.taken = false; });
     // (What the conversation had then: after it comes again in full, not one of those.)
+    if (this.bubbles) this.stampOn(bubble, null, "sent");
     const out = { text: text.trim(), key: outKey(message), shots, tray, mark: this.items.length, known: new Set(this.itemKeys), queued: this.engine === "chat" && this.working(),
                   sent: false, el: h("div", { class: "msg user sending" }, bubble) };
     this.outbox.push(out);
@@ -4024,6 +4144,33 @@ const IMAGES_MAX = 20;
 // ---- the pictures of a message, by name: [Image #1] in its words (as Claude
 // Code names a pasted one), "Image 1" on its thumbnail.
 function imageLabel(n) { return `Image ${n}`; }
+
+// The line of words a bubble ends on, where its time can sit at the end
+// (Chat.stampOn), or null when it ends in something else: Claude's last
+// paragraph or list item, your words (or a chip) as they run.
+function stampLine(bubble) {
+  const last = bubble.lastChild;
+  if (!last) return null;
+  if (last.nodeType === 3) return last.data.trim() ? bubble : null;
+  if (last.nodeType !== 1) return null;
+  if (last.matches(".chip")) return bubble;
+  if (last.matches(".said")) return stampLine(last);
+  if (!last.matches(".md")) return null;
+  let x = last.lastElementChild;
+  while (x && (/^(UL|OL)$/.test(x.tagName) || (x.tagName === "LI" && x.lastElementChild && /^(UL|OL)$/.test(x.lastElementChild.tagName))))
+    x = x.lastElementChild;
+  return x && /^(P|LI)$/.test(x.tagName) ? x : null;
+}
+
+// A day, as a messaging app marks it between its messages: Today,
+// Yesterday, its weekday this week, else its date.
+function chatDay(d, now = new Date()) {
+  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return d.toLocaleDateString([], { weekday: "long" });
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
 
 // [Image #n] where the caret is in a field, a space either side of it.
 function placeImageName(field, n) {

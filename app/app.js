@@ -258,11 +258,12 @@ function sendTo(id, body) {
     (r) => r.status !== "idle" || you(r) > was, done, { quiet: true });
 }
 
-// Seen: off what's new at once.
+// Seen: off what's new at once, and your assistant's or an agent's unread
+// messages with it (its row's count, the icon's badge).
 function seenNow(id) {
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   const done = api(`/api/session/${encodeURIComponent(id)}/seen`);
-  if (s && s.unseen) aheadOf(id, { unseen: false }, (r) => !r.unseen, done, { quiet: true }).catch(() => {});
+  if (s && (s.unseen || s.unread)) aheadOf(id, { unseen: false, unread: 0 }, (r) => !r.unseen && !r.unread, done, { quiet: true }).catch(() => {});
   else done.catch(() => {});
 }
 

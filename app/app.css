@@ -90,6 +90,22 @@
      (a question, a permission, a plan), and the button that does what the
      card is for */
   --bubble-user-border: color-mix(in srgb, var(--bubble-user-edge) 40%, transparent);
+  /* your assistant's and your agents' chats, as a messaging app's (chat.css
+     .chat.bubbles): its bubbles and yours, their corners, a message's time,
+     your ticks once it has it, the day between them */
+  --chat-them-bg: color-mix(in srgb, var(--surface) 94%, transparent);
+  --chat-them-text: var(--text);
+  --chat-them-border: var(--border);
+  --chat-you-bg: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  --chat-you-text: var(--text);
+  --chat-you-border: color-mix(in srgb, var(--accent) 45%, transparent);
+  --chat-bubble-radius: 14px;
+  --chat-stamp: var(--text-muted);
+  --chat-read: var(--accent);
+  --chat-day-bg: color-mix(in srgb, var(--surface) 90%, transparent);
+  /* how many messages you haven't read (ui.js uiUnread) */
+  --unread-bg: var(--accent);
+  --unread-text: var(--on-accent);
   --step-icon: var(--text-muted);
   --ask-bg: var(--surface);
   --ask-border: var(--accent);

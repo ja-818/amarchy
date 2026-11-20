@@ -156,6 +156,30 @@ html { touch-action: manipulation; }
 .avatar.letter circle { fill: color-mix(in srgb, var(--ph, var(--accent)) 24%, var(--card-bg, var(--surface))); }
 .avatar.letter text { fill: var(--ph, var(--accent)); font-family: inherit; font-size: 54px; font-weight: 700; }
 .tcard-head .avatar { width: 26px; height: 26px; flex: none; }
+.tcard-head .avatar.row { width: 46px; height: 46px; }
+.avatar.head { width: 34px; height: 34px; flex: none; }
+/* A conversation, as a messaging app lists it (uiCard sub, count: today.js
+   todayAgent): its picture, its name over its last message (or typing…), its
+   time over how many you haven't read. */
+.tcard-head.two { align-items: center; gap: 12px; padding-top: 9px; padding-bottom: 9px; }
+.tcard-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tcard-main > .tcard-title { flex: none; font-weight: 700; }
+.tcard-sub { min-width: 0; font-size: var(--caption); line-height: 1.4; color: var(--text-muted);
+             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tcard-sub .t-accent { color: var(--accent); font-weight: 700; }
+.tcard-sub .t-ask { color: var(--warn, var(--warning)); font-weight: 700; }
+.tcard-sub .none { font-style: italic; }
+.tcard-side { flex: none; align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 2px 0; }
+.tcard-side:has(> :only-child) { justify-content: center; }
+.tcard-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tcard-time.on { color: var(--unread-bg); font-weight: 700; }
+/* Unread: a round count, filled (ui.js uiUnread). */
+.ui-unread {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box;
+  font-size: 12px; font-weight: 800; line-height: 1; border-radius: 11px;
+  color: var(--unread-text); background: var(--unread-bg); font-variant-numeric: tabular-nums;
+}
+.tcard.k-assistant .tcard-sub:has(+ *) { -webkit-line-clamp: 1; }
 /* Under the pointer, and under the keys: the card, the whole of it. */
 @media (hover: hover) { .tcard[data-id]:hover, .tcard.k-due:hover, .tcard.k-chase:hover, .tcard.k-someday:hover, .tcard.k-task:hover {
   background: linear-gradient(var(--card-hover-bg), var(--card-hover-bg)), var(--card-bg); border-color: var(--card-hover-border);
@@ -479,6 +503,13 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @media (hover: hover) { .head-title:hover { background: var(--control-hover); } }
 .head-title .task { flex: 0 1 auto; min-width: 0; font-size: var(--title); overflow: hidden; text-overflow: ellipsis; }
 .head-title .avatar.small { width: 22px; height: 22px; flex: none; }
+/* Your assistant's or an agent's: its picture, its name, what it's up to under it (uiPresence). */
+.head-title.who { gap: 10px; }
+.head-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.head-name .task { font-size: var(--title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-sub { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-sub.t-accent { color: var(--accent); }
+.head-sub.t-ask { color: var(--warn, var(--warning)); }
 .head-title .tcard-chip { max-width: 22%; }
 /* Where it stands: a box of the buttons' size, neutral, its tone a dot. */
 .head-state {
