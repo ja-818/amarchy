@@ -880,6 +880,28 @@ function replyOutline(parts) {
 const GOAL_STATES = ["working", "waiting", "blocked", "done"];
 const GOAL_FENCE = /^```[ \t]*goal\b([^\n]*)\n([\s\S]*?)^```[ \t]*$\n?/gm;
 
+// What your assistant or an agent wrote, as the messages it sent (its chat
+// format: a line holding only --- between two, not in a code block or a
+// block): each a bubble. bin/amarchy chat_messages splits them the same.
+// partial: as it's written (the last one kept even empty, a --- half
+// typed at its end left out).
+function chatMessages(text, partial = false) {
+  const out = [];
+  let cur = [], fenced = false;
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  if (partial && /^ {0,3}-{1,2}\s*$/.test(lines[lines.length - 1])) lines.pop();
+  for (const line of lines) {
+    if (fenced) fenced = !/^ {0,3}```\s*$/.test(line);
+    else if (/^ {0,3}```/.test(line)) fenced = true;
+    else if (/^ {0,3}-{3,}\s*$/.test(line)) { out.push(cur.join("\n")); cur = []; continue; }
+    cur.push(line);
+  }
+  out.push(cur.join("\n"));
+  const kept = out.map((m) => m.trim());
+  const last = kept.pop();
+  return [...kept.filter(Boolean), ...(partial || last ? [last] : [])];
+}
+
 function replyGoal(text) {
   const found = replyBlocks(text).filter((b) => b.kind === "goal").pop();
   if (!found) return null;
@@ -2349,13 +2371,17 @@ class Chat {
                         : h("div", { class: "msg note" }, text));
     } else if (it.kind === "claude") {
       // (Only a goal block, added to the reply before it when it had none: nothing to show.)
-      const view = this.claudeView(it.text, it.key || `said:${this.items.indexOf(it)}`, earlier);
-      if (view.childElementCount) {
+      // Your assistant's or an agent's: the messages it sent, a bubble each.
+      const key = it.key || `said:${this.items.indexOf(it)}`;
+      const texts = this.bubbles ? chatMessages(withoutGoal(it.text)) : [it.text];
+      texts.forEach((text, i) => {
+        const view = this.claudeView(text, i ? `${key}|m${i}` : key, earlier);
+        if (!view.childElementCount) return;
         if (!earlier) this.pastQuestions(where);
         if (this.bubbles) this.stampOn(view, it.at);
         where.append(view);
         this.loose = view;
-      }
+      });
       if (!earlier) {
         // What Claude was writing is in the conversation now.
         this.said = String(it.text || "").replace(/\s+$/, "");
@@ -2810,7 +2836,9 @@ class Chat {
       if (!s || !text.startsWith(s.text.slice(0, Math.min(s.text.length, 24)))) {
         this.endStream();
         this.stream = { text, shown: 0, done: false };
-        this.streamEl = h("div", { class: "msg claude streaming", "aria-live": "off" });
+        // Your assistant's or an agent's: its messages, a bubble each, as they come (drawStreamBubbles).
+        this.streamEl = this.bubbles ? h("div", { class: "stream-msgs", "aria-live": "off" })
+          : h("div", { class: "msg claude streaming", "aria-live": "off" });
       } else {
         s.text = text;
         s.shown = Math.min(s.shown, text.length);
@@ -2857,6 +2885,7 @@ class Chat {
     if (!s.done && s.shown < s.text.length) shown = shown.replace(/\S*$/, "");
     // The goal block a reply ends with isn't shown (as in the conversation), nor half of one.
     shown = withoutGoal(shown).replace(/\n?```[ \t]*goal\b[\s\S]*$/, "");
+    if (this.bubbles) return this.drawStreamBubbles(shown, s);
     // The paragraphs written whole are drawn once; only the one being written
     // is drawn again each frame (a long reply drew all of it sixty times a second).
     let cut = -1;
@@ -2889,6 +2918,39 @@ class Chat {
       const lines = s.parts[1].querySelectorAll("p, li, h2, h3, h4, td, th, pre code");
       (lines[lines.length - 1] || s.parts[1]).append(h("span", { class: "caret", "aria-hidden": "true" }));
     }
+  }
+
+  // Your assistant's or an agent's words as it writes them: the messages it
+  // sent already (each --- ends one), drawn once each as the conversation
+  // will show them, not to tap yet; the one it's writing, with the caret.
+  drawStreamBubbles(shown, s) {
+    const texts = chatMessages(shown, !s.done);
+    s.msgs = s.msgs || [];
+    const els = [];
+    texts.forEach((text, i) => {
+      if (!text) return;      // the next one, not begun yet
+      const writing = !s.done && i === texts.length - 1;
+      const was = s.msgs[i];
+      if (was && was.text === text && was.writing === writing) { els.push(was.el); return; }
+      let el;
+      if (writing) {
+        // (Half a **bold** or `code` not closed yet would flash: left out until it is.)
+        let t = text;
+        for (const re of [/\*\*/g, /(?<!`)`(?!`)/g]) {
+          const marks = [...t.matchAll(re)];
+          if (marks.length % 2) { const at = marks[marks.length - 1].index; t = t.slice(0, at) + t.slice(at + marks[marks.length - 1][0].length); }
+        }
+        el = h("div", { class: "msg claude streaming", html: md(t) });
+        const lines = el.querySelectorAll("p, li, h2, h3, h4, td, th, pre code");
+        (lines[lines.length - 1] || el).append(h("span", { class: "caret", "aria-hidden": "true" }));
+      } else {
+        el = h("div", { class: "msg claude streaming done" }, ...this.claudeView(text, "stream", true, true).childNodes);
+      }
+      s.msgs[i] = { text, writing, el };
+      els.push(el);
+    });
+    s.msgs.length = texts.length;
+    if (els.length !== this.streamEl.children.length || els.some((el, i) => this.streamEl.children[i] !== el)) this.streamEl.replaceChildren(...els);
   }
 
   endStream() {

@@ -1040,12 +1040,12 @@ Sound** has a tab for each.
 ## Chatting with your assistant and your agents
 
 Your assistant and your agents are people you text, not work you review. Their
-chats look and read like a messaging app's, in your theme's colors; every other
-chat keeps the working view (the Briefing, the folded sections, the steps, the
-buttons).
+chats look and read like a messaging app's, in your theme's colors and its square
+corners; every other chat keeps the working view (the Briefing, the folded
+sections, the steps, the buttons).
 
-- **Bubbles**: what it says on the left, what you say on the right, each with its
-  time in its corner; yours with ticks (one while it's on its way, two once its
+- **Bubbles**: what it says on the left, what you say on the right, square as every
+  card of the app, each with its time in its corner; yours with ticks (one while it's on its way, two once its
   Claude has it). Several in a row sit close together. The day goes between them
   (Today, Yesterday, Monday, Nov 12).
 - **Typing…**: while it works, three dots in a bubble at the end, and **typing…**
@@ -1059,12 +1059,16 @@ buttons).
   all of it. Your buttons (a task's, a loop's on Today) are yours: on the right.
 - **The box alone**: its model, effort and mode menus show while you write.
 - **How it writes**: amarchy starts its Claude with a format of its own (bin/amarchy
-  `CHAT_FORMAT`): text like a person, short messages, the answer first; no brief, no
-  headings, no goal block (it lives on). Its blocks are the same (a link, a draft, a
-  picture, an X post, a date), and a question with a few clear answers can still be
-  buttons. The end of a turn checks only that its blocks can be drawn. A chat you
-  make an agent (or your assistant), or one that stops being one, is started again
-  once idle, the same conversation, with the format it writes in now.
+  `CHAT_FORMAT`): WhatsApp with superpowers. Several short messages rather than one
+  long one, the answer first: a line holding only `---` ends a message and starts the
+  next, and each is a bubble of its own (as it's written too). No brief, no headings,
+  no goal block (it lives on). Markdown (bold, lists, tables, links) and its blocks
+  are the same as any chat's (a link, a draft, a picture, an X post, a date, a
+  chart), and a question with a few clear answers is buttons. The end of a turn
+  sends back a message over 60 words (to split it), a heading, or a block that can't
+  be drawn. A chat you make an agent (or your assistant), or one that stops being
+  one, is started again once idle, the same conversation, with the format it writes
+  in now.
 - **Real work gets a chat of its own**: an agent that needs code written or something
   built starts a chat for it (`amarchy new`), which has the working view; what you
   need to do later goes on your Tasks.

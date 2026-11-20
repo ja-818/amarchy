@@ -73,7 +73,7 @@ in `app/ui.css`: see [components.md](components.md).
 | `--bubble-user-border` | `--bubble-user-edge` at 40% | Your bubble's outline in the chat |
 | `--chat-them-bg` / `--chat-them-text` / `--chat-them-border` | `--surface` at 94%, `--text`, `--border` | Your assistant's or an agent's bubbles (its chat, a messaging app's) |
 | `--chat-you-bg` / `--chat-you-text` / `--chat-you-border` | `--accent` at 24% on `--surface`, `--text`, `--accent` at 45% | Yours there |
-| `--chat-bubble-radius` | `14px` | Their corners (the one by who sent it: 4px, as a messaging app's tail) |
+| `--chat-bubble-radius` | `--radius-bubble` | Their corners: square as the app's, unless a theme rounds them (and the day's mark, the quiet lines) |
 | `--chat-stamp` / `--chat-read` | `--text-muted`, `--accent` | A message's time; your ticks once its Claude has it |
 | `--chat-day-bg` | `--surface` at 90% | The day between messages, the quiet lines in the middle (steps, what a script sent) |
 | `--unread-bg` / `--unread-text` | `--accent`, `--on-accent` | How many messages you haven't read (a round count), and a row's time while there are some |

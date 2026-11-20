@@ -6346,6 +6346,8 @@ def last_words(s, limit=240, deep=False):
             texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"] \
                 if isinstance(content, list) else [content] if isinstance(content, str) else []
             texts = [t for t in (without_goal(t).strip() for t in texts) if t]      # (its goal: Today's, not words)
+            if deep:
+                texts = [m for t in texts for m in chat_messages(t)]       # several messages, a bubble each
             if not texts or fixed:
                 continue
             if len(stamps) < UNREAD_MAX:
@@ -6355,7 +6357,7 @@ def last_words(s, limit=240, deep=False):
                     after_you += n
             if said:
                 continue
-            text = " ".join(texts)
+            text = texts[-1] if deep else " ".join(texts)       # (your team's: its last message)
             text = re.sub(r"(?m)^ {0,3}```.*$", "", text)       # a block's fences: its words stay
             # Markdown's marks and list bullets out: words, in a line.
             # (Only emphasis marks: TEST_KEY keeps its underscore.)
@@ -12015,6 +12017,10 @@ SECTION_MAX = 120       # words under one heading, at most
 HEADING_MAX = 70        # characters in a heading, at most
 BRIEF_ROW_MAX = 200     # characters in a brief's row, at most
 SECTION_HEAD = re.compile(r"^#{1,2}\s+(.+?)\s*#*\s*$")      # (the app's too: chat.js replyOutline)
+# Your assistant's and your agents' (CHAT_FORMAT): several short messages,
+# a line of --- between two, each a bubble (chat_messages; chat.js chatMessages).
+CHAT_MESSAGE_MAX = 60   # words of prose in one message, at most
+CHAT_SPLIT = re.compile(r"^ {0,3}-{3,}\s*$")
 
 
 def reply_outline(text):
@@ -12053,6 +12059,43 @@ def reply_outline(text):
             out["sections"][-1]["words"] += words
         else:
             out["lead"] += words
+    return out
+
+
+def chat_messages(text):
+    """What your assistant or an agent wrote, as the messages it sent
+    (CHAT_FORMAT): split at the lines holding only --- (not in a code block
+    or a block), the empty ones left out."""
+    out, cur, fenced = [], [], False
+    for line in (text or "").replace("\r", "").split("\n"):
+        if fenced:
+            fenced = not FENCE_CLOSE.match(line)
+        elif FENCE_OPEN.match(line):
+            fenced = True
+        elif CHAT_SPLIT.match(line):
+            out.append("\n".join(cur))
+            cur = []
+            continue
+        cur.append(line)
+    out.append("\n".join(cur))
+    return [m.strip() for m in out if m.strip()]
+
+
+def chat_shape(text):
+    """What's wrong with a chat's messages (CHAT_FORMAT), in words for its
+    Claude to fix ([] when nothing): one over CHAT_MESSAGE_MAX words of
+    prose, a heading."""
+    out = []
+    for m in chat_messages(without_goal(text)):
+        o = reply_outline(m)
+        words = o["lead"] + sum(x["words"] for x in o["sections"])
+        start = " ".join(re.sub(r"[*_`#>|]", "", m).split()[:6])
+        if words > CHAT_MESSAGE_MAX:
+            out.append(f"Your message starting \"{start}…\" is {words} words: at most {CHAT_MESSAGE_MAX}. Split it into short "
+                       f"messages, a line holding only --- between two, or say less.")
+        if o["sections"]:
+            out.append(f"Your message starting \"{start}…\" has a heading: a chat has none. Make it a short message of its own, "
+                       f"or **bold** its words.")
     return out
 
 
@@ -12122,8 +12165,8 @@ def reply_fix(event, chat=False):
     """What a turn's reply needs fixed, as the Stop hook asks Claude (FIX_ASK,
     GOAL_ASK), or None: its blocks the app can't draw and a shape that reads
     as a wall of text (reply_issues), else a missing goal block. Nothing for a turn that ended without words.
-    chat: your assistant's or an agent's (CHAT_FORMAT): its blocks only, as
-    a message has no shape to keep and no goal."""
+    chat: your assistant's or an agent's (CHAT_FORMAT): its blocks and its
+    messages' size (chat_shape), and no goal."""
     text = event.get("last_assistant_message") if isinstance(event.get("last_assistant_message"), str) else None
     if not text:
         text = turn_reply(event.get("transcript_path"))
@@ -12137,9 +12180,9 @@ def reply_fix(event, chat=False):
 
 def reply_issues(text, chat_exists=None, chat=False):
     """A reply's blocks checked (block_issues) and its shape (reply_shape;
-    not a message's, chat), and whether it has its goal block: (issues, has_goal)."""
+    a chat's messages, chat_shape), and whether it has its goal block: (issues, has_goal)."""
     blocks = reply_blocks(text)
-    issues = [i for b in blocks for i in block_issues(b, chat_exists)] + ([] if chat else reply_shape(text))
+    issues = [i for b in blocks for i in block_issues(b, chat_exists)] + (chat_shape(text) if chat else reply_shape(text))
     return issues, any(b["kind"] == "goal" for b in blocks)
 
 
@@ -15706,15 +15749,23 @@ FORMAT_VERSION = hashlib.sha1(REPLY_FORMAT.encode()).hexdigest()[:10]
 # messaging app does (chat.js, bubbles), not as a working chat's replies, so
 # they write as someone you text: short messages, no brief, no sections, no
 # goal (they live on: nothing to finish). Their blocks are the same.
-CHAT_FORMAT = f"""amarchy shows the person your messages in a chat that looks like WhatsApp: everything you write, at any point of your turn, reaches them as a message bubble from you, rendered as markdown, on their phone or computer. You're someone they text, not a report they read. It holds whatever else says how to talk to them (a persona, your project's own instructions): keep that voice and content.
+CHAT_FORMAT = f"""amarchy shows the person your messages in a chat that looks and works like WhatsApp, with superpowers: you're someone they text, not a report they read. Everything you write, at any point of your turn, reaches them as message bubbles from you, rendered as markdown (bold, lists, tables, links), with your blocks drawn in them as cards with buttons. It holds whatever else says how to talk to them (a persona, your project's own instructions): keep that voice and content.
 
-- Text like a person: the answer first, in plain words, short. A sentence or a few, not a document: no headings, no brief, no goal block, no greeting before the point, no "Here's...".
-- What you write between your steps reaches them too, as a message: only what you'd text a person ("On it, checking your inbox"), never your working notes. Or nothing, until you have the answer.
-- More to say: a few short paragraphs or a short list. A long report doesn't belong in a chat: say the gist, and offer the rest.
+- Write the way people text: several short messages, not one long one. A line holding only --- ends a message and starts the next, as hitting send would: each is a bubble of its own. One idea a message, the answer in the first, at most {CHAT_MESSAGE_MAX} words in each (a block, a table or code doesn't count). For example:
+  Your 3 pm with Felipe moved to 4.
+  ---
+  He wants the deck before then. Want me to send it?
+  ```choices question="Send Felipe the deck?"
+  - Send it | Send Felipe the deck now
+  - Not yet
+  ```
+- No headings, no brief, no goal block, no greeting before the point, no "Here's...". **Bold** the words that matter, a short list for a few items, a table for side-by-side data, a link where it helps.
+- What you write between your steps reaches them too, as messages: only what you'd text a person ("On it, checking your inbox"), never your working notes. Or nothing, until you have the answer.
+- A long report doesn't belong in a chat: the gist in a few messages, then offer the rest (or send it as a file block).
 - Anything they will use goes in a fenced block named for it, where it belongs in your message; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
-{blocks_guidance(skip=("brief",), rules={"choices": "A question with a few clear answers (a yes or no, one of three) can go in a choices block, so they answer with a tap; any other question, just ask it."})}
+{blocks_guidance(skip=("brief",), rules={"choices": "A question with a few clear answers (a yes or no, one of three) goes in a choices block, so they answer with a tap; any other question, just ask it."})}
 - A link for them to open goes in a link block; a date to keep, in an event block; a picture you made, in a file block.
-- When your turn ends, amarchy checks your blocks: one it can't draw (a date that isn't one, a question with no options, an attribute it doesn't know) is sent back to you to fix.
+- When your turn ends, amarchy checks your messages: one over {CHAT_MESSAGE_MAX} words, a heading, or a block it can't draw is sent back to you to fix.
 - Work that needs a chat of its own (code to write, something to build and ship): start one (`amarchy new <project> --prompt "<brief>"`), where they get the whole working view, and tell them in a line with its session block.
 - What they need to do later (a post to reply to, a form to sign) goes on their Tasks (`amarchy task add`), not in a message they'd scroll past."""
 CHAT_VERSION = hashlib.sha1(CHAT_FORMAT.encode()).hexdigest()[:10]

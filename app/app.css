@@ -99,7 +99,7 @@
   --chat-you-bg: color-mix(in srgb, var(--accent) 24%, var(--surface));
   --chat-you-text: var(--text);
   --chat-you-border: color-mix(in srgb, var(--accent) 45%, transparent);
-  --chat-bubble-radius: 14px;
+  --chat-bubble-radius: var(--radius-bubble);   /* square as the rest of the app, unless a theme rounds them */
   --chat-stamp: var(--text-muted);
   --chat-read: var(--accent);
   --chat-day-bg: color-mix(in srgb, var(--surface) 90%, transparent);

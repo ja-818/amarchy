@@ -629,28 +629,26 @@
    sent, a quiet line in the middle; its steps one quiet line, a tap away. */
 .chat.bubbles .chat-conv { gap: 4px; }
 .chat.bubbles .chat-tail { gap: 4px; }
-/* A bubble: its corner by who sent it square, as a messaging app's tail. */
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude, .chat.bubbles .msg.user .bubble {
+/* A bubble: square as every card of the app (--chat-bubble-radius, a theme's to round). */
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude, .chat.bubbles .msg.user .bubble {
   position: relative; max-width: min(85%, 560px); padding: 7px 11px 8px; line-height: 1.45;
   border-radius: var(--chat-bubble-radius); overflow-wrap: anywhere;
 }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude {
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude {
   align-self: flex-start; color: var(--chat-them-text); background: var(--chat-them-bg);
-  border: 1px solid var(--chat-them-border); border-top-left-radius: 4px; min-width: 0;
+  border: 1px solid var(--chat-them-border); min-width: 0;
 }
 .chat.bubbles .msg.user { padding-left: 0; }
 .chat.bubbles .msg.user .bubble {
-  color: var(--chat-you-text); background: var(--chat-you-bg); border: 1px solid var(--chat-you-border); border-top-right-radius: 4px;
+  color: var(--chat-you-text); background: var(--chat-you-bg); border: 1px solid var(--chat-you-border);
 }
-/* The first of a run from the same side stands off what came before; the rest sit close, their corners all round. */
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude, .chat.bubbles :is(.chat-conv, .chat-outbox) > .msg.user { margin-top: 6px; }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude + .msg.claude, .chat.bubbles .chat-conv > .msg.user + .msg.user { margin-top: 0; }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude + .msg.claude { border-top-left-radius: var(--chat-bubble-radius); }
-.chat.bubbles .chat-conv > .msg.user + .msg.user .bubble { border-top-right-radius: var(--chat-bubble-radius); }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude :is(p, ul, ol, .code, .table-wrap, blockquote) { margin: 0 0 8px; }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude :is(h2, h3, h4) { font-size: var(--body); margin: 10px 0 4px; }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude > :is(.artifacts, .choices, .brief, .ui-brief, .tsec) { margin: 6px 0; }
-.chat.bubbles :is(.chat-conv, .chat-tail) > .msg.claude > :is(.artifacts, .choices):last-child { margin-bottom: 4px; }
+/* The first of a run from the same side stands off what came before; the rest sit close. */
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude, .chat.bubbles :is(.chat-conv, .chat-outbox) > .msg.user { margin-top: 6px; }
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude + .msg.claude, .chat.bubbles .chat-conv > .msg.user + .msg.user { margin-top: 0; }
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude :is(p, ul, ol, .code, .table-wrap, blockquote) { margin: 0 0 8px; }
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude :is(h2, h3, h4) { font-size: var(--body); margin: 10px 0 4px; }
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude > :is(.artifacts, .choices, .brief, .ui-brief, .tsec) { margin: 6px 0; }
+.chat.bubbles :is(.chat-conv, .chat-tail, .stream-msgs) > .msg.claude > :is(.artifacts, .choices):last-child { margin-bottom: 4px; }
 /* Its time (and your ticks), in the bubble's corner, at the end of its last line. */
 .chat.bubbles .stamp {
   position: absolute; right: 9px; bottom: 4px; display: inline-flex; align-items: center; gap: 3px;
@@ -670,7 +668,7 @@
 /* It's typing: three dots, in a bubble of its. */
 .chat.bubbles .chat-tail > .msg.claude.typing { padding: 12px 14px; margin-top: 6px; }
 .chat.bubbles .typing .dots { display: inline-flex; gap: 4px; align-items: center; height: 10px; }
-.chat.bubbles .typing .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); opacity: .4; }
+.chat.bubbles .typing .dots i { width: 6px; height: 6px; background: var(--text-muted); opacity: .4; }     /* square, as the spinner's dots */
 @media (prefers-reduced-motion: no-preference) {
   .chat.bubbles .typing .dots i { animation: chat-typing 1.2s ease-in-out infinite; }
   .chat.bubbles .typing .dots i:nth-child(2) { animation-delay: .15s; }
@@ -689,9 +687,9 @@
 .chat.bubbles .msg.note.auto b { flex: none; color: var(--text); font-weight: 700; }
 .chat.bubbles .msg.note.auto .auto-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat.bubbles .msg.note.auto .auto-time { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
-.chat.bubbles .msg.note.auto[open] summary { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+
 .chat.bubbles .msg.note.auto .auto-body { margin-top: 4px; padding: 8px 12px; max-height: 40vh; overflow: auto; white-space: pre-wrap;
-  background: var(--chat-day-bg); border: 1px solid var(--border-faint); border-radius: 4px 4px var(--chat-bubble-radius) var(--chat-bubble-radius); }
+  background: var(--chat-day-bg); border: 1px solid var(--border-faint); border-radius: var(--chat-bubble-radius); }
 /* Its steps: one quiet line in the middle (how long, how many), a tap away; never open by themselves. */
 .chat.bubbles .work { align-self: center; max-width: min(92%, 560px); margin: 2px 0; }
 .chat.bubbles .work > .work-head, .chat.bubbles .work.live > .work-head {
@@ -711,3 +709,5 @@
 .chat.bubbles .nav-item:focus-visible.msg.claude, .keyed .chat.bubbles:not(.writing) .nav-sel.msg.claude { outline-offset: 2px; border-radius: var(--chat-bubble-radius); }
 /* The box alone, as a messaging app's; the model, effort and mode over it while you write. */
 .chat.bubbles:not(.writing) .pills { display: none; }
+/* What it's writing, its messages a bubble each, laid out with the rest. */
+.chat.bubbles .stream-msgs { display: contents; }

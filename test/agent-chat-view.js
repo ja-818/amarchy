@@ -54,6 +54,9 @@ const ITEMS = [
   { kind: "claude", text: "Morning! The amarchy post is live. Two more targets tonight.", key: "c6:0", at: today(8, 2) },
   { kind: "user", text: "Nice, thanks", turn: true, key: "u4:0", at: today(8, 5) },
   { kind: "claude", text: "Anytime.", key: "c7:0", at: today(8, 5) },
+  // Several messages in one reply (a line of --- between two): a bubble each; a table in one.
+  { kind: "user", text: "How did this week go?", turn: true, key: "u5:0", at: today(8, 5) },
+  { kind: "claude", text: "Good week: **3 posts**, 41 replies.\n---\nBy post:\n\n| Post | Likes |\n|---|---|\n| Tasks | 12 |\n| Omarchy | 9 |\n---\nWant next week's plan?", key: "c9:0", at: today(8, 6) },
   // An old reply, from before it wrote as someone you text: read as written, nothing folded.
   { kind: "claude", text: "The week's posts are drafted.\n\n```brief\nChecked: all five read well\nYou: Pick the first\n```\n\n```choices question=\"Post Monday's now?\"\n- Post it | Post Monday's now\n- Wait\n```\n\n## Monday is the strongest\n\nIt has the demo GIF.\n\n```goal state=\"waiting\"\nPost every day\n```", key: "c8:0", at: today(8, 6) },
 ];
@@ -135,7 +138,23 @@ async function run(browser, port, layout) {
       state: [...document.querySelectorAll(".head-state")].some((x) => x.offsetParent),
     };
   });
-  check(where, c.them === 6 && c.you === 2, `its 6 messages and your 2 (${c.them}, ${c.you})`);
+  check(where, c.them === 9 && c.you === 3, `its 9 messages (three in one reply) and your 3 (${c.them}, ${c.you})`);
+  const split = await p.evaluate(() => { const chat = [...document.querySelectorAll(".chat.bubbles")].find((x) => x.offsetParent);
+    const them = [...chat.querySelectorAll(".chat-conv > .msg.claude")].map((m) => m.innerText.split("\n")[0]);
+    const at = them.findIndex((t) => /Good week/.test(t));
+    const table = chat.querySelectorAll(".chat-conv > .msg.claude")[at + 1];
+    const r = table.getBoundingClientRect(), t = table.querySelector("table").getBoundingClientRect();
+    return { three: at >= 0 && /By post/.test(them[at + 1]) && /next week/.test(them[at + 2]), noRule: !chat.querySelector(".chat-conv > .msg.claude hr"),
+             table: t.width > 0 && t.right <= r.right + 1 && t.left >= r.left - 1 }; });
+  check(where, split.three && split.noRule, `a reply of three messages: three bubbles, no rule drawn (${JSON.stringify(split)})`);
+  check(where, split.table, "a table in a bubble, inside it");
+  const square = await p.evaluate(() => { const chat = [...document.querySelectorAll(".chat.bubbles")].find((x) => x.offsetParent);
+    const want = getComputedStyle(document.documentElement).getPropertyValue("--radius-bubble").trim() || "0px";
+    const r = (el) => getComputedStyle(el).borderTopLeftRadius;
+    const els = [chat.querySelector(".chat-conv > .msg.claude"), chat.querySelector(".msg.user .bubble"), chat.querySelector(".msg.day span"),
+                 chat.querySelector(".msg.note.auto summary"), chat.querySelector(".work > .work-head")];
+    return { want, got: els.map((el) => (el ? r(el) : "none")) }; });
+  check(where, square.got.every((x) => x === (square.want === "0" ? "0px" : square.want)), `square as the app: bubbles, days, quiet lines, steps (${JSON.stringify(square)})`);
   check(where, c.left && c.right, "its on the left, yours on the right");
   check(where, c.stamps && c.ticks && c.inside, "each with its time in its corner, yours with ticks");
   check(where, JSON.stringify(c.days) === JSON.stringify(["Yesterday", "Today"]), `the day between them (${c.days.join(", ")})`);
@@ -175,6 +194,13 @@ async function run(browser, port, layout) {
         "working: three dots in a bubble");
   check(where, await until(p, () => [...document.querySelectorAll(".head-sub")].some((x) => x.offsetParent && x.innerText === "typing…")), "and typing… under its name");
   check(where, await p.evaluate(() => ![...document.querySelectorAll(".chat.bubbles .working")].some((x) => x.offsetParent)), "not the working line of a working chat");
+  // Writing: each message a bubble as it comes, the one being written with the caret; no --- shown.
+  await p.evaluate(() => { const ch = chatsOpen.get("scout-scout"); ch.live = { ...ch.live, partial: "Found **three** posts.\n---\nThe best one is on Om" }; ch.renderTail(); });
+  check(where, await until(p, () => { const m = [...document.querySelectorAll(".chat.bubbles .stream-msgs > .msg.claude")].filter((x) => x.offsetParent);
+    return m.length === 2 && /Found three posts/.test(m[0].innerText) && !m[0].querySelector(".caret") && /The best one is on Om/.test(m[1].innerText)
+      && !!m[1].querySelector(".caret") && !/---/.test(m[0].innerText + m[1].innerText); }), "writing: a bubble a message as it comes, the caret in the last");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-writing.png`) });
+  await p.evaluate(() => { const ch = chatsOpen.get("scout-scout"); ch.live = { ...ch.live, partial: "" }; ch.endStream(); ch.renderTail(); });
   await p.screenshot({ path: path.join(SHOTS, `${where}-typing.png`) });
 
   // What you send: your bubble at once, its time and a tick.

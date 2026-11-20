@@ -61,12 +61,25 @@ check("WhatsApp" in cf and "no brief" in cf and "no goal block" in cf and "```br
       "the chat format: texting, no brief or goal block to write")
 check("```whatsapp" in cf and "```link" in cf and "```choices" in cf and "```xpost" in cf, "its blocks are there, as the reply format's")
 check("just ask it" in cf and "Any question you ask them" not in cf, "a question: a choices block only when it has a few clear answers")
+check("several short messages" in cf and "A line holding only ---" in cf and f"at most {am.CHAT_MESSAGE_MAX} words" in cf,
+      "several short messages, a --- between two, each short")
+check("superpowers" in cf and "a table for side-by-side data" in cf, "WhatsApp with superpowers: markdown, tables, blocks")
 check("amarchy task add" in cf and "amarchy new" in cf, "what's for later on Tasks; real work in a chat of its own")
 
-# ---- the turn's check: an agent's blocks only
+# ---- its messages: split at ---, each short
+check(am.chat_messages("Moved to 4.\n---\nWant the deck?\n```command\n---\n```\n---\n\n ---\nOk") ==
+      ["Moved to 4.", "Want the deck?\n```command\n---\n```", "Ok"], "its messages: split at a line of ---, not in a block, none empty")
+
+# ---- the turn's check: an agent's blocks and its messages' size
 LONG = "The search page works. " + " ".join(["It filters as you type and shows everything when the search is empty."] * 12)
-check(am.reply_fix({"last_assistant_message": LONG}, chat=True) is None, "an agent's long message: not sent back for its shape")
-check(am.reply_fix({"last_assistant_message": "Done, posted it."}, chat=True) is None, "nor for a goal block")
+ask = am.reply_fix({"last_assistant_message": LONG}, chat=True) or ""
+check(ask.startswith(am.FIX_MARK) and "Split it into short messages" in ask, "an agent's wall of text: sent back, to split it")
+SPLIT = "\n---\n".join(["It filters as you type and shows everything when the search is empty."] * 6)
+check(am.reply_fix({"last_assistant_message": SPLIT}, chat=True) is None, "the same words as short messages: fine")
+TABLE = "Here they are:\n\n| Post | Likes |\n|---|---|\n" + "\n".join(f"| Post number {i} about the launch | {i} |" for i in range(20))
+check(am.reply_fix({"last_assistant_message": TABLE}, chat=True) is None, "a big table in a message: fine (it isn't words to read)")
+check("has a heading" in (am.reply_fix({"last_assistant_message": "## Today\nTwo posts."}, chat=True) or ""), "a heading: sent back")
+check(am.reply_fix({"last_assistant_message": "Done, posted it."}, chat=True) is None, "no goal block: fine")
 bad = "Here:\n\n```event title=\"Call\" when=\"someday\"\nx\n```"
 ask = am.reply_fix({"last_assistant_message": bad}, chat=True)
 check(bool(ask) and ask.startswith(am.FIX_MARK), "a block it can't draw: sent back, as any chat's")
@@ -114,13 +127,13 @@ def tool(t, uid, tid):
 def result(t, uid, tid):
     return {"type": "user", "uuid": uid, "timestamp": iso(t), "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "content": "x"}]}}
 lines = [said("Old news", t0 - 100, "a0"), user("Find me posts", t0, "h1"), said("On it.", t0 + 10, "a1"), tool(t0 + 20, "a2", "t1"), result(t0 + 30, "r1", "t1"),
-         said("Found two.", t0 + 40, "a3"), said("Both on your **Tasks**.\n\n```goal state=\"working\"\nHunt\n```", t0 + 50, "a4"),
+         said("Found two.\n---\nBoth on your **Tasks**.\n\n```goal state=\"working\"\nHunt\n```", t0 + 50, "a4"),
          said("```goal state=\"working\"\nHunt\n```", t0 + 55, "a5")]
 f.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
 am.transcript = lambda s: f if s["id"] == "scout-scout" else None
 w = am.last_words(S["scout-scout"], deep=True)
 check(w["said"] == "Both on your Tasks." and abs(w["said_at"] - (t0 + 50)) <= 1, f"its last message, and when ({w['said']!r})")
-check(len(w["stamps"]) == 4 and w["after_you"] == 3, f"the times of its messages, three since yours (a goal alone isn't one) ({len(w['stamps'])}, {w['after_you']})")
+check(len(w["stamps"]) == 4 and w["after_you"] == 3, f"the times of its messages, three since yours (two in one, a ---; a goal alone isn't one) ({len(w['stamps'])}, {w['after_you']})")
 check(am.unread(S["scout-scout"], w) == 0, "never looked since this was kept, and nothing unseen: none")
 am.mark_unseen("scout-scout")
 check(am.unread(S["scout-scout"], w) == 3, "never looked, its turn unseen: those since your message")
@@ -130,7 +143,7 @@ check(am.unread(S["scout-scout"], w) == 2, "looked after its first: the two sinc
 am.mark_seen("scout-scout")
 check(am.unread(S["scout-scout"], w) == 0 and not am.unseen("scout-scout"), "looked now: none, and not unseen")
 w2 = am.last_words(S["scout-scout"])
-check(w2["said"] == w["said"], "the list's words, read the same without deep")
+check(w2["said"] == "Found two. --- Both on your Tasks.", f"a working chat's list words: the whole reply in a line ({w2['said']!r})")
 
 # ---- the badge: what needs you, and your team's unread messages
 ss = [{"id": "jaken-jaken", "assistant": "main", "unread": 2, "status": "idle"}, {"id": "scout-scout", "assistant": "agent", "unread": 3, "status": "idle"},
