@@ -268,11 +268,13 @@ function boardKeys(e) {
 
 // Esc over an open chat: back to the board, always (what you were writing
 // stays, as a chat's draft does). But for what Esc does first: stop a
-// dictation, close a menu or a sheet; and in a terminal, Esc is the terminal's.
+// dictation, close a menu or a sheet, or Select text over a terminal; and in
+// a terminal, Esc is the terminal's.
 function boardEsc(e) {
   if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
-  if (e.target.closest && e.target.closest(".term-box")) return;
+  if (e.target.closest && e.target.closest(".term-box, .term-text")) return;
+  if (desk.terminal && desk.terminal.talk.on()) return;     // its message line's dictation
   const c = desk.chat;
   if (c && (c.talk.on() || c.menu)) return;
   if (c && c.navKey(e)) return;      // out of the box, or of a message, first (chat.js)

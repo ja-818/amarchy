@@ -120,10 +120,14 @@ here holds for both.
 - **Chat | Terminal** on the phone, or a side panel on a computer: the
   project's terminal (Run, and the saved commands) and the **Changes** and
   **Details** tabs (the branch, the worktree and the base live there).
+  Under a terminal, on both, a **message line** as in a messaging app: what
+  they write, dictate or paste there goes in when they send it, then Enter.
+  Holding a finger on the terminal (a right click) gives **Paste** and
+  **Select text** (to copy what it printed); a swipe scrolls it back.
 - **Claude's classic terminal**: under Advanced in a chat's menu, shown only
   with Show terminals on. Send the user there for what the chat can't do yet
   (`/login`, `/config`, `/rewind`, an MCP login). Don't offer it for anything
-  the chat does.
+  the chat does. A code to paste (a login's) goes in its message line.
 - **Settings**: sleep time, chimes, what tells them, dictation, secrets, the
   look and the terminals.
 

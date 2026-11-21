@@ -6792,6 +6792,35 @@ def tmux_has(name):
     return tmux("has-session", "-t", f"={name}").returncode == 0
 
 
+TTY_TEXT_LINES = 3000       # how far back a terminal's text goes (Select text in the app)
+
+
+def tty_text(sid, which):
+    """What a session's terminal (which: claude or term) printed and shows
+    now, as text, for the app's Select text: its last TTY_TEXT_LINES lines,
+    each as it was printed (the lines tmux wrapped to the width joined
+    again, so a long address or command is whole), without the blank ones
+    at its end. None when it isn't running."""
+    r = tmux("capture-pane", "-p", "-J", "-S", f"-{TTY_TEXT_LINES}", "-t", f"={tmux_name(sid, which)}:")
+    if r.returncode != 0:
+        return None
+    lines = [l.rstrip() for l in r.stdout.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
+def tty_bottom(sid, which):
+    """A session's terminal back at its bottom, live: out of tmux's copy
+    mode, where scrolling back (the wheel, a finger) leaves it. What the
+    app types from its message line or pastes then lands at the prompt,
+    not in copy mode's keys. Nothing when it isn't in that mode."""
+    target = f"={tmux_name(sid, which)}:"
+    r = tmux("display-message", "-p", "-t", target, "#{pane_in_mode}")
+    if r.returncode == 0 and r.stdout.strip() not in ("", "0"):
+        tmux("send-keys", "-t", target, "-X", "cancel")
+
+
 def tmux_env(s):
     return [x for k, v in session_env(s).items() for x in ("-e", f"{k}={v}")]
 
@@ -10297,7 +10326,8 @@ def upload_name(name):
 def app_upload(s, data):
     """A file you gave Claude, kept in the session's worktree under
     .amarchy/uploads/ (git-ignored, so it's never committed): {name, data
-    (base64)} -> {path (from the worktree's top), size}, or (code, why).
+    (base64)} -> {path (from the worktree's top), full (from /: what a
+    terminal's message line types), size}, or (code, why).
     {remove: path}: one taken back before it was sent."""
     root = Path(s["path"])
     if not root.is_dir():
@@ -10330,7 +10360,7 @@ def app_upload(s, data):
         tmp.replace(f)
     except OSError as e:
         return 500, f"couldn't keep it: {e}"
-    return {"path": str(f.relative_to(root)), "size": len(raw)}
+    return {"path": str(f.relative_to(root)), "full": str(f), "size": len(raw)}
 
 
 def transcript_image(s, rec, n):
@@ -13313,6 +13343,11 @@ def app_handler(st, users, address):
                         if isinstance(size, list) and len(size) == 2 and all(isinstance(n, int) for n in size):
                             fcntl.ioctl(master, termios.TIOCSWINSZ,
                                         struct.pack("HHHH", min(max(size[1], 2), 500), min(max(size[0], 2), 1000), 0, 0))
+                        # Before what the message line sends or a Paste: back
+                        # at the bottom (out of copy mode), done before the
+                        # keys that come after it are written.
+                        if msg.get("bottom") is True:
+                            tty_bottom(sid, which)
                     elif op == 9:
                         self.ws_send(data, op=10)
             except OSError:
@@ -13588,13 +13623,18 @@ def app_handler(st, users, address):
             if path == "/api/secrets":      # the secrets' names (never a value): Settings → Secrets
                 return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
                                        "projects_known": project_names()})
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|tty/claude|tty/term|commands|agent)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|tty/claude|tty/term|tty/claude/text|tty/term/text|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
                 if m.group(2) == "agent":
                     return self.chat(s, "agent", {})
+                if m.group(2).endswith("/text"):        # Select text: what the terminal printed, as text
+                    text = tty_text(s["id"], m.group(2).split("/")[1])
+                    if text is None:
+                        return self.error(409, "That terminal isn't running")
+                    return self.send(200, {"text": text})
                 if m.group(2).startswith("tty/"):
                     return self.tty(s, m.group(2)[4:], args)
                 if m.group(2) == "commands":

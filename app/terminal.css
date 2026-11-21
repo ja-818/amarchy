@@ -34,13 +34,57 @@
 .term-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .session-term.phone .term-body > .term-box { --term-pad: 4px 6px; background: transparent; }
 
+/* A finger on the terminal is the terminal's (terminal.js: a swipe scrolls
+   it back, held still it's the menu): not the page's scroll or zoom, not
+   the phone's own selection or callout. */
+.session-term .term-box { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
 /* The phone's keys, under the terminal: Claude's menus' keys, the keys a
    phone's keyboard hasn't always. */
-.term-keyrows { padding: 6px 8px calc(6px + var(--bottom, 0px)); border-top: 1px solid var(--border-faint); }
-.keyboard-up .term-keyrows { padding-bottom: 6px; }
+.term-keyrows { padding: 6px 8px; border-top: 1px solid var(--border-faint); }
 .term-keys { margin-bottom: 0; }
 .term-keys + .term-keys { margin-top: 6px; }
 .term-keys[hidden] { display: none; }
 .term-keys .control { min-width: 40px; padding: 4px 8px; }
 .term-keys .control.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 
+
+/* The message line (uiComposer): under the terminal, as a messaging app's
+   box; the phone's last thing, over its home bar. */
+.term-compose { padding: 6px 8px; border-top: 1px solid var(--border-faint); }
+.session-term.phone .term-compose { padding-bottom: calc(6px + var(--bottom, 0px)); }
+.keyboard-up .session-term.phone .term-compose { padding-bottom: 6px; }
+.term-line { min-height: 0; }
+.term-line textarea { min-height: 40px; }
+.term-line .cbtn { width: 40px; height: 40px; }
+.term-line .cbtn .glyph svg { width: 20px; height: 20px; display: block; }
+@media (pointer: coarse) {
+  .term-line textarea { min-height: 44px; }
+  .term-line .cbtn { width: 44px; height: 44px; }
+}
+
+/* Where a finger was held: the menu's anchor (uiDropdown), nothing seen. */
+.term-point { position: fixed; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
+
+/* Select text: the terminal's text in its place, still, to select and copy
+   as in a message (the terminal under it hidden meanwhile). */
+.session-term.selecting .term-body > .term-box { visibility: hidden; }
+.term-text { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
+             background: color-mix(in srgb, var(--term-background) calc(var(--term-alpha) * 100%), transparent); }
+.session-term.phone .term-text { background: transparent; }
+.term-text-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border-faint); background: var(--selected-bg); }
+.term-text-hint { flex: 1; min-width: 0; color: var(--text-muted); font-size: var(--caption); }
+.term-text-bar .control { min-height: var(--control-h); padding: 4px 10px; font-size: var(--caption); font-weight: 700; }
+.term-text-body {
+  flex: 1; min-height: 0; overflow: auto; margin: 0;
+  padding: var(--term-pad, 10px);
+  border: 0; border-radius: 0; background: none;
+  font-family: var(--font-code); font-size: var(--term-text-size, 12px); line-height: 1.35;
+  color: var(--term-foreground, var(--text));
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+  overscroll-behavior: contain;
+}
+.term-text-body:focus { outline: none; }
+.term-text-body a { color: var(--accent); text-decoration: underline; }
+.session-term.phone .term-text-body { --term-pad: 6px 8px; }

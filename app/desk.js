@@ -142,8 +142,13 @@ function wsURL(path) {
 
 // ---- a real terminal: a session's Claude or its own, attached to its tmux
 
+const HOLD_MS = 450;         // a finger held this long on a terminal: its menu (Paste, Select text)
+const TMUX_WHEEL = 5;       // lines tmux scrolls back for one turn of the wheel
+
 class TermPane {
-  // which: "claude" or "term". opts.size: font size.
+  // which: "claude" or "term". opts: size (its font size), hold(x, y) (a
+  // finger held on it, or a right click: its menu there), files(list)
+  // (pictures or files pasted or dropped on it).
   constructor(which, opts) {
     this.which = which;
     this.opts = opts || {};
@@ -183,14 +188,24 @@ class TermPane {
       }
       return true;
     });
-    t.onData((d) => this.send(enc.encode(d)));
+    t.onData((d) => {
+      // A key typed after scrolling back: the terminal back at its prompt
+      // first (tmux would take it as its copy mode's), as a terminal of its
+      // own would; what the mouse and the focus report isn't a key.
+      if (this.back && !/^\x1b\[(<|M|I$|O$)/.test(d)) this.bottom();
+      this.send(enc.encode(d));
+    });
     t.onBinary((d) => this.send(Uint8Array.from(d, (c) => c.charCodeAt(0) & 0xff)));
     t.onResize(({ cols, rows }) => this.control({ resize: [cols, rows] }));
     t.attachCustomKeyEventHandler((e) => this.key(e));
     t.textarea.addEventListener("focus", () => paneFocused(this));
     t.textarea.addEventListener("blur", () => paneFocused(null));
     new ResizeObserver(() => this.fit()).observe(this.el);
-    if (this.which === "claude") this.pasting();
+    // The wheel turned back: what's typed next comes back to the prompt.
+    this.el.addEventListener("wheel", (e) => { if (e.deltaY < 0) this.back = true; }, { capture: true, passive: true });
+    this.pasting();
+    this.touching();
+    this.pointing();
     this.fit();
   }
 
@@ -294,6 +309,11 @@ class TermPane {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(data);
   }
 
+  // Connected: what's sent now reaches it.
+  live() {
+    return !!(this.term && this.ws && this.ws.readyState === WebSocket.OPEN);
+  }
+
   control(msg) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
@@ -321,30 +341,155 @@ class TermPane {
     return true;
   }
 
-  // An image pasted (⌘V) or dropped on Claude: to the host, then Ctrl+V,
-  // with which Claude asks for it.
+  // A picture or a file pasted (⌘V) or dropped on it: opts.files has it
+  // (terminal.js: into Claude's prompt as Ctrl+V does, or uploaded and its
+  // path typed). Without it, Claude's takes an image (to the host, then
+  // Ctrl+V, with which Claude asks for it).
   pasting() {
-    const image = (list) => Array.from(list || []).find((f) => /^image\//.test(f.type));
+    const take = (files) => {
+      files = files.filter(Boolean);
+      if (this.opts.files) return this.opts.files(files);
+      const img = files.find((f) => /^image\//.test(f.type));
+      if (img && this.which === "claude") this.pasteImage(img);
+    };
+    const wanted = (files) => files.length && (this.opts.files || (this.which === "claude" && files.some((f) => /^image\//.test(f.type))));
     this.box.addEventListener("paste", (e) => {
-      const item = e.clipboardData && Array.from(e.clipboardData.items).find((i) => i.kind === "file" && /^image\//.test(i.type));
-      if (!item) {        // text: the terminal pastes it, and wl-paste on the host has it too
-        clipText(e.clipboardData && e.clipboardData.getData("text/plain"));
+      const d = e.clipboardData;
+      const files = d ? Array.from(d.items).filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter(Boolean) : [];
+      // Text (even with a picture of it, as from a sheet): the terminal pastes
+      // it, and wl-paste on the host has it too.
+      if (!wanted(files) || (d.getData("text/plain") || "").trim()) {
+        clipText(d && d.getData("text/plain"));
         return;
       }
       e.preventDefault();
       e.stopPropagation();
-      this.pasteImage(item.getAsFile());
+      take(files);
     }, true);
     this.box.addEventListener("dragover", (e) => {
       if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
     });
     this.box.addEventListener("drop", (e) => {
-      const f = e.dataTransfer && image(e.dataTransfer.files);
-      if (!f) return;
+      const files = e.dataTransfer ? Array.from(e.dataTransfer.files || []) : [];
+      if (!wanted(files)) return;
       e.preventDefault();
       this.focus();
-      this.pasteImage(f);
+      take(files);
     });
+  }
+
+  // A finger on it, as on a phone's messages: a swipe up or down scrolls
+  // back through what it printed (tmux's scrollback, as the wheel does) and
+  // a flick goes on a while; held still, its menu (opts.hold: Paste, Select
+  // text) and no tap after it. A tap is a tap: the keyboard, a link.
+  touching() {
+    const box = this.box;
+    let start = null, timer = null, held = false, swiping = false, lastY = 0, lastT = 0, speed = 0, glide = 0;
+    const reset = () => { clearTimeout(timer); start = null; swiping = false; };
+    box.addEventListener("touchstart", (e) => {
+      cancelAnimationFrame(glide);
+      reset();
+      held = false;
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      start = { x: t.clientX, y: t.clientY };
+      lastY = t.clientY;
+      lastT = e.timeStamp;
+      speed = 0;
+      this.scrolled = 0;
+      if (this.opts.hold) timer = setTimeout(() => { held = true; const at = start; reset(); this.opts.hold(at.x, at.y); }, HOLD_MS);
+    }, { capture: true, passive: true });
+    box.addEventListener("touchmove", (e) => {
+      if (held) { e.preventDefault(); return; }
+      if (!start || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x, dy = t.clientY - start.y;
+      if (!swiping) {
+        if (Math.hypot(dx, dy) < 8) return;
+        clearTimeout(timer);
+        if (Math.abs(dy) < Math.abs(dx)) { start = null; return; }     // sideways: not ours
+        swiping = true;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      const d = t.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT);
+      speed = 0.7 * (d / dt) + 0.3 * speed;
+      lastY = t.clientY;
+      lastT = e.timeStamp;
+      this.scrollBy(-d, t.clientX, t.clientY);
+    }, { capture: true, passive: false });
+    box.addEventListener("touchend", (e) => {
+      const was = swiping;
+      reset();
+      // Held: its menu is up, and the finger lifting isn't a tap (no keyboard).
+      if (held) { e.preventDefault(); held = false; return; }
+      if (!was) return;
+      e.preventDefault();
+      // A flick: on a while, slower and slower, as a phone's lists do.
+      let v = speed, last = performance.now();
+      const x = e.changedTouches[0] ? e.changedTouches[0].clientX : 0, y = e.changedTouches[0] ? e.changedTouches[0].clientY : 0;
+      const step = (now) => {
+        const dt = now - last;
+        last = now;
+        v *= Math.pow(0.995, dt);
+        if (Math.abs(v) < 0.05) return;
+        this.scrollBy(-v * dt, x, y);
+        glide = requestAnimationFrame(step);
+      };
+      if (Math.abs(v) > 0.3) glide = requestAnimationFrame(step);
+    }, { capture: true, passive: false });
+    box.addEventListener("touchcancel", () => { reset(); held = false; }, { capture: true, passive: true });
+  }
+
+  // A right click: the same menu, where it was (not tmux's own, nor the
+  // browser's). With Shift, the browser's.
+  pointing() {
+    const box = this.box;
+    const mine = (e) => e.button === 2 && !e.shiftKey && this.opts.hold && !(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents);
+    box.addEventListener("mousedown", (e) => { if (mine(e)) { e.preventDefault(); e.stopPropagation(); } }, true);
+    box.addEventListener("mouseup", (e) => { if (mine(e)) e.stopPropagation(); }, true);
+    box.addEventListener("contextmenu", (e) => {
+      if (e.shiftKey || !this.opts.hold) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;     // a finger held: touching() has it
+      this.opts.hold(e.clientX, e.clientY);
+    }, true);
+  }
+
+  // Scrolled by px (up when less than 0), as the wheel would: tmux scrolls
+  // back (its copy mode) when it has the mouse, a turn of the wheel being
+  // TMUX_WHEEL lines; else the terminal's own scrollback, line by line.
+  scrollBy(px, x, y) {
+    if (!this.term) return;
+    const screen = this.term.element && this.term.element.querySelector(".xterm-screen");
+    const cell = screen && screen.clientHeight ? screen.clientHeight / this.term.rows : 16;
+    const mouse = this.term.modes.mouseTrackingMode !== "none";
+    const unit = mouse ? cell * TMUX_WHEEL : cell;
+    this.scrolled = (this.scrolled || 0) + px;
+    const n = Math.trunc(this.scrolled / unit);
+    if (!n) return;
+    this.scrolled -= n * unit;
+    if (!mouse) return this.term.scrollLines(n);
+    for (let i = 0; i < Math.abs(n); i++)
+      screen.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.sign(n), deltaMode: WheelEvent.DOM_DELTA_LINE,
+                                                     clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  }
+
+  // Text into it as a paste: bracketed when the program asked for that
+  // (Claude, the shell: it lands whole, a new line in it doesn't run
+  // anything), back at the bottom first.
+  paste(text) {
+    if (!this.term || !text) return;
+    this.bottom();
+    this.term.paste(text);
+  }
+
+  // Back at the bottom, live (out of tmux's copy mode, where scrolling back
+  // left it): what's typed next lands at the prompt.
+  bottom() {
+    this.back = false;
+    this.control({ bottom: true });
   }
 
   async pasteFromClipboard() {
@@ -362,19 +507,21 @@ class TermPane {
     else this.send(enc.encode("\x16"));
   }
 
+  // A picture into Claude's prompt: the host's clipboard (what wl-paste
+  // gives Claude), then Ctrl+V, with which Claude asks for it ([Image #1]
+  // in its prompt). True once it's there.
   async pasteImage(blob) {
     try {
-      const png = blob.type === "image/png" ? blob : await asPNG(blob);
-      const data = await new Promise((ok, fail) => {
-        const r = new FileReader();
-        r.onload = () => ok(String(r.result).split(",", 2)[1]);
-        r.onerror = () => fail(new Error("couldn't read the image"));
-        r.readAsDataURL(png);
-      });
-      await api("/api/clip", { type: "image/png", data });
+      const kind = /^image\/(png|jpeg|gif|webp)$/.test(blob.type) ? blob.type : "image/png";
+      const img = kind === blob.type ? blob : await asPNG(blob);
+      if (img.size > 18e6) throw new Error("That image is too big (18 MB at most)");
+      await api("/api/clip", { type: kind, data: await base64Of(img) });
+      this.bottom();
       this.send(enc.encode("\x16"));
+      return true;
     } catch (e) {
       toast(e.message);
+      return false;
     }
   }
 }
@@ -389,11 +536,13 @@ async function asPNG(blob) {
 }
 
 // What tmux copied, to your clipboard. Safari only lets a page write it
-// right after a click or a key: then a click on the notice does it.
+// right after a click or a key: then a click on the notice does it. True
+// when it's there already.
 async function copyText(text) {
   clipText(text);       // the host's wl-paste has it too
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch (e) {
     toast("Copied in the terminal: click here to copy it here too");
     const t = document.querySelector(".toast:not(.stay)");
@@ -401,6 +550,7 @@ async function copyText(text) {
       t.classList.add("action");
       t.addEventListener("click", () => { navigator.clipboard.writeText(text).catch(() => {}); t.remove(); }, { once: true });
     }
+    return false;
   }
 }
 

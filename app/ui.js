@@ -425,6 +425,23 @@ function uiSearch({ placeholder = "Search", label = "Search", key = "/", cls = "
   return box;
 }
 
+// The box you write in and send from, as a messaging app's: the field (a
+// textarea, with its own keys, made by who uses it) between the buttons
+// before it (+) and after it (the mic, Send), on one row, and over that
+// row what goes with it (top: the pictures and files). Rounded as the
+// theme rounds; its look is the --composer-* tokens. A chat's box
+// (chat.js), a terminal's message line (terminal.js).
+function uiComposer({ field, before = [], after = [], top = null, cls = "" }) {
+  return h("div", { class: `composer ui-composer${cls ? ` ${cls}` : ""}` }, top,
+    h("div", { class: "composer-row" }, ...before, field, ...after));
+}
+
+// One of the box's round buttons, a finger's size: kind is its class
+// (attach, mic, send, stop), content its icon.
+function uiComposerButton(kind, label, content, act, extra = {}) {
+  return h("button", { class: `cbtn ${kind}`, type: "button", "aria-label": label, onclick: act || null, ...extra }, content);
+}
+
 // A tool in a bar: its icon, its name for a screen reader and on hover.
 function uiTool(icon, label, act, { title = "", cls = "", extra = {} } = {}) {
   return h("button", { class: `control ui-tool${cls ? ` ${cls}` : ""}`, type: "button", title: title || label, "aria-label": label,

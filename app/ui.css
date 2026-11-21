@@ -60,6 +60,15 @@
   /* The search box (uiSearch). */
   --search-bg: var(--control-bg);
   --search-border: var(--control-border);
+  /* The box you write in (uiComposer): a chat's, a terminal's message line. */
+  --composer-bg: var(--control-bg);
+  --composer-border: var(--tile-border);
+  --composer-border-width: var(--tile-width);
+  --composer-radius: var(--radius-card);
+  --composer-shadow: var(--shadow-card);
+  --composer-focus: var(--focus-ring);
+  --composer-send-bg: var(--primary-bg);
+  --composer-send-text: var(--primary-text);
   /* Your score (uiScore), badges (uiBadges), big numbers (uiTiles), a chart (uiChart), progress (uiProgress). */
   --score-flame: var(--orange, var(--warn, var(--warning)));
   --score-bg: var(--button-bg);
@@ -441,6 +450,46 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-search:focus-within .ui-search-key { display: none; }
 /* No keys on a phone: no key to show. */
 @media (pointer: coarse) { .ui-search-key { display: none; } }
+
+/* ---- the box you write in (uiComposer): rounded as the theme rounds, +
+   on its left, the mic and Send (Stop while Claude works) on its right. A
+   chat's box, a terminal's message line. */
+.composer {
+  display: flex; flex-direction: column; gap: 4px;
+  min-height: 52px;
+  padding: 4px;
+  border: var(--composer-border-width) solid var(--composer-border);
+  border-radius: var(--composer-radius);
+  box-shadow: var(--composer-shadow);
+  background: var(--composer-bg);
+}
+.composer:focus-within { border-color: var(--composer-focus); }
+.composer-row { display: flex; align-items: flex-end; gap: 2px; }
+.composer textarea {
+  flex: 1; min-width: 0;
+  min-height: 44px; max-height: 40vh;
+  resize: none; border: 0; background: none; outline: none;
+  padding: 9px 6px;
+  font-size: 16px;      /* less, and iOS zooms in on it */
+  line-height: 1.4;
+}
+.composer textarea::placeholder { color: var(--text-muted); }
+.cbtn {
+  flex: none; width: 44px; height: 44px;     /* a finger's target */
+  display: grid; place-items: center;
+  font-size: 19px;
+  color: var(--text-muted);
+  border-radius: var(--radius-control);
+}
+.cbtn .ic { width: 20px; height: 20px; }
+.cbtn:active:not(:disabled) { background: var(--control-pressed); }
+.cbtn.send:not(:disabled) { color: var(--composer-send-text); background: var(--composer-send-bg); }
+.cbtn.send:disabled { opacity: 0.4; }
+.cbtn.stop { color: var(--text); background: var(--control-selected); }
+/* Hold to dictate: lit while it listens, the box too. */
+.cbtn.mic { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.cbtn.mic.on { color: var(--on-accent); background: var(--accent); }
+.composer.listening { border-color: var(--accent); animation: listen 1.2s ease-in-out infinite; }
 
 /* ---- a bar (.ui-bar): the board's and an open chat's are one, as
    Omarchy's bar is: where you are on the left (the Ⓐ and Chats | Tasks;

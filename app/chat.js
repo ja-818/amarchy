@@ -1284,12 +1284,10 @@ class Chat {
     this.input.addEventListener("blur", () => setTimeout(() => {
       if (this.menu && this.menu.name === "slash" && !this.box.contains(document.activeElement)) this.closeMenu();
     }, 150));
-    this.attachBtn = h("button", { class: "cbtn attach", type: "button", "aria-label": "Add a photo or a file", "aria-haspopup": "menu",
-                                   onclick: () => this.toggleMenu("add") }, icon("plus"));
-    this.micBtn = h("button", { class: "cbtn mic", type: "button", "aria-label": "Dictate (hold, or tap and tap again)", hidden: true },
-                    glyph("mic"));
-    this.sendBtn = h("button", { class: "cbtn send", type: "button", "aria-label": "Send", onclick: () => this.send() }, glyph("send"));
-    this.stopBtn = h("button", { class: "cbtn stop", type: "button", "aria-label": "Stop Claude", onclick: () => this.stop() }, glyph("stop"));
+    this.attachBtn = uiComposerButton("attach", "Add a photo or a file", icon("plus"), () => this.toggleMenu("add"), { "aria-haspopup": "menu" });
+    this.micBtn = uiComposerButton("mic", "Dictate (hold, or tap and tap again)", glyph("mic"), null, { hidden: true });
+    this.sendBtn = uiComposerButton("send", "Send", glyph("send"), () => this.send());
+    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop());
     // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
@@ -1297,8 +1295,8 @@ class Chat {
     // The pictures and files going with the message, over the line you type on.
     this.tray = [];
     this.trayEl = h("div", { class: "tray", hidden: true });
-    this.composer = h("div", { class: "composer" }, this.trayEl,
-      h("div", { class: "composer-row" }, this.attachBtn, this.input, this.micBtn, this.stopBtn, this.sendBtn));
+    this.composer = uiComposer({ field: this.input, top: this.trayEl, before: [this.attachBtn],
+                                 after: [this.micBtn, this.stopBtn, this.sendBtn] });
     // Over it: the model and the mode, and the menu that's open (+, /, a pill's).
     this.info = null;           // /composer: the commands, the models, the model and mode
     this.modelPill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("model") });

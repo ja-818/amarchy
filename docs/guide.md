@@ -211,13 +211,35 @@ runs, on the phone too:
 - Under it, on a phone, the keys a phone's keyboard hasn't: Esc, Tab, **Ctrl** (it
   waits for the next key), the arrows, ^C, ^D, `|` `~` `/` `-`, and **A−**/**A+** for
   the text size.
+- Under those, on the phone and on a computer, a **message line**: the chat's own box,
+  for the terminal. Write there as you would in a message (your phone's keyboard, its
+  autocorrect and dictation, the mic, holding it to **Paste**) and send it: it goes to
+  the terminal as one paste (a new line in it runs nothing) and then Enter, so a command
+  runs. Sent empty (**⏎**), it's Enter alone. `Enter` sends, `Shift+Enter` is a new
+  line; what you were writing stays. Scrolled back, the terminal comes back to its
+  prompt first.
+- **+** on it: **Paste** and **Select text** (below), and a picture or a file: saved in
+  the project (`.amarchy/uploads/`, never committed) and its path typed into the line,
+  quoted. A picture or a file pasted into the line, or pasted or dropped on the
+  terminal, goes the same way.
+- **Hold a finger on the terminal** (right-click on a computer; `Shift`+right-click for
+  the browser's own menu): **Paste** puts what you copied into the terminal where its
+  cursor is, without Enter (the phone asks first: tap its Paste); **Select text** shows
+  what the terminal printed (its last 3000 lines, each line whole even where the
+  terminal wrapped it) as text, at its end: hold a word and drag to select, as in any
+  message, and Copy; its addresses are links. **Copy all**, **Done** (or `Esc`).
+- **Swipe** the terminal on a phone to scroll back through what it printed (a flick
+  goes on a while), as the wheel does on a computer. A tap is still the terminal's:
+  its keyboard, a link.
 
 **Claude's classic terminal** is Claude Code's own interactive app, on the same
 conversation. It is for what the chat can't do yet: `/login`, `/config`, `/rewind`,
 and logging in to an MCP server. It's under **Advanced** in a chat's menu and shows
 only while Show terminals is on. Opening it holds the chat there while you have it
 open; the chat goes back when you leave it, or on your next message. Over it, the
-keys for Claude's menus (⇧Tab, ⏎, 1 2 3) are on the phone. 
+keys for Claude's menus (⇧Tab, ⏎, 1 2 3) are on the phone. Its message line writes to
+Claude (capitals and autocorrect on): `/login` and send, or paste the code it asks for;
+a picture there (+, or pasted) goes into Claude's prompt, as `Ctrl+V` does.
 With Show terminals off, a chat's menu still opens its project terminal, under
 **Advanced**, and Claude's classic terminal is not offered.
 
@@ -465,7 +487,9 @@ installed); "As iOS does" is the sheet.
 **Pasting an image**: `⌘V` in the chat's box (`Ctrl+V` on other computers), or
 dropping it (or any file) on the chat, and it goes with your message (see "The box
 you type in" above). In Claude's classic terminal, `⌘V` or `Ctrl+V` pastes it into
-Claude's own prompt, and Claude's `Ctrl+V` gets it from amarchy's `wl-paste`. The
+Claude's own prompt, and Claude's `Ctrl+V` gets it from amarchy's `wl-paste`. In the
+chat's terminal, a picture or a file pasted or dropped is saved in the project and
+its path typed (see [Chat and terminal](#chat-and-terminal)). The
 host keeps what you last pasted, from any browser or phone, as its clipboard (the
 **web clipboard**, `~/.local/state/amarchy/clipboard/web.clip`, yours only), text you
 paste or copy in its terminals too, so `wl-paste` in any chat (Claude's own, or
