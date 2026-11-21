@@ -1081,6 +1081,16 @@ sections, the steps, the buttons).
   (`amarchy send`, another Claude's message) is a quiet line in the middle,
   **Automatic** or **From** the chat that sent it, with its first words; a tap opens
   all of it. Your buttons (a task's, a loop's on Today) are yours: on the right.
+- **Routines with nothing for you don't show**: when what a timer, a script or another
+  chat sent it leaves nothing you'd want to see (a merge not worth a post, a check that
+  found nothing), its Claude ends the turn with `NO_REPLY`, and that whole run is gone
+  from what you see, as if it never ran: no message, no notification, nothing unread,
+  its row and Today as they were. While a run like that works, the chat stays as it
+  was (no typing…); if it ends with something to say, it all shows at once, with what
+  woke it. A run you started, or one that asks you something, always shows: `NO_REPLY`
+  to it is sent back to be answered. Its Claude still has the run in its
+  conversation (ask it what it skipped), and `amarchy quiet <id>` lists them, with the
+  few words it said why. Working chats do the same. (OpenClaw's idea.)
 - **The box alone**: its model, effort and mode menus show while you write.
 - **How it writes**: amarchy starts its Claude with a format of its own (bin/amarchy
   `CHAT_FORMAT`): WhatsApp with superpowers. Several short messages rather than one
@@ -1187,6 +1197,11 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 ```
+
+A routine doesn't have to decide whether its news is worth a message: send it, and
+the chat's Claude decides. What leaves nothing for you to see it ends with
+`NO_REPLY`, and you never see that run (see [Chatting with your assistant and your
+agents](#chatting-with-your-assistant-and-your-agents)); `amarchy quiet <id>` lists them.
 
 **`amarchy notify`** sends a notification of your own to every phone (and browser)
 the app notifies, through the same Web Push as the app's own ones (`amarchy app

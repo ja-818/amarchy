@@ -70,7 +70,11 @@ A user message, one JSON line:
 
 - **`uuid`** is optional; given, it's the id the transcript keeps for that
   message and the id in `command_lifecycle` frames, so a host can follow its
-  own message.
+  own message (checked). amarchy's broker tells by it who began each turn: a
+  `started` frame with one of its own ids is that message's (yours, or what a
+  timer sent), any other is Claude Code's own (another Claude's message, a
+  background task that ended). A turn you didn't begin may end quiet
+  (`NO_REPLY`, bin/amarchy `quiet_stop`) and is hidden from the app.
 - **`priority`** *(schema)*: `now`, `next` or `later`. Sent while Claude works:
   `next` is taken into the turn under way at its next step (checked: one
   result for both); `later` waits and runs as a turn of its own right after

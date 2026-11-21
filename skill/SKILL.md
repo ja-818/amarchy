@@ -101,6 +101,15 @@ case), your conversation is in the app's chat, and:
   your steps too, reaches them as a message. Markdown and your blocks are the
   same. What a timer, a script or another chat sends you shows apart from
   what they said.
+- **What a timer, a script or another chat sends you** (not the user) that
+  leaves nothing they'd want to see (a check that found nothing, a merge not
+  worth a post): end your turn with `NO_REPLY` alone (a few words of why after
+  it are kept, never shown). amarchy then hides that whole turn, as if it never
+  ran: no message, no notification, nothing unread, the chat as it was. While
+  such a turn works, nothing of it shows; if it ends with something to say, it
+  all shows at once. Never `NO_REPLY` to what the user wrote, or in a turn that
+  asked them something: it's sent back to be answered. `amarchy quiet [id]`
+  lists the hidden turns.
 - What they send while you work waits for your turn, unless they send it now.
 - Your questions and permission requests reach them as cards with buttons. Ask
   in plain words, with short option labels: that reads best on a phone.
@@ -154,7 +163,10 @@ command's usage without running it (an option it doesn't know fails instead).
   (on screen), `agent` (the name its Claude goes by in `ListAgents` /
   `SendMessage`, empty until its Claude runs), `engine` (`chat`: the app's chat
   engine, or `terminal`: Claude Code's own terminal app), `background` (how many
-  background tasks and Claude Code background sessions it has going).
+  background tasks and Claude Code background sessions it has going), `quiet`
+  (at work on what a timer, a script or another chat sent it, nothing shown of
+  it yet: the app shows it idle until it says something, and nothing at all if
+  it ends with `NO_REPLY`).
 - `amarchy projects --json`: the user's projects and how many sessions each
   has, in the user's order (`amarchy projects order` prints just the names).
 - `amarchy run --show` / `amarchy run --list`: the project's run command / all
@@ -207,6 +219,10 @@ command's usage without running it (an option it doesn't know fails instead).
 - `amarchy secret ask <NAME> --why "..."` / `amarchy secret list`: get a key or
   password from the user without it going through the chat (see "Secrets"
   below).
+- `amarchy quiet [id] [--json]`: the turns a timer, a script or another chat
+  started that ended with `NO_REPLY`, hidden from the user: when, what woke it,
+  the words its Claude said why. When the user asks why they didn't hear about
+  something, look here.
 - `amarchy dictation`: whether the host can write the user's dictation down
   (the mic in the composer). If they say dictation doesn't work, check it first.
 - `amarchy automations` / `amarchy automations log <timer>`: what runs by itself

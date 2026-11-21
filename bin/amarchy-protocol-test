@@ -624,9 +624,13 @@ def t_queue(t):
     c.wait(lambda e: e.get("type") == "assistant" and any(b.get("type") == "tool_use"
                                                           for b in e["message"]["content"]), since=m,
            what="the command starting")
-    c.send("Also reply with the word PAPAYA.", priority="next", uuid=str(uuid.uuid4()))
+    papaya = str(uuid.uuid4())
+    c.send("Also reply with the word PAPAYA.", priority="next", uuid=papaya)
     c.result(m)
     lifecycle = c.all(lambda e: e.get("type") == "command_lifecycle", m)
+    # The broker follows who began each turn by it (Agent.turn_started): a timer's turn may end quiet.
+    check(any(x.get("command_uuid") == papaya and x.get("state") == "started" for x in lifecycle),
+          "no command_lifecycle started with our message's uuid (amarchy tells your turns from a timer's by it)")
     results = c.all(lambda e: e.get("type") == "result", m)
     t.note(f"'next' while a tool ran: {'taken into the same turn' if 'papaya' in c.text(m).lower() and len(results) == 1 else 'its own turn'}; "
            f"lifecycle frames: {[x.get('state') or x.get('status') for x in lifecycle][:6]}")

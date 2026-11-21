@@ -44,6 +44,9 @@ Sessions:
   amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]
                                         the same, returning at once (it's delivered in the background), or
                                         waiting that long; from the session's own Claude it never waits
+  amarchy quiet [id] [--json]           the turns a timer, a script or another chat started that its Claude
+                                        ended with NO_REPLY (nothing for you to see), hidden from the app:
+                                        when, what woke it, the words it said why
   amarchy list [--compact]              sessions as JSON, in list order (task, age, and agent: the name its
                                         Claude goes by for other Claude sessions' SendMessage)
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
@@ -320,6 +323,7 @@ State: ~/.local/state/amarchy/.
 """
 
 import base64
+import bisect
 import calendar
 import copy
 import datetime
@@ -5257,13 +5261,26 @@ def cmd_hook(sid, state):
         live = agent_live(sid)
         if live.get("pending") and live.get("state") not in ("exited", None):
             return
+    # A turn a timer, a script or another chat started, that ended with
+    # nothing for you to see (NO_REPLY): idle, and nothing new, nothing told,
+    # the turn hidden from the app (quiet_stop). NO_REPLY to what you wrote
+    # is sent back, to be answered (once).
+    quiet = quiet_stop(s, event) if state == "idle" and event.get("hook_event_name") == "Stop" else None
+    if quiet is True:
+        set_status(sid, "idle", done=False)
+        if claude_format_version() != format_version(s):
+            detach([ENTRY, "claude-reload", sid])
+        return
+    if quiet and not event.get("stop_hook_active"):
+        print(json.dumps({"decision": "block", "reason": quiet}))
+        return
     # A turn ended with a reply whose blocks can't be drawn, a long one that
     # isn't in sections with its brief, or one without its goal block: sent
     # back to Claude to fix (reply_fix), once (the second
     # stop is stop_hook_active), and the session stays working meanwhile.
     # Only a Claude that has the current format: it knows what's asked.
     if state == "idle" and event.get("hook_event_name") == "Stop" and not event.get("stop_hook_active") \
-            and claude_format_version() == format_version(s):
+            and claude_format_version() == format_version(s) and not quiet:
         ask = reply_fix(event, chat=is_agent(s))
         if ask:
             print(json.dumps({"decision": "block", "reason": ask}))
@@ -5674,7 +5691,8 @@ def session_view():
         # Claude Code background sessions (/bg) still running in its worktree, and on the
         # chat engine the background tasks its Claude runs (live.json's tasks).
         bgs = background_sessions(s, background)
-        tasks = (agent_live(s["id"]).get("tasks") or []) if engine(s) == "chat" and s["awake"] else []
+        live = agent_live(s["id"]) if engine(s) == "chat" and s["awake"] else {}
+        tasks = live.get("tasks") or []
         s["background"] = len(bgs) + len(tasks)
         # Its turn ended, but something it started still runs to an end (a test
         # run, a helper): it's at work, "running", not done; Claude Code wakes
@@ -5684,6 +5702,15 @@ def session_view():
         s["running"], s["serving"] = (runs or [""])[0], (serves or [""])[0]
         if s["status"] == "idle" and runs and not s["sleeping"] and not s.get("setup"):
             s["status"] = "running"
+        # At work on what a timer, a script or another chat sent it, with
+        # nothing to show of it yet (turn_hold; quiet_waking, while its Claude
+        # starts with it): the app shows it as it was (app_row) until it has
+        # something to say, and nothing at all if it ends quiet (NO_REPLY).
+        # So is one whose quiet turn left something running (a background job:
+        # "running"), until that ends and it says what it found, or nothing.
+        s["quiet"] = bool(not s.get("setup") and s["engine"] == "chat" and (
+            s["status"] == "working" and (turn_hold(s, live) is not None if live.get("turn") else quiet_waking(s["id"]))
+            or s["status"] == "running" and quiet_last(s["id"])))
         s["priority"] = priority(s)
         # Its previews, each with where it stands (its button; a dropdown of them, with several).
         s["previews"] = preview_shown(s)
@@ -6310,7 +6337,9 @@ def last_words(s, limit=240, deep=False):
     if not f:
         return none
     try:
-        stamp, size = f.stat().st_mtime_ns, f.stat().st_size
+        size = f.stat().st_size
+        hidden = turns_hidden(s)        # (the quiet turns and the one held: not words you'd read)
+        stamp = (f.stat().st_mtime_ns, len(hidden[0]), hidden[0][-1:], hidden[1])
     except OSError:
         return none
     key = f"{f}|{int(deep)}"
@@ -6321,7 +6350,7 @@ def last_words(s, limit=240, deep=False):
     for tail in (64_000, 400_000):
         said, said_at, stamps, after_you, step, done, looking, counting, fixed = "", 0, [], 0, None, set(), True, True, False
         for r in reversed(conversation_records(f, tail=tail)):
-            if not isinstance(r, dict) or r.get("isSidechain"):
+            if not isinstance(r, dict) or r.get("isSidechain") or record_hidden(r, hidden):
                 continue
             message = r.get("message") if isinstance(r.get("message"), dict) else {}
             content = message.get("content")
@@ -9533,19 +9562,30 @@ def brief_text(b):
     return "\n\n".join(out)
 
 
-def app_items(records, s):
+def app_items(records, s, hidden=None):
     """A conversation's records as the app shows them: what you said, what
     Claude said, its tool calls (each result follows as "result", for the
     call it answers) and notes. Thinking and Claude Code's bookkeeping are left out.
     What Claude says after its brief (update_brief) until your next message is
     marked aside: it repeats what it said, and the app leaves it out; the
-    brief itself is shown as the text it held (brief_text)."""
+    brief itself is shown as the text it held (brief_text). The turns that
+    aren't shown (hidden: turns_hidden's, read here if not given) are left
+    out whole: the quiet ones, and the one held under way."""
     out, briefed = [], False
     # What a script, a timer or another chat sent it (amarchy send), each
     # matched once, by its words, to the message it became: "from".
     sent = [dict(e) for e in sent_by_read(s["id"])] if s and s.get("id") else []
+    hidden = turns_hidden(s) if hidden is None and s and s.get("id") else hidden
     for r in records:
         if not isinstance(r, dict) or r.get("isSidechain"):
+            continue
+        if record_hidden(r, hidden):
+            # Not shown, but what it was sent is matched still: the same words
+            # sent again later are that later message's.
+            if r.get("type") == "user" and human_record(r):
+                item = user_item(message_text((r.get("message") or {}).get("content") or ""))
+                if item and item["kind"] == "user":
+                    sent_by_match(sent, item["text"], r.get("timestamp") or "")
             continue
         if r.get("type") == "user" and fix_feedback(r):
             # The reply sent back to be written again (reply_fix): its words
@@ -9733,9 +9773,26 @@ class AppConversation:
         except OSError:
             return []
         done = data.rfind(b"\n") + 1        # a line still being written waits for the next time
-        records = read_records(self.file, self.offset, self.offset + done) if done else []
+        hidden = turns_hidden(self.s)
+        records, pos = [], 0
+        while pos < done:
+            end = data.index(b"\n", pos) + 1
+            line = data[pos:end]
+            if line.strip() and b'"type":"api-request' not in line[:40]:      # (read_records's)
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    r = None
+                # The turn held under way (turn_hold): read again next time,
+                # shown once it ends (unless it ended quiet).
+                if hidden[1] is not None and isinstance(r, dict) and record_at(r) >= hidden[1]:
+                    done = pos
+                    break
+                if r is not None:
+                    records.append(r)
+            pos = end
         self.offset += done
-        return app_items(records, self.s)
+        return app_items(records, self.s, hidden)
 
 
 def app_closing(s):
@@ -9957,7 +10014,7 @@ def app_earlier(s, before):
         return [], 0
     with open(f, "rb") as fh:
         start = line_start(fh, before - APP_CHUNK)
-    return app_items(read_records(f, start, before), s), start
+    return app_items(read_records(f, start, before), s, turns_hidden(s)), start
 
 
 EXITED = "Claude Code exited. Press Enter"
@@ -10195,9 +10252,19 @@ def chat_attach(s, images):
     return None if r.get("ok") else (400, r.get("error") or "it wasn't attached")
 
 
-def chat_live(live):
-    """live.json as the app gets it (the stream's live event)."""
-    return {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket", "updated")} if live else None
+def chat_live(live, s=None):
+    """live.json as the app gets it (the stream's live event). A turn held
+    (turn_hold: a timer's, a script's or another chat's, nothing shown of it
+    until it ends) is idle to the app: no typing…, no words, no step. What
+    such a one sent that waits for Claude to be free isn't yours to see."""
+    if not live:
+        return None
+    out = {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket", "updated", "turn")}
+    if isinstance(live.get("queue"), list):
+        out["queue"] = [m for m in live["queue"] if isinstance(m, dict) and not m.get("elsewhere")]
+    if s and turn_hold(s, live) is not None:
+        out.update(state="idle", partial="", thinking=False, activity=None, working_since=None)
+    return out
 
 
 # ---- the composer (phase C2 of docs/plan-chat-app.md): the / menu, the
@@ -11533,7 +11600,7 @@ def app_watch(st):
                     mark_seen(s["id"])
                     s["unseen"] = False
                     s["unread"] = 0
-            view = {"hostname": host_name(), "sessions": ss, "projects": ps,
+            view = {"hostname": host_name(), "sessions": [app_row(s) for s in ss], "projects": ps,
                     "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
@@ -12033,7 +12100,8 @@ def block_issues(b, chat_exists=None):
 
 HOOK_FEEDBACK = "Stop hook feedback:"
 FIX_MARK = "amarchy: your reply can't be shown as it is"
-FIX_MARKS = (FIX_MARK, "amarchy: some blocks in your reply can't be drawn")      # (the second: what it said until 2026-11-10)
+FIX_MARKS = (FIX_MARK, "amarchy: some blocks in your reply can't be drawn",      # (the second: what it said until 2026-11-10)
+             "amarchy: NO_REPLY hides only a turn")      # (SILENT_ASK's)
 GOAL_MARK = "amarchy: your reply doesn't end with its goal block"
 FIX_ASK = (FIX_MARK + ":\n{issues}\nWrite your whole reply again with them fixed, "
            "as if for the first time (don't mention the fix): the person sees it in place of the one you wrote.")
@@ -12286,8 +12354,12 @@ def chat_reply(s):
         st = f.stat()
     except OSError:
         return empty
+    # The quiet turns and the one held under way aren't where it stands
+    # (turns_hidden): nothing of them is read, and they didn't move it (at).
+    hidden = turns_hidden(s)
+    stamp = (st.st_mtime_ns, len(hidden[0]), hidden[0][-1:], hidden[1])
     cached = _replies.get(str(f))
-    if cached and cached[0] == st.st_mtime_ns:
+    if cached and cached[0] == stamp:
         return cached[2]
     # The file only grows: a goal read before is still its newest unless the
     # end has a newer one. A chat at work a long while pushes its last goal
@@ -12298,10 +12370,18 @@ def chat_reply(s):
     answered, reply_seen = False, False
     for tail in (200_000, 2_000_000):
         out.update(goal="", state="", goal_at=0, asks=[], links=[], you_at=0)
-        answered, reply_seen = False, False
+        answered, reply_seen, moved = False, False, None
         for r in reversed(conversation_records(f, tail=tail)):
             if not isinstance(r, dict) or r.get("isSidechain"):
                 continue
+            said = r.get("type") in ("user", "assistant")
+            if record_hidden(r, hidden):
+                if said and moved is None:
+                    moved = False       # its last words are a hidden turn's
+                continue
+            if said and moved is False and record_at(r):
+                moved = record_at(r)        # what moved it last, of what's shown
+                out["at"] = min(st.st_mtime, moved)
             if human_turn(r):
                 out["you_at"] = out["you_at"] or timestamp(r)
                 answered = answered or not reply_seen
@@ -12331,7 +12411,7 @@ def chat_reply(s):
         out.update(goal=before["goal"], state=before["state"], goal_at=before["goal_at"])
     if not out["you_at"] and before:
         out["you_at"] = before["you_at"]      # (further back than what's read)
-    _replies[str(f)] = (st.st_mtime_ns, st.st_size, out)
+    _replies[str(f)] = (stamp, st.st_size, out)
     if len(_replies) > 500:
         _replies.clear()
     return out
@@ -13012,6 +13092,13 @@ def search_warm(st):
         time.sleep(60)
 
 
+def app_row(s):
+    """A session as the app shows it: one at work on what a timer, a script
+    or another chat sent it, with nothing to show yet (quiet), as it was:
+    idle, no step, not waking (no typing…, no "Working")."""
+    return {**s, "status": "idle", "doing": None, "waking": False, "running": ""} if s.get("quiet") else s
+
+
 def app_words(st, ss):
     """The list's words for each session: the last thing its Claude wrote
     (said), the step it's on while it works (doing: {tool, input}, which
@@ -13030,7 +13117,7 @@ def app_words(st, ss):
         if not s.get("assistant"):
             s["said"] = words["said"]
         s["doing"] = None
-        if s.get("status") == "working":
+        if s.get("status") == "working" and not s.get("quiet"):
             act = agent_live(s["id"]).get("activity") if s.get("engine") == "chat" else None
             s["doing"] = {"tool": act.get("tool") or "", "input": step_input(act.get("input"))} \
                 if isinstance(act, dict) and act.get("tool") else words["step"]
@@ -13827,7 +13914,7 @@ def app_handler(st, users, address):
                             sig = None
                         if sig != live_sig:
                             live_sig, was = sig, live
-                            live = chat_live(agent_live(s["id"]))
+                            live = chat_live(agent_live(s["id"]), st.row(s["id"]) or s)
                             if live != was:
                                 self.event("live", live)
                                 if any((live or {}).get(k) != (was or {}).get(k) for k in ("pending", "state")):
@@ -14155,7 +14242,7 @@ def app_handler(st, users, address):
                     told = json.loads((claude_dir(sid) / "agent.json").read_text())
                 except (OSError, ValueError):
                     told = {}
-                return self.send(200, {"agent": told, "live": chat_live(agent_live(sid))})
+                return self.send(200, {"agent": told, "live": chat_live(agent_live(sid), s)})
             st.seen[sid] = time.time()
             st.looking(sid)
             if what in ("model", "effort", "mode") and not agent_up(sid):
@@ -14966,16 +15053,23 @@ def starting(sid):
         return False
 
 
-def send_start(s, text):
+def send_start(s, text, mine=True):
     """Start the session's Claude (asleep, exited or not running) with text
-    as its first message. None once it took it, else why not."""
+    as its first message. None once it took it, else why not. mine: yours;
+    else a script's, a timer's or another chat's (amarchy send)."""
     sid = s["id"]
     d = claude_dir(sid)
     since = time.time()
     # You wrote to it: what it did before is seen. (The list says it's working
     # while this waits for its Claude: should that never come, it's idle
-    # again, and not "done" a second time.)
-    mark_seen(sid)
+    # again, and not "done" a second time.) A timer waking it isn't you: what
+    # you haven't read stays unread, and it wakes unseen (quiet_waking) until
+    # it has something to say (turn_hold).
+    if mine:
+        mark_seen(sid)
+        (d / "send-quiet").unlink(missing_ok=True)
+    else:
+        write_file(d / "send-quiet", "")
     write_file(d / "send", text)
     if asleep_since(sid) is not None:
         wake(s)
@@ -15012,15 +15106,17 @@ def send_started(sid, text, since):
     try:
         if (d / "send").read_text() == text:
             (d / "send").unlink()
+            (d / "send-quiet").unlink(missing_ok=True)
             return "its Claude didn't start"
     except OSError:
         pass
     return None     # it started with it, and hasn't said it's working on it (a /command)
 
 
-def send_deliver(sid, text, deadline):
+def send_deliver(sid, text, deadline, mine=False):
     """Deliver a message to the session's Claude once it's free (see above).
-    None once Claude has it, else why not."""
+    None once Claude has it, else why not. mine: yours (a button of yours),
+    not a script's, a timer's or another chat's."""
     wait = ""
     while True:
         s = session(sid)
@@ -15052,21 +15148,22 @@ def send_deliver(sid, text, deadline):
             else:
                 pane = host_pane(s)
                 if pane and pane_claude(pane, processes()) is None and not starting(sid):
-                    return send_start(s, text)
+                    return send_start(s, text, mine)
                 wait = "its Claude is starting up"
         elif starting(sid):
             wait = "its Claude is starting with another message"
         elif waking_now(sid):
             wait = "its Claude is waking up"
         else:
-            return send_start(s, text)      # asleep: it wakes with the message
+            return send_start(s, text, mine)        # asleep: it wakes with the message
         time.sleep(0.5)
 
 
 def send_run(sid, f, deadline):
     """Deliver the message in queue file f, in its turn, and drop it."""
     try:
-        text = send_entry(f)["text"]
+        entry = send_entry(f)
+        text, mine = entry["text"], entry.get("mine") is True
         while True:
             turn = send_turn(f)
             if turn is None:
@@ -15076,7 +15173,7 @@ def send_run(sid, f, deadline):
             if time.time() > deadline:
                 return fail(f"{sid}: not sent: messages sent before it were still waiting")
             time.sleep(0.5)
-        why = send_deliver(sid, text, deadline)
+        why = send_deliver(sid, text, deadline, mine)
     finally:
         f.unlink(missing_ok=True)
     if why:
@@ -15154,10 +15251,11 @@ def cmd_send(args):
     # Not you (a script, a timer, another chat), unless it's a button of
     # yours (task_press): your assistant's and your agents' chats show it
     # apart from what you said (app_items "from").
-    if os.environ.get("AMARCHY_SENT_BY") != "you":
-        sent_by_note(sid, text, os.environ.get("AMARCHY_SESSION", ""))
+    mine = os.environ.get("AMARCHY_SENT_BY") == "you"
+    if not mine:
+        sent_by_note(sid, text, os.environ.get("AMARCHY_SESSION", ""), deadline)
     f = send_queue(sid) / f"{time.time_ns()}-{os.getpid()}"
-    write_file(f, json.dumps({"pid": os.getpid(), "text": text, "deadline": deadline}))
+    write_file(f, json.dumps({"pid": os.getpid(), "text": text, "deadline": deadline, "mine": mine}))
     if wait:
         return send_run(sid, f, deadline)
     if not send_later(sid, f):
@@ -15174,15 +15272,17 @@ def sent_hash(text):
     return hashlib.sha1(" ".join(str(text or "").split()).encode()).hexdigest()[:16]
 
 
-def sent_by_note(sid, text, origin):
+def sent_by_note(sid, text, origin, deadline=None):
     """amarchy send sent a session text, not you: from origin (the session
-    it ran in), or a script or timer ("")."""
+    it ran in), or a script or timer (""); deadline: when it stops waiting
+    for Claude to be free (sent_by_taken)."""
     try:
         SENT_BY.mkdir(parents=True, exist_ok=True)
         f = SENT_BY / f"{sid}.jsonl"
         with open(f, "a") as fh:
             fh.write(json.dumps({"at": time.time(), "hash": sent_hash(text),
-                                 "from": origin if origin and session(origin) and origin != sid else ""}) + "\n")
+                                 "from": origin if origin and session(origin) and origin != sid else "",
+                                 **({"until": round(deadline)} if deadline else {})}) + "\n")
         if f.stat().st_size > SENT_BY_KEPT * 200:
             lines = f.read_text().splitlines()[-SENT_BY_KEPT:]
             write_file(f, "\n".join(lines) + "\n")
@@ -15215,6 +15315,221 @@ def sent_by_read(sid):
         return []
     _sent_by[sid] = (stamp, out)
     return out
+
+
+def sent_by_taken(sid, text, taken):
+    """Whether text, reaching the session's Claude now, is what amarchy send
+    sent it (sent_by_note: a script's, a timer's, another chat's), not yours:
+    the newest note of those words still waiting (its until, else
+    SEND_TIMEOUT from when it was sent) that isn't taken yet (taken: what
+    the broker matched already, a set it keeps), which it takes."""
+    key, now = sent_hash(text), time.time()
+    for e in reversed(sent_by_read(sid)):
+        mark = (e["at"], e["hash"])
+        until = e.get("until") if isinstance(e.get("until"), (int, float)) else e["at"] + SEND_TIMEOUT * 60
+        if e["hash"] == key and mark not in taken and e["at"] - 5 <= now <= until + SEND_START + 60:
+            taken.add(mark)
+            return True
+    return False
+
+
+# ---- quiet turns: what a timer, a script or another chat started, that
+# ended with nothing for you to see
+#
+# A turn's Claude ends with SILENT (NO_REPLY, OpenClaw's word for it) when what
+# woke it leaves nothing you'd want to see: a check that found nothing, a merge
+# not worth a post. The turn is then gone from everything you see (its chat,
+# the list's words, unread, the notifications, Today), as if it never ran: it
+# stays in the conversation, its Claude remembers it, and `amarchy quiet` lists
+# them. Only a turn you didn't start (the broker knows who did: Agent.turn) and
+# nobody asked you anything in: the Stop hook (cmd_hook, quiet_stop) sends
+# anything else back to be answered. While such a turn works, nothing of it
+# shows (turn_hold): no typing…, no words, the chat idle as it was; once it
+# ends, it's all there at once unless it ended quiet.
+
+SILENT = "NO_REPLY"
+SILENT_RE = re.compile(r"^[\s*_`>]*NO_REPLY(?![A-Za-z0-9])[\s\S]*$|^[\s\S]*(?<![A-Za-z0-9])NO_REPLY[\s*_`.!]*$")
+SILENT_MARK = "amarchy: NO_REPLY hides only a turn a timer, a script or another chat started"
+SILENT_ASK = (SILENT_MARK + ", when nobody needed them during it. They wrote to you themselves in this one (or answered you "
+              "in it), so they're waiting to hear from you: reply to them as usual, in full.")
+QUIET_TURNS = STATE / "quiet-turns"     # <id>.jsonl: its quiet turns, {since, until, what, note}
+QUIET_KEPT = 500        # quiet turns remembered for each session (the newest)
+
+
+def silent_note(text):
+    """None unless a turn's reply is SILENT: alone, or first or last with a
+    few words of why around it (those words: its note, "" for none)."""
+    t = (text or "").strip()
+    if not t or not SILENT_RE.match(t):
+        return None
+    return " ".join(re.sub(r"[*_`]*NO_REPLY[*_`.!]*", " ", t).split()).strip(" —–-:;,.")[:300]
+
+
+def quiet_note(sid, turn, note):
+    """A quiet turn, written down: from when the broker began it to now."""
+    try:
+        QUIET_TURNS.mkdir(parents=True, exist_ok=True)
+        f = QUIET_TURNS / f"{sid}.jsonl"
+        with open(f, "a") as fh:
+            fh.write(json.dumps({"since": float(turn["since"]), "until": time.time(),
+                                 "what": " ".join(str(turn.get("what") or "").split())[:200], "note": note}) + "\n")
+        if f.stat().st_size > QUIET_KEPT * 400:
+            write_file(f, "\n".join(f.read_text().splitlines()[-QUIET_KEPT:]) + "\n")
+    except (OSError, KeyError, TypeError, ValueError):
+        pass
+
+
+_quiet = {}
+
+
+def quiet_turns(sid):
+    """A session's quiet turns, oldest first: [{since, until, what, note}]."""
+    f = QUIET_TURNS / f"{sid}.jsonl"
+    try:
+        stamp = f.stat().st_mtime_ns
+    except OSError:
+        return []
+    if _quiet.get(sid, (None,))[0] == stamp:
+        return _quiet[sid][1]
+    out = []
+    try:
+        for line in f.read_text().splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and isinstance(e.get("since"), (int, float)) and isinstance(e.get("until"), (int, float)):
+                out.append(e)
+    except OSError:
+        return []
+    out.sort(key=lambda e: e["since"])
+    _quiet[sid] = (stamp, out)
+    if len(_quiet) > 500:
+        _quiet.clear()
+    return out
+
+
+def quiet_last(sid):
+    """Whether the session's last turn ended quiet: it's idle since (the Stop
+    hook wrote it down, then set it idle: quiet_stop)."""
+    turns = quiet_turns(sid)
+    try:
+        f = STATUS / sid
+        return bool(turns) and f.read_text().strip() == "idle" and 0 <= f.stat().st_mtime - turns[-1]["until"] < 5
+    except OSError:
+        return False
+
+
+def quiet_waking(sid):
+    """Whether the session's Claude is starting (asleep, exited) with what a
+    timer, a script or another chat sent it (send_start): unseen, as its
+    turn will be (turn_hold), not "typing…"."""
+    try:
+        return time.time() - (claude_dir(sid) / "send-quiet").stat().st_mtime < SEND_START + 60
+    except OSError:
+        return False
+
+
+def turn_hold(s, live=None):
+    """When the turn under way began, if a timer, a script or another chat
+    started it (the broker's turn: elsewhere), nobody's been asked anything
+    in it and its Claude still works on it: what it says waits until it
+    ends, and is shown then unless it ended quiet. None otherwise. The
+    Stop hook sets the status idle once it knows (quiet or not): from then
+    on, nothing is held."""
+    if not s or engine(s) != "chat":
+        return None
+    try:
+        if (STATUS / s["id"]).read_text().strip() != "working":
+            return None
+    except OSError:
+        return None
+    live = agent_live(s["id"]) if live is None else live
+    turn = live.get("turn") if isinstance(live, dict) else None
+    if not isinstance(turn, dict) or live.get("state") in ("waiting", "exited") or live.get("pending") \
+            or not turn.get("elsewhere") or turn.get("asked") or not isinstance(turn.get("since"), (int, float)):
+        return None
+    return float(turn["since"])
+
+
+def turns_hidden(s, live=None):
+    """What of a session's conversation isn't shown: its quiet turns (their
+    spans, sorted) and the turn held under way (its start, or None)."""
+    spans = [(e["since"], e["until"]) for e in quiet_turns(s["id"])] if s and s.get("id") else []
+    return spans, turn_hold(s, live)
+
+
+def record_at(r):
+    """A conversation record's time (its timestamp, to the millisecond), or 0."""
+    t = r.get("timestamp") if isinstance(r, dict) else None
+    if not isinstance(t, str):
+        return 0
+    try:
+        return datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
+
+
+def record_hidden(r, hidden):
+    """Whether a conversation record belongs to a turn that isn't shown
+    (turns_hidden): a quiet one, or the one held under way."""
+    if not hidden:
+        return False
+    spans, hold = hidden
+    if not spans and hold is None:
+        return False
+    t = record_at(r)
+    if not t:
+        return False
+    if hold is not None and t >= hold:
+        return True
+    i = bisect.bisect_right(spans, (t, float("inf"))) - 1
+    return i >= 0 and spans[i][0] <= t <= spans[i][1]
+
+
+def quiet_stop(s, event):
+    """At a turn's end (the Stop hook): True when its reply is SILENT and the
+    turn is one to hide (a timer, a script or another chat started it, and
+    nobody was asked anything in it): written down, and idle without being
+    done (nothing new, nothing told). SILENT_ASK when the reply is SILENT
+    but the turn is yours: it's sent back, to be answered. None otherwise."""
+    text = event.get("last_assistant_message") if isinstance(event.get("last_assistant_message"), str) else None
+    if not text:
+        text = turn_reply(event.get("transcript_path"))
+    note = silent_note(text)
+    if note is None:
+        return None
+    turn = (agent_live(s["id"]).get("turn") if engine(s) == "chat" else None) or {}
+    if turn.get("elsewhere") and not turn.get("asked") and isinstance(turn.get("since"), (int, float)):
+        quiet_note(s["id"], turn, note)
+        return True
+    return SILENT_ASK
+
+
+def cmd_quiet(args):
+    """amarchy quiet [<id>] [--json]: the turns hidden as quiet (NO_REPLY):
+    when, what woke it, the few words its Claude said why."""
+    as_json = "--json" in args
+    rest = [a for a in args if a != "--json"]
+    if len(rest) > 1 or rest and rest[0].startswith("-"):
+        print(usage("quiet"), file=sys.stderr)
+        return 1
+    sid = rest[0] if rest else own_session_id()
+    if not sid or not session(sid):
+        return fail(f"No session {sid!r}" if sid else "Not in a session: name one, amarchy quiet <id>")
+    turns = quiet_turns(sid)
+    if as_json:
+        print(json.dumps(turns, indent=1))
+        return 0
+    if not turns:
+        print(f"{sid}: no quiet turns")
+        return 0
+    for e in turns[-50:]:
+        when = time.strftime("%a %d %b %H:%M", time.localtime(e["since"]))
+        print(f"{when}  {e.get('what') or '(another chat, or its own background job)'}")
+        if e.get("note"):
+            print(f"                  → {e['note']}")
+    return 0
 
 
 def cmd_notify(args):
@@ -15780,6 +16095,7 @@ REPLY_FORMAT = f"""amarchy shows the person your replies as you write them, rend
 - When your turn ends, amarchy checks your blocks: one it can't draw (a date that isn't one, a question with no options, an attribute it doesn't know) is sent back to you to fix.
 - Something live for them to look at: a dev server, register it as the chat's preview instead of starting it in your shell (`amarchy preview --run '<command>' <url>`: amarchy runs it, keeps it through your sleep, and stops it when the chat is completed); a deploy, `amarchy preview <url>`. Either puts a Preview button on this chat and its card that stays, so they never ask for the address or look for it in the conversation (it starts the server again when it isn't running). Two or more to look at (an app and its admin, a storybook): register each with `--name <what it is>`, and the button is Previews, a list to pick from. Run it again when the address changes, and `amarchy preview --clear` when you stop serving it for good. Still give it in a link block when it's new.
 - Sources you used are the last section, "## Sources", as links.
+- What a timer, a script or another chat sent you, not them, when it leaves nothing they'd want to see (a check that found nothing): reply {SILENT} alone, with no goal block (a few words of why after it are kept for you, never shown). amarchy hides that whole turn: no notification, the chat as it was. Never to what they wrote themselves.
 {goal_guidance()}
 - When your turn ends, amarchy checks that shape too: a long reply in one piece, a section that runs on, a missing brief block, or a brief or choices block after a heading is sent back to you to write again.
 - Never put what they need only in an earlier message: each reply stands on its own."""
@@ -15801,6 +16117,7 @@ CHAT_FORMAT = f"""amarchy shows the person your messages in a chat that looks an
   ```
 - No headings, no brief, no goal block, no greeting before the point, no "Here's...". **Bold** the words that matter, a short list for a few items, a table for side-by-side data, a link where it helps.
 - What you write between your steps reaches them too, as messages: only what you'd text a person ("On it, checking your inbox"), never your working notes. Or nothing, until you have the answer.
+- What a timer, a script or another chat sent you, not them, when it leaves nothing they'd want to see (a check that found nothing, a merge not worth a post): end your turn with {SILENT} alone (a few words of why after it are kept for you, never shown). amarchy then hides that whole turn as if it never ran: no message, no notification, nothing unread. Anything they'd want to know or act on, say as usual. Never {SILENT} to what they wrote themselves.
 - A long report doesn't belong in a chat: the gist in a few messages, then offer the rest (or send it as a file block).
 - Anything they will use goes in a fenced block named for it, where it belongs in your message; the app draws it there with its buttons (Copy, Open in WhatsApp, Add to calendar, a chart...). Attributes go on the opening line as key="value", in straight double quotes; title="..." and note="..." fit any block:
 {blocks_guidance(skip=("brief",), rules={"choices": "A question with a few clear answers (a yes or no, one of three) goes in a choices block, so they answer with a tap; any other question, just ask it."})}
@@ -16056,7 +16373,11 @@ class Agent:
                      "last_result": None, "account": None, "version": None, "socket": str(self.sock_path),
                      "title": None, "error": None,
                      "working_since": None,     # when the turn under way started (a question's wait included)
-                     "before_plan": None}       # the mode plan mode came from: approving a plan goes back to it
+                     "before_plan": None,       # the mode plan mode came from: approving a plan goes back to it
+                     # The turn under way: when it began (since), whether a timer, a script or another chat
+                     # started it and nothing of yours joined it (elsewhere), whether it asked you anything
+                     # (asked), what started it (what). turn_hold and quiet_stop read it.
+                     "turn": None}
         self.version = self.written = 0     # of live, as changed and as written to live.json
         self.last_written = None    # live.json's text, as last written
         self.queue = []             # our messages waiting for Claude to be free (live["queue"] says what they are)
@@ -16071,6 +16392,9 @@ class Agent:
         self.typed = []             # a paste arriving in the pane, line by line
         self.pasting = False
         self.titled = False         # asked for a title for the conversation already
+        self.taken = set()          # amarchy send's notes matched to a message already (sent_by_taken)
+        self.delivered = {}         # our messages given to Claude: uuid -> {elsewhere, at, what}, until it starts on them
+        self.ended = time.time()    # when the last turn ended (its result): what comes after is the next one's
 
     # ---- output to the pane
 
@@ -16174,7 +16498,10 @@ class Agent:
                                              else content)]
                 self.attached = []
                 self.save_attached()
-            message = {"uuid": uid, "content": content, "at": time.time()}
+            # A script's, a timer's or another chat's (amarchy send), not yours:
+            # its turn may end quiet (quiet_stop).
+            elsewhere = sent_by_taken(self.sid, message_text(content), self.taken)
+            message = {"uuid": uid, "content": content, "at": time.time(), "elsewhere": elsewhere}
             if when == "idle" and (self.busy or self.live["pending"] or self.queue
                                    or self.live["state"] == "starting"):
                 self.queue.append(message)
@@ -16187,7 +16514,8 @@ class Agent:
         """live["queue"] from the queue: each message's text and how many images."""
         with self.lock:
             self.live["queue"] = [{"uuid": m["uuid"], "text": message_text(m["content"]),
-                                   "images": message_images(m["content"]), "at": m["at"]} for m in self.queue]
+                                   "images": message_images(m["content"]), "at": m["at"],
+                                   **({"elsewhere": True} if m.get("elsewhere") else {})} for m in self.queue]
         self.changed(True)
 
     def load_attached(self):
@@ -16228,8 +16556,20 @@ class Agent:
         return {"ok": True, "attachments": n}
 
     def deliver(self, message, priority=None):
+        now = time.time()
         with self.lock:
             self.busy = True
+            elsewhere = bool(message.get("elsewhere"))
+            what = message_text(message["content"])[:200]
+            self.delivered[message["uuid"]] = {"elsewhere": elsewhere, "at": now, "what": what}
+            if len(self.delivered) > 50:        # (ones Claude never started on: a stop, an exit)
+                self.delivered = dict(list(self.delivered.items())[-50:])
+            # The turn it starts, as it's handed over: anything its Claude
+            # writes of it comes after (turn_hold). One taken into a turn under
+            # way joins that one when Claude starts on it (turn_started).
+            if priority is None and not self.live["turn"]:
+                self.live["turn"] = {"since": now, "elsewhere": elsewhere, "asked": False, "what": what}
+        self.changed(True)
         # Claude's hook says working when it takes it (UserPromptSubmit), a
         # moment later: said now, so the chat is never idle (or "done") with
         # your message on its way. Not one taken into a turn under way: that
@@ -16431,7 +16771,9 @@ class Agent:
         elif kind == "command_lifecycle" and o.get("state") == "started":
             with self.lock:
                 self.busy = True
+                self.turn_started(o.get("command_uuid"))
             self.set_state()
+            self.changed(True)
         elif kind == "stream_event":
             self.on_stream(o.get("event") or {})
         elif kind == "assistant":
@@ -16446,6 +16788,23 @@ class Agent:
         elif kind == "result":
             self.on_result(o)
             threading.Thread(target=self.read_effort, daemon=True).start()
+
+    def turn_started(self, uid):
+        """Claude starts on a message (under the lock): ours (delivered), or
+        one Claude Code had of its own (another Claude's, a background task
+        that ended): neither is yours. With no turn under way it begins one;
+        yours taken into one makes it yours."""
+        mine = self.delivered.pop(uid, None) if uid else None
+        elsewhere = mine["elsewhere"] if mine else True
+        turn = self.live["turn"]
+        if not turn:
+            # One of Claude Code's own: the message it starts on may be written
+            # a moment before it says so; whatever came since the last turn
+            # ended is this one's (a turn's words come before its result).
+            since = mine["at"] if mine else max(time.time() - 2, self.ended)
+            self.live["turn"] = {"since": since, "elsewhere": elsewhere, "asked": False, "what": mine["what"] if mine else ""}
+        elif not elsewhere:
+            turn["elsewhere"] = False
 
     def on_request(self, o):
         req = o.get("request") or {}
@@ -16463,6 +16822,8 @@ class Agent:
                    "answered": {}}     # AskUserQuestion's questions answered so far, one by one
         with self.lock:
             self.live["pending"].append(pending)
+            if self.live["turn"]:
+                self.live["turn"]["asked"] = True       # it needs you: shown, and never quiet
         self.draw_request(pending)
         self.set_state()
         agent_status(self.sid, "waiting")      # again: a hook may have said working since the first
@@ -16551,6 +16912,10 @@ class Agent:
             # What went in to Claude: ours, or a message from another session.
             text = content if isinstance(content, str) else " ".join(
                 b.get("text", "") if b.get("type") == "text" else f"[{b.get('type')}]" for b in content or [])
+            with self.lock:
+                turn = self.live["turn"]
+                if turn and not turn.get("what") and text.strip():     # (one Claude Code began: amarchy quiet says what)
+                    turn["what"] = " ".join(re.sub(r"<[^>]*>|^\s*Another Claude session sent a message:", " ", text).split())[:200]
             m = re.fullmatch(r"\s*<local-command-std(?:out|err)>(.*)</local-command-std(?:out|err)>\s*", text, re.S)
             if m:
                 self.out(f"  · {m.group(1).strip()}", dim=True)
@@ -16572,6 +16937,8 @@ class Agent:
     def on_result(self, o):
         with self.lock:
             self.busy = False
+            self.live["turn"] = None        # (its Stop hook has read it: quiet_stop)
+            self.ended = time.time()
             self.live["turns"] += 1
             self.live["activity"] = None
             self.live["partial"] = ""
@@ -16955,6 +17322,7 @@ class Agent:
         self.changed(True)
         for text in first:
             self.send(text)
+        (self.dir / "send-quiet").unlink(missing_ok=True)      # (quiet_waking: it's the turn's to say now)
         self.next_queued()
         if sys.stdin.isatty():
             sys.stdout.write("\033[?2004h")     # pastes come bracketed (read_tty)
@@ -17210,6 +17578,7 @@ OPTIONS = {
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
+    "quiet": ({"--json"}, set(), set()),
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "agents": ({"--json", "--name", "--picture", "--crop", "--sound"}, {"--name", "--picture", "--crop", "--sound"}, set()),
     "alerts": (set(), set(), set()),
@@ -17364,6 +17733,8 @@ def main(argv):
         return cmd_send(args)
     elif cmd == "notify":
         return cmd_notify(args)
+    elif cmd == "quiet":
+        return cmd_quiet(args)
     elif cmd == "assistant":
         return cmd_assistant(args)
     elif cmd == "agents":
