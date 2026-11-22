@@ -1307,6 +1307,29 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
 | `APP_HTTPS=` | `443` | The port on your tailnet (443, 8443 or 10000). |
 | `AUTO_UPDATE=off` | on | Stops the timer that keeps amarchy up to date. |
 
+### Who gets in
+
+- **Your phone and your browsers**, through Tailscale: the app's server listens
+  on `127.0.0.1:7397` only, and `tailscale serve` puts it on
+  `https://<this machine>.<tailnet>.ts.net`, saying whose request it is. Only your
+  login gets in (`APP_USERS=`), and only the app's own pages can change anything
+  (their `Origin`), so a website open on your phone can't drive your chats.
+- **The desktop app on this machine** comes straight to `127.0.0.1:7397`, no
+  Tailscale needed (it works offline). It reads the **local key**,
+  `~/.local/state/amarchy/app/local.key` (made by the app's server, readable by
+  you only), and opens `http://127.0.0.1:7397/local?key=<the key>`: that sets a
+  cookie (HttpOnly, SameSite=Strict, for that port) and sends it on to the app,
+  the key gone from the address. With the cookie it's let in from you only (the
+  kernel says whose the connection is: another user on this machine is refused,
+  even with the key), never through a proxy, and changes only from its own page
+  (`Origin http://127.0.0.1:7397`). Delete the file and restart the app's server
+  for a new key: every cookie made from the old one stops working. Don't open
+  that address in an ordinary browser: its history would keep the key.
+
+The app's server runs without Tailscale too (`amarchy app on` then serves this
+machine only, for the desktop app), and takes your tailnet as soon as Tailscale
+is up.
+
 Environment variables (set them where your login environment reads them, so that
 the app's service and the chats inherit them):
 

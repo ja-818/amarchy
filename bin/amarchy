@@ -102,7 +102,9 @@ it something; its screen stays as it was, and what you type goes to Claude when 
 The app (your sessions on your phone, as an app on the home screen, and in a computer's browser, with real
 terminals; reachable only on your Tailscale network):
   amarchy app on                        serve it on your tailnet (https://<this machine>.<tailnet>.ts.net,
-                                        with tailscale serve), now and after every reboot; prints its address
+                                        with tailscale serve), now and after every reboot; prints its address.
+                                        Without Tailscale: this machine only, for the desktop app (its local
+                                        key, ~/.local/state/amarchy/app/local.key; docs/guide.md, "Who gets in")
   amarchy app off                       stop serving it (the phones keep it, for when it's on again)
   amarchy app [--status]                whether it's on, where, and how many phones and browsers it notifies
   amarchy app --test                    send each phone a test notification
@@ -13580,13 +13582,82 @@ def app_moments(st, ss):
         threading.Thread(target=push_all, args=(payload,), daemon=True).start()
 
 
+# ------------------------------------------------------------------ machines
+#
+# amarchy on several machines, every machine's chats on one board
+# (docs/plan-omarchy-and-machines.md, track A; its "contract between machines
+# and apps" is protocol 1). This part: who may call the app's server besides
+# a browser through tailscale serve.
+#
+# The desktop app on this machine comes straight to 127.0.0.1:<APP_PORT>, no
+# Tailscale needed. It reads the local key (STATE/app/local.key, 0600: only you
+# read it) and opens http://127.0.0.1:<port>/local?key=<key>, which sets a
+# cookie (HttpOnly, SameSite=Strict, for that port) and sends it on to the
+# app. A request to 127.0.0.1 itself with that cookie is let in, when it comes
+# from you (the socket's owner, as the kernel says: not another user here who
+# can reach localhost too) and not through a proxy (tailscale serve also comes
+# from 127.0.0.1: it says whose request it is, and where it came from). A
+# change, as from the app on Tailscale, only from the app's own page (Origin
+# http://127.0.0.1:<port>), so another page in that window can't drive it.
+
+LOCAL_KEY = APP / "local.key"
+LOCAL_COOKIE = "amarchy_local"      # + _<port>: a browser's cookies for 127.0.0.1 are every port's
+LOCAL_COOKIE_AGE = 400 * 86400      # as long as a browser keeps one
+
+
+def local_key():
+    """The local key (made the first time, 0600)."""
+    for _ in range(50):
+        try:
+            if LOCAL_KEY.stat().st_mode & 0o077:
+                os.chmod(LOCAL_KEY, 0o600)
+            key = LOCAL_KEY.read_text().strip()
+            if re.fullmatch(r"[\w-]{43,}", key):
+                return key
+        except FileNotFoundError:
+            APP.mkdir(parents=True, exist_ok=True)
+            tmp = APP / f".local.key.{os.getpid()}.{threading.get_ident()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(b64u(os.urandom(32)) + "\n")
+            try:
+                os.link(tmp, LOCAL_KEY)     # never over one another process just made
+            except FileExistsError:
+                pass
+            finally:
+                tmp.unlink(missing_ok=True)
+            continue
+        except OSError:
+            pass
+        time.sleep(0.02)        # being written: in a moment
+    raise OSError(f"couldn't read or make {LOCAL_KEY}")
+
+
+def local_cookie_value(key=None):
+    """What the cookie holds: made from the key (not the key itself), so a
+    new key (the file deleted) lets no old cookie in."""
+    return hmac.new((key or local_key()).encode(), b"amarchy local cookie", hashlib.sha256).hexdigest()
+
+
+def local_uid_ok(sock):
+    """The other end of a connection on this machine is you: its socket's
+    owner, as the kernel says. Where it can't say (not Linux), the key alone."""
+    uid = peer_uid(sock)
+    return uid == os.getuid() or (uid is None and not sys.platform.startswith("linux"))
+
+
 def app_handler(st, users, address):
     import http.server
     trusted = tailscale_uids()
+    # Who's let in through Tailscale, and at which address: app_serve reads
+    # them again while Tailscale isn't up (the desktop app works without it).
+    tailnet = {"users": set(users), "address": address}
 
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "amarchy"
         sys_version = ""
+        net = tailnet
+        via = None          # how this request came: "tailscale" or "local" (allowed)
 
         def log_message(self, fmt, *args):
             pass
@@ -13600,7 +13671,8 @@ def app_handler(st, users, address):
             # The dictation's and the terminals' WebSockets, to this host (not
             # every browser counts wss: as 'self').
             host = self.headers.get("Host", "")
-            csp = APP_CSP.replace("connect-src 'self'", f"connect-src 'self' wss://{host}") \
+            ws = "ws" if self.via == "local" else "wss"
+            csp = APP_CSP.replace("connect-src 'self'", f"connect-src 'self' {ws}://{host}") \
                 if re.fullmatch(r"[\w.-]+(:\d+)?", host) else APP_CSP
             # The terminals (xterm.js) style themselves: <style> elements the
             # page made (its nonce), and style attributes.
@@ -13678,10 +13750,15 @@ def app_handler(st, users, address):
                 pass        # the browser had enough (a video it plays from elsewhere in it)
 
         def allowed(self, write=False):
-            """Only you, through tailscale serve, at this machine's address;
-            changes only from the app's own pages."""
+            """Only you, through tailscale serve, at this machine's address,
+            or the desktop app here (the local key: local_allowed); changes
+            only from the app's own pages."""
+            self.via = None
+            if self.straight():
+                return self.local_allowed(write)
             host = self.headers.get("Host", "")
-            if self.headers.get("Tailscale-User-Login", "") not in users or host.split(":")[0] != address:
+            if self.headers.get("Tailscale-User-Login", "") not in self.net["users"] \
+                    or not self.net["address"] or host.split(":")[0] != self.net["address"]:
                 self.error(403, "not yours")
                 return False
             # Through tailscale serve: that header is Tailscale's, not another
@@ -13698,7 +13775,77 @@ def app_handler(st, users, address):
                         or not self.headers.get("Content-Type", "").startswith("application/json")):
                     self.error(403, "only from the app")
                     return False
+            self.via = "tailscale"
             return True
+
+        # ---- the desktop app on this machine (see "machines": the local key)
+
+        def straight(self):
+            """Whether this came straight to 127.0.0.1:<this port>, not
+            through a proxy: tailscale serve comes from 127.0.0.1 too, but to
+            this machine's name, saying whose request it is and from where."""
+            return (self.headers.get("Host", "") == f"127.0.0.1:{self.server.server_address[1]}"
+                    and self.client_address[0] == "127.0.0.1"
+                    and not any(self.headers.get(h) is not None for h in (
+                        "Tailscale-User-Login", "Tailscale-User-Name", "X-Forwarded-For", "X-Forwarded-Host",
+                        "Forwarded", "Via")))
+
+        def local_cookie(self):
+            name = f"{LOCAL_COOKIE}_{self.server.server_address[1]}"
+            for part in self.headers.get_all("Cookie") or []:
+                for c in part.split(";"):
+                    k, _, v = c.strip().partition("=")
+                    if k == name:
+                        return v
+            return None
+
+        def local_allowed(self, write=False):
+            """The desktop app here: its cookie (from /local), from you; a
+            change only from its own page."""
+            given = self.local_cookie()
+            try:
+                good = bool(given) and hmac.compare_digest(given.encode(), local_cookie_value().encode())
+            except OSError:
+                good = False
+            if not good or not local_uid_ok(self.connection):
+                self.error(403, "not yours")
+                return False
+            if write:
+                site = self.headers.get("Sec-Fetch-Site")
+                if (self.headers.get("Origin") != f"http://{self.headers.get('Host')}" or (site and site != "same-origin")
+                        or not self.headers.get("Content-Type", "").startswith("application/json")):
+                    self.error(403, "only from the app")
+                    return False
+            self.via = "local"
+            return True
+
+        def local_in(self, args):
+            """GET /local?key=<the local key>[&next=/<path>]: the desktop app
+            comes in. Its cookie set, it's sent on to the app (or next: a
+            path here), so the key stays out of the page's address."""
+            given = (args.get("key") or [""])[0]
+            try:
+                key = local_key()
+            except OSError as e:
+                return self.error(500, str(e))
+            if not self.straight() or not local_uid_ok(self.connection) or not given \
+                    or not hmac.compare_digest(given.encode(), key.encode()):
+                return self.error(403, "not yours")
+            to = (args.get("next") or ["/"])[0]
+            if not re.fullmatch(r"/(?![/\\])[^\s\\\x00-\x1f\x7f]*", to) or to.startswith("/local"):
+                to = "/"
+            self.via = "local"
+            port = self.server.server_address[1]
+            self.head(303, "text/plain", [
+                ("Location", to), ("Content-Length", "0"),
+                ("Set-Cookie", f"{LOCAL_COOKIE}_{port}={local_cookie_value(key)}; Path=/; HttpOnly; "
+                               f"SameSite=Strict; Max-Age={LOCAL_COOKIE_AGE}")], cache="no-store")
+            self.end_headers()
+
+        def own_origin(self):
+            """The app's own page's origin, for this request."""
+            host = self.headers.get("Host", "")
+            return f"http://{host}" if self.via == "local" else f"https://{host}"
 
         def body(self, limit=200_000):
             try:
@@ -13724,7 +13871,7 @@ def app_handler(st, users, address):
             if self.headers.get("Upgrade", "").lower() != "websocket":
                 self.error(400, "a WebSocket")
                 return False
-            if self.headers.get("Origin") != f"https://{host}" or (site and site != "same-origin"):
+            if self.headers.get("Origin") != self.own_origin() or (site and site != "same-origin"):
                 self.error(403, "only from the app")
                 return False
             if self.headers.get("Sec-WebSocket-Version") != "13" or not self.headers.get("Sec-WebSocket-Key"):
@@ -14000,16 +14147,20 @@ def app_handler(st, users, address):
                 self.wfile.write(bytes([0x80 | op]) + size + data)
 
         def do_GET(self):
-            if not self.allowed():
-                return
             path, _, query = self.path.partition("?")
             args = urllib.parse.parse_qs(query)
+            if path == "/local":        # the desktop app on this machine comes in (see "machines")
+                return self.local_in(args)
+            if not self.allowed():
+                return
             if path == "/api/state":
                 with st.changed:
                     view = dict(st.view)
                 name, bind = host_network()
+                user = self.headers.get("Tailscale-User-Login") if self.via == "tailscale" else \
+                    next(iter(sorted(self.net["users"])), None)
                 return self.send(200, {**view, "key": app_public(), "host": {"name": name, "address": bind, "out": _links_out},
-                                       "user": self.headers.get("Tailscale-User-Login")})
+                                       "user": user})
             if path == "/api/events":
                 return self.list_stream()
             if path == "/api/github":       # your repos, for a new project
@@ -14024,7 +14175,12 @@ def app_handler(st, users, address):
                 return self.send(200, {"repos": [{"name": x.get("name"), "private": bool(x.get("private")),
                                                   "added": bool(x.get("added"))} for x in repos if isinstance(x, dict)]})
             if path == "/api/share/key":    # the Shortcut's address, for Settings (see "sharing into amarchy")
-                return self.send(200, {"url": f"https://{self.headers.get('Host', '')}/api/share?key={share_key()}"})
+                # On the tailnet, where a phone's Shortcut reaches (not 127.0.0.1, from the desktop app).
+                base = f"https://{self.headers.get('Host', '')}/" if self.via != "local" else \
+                    app_url(self.net["address"]) if self.net["address"] else None
+                if not base:
+                    return self.error(409, "This machine isn't on Tailscale yet: a phone can't reach it")
+                return self.send(200, {"url": f"{base}api/share?key={share_key()}"})
             m = re.fullmatch(r"/api/share/(\d{1,2})", path)
             if m:       # a picture of what you shared: ?id= says which share's
                 found = share_picture(int(m.group(1)), (args.get("id") or [None])[0])
@@ -15260,17 +15416,34 @@ def app_serve():
     import http.server
     status = tailscale_status()
     address, users = app_address(status), app_users(status)
+    # Without Tailscale (not set up yet, or offline) it still serves the
+    # desktop app here (the local key), and takes the tailnet once it's up.
     if not address:
-        return fail("this machine isn't on Tailscale (or Tailscale isn't up): the app is served on your tailnet")
-    if not users:
-        return fail("couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> "
-                    f"in {HOST_CONFIG}")
+        print("amarchy app: this machine isn't on Tailscale (or Tailscale isn't up): only the desktop app here "
+              "gets in until it is", file=sys.stderr, flush=True)
+    elif not users:
+        print("amarchy app: couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> "
+              f"in {HOST_CONFIG} (until then, only the desktop app here gets in)", file=sys.stderr, flush=True)
     app_key()
+    local_key()
     migrate()
     st = AppState()
     st.transcriber = Transcriber()      # dictation on the host
-    server = app_server_class()(("127.0.0.1", app_port()), app_handler(st, users, address))
+    handler = app_handler(st, users, address)
+    server = app_server_class()(("127.0.0.1", app_port()), handler)
     links_serve()                       # a Mac's links out (see links_handler)
+
+    def tailnet():
+        """Tailscale came up (or its owner showed) after the server started."""
+        while not (handler.net["address"] and handler.net["users"]):
+            time.sleep(15)
+            now = tailscale_status()
+            found, who = app_address(now), app_users(now)
+            if found and who:
+                handler.net.update(address=found, users=who)
+                print(f"amarchy app: on the tailnet now, {app_url(found)}", file=sys.stderr, flush=True)
+
+    threading.Thread(target=tailnet, daemon=True).start()
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
@@ -15287,8 +15460,9 @@ def app_serve():
         server.shutdown()
 
     threading.Thread(target=updated, daemon=True).start()
-    print(f"amarchy app: {app_url(address)} for {', '.join(sorted(users))} "
-          f"(on 127.0.0.1:{app_port()})", file=sys.stderr, flush=True)
+    where = f"{app_url(address)} for {', '.join(sorted(users))}" if address and users else "this machine only"
+    print(f"amarchy app: {where} (on 127.0.0.1:{app_port()}; the desktop app here: its local key, {LOCAL_KEY})",
+          file=sys.stderr, flush=True)
     server.serve_forever()
     return 0
 
@@ -15320,11 +15494,34 @@ def serve_config():
     return None
 
 
+def app_service_on():
+    """The app's server running, now and after every reboot (on 127.0.0.1
+    only: the desktop app here needs no more). Else why not."""
+    app_key()
+    local_key()
+    UNITS.mkdir(parents=True, exist_ok=True)
+    unit = UNITS / APP_UNIT
+    if not unit.exists() or unit.read_text() != app_unit():
+        write_file(unit, app_unit())
+        sh("systemctl", "--user", "daemon-reload")
+    r = sh("systemctl", "--user", "enable", "--now", APP_UNIT)
+    if r.returncode != 0:
+        return f"couldn't start {APP_UNIT}: {gist(r.stderr)}"
+    sh("systemctl", "--user", "restart", APP_UNIT)
+    return None
+
+
 def app_on():
     status = tailscale_status()
     address = app_address(status)
     if not shutil.which("tailscale") or not address:
-        return fail("the app is served on your tailnet: install Tailscale and run `sudo tailscale up` first")
+        # The desktop app here works without it (the local key); a phone needs the tailnet.
+        why = app_service_on()
+        if why:
+            return fail(why)
+        print(f"on, for this machine only (the desktop app here, on 127.0.0.1:{app_port()}). For your phone and "
+              f"other machines: install Tailscale and run `sudo tailscale up`, then amarchy app on again")
+        return 0
     if not status.get("CertDomains"):
         return fail("Tailscale has no HTTPS certificates for your tailnet yet: turn them on at "
                     "https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this again")
@@ -15335,16 +15532,9 @@ def app_on():
     if taken and taken != target:
         return fail(f"tailscale serve already sends port {app_https()} to {taken}: set APP_HTTPS=8443 "
                     f"in {HOST_CONFIG} to put the app on another port")
-    app_key()
-    UNITS.mkdir(parents=True, exist_ok=True)
-    unit = UNITS / APP_UNIT
-    if not unit.exists() or unit.read_text() != app_unit():
-        write_file(unit, app_unit())
-        sh("systemctl", "--user", "daemon-reload")
-    r = sh("systemctl", "--user", "enable", "--now", APP_UNIT)
-    if r.returncode != 0:
-        return fail(f"couldn't start {APP_UNIT}: {gist(r.stderr)}")
-    sh("systemctl", "--user", "restart", APP_UNIT)
+    why = app_service_on()
+    if why:
+        return fail(why)
     if taken != target:
         r = sh("tailscale", "serve", "--bg", f"--https={app_https()}", target)
         if r.returncode != 0:
@@ -15378,7 +15568,8 @@ def app_status():
     if not running and not served:
         print("off (amarchy app on starts it)")
         return 1
-    where = app_url(address) if address and served else "not on your tailnet (amarchy app on)"
+    where = app_url(address) if address and served else \
+        "this machine only (the desktop app here): not on your tailnet (amarchy app on)"
     print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified")
     return 0 if running and served else 1
 
