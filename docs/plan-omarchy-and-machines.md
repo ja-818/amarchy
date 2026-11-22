@@ -149,6 +149,31 @@ and tell the other tracks.
 - Board keys (order, seen, per-chat settings) use `<machine>:<id>`. A chat with
   no machine is this machine's (old data keeps working).
 
+### Omarchy: the bar, the key, the theme live
+
+- **`amarchy open [<id> | <machine>/<id> | amarchy://chat/<machine>/<id>]`**
+  is what the Ⓐ in the bar, Super+Alt+A and the Omarchy menu run: the window of
+  class `amarchy` to the front (Hyprland), else `amarchy-desktop [link]`
+  started; without the desktop app, the board in a browser window at the
+  chat, by the routes below. It finds the board in the desktop app's order.
+- **`amarchy bar --follow`** (the Ⓐ's process): one JSON line each time what
+  the Ⓐ shows changes, `{"up": true, "board", "needs", "chats": [{"machine",
+  "id", "name", "why", "link"}]}` (at most 8, the board's order), or `{"up":
+  false, "board", "why"}`. It reads the board's `/api/events` (this machine's
+  with the local key; a paired one's as a plain GET through its tailscale
+  serve) and counts with the app's own test (`asks_you`, `needs_you`).
+- **`PUT /api/peer/look`**, from a paired machine only (`X-Amarchy-Peer` and
+  its key; a page or the local key gets 403): `{"key": "omarchy-live",
+  "theme": <theme.json: name, mode, vars (the app's tokens), terminal,
+  wallpaper {phone, wide} | null, font {family, nerd, files {regular, bold}} |
+  null, from, omarchy {theme, machine}>, "files": {<name>: <base64>}}`, every
+  file it names and nothing else (wallpaper[-wide].jpg|png|webp,
+  regular|bold.ttf|otf|woff|woff2, checked by their bytes), 48 MB at most.
+  The machine keeps it as the theme of yours `omarchy-live` ("Omarchy
+  (live)"), replacing the last one in one step, and answers `{"key", "worn"}`;
+  400 says what's wrong with it. Only `omarchy-live` comes this way (syncing
+  the rest of your look is track D's).
+
 ### The desktop app: how it's opened, what it opens
 
 - **One way in**: `amarchy-desktop [amarchy://chat/<machine>/<id>]`. One
