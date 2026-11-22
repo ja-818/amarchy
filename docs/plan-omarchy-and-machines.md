@@ -164,7 +164,10 @@ and tell the other tracks.
      server answers on `127.0.0.1:<APP_PORT>`: `amarchy list --compact` isn't
      empty (chats here), or `amarchy machines --json` has more than one row
      (row 0 is this machine, `me: true`; the others are paired machines whose
-     chats it merges in). Opened with the local key (`/local?key=`).
+     chats it merges in) **and** that `me` row says `"merges": true` (its app
+     acts on other machines' chats: `chatPath`, `<machine>:<id>` routes;
+     absent is false; also in `/api/peer/hello` and `/api/state`). Opened
+     with the local key (`/local?key=`).
   3. The first paired machine (`amarchy machines --json`, not `me`) whose
      `state` is `on`.
   4. The address set by hand, `amarchy-desktop --server <url>` (kept in
