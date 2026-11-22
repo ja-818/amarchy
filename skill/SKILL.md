@@ -320,7 +320,9 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   print its id. With `--prompt` (or `--prompt -` to read it from stdin), its Claude
   starts with that as its first message: the way to hand a new session a task.
   Nothing opens on the user's screen: the new chat just shows up in their list.
-  See "Talking to other sessions".
+  See "Talking to other sessions". `--agent "<name>"` makes it one of their
+  agents from its start (a chat that lives on and texts them), only when they
+  ask for an agent.
 - `amarchy add <owner/repo|url>` / `amarchy add --new <name> [--github]`: add a
   project.
 - `amarchy close <id>`: close **another** session. It stops its preview first and

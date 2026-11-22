@@ -2,12 +2,16 @@
 // and on a wide screen. An empty amarchy (no project, no chat) opened on a
 // new device: the tour opens by itself over the welcome, once; Next, Back,
 // the keys, a swipe and the bar's segments go along it; every slide has its
-// pixel art, its words and fits the screen; its themes slide wears a theme
-// when tapped; its last slide bursts and offers the way to start (a project
-// with none, a chat with some); closed, it's seen: a reload doesn't bring it
-// back, the welcome's Take the tour, Settings and the Amarchy menu's Tour
-// do. The phone and the wide layouts have the same slides, word for word.
-// With a screenshot of every slide in both layouts.
+// pixel art, its words and fits the screen. It says why (a dozen Claude
+// Codes), how (a website the box serves, over Tailscale), how to make it an
+// app, and every feature (a few to a slide, each its picture, its joke and
+// what it does), never how to install it; its themes slide wears a theme
+// when tapped; its agents slide tells agents from projects and makes either
+// (New agent…: its sheet); its last slide bursts and offers the way to start
+// (a project with none, a chat with some); closed, it's seen: a reload
+// doesn't bring it back, the welcome's Take the tour, Settings and the
+// Amarchy menu's Tour do. The phone and the wide layouts have the same
+// slides, word for word. With a screenshot of every slide in both layouts.
 //
 //   node test/tour-view.js          both layouts
 //   node test/tour-view.js phone    one layout (phone | wide)
@@ -57,8 +61,11 @@ const slide = (p) => p.evaluate(() => {
   return {
     kicker: s.querySelector(".ui-slide-kicker").innerText,
     title: s.querySelector(".ui-slide-title").innerText,
-    words: [...s.querySelectorAll(".ui-slide-line, .ui-slide-aside, .code code, .tpill, .tbtn")].map((x) => x.innerText.trim()).filter(Boolean),
+    words: [...s.querySelectorAll(".ui-slide-line, .ui-slide-aside, .ui-slide-feat-title, .ui-slide-feat-text, .code code, .tpill, .tbtn")].map((x) => x.innerText.trim()).filter(Boolean),
     art: s.querySelectorAll(".ui-slide-art .ui-px svg rect, .ui-slide-art .ui-keycap").length,
+    feats: [...s.querySelectorAll(".ui-slide-feat")].map((f) => ({ art: f.querySelectorAll(".ui-slide-feat-art .ui-px svg rect").length,
+      title: f.querySelector(".ui-slide-feat-title").innerText.trim(), text: (f.querySelector(".ui-slide-feat-text") || {}).innerText || "",
+      lined: Math.abs(f.querySelector(".ui-slide-feat-title").getBoundingClientRect().left - s.querySelector(".ui-slide-title").getBoundingClientRect().left) > 40 })),
     fits: stage.scrollHeight <= stage.clientHeight + 1,
     count: document.querySelector(".ui-slides-count").innerText,
     next: document.querySelector(".ui-slides-next").innerText,
@@ -85,7 +92,7 @@ async function run(browser, port, layout) {
   check(where, await open(p), "the tour opens by itself, the first time");
   check(where, await p.evaluate((n) => document.querySelectorAll(".ui-slides-seg").length === n, SLIDES), `${SLIDES} slides, a segment each`);
   const first = await slide(p);
-  check(where, first.kicker.toLowerCase() === "amarchy in 100 seconds" && /Twelve is a company/.test(first.title), `its first: ${first.title}`);
+  check(where, first.kicker.toLowerCase() === "amarchy in 100 seconds" && /dozen Claude Codes/.test(first.title), `its first, why: ${first.title}`);
   check(where, first.back && first.count === `1 / ${SLIDES}` && first.next === "Next", "Back hidden on the first, 1 of all, Next");
   await p.screenshot({ path: path.join(SHOTS, `${where}-tour-01.png`) });
 
@@ -101,15 +108,30 @@ async function run(browser, port, layout) {
     const s = await slide(p);
     seen.push(s);
     check(where, (await at(p)) === i, `slide ${i + 1}: ${s.kicker} · ${s.title}`);
-    check(where, s.art > 0, `  its pixel art (${s.art} pixels)`);
+    if (s.feats.length) {
+      check(where, s.feats.length >= 2 && s.feats.length <= 3, `  ${s.feats.length} features`);
+      check(where, s.feats.every((f) => f.art > 0 && f.title && f.text.length > 20), `  each its picture, its joke and what it does (${s.feats.map((f) => f.title).join(" / ")})`);
+      check(where, s.feats.every((f) => f.lined), "  the words beside the pictures, in a column of their own");
+    } else check(where, s.art > 0, `  its pixel art (${s.art} pixels)`);
     check(where, s.fits, "  it fits the screen, nothing to scroll");
     await p.screenshot({ path: path.join(SHOTS, `${where}-tour-${String(i + 1).padStart(2, "0")}.png`) });
   }
-  // What it says: the Safari apps, themes, the setup's command.
+  // What it says: why, how (a website, over Tailscale), the Safari apps,
+  // every feature, themes, agents and projects; not how to install it.
   const all = seen.map((s) => [s.title, ...s.words].join("\n")).join("\n");
+  check(where, /website/.test(seen[1].words.join(" ")) && /Tailscale/.test(seen[1].words.join(" ")), "how it works: a website the box serves, over Tailscale");
   check(where, /Add to Home Screen/.test(all) && /Add to Dock/.test(all) && (all.match(/Safari/g) || []).length >= 2, "making it an app from Safari, on iPhone and Mac");
+  check(where, !/install\.sh|amarchy app on|git clone/.test(all), "nothing on installing it");
+  const features = { "touch grass": /touch grass/, worktree: /worktree/, "chats nap": /sleeps to free memory/, briefings: /Briefings/,
+    dictation: /\bmic\b/, notifications: /notification/, "Ship it": /Ship it/, Preview: /Preview/, terminal: /terminal in your pocket/i,
+    "Now · At work · For later": /At work[\s\S]*Now[\s\S]*For later/, Tasks: /Tasks[\s\S]*meeting recordings/, secrets: /Keys and passwords/,
+    dopamine: /dopamine[\s\S]*40 badges/, vim: /Vim/ };
+  const missing = Object.entries(features).filter(([, re]) => !re.test(all)).map(([k]) => k);
+  check(where, !missing.length, `every feature${missing.length ? `: missing ${missing.join(", ")}` : ""}`);
   check(where, /themes/i.test(all) && /Tokyo Night/.test(all), "the themes");
-  check(where, /install\.sh/.test(all) && /amarchy app on/.test(all) && /Tailscale/.test(all), "how to set it up");
+  const agents = seen[SLIDES - 2];
+  check(where, agents.kicker.toLowerCase() === "make it yours" && /A project/.test(agents.words.join(" ")) && /An agent/.test(agents.words.join(" "))
+        && agents.words.includes("New project…") && agents.words.includes("New agent…"), "agents and projects told apart, and New project…, New agent…");
   const last = seen[SLIDES - 1];
   check(where, last.next === "Let's go" && last.words.includes("Add a project from GitHub") && last.words.includes("Start an empty project"),
         "the last: Let's go, and the way to start (no project yet: add one)");
@@ -203,6 +225,36 @@ async function run(browser, port, layout) {
   await p.evaluate(() => { closeSheets(); tourShow(8); });
   check(where, await until(p, () => /^\d+ themes$/.test((document.querySelector(".tour-themes-count") || {}).textContent || "")),
         "opened on the themes: how many, once they've come");
+  await p.evaluate(() => closeSheets());
+  await p.evaluate(() => tourShow(0));
+  await open(p);
+
+  // Agents and projects: New agent… — the tour goes, its sheet comes: what
+  // it's called, its job, where it lives (a folder of its own, picked, named
+  // after it), Make the agent.
+  await p.click(`.ui-slides-seg:nth-child(${SLIDES - 1})`);
+  await until(p, (n) => document.querySelector(".sheet-back.slides").at() === n - 2, SLIDES);
+  await p.evaluate(() => [...document.querySelectorAll(".ui-slide-actions .tbtn")].find((b) => b.innerText === "New agent…").click());
+  const sheetSel = ".sheet[aria-label='New agent']";
+  check(where, await until(p, (q) => !document.querySelector(".sheet-back.slides") && !!document.querySelector(q), sheetSel), "New agent…: the tour goes, its sheet comes");
+  const made = await p.evaluate((q) => {
+    const s = document.querySelector(q);
+    return { fields: s.querySelectorAll("input, textarea").length, own: (s.querySelector(".menu-item.on") || {}).innerText || "",
+             make: [...s.querySelectorAll("button")].some((b) => b.innerText === "Make the agent") };
+  }, sheetSel);
+  check(where, made.fields === 2 && /A folder of its own/.test(made.own) && made.make,
+        `  its name, its job, where it lives (a folder of its own, picked), Make the agent (${JSON.stringify(made)})`);
+  await p.fill(`${sheetSel} input`, "Scout Bot");
+  check(where, await until(p, (q) => /scout-bot/.test(document.querySelector(`${q} .menu-item.on`).innerText), sheetSel), "  its folder named after it");
+  await sleep(400);
+  await p.screenshot({ path: path.join(SHOTS, `${where}-new-agent.png`) });
+  await p.evaluate(() => closeSheets());
+  check(where, await until(p, (q) => !document.querySelector(q), sheetSel), "  closed");
+  await p.evaluate(() => { newAgentSheet(); });
+  await until(p, (q) => !!document.querySelector(q), sheetSel);
+  await p.evaluate((q) => [...document.querySelectorAll(`${q} button`)].find((b) => b.innerText === "Make the agent").click(), sheetSel);
+  check(where, await until(p, (q) => !!document.querySelector(q) && /called/.test((document.querySelector(".toast") || {}).innerText || ""), sheetSel),
+        "  Make the agent with no name: asks what it's called, the sheet stays");
   await p.evaluate(() => closeSheets());
   await p.evaluate(() => tourShow(0));
   await open(p);

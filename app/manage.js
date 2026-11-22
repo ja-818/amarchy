@@ -272,6 +272,71 @@ function agentSheet(s) {
     } }, main ? "Not my assistant any more" : "Not an agent any more"));
 }
 
+// ---- a new agent (amarchy new --agent)
+//
+// A chat that lives on from its start: what it's called, its job (its first
+// message: what it keeps doing for you; none, and it waits for you to text
+// it) and where it lives: a folder of its own (a new, empty project named
+// after it, the usual home of one) or one of your projects. Made, its chat
+// opens, on top of your chats. The same sheet on the phone and a computer:
+// from the Amarchy menu, Settings' Agents and the tour.
+function newAgentSheet() {
+  const ps = () => ((app.view && app.view.projects) || []).map((p) => p.name);
+  // Its own folder's name: its name, as a project's (letters, numbers, - and .).
+  const folder = () => name.value.trim().toLowerCase().replace(/[^\w.-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 60) || "agent";
+  let home = null;      // null: a folder of its own; else one of your projects
+  const list = h("div", { class: "menu" });
+  const name = field({ placeholder: "For example: Scout", maxlength: "40", oninput: () => draw() }, () => make());
+  const job = field({ rows: 3, maxlength: "4000", placeholder: "For example: every morning, go through my X mentions and put the ones worth a reply on Tasks" });
+  const draw = () => {
+    const own = folder(), have = ps();
+    const item = (key, label, detail) => h("button", { class: `menu-item${home === key ? " on" : ""}`, onclick: () => { home = key; draw(); } },
+      h("span", { class: "label" }, h("span", { class: "text" }, label, detail ? h("small", {}, detail) : null)),
+      home === key ? glyph("check", "val") : null);
+    keepFocus(list, () => list.replaceChildren(
+      item(null, "A folder of its own", have.includes(own) ? `${own}, one of your projects already` : `a new project: ${own}`),
+      ...have.map((p) => item(p, projectName(p), "one of your projects"))));
+  };
+  let busy = false;
+  const make = async () => {
+    const called = name.value.trim();
+    if (!called) { name.focus(); return toast("What should it be called?"); }
+    if (busy) return;
+    busy = true;
+    btn.classList.add("busy");
+    let repo = home;
+    try {
+      if (repo === null) {
+        repo = folder();
+        if (!ps().includes(repo)) {
+          toast(`Making its folder, ${repo}…`);
+          await api("/api/add", { new: repo });
+        }
+      }
+      const text = job.value.trim();
+      const d = await api("/api/new", { repo, agent: called, ...(text ? { prompt: text } : {}) });
+      closeSheets();
+      toast(`${called} is one of your agents: on top of your chats`);
+      // Its chat, once the list has it.
+      if (d.id && row(d.id)) boardOpen(d.id);
+      else if (d.id) board.waitFor = d.id;
+    } catch (e) { toast(e.message); }
+    busy = false;
+    btn.classList.remove("busy");
+  };
+  const btn = h("button", { class: "control wide accent", onclick: () => make() }, "Make the agent");
+  sheet({ key: "new-agent" }, sheetHead("New agent", "A chat that lives on"),
+    h("p", {}, "A chat in a project does one job and is done. An agent never is: it keeps a job going (your inbox, your X account, "
+               + "Monday's report), texts you like a coworker, and puts what needs you on Tasks. It sits on top of your chats."),
+    h("div", { class: "section" }, "Its name"), name,
+    h("div", { class: "section" }, "Its job"), job,
+    h("div", { class: "section" }, "Where it lives"), list,
+    h("p", {}, "Its notes and scripts go there. A folder of its own is the usual."),
+    btn);
+  draw();
+  setTimeout(() => name.focus(), 50);
+}
+
 // Where its picture goes: your assistant's, or an agent's.
 function pictureApi(s) { return s.assistant === "main" ? "/api/assistant/picture" : `/api/session/${sid(s)}/agent/picture`; }
 

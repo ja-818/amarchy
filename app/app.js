@@ -2300,9 +2300,10 @@ async function openSettings() {
       h("div", { class: "section" }, "Agents"),
       ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),
         h("span", {}, `${x.assistant_name || "Assistant"}: name, picture, chime…`))),
+      h("button", { class: "control wide", onclick: () => newAgentSheet() }, "New agent…"),
       h("p", {}, team.length ? `Chats that live on rather than finish, on top of the list${helper ? `; ${helper.assistant_name || "your assistant"} is your assistant, and your tasks go to it` : ""}. `
-                               + "Make another one an agent from its menu (⋯, or hold it in the list)."
-                             : "None yet: open a chat's menu (⋯, or hold it in the list) and make it your assistant, or an agent."),
+                               + "New agent… makes another; a chat's menu (⋯, or hold it in the list) makes it one."
+                             : "None yet: New agent… makes one, or a chat's menu (⋯, or hold it in the list) makes it your assistant, or an agent."),
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));

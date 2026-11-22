@@ -775,6 +775,16 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-slide-line code { font-size: .9em; }
 .ui-slide-aside { margin: 0; font-size: var(--caption); line-height: 1.5; color: var(--text-muted); }
 .ui-slide-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+/* A slide's features: a row each, its small picture in a square of one
+   size (so the words line up), what it is in a line, what it does under it. */
+.ui-slide-feats { display: flex; flex-direction: column; gap: 18px; margin-top: 4px; }
+.ui-slide-feat { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 14px; align-items: start; }
+.ui-slide-feat-art { width: 48px; height: 48px; display: grid; place-items: center; }
+.ui-slide-feat-art .ui-px svg { max-width: 48px; max-height: 48px; width: auto; height: auto; }
+.ui-slide-feat-title { margin: 0 0 3px; font-size: var(--body); line-height: 1.35; font-weight: 800; color: var(--text); text-wrap: balance; }
+.ui-slide-feat-text { margin: 0; font-size: var(--body); line-height: 1.45; color: var(--text-muted); text-wrap: pretty; }
+.ui-slide-feat-text b { font-weight: 800; color: var(--text); }
+.ui-slide-feat-text code { font-size: .9em; }
 .ui-slides-stage .code { margin: 0; }
 .ui-slides-stage .code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ui-slides-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--border-faint); }

@@ -42,10 +42,15 @@ remove amarchy, run `install.sh --uninstall`; your projects and chats are left a
 
 ### The tour
 
-**amarchy in 100 seconds**: what amarchy is, how to set it up, how to make it an
-app from Safari (on an iPhone and on a Mac), how it works, the chat, the board, the
-moves that get the most out of it, the themes and the keys, as eleven slides with
-pixel art in your theme's own colors. It opens by itself the first time an empty
+**amarchy in 100 seconds**: why amarchy (a dozen Claude Codes, on a computer that
+never sleeps, from your pocket), how it works (a website that computer serves,
+private over Tailscale), how to make it an app from Safari (on an iPhone and on a
+Mac), then its features, a few to a slide, each a joke and what it does (chats in
+parallel, each in its worktree; napping chats; briefings with buttons; dictation;
+notifications; Ship it; previews; a terminal per chat; Now, At work and For later;
+Tasks; secrets; streaks and badges; the keys), then making it yours: a theme, and
+agents next to projects, with **New project…** and **New agent…**. Eleven slides
+with pixel art in your theme's own colors; nothing on installing it. It opens by itself the first time an empty
 amarchy (no project, no chat yet) is opened on a device, over the welcome; any time
 after, it's **Tour** in the Amarchy menu (the **Ⓐ**), **Take the tour** on the
 welcome, and **Settings → Help**. Next, Back, a swipe sideways, the arrow keys or a
@@ -1055,8 +1060,13 @@ assistant's); it has [tasks of its own](#your-agents-tasks) instead:
 the same way (`--name`, `--picture`, `--sound`). An agent you make your assistant
 (`amarchy assistant <id>`) keeps its name and is no longer an agent.
 
-In the app: a chat's menu, **Make it an agent…** (or your assistant, in place of the
-one you have); on an agent, **name, picture, chime…**: rename it, choose its picture
+In the app: **New agent…** (the Amarchy menu, **Settings → Agents**, the tour) makes
+one from scratch: what it's called, its job (its first message; none, and it waits
+for you to text it) and where it lives, a folder of its own (a new, empty project
+named after it, the usual) or one of your projects; it's an agent from its start
+(`amarchy new <project> --agent <name>`), its chat open. A chat's menu, **Make it
+an agent…**, makes one of a chat you have (or your assistant, in place of the one
+you have); on an agent, **name, picture, chime…**: rename it, choose its picture
 (cut in the circle as your assistant's is), pick its chime, or **Not an agent any
 more**. **Settings → Agents** lists them, your assistant first, and **Settings →
 Sound** has a tab for each.
@@ -1314,6 +1324,8 @@ amarchy new <project> [name] --model <model>     on that model (opus, sonnet, ha
                                       new chat's default (the app's new chat picks it; Opus until you do)
 amarchy new <project> [name] --effort <effort>   thinking that hard (low, medium, high, xhigh, max, auto) instead
                                       of the new chat's (the app's new chat picks it, beside the model)
+amarchy new <project> [name] --agent <name>      one of your agents from its start, called that (the app's
+                                      New agent); --prompt gives it its job
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]   a message for its Claude, once Claude is free
 amarchy list [--compact]              sessions as JSON, in list order (task, age, agent, engine...)
 amarchy close [id] [--force]          close a session (the current one if no id); --force discards uncommitted changes

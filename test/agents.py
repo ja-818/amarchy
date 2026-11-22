@@ -161,6 +161,31 @@ check([a["id"] for a in am.team()] == ["jaken-jaken", "fireship-fireship"], "mad
 # The app's sounds: each agent's.
 check(am.app_sounds()["agent_sounds"] == {"fireship-fireship": am.team()[1]["sound"]}, "the app's sounds: each agent's chime")
 
+# A new chat that's an agent from its start (amarchy new --agent, the app's
+# New agent): written down before its Claude starts, so it starts writing as
+# someone you text; a chat already there isn't made one by surprise.
+repo = Path(home) / "Work" / "inbox"
+repo.mkdir(parents=True)
+for cmd in (["init", "-q", "-b", "main"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "Initial commit"]):
+    subprocess.run(["git", *cmd], cwd=repo, check=True)
+started = []
+am.host_start = lambda s: started.append((s["id"], am.reply_format(am.session(s["id"]))))
+am.agent_remember = lambda *a, **k: None
+rc, out, err = run("new", "inbox", "watcher", "--agent", "Inbox", "--prompt", "Keep my inbox at zero")
+sid = out.strip()
+check(rc == 0 and sid == "inbox-watcher", f"made: its id ({out.strip()!r} {err.strip()!r})")
+inbox = next((a for a in am.team() if a["id"] == sid), None)
+check(inbox and inbox["role"] == "agent" and inbox["name"] == "Inbox", f"one of your agents, called that ({inbox})")
+check(inbox and inbox["sound"] not in {a["sound"] for a in am.team() if a["id"] != sid}, "with a chime of its own")
+check(started == [(sid, am.CHAT_FORMAT)], "its Claude starts writing as someone you text")
+check(am.session(sid).get("prompt") == "Keep my inbox at zero", "its job: its first message")
+rc, _, err = run("new", "inbox", "watcher", "--agent", "Other")
+check(rc == 1 and "amarchy agents" in err and am.team()[-1]["name"] == "Inbox", "a chat already there: not made one by surprise")
+rc, _, err = run("new", "inbox", "--agent", "x" * 41)
+check(rc == 1 and "40 characters" in err, "a name too long: refused")
+rc, _, err = run("new", "inbox", "--agent")
+check(rc == 1, "--agent with no name: refused")
+
 shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")
 sys.exit(1 if failed else 0)

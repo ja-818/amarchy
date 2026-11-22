@@ -37,6 +37,9 @@ Sessions:
   amarchy new <project> [name] --prompt <text|-> --attach <image>...
                                         with pictures (PNG, JPEG, GIF or WebP files) going with that first
                                         message (the app's new chat: a screenshot pasted into it)
+  amarchy new <project> [name] --agent <name> [--prompt <text|->]
+                                        one of your agents from its start, called that (the app's New
+                                        agent): it texts you, lives on, never a chat to complete
   amarchy send <id> <text|->            a message for a session's Claude, as if typed and sent (- reads it
                                         from stdin), once Claude is free: after the turn under way, not
                                         over a question it asks; a session asleep or whose Claude exited
@@ -2625,12 +2628,13 @@ def auto_name(repo):
     return f"session-{int(time.time())}"
 
 
-def create(repo, name, prompt=None, model=None, images=None, effort=None):
+def create(repo, name, prompt=None, model=None, images=None, effort=None, agent=None):
     """Start a session: its row in the list right away, and its Claude in
     tmux, which makes the worktree first (setup_session) and is then Claude,
     asked prompt first if given (images, Claude's image blocks, going with
     it), on model and effort (else the new chat's: new_model, new_effort).
-    Returns the session id,
+    agent: a name, and it's one of your agents from the start (its Claude
+    starts writing as someone you text: CHAT_FORMAT). Returns the session id,
     or None, having said why not."""
     repo_dir = WORK / repo
     name = slug(name)
@@ -2642,9 +2646,11 @@ def create(repo, name, prompt=None, model=None, images=None, effort=None):
         return None
     sid = f"{repo}-{name}"
     if session(sid):
-        if prompt is not None:
-            # Its Claude is already running: a first prompt can't reach it.
-            fail(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)")
+        if prompt is not None or agent is not None:
+            # Its Claude is already running: a first prompt can't reach it,
+            # and a chat of yours isn't made an agent by surprise.
+            fail(f"{sid} already exists: message its Claude instead (amarchy list has its agent name)"
+                 if agent is None else f"{sid} already exists: amarchy agents {sid} makes it an agent")
             return None
         return sid
     if sh("git", "rev-parse", "--verify", "--quiet", "HEAD", cwd=repo_dir).returncode != 0:
@@ -2662,6 +2668,10 @@ def create(repo, name, prompt=None, model=None, images=None, effort=None):
     if prompt is not None:
         s["prompt"] = prompt      # taken (once) by `amarchy claude` when Claude starts
     save_session(s)
+    if agent is not None:
+        # One of your agents before its Claude starts: it starts with their format.
+        rows = [a for a in agents_saved() if a["id"] != sid]
+        agents_write(rows + [{"id": sid, "name": agent, "sound": agent_free_chime(but=sid)}])
     if images:
         chat_attach_later(sid, images)      # with that first message (Agent.load_attached), before its Claude starts
     # Its Claude starts on it (Agent.restore, before the first message; the
@@ -2927,13 +2937,15 @@ def cmd_claude(sid):
 
 def cmd_new(args):
     """amarchy new <project> [name] [--prompt <text>|-] [--attach <image>]
-    [--model <model>] [--effort <effort>]: the new session's id on stdout.
-    --prompt is the first thing its Claude is asked (- reads it from stdin),
-    each --attach a picture going with it; --model the model it's on and
-    --effort how hard it thinks (else the new chat's: new_model,
-    new_effort). --no-jump, from when a desktop showed the new session, is
-    still taken, and changes nothing: nothing opens anywhere."""
-    prompt, model, effort, rest, attach = None, None, None, [], []
+    [--model <model>] [--effort <effort>] [--agent <name>]: the new
+    session's id on stdout. --prompt is the first thing its Claude is asked
+    (- reads it from stdin), each --attach a picture going with it; --model
+    the model it's on and --effort how hard it thinks (else the new chat's:
+    new_model, new_effort); --agent makes it one of your agents, called
+    that, from its start (amarchy agents). --no-jump, from when a desktop
+    showed the new session, is still taken, and changes nothing: nothing
+    opens anywhere."""
+    prompt, model, effort, agent, rest, attach = None, None, None, None, [], []
     it = iter(args)
     for a in it:
         if a == "--no-jump":
@@ -2957,8 +2969,12 @@ def cmd_new(args):
             effort = a.split("=", 1)[1] if "=" in a else next(it, None)
             if not effort_choice(effort):
                 return fail(f"--effort needs one of {', '.join(EFFORTS)}, or auto")
+        elif a == "--agent" or a.startswith("--agent="):
+            agent = (a.split("=", 1)[1] if "=" in a else next(it, None) or "").strip()
+            if not agent or len(agent) > 40:
+                return fail("--agent takes what to call it (40 characters at most)")
         elif a.startswith("--"):
-            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach, --model and --effort)")
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach, --model, --effort and --agent)")
         else:
             rest.append(a)
     if not rest or len(rest) > 2:
@@ -2984,7 +3000,7 @@ def cmd_new(args):
     if isinstance(blocks, str):
         return fail(f"--attach: {blocks}")
     repo = rest[0]
-    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks, effort)
+    sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks, effort, agent)
     if not sid:
         return 1
     print(sid)
@@ -14606,8 +14622,10 @@ def app_handler(st, users, address):
             return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
 
         def new(self, data):
-            """{repo, prompt, model, effort, images: [{type, data (base64)}]}: a new
-            chat, the pictures (a screenshot pasted) going with its prompt."""
+            """{repo, prompt, model, effort, images: [{type, data (base64)}],
+            agent}: a new chat, the pictures (a screenshot pasted) going with
+            its prompt; agent: a name, and it's one of your agents from its
+            start (amarchy new --agent)."""
             repo, prompt, model = data.get("repo"), data.get("prompt"), data.get("model")
             if not isinstance(repo, str) or repo not in {p["name"] for p in st.view.get("projects", [])} \
                     and repo not in {p["name"] for p in projects()}:      # one just added: not in the list yet
@@ -14620,6 +14638,11 @@ def app_handler(st, users, address):
             if effort is not None and not effort_choice(effort):
                 return self.error(400, "which effort")
             on += ["--effort", effort] if effort else []
+            agent = data.get("agent")
+            if agent is not None:
+                if not isinstance(agent, str) or not agent.strip() or len(agent.strip()) > 40:
+                    return self.error(400, "what to call the agent (40 characters at most)")
+                on += ["--agent", agent.strip()]
             images = chat_images(data.get("images"))
             if isinstance(images, str):
                 return self.error(400, images)
@@ -17560,7 +17583,7 @@ def cmd_agent(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt", "--no-jump", "--model", "--effort", "--attach"}, {"--prompt", "--model", "--effort", "--attach"}, set()),
+    "new": ({"--prompt", "--no-jump", "--model", "--effort", "--attach", "--agent"}, {"--prompt", "--model", "--effort", "--attach", "--agent"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact"}, set(), set()),

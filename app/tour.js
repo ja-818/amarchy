@@ -1,9 +1,13 @@
 // ---- the tour: amarchy in 100 seconds
 //
-// What amarchy is, how to set it up, how it works and how to get the most
-// out of it, as slides (ui.js uiSlides) with pixel art in the theme's own
-// colors (uiPixels): one theme changes every picture with the rest. The same
-// slides and words on the phone and on a computer; only the layout fits.
+// Why amarchy (a dozen Claude Codes, on a computer that never sleeps, from
+// your pocket), how it works (a website that box serves, private over
+// Tailscale) and making it an app; then its features, a few to a slide, each
+// a joke and what it does; then making it yours (a theme; agents and
+// projects, and a new one of either). As slides (ui.js uiSlides) with pixel
+// art in the theme's own colors (uiPixels): one theme changes every picture
+// with the rest. The same slides and words on the phone and on a computer;
+// only the layout fits.
 //
 // It opens by itself the first time an empty amarchy (no project, no chat
 // yet) is opened on a device, over the welcome; and from the Amarchy menu
@@ -78,18 +82,6 @@ const TOUR_ZZZ = [
   "mmmmm.......",
 ];
 
-// A terminal, its cursor blinking after the command.
-function tourTerminal() {
-  const m = uiPixmap(24, 15);
-  m.box(0, 0, 24, 15, "k").frame(0, 0, 24, 15, "t").box(1, 1, 22, 2, "m");
-  m.set(2, 1, "r").set(4, 1, "y").set(6, 1, "g").set(2, 2, "r").set(4, 2, "y").set(6, 2, "g");
-  m.line(2, 5, 3, 5, "g").box(5, 5, 12, 1, "t");
-  m.line(2, 7, 3, 7, "g").box(5, 7, 15, 1, "t");
-  m.box(2, 9, 9, 1, "m");
-  m.line(2, 11, 3, 11, "g").box(5, 11, 7, 1, "t").box(13, 11, 2, 2, "A");
-  return m;
-}
-
 // Branches: two chats' copies of the code, off main and back into it.
 function tourBranches() {
   const m = uiPixmap(31, 15);
@@ -102,33 +94,7 @@ function tourBranches() {
   return m;
 }
 
-// A reply with its buttons (Allow lit), and the pointer about to press it.
-function tourBubble() {
-  const m = uiPixmap(26, 20);
-  m.box(1, 1, 24, 15, "k").frame(0, 0, 26, 17, "t").set(0, 0, ".").set(25, 0, ".").set(0, 16, ".").set(25, 16, ".");
-  m.box(2, 2, 17, 1, "t").box(2, 4, 12, 1, "m");
-  m.frame(2, 7, 10, 4, "m").box(14, 7, 10, 4, "a");
-  m.put(3, 16, ["tkkt", "tkt.", "tt..", "t..."]);
-  m.put(18, 9, ["t....", "tt...", "tkt..", "tkkt.", "tkkkt", "tktt.", "t..t."]);
-  return m;
-}
-
-// The board: three columns of cards, one at work (it blinks), one asking.
-function tourBoard() {
-  const m = uiPixmap(29, 17);
-  [0, 10, 20].forEach((x, i) => {
-    m.box(x, 0, [5, 4, 6][i], 1, ["a", "m", "m"][i]);
-    for (let j = 0; j < [3, 2, 1][i]; j++) {
-      const y = 2 + j * 5;
-      m.box(x, y, 9, 4, "k").frame(x, y, 9, 4, "m");
-      m.box(x + 2, y + 1, 5, 1, "t");
-      m.box(x + 2, y + 2, 3, 1, i === 0 && j === 0 ? "R" : i === 0 && j === 1 ? "G" : "m");
-    }
-  });
-  return m;
-}
-
-// The streak's flame, and the trophy: what a merge earns.
+// The streak's flame: what a merge earns.
 const TOUR_FLAME = [
   ".....o......",
   ".....oo.....",
@@ -145,21 +111,6 @@ const TOUR_FLAME = [
   "..oyyYYyyo..",
   "...oyyyyo...",
   "....oooo....",
-];
-const TOUR_TROPHY = [
-  "...yyyyyyyy...",
-  "yyyyyyyyyyyyyy",
-  "y..yyyyyyTy..y",
-  "y..yyyyyyyy..y",
-  ".y.yyyyyyyy.y.",
-  "..yyyyyyyyyy..",
-  "....yyyyyy....",
-  ".....yyyy.....",
-  "......yy......",
-  "......yy......",
-  "....yyyyyy....",
-  "...mmmmmmmm...",
-  "...mmmmmmmm...",
 ];
 
 // The theme's hues in a row, each its own beat.
@@ -219,6 +170,181 @@ const TOUR_ROCKET = [
   ".....YY.....",
   "....O..O....",
   ".....Y......",
+];
+
+// ---- the features' pictures: small, each in a square of one size
+
+// Grass, and the sun over it: go touch it.
+const TOUR_GRASS = [
+  ".yy.........",
+  "yYYy........",
+  "yYYy........",
+  ".yy.........",
+  "............",
+  "..g.....g...",
+  "g.g..g..g.g.",
+  "g.gg.g.gg.g.",
+  "gggggggggggg",
+  "gggggggggggg",
+];
+
+// A mic, recording.
+const TOUR_MIC = [
+  "....tttt....",
+  "...taaaat...",
+  "...taAAat...",
+  "...taAAat...",
+  "...taaaat...",
+  ".t.taaaat.t.",
+  ".t..tttt..t.",
+  "..t......t..",
+  "...tttttt...",
+  "......t.....",
+  "....tttt....",
+];
+
+// A bell, ringing.
+const TOUR_BELL = [
+  ".....yy...R.",
+  "....yyyy....",
+  "...yyyyyy...",
+  "...yyyyyy...",
+  "...yyyyyy...",
+  "..yyyyyyyy..",
+  ".yyyyyyyyyy.",
+  ".yyyyyyyyyy.",
+  "............",
+  ".....yy.....",
+];
+
+// A ship, its sail up: ship it.
+const TOUR_SHIP = [
+  "......t.......",
+  "......taa.....",
+  "......taaa....",
+  "......taaaa...",
+  "......tAAAAa..",
+  "......t.......",
+  ".tttttttttttt.",
+  "..tttttttttt..",
+  "...tttttttt...",
+  "bbbbbbbbbbbbbb",
+  ".b..bb..bb..b.",
+];
+
+// A browser's window, playing: the preview.
+const TOUR_PREVIEW = [
+  "tttttttttttttt",
+  "trtytgttttttmt",
+  "tttttttttttttt",
+  "t............t",
+  "t....G.......t",
+  "t....GG......t",
+  "t....GGG.....t",
+  "t....GG......t",
+  "t....G.......t",
+  "t............t",
+  "tttttttttttttt",
+];
+
+// A list, two of it ticked off.
+const TOUR_TASKS = [
+  "ggg.........",
+  "ggg.tttttttt",
+  "ggg.........",
+  "............",
+  "ggg.........",
+  "ggg.tttttt..",
+  "ggg.........",
+  "............",
+  "mmm.........",
+  "m.m.mmmmmmmm",
+  "mmm.........",
+];
+
+// A padlock: your keys and passwords.
+const TOUR_LOCK = [
+  "...tttttt...",
+  "..t......t..",
+  "..t......t..",
+  "..t......t..",
+  ".yyyyyyyyyy.",
+  ".yyyyyyyyyy.",
+  ".yyyykkyyyy.",
+  ".yyyykkyyyy.",
+  ".yyyyykyyyy.",
+  ".yyyyyyyyyy.",
+];
+
+// A keyboard, h j k l lit.
+const TOUR_KEYBOARD = [
+  "tttttttttttttttt",
+  "t..............t",
+  "t.m.m.m.m.m.m..t",
+  "t..............t",
+  "t.m.m.A.A.A.A..t",
+  "t..............t",
+  "t...mmmmmmmm...t",
+  "t..............t",
+  "tttttttttttttttt",
+];
+
+// Two branches off main and back into it: a chat's own copy of the code.
+const TOUR_BRANCH = [
+  "...AA....aa...",
+  "...AA....aa...",
+  "..a........a..",
+  ".a..........a.",
+  "tttttttttttttt",
+  ".g..........g.",
+  "..g........g..",
+  "...GG....gg...",
+  "...GG....gg...",
+];
+
+// Three columns of cards, the first one's at work: Now, At work, For later.
+const TOUR_COLUMNS = [
+  "aaa.mmm.mmm",
+  "...........",
+  "ttt.ttt.ttt",
+  "tRt.tmt.tmt",
+  "ttt.ttt.ttt",
+  "...........",
+  "ttt.ttt....",
+  "tGt.tmt....",
+  "ttt.ttt....",
+  "...........",
+  "ttt........",
+  "tmt........",
+  "ttt........",
+];
+
+// A terminal's window, its prompt and cursor.
+const TOUR_PROMPT = [
+  "tttttttttttttt",
+  "trtytgtttttttt",
+  "t............t",
+  "t.g..........t",
+  "t..g.........t",
+  "t...g........t",
+  "t..g.........t",
+  "t.g...AAAA...t",
+  "t............t",
+  "tttttttttttttt",
+];
+
+// Lines, the first one lit: the reply's answer first, its details folded.
+const TOUR_BRIEF = [
+  "tttttttttttttt",
+  "t............t",
+  "t.aaaaaaaaa..t",
+  "t.mmmmmm.....t",
+  "t............t",
+  "t.AAAA.mmmm..t",
+  "t............t",
+  "tttttttttttttt",
+  "..tt..........",
+  "..t...........",
 ];
 
 // ---- the slides
@@ -293,37 +419,39 @@ function tourInstalled() {
     : uiPill("You're in a browser tab right now. Fix that.", "warn");
 }
 
+// A new project: as the Amarchy menu's (its first chat's box after).
+function tourNewProject() {
+  closeSheets();
+  if (app.desk) newProject(); else newProjectSheet((p) => newChatIn(p));
+}
+
+// A feature: its picture, small (scale: a pixel's size), what it is, what it does.
+function tourFeature(rows, scale, title, text) {
+  return { art: () => uiPixels(rows, { scale }), title, text };
+}
+
 function tourSlides() {
   const art = (rows, opts) => uiPixels(rows, opts);
+  const feat = tourFeature;
   return [
     {
       kicker: "amarchy in 100 seconds",
-      title: "One Claude is a coworker. Twelve is a company.",
+      title: "Run a dozen Claude Codes from your pocket.",
       art: () => [art(tourBot("A"), { scale: 7, cls: "bob" }), art(tourBot("G"), { scale: 9, cls: "bob d1" }), art(tourBot("P"), { scale: 7, cls: "bob d2" })],
       body: [
-        "amarchy runs a dozen **Claude Codes** at once, each in a chat of its own, on a machine that never sleeps.",
-        "You talk to them from your phone or your browser. They write the code. You take the credit. Like a real senior engineer.",
+        "amarchy runs your **Claude Code** chats on a computer that never sleeps, and puts all of them on your phone and your laptop.",
+        "One Claude at a time, you wait on it. A dozen at once, they wait on you. You stop writing code and start approving it. It's called a promotion.",
         h("p", { class: "ui-slide-aside" }, "Next: swipe, →, or the button. Esc or ✕ to bail. We won't be offended. (We will.)"),
       ],
     },
     {
-      kicker: "What it is",
+      kicker: "How it works",
       title: "A server that stays up, so you don't have to.",
       art: () => [art(TOUR_SERVER, { scale: 7 }), art(TOUR_MOON, { scale: 6, cls: "bob" }), art(TOUR_ZZZ, { scale: 4, cls: "bob d2" })],
       body: [
         "Claude Code lives on a **Linux box that's always on**: a server, or that PC in the corner collecting dust and guilt.",
-        "Shut the laptop. Pocket the phone. Your chats keep working. They don't need sleep, coffee or a standup.",
-        "You reach it over **Tailscale**: private to your own devices, no ports open to the internet. Hackers will need a new hobby.",
-      ],
-    },
-    {
-      kicker: "Set it up",
-      title: "The setup, any% speedrun.",
-      art: () => art(tourTerminal(), { scale: 7 }),
-      body: () => [
-        "You need a Linux machine that stays on, **Claude Code** logged in, `git`, `tmux` 3.5+ and `python3`. Plus **Tailscale** on it and on your devices, with HTTPS certificates on. Then:",
-        tourCode("git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy\n~/.local/share/amarchy/install.sh\namarchy app on"),
-        "`amarchy app on` prints your app's address. If you're reading this, you already did all that. You're DevOps now. Update your LinkedIn.",
+        "amarchy is the **website** that box serves. Open it from your phone or any browser and every chat is there. Shut the laptop: they keep working. No sleep, no coffee, no standup.",
+        "It's private over **Tailscale**: only your own devices get in, no ports open to the internet. Hackers will need a new hobby.",
       ],
     },
     {
@@ -331,55 +459,75 @@ function tourSlides() {
       title: "It's a website. Make it an app. Trust us.",
       art: () => [art(TOUR_PHONE, { scale: 6 }), art(tourMac(), { scale: 6 })],
       body: [
-        "**iPhone**: open it in **Safari**, tap Share → **Add to Home Screen**, then open amarchy from there. Only then can it notify you. Apple's rules, not ours.",
-        "**Mac**: open it in **Safari**, then File → **Add to Dock**. Its own window, its own icon, no tabs, ⌘Tab to it like a real app.",
+        "A website, so Safari makes it a real app. No App Store, no review, no 30% cut.",
+        "**iPhone**: in **Safari**, Share → **Add to Home Screen**, then open it from there. Only then can it notify you. Apple's rules, not ours.",
+        "**Mac**: in **Safari**, File → **Add to Dock**. Its own window and icon, ⌘Tab to it like a real app.",
         "Chrome works too. We see you. We don't judge. (We judge a little.)",
       ],
       extra: () => h("div", { class: "ui-slide-status" }, tourInstalled()),
     },
     {
-      kicker: "How it works",
-      title: "Every chat gets its own copy of the code.",
-      art: () => art(tourBranches(), { scale: 7 }),
-      body: [
-        "Each chat works in its own **worktree**, on its own branch, fresh off the latest main. Ten chats change ten things, and nobody steps on anybody.",
-        "Merge conflicts are still possible. We're not wizards.",
-        "When the work is good, say **ship it**: it's merged into main. That's a mission complete. Confetti is involved.",
+      kicker: "Features",
+      title: "Parallel by default.",
+      features: () => [
+        feat(TOUR_GRASS, 4, "Start everything. Then go touch grass.",
+             "Fire off five chats before your coffee's cold, then answer their cards as they come. That's the whole job now."),
+        feat(TOUR_BRANCH, 3, "Ten chats. Zero collisions.",
+             "Every chat gets its own **worktree**: a fresh copy of the code, on its own branch. Nobody steps on anybody. Merge conflicts still exist. We're not wizards."),
+        feat(TOUR_MOON, 4, "Chats nap. Like cats.",
+             "An idle chat sleeps to free memory, and wakes up right where it was the moment you text it."),
       ],
     },
     {
-      kicker: "The chat",
-      title: "You type. Claude does. You press buttons.",
-      art: () => art(tourBubble(), { scale: 7 }),
-      body: [
-        "Say what you want. Claude reads the project, writes the code, runs it, and tells you how it went: the answer first, the details folded.",
-        "When it needs you, it's a card with buttons: a question, a permission, a plan. Allow. Allow. Always allow. Congratulations: you've invented management.",
-        "Tap the **mic** to talk instead of type. Paste a screenshot: Claude sees it.",
+      kicker: "Features",
+      title: "Less reading. More tapping.",
+      features: () => [
+        feat(TOUR_BRIEF, 4, "Briefings, not walls of text.",
+             "Every reply opens with what happened and what's on you. Your choices are **buttons**. The details stay folded until you want them."),
+        feat(TOUR_MIC, 4, "Just say it.",
+             "Tap the **mic** anywhere you'd type: a chat, a new chat, a terminal. Walking the dog counts as working now."),
+        feat(TOUR_BELL, 4, "Your phone buzzes. Something shipped.",
+             "A real notification when a chat is done or needs you. You can run, but you can't hide."),
       ],
     },
     {
-      kicker: "The board",
-      title: "Inbox zero, but for robots.",
-      art: () => art(tourBoard(), { scale: 7 }),
-      body: [
-        "**Chats | Tasks.** Every chat is a card: what it's doing, what it asks you, and its buttons right there. Answer without even opening it.",
-        "**At work** on top. **Now** is what you're on: pin what matters. **For later** is the guilt pile.",
-        "**Needs you** shows only what waits on you. A chime rings, your phone buzzes. You can run, but you can't hide.",
+      kicker: "Features",
+      title: "Ship from the couch.",
+      features: () => [
+        feat(TOUR_SHIP, 3, "Ship it. It's a button.",
+             "When the work is good, Claude hands you a **Ship it** button. One tap: merged into main, pushed, done. Mission complete. Confetti is involved."),
+        feat(TOUR_PREVIEW, 3, "See it running. No terminal.",
+             "A chat's dev server is its **Preview**, a tap from its card. Not running? The tap starts it."),
+        feat(TOUR_PROMPT, 3, "A terminal in your pocket.",
+             "Every chat has its own, in its own copy of the code. For that one command, from the bus."),
       ],
     },
     {
-      kicker: "Pro moves",
-      title: "Start everything. Then go touch grass.",
-      art: () => [art(TOUR_FLAME, { scale: 7, cls: "flicker" }), art(TOUR_TROPHY, { scale: 7 })],
-      body: [
-        "Fire off five chats before your coffee's cold, then answer the cards as they come. That's the whole job now.",
-        "Keys and passwords never go in the chat: Claude asks for them in a card, and they stay on your machine.",
-        "Idle chats nap to free memory and wake up where they were when you text them. Like a cat. A chat's dev server is its **Preview**, a tap from its card.",
-        "Every merge counts: streaks, combos, 40 badges, confetti. It's dopamine, but it ships.",
+      kicker: "Features",
+      title: "Organized, for once.",
+      features: () => [
+        feat(TOUR_COLUMNS, 4, "Inbox zero, but for robots.",
+             "**At work** on top. **Now** is what you're on: pin what matters. **For later** is the guilt pile."),
+        feat(TOUR_TASKS, 4, "A to-do list that does itself.",
+             "**Tasks** has what you promised people, often straight from your meeting recordings (\"I'll send it by Tuesday\"). One tap, and a chat does it with you."),
+        feat(TOUR_LOCK, 4, "Secrets stay secret.",
+             "Keys and passwords never go in the chat: Claude asks for them in a card, and they stay on your machine."),
       ],
     },
     {
-      kicker: "Themes",
+      kicker: "Features",
+      title: "Addictive, on purpose.",
+      features: () => [
+        feat(TOUR_FLAME, 3, "It's dopamine, but it ships.",
+             "Every merge counts: streaks, combos, 40 badges, confetti."),
+        feat(TOUR_KEYBOARD, 3, "Vim users: welcome home.",
+             "**j** / **k** go card to card, **Enter** opens, **Esc** goes back, **n** is a new chat, **/** searches, **?** shows every key. **Ctrl+Alt+M** opens the Amarchy menu from anywhere."),
+        feat(TOUR_PHONE, 3, "Thumbs are keys too.",
+             "On the phone, hold a card for its menu, and swipe a sheet down to close it."),
+      ],
+    },
+    {
+      kicker: "Make it yours",
       title: "Dark mode is a personality. Pick yours.",
       art: () => art(tourSwatches(), { scale: 7 }),
       body: () => [
@@ -391,14 +539,14 @@ function tourSlides() {
       actions: () => [uiButton("Theme, font and wallpaper…", () => openLook())],
     },
     {
-      kicker: "Keys",
-      title: "Vim users: welcome home.",
-      art: () => h("div", { class: "ui-keycaps" }, ...["h", "j", "k", "l"].map((k) => h("kbd", { class: "ui-keycap" }, k))),
+      kicker: "Make it yours",
+      title: "Projects ship. Agents stick around.",
+      art: () => [art(tourBranches(), { scale: 4 }), art(tourBot("A"), { scale: 6, cls: "bob" })],
       body: [
-        "On a computer, everything has a key. **j** / **k** go card to card, **Enter** opens, **Esc** goes back, **n** is a new chat, **/** searches, and **?** shows them all.",
-        "**Ctrl+Alt+M** opens the Amarchy menu from anywhere. This tour lives there too.",
-        "On the phone, hold a card for its menu and swipe a sheet down to close it. Thumbs are keys too.",
+        "**A project** is a repo. Each chat in it is one job: it works on its own branch, you ship it, the chat's done. Next.",
+        "**An agent** is a chat that never ends. Give it a name, a face and a job (your inbox, your X account, Monday's report). It texts you like a coworker who never logs off, and puts what needs you on Tasks.",
       ],
+      actions: () => [uiButton("New project…", tourNewProject), uiButton("New agent…", () => { closeSheets(); newAgentSheet(); })],
     },
     {
       kicker: "That's it",
@@ -412,17 +560,6 @@ function tourSlides() {
       actions: () => tourStart(),
     },
   ];
-}
-
-// A command to copy, as a chat's code block (its Copy).
-function tourCode(text) {
-  const box = h("div", { html: codeBlock(text, "sh") });
-  const code = box.firstChild;
-  code.querySelector(".copy").addEventListener("click", (e) => {
-    const btn = e.currentTarget;
-    copyText(text).then(() => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); });
-  });
-  return code;
 }
 
 // The tour, from its first slide (or at).

@@ -44,7 +44,8 @@
 //   it (Image 1, as its [Image #1] in the words); a tap: uiPhoto.
 // - uiPhoto: pictures full screen, one at a time, ✕ at the top right.
 // - uiSlides: slides one at a time over everything (the tour), a bar of
-//   where you are on top, Back and Next under it.
+//   where you are on top, Back and Next under it; a slide's words, or a few
+//   features (a small picture, a line, what it does).
 // - uiPixels, uiPixmap: pixel art in the theme's own colors.
 // - uiBurst: confetti in the theme's hues (a mission complete, the tour's end).
 // - uiScrollRow: a row that scrolls sideways, square ‹ › beside it, the wheel too.
@@ -1210,9 +1211,11 @@ function uiBurst({ bits = 90, far = 42 } = {}) {
 }
 
 // Slides, one at a time, over everything (a tour). slides: [{kicker, title,
-// art, body: [lines: words, or nodes], extra, actions, burst}], each drawn
-// when it comes (art, body, extra and actions may be functions that make
-// them then). A line's words take **bold** and `code`.
+// art, body: [lines: words, or nodes], features, extra, actions, burst}],
+// each drawn when it comes (art, body, features, extra and actions may be
+// functions that make them then). A line's words take **bold** and `code`.
+// features: [{art, title, text}], a few to a slide, a row each: its small
+// picture, then what it is in a line (the joke) and what it does under it.
 // At the top, a bar of segments: where you are (a tap goes to that one) and
 // the ✕; at the bottom Back, n of all, and Next (the last one's: done, which
 // closes it). → / ← (Space, Shift+Space; PageDown, PageUp), a swipe
@@ -1257,6 +1260,11 @@ function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = 
       s.kicker ? h("div", { class: "ui-slide-kicker" }, s.kicker) : null,
       h("h3", { class: "ui-slide-title" }, s.title),
       ...body,
+      s.features ? h("div", { class: "ui-slide-feats" }, ...(made(s.features) || []).filter(Boolean).map((f) => h("div", { class: "ui-slide-feat" },
+        h("div", { class: "ui-slide-feat-art" }, made(f.art) || null),
+        h("div", { class: "ui-slide-feat-words" },
+          h("h4", { class: "ui-slide-feat-title" }, words(f.title)),
+          f.text ? h("p", { class: "ui-slide-feat-text" }, words(f.text)) : null)))) : null,
       made(s.extra) || null,
       s.actions ? h("div", { class: "ui-slide-actions" }, ...(made(s.actions) || []).filter(Boolean)) : null);
     stage.replaceChildren(slide);
