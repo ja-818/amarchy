@@ -4,15 +4,22 @@
 
 **Run a dozen Claude Codes at once, each in a chat of its own.**
 
-Talk to Claude in a chat, on your phone or in a computer's browser. Each chat works on its
-own copy of a project, so several can work at once without getting in each other's way.
-When one of them asks you something or finishes, you know.
+From your phone or any browser, on a Linux box that never sleeps.
+
+<img src="docs/images/hero.png" alt="amarchy on a computer and a phone: a board of Claude Code chats at work, and one asking to ship its fix" width="100%">
 
 [Install](#install) · [Keys](#the-keys-that-matter) · [Full guide](docs/guide.md)
 
 </div>
 
----
+## Why
+
+- **One Claude at a time, you wait on it. A dozen at once, they wait on you.** Each chat
+  works on its own git worktree and branch, so they never step on each other.
+- **You answer from your phone.** Questions, permissions and "Ship it?" come as buttons, and
+  your phone buzzes when a chat needs you or is done.
+- **It keeps going with the lid shut.** It runs on any Linux box with tmux (a server, a PC at
+  home), private to your devices over Tailscale.
 
 ## What you get
 
