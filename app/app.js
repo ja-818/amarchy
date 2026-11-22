@@ -4,7 +4,7 @@
 "use strict";
 
 const root = document.getElementById("root");
-const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "", nerd: false,
+const app = { view: null, key: "", user: "", online: true, list: null, session: null, failed: "",
               query: "", organize: null, tab: "today" };     // tab: the phone's home, Today or Chats (today.js)
 // running: its turn ended, but something it started still runs (a test run,
 // a helper): Claude goes on when that ends (bin/amarchy session_view).
@@ -14,16 +14,10 @@ const STATUS = { waiting: "Needs your answer", working: "Working", running: "Run
                  interrupted: "Interrupted" };
 const PRIORITY = { high: "Pinned", normal: "Now", low: "For later" };
 const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
-// The glyphs of amarchy's list (Nerd Font icons), for what has no drawing
-// below (ICONS, used first: they never wait on a font), when the look's
-// font has them; else plain marks.
-const NERD = {
-  waiting: "\u{F009E}", idle: "\u{F012C}", done: "\u{F05E0}", asleep: "\u{F04B2}", high: "\u{F023B}", low: "\u{F0045}",
-  back: "\u{F0141}", plus: "\u{F0415}", more: "\u{F01D8}", gear: "\u{F0493}", send: "\u{F005D}",
-  stop: "\u{F04DB}", check: "\u{F012C}", down: "\u{F0140}", search: "\u{F0349}", close: "\u{F0156}",
-  organize: "\u{F04BC}", mic: "\u{F036C}", project: "\u{F024B}", status: "\u{F0279}", newest: "\u{F1548}", oldest: "\u{F1547}",
-  up: "\u{F005D}", under: "\u{F0045}", order: "\u{F04BA}", image: "\u{F02E9}", clock: "\u{F0150}", next: "\u{F0142}",
-};
+// Every icon is a drawing (ICONS): it never waits on a font. A Nerd Font's
+// glyph is blank, or an empty box, until the font has come, and for good if
+// it doesn't (a pinned chat's flag was a box until then). Plain marks only
+// for a name with no drawing.
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", interrupted: "!", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅", clock: "◷", next: "›" };
 const ICONS = {
@@ -56,6 +50,19 @@ const ICONS = {
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2L4 13.5h6.5L9.5 22 20 9.5h-6.5z"/></svg>',
   tour: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z" fill="currentColor"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 3.2 2.4 4.9 4 6.6 1.6 1.7 3 3.5 3 6.1A7 7 0 0 1 5 15.2c0-2.3 1-4.2 2.6-5.6.2 1.7.9 2.9 2.2 3.6-.5-3.9.6-7.6 2.2-10.7z"/></svg>',
+  high: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h12l-3 4.5 3 4.5H6z" fill="currentColor"/></svg>',
+  low: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  under: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
+  asleep: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
+  project: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  status: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+  waiting: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>',
+  idle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>',
+  newest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6M5 20h14"/></svg>',
+  oldest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V7M6 13l6-6 6 6M5 4h14"/></svg>',
+  order: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v16M4 8l4-4 4 4M16 20V4M12 16l4 4 4-4"/></svg>',
 };
 
 // ---- small helpers
@@ -81,13 +88,11 @@ function projectName(repo) {
   return String(repo || "").split(/[-_]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
-// An icon: its drawing, else the Nerd Font glyph, else a plain mark.
+// An icon: its drawing, else a plain mark.
 function glyph(name, cls) {
   const el = h("span", { class: `glyph${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
-  // A drawing first: it never waits on a font (a Nerd Font's glyph is blank
-  // until the font has come, and for good if it doesn't: Send's arrow, the mic).
+  // A drawing: it never waits on a font (ICONS).
   if (ICONS[name]) el.innerHTML = ICONS[name];
-  else if (app.nerd && NERD[name]) el.textContent = NERD[name];
   else el.textContent = PLAIN[name] || "";
   return el;
 }
@@ -708,7 +713,6 @@ function openList() {
     aheadOn(app.view);
     app.online = true;
     app.failed = "";
-    app.nerd = !!app.view.nerd;
     if (app.view.build && app.build && app.view.build !== app.build) updated();
     app.build = app.build || app.view.build;     // the page's own: index.html's (start)
     wearLook(app.view.look);
@@ -2348,7 +2352,6 @@ async function openSettings() {
 // other device takes it from the list in a moment.
 function lookWorn(info) {
   if (app.view) app.view.look = info.look;
-  app.nerd = !!info.nerd;
   wearLook(info.look);
   refresh();
 }
@@ -2710,7 +2713,6 @@ async function start() {
     app.key = d.key;
     app.user = d.user;
     app.host = d.host || null;
-    app.nerd = !!d.nerd;
     if (d.sessions) app.view = d;
   } catch (e) {
     app.failed = e.message.includes("Amarchy") ? e.message
