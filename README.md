@@ -7,7 +7,7 @@
 A dozen Claude Codes on your own box, run from your phone or any browser.
 One board says which one needs you and what for. You answer with a tap.
 
-<img src="docs/images/hero.png" alt="amarchy on a computer and a phone: a board of Claude Code chats at work, and one asking to ship its fix" width="100%">
+<img src="docs/images/hero.jpg" alt="amarchy on a computer and a phone: a board of Claude Code chats at work, and one asking to ship its fix" width="100%">
 
 [Install](#install) · [Keys](#the-keys-that-matter) · [Full guide](docs/guide.md)
 

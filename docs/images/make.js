@@ -1,12 +1,14 @@
 // amarchy's pictures for GitHub, drawn by the app itself, with demo chats
 // only (never a real one: real chats name clients):
 //
-//   docs/images/social-preview.png  1280×640, the link's card ("Stop babysitting
-//                                   your agents. Manage them."): what X, Slack
+//   docs/images/social-preview.jpg  1280×640 at 2× (sharp on a Retina screen; a
+//                                   JPEG, under GitHub's 1 MB), the link's card
+//                                   ("Stop babysitting your agents. Manage
+//                                   them."): what X, Slack
 //                                   and iMessage show for github.com/ja-818/amarchy
 //                                   (uploaded by hand: repo Settings → General →
 //                                   Social preview; GitHub has no API for it)
-//   docs/images/hero.png            the README's top: the board on a computer,
+//   docs/images/hero.jpg            the README's top, at 2×: the board on a computer,
 //                                   and on a phone with a chat open
 //
 // Both are made of shots of the real app (the board on a phone and on a
@@ -221,7 +223,7 @@ const CSS = `
   .gh-notch { height: 46px; background: var(--surface); }
 `;
 
-async function compose(browser, port, { file, width, height, scale, shots, kind }) {
+async function compose(browser, port, { file, width, height, scale, shots, kind, max = 0 }) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, baseURL: `http://127.0.0.1:${port}` });
   const p = await ctx.newPage();
   const errors = [];
@@ -260,8 +262,9 @@ async function compose(browser, port, { file, width, height, scale, shots, kind 
   }, { shots, kind, css: CSS });
   await p.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
   await sleep(300);
-  await p.screenshot({ path: file });
+  await p.screenshot({ path: file, type: "jpeg", quality: 92 });
   if (errors.length) throw new Error(`${kind}: page errors: ${errors.join("; ")}`);
+  if (max && fs.statSync(file).size > max) throw new Error(`${kind}: ${fs.statSync(file).size} bytes, more than ${max}`);
   await ctx.close();
   return file;
 }
@@ -282,8 +285,8 @@ async function compose(browser, port, { file, width, height, scale, shots, kind 
     const chat = await chatShot(browser, port);
     const shots = { board: png(board), wide: png(wide), chat: png(chat) };
     const out = [
-      await compose(browser, port, { file: path.join(OUT, "social-preview.png"), width: 1280, height: 640, scale: 1, shots, kind: "social" }),
-      await compose(browser, port, { file: path.join(OUT, "hero.png"), width: 1440, height: 720, scale: 1.5, shots, kind: "hero" }),
+      await compose(browser, port, { file: path.join(OUT, "social-preview.jpg"), width: 1280, height: 640, scale: 2, shots, kind: "social", max: 1000 * 1000 }),
+      await compose(browser, port, { file: path.join(OUT, "hero.jpg"), width: 1440, height: 720, scale: 2, shots, kind: "hero" }),
     ];
     for (const f of out) console.log(`${path.relative(process.cwd(), f)}  ${(fs.statSync(f).size / 1024).toFixed(0)} KB`);
   } finally {
