@@ -49,10 +49,10 @@ browser. Your SessionStart context says so. You and the terminal run in tmux
 there, and the user sees both through the app. Then:
 
 - The user's browser isn't on your machine. Your SessionStart context says
-  which address to listen on (the machine's private network address, never
-  `0.0.0.0` on your own initiative) and what URL to give them (`amarchy preview`,
-  below). Other sessions
-  share the machine, so check the port is free.
+  which address to listen on (`127.0.0.1` when amarchy serves previews over
+  HTTPS, else the machine's private network address; never `0.0.0.0` on your
+  own initiative) and what URL to give them (`amarchy preview`, below). Other
+  sessions share the machine, so check the port is free.
 - `amarchy run`, `list`, `new`, `rename`, `close` and messaging other sessions
   work as below; the other sessions you see are the host's.
 - Nothing opens on their screen from here (a browser, a GUI app): tell them
@@ -190,8 +190,27 @@ command's usage without running it (an option it doesn't know fails instead).
   **Preview** button (its head and its card), and returns once it answers (or
   with its log when it doesn't). The button starts it again when it isn't running
   (no message to you), and **Complete** stops it and checks it's gone.
-  - Listen on the host's address (your SessionStart context: `--host 100.x.y.z`),
-    on a free port; the URL is `http://<host>:<port>`. A localhost URL is refused.
+  - **Over HTTPS** (your SessionStart context gives the address: on a host whose
+    tailnet has HTTPS, the normal case): listen on `127.0.0.1`, on a free port,
+    and register `https://<this machine>.<tailnet>.ts.net:<port>`
+    (`http://localhost:<port>` with `--run` comes to the same). While it runs,
+    amarchy has `tailscale serve` put that port, and each `--port`, on the
+    tailnet over HTTPS at the same number, sending it on to `127.0.0.1`. That's
+    HTTP/2: a dev server's page is hundreds of files, and over plain http a phone
+    far away fetches them a few at a time (16 s for a Vite app at 148 ms, 3 s
+    this way). So its server must listen on `127.0.0.1` only, not `0.0.0.0` or
+    the tailnet address (those ports are tailscale serve's there): its live
+    reload too. Best, the live reload rides on the main port (Vite's
+    `server.hmr.server`, Next's own): a websocket on a port of its own binds
+    `0.0.0.0` unless told, and can't connect. amarchy says so when it can't
+    have a port, or its log says one was in use. Give `--host 127.0.0.1`, not
+    `localhost` (Node may take that as `::1` only). An API the page calls on
+    another port is a preview of its own the same way (`--name API`), called at
+    its `https://` address: an HTTPS page can't call plain http.
+  - Without HTTPS on the tailnet: listen on the host's address (your
+    SessionStart context: `--host 100.x.y.z`), on a free port; the URL is
+    `http://<host>:<port>`. A localhost URL is refused. (One registered that way
+    on a host with HTTPS works as it did; amarchy says the faster way.)
   - `--port <n>` for each other port it takes (an HMR / websocket port, an API
     beside it): amarchy checks they're free before it starts, and after it stops.
   - `--stop '<command>'` when it starts something outside itself that must go too

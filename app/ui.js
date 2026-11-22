@@ -589,6 +589,12 @@ function uiPreviews(s) { return (s && s.previews) || []; }
 function uiPreviewAt(id, p) { return `${id}\n${(p && p.key) || ""}`; }
 function uiPreviewFind(s, key) { return uiPreviews(s).find((p) => (p.key || "") === (key || "")) || null; }
 
+// Its address, short: amarchy:5180/app (not https://, nor the tailnet's
+// name amarchy serves it over HTTPS at: amarchy.tail1234.ts.net).
+function uiPreviewWhere(url) {
+  return String(url || "").replace(/^https?:\/\//, "").replace(/^([^.:/]+)\.[^.:/]+\.ts\.net(?=[:/]|$)/i, "$1").replace(/\/$/, "");
+}
+
 function uiPreviewOf(p) {
   return (p && p.state) || (p && p.run ? "stopped" : "down");
 }
@@ -667,7 +673,7 @@ function uiPreviewItems(s, act) {
   return uiPreviews(s).map((p) => {
     const state = uiPreviewOf(p);
     const asked = uiPreviewAsking(s, p);
-    return { label: p.label || p.url, detail: asked ? "Asked Claude…" : `${UI_PREVIEW_ROW[state]} · ${p.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
+    return { label: p.label || p.url, detail: asked ? "Asked Claude…" : `${UI_PREVIEW_ROW[state]} · ${uiPreviewWhere(p.url)}`,
              icon: state === "starting" ? "" : "preview", lead: state === "starting" ? spinner() : null, bad: state === "failed",
              tone: state, disabled: asked, act: () => act(p) };
   });

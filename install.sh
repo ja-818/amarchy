@@ -213,6 +213,8 @@ EOF
 if ((uninstall)); then
   guard_live "uninstalling takes it away"
   live=$(live_checkouts | sed -n 1p)
+  # The chats' previews: stopped, and off the tailnet (nothing would look after them).
+  [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" previews-off >/dev/null 2>&1 || true
   # The app: no longer served on the tailnet, its service gone.
   if [[ -f $units/amarchy-app.service && -x $bin_dir/amarchy ]]; then
     "$bin_dir/amarchy" app off >/dev/null 2>&1 || true

@@ -950,7 +950,7 @@ async function confirmClose(s, known) {
   const runs = c.running || [];
   const stops = runs.length ? h("p", { class: "close-stops" }, `Stops what's still running: ${runs[0]}${runs.length > 1 ? ` (and ${runs.length - 1} more)` : ""}.`) : null;
   // Its previews stop with it (and are checked gone).
-  const ups = c.previews || [];
+  const ups = (c.previews || []).map(uiPreviewWhere);
   const preview = ups.length ? h("p", { class: "close-stops" }, ups.length > 1 ? `Stops its ${ups.length} previews, ${ups.slice(0, -1).join(", ")} and ${ups[ups.length - 1]}.`
                                                                                : `Stops its preview, ${ups[0]}.`) : null;
   const yes = h("button", { class: "control wide danger", onclick: async () => {

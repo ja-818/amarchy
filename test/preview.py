@@ -9,7 +9,12 @@
 # Several in one chat, each with a name: their own services, ports, logs;
 # one starting doesn't take another down; each stops on its own, Complete
 # stops them all; a new name restarts nothing. A chat from before (one
-# "preview") reads as its first.
+# "preview") reads as its first. Over HTTPS (a stand-in for tailscale, its
+# settings in a file: the real ones are never touched): a command serving
+# localhost is registered at the tailnet's name; while it runs, tailscale
+# serve has each of its ports, and they come off when it stops, fails, is
+# cleared or its chat is completed; a port tailscale sends elsewhere, a
+# server on 0.0.0.0, the app's own address: refused, saying why.
 #
 #   python3 test/preview.py         exits 0 when every check passed
 
@@ -22,6 +27,34 @@ os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+
+# tailscale, a stand-in: what it serves in a file of the test's own.
+fakebin = Path(home) / "fakebin"
+fakebin.mkdir()
+(fakebin / "tailscale").write_text("""#!/usr/bin/env python3
+import json, pathlib, sys
+f = pathlib.Path(sys.argv[0]).resolve().parent.parent / "served.json"
+conf = json.loads(f.read_text()) if f.exists() else {}
+a = sys.argv[1:]
+if a[:3] == ["serve", "status", "--json"]:
+    print(json.dumps({"TCP": {p: {"HTTPS": True} for p in conf},
+                      "Web": {f"box.tail1234.ts.net:{p}": {"Handlers": {"/": {"Proxy": t}}} for p, t in conf.items()}} if conf else {}))
+elif a[:1] == ["serve"]:
+    port = next(x for x in a if x.startswith("--https=")).split("=")[1]
+    if a[-1] == "off":
+        conf.pop(port, None)
+    else:
+        conf[port] = a[-1]
+    f.write_text(json.dumps(conf))
+elif a[:2] == ["status", "--json"]:
+    print("{}")
+else:
+    sys.exit(1)
+""")
+(fakebin / "tailscale").chmod(0o755)
+os.environ["PATH"] = f"{fakebin}:{os.environ['PATH']}"
+served_file = Path(home) / "served.json"
+served = lambda: json.loads(served_file.read_text()) if served_file.exists() else {}
 
 failed = []
 def check(ok, what):
@@ -274,7 +307,100 @@ else:
               and not am.preview_pids(sid), "an address alone: an address only, its service stopped")
         check(am.cmd_preview(["--id", sid, "--run", "x", "https://example.com/"]) != 0, "a command for an address elsewhere: refused")
         check(am.cmd_preview(["--id", sid, "--stop", "x"]) != 0, "--stop without a command: refused")
+        # ---- over HTTPS: tailscale serve in front of it, its server on 127.0.0.1
+        am._tailnet = "box.tail1234.ts.net"
+        tid = f"t{os.getpid()}-tls"
+        twork = tempfile.mkdtemp(prefix="preview-tls-")
+        am.save_session({"id": tid, "repo": "p", "name": "tls", "branch": "tls", "base": "main", "path": twork})
+        tp, thmr = free_port(), free_port()
+        tserve = f"python3 -m http.server {tp} --bind 127.0.0.1"
+        turl = f"https://box.tail1234.ts.net:{tp}/"
+        def said(*args):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                r = am.cmd_preview(["--id", tid, *args])
+            return r, out.getvalue() + err.getvalue()
+        tfirst = lambda: am.previews(am.session(tid))[0]
+        both = {str(tp): f"http://127.0.0.1:{tp}", str(thmr): f"http://127.0.0.1:{thmr}"}
+        r, out = said("--run", tserve, f"http://localhost:{tp}/", "--port", str(thmr))
+        check(r == 0 and tfirst()["url"] == turl and "over HTTPS" in out,
+              f"a command serving localhost: registered at the tailnet's name, served over HTTPS ({out.strip()[:80]})")
+        check(served() == both, "while it runs: each of its ports on the tailnet, at its own number, to 127.0.0.1")
+        check(am.preview_record(tid).get("fronted") == sorted([tp, thmr]), "what it put there, in its record")
+        check(am.preview_local(turl) == ("127.0.0.1", tp) and am.preview_state(am.session(tid), tfirst()) == "up",
+              "where it lands: its server on 127.0.0.1, answering: up")
+        check(am.preview_label(tfirst()) == f"box:{tp}", "called by the machine's short name and its port")
+        check(said("--run", tserve, f"http://localhost:{tp}/", "--port", str(thmr))[0] == 0 and len(am.previews(am.session(tid))) == 1,
+              "registered again the same way: the same one")
+        check(am.preview_stop(am.session(tid), tfirst()) == [] and served() == {} and am.preview_record(tid).get("fronted") == [],
+              "stopped: off the tailnet")
+        check(am.preview_start(am.session(tid), tfirst(), wait=20) is None and served() == both, "started again: on it again")
+        check(am.preview_start(am.session(tid), tfirst()) is None and served() == both, "start while it runs: the same")
+        served_file.write_text(json.dumps({str(tp): f"http://127.0.0.1:{tp}"}))
+        check(am.preview_start(am.session(tid), tfirst()) is None and served() == both, "one of its ports taken off while it runs: start puts it back")
+        # Its service gone without amarchy (it failed, a restart): the sleep timer takes its ports off.
+        subprocess.run(["systemctl", "--user", "stop", am.preview_unit(tid)], capture_output=True)
+        am.preview_tend()
+        check(served() == both, "not running a moment ago (it may be starting): left a minute")
+        am.preview_note(tid, fronted_at=time.time() - 120)
+        am.preview_tend()
+        check(served() == {} and am.preview_record(tid).get("fronted") == [], "not running for longer: off the tailnet")
+        # A port tailscale serve sends elsewhere: it doesn't start, and says so.
+        served_file.write_text(json.dumps({str(thmr): "http://127.0.0.1:9"}))
+        why = am.preview_start(am.session(tid), tfirst())
+        check(why and "tailscale serve already sends" in why and f"port {thmr}" in why and not am.preview_pids(tid)
+              and served() == {str(thmr): "http://127.0.0.1:9"}, f"a port tailscale serve sends elsewhere: refused, and left as it was ({why})")
+        served_file.write_text("{}")
+        # A server on every address: tailscale serve can't have its port; said, with what to do.
+        r, out = said("--run", f"python3 -m http.server {tp} --bind 0.0.0.0", turl, "--port", str(thmr))
+        check(r != 0 and "127.0.0.1" in out and "0.0.0.0" in out, "its server on 0.0.0.0: said, listen on 127.0.0.1 only")
+        am.preview_stop(am.session(tid), tfirst())
+        # On ::1 only (localhost, as Node may take it): said, with what to do.
+        wait, am.PREVIEW_WAIT = am.PREVIEW_WAIT, 4
+        r, out = said("--run", f"python3 -m http.server {tp} --bind ::1", turl, "--port", str(thmr))
+        am.PREVIEW_WAIT = wait
+        check(r != 0 and "::1 only" in out and "127.0.0.1" in out, "its server on ::1 only: said, listen on 127.0.0.1")
+        am.preview_stop(am.session(tid), tfirst())
+        # Its log says a port was in use (a live reload on 0.0.0.0, say): it answers, and that's said.
+        r, out = said("--run", f"echo 'WebSocket server error: Port {thmr} is already in use'; {tserve}", turl, "--port", str(thmr))
+        check(r == 0 and "a port was in use" in out, "its log says a port was in use: said")
+        # The app's own address, and one with no command: refused.
+        check(said("--name", "App", "--run", tserve, "https://box.tail1234.ts.net/")[0] != 0, "the app's own address: refused")
+        check(said("--name", "Docs", "https://box.tail1234.ts.net:4999/")[0] != 0, "at the tailnet's name with no command: refused")
+        check(said("--name", "Local", "http://localhost:4998/")[0] != 0, "localhost with no command: refused, as before")
+        # From before (its server on the tailnet's address): works as it did, and Claude is told the faster way.
+        lp = free_port()
+        r, out = said("--name", "Old", "--run", f"python3 -m http.server {lp} --bind 127.0.0.1", f"http://box:{lp}/")
+        check(r == 0 and f"https://box.tail1234.ts.net:{lp}" in out and str(lp) not in served(), "one from before: as it was, and told the faster way")
+        check(am.preview_label(am.previews(am.session(tid))[1]) == "Old", "(named)")
+        # What Claude is told.
+        ctx = am.agent_context(am.session(tid))
+        check("https://box.tail1234.ts.net:<port>" in ctx and "127.0.0.1" in ctx and "http://box:<port>" not in ctx,
+              "the session's start: listen on 127.0.0.1, register the tailnet's name")
+        check("https://box.tail1234.ts.net:<port>" in am.serve_reminder(bash("pnpm dev", True)), "the reminder too")
+        # tailscale serve's own socket is no one's to stop, and no port taken.
+        served_file.write_text(json.dumps(both))
+        front = {"port": tp, "pid": None, "uid": 0, "local": "6447591D"}
+        check(am.front_socket(front, am.serve_web(fresh=True)) and not am.front_socket({**front, "local": "0100007F"})
+              and not am.front_socket({**front, "local": "00000000"}) and not am.front_socket({**front, "uid": 1000})
+              and not am.front_socket({**front, "port": 9}), "tailscale serve's socket in front of one: told apart")
+        check("tailscale serve" in am.holder_words(front), "and said as such")
+        check(am.address_words("6447591D") == "29.89.71.100" and am.address_words("00000000") == "0.0.0.0", "addresses, as people write them")
+        served_file.write_text("{}")
+        # Complete: off the tailnet with it.
+        am.preview_start(am.session(tid), tfirst(), wait=20)
+        check(served() == both, "running again")
+        check(am.preview_close(am.session(tid)) == [] and served() == {}, "Complete: stopped, and off the tailnet")
+        # Uninstalling: every one stopped, off the tailnet.
+        am.preview_start(am.session(tid), tfirst(), wait=20)
+        check(am.cmd_previews_off([]) == 0 and not am.chat_preview_pids(am.session(tid)) and served() == {}, "uninstalling: all stopped, all off")
+        am._tailnet = ""
+        check(am.preview_tls() is None and not am.preview_fronted(turl), "without HTTPS on the tailnet: nothing is served that way")
     finally:
+        am._tailnet = ""
+        for slot in (f"t{os.getpid()}-tls", am.preview_slot(f"t{os.getpid()}-tls", "old")):
+            subprocess.run(["systemctl", "--user", "stop", am.preview_unit(slot)], capture_output=True)
+            subprocess.run(["systemctl", "--user", "reset-failed", am.preview_unit(slot)], capture_output=True)
         for slot in (sid, am.preview_slot(sid, "api-docs"), am.preview_slot(sid, "docs")):
             subprocess.run(["systemctl", "--user", "stop", am.preview_unit(slot)], capture_output=True)
             subprocess.run(["systemctl", "--user", "reset-failed", am.preview_unit(slot)], capture_output=True)

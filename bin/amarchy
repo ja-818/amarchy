@@ -68,7 +68,11 @@ Sessions:
                                         when the chat is completed (with the --stop command, for what it started
                                         elsewhere, like containers), checking its ports (the URL's, and each
                                         --port: an HMR port) are free. Waits until it answers; --no-start saves only.
-                                        Its Preview button opens it, starting it again first when it isn't running
+                                        Its Preview button opens it, starting it again first when it isn't running.
+                                        On a tailnet with HTTPS, give https://<this machine>.<tailnet>.ts.net:<port>
+                                        (or http://localhost:<port>, which comes to that) and listen on 127.0.0.1:
+                                        while it runs, amarchy serves the URL's port and each --port there over
+                                        HTTPS (tailscale serve), at the same numbers; fast on a phone (HTTP/2)
   amarchy preview --name <name> ...     one of several (an app and its API, a storybook): each with a name of
                                         its own, and the button is Previews, a list to pick from. Without
                                         --name, it's the chat's only one (registering again changes it), and
@@ -328,6 +332,7 @@ State: ~/.local/state/amarchy/.
 import base64
 import bisect
 import calendar
+import contextlib
 import copy
 import datetime
 import fcntl
@@ -938,10 +943,44 @@ def save_command(repo, name, command):
 RUN_DEFAULT = "run"
 
 
+_tailnet = None
+def preview_tls():
+    """The name previews are served at over HTTPS, on the tailnet (the one
+    its certificate is for: amarchy.tail1234.ts.net), or None where they
+    can't be: no Tailscale, no HTTPS certificates on the tailnet, or a host
+    whose address was set by hand (BIND= in the host config)."""
+    global _tailnet
+    if _tailnet is None:
+        name, bind = "", host_network()[1]
+        if bind and shutil.which("tailscale"):
+            status = tailscale_status()
+            me = status.get("Self") or {}
+            if status.get("CertDomains") and bind in (me.get("TailscaleIPs") or []):
+                name = (me.get("DNSName") or "").rstrip(".").lower()
+        _tailnet = name
+    return _tailnet or None
+
+
+def preview_fronted(url):
+    """Whether amarchy serves a preview's address over HTTPS itself
+    (https://<this machine's tailnet name>:<port>): tailscale serve has that
+    port on the tailnet, and its server listens on 127.0.0.1:<port>."""
+    tls = preview_tls()
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = u.port
+    except ValueError:
+        return False
+    return bool(tls) and u.scheme == "https" and (u.hostname or "").lower() == tls and bool(port) and port != app_https()
+
+
 def preview_local(url):
     """Where on this machine a preview's address lands: (host, port), or None
-    for one served elsewhere (a deploy)."""
+    for one served elsewhere (a deploy). One amarchy serves over HTTPS lands
+    on its server, on 127.0.0.1 (not on tailscale serve, in front of it)."""
     u = urllib.parse.urlsplit(url)
+    if preview_fronted(url):
+        return ("127.0.0.1", u.port)
     name, bind = host_network()
     here = {"localhost", "127.0.0.1", "::1", "0.0.0.0", name.lower(), socket.gethostname().lower()} | ({bind} if bind else set())
     host = (u.hostname or "").lower()
@@ -1013,6 +1052,19 @@ def preview_up(url):
 # a chat had before there could be several), so a new name changes nothing
 # that runs. Without --name a command is about the only one, or all of them.
 #
+# On a tailnet with HTTPS (the app's own way in), a preview is served over
+# HTTPS too: https://<this machine>.<tailnet>.ts.net:<port>, its server on
+# 127.0.0.1:<port>. While it runs, tailscale serve has each of its ports (the
+# URL's, each --port: an HMR websocket's) on the tailnet at the same number,
+# sending it on to 127.0.0.1 (preview_front; off again when it stops,
+# preview_unfront). That's HTTP/2: a dev server's page is hundreds of files,
+# which plain http fetches six at a time, each a round trip away from a phone
+# (16 s for Houston's, 148 ms away; 3 s this way). Same numbers, so a page's
+# own links to its other ports (its live reload) work as they are; and its
+# server can't take those ports on every address (0.0.0.0) or the tailnet's:
+# tailscale serve has them there. One at http://<this machine>:<port> (its
+# server on the tailnet address) is from before, and works as it did.
+#
 # A preview served elsewhere (a deploy) is an address only: `amarchy preview
 # <url>`. One registered before (an address, no command) answers nothing: its
 # button asks its Claude to start it, and register it.
@@ -1069,6 +1121,8 @@ def preview_label(p):
     if p.get("name"):
         return p["name"]
     u = urllib.parse.urlsplit(p.get("url") or "")
+    if preview_fronted(p.get("url") or ""):       # amarchy:5180, not amarchy.tail1234.ts.net:5180
+        return f"{u.hostname.split('.')[0]}:{u.port}{u.path}".rstrip("/")
     return (u.netloc + u.path).rstrip("/") or p.get("url") or "Preview"
 
 
@@ -1159,6 +1213,158 @@ def preview_ports(p):
     return sorted({*(p.get("ports") or []), *([where[1]] if where else [])})
 
 
+# ---- a preview over HTTPS: tailscale serve in front of it (see above)
+
+def serve_target(port):
+    """Where tailscale serve sends a preview's port: its server, on localhost."""
+    return f"http://127.0.0.1:{port}"
+
+
+_serve_web = [0.0, {}]
+def serve_web(fresh=False):
+    """What tailscale serve does with each port it has on the tailnet:
+    {port: where it sends it} (http://127.0.0.1:<port> for a preview's, the
+    app's own for its port). Read again after 2 s, or fresh."""
+    if not fresh and time.time() - _serve_web[0] < 2:
+        return _serve_web[1]
+    try:
+        conf = json.loads(sh("tailscale", "serve", "status", "--json").stdout or "{}")
+    except ValueError:
+        conf = {}
+    out = {}
+    for port, tcp in (conf.get("TCP") or {}).items():
+        if str(port).isdigit():
+            out[int(port)] = f"tcp {tcp['TCPForward']}" if isinstance(tcp, dict) and tcp.get("TCPForward") else "something else"
+    for hostport, web in (conf.get("Web") or {}).items():
+        port = hostport.rsplit(":", 1)[-1]
+        if port.isdigit():
+            handlers = (web or {}).get("Handlers") or {}
+            out[int(port)] = (handlers.get("/") or {}).get("Proxy") or ("something else" if handlers else out.get(int(port), "something else"))
+    _serve_web[:] = [time.time(), out]
+    return out
+
+
+@contextlib.contextmanager
+def serve_lock():
+    """One change to tailscale serve's settings at a time, on this machine
+    (it reads them all, changes one, writes them all back)."""
+    PREVIEWS.mkdir(parents=True, exist_ok=True)
+    with open(PREVIEWS / "serve.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            _serve_web[0] = 0.0
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def front_socket(x, web=None):
+    """Whether something listening on a port (listeners) is tailscale serve
+    in front of a preview's server: tailscaled, on this machine's tailnet
+    address, sending it on to 127.0.0.1 at that port."""
+    if loopback(x["local"]) or set(x["local"]) == {"0"}:
+        return False
+    if x["pid"] is None:
+        if x["uid"] != 0:
+            return False
+    elif "tailscaled" not in os.path.basename((cmdline(x["pid"]) or [""])[0]):
+        return False
+    return (serve_web() if web is None else web).get(x["port"]) == serve_target(x["port"])
+
+
+def serve_claims(but=None):
+    """Which preview has each port tailscale serve has for one, of the ones
+    running: {port: slot} (but that one)."""
+    out = {}
+    for f in PREVIEWS.glob("*.json") if PREVIEWS.is_dir() else []:
+        if f.stem == but:
+            continue
+        ports = preview_record(f.stem).get("fronted") or []
+        if ports and preview_pids(f.stem):
+            out.update({n: f.stem for n in ports})
+    return out
+
+
+def serve_why(r):
+    """Why a tailscale serve change didn't take, in words."""
+    said = (r.stderr or r.stdout or "").strip()
+    if "access denied" in said.lower():
+        return "Tailscale won't let amarchy change what it serves: run `sudo tailscale set --operator=$USER` once"
+    return gist(said) or "tailscale serve failed"
+
+
+def preview_front(s, p):
+    """Put a preview's ports on the tailnet over HTTPS (one amarchy serves
+    that way, preview_fronted): tailscale serve has each at its own number,
+    sending it on to 127.0.0.1. Kept in its record (fronted), to take off
+    again. None, or why not."""
+    if not preview_fronted(p.get("url") or ""):
+        return None
+    slot = preview_slot(s["id"], p["key"])
+    ports = preview_ports(p)
+    if app_https() in ports:
+        return f"port {app_https()} is amarchy's own on your tailnet: give it another"
+    with serve_lock():
+        web = serve_web(fresh=True)
+        taken = [f"port {n} to {web[n]}" for n in ports if n in web and web[n] != serve_target(n)]
+        if taken:
+            return f"tailscale serve already sends {'; '.join(taken)}: give it other ports"
+        done = set(preview_record(slot).get("fronted") or [])
+        why = None
+        for n in ports:
+            if web.get(n) != serve_target(n):
+                r = sh("tailscale", "serve", "--bg", f"--https={n}", serve_target(n))
+                if r.returncode != 0:
+                    why = f"couldn't put port {n} on your tailnet over HTTPS: {serve_why(r)}"
+                    break
+            done.add(n)
+        preview_note(slot, fronted=sorted(done), fronted_at=time.time())
+    if why:
+        preview_unfront(slot)
+    return why
+
+
+def preview_unfront(slot):
+    """Take a preview's ports off the tailnet (what preview_front put there),
+    but the ones another preview running has now."""
+    ports = set(preview_record(slot).get("fronted") or [])
+    if not ports:
+        return
+    claimed = serve_claims(but=slot)
+    with serve_lock():
+        web = serve_web(fresh=True)
+        for n in sorted(ports):
+            if n not in claimed and web.get(n) == serve_target(n):
+                sh("tailscale", "serve", f"--https={n}", "off")
+        preview_note(slot, fronted=[])
+    _preview_up.clear()
+
+
+def preview_loose(p):
+    """What listens on one of a preview amarchy serves over HTTPS's ports on
+    more than 127.0.0.1 (on 0.0.0.0, or the tailnet's address): where
+    tailscale serve can't have it. [words]."""
+    if not preview_fronted(p.get("url") or ""):
+        return []
+    web = serve_web()
+    return [holder_words(x) + f" on {address_words(x['local'])}" for x in listeners(preview_ports(p))
+            if not loopback(x["local"]) and not front_socket(x, web)]
+
+
+def address_words(hexed):
+    """An address as /proc/net/tcp writes it, as people do: 0.0.0.0, 100.89.29.4, ::."""
+    try:
+        raw = bytes.fromhex(hexed)
+        if len(raw) == 4:
+            return socket.inet_ntop(socket.AF_INET, raw[::-1])
+        return socket.inet_ntop(socket.AF_INET6, b"".join(raw[i:i + 4][::-1] for i in range(0, 16, 4)))
+    except (ValueError, OSError):
+        return hexed
+
+
+PREVIEW_IN_USE = re.compile(r"EADDRINUSE|address already in use|port \d+ is already in use", re.I)
+
+
 def preview_state(s, p):
     """Where one of a chat's previews stands: up (it answers), starting (its
     service runs, nothing answers yet), failed (its service ended in error),
@@ -1226,6 +1432,11 @@ def listeners(ports):
 
 def holder_words(x):
     """What holds a port, in words: `node …/vite --port 5180` (pid 123)."""
+    if front_socket(x):
+        claimed = serve_claims().get(x["port"])
+        rec = preview_record(claimed) if claimed else {}
+        whose = f" of chat {rec['sid']}'s preview" if rec.get("sid") else ""
+        return f"port {x['port']}: tailscale serve (HTTPS{whose}, for a server on 127.0.0.1:{x['port']})"
     if x["pid"] is None:
         try:
             import pwd
@@ -1304,6 +1515,20 @@ def cmd_preview_exec(args):
     os.execve("/bin/bash", ["bash", "-lc", command], preview_exec_env(s, p))
 
 
+def cmd_previews_off(args):
+    """Every chat's preview stopped, and off the tailnet (plumbing: install.sh
+    --uninstall, since nothing would look after them once amarchy is gone)."""
+    for s in sessions():
+        for p in previews(s):
+            if p.get("run") or p.get("ports"):
+                preview_stop(s, p, why="stopped")
+    for rec in PREVIEWS.glob("*.json") if PREVIEWS.is_dir() else []:    # (a chat's gone, a test's)
+        if preview_pids(rec.stem):
+            sh("systemctl", "--user", "stop", preview_unit(rec.stem))
+        preview_unfront(rec.stem)
+    return 0
+
+
 _preview_starting = threading.Lock()     # the app's server: two taps (the button, its sheet) start it once
 
 
@@ -1330,14 +1555,14 @@ def preview_launch(s, p, restart, say):
     unit = preview_unit(slot)
     if preview_pids(slot):
         if not restart:
-            return None
+            return preview_front(s, p)      # (on the tailnet still: put back, if it was taken off)
         sh("systemctl", "--user", "stop", unit)
-    holders = listeners(preview_ports(p))
+    holders = preview_holders(s, p)
     strays = preview_strays(s, holders)
     if strays:
         say(f"Stopping what this chat left on its ports: " + "; ".join(holder_words(x) for x in holders if x["pid"] in strays))
         stop_processes(strays)
-        holders = [x for x in listeners(preview_ports(p)) if x["pid"] not in strays]
+        holders = [x for x in preview_holders(s, p) if x["pid"] not in strays]
     own = preview_pids(slot)
     taken = [x for x in holders if x["pid"] not in own]
     if taken:
@@ -1352,6 +1577,11 @@ def preview_launch(s, p, restart, say):
         return "its ports are taken: " + "; ".join(words)
     sh("systemctl", "--user", "reset-failed", unit)
     PREVIEWS.mkdir(parents=True, exist_ok=True)
+    # On the tailnet over HTTPS before it starts: it answers there the
+    # moment it answers at all (and can't take those ports on 0.0.0.0).
+    why = preview_front(s, p)
+    if why:
+        return why
     log = PREVIEWS / f"{slot}.log"
     log.write_text("")
     memory = p.get("memory") or PREVIEW_MEMORY
@@ -1365,29 +1595,79 @@ def preview_launch(s, p, restart, say):
            *[f"--setenv={k}={os.environ[k]}" for k in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "AMARCHY_WORK") if os.environ.get(k)],
            ENTRY, "preview-exec", sid, *([p["key"]] if p["key"] else []))
     if r.returncode != 0:
-        return None if preview_pids(slot) else f"systemd couldn't start it: {last_line(r, 'systemd-run failed')}"
+        if preview_pids(slot):
+            return None
+        preview_unfront(slot)
+        return f"systemd couldn't start it: {last_line(r, 'systemd-run failed')}"
     now = time.time()
     preview_note(slot, sid=sid, key=p["key"], started=now, used=now, stopped=None, why=None)
     _preview_up.clear()
     return None
 
 
+def preview_holders(s, p):
+    """What listens on a preview's ports, before it starts (listeners), but
+    tailscale serve in front of one of them for no other preview running
+    now: kept for an HTTPS one (it's what it would put there), taken off
+    the tailnet for one from before (its server takes that address)."""
+    ports = preview_ports(p)
+    holders = listeners(ports)
+    web = serve_web()
+    claimed = serve_claims(but=preview_slot(s["id"], p["key"]))
+    spare = {x["port"] for x in holders if front_socket(x, web) and x["port"] not in claimed}
+    if not spare:
+        return holders
+    if not preview_fronted(p.get("url") or ""):
+        with serve_lock():
+            for n in sorted(spare):
+                sh("tailscale", "serve", f"--https={n}", "off")
+        end = time.time() + 3
+        while time.time() < end and any(front_socket(x, web) for x in listeners(sorted(spare))):
+            time.sleep(0.1)
+    return [x for x in holders if not (x["port"] in spare and front_socket(x, web))]
+
+
 def preview_wait(s, p, wait, say):
-    """Wait for a preview to answer: None once it does, else why not."""
+    """Wait for a preview to answer: None once it does, else why not. One
+    over HTTPS has to listen on 127.0.0.1 only (tailscale serve has its ports
+    on the tailnet): said when it doesn't, or its log says a port was taken."""
     slot = preview_slot(s["id"], p["key"])
+    fronted = preview_fronted(p["url"])
+    where = preview_local(p["url"])
+    only = (f"amarchy serves {', '.join(map(str, preview_ports(p)))} on your tailnet over HTTPS, so its server "
+            f"must listen on 127.0.0.1 only (--host 127.0.0.1), not on 0.0.0.0 or {host_network()[1]}: its live "
+            f"reload too (a websocket on a port of its own binds 0.0.0.0 unless told; best, have it ride on the "
+            f"main port, as Vite's hmr.server does)") if fronted else ""
     end = time.time() + wait
     while time.time() < end:
         _preview_up.clear()
         if preview_up(p["url"]):
+            loose = preview_loose(p)
+            if loose:
+                return f"it listens on more than 127.0.0.1 ({'; '.join(loose)}): {only}"
+            if fronted and PREVIEW_IN_USE.search(preview_log(slot, 200)):
+                say(f"It answers, but its log says a port was in use: {only}.")
             return None
         if not preview_pids(slot):
             time.sleep(0.3)
             if not preview_pids(slot):
-                return "it stopped on its own"
+                taken = fronted and PREVIEW_IN_USE.search(preview_log(slot, 200))
+                return "it stopped on its own" + (f": a port it wanted was in use ({only})" if taken else "")
         time.sleep(0.5)
-    where = preview_local(p["url"])
+    if fronted:
+        loose = preview_loose(p)
+        if loose:
+            return f"it listens on more than 127.0.0.1 ({'; '.join(loose)}): {only}"
+        if any(x["local"] == "0" * 24 + "01000000" for x in listeners([where[1]])):
+            return (f"it listens on ::1 only (localhost, as Node may take it): make it listen on 127.0.0.1 "
+                    f"(--host 127.0.0.1), where amarchy sends it from {p['url']}")
+        return f"nothing answers on 127.0.0.1:{where[1]} after {wait} s: {only}"
     loose = [x for x in listeners([where[1]]) if where] if where else []
-    if loose and where and where[0] != "127.0.0.1" and all(x["local"] in ("0100007F", "0" * 24 + "01000000") for x in loose):
+    if loose and where and where[0] != "127.0.0.1" and all(loopback(x["local"]) for x in loose):
+        tls = preview_tls()
+        if tls:
+            return (f"it listens on localhost only: register it as https://{tls}:{where[1]} instead, and amarchy "
+                    f"serves it on your tailnet over HTTPS (or make it listen on {where[0]})")
         return f"it listens on localhost only: make it listen on {where[0]} (--host {where[0]})"
     return f"nothing answers at {p['url']} after {wait} s"
 
@@ -1405,7 +1685,7 @@ def preview_leftovers(s, p, wait=5):
         n = len(preview_pids(slot))
         left = [f"its preview service{named}: {n} process{'es' if n != 1 else ''}"] if n else []
         for x in listeners(preview_ports(p)):
-            if x["pid"] in others:
+            if x["pid"] in others or front_socket(x):       # (tailscale serve's: another preview's now, or going)
                 continue
             other = holder_session(x["pid"]) if x["pid"] else None
             if not other or other == sid:
@@ -1436,6 +1716,7 @@ def preview_stop(s, p, teardown=True, why="stopped"):
         sh("systemctl", "--user", "stop", unit)
         sh("systemctl", "--user", "reset-failed", unit)
         preview_note(slot, stopped=time.time(), why=why)
+    preview_unfront(slot)       # off the tailnet with it (what it had there, whatever its address is now)
     strays = preview_strays(s, listeners(preview_ports(p)))
     if strays:
         stop_processes(strays)
@@ -1512,9 +1793,13 @@ def preview_tend():
             slot = preview_slot(s["id"], p["key"])
             known.add(slot)
             pids = preview_pids(slot) if p.get("run") else set()
-            if not pids:
-                continue
             rec, now = preview_record(slot), time.time()
+            if not pids:
+                # Not running (it failed, the machine restarted): off the
+                # tailnet too, but while it's being put there to start.
+                if rec.get("fronted") and now - (rec.get("fronted_at") or 0) > 60:
+                    preview_unfront(slot)
+                continue
             if watched(pids) or s["id"] in shown or s.get("status") in ("working", "waiting", "running"):
                 if now - (rec.get("used") or 0) > 60:
                     preview_note(slot, used=now)
@@ -1532,6 +1817,7 @@ def preview_tend():
         if preview_pids(slot) or preview_failed(slot):
             sh("systemctl", "--user", "stop", preview_unit(slot))
             sh("systemctl", "--user", "reset-failed", preview_unit(slot))
+        preview_unfront(slot)
         rec.unlink(missing_ok=True)
         (PREVIEWS / f"{slot}.log").unlink(missing_ok=True)
     chats = {re.sub(r"[^A-Za-z0-9_.-]", "_", s["id"]) for s in sessions()}
@@ -1673,6 +1959,19 @@ def preview_command(sid, opts, ports, flags, args, unlock):
         for p in which:
             print(p["url"] if len(which) == 1 else f"{preview_label(p)}: {p['url']}")
         return 0
+    # A command serving localhost, on a tailnet with HTTPS: amarchy serves it
+    # there (https://<this machine's tailnet name>:<port>).
+    tls, moved = preview_tls(), None
+    commanding = "--run" in opts or bool({"--stop", "--memory", "--idle"} & opts.keys() or ports)
+    try:
+        given = urllib.parse.urlsplit(url)
+        given_port = given.port
+    except ValueError:
+        given, given_port = None, None
+    if (tls and commanding and given and given.scheme == "http" and given_port
+            and (given.hostname or "").lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0")):
+        moved = url
+        url = urllib.parse.urlunsplit(("https", f"{tls}:{given_port}", given.path or "/", given.query, given.fragment))
     # Which one this is: the one of that name; else the one at that address;
     # with no name, else its only one (its address changed); else a new one.
     target = one or next((p for p in ps if url and p["url"] == url), None)
@@ -1691,7 +1990,17 @@ def preview_command(sid, opts, ports, flags, args, unlock):
         return fail(f"Not an address to open: {url} (http://... or https://...)")
     host, bind = host_network()
     if bind and u.hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        if tls:
+            return fail(f"{url} doesn't reach their browser: listen on 127.0.0.1 and register it with the command "
+                        f"that serves it (amarchy preview --run '<command>' https://{tls}:<port>), and amarchy "
+                        f"serves it on their tailnet over HTTPS")
         return fail(f"{url} doesn't reach their browser: listen on {bind} and give http://{host}:<port>")
+    try:
+        u_port = u.port
+    except ValueError:
+        return fail(f"Not an address to open: {url} (its port isn't a number)")
+    if tls and u.scheme == "https" and u.hostname.lower() == tls and u_port in (None, app_https()):
+        return fail(f"{url} is amarchy's own address: give the preview a port of its own (https://{tls}:<port>)")
     new = {"url": url}
     # Its name: the one given (the one it has, when that's the same name in
     # other letters: only --rename changes how it's written).
@@ -1703,6 +2012,9 @@ def preview_command(sid, opts, ports, flags, args, unlock):
     run = opts.get("--run") or (base.get("run") if edits else None)
     if edits and not run:
         return fail("--stop, --port, --memory and --idle go with a command: amarchy preview --run '<command>' <url>")
+    if preview_fronted(url) and not run:
+        return fail(f"amarchy serves {url} over HTTPS only for a command it runs: "
+                    f"amarchy preview --run '<command>' {url} (its server on 127.0.0.1)")
     if run:
         if not preview_local(url):
             return fail(f"{url} isn't on this machine: a command amarchy runs serves here (http://{host}:<port>)")
@@ -1758,17 +2070,25 @@ def preview_command(sid, opts, ports, flags, args, unlock):
         preview_note(slot, sid=sid, key=key, path=os.environ.get("PATH", ""))
     unlock()
     if run:
+        at = f"It's at {url} (amarchy serves {moved} there, on their tailnet over HTTPS)." if moved else ""
         if "--no-start" in flags:
-            if also:
-                print(also.strip())
+            if also or at:
+                print(" ".join(x for x in (at, also.strip()) if x))
             return 0
         why = preview_start(s, new, wait=PREVIEW_WAIT, say=print)
         if why:
             log = preview_log(slot, 15)
             again = f" --name {shlex.quote(new['name'])}" if len(ps) > 1 and new.get("name") else ""
-            return fail(f"Saved, but {why}" + (f"\nIts log ends:\n{log}" if log else "") +
+            return fail(f"Saved, but {why}" + (f"\n{at}" if at else "") + (f"\nIts log ends:\n{log}" if log else "") +
                         f"\nFix it, then: amarchy preview restart{again}")
         print(f"Up at {url}: its Preview button opens it, and starts it again whenever it isn't running." + also)
+        if moved:
+            print(f"(amarchy serves {moved} there, on their tailnet over HTTPS.)")
+        elif tls and not preview_fronted(url):
+            where = preview_local(url)
+            print(f"Over plain http it loads slowly on their phone (a browser fetches a dev server's files a few at a "
+                  f"time, each a round trip away): make it listen on 127.0.0.1 and register "
+                  f"https://{tls}:{where[1] if where else '<port>'} instead, and amarchy serves it over HTTPS.")
         return 0
     if not preview_up(url):
         print(f"Saved, but nothing answers at {url} yet: its button says so until it does." + also)
@@ -2067,6 +2387,13 @@ SECRET_READERS = ("cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|sed
                   "find|ls|stat|file|wc|md5sum|sha\\w*sum|openssl|gpg|printf|echo|eval|exec|sh|bash|zsh|fish")
 
 
+def preview_template():
+    """A preview's address as Claude is told to give it: https://<this
+    machine>.<tailnet>.ts.net:<port> where amarchy serves it over HTTPS."""
+    tls = preview_tls() if host_network()[1] else None
+    return f"https://{tls}:<port> (listening on 127.0.0.1)" if tls else "http://<host>:<port>"
+
+
 def serve_reminder(event):
     """PreToolUse: a dev server Claude starts in the background (Bash's
     run_in_background, or `&`) stops when its chat sleeps. What it's told,
@@ -2083,7 +2410,7 @@ def serve_reminder(event):
     return ("amarchy: a server started here stops when this chat sleeps (a minute after it goes idle). If it's "
             "for the user to look at, don't keep it here: register it as the chat's preview, and amarchy runs it "
             "outside your shells, starts it again from its Preview button, and stops it when the chat is "
-            "completed: amarchy preview --run '<command>' http://<host>:<port> [--port <hmr port>] "
+            f"completed: amarchy preview --run '<command>' {preview_template()} [--port <hmr port>] "
             "[--stop '<teardown>'] (with --name <what it is> for each, when there's more than one; the amarchy "
             "skill). Only a server for your own check (a test run) belongs here.")
 
@@ -5187,7 +5514,21 @@ def agent_context(s):
                  "they type to you in the app's composer, and a message they send while you work waits for your "
                  "turn unless they send it now. Their answers to your questions and their permissions come back "
                  "as the choices you offered. ")
-    if bind:
+    tls = preview_tls() if bind else None
+    if tls:
+        text += (f"For them to open something you serve (a dev server, a preview), listen on 127.0.0.1 and "
+                 f"register it as this chat's preview: `amarchy preview --run '<command>' https://{tls}:<port>` "
+                 f"(plus `--port <n>` for each other port it takes, like an HMR port, and `--stop '<command>'` if "
+                 f"it starts something elsewhere, like containers). amarchy serves each of those ports to them "
+                 f"over HTTPS on their private network, at the same number (HTTP/2: a dev server's page loads "
+                 f"fast on their phone), so it must listen on 127.0.0.1 only, not 0.0.0.0 or {bind}: its live "
+                 f"reload too (best on its main port). amarchy runs it as a service of the chat's own, so it "
+                 f"outlives your sleep, puts it "
+                 f"on the Preview button (which starts it again when it isn't running), and stops it when the chat "
+                 f"is completed. Two or more to look at (an app and its admin, a storybook): give each a name, "
+                 f"`--name <what it is>`, and the button is Previews, a list to pick from. "
+                 f"Don't leave a dev server in your background shells: it stops when the chat sleeps. ")
+    elif bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
                  f"(reachable only from their private network) and register it as this chat's preview: "
                  f"`amarchy preview --run '<command>' http://{name}:<port>` (plus `--port <n>` for each other port "
@@ -17619,7 +17960,7 @@ OPTIONS = {
     "terminals": (set(), set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
-    "reap": None, "preview-exec": None, "shorten": None, "attach": None, "held": None,
+    "reap": None, "preview-exec": None, "previews-off": None, "shorten": None, "attach": None, "held": None,
     "paste": None, "agent": None, "claude-reload": None,
 }
 HELP = ("-h", "--help")
@@ -17730,6 +18071,8 @@ def main(argv):
         return cmd_wake(args)
     elif cmd == "preview-exec" and args:
         return cmd_preview_exec(args)
+    elif cmd == "previews-off" and not args:
+        return cmd_previews_off(args)
     elif cmd == "reap" and len(args) == 1:
         return cmd_reap(args[0])
     elif cmd == "claude" and len(args) == 1:

@@ -605,9 +605,20 @@ to sleep**.
 address and the ports it takes:
 
 ```sh
-amarchy preview --run 'pnpm dev --host 100.89.29.4 --port 5180' http://amarchy:5180 \
+amarchy preview --run 'pnpm dev --host 127.0.0.1 --port 5180' https://amarchy.tail1234.ts.net:5180 \
   --port 24680 --stop 'docker compose down'
 ```
+
+**Over HTTPS.** Its server listens on `127.0.0.1`, and while it runs amarchy has
+`tailscale serve` put its ports (the address's and each `--port`) on your tailnet
+over HTTPS, each at the same number. That's HTTP/2, which is what makes a dev
+server fast on your phone: its page is hundreds of files, and over plain http a
+browser fetches them a few at a time, each a round trip to the machine (a Vite app
+took 16 s at 148 ms away; 3 s this way). It needs HTTPS certificates on your
+tailnet, which the app already does (`amarchy app on`). A preview registered the
+old way (`http://amarchy:5180`, its server on the tailnet address) works as it did.
+The server and its live reload must listen on `127.0.0.1` only: amarchy says so
+when one doesn't, or its log says a port was in use.
 
 amarchy runs the command as a systemd user service of the chat's own
 (`amarchy-preview-<chat>`), outside Claude, so the chat sleeping doesn't stop it;
@@ -1258,7 +1269,8 @@ runs the chat engine's test against the Claude Code installed, about three minut
 few cheap turns on your login, and records the result; a failure shows in Settings. The
 update starts it when Claude Code has changed.
 
-`install.sh --uninstall` takes all of that out again; your worktrees, your chats,
+`install.sh --uninstall` takes all of that out again (the chats' previews stop, and come
+off your tailnet); your worktrees, your chats,
 `~/.local/state/amarchy` and the secrets you gave in the app are left alone (the
 installer tells you where the secrets are, so you can delete them).
 

@@ -29,7 +29,8 @@ const ONLY = process.argv[2];
 const URL_UP = "http://amarchy:5173/";
 
 const URL_STOPPED = "http://amarchy:5174/";
-const URL_APP = "http://amarchy:5180/", URL_BOOK = "http://amarchy:6006/";
+// Served over HTTPS by amarchy (tailscale serve): the dropdown and Complete say it short, amarchy:5180.
+const URL_APP = "https://amarchy.tail1234.ts.net:5180/", URL_BOOK = "https://amarchy.tail1234.ts.net:6006/";
 const one = (url, extra) => [{ key: "", label: url.replace(/^http:\/\//, "").replace(/\/$/, ""), url, ...extra }];
 for (const c of CHATS) {
   if (c.id === "proj-fresh") c.previews = one(URL_UP, { run: "pnpm dev", state: "up" });
@@ -39,7 +40,7 @@ for (const c of CHATS) {
   if (c.id === "proj-done") c.previews = [{ key: "", name: "App", label: "App", url: URL_APP, run: "pnpm dev --port 5180", state: "up" },
                                           { key: "storybook", name: "Storybook", label: "Storybook", url: URL_BOOK, run: "pnpm storybook -p 6006", state: "stopped" }];
 }
-const FAILED = { url: "http://amarchy:5175/", run: "pnpm dev --port 5175", stop: "", ports: [5175, 24678], memory_max: "2G", idle: 10800,
+const FAILED = { url: "https://amarchy.tail1234.ts.net:5175/", run: "pnpm dev --port 5175", stop: "", ports: [5175, 24678], memory_max: "2G", idle: 10800,
                  state: "failed", log: "Error: Cannot find module 'vite'\n    at boom (x.js:1:1)", task: "Refund: old order", id: "proj-later" };
 
 const card = (id) => `.today:not([hidden]) .tcard[data-id=${id}]`;
@@ -224,10 +225,10 @@ async function run(browser, port, layout) {
   await p.route("**/api/session/proj-done/close", (r) => { p.posts.push({ url: r.request().url(), body: r.request().postDataJSON() });
     r.fulfill({ status: 409, json: { error: "Its preview is still running", preview_left: ["port 5173: node vite (pid 4242)"], changes: 0 } }); });
   await p.evaluate(() => confirmClose(rowOf("proj-fresh"), { changes: 0, running: [], previews: ["http://amarchy:5173/"] }));
-  check(layout, await until(p, () => /Stops its preview, http:\/\/amarchy:5173\//.test([...document.querySelectorAll(".sheet")].pop().innerText)), "Complete says it stops its preview");
+  check(layout, await until(p, () => /Stops its preview, amarchy:5173\./.test([...document.querySelectorAll(".sheet")].pop().innerText)), "Complete says it stops its preview");
   await p.evaluate(() => closeSheets());
-  await p.evaluate(() => confirmClose(rowOf("proj-done"), { changes: 0, running: [], previews: ["http://amarchy:5180/", "http://amarchy:6006/"] }));
-  check(layout, await until(p, () => /Stops its 2 previews, http:\/\/amarchy:5180\/ and http:\/\/amarchy:6006\//.test([...document.querySelectorAll(".sheet")].pop().innerText)),
+  await p.evaluate(() => confirmClose(rowOf("proj-done"), { changes: 0, running: [], previews: ["https://amarchy.tail1234.ts.net:5180/", "http://amarchy:6006/"] }));
+  check(layout, await until(p, () => /Stops its 2 previews, amarchy:5180 and amarchy:6006\./.test([...document.querySelectorAll(".sheet")].pop().innerText)),
         "with several, that it stops them all");
   await p.evaluate(() => [...[...document.querySelectorAll(".sheet")].pop().querySelectorAll("button")].find((b) => /Complete/.test(b.innerText)).click());
   check(layout, await until(p, () => { const s = [...document.querySelectorAll(".sheet")].pop(); return s && /Its preview is still running/.test(s.innerText) && /pid 4242/.test(s.innerText); }),
