@@ -192,7 +192,11 @@ and tell the other tracks.
      chats it merges in) **and** that `me` row says `"merges": true` (its app
      acts on other machines' chats: `chatPath`, `<machine>:<id>` routes;
      absent is false; also in `/api/peer/hello` and `/api/state`). Opened
-     with the local key (`/local?key=`).
+     with the local key: the desktop app calls `/local?key=` itself and hands
+     the cookie to its web view (as `SameSite=Lax`: WebKit counts the
+     window's first load as coming from another site, its own page, and
+     holds a Strict cookie back), so the key is never in an address the web
+     view keeps.
   3. The first paired machine (`amarchy machines --json`, not `me`) whose
      `state` is `on`.
   4. The address set by hand, `amarchy-desktop --server <url>` (kept in
