@@ -13804,7 +13804,7 @@ PROTOCOL = 1                    # the contract between machines (docs/plan-omarc
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy"
 MACHINES = CONFIG / "machines.json"
 MACHINE_LABEL = CONFIG / "label"        # this machine's label, when you gave it one
-MACHINE_NAME = CONFIG / "name"          # its name, kept once paired (a tailnet that renames it breaks no pair)
+MACHINE_NAME_FILE = CONFIG / "name"          # its name, kept once paired (a tailnet that renames it breaks no pair)
 PEERS_SEEN = APP / "peers"              # <name>.json: each machine's chats as last seen, for while it's off
 PEER_TIMEOUT = 8                        # seconds to reach a machine
 # Seconds a machine's stream may stay silent (it says "still here" every
@@ -13824,7 +13824,7 @@ def machine_name():
     if host_setting("NAME"):
         return host_setting("NAME").lower()
     try:
-        kept = MACHINE_NAME.read_text().strip().lower()
+        kept = MACHINE_NAME_FILE.read_text().strip().lower()
         if re.fullmatch(MACHINE_NAME_RE, kept):
             return kept
     except OSError:
@@ -13835,11 +13835,11 @@ def machine_name():
 def machine_name_keep():
     """Paired: this machine's name stays what the others know it by, even
     when Tailscale gives it another (a move to another tailnet)."""
-    if host_setting("NAME") or MACHINE_NAME.exists():
+    if host_setting("NAME") or MACHINE_NAME_FILE.exists():
         return
     name = machine_name()
     if re.fullmatch(MACHINE_NAME_RE, name):
-        write_file(MACHINE_NAME, name + "\n")
+        write_file(MACHINE_NAME_FILE, name + "\n")
 
 
 def machine_label():
@@ -16825,12 +16825,37 @@ def links_serve():
     return server
 
 
+APP_TAILNET = APP / "tailnet.json"      # the app's address and logins on the tailnet, as Tailscale last said
+
+
+def tailnet_last(address=None, users=None):
+    """Kept (address and users given), or as last kept: {address, users}."""
+    if address and users:
+        try:
+            write_file(APP_TAILNET, json.dumps({"address": address, "users": sorted(users), "at": int(time.time())}))
+        except OSError:
+            pass
+        return {}
+    try:
+        kept = json.loads(APP_TAILNET.read_text())
+        return kept if isinstance(kept, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def app_serve():
     """Run the app's server (what amarchy-app.service runs) until amarchy is
     updated, when systemd starts the new one."""
     import http.server
     status = tailscale_status()
     address, users = app_address(status), app_users(status)
+    # Tailscale logged out for a moment (signing in again, a move to another
+    # tailnet): who and where it last said, until it says again.
+    if not (address and users):
+        last = tailnet_last()
+        address, users = address or last.get("address"), users or set(last.get("users") or [])
+    else:
+        tailnet_last(address, users)
     # Without Tailscale (not set up yet, or offline) it still serves the
     # desktop app here (the local key), and takes the tailnet once it's up.
     if not address:
@@ -16857,6 +16882,7 @@ def app_serve():
             found, who = app_address(now), app_users(now)
             if found and who and (found, who) != (handler.net["address"], handler.net["users"]):
                 handler.net.update(address=found, users=who)
+                tailnet_last(found, who)
                 print(f"amarchy app: on the tailnet as {app_url(found)}, for {', '.join(sorted(who))}", file=sys.stderr, flush=True)
 
     threading.Thread(target=tailnet, daemon=True).start()

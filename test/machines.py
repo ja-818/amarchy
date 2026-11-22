@@ -398,6 +398,21 @@ try:
     r = alpha.amarchy("send", "beta:nope-chat", "x")
     check(r.returncode != 0 and "no such chat" in r.stderr, f"a chat that isn't there: said ({r.stderr.strip()[-80:]})")
 
+    print("another machine's agent and its task")
+    r = beta.amarchy("agents", sid, "--name", "Beta")
+    check(r.returncode == 0, f"beta's chat made an agent ({(r.stdout or r.stderr).strip()[:80]})")
+    r = beta.amarchy("task", "add", "--title", "Check: the beta box", "--button", "Done=done with the beta box", "--agent", sid)
+    tid = r.stdout.strip()
+    check(r.returncode == 0 and len(tid) == 6, f"a task of its own ({tid or r.stderr.strip()[:80]})")
+    task = until(lambda: next((x for x in (alpha.state().get("today") or {}).get("tasks") or [] if x.get("id") == tid), None), limit=15)
+    check(bool(task) and task.get("machine") == "beta" and task.get("agent") == sid, f"on alpha's Tasks, with its machine ({task})")
+    code, _, said = alpha.ask("POST", "/api/m/beta/api/tasks/press", {"id": tid, "button": 0})
+    check(code == 200, f"its button pressed through alpha ({code} {said})")
+    check(bool(until(lambda: "done with the beta box" in (wt / "got.txt").read_text(), limit=20)), "its message reached the agent on beta")
+    check(bool(until(lambda: not any(x.get("id") == tid for x in (alpha.state().get("today") or {}).get("tasks") or []), limit=15)),
+          "and it's off alpha's Tasks")
+    beta.amarchy("agents", sid, "off")
+
     print("the pass-through: REST")
     code, _, direct = beta.ask("GET", f"/api/session/{sid}/composer")
     code2, _, via = alpha.ask("GET", f"/api/m/beta/api/session/{sid}/composer")
