@@ -202,8 +202,8 @@ command's usage without running it (an option it doesn't know fails instead).
     far away fetches them a few at a time (16 s for a Vite app at 148 ms, 3 s
     this way). So its server must listen on `127.0.0.1` only, not `0.0.0.0` or
     the tailnet address (those ports are tailscale serve's there): its live
-    reload too. Best, the live reload rides on the main port (Vite's
-    `server.hmr.server`, Next's own): a websocket on a port of its own binds
+    reload too. Best, the live reload rides on the main port (Vite 8's
+    `server.ws.server`, `server.hmr.server` before it; Next's own): a websocket on a port of its own binds
     `0.0.0.0` unless told, and can't connect. amarchy says so when it can't
     have a port, or its log says one was in use. Give `--host 127.0.0.1`, not
     `localhost` (Node may take that as `::1` only). An API the page calls on

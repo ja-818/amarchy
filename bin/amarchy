@@ -1637,7 +1637,7 @@ def preview_wait(s, p, wait, say):
     only = (f"amarchy serves {', '.join(map(str, preview_ports(p)))} on your tailnet over HTTPS, so its server "
             f"must listen on 127.0.0.1 only (--host 127.0.0.1), not on 0.0.0.0 or {host_network()[1]}: its live "
             f"reload too (a websocket on a port of its own binds 0.0.0.0 unless told; best, have it ride on the "
-            f"main port, as Vite's hmr.server does)") if fronted else ""
+            f"main port: Vite's server.ws.server, hmr.server before Vite 8)") if fronted else ""
     end = time.time() + wait
     while time.time() < end:
         _preview_up.clear()
