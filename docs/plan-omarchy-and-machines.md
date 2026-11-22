@@ -236,6 +236,22 @@ and tell the other tracks.
   (`{"version", "platform"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
   natively, window closed or not.
+- **Its notifications**: every notification an app server sends the phones
+  (a chat that needs you or is done, another machine's chat, an agent's task,
+  `amarchy notify`, Settings' test) is also kept for the desktop apps, and
+  `GET /api/notices` (an SSE stream, let in as `/api/events` is) sends each
+  as `event: notice`, never one from before it connected. Its data is the
+  phone's (`title`, `body`, `tag`, `url`, `ask`, `icon`, `waiting`, `urgent`)
+  plus `id`, `at`, `session` (`<id>`, or `<machine>:<id>` for another
+  machine's), `sound` (the chime it rings with) and `actions`: up to three
+  `{"label", "path", "body"}`, each a POST of `body` to `path` on the same
+  server, as the app's own page would make it (Allow and Deny:
+  `/api/session/<id>/answer`; a question's options; a done reply's choices:
+  `/api/session/<id>/send`; another machine's chat through
+  `/api/m/<machine>/…`). A desktop app listening counts as a device notified
+  (`amarchy notify`, a task's `--notify`, the test). In the desktop app the
+  page rings no chime of its own: the desktop app rings `sound` when it shows
+  the notice (window closed or not).
 
 ### What lives where
 
