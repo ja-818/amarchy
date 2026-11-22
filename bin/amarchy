@@ -2869,6 +2869,26 @@ def default_base(repo_dir):
 FETCH_TIMEOUT = 30
 
 
+def git_net_env():
+    """git talking to origin from a script: it never stops to ask for a
+    password or a host key, it fails instead."""
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0",
+            "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")}
+
+
+def origin_head(repo_dir):
+    """Ask origin which branch is its default now, and remember it
+    (refs/remotes/origin/HEAD, what default_base reads). It's set when the
+    repo is cloned and stays there when the project changes it on GitHub
+    (houston-os went from main to dev): new chats would start from a branch
+    the work no longer goes to. As it was when origin doesn't answer."""
+    try:
+        subprocess.run(["git", "remote", "set-head", "origin", "--auto"], cwd=repo_dir, capture_output=True,
+                       text=True, timeout=FETCH_TIMEOUT, stdin=subprocess.DEVNULL, env=git_net_env())
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def fetch_base(repo_dir, base):
     """Bring base up to date from origin, and return it (it can change when
     origin's branches were never fetched). Only that branch when base is on
@@ -2881,8 +2901,7 @@ def fetch_base(repo_dir, base):
     try:
         r = subprocess.run(["git", "fetch", "--quiet", "origin", *([branch] if branch else [])], cwd=repo_dir,
                            capture_output=True, text=True, timeout=FETCH_TIMEOUT, stdin=subprocess.DEVNULL,
-                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get(
-                               "GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
+                           env=git_net_env())
         error = r.stderr.strip() if r.returncode else None
     except subprocess.TimeoutExpired:
         error = f"no answer from origin in {FETCH_TIMEOUT}s"
@@ -3018,6 +3037,10 @@ def make_worktree(s):
     # Already there when its tmux went before Claude started.
     if not (path / ".git").exists():
         with step(f"Fetching the latest {base}") as st:
+            if has_origin(repo_dir) and base == default_base(repo_dir):
+                origin_head(repo_dir)       # origin's default: it may be another branch by now
+                base = default_base(repo_dir)
+                st.text = f"Fetching the latest {base}"
             base, error = fetch_base(repo_dir, base)
             if error:
                 st.warn(f"Couldn't fetch, so from what was fetched last: {gist(error)}")
