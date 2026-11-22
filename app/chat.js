@@ -2990,8 +2990,8 @@ class Chat {
     const content = !this.view.content;
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
-    const cut = !!(this.row && this.row.interrupted);
-    const key = [now ? now.key || now.note : "composer", sleep, cut, this.view.composer, this.view.above.length, content].join("|");
+    const stopped = !!(this.row && this.row.interrupted);
+    const key = [now ? now.key || now.note : "composer", sleep, stopped, stopped && this.row.cut, this.view.composer, this.view.above.length, content].join("|");
     this.renderQueue();
     this.renderBackground();
     this.drawPills();
@@ -3007,10 +3007,11 @@ class Chat {
           onclick: () => this.post("keys", { keys: ["Enter"] }).catch((e) => toast(e.message)) }, "Start Claude again"))));
     } else if (this.view.composer) {
       if (now && now.exited) kids.push(h("div", { class: "dock-note" }, "Claude stopped. Send a message to start it again."));
-      // Its last turn was cut off (the machine ran out of memory): it says so,
-      // asleep or not (what you send wakes it all the same).
-      if (cut && sleep !== "waking") kids.push(h("div", { class: "dock-note interrupted" }, glyph("interrupted", "cut-mark"),
-        h("span", {}, "Interrupted before it finished."),
+      // Its last turn was cut off (the machine ran out of memory), or what it
+      // waited on in the background stopped with its Claude (row.cut): it says
+      // so, asleep or not (what you send wakes it all the same).
+      if (stopped && sleep !== "waking") kids.push(h("div", { class: "dock-note interrupted" }, glyph("interrupted", "cut-mark"),
+        h("span", { title: this.row.cut || null }, this.row.cut ? `Stopped before it ended: ${cut(this.row.cut, 90).replace(/[^.…]$/, "$&.")}` : "Interrupted before it finished."),
         h("button", { class: "text-btn resume", type: "button", title: `Send it: ${RESUME_TEXT}`,
                       onclick: () => this.post("send", { text: RESUME_TEXT }).catch((e) => toast(e.message)) }, "Resume")));
       // Asleep, what you send wakes it (with that as Claude's first message).

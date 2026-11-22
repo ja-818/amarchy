@@ -345,7 +345,8 @@ host's chats without anything else installed.
 - **Chats**: every chat a card (its project, its state, its goal and what it last
   said, its question's buttons), in **At work** (folded), **Now** and **For later**: pinned on top, then
   the one you last wrote to (`p` pins, `f` for later). **Needs you** (`o`) shows only
-  what asks you, what's blocked and what finished that you haven't opened yet. A done
+  what asks you, what's blocked, what was interrupted (**Resume**) and what finished
+  that you haven't opened yet. A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes
   it, with Undo.
 - **Tasks**: your agents' tasks first (each with its agent's picture and name, how
@@ -555,7 +556,8 @@ A chat never sleeps while something would be lost with its Claude:
 
 - it's working, or it's asking you something (a permission, a question);
 - a command Claude started is still running in the background and runs to an end
-  (a build, a test run);
+  (a build, a test run, a CI watch like `gh pr checks --watch`: what waits for
+  something to end is a run, never a server, `--watch` or not);
 - background agents are still at it (its conversation is still moving, or Claude is
   busy);
 - a `/loop` or a scheduled task is due to wake it;
@@ -580,9 +582,14 @@ touches it (below).
 
 A chat whose turn was **cut off** before it finished (the machine ran out of
 memory, or restarted, or Claude crashed) says **Interrupted**, asleep or not,
-instead of its last time or Ready. **Resume**, on its card and in the chat, tells it
-to carry on where it was cut off (and wakes it if it sleeps) (`amarchy list`:
-`interrupted`).
+instead of its last time or Ready. So does one whose Claude stopped while what it
+waited on still ran in the background (a CI watch, a test run): that stopped too,
+before it ended, and its Claude would wait forever for it. Its chat says what
+stopped, over the box you type in ("Stopped before it ended: Watch the PR's CI
+checks"), and the next thing it's sent tells its Claude, unseen in the chat, so it
+runs it again. Either way it needs you: it's under **Needs you**. **Resume**, on its
+card and in the chat, tells it to carry on where it was cut off (and wakes it if it
+sleeps) (`amarchy list`: `interrupted`, and `cut`: what stopped).
 
 ```sh
 amarchy sleep              # this chat, now (it says why not, if something would be lost)
@@ -885,7 +892,8 @@ first, then the one you last wrote to), and one count over it:
   further out, and the other chats, folded but for what's at work. A chat whose turn
   ended while what it started still runs (a test run, a helper) is at work too:
   **Running · what runs**, never Done, and completing it asks first, as it would stop
-  the run. A dev server it left serving doesn't count: it never ends.
+  the run. A dev server it left serving doesn't count: it never ends. A watch that
+  ends (`gh pr checks --watch`, "until they finish") is a run.
 
 Closing a chat is completing its mission (**Complete mission**, wherever Close used
 to be): your theme's colors burst over your wallpaper, a tick lands, **MISSION

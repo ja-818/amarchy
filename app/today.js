@@ -183,8 +183,9 @@ function todayParts(v) {
   // they do (asking you, its row says so and has its answers: todayAgent).
   const main = ss.find(isMain) || null;
   const agents = ss.filter((s) => s.assistant === "agent");
-  // Finished a turn you haven't opened: it needs you too (to see what it did).
-  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isAgent(s) && !todayBusy(s) && todayUnseen(s));
+  // Finished a turn you haven't opened: it needs you too (to see what it
+  // did). So does one cut off (interrupted): it won't go on until you Resume it.
+  const fresh = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !isAgent(s) && !todayBusy(s) && (todayUnseen(s) || s.interrupted === true));
   const rest = ss.filter((s) => !asks.includes(s) && !blocked.includes(s) && !fresh.includes(s) && !isAgent(s));
   const done = rest.filter((s) => !todayBusy(s) && ((s.today || {}).state === "done" || todayMergedAll(s)));
   const quietFor = (s) => now - ((s.today || {}).at || 0);
@@ -383,16 +384,19 @@ function todayStatePill(s) {
     return uiPill(s.permission ? "Permission" : "Asks you", "ask");
   if (s.status === "working") return uiPill("Working", "working");
   if (s.status === "running") return todayRunningPill(s);
-  if (s.interrupted) return todayInterruptedPill();
+  if (s.interrupted) return todayInterruptedPill(s);
   if (t.state === "blocked") return uiPill("Blocked", "late");
   if (t.state === "done") return uiPill("Done", "done");
   return uiPill(sleepOf(s) ? statusWords(s) : t.at ? autoPast(t.at) : statusWords(s), "quiet");
 }
 
 // Its turn was cut off before it finished (the machine ran out of memory,
-// Claude crashed): whatever its goal block said last, it isn't that.
-function todayInterruptedPill() {
-  return uiPill("Interrupted", "warn", { title: "Its last turn was cut off before it finished: send it something to carry on" });
+// Claude crashed), or what it waited on in the background stopped with its
+// Claude before it ended (s.cut: a CI watch, a test run): whatever its goal
+// block said last, it isn't that, and it won't go on by itself.
+function todayInterruptedPill(s) {
+  return uiPill("Interrupted", "warn", { title: s && s.cut ? `Stopped before it ended: ${s.cut}. Resume to run it again and go on`
+    : "Its last turn was cut off before it finished: send it something to carry on" });
 }
 
 function todayChip(s) { return s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo); }
@@ -638,7 +642,7 @@ function todayChat(s, kind) {
   const finished = (t.state === "done" || todayMergedAll(s)) && !running;
   const stalled = kind === "ready" && !todayBusy(s) && t.at && Date.now() / 1000 - t.at > TODAY_STALE;
   const pill = running ? todayRunningPill(s)
-    : s.interrupted ? todayInterruptedPill()
+    : s.interrupted ? todayInterruptedPill(s)
     : kind === "fresh" ? uiPill(merged ? `${uiMergedWords(merged)} · new` : finished ? "Done · new" : "New", "new")
     : merged ? uiPill(uiMergedWords(merged), "done")
     : kind === "done" ? uiPill("Done · not merged", "done") : kind === "stale" || stalled ? uiPill(`Stalled ${quiet}d`, "warn")
@@ -1086,7 +1090,7 @@ function todayKey(v) {
 // request, its questions' answers): the same, the same card (todayFill
 // keeps it, but for what it shows that changed).
 function todayRowKey(s) {
-  return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.asks,
+  return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.cut, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
     s.assistant_name, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
     uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)])]);
