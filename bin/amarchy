@@ -16956,36 +16956,39 @@ def app_service_on():
 
 
 def app_on():
+    """The app's server on, now and after every reboot, then on the tailnet
+    (tailscale serve). The server runs whatever the tailnet's state (the
+    desktop app here needs only it); what's missing for the tailnet is said,
+    and the exit is 1 until it's there."""
     status = tailscale_status()
     address = app_address(status)
-    if not shutil.which("tailscale") or not address:
-        # The desktop app here works without it (the local key); a phone needs the tailnet.
-        why = app_service_on()
-        if why:
-            return fail(why)
-        print(f"on, for this machine only (the desktop app here, on 127.0.0.1:{app_port()}). For your phone and "
-              f"other machines: install Tailscale and run `sudo tailscale up`, then amarchy app on again")
-        return 0
-    if not status.get("CertDomains"):
-        return fail("Tailscale has no HTTPS certificates for your tailnet yet: turn them on at "
-                    "https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this again")
-    if not app_users(status):
-        return fail(f"couldn't tell who owns this machine on Tailscale: set APP_USERS=<your login> in {HOST_CONFIG}")
-    target = f"http://127.0.0.1:{app_port()}"
-    taken = serve_config()
-    if taken and taken != target:
-        return fail(f"tailscale serve already sends port {app_https()} to {taken}: set APP_HTTPS=8443 "
-                    f"in {HOST_CONFIG} to put the app on another port")
     why = app_service_on()
     if why:
         return fail(why)
+    here = f"on, for this machine (the desktop app here, on 127.0.0.1:{app_port()})"
+    if not shutil.which("tailscale") or not address:
+        # The desktop app here works without it (the local key); a phone needs the tailnet.
+        print(f"{here}. For your phone and other machines: install Tailscale and run `sudo tailscale up`, "
+              f"then amarchy app on again")
+        return 0
+    if not status.get("CertDomains"):
+        return fail(f"{here}, but not on your tailnet yet: Tailscale has no HTTPS certificates for it. Turn them on at "
+                    "https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this again")
+    if not app_users(status):
+        return fail(f"{here}, but not on your tailnet yet: couldn't tell who owns this machine on Tailscale. "
+                    f"Set APP_USERS=<your login> in {HOST_CONFIG}, then run this again")
+    target = f"http://127.0.0.1:{app_port()}"
+    taken = serve_config()
+    if taken and taken != target:
+        return fail(f"{here}, but not on your tailnet yet: tailscale serve already sends port {app_https()} to {taken}. "
+                    f"Set APP_HTTPS=8443 in {HOST_CONFIG} to put the app on another port, then run this again")
     if taken != target:
         r = sh("tailscale", "serve", "--bg", f"--https={app_https()}", target)
         if r.returncode != 0:
             why = gist(r.stderr or r.stdout)
             if "access denied" in (r.stderr + r.stdout).lower():
-                why = "Tailscale won't let you change it: run `sudo tailscale set --operator=$USER` once"
-            return fail(f"couldn't serve it on your tailnet: {why}")
+                why = "Tailscale won't let you change it: run `sudo tailscale set --operator=$USER` once, then this again"
+            return fail(f"{here}, but couldn't serve it on your tailnet: {why}")
     if sh("loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger").stdout.strip() == "Linger=no":
         print("  Note: it stops when you log out of this machine. `sudo loginctl enable-linger $USER` keeps it running.")
     print(f"{app_url(address)}\n"

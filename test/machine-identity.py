@@ -66,5 +66,27 @@ check(kept.get("address") == "box.tail1234.ts.net" and kept.get("users") == ["me
 am.tailnet_last(None, set())
 check(am.tailnet_last().get("address") == "box.tail1234.ts.net", "nothing said: the last kept stays")
 
+print("amarchy app on: the server runs, whatever the tailnet's state")
+import contextlib, io
+calls = []
+am.app_service_on = lambda: calls.append("service") or None     # (never the live systemd)
+am.shutil.which = lambda name: "/usr/bin/" + name
+am.sh = lambda *a, **k: calls.append(a[:2]) or am.subprocess.CompletedProcess(a, 0, "", "")
+am.serve_config = lambda: None
+def on(status):
+    calls.clear()
+    am.tailscale_status = lambda: status
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = am.app_on()
+    return code, out.getvalue() + err.getvalue()
+code, said = on({})
+check(code == 0 and calls[:1] == ["service"] and "for this machine" in said, f"no Tailscale: on here, 0 ({said.strip()[:70]})")
+code, said = on({**STATUS})
+check(code == 1 and calls[:1] == ["service"] and "HTTPS certificates" in said and "for this machine" in said,
+      f"no HTTPS certificates: on here all the same, the tailnet's part said, 1 ({said.strip()[:90]})")
+code, said = on({**STATUS, "CertDomains": ["box.tail1234.ts.net"]})
+check(code == 0 and calls[0] == "service" and ("tailscale", "serve") in calls, "all there: on here, and on the tailnet")
+
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed'}")
 sys.exit(1 if failed else 0)

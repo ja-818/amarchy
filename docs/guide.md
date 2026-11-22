@@ -1486,9 +1486,11 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
   `<path>` there (requests, event streams, terminals), and nothing passes a
   request on twice.
 
-The app's server runs without Tailscale too (`amarchy app on` then serves this
-machine only, for the desktop app), and takes your tailnet as soon as Tailscale
-is up.
+The app's server runs without Tailscale too: `amarchy app on` always starts it
+for this machine (the desktop app), and puts it on your tailnet when Tailscale
+is up with HTTPS certificates (else it says what's missing). It takes the
+tailnet as soon as Tailscale is up, and keeps the last address and login
+Tailscale gave while it signs in again.
 
 Environment variables (set them where your login environment reads them, so that
 the app's service and the chats inherit them):
