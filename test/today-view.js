@@ -462,9 +462,12 @@ async function steady(p, where) {
 async function interrupted(p, where) {
   const set = (o) => p.evaluate((o) => { app.view = { ...app.view, sessions: app.view.sessions.map((x) => (x.id === "proj-later" ? { ...x, ...o } : x)) }; refresh(); }, o);
   await tab(p, "chats");
+  const needs = await p.evaluate(() => todayCount(app.view, "chats"));
   await set({ interrupted: true, sleeping: true });
   check(where, await until(p, () => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tpill");
                                        return !!c && c.textContent === "Interrupted" && c.classList.contains("t-warn"); }), "a turn cut off: its card says Interrupted");
+  check(where, await p.evaluate((n) => todayCount(app.view, "chats") === n + 1 && todayParts(app.view).fresh.some((s) => s.id === "proj-later"), needs),
+        "it needs you (Resume): under Needs you, counted");
   check(where, await p.evaluate(() => statusWords(row("proj-later")) === "Interrupted" && statusTone(row("proj-later")) === "interrupted"), "its state in words: Interrupted, asleep or not");
   await p.evaluate(() => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later]"); const sec = c && c.closest("details"); if (sec) sec.open = true; c && c.scrollIntoView(); });
   check(where, await until(p, () => [...document.querySelectorAll(".today:not([hidden]) .tcard[data-id=proj-later] .tbtn.resume.primary")].some((b) => b.textContent === "Resume")), "its card: Resume");
@@ -489,7 +492,19 @@ async function interrupted(p, where) {
   await unsent(p);
   await p.evaluate(() => go("#/"));
   await until(p, () => !(app.desk ? desk.current : app.session));
-  await set({ interrupted: false, sleeping: false });
+  // What it waited on in the background stopped with its Claude (a CI watch):
+  // its chat says what, and so does its card's pill.
+  await set({ interrupted: true, sleeping: true, cut: "Watch the PR's CI checks until they finish" });
+  check(where, await p.evaluate(() => /^Stopped before it ended: Watch the PR's CI checks until they finish\. Resume/.test(todayInterruptedPill(row("proj-later") || { cut: "" }).title)),
+        "a run cut: its pill says what stopped before it ended");
+  await p.evaluate(() => todayOpen(row("proj-later")));
+  check(where, await until(p, () => [...document.querySelectorAll(".chat-dock .dock-note.interrupted")].some((x) => x.offsetParent
+                                     && /Stopped before it ended: Watch the PR's CI checks until they finish\./.test(x.textContent))),
+        "and over the box in its chat");
+  await p.screenshot({ path: path.join(SHOTS, `${where}-cut-open.png`) });
+  await p.evaluate(() => go("#/"));
+  await until(p, () => !(app.desk ? desk.current : app.session));
+  await set({ interrupted: false, sleeping: false, cut: "" });
   check(where, await until(p, () => { const c = document.querySelector(".today:not([hidden]) .tcard[data-id=proj-later] .tpill"); return !c || c.textContent !== "Interrupted"; }), "carried on: not Interrupted any more");
 }
 

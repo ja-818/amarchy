@@ -302,7 +302,7 @@ spans[-1]["until"] = time.time()
 am.write_file(am.QUIET_TURNS / "fire-fire.jsonl", "".join(json.dumps(e) + "\n" for e in spans))
 (am.STATUS / "fire-fire").write_text("idle")        # (the hook: written down, then idle)
 check(am.quiet_last("fire-fire"), "its last turn ended quiet")
-am.write_file(am.agent_live_file("fire-fire"), json.dumps({"state": "idle", "pending": [], "queue": [], "turn": None,
+am.write_file(am.agent_live_file("fire-fire"), json.dumps({"state": "idle", "pid": os.getpid(), "pending": [], "queue": [], "turn": None,
                                                             "tasks": [{"task_id": "b1", "task_type": "local_bash", "description": "Run the hunt"}]}))
 row = next(s for s in am.session_view() if s["id"] == "fire-fire")
 check(row["status"] == "running" and row["quiet"] and am.app_row(row)["status"] == "idle" and am.app_row(row)["running"] == "",

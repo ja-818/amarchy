@@ -161,7 +161,9 @@ command's usage without running it (an option it doesn't know fails instead).
   running: it never ends, so the session counts as idle), `sleeping` (its Claude Code isn't running until the user types in it
   or sends it something; it still shows as idle), `interrupted` (idle, but its last
   turn was cut off before it finished: the machine ran out of memory or restarted,
-  Claude crashed; the user sees "Interrupted"), `unseen` (idle, and finished a
+  Claude crashed; or what it ran in the background stopped with its Claude before it
+  ended; the user sees "Interrupted"), `cut` (that run, in words: its Claude is
+  told with the next message it gets), `unseen` (idle, and finished a
   turn the user hasn't opened yet), `priority` (`high`, `normal`, `low`), `task`
   (what it's about: the user's name for it, else Claude Code's title cut down to
   "Keyword: a few words"), `claude_title` (Claude Code's whole title), `current`

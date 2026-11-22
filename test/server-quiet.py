@@ -42,7 +42,7 @@ check(len(written) == 2, "a change is written")
 agent.live["updated"] = time.time()     # one from an older broker's state
 agent.flush_live()
 check(len(written) == 2, "a stamp alone isn't a change")
-check(am.chat_live({"state": "idle", "updated": 1, "pid": 2}) == {"state": "idle"},
+check(am.chat_live({"state": "idle", "updated": 1, "pid": 2}) == {"state": "idle", "tasks": [], "cut": []},
       "the stream's live leaves the stamp out (an older broker's)")
 
 # A helper's step: under the activity it belongs to, news; under none, not.

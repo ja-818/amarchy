@@ -750,7 +750,7 @@ def save_session(s):
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
                "running", "serving", "unseen", "assistant", "assistant_name", "said", "said_at", "unread", "picture", "chime",
-               "today", "permission", "merged")
+               "today", "permission", "merged", "cut", "interrupted")
 
 
 def own_session_id():
@@ -3159,6 +3159,13 @@ SERVING_RUN = re.compile(r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|ser
                          r"|http\.server|\brunserver\b|\b(?:uvicorn|gunicorn|hypercorn|nodemon|live-server|webpack-dev-server)\b"
                          r"|\bflask\s+run\b|\brails\s+s(?:erver)?\b|\bphp\s+-S\b|\bjekyll\s+serve\b|\bhugo\s+server\b"
                          r"|\bamarchy\s+app\s+serve\b|--watch\b|\btail\s+-[fF]\b|\bjournalctl\b.*\s-f\b", re.I)
+# What waits for something to end, whatever else it says: a run, never a
+# server, though its command has --watch in it (`gh pr checks 310 --watch`) or
+# Claude called it watching ("Watch the PR's CI checks until they finish").
+# Claude goes on when it ends: its chat is Running, kept awake until then.
+RUNS_SAID = re.compile(r"\buntil\b|\bwait(?:s|ing)?\s+(?:for|on|until)\b", re.I)
+RUNS_CMD = re.compile(r"\bgh\s+(?:pr\s+checks|run\s+watch)\b|\bkubectl\s+(?:rollout\s+status|wait)\b"
+                      r"|--exit-status\b", re.I)
 _task_commands = {}     # task id -> its command ("" not found yet: (at, "") to look again later)
 
 
@@ -3196,14 +3203,19 @@ def task_command(task_id):
 def task_serves(t):
     """Whether a background task serves (a dev server, a watcher) rather than
     runs to an end: see SERVING_SAID. Helpers (subagents) and watches
-    (Monitor) end, and Claude goes on when they do."""
+    (Monitor) end, and Claude goes on when they do. By its command as the
+    chat engine kept it (the Bash call's, so the same whether it still runs
+    or not), else as its shell has it."""
     if t.get("task_type") != "local_bash":
         return False
     said = t.get("description") or ""
+    command = t.get("command") or task_command(t.get("task_id") or "")
+    # What says it waits for an end ("until they finish", gh pr checks --watch) runs.
+    if RUNS_SAID.search(said) or RUNS_CMD.search(command):
+        return False
     # "Run e2e against the dev server" is a test run: when in doubt, it runs
     # (a chat left Running costs less than a run stopped halfway).
-    return bool((SERVING_SAID.search(said) and not SERVING_NOT.search(said))
-                or SERVING_RUN.search(task_command(t.get("task_id") or "")))
+    return bool((SERVING_SAID.search(said) and not SERVING_NOT.search(said)) or SERVING_RUN.search(command))
 
 
 def task_words(t):
@@ -3522,7 +3534,7 @@ def shell_serves(pid, tasks=()):
     if task:
         return task_serves(task)
     command = re.sub(r"^.*?&& eval '?|'? < /dev/null.*$|' && pwd -P.*$", "", " ".join(cmdline(pid)), flags=re.S)
-    return bool(SERVING_RUN.search(command))
+    return bool(SERVING_RUN.search(command)) and not RUNS_CMD.search(command)
 
 
 def sleep_blockers(s, pane, procs, auto):
@@ -3547,13 +3559,13 @@ def sleep_blockers(s, pane, procs, auto):
             reasons.append("it's waiting for your answer")
         # What only serves (a dev server) doesn't keep it awake: it's stopped
         # with it (put_to_sleep), unless you have its page open.
-        runs = [t for t in live.get("tasks") or [] if isinstance(t, dict) and not task_serves(t)]
+        runs = [t for t in live_tasks(live) if not task_serves(t)]
         if runs:
             reasons.append(f"a task is running in the background ({runs[0].get('description') or ''})")
         if live.get("queue"):
             reasons.append("a message is waiting to go in")
     shells = [p for p in descendants(pid, procs) if "/shell-snapshots/" in " ".join(cmdline(p))
-              and not shell_serves(p, live.get("tasks") or [])]
+              and not shell_serves(p, live_tasks(live))]
     if shells:
         command = " ".join(cmdline(shells[0]))
         command = re.sub(r"^.*?&& eval '?|'? < /dev/null.*$|' && pwd -P.*$", "", command)[:60]
@@ -5707,8 +5719,8 @@ def session_view():
         # Claude Code background sessions (/bg) still running in its worktree, and on the
         # chat engine the background tasks its Claude runs (live.json's tasks).
         bgs = background_sessions(s, background)
-        live = agent_live(s["id"]) if engine(s) == "chat" and s["awake"] else {}
-        tasks = live.get("tasks") or []
+        live = agent_live(s["id"]) if engine(s) == "chat" else {}
+        tasks = live_tasks(live) if s["awake"] else []
         s["background"] = len(bgs) + len(tasks)
         # Its turn ended, but something it started still runs to an end (a test
         # run, a helper): it's at work, "running", not done; Claude Code wakes
@@ -5732,8 +5744,13 @@ def session_view():
         s["previews"] = preview_shown(s)
         s.pop("preview", None)
         # Its last turn was cut off (the machine ran out of memory, Claude
-        # crashed): idle, but not done. Asleep or not, it says so.
-        s["interrupted"] = interrupted(s)
+        # crashed), or what it ran in the background to go on from (a CI
+        # watch, a test run) stopped with its Claude before it ended
+        # (live_cut: it would wait for it forever): idle, but not done.
+        # Asleep or not, it says so, and what was cut.
+        cut = live_cut(live) if not s.get("setup") else []
+        s["cut"] = task_words(cut[0]) if cut else ""
+        s["interrupted"] = (bool(cut) and s["status"] == "idle") or interrupted(s)
         # Done, and you haven't opened it since.
         s["unseen"] = s["status"] == "idle" and not s.get("setup") and not s["interrupted"] and unseen(s["id"])
         # The secrets its Claude asks you for (amarchy secret ask): a card each.
@@ -9818,7 +9835,7 @@ def app_closing(s):
     halfway (a test run, a helper; not a dev server, which only serves)."""
     path = Path(s["path"])
     changes = len(sh("git", "status", "--porcelain", cwd=path).stdout.splitlines()) if path.is_dir() else 0
-    tasks = (agent_live(s["id"]).get("tasks") or []) if engine(s) == "chat" else []
+    tasks = live_tasks(agent_live(s["id"])) if engine(s) == "chat" else []
     runs, _ = background_runs(tasks, background_sessions(s))
     # Its previews stop too (and are checked gone: the close itself says if one isn't).
     running = [p["url"] for p in previews(s) if p.get("run") and preview_state(s, p) in ("up", "starting")]
@@ -10276,6 +10293,8 @@ def chat_live(live, s=None):
     if not live:
         return None
     out = {k: v for k, v in live.items() if k not in ("pid", "claude_pid", "socket", "updated", "turn")}
+    # What still runs, and what stopped with its Claude before it ended (live_cut).
+    out["tasks"], out["cut"] = live_tasks(live), live_cut(live)
     if isinstance(live.get("queue"), list):
         out["queue"] = [m for m in live["queue"] if isinstance(m, dict) and not m.get("elsewhere")]
     if s and turn_hold(s, live) is not None:
@@ -15869,6 +15888,49 @@ def agent_live(sid):
         return {}
 
 
+def live_tasks(live):
+    """What a chat's Claude runs in the background now (live.json's tasks):
+    nothing once its broker has stopped (asleep, a crash, a restart), as what
+    it ran stopped with it."""
+    pid = live.get("pid")
+    up = live.get("state") != "exited" and isinstance(pid, int) and Path(f"/proc/{pid}").exists()
+    return [t for t in live.get("tasks") or [] if isinstance(t, dict)] if up else []
+
+
+def live_cut(live):
+    """What a chat's Claude ran in the background when it stopped, that never
+    reached its end (a test run, a CI watch, a helper; not a server, which
+    sleep stops by design): Claude Code won't say it ended, so its Claude
+    would wait for it forever. live.json's cut (Agent.claude_ended), and what
+    a broker that's gone without saying so (killed outright, a reboot) still
+    lists as running. Told to its Claude with the next message (Agent.deliver)."""
+    cut = [t for t in live.get("cut") or [] if isinstance(t, dict)]
+    if live.get("tasks") and not live_tasks(live):
+        cut += [t for t in live["tasks"] if isinstance(t, dict) and not task_serves(t)]
+    return cut
+
+
+CUT_KEEP = 5        # runs cut kept for the next Claude to be told of, the latest
+
+
+def cut_note(cut):
+    """What a chat's Claude is told, after the next message, of what it ran
+    in the background that stopped with the Claude before it (live_cut): a
+    reminder the chat doesn't show (user_item). Without it, it would wait for
+    a notification that never comes."""
+    lines = []
+    for t in cut[-CUT_KEEP:]:
+        what = task_words(t)
+        command = " ".join(str(t.get("command") or "").split())[:300]
+        lines.append(f"- {what}" + (f" (`{command}`)" if command and command != what else ""))
+    one = len(lines) == 1
+    return ("<system-reminder>\namarchy: your Claude Code stopped since your last turn (it slept, restarted or "
+            f"crashed), and what you left running in the background stopped with it, before it ended:\n"
+            + "\n".join(lines) + f"\nNo notification will come for {'it' if one else 'them'}, and "
+            f"{'its' if one else 'their'} output may be cut short or gone. Run {'it' if one else 'them'} again "
+            "if you still need to, then go on.\n</system-reminder>")
+
+
 # A turn cut off: Claude was stopped in the middle of one (the machine ran
 # out of memory, it restarted, Claude crashed), so it never ended with a
 # result. Told by Claude's own output (stream.jsonl): the last of it that says
@@ -16392,6 +16454,7 @@ class Agent:
         self.live = {"pid": os.getpid(), "claude_pid": None, "state": "starting", "since": time.time(),
                      "conversation": conversation_id(self.sid) or None, "model": None, "effort": None, "permission_mode": None,
                      "pending": [], "partial": "", "thinking": False, "activity": None, "tasks": [],
+                     "cut": [],      # what the Claude before ran that never reached its end (live_cut)
                      "queue": [], "attachments": 0, "rate_limits": {}, "turns": 0, "cost_usd": 0.0,
                      "last_result": None, "account": None, "version": None, "socket": str(self.sock_path),
                      "title": None, "error": None,
@@ -16418,6 +16481,8 @@ class Agent:
         self.taken = set()          # amarchy send's notes matched to a message already (sent_by_taken)
         self.delivered = {}         # our messages given to Claude: uuid -> {elsewhere, at, what}, until it starts on them
         self.ended = time.time()    # when the last turn ended (its result): what comes after is the next one's
+        self.bg_calls = {}          # Bash calls run in the background: tool_use id -> command
+        self.bg_commands = {}       # their tasks: task id -> command (live["tasks"]' command: task_serves)
 
     # ---- output to the pane
 
@@ -16584,6 +16649,14 @@ class Agent:
             self.busy = True
             elsewhere = bool(message.get("elsewhere"))
             what = message_text(message["content"])[:200]
+            # What stopped with the Claude before this one, before it ended
+            # (live_cut): said to Claude after your words, unseen in the chat.
+            cut, self.live["cut"] = self.live.get("cut") or [], []
+            if cut:
+                content = message["content"]
+                blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
+                message = {**message, "content": [*blocks, {"type": "text", "text": cut_note(cut)}]}
+                self.out(f"  · told Claude what stopped before it ended: {', '.join(task_words(t) for t in cut)}"[:400], dim=True)
             self.delivered[message["uuid"]] = {"elsewhere": elsewhere, "at": now, "what": what}
             if len(self.delivered) > 50:        # (ones Claude never started on: a stop, an exit)
                 self.delivered = dict(list(self.delivered.items())[-50:])
@@ -16779,10 +16852,25 @@ class Agent:
         elif kind == "system" and sub == "background_tasks_changed":
             with self.lock:
                 # When each began (Claude Code doesn't say): when we first saw it.
-                began = {t.get("task_id"): t.get("started") for t in live.get("tasks") or []}
-                live["tasks"] = [{**t, "started": began.get(t.get("task_id")) or time.time()}
+                # Its command, the Bash call's (task_started says which call).
+                was = {t.get("task_id"): t for t in live.get("tasks") or []}
+                live["tasks"] = [{**t, "started": (was.get(t.get("task_id")) or {}).get("started") or time.time(),
+                                  **self.task_command(t.get("task_id"))}
                                  for t in o.get("tasks") or [] if isinstance(t, dict)]
             self.changed(True)
+        elif kind == "system" and sub == "task_started":
+            # Which Bash call a background task runs: its command, so what it
+            # is (a run, a server: task_serves) is known whether it runs or not.
+            with self.lock:
+                command = self.bg_calls.pop(o.get("tool_use_id"), None)
+                if command and o.get("task_id"):
+                    self.bg_commands[o["task_id"]] = command
+                    while len(self.bg_commands) > 200:
+                        self.bg_commands.pop(next(iter(self.bg_commands)))
+                    for t in live.get("tasks") or []:
+                        if t.get("task_id") == o["task_id"]:
+                            t["command"] = command
+            self.changed()
         elif kind == "system" and sub == "task_notification":
             self.out(f"  ⏺ background task {o.get('status', 'done')}: {o.get('summary') or o.get('task_id')}", dim=True)
         elif kind == "system" and sub == "session_title_changed":
@@ -16902,7 +16990,21 @@ class Agent:
                 self.live["thinking"] = False
             self.changed()
 
+    def task_command(self, task_id):
+        """A background task's command, as a field of its live["tasks"] entry ({} unknown)."""
+        command = self.bg_commands.get(task_id)
+        return {"command": command} if command else {}
+
     def on_assistant(self, o):
+        # A command run in the background (a helper's too): its task says
+        # which call it is when it starts (task_started).
+        for block in o["message"].get("content") or []:
+            given = block.get("input") if block.get("type") == "tool_use" and block.get("name") == "Bash" else None
+            if isinstance(given, dict) and given.get("run_in_background") and isinstance(given.get("command"), str):
+                with self.lock:
+                    self.bg_calls[block.get("id")] = given["command"][:2000]
+                    while len(self.bg_calls) > 200:
+                        self.bg_calls.pop(next(iter(self.bg_calls)))
         if o.get("parent_tool_use_id"):
             # A helper's (subagent's): the step it's on, under its Agent call's.
             steps = [b for b in o["message"].get("content") or [] if b.get("type") == "tool_use"]
@@ -17264,6 +17366,17 @@ class Agent:
         except AttributeError:
             pass
 
+    def claude_ended(self, code):
+        """Its Claude has exited (asleep, stopped, crashed), and what it ran in
+        the background with it. What would have run to an end (a test run, a
+        CI watch, a helper) is cut: it never will, and Claude Code won't say so
+        (live_cut). A server only stops, as sleep means it to."""
+        with self.lock:
+            runs = [{**t, "cut_at": time.time()} for t in self.live.get("tasks") or []
+                    if isinstance(t, dict) and not task_serves(t)]
+            self.live.update(state="exited", pending=[], partial="", activity=None, exit_code=code, tasks=[],
+                             cut=([*(self.live.get("cut") or []), *runs])[-CUT_KEEP:])
+
     def run(self):
         s = self.s
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -17274,6 +17387,9 @@ class Agent:
             print(f"\n  \033[31mThis conversation is open in another Claude already (pid {other.get('pid')}, "
                   f"the {other.get('engine')} engine).\033[0m\n", flush=True)
             return 1
+        # What the Claude before this one ran in the background that never
+        # reached its end (live_cut): this one is told with its first message.
+        self.live["cut"] = live_cut(agent_live(self.sid))[-CUT_KEEP:]
         path = Path(s["path"])
         os.chdir(path)
         os.environ["PWD"] = str(path)
@@ -17353,8 +17469,8 @@ class Agent:
             threading.Thread(target=self.read_tty, daemon=True).start()
         code = self.claude.wait()
         self.done.set()
+        self.claude_ended(code)
         with self.lock:
-            self.live.update(state="exited", pending=[], partial="", activity=None, exit_code=code)
             queued, self.queue = self.queue, []
             # Not sent yet: the next Claude of this session starts with them,
             # their images attached again for it.
