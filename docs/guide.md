@@ -592,6 +592,19 @@ All three run `amarchy open`, which takes a chat too (`amarchy open
 amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
 a browser window (an Omarchy web app).
 
+**The theme live**: a theme called **Omarchy (live)** made from the desktop's
+look as it is now: its colors and what its menus and popups look like (your
+own `~/.config/omarchy/shell.toml` over the theme's, as the shell reads it),
+the corners Hyprland draws, the wallpaper on the desktop (cut for a phone and a
+computer) and the font Omarchy set. Pick it in **Settings → Look** on any of
+your devices (its font comes with it). When the desktop's look changes (a theme
+switched, a wallpaper, the font, your shell.toml or `looknfeel.lua`), it's made
+again and sent on, and every app wearing it changes too: Omarchy's `theme-set`
+hook and a systemd path unit (`amarchy-omarchy-look.path`, the kernel telling it
+a file changed) run `amarchy theme --omarchy`; nothing checks every few seconds.
+It's kept on the desktop and sent to every machine paired with it (the server
+the desktop app shows), which keeps the last one it got.
+
 **Which chats**: the board the desktop app shows. This machine's own amarchy
 when it has chats (or merges your other machines' in); else the first machine
 you paired with it that answers (`amarchy machines add <your server>`; see
@@ -761,6 +774,9 @@ browser. Every phone and browser wears it at once.
 - **Font**: JetBrains Mono (Omarchy's), Caskaydia Mono or Fira Code, the Nerd Font
   builds with the icons the list uses, or System (the device's own monospace, SF
   Mono on Apple's).
+- **Omarchy (live)**: your Omarchy desktop's own look, as it is now (see
+  [On Omarchy](#on-omarchy)): it changes when the desktop's does. Picked, it
+  wears the desktop's font too.
 - **Wallpaper**: one of Omarchy's own for the theme, every one Omarchy ships with it
   (a little picture of each to pick from; a theme remembers which), your own
   (choose a picture: it's cut to a phone's screen and a computer's, in the browser),
@@ -1479,6 +1495,7 @@ amarchy machines found [--json]       machines of yours that answer as amarchy, 
 On Omarchy (see On Omarchy):
 amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]   the desktop app at the front, on that chat
 amarchy bar [--follow]                what the Ⓐ in the bar shows (JSON); --follow: again on every change
+amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's look and send it to your machines
 
 Look and sound:
 amarchy theme [--show]                print the theme, the font and the wallpaper

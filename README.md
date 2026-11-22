@@ -55,7 +55,8 @@ One board says which one needs you and what for. You answer with a tap.
   app on a computer. Both work over your private Tailscale network, not the internet.
 - **At home on Omarchy.** The **Ⓐ** in the bar lights up when a chat needs you and says how
   many; click it and you're on that chat. **Super + Alt + A** brings amarchy to the front, and
-  it's in the Omarchy menu.
+  it's in the Omarchy menu. Pick **Omarchy (live)** and the app wears your desktop's theme,
+  wallpaper and font, on every device, changing when the desktop's does.
 
 ## Install
 

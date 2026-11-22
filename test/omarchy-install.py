@@ -61,6 +61,7 @@ else:
     print("ok")
 '''
 FAKE_HYPRCTL = '#!/bin/sh\necho "$@" >> "$HOME/hyprctl-calls"\necho ok\n'
+FAKE_SYSTEMCTL = '#!/bin/sh\necho "$@" >> "$HOME/systemctl-calls"\n'
 
 MENU_PARSE = r'''
 const fs = require("fs"), vm = require("vm");
@@ -85,6 +86,7 @@ def home_setup(base, omarchy=True):
     fakes.mkdir()
     (fakes / "omarchy-shell").write_text(FAKE_SHELL)
     (fakes / "hyprctl").write_text(FAKE_HYPRCTL)
+    (fakes / "systemctl").write_text(FAKE_SYSTEMCTL)
     for f in fakes.iterdir():
         f.chmod(0o755)
     env = {"HOME": str(home), "PATH": f"{fakes}:/usr/bin:/bin", "HYPRLAND_INSTANCE_SIGNATURE": "test",
@@ -157,6 +159,22 @@ def main():
         check("its action runs amarchy open", entry and entry["action"] == f"'{home}/.local/bin/amarchy' open",
               entry and entry["action"])
         check("placed once (marker)", (home / ".local/state/amarchy/omarchy-bar-placed").is_file())
+        hook = home / ".config/omarchy/hooks/theme-set.d/amarchy"
+        check("Omarchy's theme-set hook makes the live theme", hook.is_file() and os.access(hook, os.X_OK)
+              and "amarchy-omarchy-look.service" in hook.read_text())
+        units = home / ".config/systemd/user"
+        path_unit = (units / "amarchy-omarchy-look.path").read_text() if (units / "amarchy-omarchy-look.path").exists() else ""
+        check("a path unit follows the wallpaper, the font, the theme and your overrides",
+              all(f"PathChanged=%h/{f}" in path_unit for f in (
+                  ".local/state/omarchy/current\n", ".local/state/omarchy/current/theme.name",
+                  ".config/fontconfig/fonts.conf", ".config/omarchy/shell.toml", ".config/hypr/looknfeel.lua")), path_unit)
+        service = (units / "amarchy-omarchy-look.service").read_text() if (units / "amarchy-omarchy-look.service").exists() else ""
+        check("its service runs amarchy theme --omarchy", f"ExecStart={home}/.local/bin/amarchy theme --omarchy --quiet"
+              in service, service)
+        sysd = (home / "systemctl-calls").read_text().splitlines()
+        check("enabled, and made once now", "--user daemon-reload" in sysd and "--user enable --now amarchy-omarchy-look.path"
+              in sysd and "--user start --no-block amarchy-omarchy-look.service" in sysd, sysd)
+        (home / "systemctl-calls").unlink()
 
         backups = sorted(str(p) for p in home.rglob("*.amarchy-bak.*"))
         check("a backup of each file it changed", len(backups) == 2, backups)
@@ -164,6 +182,8 @@ def main():
         # Again: nothing new, nothing said, no backups.
         r2 = run(env)
         check("second run changes nothing", snapshot(home) == after and not r2.stdout.startswith("\x1b[1m"), r2.stdout)
+        check("second run: systemd not reloaded for nothing",
+              "--user daemon-reload" not in (home / "systemctl-calls").read_text(), (home / "systemctl-calls").read_text())
         check("no backup made for nothing", sorted(str(p) for p in home.rglob("*.amarchy-bak.*")) == backups)
 
         # You took the Ⓐ off the bar: an update doesn't put it back.
@@ -184,6 +204,10 @@ def main():
         check("uninstall takes the plugin link away", ".config/omarchy/plugins/amarchy.chats" not in gone)
         check("uninstall forgets the bar was placed", ".local/state/amarchy/omarchy-bar-placed" not in gone)
         check("uninstall says what it took", "Took away" in r.stdout, r.stdout)
+        check("uninstall takes the live theme's hook and units away", not hook.exists()
+              and not (units / "amarchy-omarchy-look.path").exists() and not (units / "amarchy-omarchy-look.service").exists())
+        check("uninstall stops the path unit", "--user disable --now amarchy-omarchy-look.path"
+              in (home / "systemctl-calls").read_text())
 
     # Installed, then uninstalled with the Ⓐ still on the bar: off the bar too.
     with tempfile.TemporaryDirectory() as base:
@@ -207,6 +231,25 @@ def main():
         run(env, "--uninstall")
         layout, plugins = bar_ids(home)
         check("without a shell, uninstall takes it out of shell.json", "amarchy.chats" not in sum(layout.values(), []) + plugins, layout)
+
+    # A bar as Omarchy ships it (no shell.json yet), no shell running: Omarchy's
+    # defaults, with the Ⓐ.
+    with tempfile.TemporaryDirectory() as base:
+        home, env = home_setup(base)
+        (home / ".config/omarchy/shell.json").unlink()
+        (home / "SHELL_DOWN").write_text("")
+        r = run(env)
+        check("no shell.json and no shell: install runs", r.returncode == 0, r.stderr + r.stdout)
+        made = json.loads((home / ".config/omarchy/shell.json").read_text()) \
+            if (home / ".config/omarchy/shell.json").exists() else {}
+        shipped = json.loads((SRC / "config/omarchy/shell.json").read_text())
+        check("no shell.json: Omarchy's defaults, with the Ⓐ at the end of the left",
+              made.get("bar", {}).get("layout", {}).get("left", [])[-1:] == [{"id": "amarchy.chats"}]
+              and made["bar"]["layout"]["left"][:-1] == shipped["bar"]["layout"]["left"], made.get("bar"))
+        check("no shell.json: the key and the menu too", "-- amarchy" in (home / ".config/hypr/hyprland.lua").read_text()
+              and (home / ".config/systemd/user/amarchy-omarchy-look.path").exists())
+        run(env, "--uninstall")
+        check("no shell.json before: none after uninstall", not (home / ".config/omarchy/shell.json").exists())
 
     # What an amarchy from before left: its plugin "amarchy" (on the bar and in
     # plugins[]), its load line, its menu block, and the menu with an entry of
@@ -233,7 +276,9 @@ def main():
         (home / ".config/omarchy/hooks/theme-set.d/amarchy").write_text(
             '#!/bin/bash\n# Installed by amarchy\n[[ -x x ]] && "x/amarchy" theme --refresh\nexit 0\n')
         r = run(env)
-        check("old theme hook gone", not (home / ".config/omarchy/hooks/theme-set.d/amarchy").exists())
+        hook = home / ".config/omarchy/hooks/theme-set.d/amarchy"
+        check("old theme hook replaced by the live theme's", hook.is_file() and "theme --refresh" not in hook.read_text()
+              and "amarchy-omarchy-look" in hook.read_text())
         check("install over an old one runs", r.returncode == 0, r.stderr)
         layout, plugins = bar_ids(home)
         check("old plugin off the bar and out of plugins[]", "amarchy" not in sum(layout.values(), []) + plugins,

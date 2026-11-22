@@ -147,6 +147,12 @@ Theme (the app's look, on every phone and browser; Settings, Look in the app):
                                         wears a wallpaper drawn for it)
   amarchy theme --cut [--in-background] cut the fonts (text and icons apart, with fontTools) and your own
                                         wallpapers smaller for the app (install.sh and the app start it)
+  amarchy theme --omarchy [--force] [--quiet] [--in-background]
+                                        on an Omarchy desktop: make "Omarchy (live)" (omarchy-live) from its
+                                        theme now (colors, menus, corners, wallpaper, font), keep it here and
+                                        send it to your machines; Omarchy's hook and a path unit run it when
+                                        Omarchy's look changes. Nothing changed and sent: nothing done
+                                        (--force: again anyway)
 
 Sound (the chime the app plays in a browser when a session needs you or is done):
   amarchy sound [--show]                print it
@@ -8788,6 +8794,8 @@ def look_set(theme=None, font=None, wallpaper=None, own=None, background=None, c
     if theme is not None and theme not in look_themes() and theme not in custom_themes():
         return f"no theme called {theme!r} (see amarchy theme --list)"
     fonts = look_fonts()
+    if theme == OMARCHY_LIVE and font is None and f"custom-{OMARCHY_LIVE}" in fonts:
+        font = f"custom-{OMARCHY_LIVE}"     # Omarchy's font comes with it, and follows it (see "the theme live")
     if font is not None and font not in fonts:
         return f"no font called {font!r} ({', '.join(fonts)})"
     if wallpaper is not None and wallpaper not in LOOK_WALLPAPERS:
@@ -9592,6 +9600,10 @@ def walls_said(fetch):
 
 def cmd_theme(args):
     """`amarchy theme`: the app's theme, font and wallpaper."""
+    if "--omarchy" in args:     # "Omarchy (live)" made again (see "the theme live")
+        return cmd_theme_omarchy(args)
+    if "--force" in args:
+        return fail("theme --force goes with --omarchy")
     theme = font = wallpaper = wall_arg = None
     own, listing, as_json, refresh, later, quiet, cut = None, False, False, False, False, False, False
     it = iter(args)
@@ -15661,6 +15673,36 @@ def app_handler(st, users, address):
                     later.daemon = True
                     later.start()
 
+        def do_PUT(self):
+            """PUT /api/peer/look: "Omarchy (live)" from an Omarchy desktop of
+            yours (see "the theme live"); only another machine of yours sends
+            it (its pairing key), never a page."""
+            self.here()
+            if self.path.partition("?")[0] != "/api/peer/look":
+                return self.error(404, "not found")
+            # Its body read first (bounded): whatever is said back then
+            # reaches the sender whole, not cut off by its own sending.
+            raw = self.read_body(LOOK_PUT_MAX)
+            if raw is None:
+                return self.error(413, "that theme is too big")
+            if not self.allowed(write=True):
+                return
+            if self.via != "peer":
+                return self.error(403, "only from another machine of yours")
+            try:
+                data = json.loads(raw or b"{}")
+                files = {str(f): base64.b64decode(str(v), validate=True) for f, v in (data.get("files") or {}).items()}
+            except (ValueError, AttributeError, TypeError):
+                return self.error(400, "a theme is JSON: {key, theme, files: {name: base64}}")
+            if data.get("key") != OMARCHY_LIVE:
+                return self.error(400, f"only {OMARCHY_LIVE} comes from another machine")
+            why = look_custom_put(OMARCHY_LIVE, data.get("theme"), files)
+            if why:
+                return self.error(400, why)
+            st.poke.set()       # on every page now: theme.css again, if it's worn
+            print(f"amarchy app: {OMARCHY_LIVE_NAME} from {self.peer}", file=sys.stderr, flush=True)
+            return self.send(200, {"key": OMARCHY_LIVE, "worn": look_worn()["theme"] == OMARCHY_LIVE})
+
         def post_request(self):
             if self.path.partition("?")[0] == "/api/share":     # from the phone's share sheet: not a page's
                 return self.share_in()
@@ -17807,6 +17849,312 @@ def cmd_open(args):
     return 0
 
 
+# ---- the theme live: "Omarchy (live)"
+#
+# A theme of yours (custom_themes, app/custom/omarchy-live) made from this
+# desktop's Omarchy theme as it is now: its colors (current/theme/colors.toml)
+# and what its shell.toml says of menus, popups and controls (your own
+# ~/.config/omarchy/shell.toml over it, as the shell reads them), turned into
+# the app's tokens the way amarchy's own themes are (app_look_vars,
+# docs/design-tokens.md); Hyprland's rounding; the wallpaper on the desktop
+# now (current/background), cut for a phone and a computer; and the monospace
+# font Omarchy set (fontconfig), with its files, so it's worn everywhere.
+#
+# `amarchy theme --omarchy` makes it, keeps it here and sends it to every
+# machine paired with this one (PUT /api/peer/look), so the board wears it
+# wherever you pick it (Settings → Look); a machine keeps the last one it was
+# sent. It's made again when Omarchy's changes, by events, never by polling:
+# Omarchy's theme-set hook, and a systemd path unit (amarchy-omarchy-look.path,
+# installed by omarchy/install.sh) for the wallpaper, the font, the theme's
+# name and your shell.toml and looknfeel.lua. Made the same as last time and
+# sent everywhere already, it does nothing.
+
+# Where Omarchy keeps them: under $HOME always, as its own scripts do (not XDG's).
+OMARCHY_CURRENT = HOME / ".local/state/omarchy/current"
+OMARCHY_CONFIG = HOME / ".config"
+OMARCHY_LIVE = "omarchy-live"               # its key, in app/custom
+OMARCHY_LIVE_NAME = "Omarchy (live)"
+OMARCHY_LIVE_SENT = STATE / "omarchy-live.json"     # what was made last ({"sig"}) and sent where ({"sent": {machine: sig}})
+LOOK_FONT_MAX = 12_000_000          # bytes of one font file a live theme carries
+LOOK_PUT_MAX = 48_000_000           # bytes of a theme a machine of yours sends (its files, in base64)
+FONT_MAGIC = {"ttf": (b"\x00\x01\x00\x00", b"true"), "otf": (b"OTTO",), "woff": (b"wOFF",), "woff2": (b"wOF2",)}
+
+
+def toml_merge(base, over):
+    """over's keys on base's, section by section (as the shell takes your
+    shell.toml over the theme's)."""
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = toml_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def omarchy_rounding(theme_dir):
+    """The corners Hyprland draws now (decoration:rounding), else what the
+    theme's hyprland.lua says, else Omarchy's 0."""
+    env = hypr_env()
+    if env:
+        try:
+            r = subprocess.run(["hyprctl", "-j", "getoption", "decoration:rounding"], env=env, capture_output=True,
+                               text=True, timeout=5)
+            value = json.loads(r.stdout or "{}").get("int")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return min(max(value, 0), 40)
+        except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+            pass
+    try:
+        m = re.search(r"(?m)^\s*rounding\s*=\s*(\d+)", (theme_dir / "hyprland.lua").read_text())
+    except OSError:
+        m = None
+    return min(int(m.group(1)), 40) if m else 0
+
+
+def omarchy_font():
+    """The monospace font Omarchy set (fontconfig, as omarchy-font-current
+    reads it): {"family", "nerd", "files": {"regular": (name, bytes),
+    "bold": ...}}: amarchy's own files when it's one of amarchy's fonts, else
+    the font's own (TTF or OTF, not too big). None when there's none to send."""
+    if not shutil.which("fc-match"):
+        return None
+    family = sh("fc-match", "monospace", "-f", "%{family}").stdout.split(",")[0].strip()
+    if not family:
+        return None
+    ours = next((k for k, (_, f) in LOOK_FONTS.items() if f and f.lower() == family.lower()), None)
+    files = {}
+    for weight, style in (("regular", "regular"), ("bold", "bold")):
+        if ours:
+            f = FONTS / ours / f"{weight}.woff2"
+        else:
+            found = sh("fc-match", f"{family}:style={style}", "-f", "%{file}").stdout.strip()
+            f = Path(found) if found else None
+            if f and sh("fc-match", f"{family}:style={style}", "-f", "%{family}").stdout.split(",")[0].strip().lower() \
+                    != family.lower():
+                f = None        # fontconfig fell back to another font: not this one's
+        kind = f.suffix[1:].lower() if f else ""
+        try:
+            raw = f.read_bytes() if f and kind in FONT_MAGIC and f.stat().st_size <= LOOK_FONT_MAX else b""
+        except OSError:
+            raw = b""
+        if raw.startswith(FONT_MAGIC.get(kind, (b"\xff",))):
+            files[weight] = (f"{weight}.{kind}", raw)
+    if "regular" not in files:
+        return None
+    return {"family": re.sub(r"[^\w .-]", "", family)[:64], "nerd": "nerd" in family.lower() or bool(ours),
+            "files": files}
+
+
+def omarchy_live_make():
+    """"Omarchy (live)" as this desktop's Omarchy theme is now: {"theme": its
+    theme.json, "files": {name: bytes}, "sig"}, or a string saying why not."""
+    import tomllib
+    theme_dir = OMARCHY_CURRENT / "theme"
+    try:
+        colors = theme_colors((theme_dir / "colors.toml").read_text())
+    except OSError:
+        return "no Omarchy theme here (~/.local/state/omarchy/current/theme)"
+    if not colors:
+        return "Omarchy's colors.toml doesn't read"
+    shell = {}
+    for f in (theme_dir / "shell.toml", OMARCHY_CONFIG / "omarchy/shell.toml"):
+        try:
+            shell = toml_merge(shell, tomllib.loads(f.read_text()))
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
+    variables, mode = app_look_vars(colors, shell or look_shell(colors, {}), omarchy_rounding(theme_dir))
+    try:
+        name = (OMARCHY_CURRENT / "theme.name").read_text().strip()[:40]
+    except OSError:
+        name = ""
+    files, wallpaper = {}, None
+    background = OMARCHY_CURRENT / "background"
+    if background.exists():
+        cut = {w: wallpaper_small(background.resolve(), w) for w in ("phone", "wide")}
+        if all(cut.values()):
+            wallpaper = {}
+            for w, raw in cut.items():
+                f = f"{'wallpaper' if w == 'phone' else 'wallpaper-wide'}.{image_kind(raw)}"
+                files[f], wallpaper[w] = raw, f
+    font = omarchy_font()
+    if font:
+        files.update(dict(font["files"].values()))
+        font = {**font, "files": {w: f for w, (f, _) in font["files"].items()}}
+    theme = {"name": OMARCHY_LIVE_NAME, "mode": mode, "vars": variables, "terminal": {}, "wallpaper": wallpaper,
+             "font": font, "from": f"{name or 'Omarchy'} on {machine_label()}",
+             "omarchy": {"theme": name, "machine": machine_name()}}
+    sig = hashlib.sha1(json.dumps(theme, sort_keys=True).encode()
+                       + b"".join(hashlib.sha1(files[f]).digest() for f in sorted(files))).hexdigest()
+    return {"theme": theme, "files": files, "sig": sig}
+
+
+def look_custom_put(key, theme, files):
+    """A theme of yours put whole into app/custom/<key>: theme, its
+    theme.json as a dict; files, {name: bytes}, every file it names and
+    nothing else. Written beside it, then <key> (a link to it) turned to it
+    in one step, so the app never reads it half written or missing. None, or
+    why it isn't one."""
+    if not isinstance(theme, dict) or not isinstance(files, dict):
+        return "a theme is its theme.json and its files"
+    variables = theme.get("vars")
+    if (not isinstance(variables, dict) or not variables or len(variables) > 300
+            or not all(isinstance(k, str) and re.fullmatch(r"[\w-]{1,64}", k) and isinstance(v, str)
+                       and re.fullmatch(r"[\w#().,/% -]{1,300}", v) for k, v in variables.items())):
+        return "its colors (vars) don't read"
+    named = []
+    if theme.get("wallpaper") is not None:
+        wall = theme["wallpaper"]
+        if not isinstance(wall, dict) or set(wall) != {"phone", "wide"}:
+            return "its wallpaper is {phone, wide}"
+        named += list(wall.values())
+    if theme.get("font") is not None:
+        font = theme["font"]
+        if not isinstance(font, dict) or not isinstance(font.get("files"), dict) or "regular" not in font["files"] \
+                or not set(font["files"]) <= {"regular", "bold"}:
+            return "its font is {family, nerd, files: {regular, bold}}"
+        named += list(font["files"].values())
+    for f in named:
+        if not isinstance(f, str) or not CUSTOM_FILE.fullmatch(f) or f not in files:
+            return f"it names a file it doesn't send ({str(f)[:40]})"
+    if set(files) != set(named):
+        return "it sends files it doesn't name"
+    for f, raw in files.items():
+        kind = f.rsplit(".", 1)[1]
+        ok = (image_kind(raw) == kind and len(raw) <= APP_WALLPAPER_MAX) if f.startswith("wallpaper") else \
+            (raw.startswith(FONT_MAGIC.get(kind, (b"\xff",))) and len(raw) <= LOOK_FONT_MAX)
+        if not ok:
+            return f"{f} isn't what its name says"
+    kept = {"name": str(theme.get("name") or key)[:60], "mode": "light" if theme.get("mode") == "light" else "dark",
+            "vars": variables, "terminal": theme.get("terminal") if isinstance(theme.get("terminal"), dict) else {},
+            "wallpaper": theme.get("wallpaper"), "font": theme.get("font"),
+            "from": str(theme.get("from") or "")[:120],
+            **({"omarchy": theme["omarchy"]} if isinstance(theme.get("omarchy"), dict) else {})}
+    CUSTOM.mkdir(parents=True, exist_ok=True)
+    here = CUSTOM / key
+    was = os.readlink(here) if here.is_symlink() else None
+    new = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=CUSTOM))
+    link = CUSTOM / f".{key}.link.{os.getpid()}"
+    try:
+        for f, raw in files.items():
+            (new / f).write_bytes(raw)
+        (new / "theme.json").write_text(json.dumps(kept, indent=1))
+        new.chmod(0o755)
+        if here.is_dir() and not here.is_symlink():     # one from before kept as a folder: aside, once
+            os.replace(here, CUSTOM / f".{key}.old.{os.getpid()}")
+            was = f".{key}.old.{os.getpid()}"
+        link.unlink(missing_ok=True)
+        os.symlink(new.name, link)
+        os.replace(link, here)
+    except OSError as e:
+        shutil.rmtree(new, ignore_errors=True)
+        link.unlink(missing_ok=True)
+        return f"couldn't keep it ({e.strerror or e})"
+    # What it was before, and anything left from a put cut short.
+    for d in CUSTOM.glob(f".{key}.*"):
+        if d.name != new.name and (d.name == was or time.time() - d.lstat().st_mtime > 600):
+            shutil.rmtree(d, ignore_errors=True) if d.is_dir() and not d.is_symlink() else d.unlink(missing_ok=True)
+    return None
+
+
+def omarchy_live_send(made, m):
+    """Send "Omarchy (live)" to machine m (PUT /api/peer/look): None, or why
+    it didn't take it."""
+    body = {"key": OMARCHY_LIVE, "theme": made["theme"],
+            "files": {f: base64.b64encode(raw).decode() for f, raw in made["files"].items()}}
+    try:
+        status, said = peer_json(m, "PUT", "/api/peer/look", body, timeout=60)
+    except PeerError as e:
+        return str(e)
+    return None if status == 200 else said.get("error") or f"it answered {status}"
+
+
+def omarchy_live_inputs():
+    """What "Omarchy (live)" is made from, as a signature that changes with
+    any of it (cheap: no picture cut, no font read)."""
+    h = hashlib.sha1()
+    theme_dir = OMARCHY_CURRENT / "theme"
+    for f in (theme_dir / "colors.toml", theme_dir / "shell.toml", theme_dir / "hyprland.lua",
+              OMARCHY_CONFIG / "omarchy/shell.toml", OMARCHY_CURRENT / "theme.name"):
+        try:
+            h.update(f.read_bytes())
+        except OSError:
+            h.update(b"-")
+    for f in (OMARCHY_CURRENT / "background",):
+        try:
+            st_ = f.stat()
+            h.update(f"{f.resolve()}:{st_.st_mtime_ns}:{st_.st_size}".encode())
+        except OSError:
+            h.update(b"-")
+    if shutil.which("fc-match"):
+        h.update(sh("fc-match", "monospace", "-f", "%{family}|%{file}").stdout.encode())
+    h.update(str(omarchy_rounding(theme_dir)).encode())
+    h.update(machine_label().encode())
+    return h.hexdigest()
+
+
+def omarchy_live(force=False):
+    """Make "Omarchy (live)" again, keep it, send it to every machine paired
+    with this one that doesn't have this one yet. What happened, in lines, and
+    whether all of it went: ([words], ok). Made again until what it's made
+    from holds still (a theme switch writes several files)."""
+    try:
+        last = json.loads(OMARCHY_LIVE_SENT.read_text())
+    except (OSError, ValueError):
+        last = {}
+    inputs = omarchy_live_inputs()
+    paired = machines_read()
+    sent = last.get("sent") if isinstance(last.get("sent"), dict) else {}
+    if (not force and inputs == last.get("inputs") and (CUSTOM / OMARCHY_LIVE / "theme.json").is_file()
+            and all(sent.get(m["name"]) == last.get("sig") for m in paired)):
+        return [], True     # made and sent as it is already
+    for _ in range(3):
+        made = omarchy_live_make()
+        if isinstance(made, str):
+            return [made], False
+        now = omarchy_live_inputs()
+        if now == inputs:
+            break
+        inputs = now        # it changed while it was made (a theme switch under way): again
+    if last.get("sig") != made["sig"]:
+        sent = {}
+    out, ok = [], True
+    if force or last.get("sig") != made["sig"] or not (CUSTOM / OMARCHY_LIVE / "theme.json").is_file():
+        why = look_custom_put(OMARCHY_LIVE, made["theme"], made["files"])
+        if why:
+            return [f"couldn't keep it here: {why}"], False
+        out.append(f"{OMARCHY_LIVE_NAME}: made from {made['theme']['from']}")
+    for m in paired:
+        if not force and sent.get(m["name"]) == made["sig"]:
+            continue
+        why = omarchy_live_send(made, m)
+        if why:
+            ok = False
+            out.append(f"not sent to {m['label']}: {why}")
+        else:
+            sent[m["name"]] = made["sig"]
+            out.append(f"sent to {m['label']}")
+    write_file(OMARCHY_LIVE_SENT, json.dumps({"sig": made["sig"], "inputs": inputs, "sent": sent,
+                                              "at": int(time.time())}))
+    return out, ok
+
+
+def cmd_theme_omarchy(args):
+    """`amarchy theme --omarchy [--force] [--quiet] [--in-background]`."""
+    if "--in-background" in args:
+        unit = "amarchy-omarchy-look"
+        if shutil.which("systemctl") and sh("systemctl", "--user", "cat", f"{unit}.service").returncode == 0:
+            r = sh("systemctl", "--user", "start", "--no-block", f"{unit}.service")
+        else:
+            r = sh("systemd-run", "--user", "--quiet", "--collect", f"--unit={unit}-{int(time.time())}",
+                   ENTRY, "theme", "--omarchy", "--quiet") if shutil.which("systemd-run") else None
+        if r is None or r.returncode != 0:
+            subprocess.Popen([ENTRY, "theme", "--omarchy", "--quiet"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        return 0
+    lines, ok = omarchy_live(force="--force" in args)
+    if lines and ("--quiet" not in args or not ok):
+        print("\n".join(lines), file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
+
+
 # ------------------------------------------------------------------ the chat engine (amarchy agent)
 #
 # Phases A1 and A2 of docs/plan-chat-app.md. Any session can opt in ("Try
@@ -19772,7 +20120,7 @@ OPTIONS = {
     "sleep": ({"--force", "--all", "--after", "--idle"}, {"--after"}, set()),
     "wake": (set(), set(), set()),
     "theme": ({"--show", "--list", "--json", "--font", "--wallpaper", "--refresh-wallpapers", "--cut",
-               "--in-background", "--quiet"}, {"--font", "--wallpaper"}, set()),
+               "--in-background", "--quiet", "--omarchy", "--force"}, {"--font", "--wallpaper"}, set()),
     "sound": ({"--show", "--list", "--json", "--assistant"}, set(), set()),
     "app": ({"--status", "--test"}, set(), set()),
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),

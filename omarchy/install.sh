@@ -10,6 +10,11 @@
 #     ~/.config/hypr/hyprland.lua by a line ending in "-- amarchy"
 #   - Amarchy in the Omarchy menu (Super+Space), a block of its own in
 #     ~/.config/omarchy/extensions/omarchy-menu.jsonc
+#   - the theme live: "Omarchy (live)" made again (amarchy theme --omarchy)
+#     when Omarchy's look changes, by events: its theme-set hook
+#     (~/.config/omarchy/hooks/theme-set.d/amarchy) and a systemd path unit,
+#     amarchy-omarchy-look.path (the wallpaper, the font, the theme's name,
+#     your shell.toml and looknfeel.lua); made once now
 #   - takes away what an amarchy from before left (its plugin "amarchy")
 #
 #   omarchy/install.sh             put them in place, on an Omarchy desktop
@@ -34,7 +39,10 @@ done
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 bin_dir="$HOME/.local/bin"
-config="${XDG_CONFIG_HOME:-$HOME/.config}"
+# Omarchy's own files are under $HOME/.config whatever XDG says (as its
+# scripts and its shell read them); systemd's follow XDG.
+config="$HOME/.config"
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"
 hypr_conf="$config/hypr/hyprland.lua"
 shell_json="$config/omarchy/shell.json"
@@ -44,14 +52,29 @@ plugin_dir="$config/omarchy/plugins/$plugin_id"
 # The Ⓐ was put on the bar once: never again by an update (you may have
 # moved it, or taken it off).
 placed="$state/omarchy-bar-placed"
+# shell.json was made by amarchy from Omarchy's defaults (there was none):
+# gone again on --uninstall while it's still just those.
+shell_made="$state/omarchy-shell-json-made"
 load_line="dofile(\"$repo/omarchy/hypr/amarchy.lua\") -- amarchy"
 # What the amarchy from before put here (its plugin, "amarchy", and a theme
 # hook that ran a command it no longer has).
 old_plugin_dir="$config/omarchy/plugins/amarchy"
 old_theme_hook="$config/omarchy/hooks/theme-set.d/amarchy"
+# The theme live: Omarchy's hook (the same name as the old one's) and the
+# unit that makes it again.
+theme_hook="$config/omarchy/hooks/theme-set.d/amarchy"
+look_unit="amarchy-omarchy-look"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 did=()
+omarchy_root=""
+
+# A temporary file beside $1 (its own folder: the same disk, and never a
+# full /tmp's problem).
+tmp_beside() {
+  mkdir -p "$(dirname "$1")"
+  mktemp "$(dirname "$1")/.amarchy.XXXXXX"
+}
 
 # Keep only the newest three of the files starting with $1.
 prune() {
@@ -82,6 +105,7 @@ omarchy_here() {
   fi
   root=${root:-/usr/share/omarchy}
   [[ -d $root/shell && -f $hypr_conf ]] || return 1
+  omarchy_root=$root
   [[ :$PATH: == *":$root/bin:"* ]] || PATH="$PATH:$root/bin"
   command -v omarchy-shell >/dev/null
 }
@@ -97,7 +121,7 @@ shell_ask() {
 edit_shell_json() {
   [[ -f $shell_json ]] && command -v jq >/dev/null || return 1
   local tmp
-  tmp=$(mktemp)
+  tmp=$(tmp_beside "$shell_json")
   if jq "$1" "$shell_json" >"$tmp" 2>/dev/null && jq -e '.version' "$tmp" >/dev/null 2>&1; then
     replace_if_changed "$shell_json" "$tmp" || true
   fi
@@ -117,7 +141,7 @@ plugin_off() {
   in_shell_json "$1" || return 0
   shell_ask setPluginEnabled "$1" false >/dev/null || true
   in_shell_json "$1" || return 0
-  edit_shell_json "$(printf '.plugins |= map(select(.id != "%s")) | .bar.layout |= with_entries(.value |= map(select(.id != "%s")))' "$1" "$1")"
+  edit_shell_json "$(printf '.plugins |= map(select(.id != "%s")) | .bar.layout |= with_entries(.value |= map(select(.id != "%s")))' "$1" "$1")" || true
 }
 
 # The line in hyprland.lua that loads $1 (none: takes it away), in place of
@@ -127,7 +151,7 @@ plugin_off() {
 hypr_line() {
   [[ -f $hypr_conf ]] || return 0
   local tmp
-  tmp=$(mktemp)
+  tmp=$(tmp_beside "$hypr_conf")
   sed '/-- amarchy$/d' "$hypr_conf" >"$tmp"
   # The blank lines left at the end go too.
   sed -i -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' "$tmp"
@@ -149,7 +173,7 @@ menu_block() {
   mkdir -p "$(dirname "$menu_ext")"
   [[ -f $menu_ext ]] || echo "{}" >"$menu_ext"
   local tmp
-  tmp=$(mktemp)
+  tmp=$(tmp_beside "$menu_ext")
   python3 - "$menu_ext" "${1:-}" >"$tmp" <<'EOF'
 import re, sys
 from pathlib import Path
@@ -181,6 +205,95 @@ old_plugin_off() {
   fi
 }
 
+# systemctl --user, when there's a user manager to ask.
+user_systemd() {
+  command -v systemctl >/dev/null && systemctl --user "$@" >/dev/null 2>&1
+}
+
+# $1 written from stdin, when it says something new (amarchy's own file: no
+# backup). Says whether it changed.
+write_ours() {
+  local tmp
+  tmp=$(tmp_beside "$1")
+  cat >"$tmp"
+  if cmp -s "$tmp" "$1"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$1"
+  chmod 644 "$1"
+}
+
+# The theme live, made again by events (see "the theme live" in bin/amarchy):
+# a systemd path unit for the files Omarchy changes, and Omarchy's theme-set
+# hook, which runs once a theme is all in place (Hyprland's corners too).
+look_install() {
+  local changed=0
+  write_ours "$units/$look_unit.service" <<UNIT && changed=1
+# amarchy's ($repo/omarchy/install.sh puts it here; its --uninstall takes it away).
+[Unit]
+Description=Make the theme Omarchy (live) again from Omarchy's look, and send it to your machines
+
+[Service]
+Type=oneshot
+Environment=PATH=$bin_dir:/usr/local/bin:/usr/bin:/bin
+ExecStart=$bin_dir/amarchy theme --omarchy --quiet
+UNIT
+  write_ours "$units/$look_unit.path" <<UNIT && changed=1
+# amarchy's ($repo/omarchy/install.sh puts it here; its --uninstall takes it away).
+[Unit]
+Description=Omarchy's look changed: its wallpaper, font or theme, or your shell.toml or looknfeel.lua
+
+[Path]
+# The folder, not its background link: Omarchy swaps the link (ln -nsf), and a
+# watch on the link itself would follow it to the old picture. The theme's
+# folder is swapped in there too, and theme.name written.
+PathChanged=%h/.local/state/omarchy/current
+PathChanged=%h/.local/state/omarchy/current/theme.name
+PathChanged=%h/.config/fontconfig/fonts.conf
+PathChanged=%h/.config/omarchy/shell.toml
+PathChanged=%h/.config/hypr/looknfeel.lua
+Unit=$look_unit.service
+
+[Install]
+WantedBy=default.target
+UNIT
+  if ((changed)); then
+    user_systemd daemon-reload || true
+    did+=("Omarchy (live)")
+  fi
+  user_systemd enable --now "$look_unit.path" || true
+  write_ours "$theme_hook" <<'HOOK' || true
+#!/bin/bash
+# amarchy's (its install.sh puts it here; its --uninstall takes it away): the
+# theme Omarchy just set, made into "Omarchy (live)" (amarchy-omarchy-look).
+systemctl --user start --no-block amarchy-omarchy-look.service 2>/dev/null ||
+  "$HOME/.local/bin/amarchy" theme --omarchy --in-background --quiet
+exit 0
+HOOK
+  chmod 755 "$theme_hook"
+  # Made now, from the theme on the desktop now.
+  user_systemd start --no-block "$look_unit.service" ||
+    "$bin_dir/amarchy" theme --omarchy --in-background --quiet >/dev/null 2>&1 || true
+}
+
+look_remove() {
+  local gone=0
+  if [[ -f $units/$look_unit.path || -f $units/$look_unit.service ]]; then
+    user_systemd disable --now "$look_unit.path" || true
+    user_systemd stop "$look_unit.service" || true
+    rm -f "$units/$look_unit.path" "$units/$look_unit.service"
+    user_systemd daemon-reload || true
+    gone=1
+  fi
+  if [[ -f $theme_hook ]] && grep -q "$look_unit" "$theme_hook"; then
+    rm -f "$theme_hook"
+    gone=1
+  fi
+  ((gone)) && did+=("Omarchy (live)'s events")
+  return 0
+}
+
 install_home() {
   old_plugin_off
   # The Ⓐ: the plugin, a link to this checkout (an update reaches it, and the
@@ -198,7 +311,14 @@ install_home() {
     local put
     put=$(shell_ask putBarWidget "$plugin_id" '{"section":"left"}' || true)
     if [[ $put != ok ]] && ! in_shell_json "$plugin_id"; then
-      edit_shell_json "$(printf 'if ([.bar.layout[]?[]?.id] | index("%s")) then . else .bar.layout.left = ((.bar.layout.left // []) + [{"id":"%s"}]) end' "$plugin_id" "$plugin_id")"
+      # No shell.json yet (the bar as Omarchy ships it): Omarchy's own
+      # defaults, as the shell writes them when it first saves a change.
+      if [[ ! -f $shell_json && -f $omarchy_root/config/omarchy/shell.json ]]; then
+        mkdir -p "$(dirname "$shell_json")" "$state"
+        cp "$omarchy_root/config/omarchy/shell.json" "$shell_json"
+        touch "$shell_made"
+      fi
+      edit_shell_json "$(printf 'if ([.bar.layout[]?[]?.id] | index("%s")) then . else .bar.layout.left = ((.bar.layout.left // []) + [{"id":"%s"}]) end' "$plugin_id" "$plugin_id")" || true
     fi
     if [[ $put == ok ]] || in_shell_json "$plugin_id"; then
       mkdir -p "$state"
@@ -213,11 +333,19 @@ install_home() {
   menu_block "  // >>> amarchy (amarchy's install.sh puts this here; its --uninstall takes it away)
   \"amarchy\": $entry,
   // <<< amarchy"
+  look_install
 }
 
 remove_home() {
   old_plugin_off
   plugin_off "$plugin_id"
+  if [[ -f $shell_made ]]; then
+    if [[ -n $omarchy_root && -f $shell_json ]] && command -v jq >/dev/null &&
+      jq -e --slurpfile d "$omarchy_root/config/omarchy/shell.json" '. == $d[0]' "$shell_json" >/dev/null 2>&1; then
+      rm -f "$shell_json"
+    fi
+    rm -f "$shell_made"
+  fi
   if [[ -L $plugin_dir ]]; then
     rm -f "$plugin_dir"
     did+=("the Ⓐ in the bar")
@@ -226,6 +354,7 @@ remove_home() {
   rm -f "$placed"
   hypr_line ""
   menu_block ""
+  look_remove
 }
 
 if ((uninstall)); then
