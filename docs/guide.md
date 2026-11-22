@@ -538,6 +538,35 @@ closes and gives the keys back where they were. In Claude's question a choice's
 number picks it and `Esc` says no, as in Claude's own. On the board, the menu key
 (or `Shift+F10`) on a chat's card opens its menu, and `↓` from the search goes to the first card.
 
+## Machines
+
+amarchy runs on every computer you have: your always-on server, your Omarchy
+desktop, a laptop. Pair them and every machine's chats are on one board, in
+the app on any of them, on your phone and in any browser. A chat lives on its
+machine (its worktree, its Claude, its terminal and previews are there); the
+board, its pass-through and every chat action reach it wherever it runs.
+
+```
+amarchy machines                  # this machine, then the paired ones: on, off, or update
+amarchy machines add omarchy      # pair with another machine of yours (its Tailscale name, or its address)
+amarchy machines rename omarchy "Desktop"
+amarchy machines remove omarchy   # both forget the other
+```
+
+- **Pairing** needs both machines on your tailnet and amarchy's app on the
+  one you add (`amarchy app on` there). It checks the other is yours (the same
+  Tailscale login) and on the same version of the contract between machines;
+  else it says what to update. Both machines keep the other in
+  `~/.config/amarchy/machines.json` (readable by you only), with one key the
+  pair shares.
+- **The board** shows each chat with its machine. A machine that doesn't
+  answer (shut, asleep, off the network: silent for 45 s) keeps its chats as
+  last seen, marked off, until it's back; it comes back by itself.
+- **A machine's label** (what the app calls it) is kept on that machine, so
+  every machine shows the same; renaming another one asks it to rename itself.
+- **Versions**: machines on another version of the contract say "Update
+  amarchy on <label>" instead of breaking.
+
 ## Sleep
 
 Every Claude Code holds a few hundred MB of memory, also while it waits for you. So
@@ -1305,6 +1334,7 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
 | `APP_USERS=` | this machine's owner | The Tailscale logins the app lets in. |
 | `APP_PORT=` | `7397` | The app's port, on localhost. |
 | `APP_HTTPS=` | `443` | The port on your tailnet (443, 8443 or 10000). |
+| `URL=` | `https://<this machine>.<tailnet>.ts.net` | The address your other machines reach this one's app at (see [Machines](#machines)). |
 | `AUTO_UPDATE=off` | on | Stops the timer that keeps amarchy up to date. |
 
 ### Who gets in
@@ -1325,6 +1355,13 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
   (`Origin http://127.0.0.1:7397`). Delete the file and restart the app's server
   for a new key: every cookie made from the old one stops working. Don't open
   that address in an ordinary browser: its history would keep the key.
+
+- **Your other machines** (see [Machines](#machines)), through this one's
+  `tailscale serve` as you, with their name (`X-Amarchy-Peer`) and the key the
+  pair shares (`Authorization: Bearer`): a web page can't send those. Through
+  one machine, the app reaches a chat on another: `/api/m/<machine>/<path>` is
+  `<path>` there (requests, event streams, terminals), and nothing passes a
+  request on twice.
 
 The app's server runs without Tailscale too (`amarchy app on` then serves this
 machine only, for the desktop app), and takes your tailnet as soon as Tailscale
@@ -1392,9 +1429,17 @@ amarchy wake [id]                     wake a session without typing in it
 
 The app:
 amarchy app on | off                  serve the app on your tailnet (https://<this machine>.<tailnet>.ts.net), now and after every reboot
+                                      (without Tailscale: this machine only, for the desktop app)
 amarchy app [--status]                whether it's on, where, and how many phones and browsers it notifies
 amarchy app --test                    send each phone a test notification
 amarchy notify <title> [body] [--session <id>] [--urgent]   a notification of your own on each phone (and browser)
+
+Machines (every machine's chats on one board):
+amarchy machines [--json]             this machine, then the paired ones: name, label, address, on | off | update
+amarchy machines add <name|address>   pair with another machine of yours on the tailnet
+amarchy machines remove <name>        unpair (both forget the other)
+amarchy machines rename <name> <label>   what the app calls a machine (kept on that machine)
+amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
 
 Look and sound:
 amarchy theme [--show]                print the theme, the font and the wallpaper
