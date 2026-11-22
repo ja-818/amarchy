@@ -282,6 +282,10 @@ takes it away; docs/guide.md, "On Omarchy"):
                                         machine's own app server, else the first of your machines (amarchy
                                         machines), else AMARCHY_URL's. --follow prints it again on every
                                         change, from the board's events, and says when it doesn't answer
+  amarchy awake [on|off] [--json]       while a chat on this machine works, amarchy's app holds off its idle
+                                        sleep (systemd-inhibit, "idle" only: the screen still locks, the lid
+                                        still sleeps it) and lets go when none does: whether it holds it now,
+                                        for which chats; off stops it, on (the default) starts it again
 
 Updating:
   amarchy protocol-check [--broker]     run the chat engine's protocol test (about 3 minutes, a few cheap turns
@@ -12041,6 +12045,7 @@ def app_watch(st):
                 projects_at = time.time()
             ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
+            awake_want(ss)      # idle sleep held off while a chat here works (see "keep-awake")
             app_words(st, ss)
             look = look_worn()
             # One finished while it was on your phone's screen: you've seen it.
@@ -18155,6 +18160,138 @@ def cmd_theme_omarchy(args):
     return 0 if ok else 1
 
 
+# ---- keep-awake
+#
+# While a chat on this machine works (its turn, or what it started that runs
+# to an end), amarchy holds off the machine's idle sleep: a systemd-inhibit
+# lock of the kind "idle", which logind's IdleAction and the idle daemons that
+# honor it (hypridle) wait on. Only "idle": the screen still locks on
+# Omarchy (its idle only locks), and closing the lid, or Suspend, still
+# sleeps it. Let go as soon as none works. The app's server holds it (it reads
+# the chats every second, app_watch); the lock is held through a pipe of its,
+# so if the server goes the lock goes with it. `amarchy awake off` stops it.
+
+AWAKE_OFF = STATE / "awake-off"          # amarchy awake off: never held
+AWAKE_STATE = STATE / "awake.json"       # what the server holds now, for amarchy awake
+AWAKE_WHY = "A chat in amarchy is working"
+AWAKE_RETRY = 60                         # seconds before trying again after systemd-inhibit failed
+_awake = {"proc": None, "since": 0, "error": None, "failed": 0, "said": None}
+
+
+def awake_working(ss):
+    """This machine's chats at work: in a turn, or running what they started."""
+    return [s for s in ss if not s.get("setup") and s.get("status") in ("working", "running")]
+
+
+def awake_hold():
+    """systemd-inhibit holding "idle" until its stdin closes (cat ends): the
+    process, or None with why in _awake["error"]."""
+    exe = shutil.which("systemd-inhibit")
+    if not exe:
+        _awake["error"] = "no systemd-inhibit on this machine"
+        return None
+    try:
+        p = subprocess.Popen([exe, "--what=idle", "--who=amarchy", f"--why={AWAKE_WHY}", "--mode=block", "cat"],
+                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except OSError as e:
+        _awake["error"] = f"systemd-inhibit didn't start ({e.strerror or e})"
+        return None
+    try:
+        p.wait(0.3)         # one that can't take the lock ends at once, saying why
+    except subprocess.TimeoutExpired:
+        return p
+    _awake["error"] = (p.stderr.read().decode(errors="replace").strip().splitlines() or ["systemd-inhibit ended"])[-1][:200]
+    return None
+
+
+def awake_release():
+    p, _awake["proc"] = _awake["proc"], None
+    if p is None:
+        return
+    try:
+        p.stdin.close()     # cat ends, and the lock with it
+        p.wait(3)
+    except (OSError, subprocess.TimeoutExpired):
+        p.terminate()
+        try:
+            p.wait(3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+def awake_want(ss):
+    """Hold off idle sleep while a chat here works (ss: this machine's chats,
+    as app_watch reads them every second), let go when none does. Never
+    raises: the list goes on whatever happens here."""
+    try:
+        working = awake_working(ss)
+        off = AWAKE_OFF.exists()
+        p = _awake["proc"]
+        alive = p is not None and p.poll() is None
+        if working and not off and not alive:
+            if p is not None:       # it ended by itself (logind restarted?): again
+                _awake["proc"] = None
+            if time.time() - _awake["failed"] > AWAKE_RETRY:
+                _awake["proc"] = awake_hold()
+                if _awake["proc"]:
+                    _awake.update(since=time.time(), error=None)
+                else:
+                    _awake["failed"] = time.time()
+        elif (not working or off) and (alive or p is not None):
+            awake_release()
+        held = _awake["proc"] is not None and _awake["proc"].poll() is None
+        said = {"held": held, "working": [s["id"] for s in working], "off": off,
+                "since": int(_awake["since"]) if held else None, "error": None if held or not working else _awake["error"],
+                "pid": os.getpid()}
+        if said != _awake["said"]:
+            write_file(AWAKE_STATE, json.dumps(said))
+            _awake["said"] = said
+    except Exception as e:      # never the list's end
+        print(f"amarchy app: keep-awake: {e}", file=sys.stderr, flush=True)
+
+
+def cmd_awake(args):
+    """`amarchy awake [on|off] [--json]`."""
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    if args[:1] in (["on"], ["off"]) and len(args) == 1:
+        if args[0] == "off":
+            write_file(AWAKE_OFF, "off\n")
+        else:
+            AWAKE_OFF.unlink(missing_ok=True)
+    elif args:
+        return fail("usage: amarchy awake [on|off] [--json]")
+    try:
+        said = json.loads(AWAKE_STATE.read_text())
+    except (OSError, ValueError):
+        said = {}
+    server = isinstance(said.get("pid"), int) and Path(f"/proc/{said['pid']}").exists() \
+        and "amarchy" in Path(f"/proc/{said['pid']}/cmdline").read_bytes().decode(errors="replace")
+    off = AWAKE_OFF.exists()
+    held = bool(server and said.get("held") and not off)
+    working = (said.get("working") or []) if server else []
+    state = {"on": not off, "held": held, "working": working, "since": said.get("since") if held else None,
+             "server": bool(server), "error": said.get("error") if server else None}
+    if as_json:
+        print(json.dumps(state))
+        return 0
+    n = len(working)
+    chats = f"{n} chat{'s' * (n != 1)} working here"
+    if off:
+        print("Off: amarchy doesn't hold off this machine's sleep (amarchy awake on)")
+    elif not server:
+        print("On, but amarchy's app isn't running here, so nothing holds off sleep (amarchy app on)")
+    elif held:
+        since = time.strftime("%H:%M", time.localtime(state["since"])) if state["since"] else "now"
+        print(f"Holding off idle sleep since {since}: {chats}. The screen still locks, and closing the lid "
+              "still sleeps it")
+    elif working:
+        print(f"Can't hold off idle sleep ({state['error'] or 'systemd-inhibit failed'}): {chats}")
+    else:
+        print("On: no chat works here now, so this machine sleeps when it's idle")
+    return 0
+
+
 # ------------------------------------------------------------------ the chat engine (amarchy agent)
 #
 # Phases A1 and A2 of docs/plan-chat-app.md. Any session can opt in ("Try
@@ -20143,6 +20280,7 @@ OPTIONS = {
     "terminals": (set(), set(), set()),
     "machines": ({"--json"}, set(), set()),
     "open": (set(), set(), set()),
+    "awake": ({"--json"}, set(), set()),
     "bar": ({"--follow"}, set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
@@ -20317,6 +20455,8 @@ def main(argv):
         return cmd_protocol_check(args)
     elif cmd == "shell" and args:
         return cmd_shell(args)
+    elif cmd == "awake":
+        return cmd_awake(args)
     elif cmd == "open" and len(args) <= 1:
         return cmd_open(args)
     elif cmd == "bar" and not [a for a in args if a != "--follow"]:

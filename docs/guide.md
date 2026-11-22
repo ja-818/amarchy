@@ -682,6 +682,18 @@ start its Claude, sending it something does. **Settings → Sleep** has the minu
 **Never**, and **Put idle chats to sleep now**; a chat's menu has **Wake** and **Put
 to sleep**.
 
+**The machine's own sleep.** While a chat on a machine works (in its turn, or
+running what it started), amarchy's app there holds off the machine's idle sleep,
+and lets go as soon as none does: a desktop or a laptop doesn't doze off under a
+chat that's working. It's a `systemd-inhibit` lock of the kind "idle" only, so the
+screen still locks (Omarchy's idle only locks it), and closing the lid or choosing
+Suspend still sleeps the machine. If amarchy's app stops, the lock goes with it.
+
+```sh
+amarchy awake              # whether it's held now, and for how many chats
+amarchy awake off          # never hold it (on: again)
+```
+
 ## Claude knows it's in amarchy
 
 **Preview.** What a chat serves for you to look at (a dev server) is its
@@ -1496,6 +1508,7 @@ On Omarchy (see On Omarchy):
 amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]   the desktop app at the front, on that chat
 amarchy bar [--follow]                what the Ⓐ in the bar shows (JSON); --follow: again on every change
 amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's look and send it to your machines
+amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 
 Look and sound:
 amarchy theme [--show]                print the theme, the font and the wallpaper
