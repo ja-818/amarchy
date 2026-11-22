@@ -263,6 +263,10 @@
                         color: var(--text-muted); font-size: var(--caption); text-align: center; }
 .chat-dock .dock-note.interrupted { color: var(--text); }
 .chat-dock .dock-note .cut-mark { color: var(--warn, var(--warning)); }
+/* Its machine doesn't answer: in place of the box, saying so. */
+.chat-dock .dock-note.machine-off { padding: 14px 12px; }
+.chat-dock .dock-note .machine { flex: none; width: 1.2em; height: 1.2em; display: inline-grid; }
+.chat-dock .dock-note .machine svg { width: 100%; height: 100%; display: block; }
 .text-btn { min-height: 36px; padding: 6px 8px; color: var(--link); font-weight: 700; white-space: nowrap; border-radius: var(--radius-control); }
 .text-btn:active { background: var(--control-pressed); }
 

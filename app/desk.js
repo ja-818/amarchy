@@ -260,7 +260,7 @@ class TermPane {
     this.fit();
     const sid = this.sid;
     const q = new URLSearchParams({ cols: this.term.cols, rows: this.term.rows });
-    const ws = this.ws = new WebSocket(wsURL(`/api/session/${encodeURIComponent(sid)}/tty/${this.which}?${q}`));
+    const ws = this.ws = new WebSocket(wsURL(chatPath(sid, `/tty/${this.which}?${q}`)));
     ws.binaryType = "arraybuffer";
     let fresh = true;
     ws.onopen = () => { this.retry = 0; this.status(null); };
@@ -359,7 +359,7 @@ class TermPane {
       // Text (even with a picture of it, as from a sheet): the terminal pastes
       // it, and wl-paste on the host has it too.
       if (!wanted(files) || (d.getData("text/plain") || "").trim()) {
-        clipText(d && d.getData("text/plain"));
+        clipText(d && d.getData("text/plain"), this.sid);
         return;
       }
       e.preventDefault();
@@ -498,7 +498,7 @@ class TermPane {
       for (const item of await navigator.clipboard.read()) {
         const type = item.types.find((t) => /^image\//.test(t));
         if (type) { blob = await item.getType(type); break; }
-        if (item.types.includes("text/plain")) clipText(await (await item.getType("text/plain")).text());
+        if (item.types.includes("text/plain")) clipText(await (await item.getType("text/plain")).text(), this.sid);
       }
     } catch (e) {
       // Not allowed (or nothing to read): Claude says so, as it would there.
@@ -515,7 +515,7 @@ class TermPane {
       const kind = /^image\/(png|jpeg|gif|webp)$/.test(blob.type) ? blob.type : "image/png";
       const img = kind === blob.type ? blob : await asPNG(blob);
       if (img.size > 18e6) throw new Error("That image is too big (18 MB at most)");
-      await api("/api/clip", { type: kind, data: await base64Of(img) });
+      await api(machinePath(this.sid, "/api/clip"), { type: kind, data: await base64Of(img) });
       this.bottom();
       this.send(enc.encode("\x16"));
       return true;
@@ -663,7 +663,7 @@ function deskRoute() {
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
   if (m) {
-    const id = decodeURIComponent(m[1]);
+    const id = normKey(decodeURIComponent(m[1]));       // <this machine>:<id> is <id>
     if (row(id)) { board.waitFor = null; show(id); }
     else if (app.view) { board.waitFor = id; boardBack(true); }      // just started: once the list has it (boardRefresh)
     return;
@@ -959,7 +959,7 @@ class DeskChanges {
     const id = this.id, ctl = this.ctl = new AbortController();
     try {
       const sig = this.data && this.data.sig;
-      const r = await fetch(`/api/session/${encodeURIComponent(id)}/changes${sig ? `?sig=${encodeURIComponent(sig)}` : ""}`,
+      const r = await fetch(chatPath(id, `/changes${sig ? `?sig=${encodeURIComponent(sig)}` : ""}`),
                             { signal: ctl.signal });
       const d = await r.json();
       if (id !== this.id) return;
@@ -1287,7 +1287,7 @@ class DeskDetails {
   async load() {
     const id = this.id;
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(id)}/details`);
+      const r = await fetch(chatPath(id, "/details"));
       const d = await r.json();
       if (id !== this.id) return;
       if (!r.ok) throw new Error(d.error || "Couldn't read it");
@@ -1845,7 +1845,7 @@ function sessionItems(s) {
     { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
     { label: "Add a picture or a file…", detail: "it goes with your next message",
       act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
-    { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo }) },
+    { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo, on: s.id }) },
     ...(uiPreviews(s).length > 1 ? [{ label: "Previews", icon: "preview", detail: "start, stop, what each wrote", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewSheet(s, p)) }) }]
       : uiPreviews(s).length ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s, uiPreviews(s)[0]) }] : []),
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }

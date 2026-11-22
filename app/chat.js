@@ -1072,7 +1072,7 @@ let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: lis
 function chatStreamEarly(id) {
   if (streamEarly && streamEarly.id === id && streamEarly.es.readyState !== EventSource.CLOSED) return;
   chatStreamDrop();
-  const es = new EventSource(streamURL(`/api/session/${encodeURIComponent(id)}/stream`));
+  const es = new EventSource(streamURL(chatPath(id, "/stream")));
   const early = { id, es, got: [], keep: {} };
   for (const type of STREAM_EVENTS) {
     early.keep[type] = (e) => early.got.push([type, e]);
@@ -1361,7 +1361,7 @@ class Chat {
     chatsOpen.set(this.id, this);
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
-    const es = early ? early.es : new EventSource(streamURL(`/api/session/${encodeURIComponent(this.id)}/stream`));
+    const es = early ? early.es : new EventSource(streamURL(chatPath(this.id, "/stream")));
     this.es = es;
     if (!early || !early.got.length) streamWatch(es, () => { if (this.es === es && !this.closed) this.reopen(); });
     this.onAskEvent = this.onAskEvent || ((e) => { if (e.detail && e.detail.id === this.id) this.showCard(); });
@@ -1375,7 +1375,7 @@ class Chat {
     const on = {
       session: (e) => {
         const working = this.working();
-        this.row = JSON.parse(e.data);
+        this.row = rowIn(JSON.parse(e.data));
         this.lookAgain();
         if (this.opts.onSession) this.opts.onSession(this.row);
         this.renderDock();
@@ -1627,7 +1627,7 @@ class Chat {
   // tells them itself (send).
   post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body) : api(`/api/session/${encodeURIComponent(this.id)}/${route}`, body);
+    const done = route === "send" ? sendTo(this.id, body) : api(chatPath(this.id, `/${route}`), body);
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());
@@ -1845,7 +1845,7 @@ class Chat {
   async earlier() {
     this.earlierBtn.disabled = true;
     try {
-      const res = await fetch(`/api/session/${encodeURIComponent(this.id)}/earlier?before=${this.start}`);
+      const res = await fetch(chatPath(this.id, `/earlier?before=${this.start}`));
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "couldn't load it");
       // Nothing before it after all: the button goes, nothing drawn again.
@@ -2065,7 +2065,7 @@ class Chat {
 
   // Where a block's picture or video comes from (a path here, or an https
   // address): the server, the only place the page takes pictures from.
-  mediaUrl(src) { return `/api/session/${encodeURIComponent(this.id)}/media?src=${encodeURIComponent(src)}`; }
+  mediaUrl(src) { return chatPath(this.id, `/media?src=${encodeURIComponent(src)}`); }
 
   // A block's parts (a reply's block: replyParts): its icon, title, the line
   // under it, its quick action, what it shows open and the actions there;
@@ -2199,7 +2199,9 @@ class Chat {
       }
       case "session": {
         const id = str(at.id);
-        return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${id}`, "Open") : null,
+        // Its id on this chat's machine (a reply names the chats beside it).
+        const key = id ? keyNamed(this.id, id) : "";
+        return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${encodeURIComponent(key)}`, "Open") : null,
           body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
       }
       case "file": {
@@ -2335,7 +2337,7 @@ class Chat {
       const prev = rec && (where.lastElementChild || (!earlier && this.tail.previousElementSibling));
       const same = prev && prev.matches(".msg.user") && prev.dataset.rec === rec ? prev.querySelector(".bubble") : null;
       if (typeof it.image === "number") {
-        const url = `/api/session/${encodeURIComponent(this.id)}/image/${encodeURIComponent(rec)}/${it.image}`;
+        const url = chatPath(this.id, `/image/${encodeURIComponent(rec)}/${it.image}`);
         const bubble = same || h("div", { class: "bubble" });
         let shots = bubble.querySelector(".shots");
         if (!shots) bubble.prepend(shots = h("div", { class: "shots" }));
@@ -2468,7 +2470,7 @@ class Chat {
     const body = (m ? unescapeHTML(m[2]) : t).trim();
     let who = "Automatic";
     const chat = (s) => (s ? (isAgent(s) ? s.assistant_name : s.task) || s.id : "");
-    if (it.from && it.from !== "script") who = `From ${chat(typeof rowOf === "function" ? rowOf(it.from) : null) || it.from}`;
+    if (it.from && it.from !== "script") who = `From ${chat(typeof rowOf === "function" ? rowOf(keyNamed(this.id, it.from)) : null) || it.from}`;
     else if (m) {
       const name = attr("from-name");
       const s = name && typeof app !== "undefined" && app.view ? app.view.sessions.find((x) => x.agent === name) : null;
@@ -2991,7 +2993,9 @@ class Chat {
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
     const stopped = !!(this.row && this.row.interrupted);
-    const key = [now ? now.key || now.note : "composer", sleep, stopped, stopped && this.row.cut, this.view.composer, this.view.above.length, content].join("|");
+    // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
+    const off = machineOff(this.row || this.id);
+    const key = [now ? now.key || now.note : "composer", sleep, stopped, stopped && this.row.cut, this.view.composer, this.view.above.length, content, off].join("|");
     this.renderQueue();
     this.renderBackground();
     this.drawPills();
@@ -2999,7 +3003,9 @@ class Chat {
     if (key === this.cardKey) { this.sendButtons(); return; }
     this.cardKey = key;
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
-    if (now && now.card) kids.push(this.card(now.card));
+    if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
+      h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
+    else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
       kids.push(this.cardShell("question", "Claude stopped", "Start it again to go on where you left off.",
@@ -3788,7 +3794,7 @@ class Chat {
       await new Promise((ok) => setTimeout(ok, 2000));      // its prompt drawn
     }
     for (const im of images) {
-      await api("/api/clip", { ...im, session: this.id, paste: true });
+      await api(machinePath(this.id, "/api/clip"), { ...im, session: chatIdOf(this.id), paste: true });
       await new Promise((ok) => setTimeout(ok, 400));       // Claude reads the clipboard
     }
     return text.trim() ? this.post("send", { text }) : this.post("keys", { keys: ["Enter"] });
@@ -3945,7 +3951,7 @@ class Chat {
     const want = this.engine;
     this.infoAt = Date.now();
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(this.id)}/composer`);
+      const r = await fetch(chatPath(this.id, "/composer"));
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "");
       this.info = d;

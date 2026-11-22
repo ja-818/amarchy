@@ -8,7 +8,6 @@
 // whose helpers it uses.
 "use strict";
 
-function sid(s) { return encodeURIComponent(s.id); }
 function rowOf(id) { return (app.view && app.view.sessions.find((x) => x.id === id)) || null; }
 function mainAssistant() { return (app.view && app.view.sessions.find((x) => x.assistant === "main")) || null; }
 // Your assistant and your agents, as the list orders them (your assistant first).
@@ -74,7 +73,7 @@ function renameSheet(s) {
 async function commandsSheet(s, opened) {
   let cmds = [];
   try {
-    const r = await fetch(`/api/session/${sid(s)}/commands`);
+    const r = await fetch(chatPath(s, "/commands"));
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "Amarchy didn't answer");
     cmds = d.commands || [];
@@ -82,7 +81,7 @@ async function commandsSheet(s, opened) {
   const runIt = async (name) => {
     closeSheets();
     try {
-      await api(`/api/session/${sid(s)}/run`, name === "run" ? {} : { name });
+      await api(chatPath(s, "/run"), name === "run" ? {} : { name });
       if (opened) opened(name);
       else toast(`Running ${name === "run" ? "the project" : name} in its terminal`);
     } catch (e) {
@@ -92,7 +91,7 @@ async function commandsSheet(s, opened) {
   };
   const forget = async (name) => {
     try {
-      await api(`/api/session/${sid(s)}/commands`, { name, forget: true });
+      await api(chatPath(s, "/commands"), { name, forget: true });
       commandsSheet(s, opened);
     } catch (e) { toast(e.message); }
   };
@@ -121,10 +120,10 @@ function commandForm(s, name, command, opened) {
     if (!/^[\w.-]{1,40}$/.test(n)) return toast("A short name: letters, numbers, - and .");
     if (!c) return toast("What should it run?");
     try {
-      await api(`/api/session/${sid(s)}/commands`, { name: n, command: c });
+      await api(chatPath(s, "/commands"), { name: n, command: c });
       if (!andRun) return commandsSheet(s, opened);
       closeSheets();
-      await api(`/api/session/${sid(s)}/run`, n === "run" ? {} : { name: n });
+      await api(chatPath(s, "/run"), n === "run" ? {} : { name: n });
       if (opened) opened(n);
       else toast(`Running ${n === "run" ? "the project" : n} in its terminal`);
     } catch (e) { toast(e.message); }
@@ -224,7 +223,7 @@ function agentSheet(s) {
     const make = async (main) => {
       const called = name.value.trim();
       try {
-        await api(`/api/session/${sid(s)}/${main ? "assistant" : "agent"}`, called ? { name: called } : {});
+        await api(chatPath(s, `/${main ? "assistant" : "agent"}`), called ? { name: called } : {});
         closeSheets();
         toast(main ? `${called || "It"} is your assistant now` : `${called || projectName(s.repo)} is an agent now`);
       } catch (e) { toast(e.message); }
@@ -246,7 +245,7 @@ function agentSheet(s) {
   const rename = async () => {
     if (!name.value.trim()) return toast("What should it be called?");
     try {
-      await api(main ? "/api/assistant" : `/api/session/${sid(s)}/agent`, { name: name.value.trim() });
+      await api(main ? "/api/assistant" : chatPath(s, "/agent"), { name: name.value.trim() });
       closeSheets();
     } catch (e) { toast(e.message); }
   };
@@ -265,7 +264,7 @@ function agentSheet(s) {
     h("button", { class: "control wide", onclick: () => soundSheet(s.id) }, "Its chime…"),
     h("button", { class: "control wide danger", onclick: async () => {
       try {
-        await api(`/api/session/${sid(s)}/${main ? "assistant" : "agent"}`, { off: true });
+        await api(chatPath(s, `/${main ? "assistant" : "agent"}`), { off: true });
         closeSheets();
         toast(main ? "No assistant: it's a chat like the others again" : `${who} is a chat like the others again`);
       } catch (e) { toast(e.message); }
@@ -338,7 +337,7 @@ function newAgentSheet() {
 }
 
 // Where its picture goes: your assistant's, or an agent's.
-function pictureApi(s) { return s.assistant === "main" ? "/api/assistant/picture" : `/api/session/${sid(s)}/agent/picture`; }
+function pictureApi(s) { return s.assistant === "main" ? "/api/assistant/picture" : chatPath(s, "/agent/picture"); }
 
 // A picture of yours, cut to the round square the lists show: drag it into
 // place, and zoom with the slider, the wheel or two fingers. What's in the
@@ -485,7 +484,7 @@ async function pasteImageInto(s, blob) {
     const kind = /^image\/(png|jpeg|gif|webp)$/.test(blob.type) ? blob.type : "image/png";
     const img = kind === blob.type ? blob : await asPNG(blob);
     if (img.size > 18e6) throw new Error("That image is too big (18 MB at most)");
-    await api("/api/clip", { type: kind, data: await base64Of(img), session: s.id, paste: true });
+    await api(machinePath(s, "/api/clip"), { type: kind, data: await base64Of(img), session: chatIdOf(s), paste: true });
     toast("Pasted into Claude's prompt: it goes with what you send next");
   } catch (e) { toast(e.message); }
 }
@@ -496,9 +495,11 @@ async function pickImageInto(s) {
 }
 
 // What you paste or copy as text in a terminal here becomes the web clipboard
-// too: wl-paste in a session reads it.
-function clipText(text) {
-  if (typeof text === "string" && text && text.length <= 1e6) api("/api/clip", { text }).catch(() => {});
+// too: wl-paste in a session reads it. On the machine of the chat it's for
+// (chat: one, or its key; else the chat open, else this machine).
+function clipText(text, chat) {
+  const on = chat || (app.session && app.session.id) || (typeof desk !== "undefined" && desk.current) || "";
+  if (typeof text === "string" && text && text.length <= 1e6) api(machinePath(on, "/api/clip"), { text }).catch(() => {});
 }
 
 // ---- what needs you: on the tab and the app's icon, as the Ⓐ in your bar

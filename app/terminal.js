@@ -52,10 +52,9 @@ let classicHeld = null;     // { id, timer }
 async function holdClassic(id, engine) {
   if (classicHeld && classicHeld.id === id) return true;
   releaseClassic();
-  const enc = encodeURIComponent(id);
   try {
-    if (engine === "chat") await api(`/api/session/${enc}/engine`, { engine: "terminal" });
-    await api(`/api/session/${enc}/classic`, {});
+    if (engine === "chat") await api(chatPath(id, "/engine"), { engine: "terminal" });
+    await api(chatPath(id, "/classic"), {});
   } catch (e) {
     toast(e.message);      // Claude works or asks something: once it's done
     return false;
@@ -67,7 +66,7 @@ async function holdClassic(id, engine) {
 }
 
 function beatClassic(held) {
-  api(`/api/session/${encodeURIComponent(held.id)}/classic`, {}).catch((e) => {
+  api(chatPath(held.id, "/classic"), {}).catch((e) => {
     clearInterval(held.timer);      // no longer on the terminal engine: stop
     if (classicHeld === held) classicHeld = null;
     toast(e.message);
@@ -81,7 +80,7 @@ function releaseClassic(id) {
   if (!held || (id && held.id !== id)) return;
   clearInterval(held.timer);
   classicHeld = null;
-  api(`/api/session/${encodeURIComponent(held.id)}/engine`, { engine: "chat" }).catch(() => {});
+  api(chatPath(held.id, "/engine"), { engine: "chat" }).catch(() => {});
 }
 
 // The keys a phone's keyboard hasn't, as a terminal sends them.
@@ -310,7 +309,7 @@ class SessionTerminal {
     this.lineTyped(false);
     toast(`Uploading ${file.name || "the file"}…`);
     try {
-      const r = await api(`/api/session/${encodeURIComponent(this.id)}/upload`, { name: file.name || "file", data: await base64Of(file) });
+      const r = await api(chatPath(this.id, "/upload"), { name: file.name || "file", data: await base64Of(file) });
       toast(`Saved in the project as ${r.path}`);
       return r.full || r.path;
     } catch (e) {
@@ -356,7 +355,7 @@ class SessionTerminal {
 
   pasteText(text) {
     if (!text) return toast("Nothing to paste: copy something first");
-    clipText(text);         // the host's wl-paste has it too
+    clipText(text, this.id);        // the host's wl-paste has it too
     this.active.paste(text);
   }
 
@@ -372,7 +371,7 @@ class SessionTerminal {
     const which = this.shown;
     let text;
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(this.id)}/tty/${which}/text`);
+      const r = await fetch(chatPath(this.id, `/tty/${which}/text`));
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "Couldn't read the terminal");
       text = d.text || "";
@@ -382,7 +381,7 @@ class SessionTerminal {
     if (this.shown !== which) return;
     this.unselect();
     const pre = h("pre", { class: "term-text-body", tabindex: "0" }, ...linkified(text));
-    pre.addEventListener("copy", () => clipText(String(getSelection() || "")));
+    pre.addEventListener("copy", () => clipText(String(getSelection() || ""), this.id));
     const copyAll = h("button", { class: "control", type: "button", onclick: () => this.copyAll(text, pre) }, "Copy all");
     const done = h("button", { class: "control accent", type: "button", onclick: () => this.unselect(true) }, "Done");
     this.selecting = h("div", { class: "term-text", role: "dialog", "aria-label": "The terminal's text" },
@@ -408,7 +407,7 @@ class SessionTerminal {
   }
 
   async copyAll(text, pre) {
-    clipText(text);
+    clipText(text, this.id);
     try {
       await navigator.clipboard.writeText(text);
       toast("Copied: all of it");
@@ -576,7 +575,7 @@ class SessionTerminal {
   async run(name) {
     if (!this.id) return;
     try {
-      await api(`/api/session/${encodeURIComponent(this.id)}/run`, name ? { name } : {});
+      await api(chatPath(this.id, "/run"), name ? { name } : {});
       if (this.shown !== "term") await this.show("term");
     } catch (e) {
       if (/No run command/.test(e.message)) return this.saveCommand("run");
@@ -595,7 +594,7 @@ class SessionTerminal {
       if (!/^[\w.-]{1,40}$/.test(n)) return toast("A short name: letters, numbers, - and .");
       if (!cmd) return toast("Which command?");
       try {
-        await api(`/api/session/${encodeURIComponent(this.id)}/commands`, { name: n, command: cmd });
+        await api(chatPath(this.id, "/commands"), { name: n, command: cmd });
         closeSheets();
         this.run(n === "run" ? undefined : n);
       } catch (e) { toast(e.message); }

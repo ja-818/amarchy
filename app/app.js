@@ -21,6 +21,7 @@ const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", interrupted: "!", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅", clock: "◷", next: "›" };
 const ICONS = {
+  machine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></svg>',
   interrupted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -196,6 +197,85 @@ async function api(path, body, { keepalive = false } = {}) {
   return data;
 }
 
+// ---- machines: every machine's chats on one board
+//
+// A chat lives on its machine (docs/plan-omarchy-and-machines.md): this
+// app's server has its own chats and every paired machine's, each with its
+// machine. The app knows a chat by its key: its id for this machine's (so
+// what was kept before, a draft, a terminal's tab, keeps working), and
+// <machine>:<id> for another's. Everything for a chat goes through chatPath:
+// /api/session/<id>/… here, the same through this server for another
+// machine's (/api/m/<machine>/api/session/<id>/…).
+
+function machineHere() { return (app.view && app.view.machine) || ""; }
+
+// A key's machine ("" for this one) and its id there.
+function keyParts(key) {
+  const k = String(key || ""), i = k.indexOf(":");
+  if (i < 0) return { machine: "", id: k };
+  const machine = k.slice(0, i);
+  return { machine: machine === machineHere() ? "" : machine, id: k.slice(i + 1) };
+}
+
+// A chat's key as the board has it (this machine's: its id alone).
+function chatKeyOf(machine, id) { return machine && machine !== machineHere() ? `${machine}:${id}` : String(id); }
+function normKey(key) { const p = keyParts(key); return chatKeyOf(p.machine, p.id); }
+function keyOfChat(x) { return typeof x === "string" ? x : (x && x.id) || ""; }
+// Another chat a chat names (who sent it something, a reply's session
+// block): an id is one on that chat's own machine; <machine>:<id> is as said.
+function keyNamed(chat, id) { return String(id).includes(":") ? normKey(id) : chatKeyOf(keyParts(keyOfChat(chat)).machine, id); }
+
+// A path on the machine a chat is on (a chat, or its key): as it is for this
+// machine's, through this server for another's.
+function machinePath(x, path) {
+  const { machine } = keyParts(keyOfChat(x));
+  return machine ? `/api/m/${encodeURIComponent(machine)}${path}` : path;
+}
+function chatPath(x, rest = "") { return machinePath(x, `/api/session/${encodeURIComponent(chatIdOf(x))}${rest}`); }
+// A chat's id on its own machine.
+function chatIdOf(x) { return keyParts(keyOfChat(x)).id; }
+
+// A chat as the server says it (its machine's id), as the app keys it.
+function rowIn(s, here) {
+  if (!s || typeof s !== "object") return s;
+  here = here === undefined ? machineHere() : here;
+  if (s.machine && here && s.machine !== here && !String(s.id).includes(":")) {
+    s.sid = s.id;
+    s.id = `${s.machine}:${s.id}`;
+  }
+  return s;
+}
+
+// The board as it came: every chat (and every agent's task) keyed.
+function boardIn(v) {
+  if (!v || !Array.isArray(v.sessions)) return v;
+  for (const s of v.sessions) rowIn(s, v.machine);
+  for (const t of (v.today && v.today.tasks) || []) {
+    if (t.machine && v.machine && t.machine !== v.machine && !String(t.id).includes(":")) {
+      t.tid = t.id;
+      t.id = `${t.machine}:${t.id}`;
+      t.agent = `${t.machine}:${t.agent}`;
+    }
+  }
+  return v;
+}
+
+// The machines on the board, this one first ([] before the server says).
+function machinesAll() { return (app.view && app.view.machines) || []; }
+// The ones that have answered (a machine paired but never reached isn't on the board yet).
+function machinesShown() { return machinesAll().filter((m) => m.me || m.on || m.seen); }
+function machineOf(x) {
+  const { machine } = keyParts(keyOfChat(x));
+  const name = machine || machineHere();
+  return machinesAll().find((m) => m.name === name) || { name, label: name, me: !machine, on: true };
+}
+// A chat's machine says nothing: "<label> is off" (or what to update), else "".
+function machineOff(x) {
+  const m = machineOf(x);
+  if (m.update) return m.update;
+  return m.on === false || (x && typeof x === "object" && x.machine_off) ? `${m.label} is off` : "";
+}
+
 // ---- ahead of the server: what you just did, on screen at once
 //
 // A change to a chat (its priority, its name, asleep or awake, seen) is
@@ -260,7 +340,7 @@ function aheadOn(v) {
 // what you said in its conversation (a turn that was over before a list
 // came). A command (/model) starts no turn: it stays where it is.
 function sendTo(id, body) {
-  const done = api(`/api/session/${encodeURIComponent(id)}/send`, body);
+  const done = api(chatPath(id, "/send"), body);
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   if (!s || s.setup || String((body && body.text) || "").trimStart().startsWith("/")) return done;
   const you = (r) => (r.today || {}).you_at || 0;
@@ -273,7 +353,7 @@ function sendTo(id, body) {
 // messages with it (its row's count, the icon's badge).
 function seenNow(id) {
   const s = app.view && app.view.sessions.find((x) => x.id === id);
-  const done = api(`/api/session/${encodeURIComponent(id)}/seen`);
+  const done = api(chatPath(id, "/seen"));
   if (s && (s.unseen || s.unread)) aheadOf(id, { unseen: false, unread: 0 }, (r) => !r.unseen && !r.unread, done, { quiet: true }).catch(() => {});
   else done.catch(() => {});
 }
@@ -486,7 +566,10 @@ function linkSettings() {
                    : "iOS opens links from a Home Screen app in a Safari sheet, whatever your default browser is: a web page can't ask which it is. Pick one to open them there instead.")];
 }
 
-function where(s) { return `${projectName(s.repo)} · ${s.name || s.branch}`; }
+function where(s) {
+  const on = machinesShown().length > 1 ? ` · on ${machineOf(s).label}` : "";
+  return `${projectName(s.repo)} · ${s.name || s.branch}${on}`;
+}
 function title(s) { return s.task || s.name; }
 function statusOf(s) { return s.status === "asleep" ? "idle" : (s.status || "idle"); }
 function stateOf(s) { return s.status || "idle"; }
@@ -541,13 +624,13 @@ const RESUME_TEXT = "Carry on where you were cut off";
 
 async function wakeSession(s) {
   try {
-    await aheadOf(s.id, { waking: true }, (r) => r.waking || !r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/wake`));
+    await aheadOf(s.id, { waking: true }, (r) => r.waking || !r.sleeping, api(chatPath(s.id, "/wake")));
   } catch (e) { /* said */ }
 }
 
 async function sleepSession(s) {
   try {
-    await aheadOf(s.id, { sleeping: true, waking: false }, (r) => r.sleeping, api(`/api/session/${encodeURIComponent(s.id)}/sleep`));
+    await aheadOf(s.id, { sleeping: true, waking: false }, (r) => r.sleeping, api(chatPath(s.id, "/sleep")));
     toast("Asleep: its memory is freed until you send it something.");
   } catch (e) { /* said */ }
 }
@@ -709,7 +792,7 @@ function openList() {
   app.list = es;
   streamWatch(es, () => { app.list = null; openList(); });
   es.addEventListener("list", (e) => {
-    app.view = JSON.parse(e.data);
+    app.view = boardIn(JSON.parse(e.data));
     aheadOn(app.view);
     app.online = true;
     app.failed = "";
@@ -745,6 +828,9 @@ function refresh() {
   if (app.desk) { deskList(); boardRefresh(); }
   else if (!app.session) renderHome();
   else uiWhenStill(`head-${app.session.id}`, () => { if (app.session) app.session.renderHeader(); });      // its preview, as the list has it
+  // Its machine went off, or came back (machines): its chat says so.
+  const open = (app.session && app.session.chat) || (app.desk && typeof desk !== "undefined" && desk.chat);
+  if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) open.renderDock(); });
   keptListScroll();
 }
 
@@ -897,13 +983,13 @@ function priorityNow(s, level) {
   // A new one put for later: seen, so it goes there (else, new, it stays in Now).
   if (level === "low" && typeof todayUnseen === "function" && todayUnseen(s)) todaySeen(s);
   return aheadOf(s.id, { priority: level }, (r) => (r.priority || "normal") === level,
-                 api(`/api/session/${encodeURIComponent(s.id)}/priority`, { level }));
+                 api(chatPath(s.id, "/priority"), { level }));
 }
 
 function renameNow(s, t) {
   const title = String(t || "").trim();
   return aheadOf(s.id, { title, task: title || s.claude_title || s.task }, (r) => (r.title || "") === title,
-                 api(`/api/session/${encodeURIComponent(s.id)}/rename`, title ? { title } : { reset: true }));
+                 api(chatPath(s.id, "/rename"), title ? { title } : { reset: true }));
 }
 
 function rowMenu(s) {
@@ -935,7 +1021,7 @@ async function confirmClose(s, known) {
   let c = known;
   if (!c) {
     try {
-      const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
+      const res = await fetch(chatPath(s.id, "/closing"));
       c = await res.json();
       if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
     } catch (e) {
@@ -956,7 +1042,7 @@ async function confirmClose(s, known) {
   const yes = h("button", { class: "control wide danger", onclick: async () => {
     yes.disabled = true;
     try {
-      const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/close`, {
+      const res = await fetch(chatPath(s.id, "/close"), {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ discard: n > 0 }) });
       const d = await res.json().catch(() => ({}));
       if (res.status === 409 && d.preview_left) { closeSheets(); return uiPreviewLeft(s, d.preview_left); }     // still running: its Claude stops it first
@@ -1116,7 +1202,7 @@ class SessionView {
       agent ? null : h("div", { class: "section" }, "Priority"), agent ? null : seg,
       h("div", { class: "section" }, "Chat"),
       h("button", { class: "control wide", onclick: () => { closeSheets(); this.chat.openMenu("add"); } }, "Add a picture or a file…"),
-      h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo }) }, "Add a secret…"),
+      h("button", { class: "control wide", onclick: () => addSecretSheet({ project: row.repo, on: row.id }) }, "Add a secret…"),
       uiPreviews(row).length ? h("button", { class: "control wide", onclick: () => { closeSheets(); uiPreviewManage({ ...row, id: this.id }); } },
                                  uiPreviews(row).length > 1 ? "Previews…" : "Preview…") : null,
       ...sessionActions({ ...row, id: this.id }),
@@ -1658,6 +1744,14 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   const effortLabel = h("b", { class: "name" });
   const effortPick = h("button", { class: "pick effort", type: "button", "aria-label": "Effort: how hard Claude thinks", "aria-haspopup": "menu",
                                    onclick: () => pickEffort() }, effortLabel, glyph("down"));
+  // Where it runs (machines.js), with two or more machines: the last one
+  // used for the project first; one without the project clones it first.
+  let where = null, wherePicked = false;
+  const whereLabel = h("b", { class: "name" });
+  const wherePickEl = h("button", { class: "pick where", type: "button", "aria-label": "Where: the machine it runs on", "aria-haspopup": "menu", hidden: true,
+                                    onclick: () => wherePick(repo, where, (m) => { where = m; wherePicked = true; update(); field.focus({ preventScroll: true }); }) },
+    glyph("machine", "machine"), whereLabel, glyph("down"));
+  const whereNote = h("span", { class: "why where-note", hidden: true });
   const field = h("textarea", { rows: wide ? 3 : 1, placeholder: "What do you want to do?", enterkeyhint: wide ? "go" : "enter",
                                 "aria-label": "What do you want to do?",
                                 oninput: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
@@ -1739,7 +1833,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
                                 changed: () => { store.set("draft:new", field.value); grow(); guess(); buttons(); },
                                 state: (text) => { saying = text; buttons(); } });
   const box = h("div", { class: "prompt new" }, field, imgBtn, micBtn, wide ? null : send);
-  const under = h("div", { class: "new-under" }, modelPick, effortPick, why, wide ? h("span", { class: "hint" }, "Tab, the next project · Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
+  const under = h("div", { class: "new-under" }, wherePickEl, modelPick, effortPick, why, whereNote, wide ? h("span", { class: "hint" }, "Tab, the next project · Enter starts it · Shift+Enter, a new line") : null, wide ? send : null);
   const el = h("div", { class: `start-chat${wide ? " wide" : ""}` },
     wide ? h("h1", { class: "new-title" }, "What do you want to do?") : null, row, trayEl, box, under);
   // Dropped on it: the pictures go with it too.
@@ -1753,7 +1847,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     addFiles(Array.from(e.dataTransfer.files || []));
     field.focus();
   });
-  const projects = () => (app.view && app.view.projects) || [];
+  const projects = () => whereProjects();       // every machine's (machines.js); this one's alone with one
   const grow = () => uiFitField(field, { max: window.innerHeight * 0.4, extra: 2 });
   // A project what you wrote names, as a word of its own ("the jaken app",
   // "houston os"): the longest name that fits, so "houston-os" beats "houston".
@@ -1788,6 +1882,15 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     uiTabs(ps.map((p) => ({ key: p.name, label: projectName(p.name), title: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : null })),
       repo, (p) => choose(p), picks);
     why.hidden = !guessed;
+    // Where: shown with two or more machines that answer.
+    const ms = whereMachines();
+    if (!wherePicked || !ms.some((m) => where && m.name === where.name)) { where = whereFor(repo); wherePicked = false; }
+    wherePickEl.hidden = !whereShown();
+    whereLabel.textContent = where ? where.label : "";
+    wherePickEl.title = "Where it runs: the machine its worktree, Claude and terminal are on";
+    const clones = !wherePickEl.hidden && where && repo && !machineHas(where, repo);
+    whereNote.hidden = !clones;
+    whereNote.textContent = clones ? `cloned on ${where.label} first` : "";
     modelLabel.textContent = modelName(model(), models()) || model();
     modelPick.title = "Which Claude answers: every new chat starts on it, until you pick another";
     effortPick.hidden = !effortsOf(modelOf(model(), models())).length;
@@ -1891,14 +1994,15 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   const start = async () => {
     if (!field.value.trim() || !repo) return;
     if (tray.some((a) => !a.data)) return toast("A picture is still on its way: a moment");
-    const job = { repo, text: field.value, pics: tray.slice(), model: model(), effort: newEffort() };
+    const job = { repo, text: field.value, pics: tray.slice(), model: model(), effort: newEffort(), where: whereShown() ? where : null };
     const images = job.pics.map((a) => ({ type: a.type, data: a.data }));
     tray = [];
     drawTray();
     field.value = "";
     store.set("draft:new", "");
     store.set("last-project", repo);
-    picked = guessed = false;
+    if (job.where) store.set(WHERE_KEY(repo), job.where.name);      // this project's next chat: there too
+    picked = guessed = wherePicked = false;
     grow();
     update();
     field.blur();
@@ -1939,15 +2043,15 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
       };
       look();
     });
-    let d;
+    const on = job.where && !job.where.me ? ` on ${job.where.label}` : "";
     try {
-      d = await api("/api/new", { repo: job.repo, prompt: job.text.replace(/\s+$/, ""), model: job.model, effort: job.effort, ...(images.length ? { images } : {}) });
+      job.id = await whereStart(job.where, { repo: job.repo, prompt: job.text.replace(/\s+$/, ""), model: job.model, effort: job.effort, ...(images.length ? { images } : {}) },
+                                (words) => toast(words));
     } catch (e) {
-      return back(`Didn't start: ${e.message}`);
+      return back(`Didn't start${on}: ${e.message}`);
     }
     // Its card says Starting… until the chat's own is there (board: boardStarting).
-    job.id = d.id;
-    toast(`Started in ${projectName(job.repo)}: it shows under At work`);
+    toast(`Started in ${projectName(job.repo)}${on}: it shows under At work`);
     if (job.id && !(await up(job.id))) return back(`Didn't start in ${projectName(job.repo)}: it couldn't be set up`);
     for (const a of job.pics) if (a.url) URL.revokeObjectURL(a.url);
     if (starting) starting(job, false);
@@ -2318,6 +2422,7 @@ async function openSettings() {
       h("div", { class: "section" }, "Projects"),
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
+    kids.push(...machinesSettings());      // machines.js
     kids.push(...shareSettings());
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
@@ -2331,8 +2436,8 @@ async function openSettings() {
       h("div", { class: "section" }, "Help"),
       h("button", { class: "control wide", onclick: () => tourShow() }, "Take the tour: amarchy in 100 seconds"),
       h("div", { class: "section" }, "Host"),
-      h("p", {}, `${(app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
-                 "Reachable only on your tailnet."));
+      h("p", {}, `${(machineOf("").label) || (app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
+                 (location.hostname === "127.0.0.1" ? "The desktop app on this machine." : "Reachable only on your tailnet.")));
     kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
     else if (store.get("layout")) kids.push(...layoutSettings());
@@ -2615,7 +2720,7 @@ function route() {
   if (app.desk) return deskRoute();
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
-  const id = m ? decodeURIComponent(m[1]) : null;
+  const id = m ? normKey(decodeURIComponent(m[1])) : null;      // <this machine>:<id> is <id>
   if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
     app.session.close();
@@ -2707,7 +2812,7 @@ async function start() {
         go(new URL(e.data.go, location.href).hash || "#/");
       }
       // A notification about a card: the session's chat shows it (chat.js).
-      if (e.data && e.data.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: e.data.ask } }));
+      if (e.data && e.data.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: normKey(e.data.ask) } }));
     });
   }
   try {
@@ -2719,7 +2824,7 @@ async function start() {
     app.key = d.key;
     app.user = d.user;
     app.host = d.host || null;
-    if (d.sessions) app.view = d;
+    if (d.sessions) app.view = boardIn(d);
   } catch (e) {
     app.failed = e.message.includes("Amarchy") ? e.message
       : "Can't reach Amarchy. Is Tailscale on, on this phone?";
@@ -2750,7 +2855,7 @@ async function start() {
   app.build = (document.querySelector('meta[name="app-build"]') || {}).content || null;
   if (app.desk) deskStart();
   else route();
-  if (asked) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: asked } }));
+  if (asked) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: normKey(asked) } }));
   if (shareError) toast(`Couldn't share that: ${shareError}`);
   shareCheck();     // something you shared, waiting for a chat
   openList();

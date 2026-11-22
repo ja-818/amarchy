@@ -215,7 +215,8 @@ function todayMergedAll(s) {
 function todayCount(v, only = null) {
   if (!v) return 0;
   const p = todayParts(v);
-  const chats = p.asks.length + p.blocked.length + p.fresh.length, tasks = p.tasks.length + p.dueNow.length + p.chaseNow.length;
+  // (Not a chat on a machine that's off: nothing answers it until it's back. Its card still shows, dimmed.)
+  const chats = [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)).length, tasks = p.tasks.length + p.dueNow.length + p.chaseNow.length;
   return only === "chats" ? chats : only === "tasks" ? tasks : chats + tasks;
 }
 
@@ -260,7 +261,7 @@ function todayUncomplete(s) {
 
 // What closing it would lose (uncommitted work, a run that hasn't ended), from the server.
 async function todayClosing(s) {
-  const res = await fetch(`/api/session/${encodeURIComponent(s.id)}/closing`);
+  const res = await fetch(chatPath(s.id, "/closing"));
   const c = await res.json();
   if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
   return c;
@@ -279,7 +280,7 @@ function todayCloseNow(ss, said = "") {
     const failed = [];
     for (const s of ss) {
       try {
-        await api(`/api/session/${encodeURIComponent(s.id)}/close`, { discard: false });
+        await api(chatPath(s.id, "/close"), { discard: false });
       } catch (e) {
         todayUI.closing.delete(s.id);
         missionUndo([s]);
@@ -354,7 +355,7 @@ function todayPermit(s, choice) {
   todayRedraw();
   todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
     seenNow(s.id);
-    api(`/api/session/${encodeURIComponent(s.id)}/answer`, { request_id: p.request_id, choice })
+    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice })
       .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }
@@ -380,6 +381,8 @@ function todayRunningPill(s) {
 // Where a chat stands, as its card's badge says it (the open chat's bar too).
 function todayStatePill(s) {
   const t = s.today || {};
+  const off = uiMachineOff(s);        // its machine doesn't answer: that, first
+  if (off) return uiPill(off, "quiet", { long: true });
   if (s.status === "waiting" || (s.secret_asks || []).length || (s.status !== "working" && (t.asks || []).length && !todayIsAnswered(s)))
     return uiPill(s.permission ? "Permission" : "Asks you", "ask");
   if (s.status === "working") return uiPill("Working", "working");
@@ -623,7 +626,7 @@ async function todayTaskPress(t, i) {
   if (keyed && boardOn()) { const go = boardMark(); if (go) boardFocus(go); }
   const back = () => { todayUI.tasksGone.delete(t.id); todayRedraw(); };
   todayUndo(`${b.label}: sent to ${name}`, () => {
-    api("/api/tasks/press", { id: t.id, button: i }, { keepalive: true })
+    api(machinePath(t.agent, "/api/tasks/press"), { id: t.tid || t.id, button: i }, { keepalive: true })
       .then(() => setTimeout(() => todayUI.tasksGone.delete(t.id), 15000))      // (gone from the server's list by then)
       .catch((e) => { back(); toast(e.message); });
   }, back, TODAY_UNDO, { hide: true });
@@ -1093,7 +1096,9 @@ function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.cut, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
     s.assistant_name, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
-    uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)])]);
+    uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)]),
+    // Its machine: shown with two or more, off or not, its label.
+    machinesShown().length > 1 ? [machineOf(s).label, uiMachineOff(s)] : null]);
 }
 
 // What a task's card shows: the task, its time as said, its agent's name and picture.

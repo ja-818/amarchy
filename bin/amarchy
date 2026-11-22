@@ -40,6 +40,9 @@ Sessions:
   amarchy new <project> [name] --agent <name> [--prompt <text|->]
                                         one of your agents from its start, called that (the app's New
                                         agent): it texts you, lives on, never a chat to complete
+  amarchy new <project> [name] --on <machine> [...]
+                                        the same on another machine of yours (amarchy machines): its project
+                                        cloned there first from GitHub when it isn't there; prints <machine>:<id>
   amarchy send <id> <text|->            a message for a session's Claude, as if typed and sent (- reads it
                                         from stdin), once Claude is free: after the turn under way, not
                                         over a question it asks; a session asleep or whose Claude exited
@@ -47,11 +50,15 @@ Sessions:
   amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]
                                         the same, returning at once (it's delivered in the background), or
                                         waiting that long; from the session's own Claude it never waits
+  amarchy send <machine>:<id> <text|->  the same to a chat on another machine of yours (amarchy machines):
+                                        handed to it at once, delivered there once its Claude is free
   amarchy quiet [id] [--json]           the turns a timer, a script or another chat started that its Claude
                                         ended with NO_REPLY (nothing for you to see), hidden from the app:
                                         when, what woke it, the words it said why
   amarchy list [--compact]              sessions as JSON, in list order (task, age, and agent: the name its
                                         Claude goes by for other Claude sessions' SendMessage)
+  amarchy list --all [--compact]        this machine's, then every paired machine's, each with its machine
+                                        (one that doesn't answer: as last seen, machine_off)
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
   amarchy rename <title>                name the current session
   amarchy rename --id <id> <title>      the same for another session; --reset instead of a title goes back to the
@@ -346,9 +353,10 @@ Environment:
   AMARCHY_SHORT_NAMES  off to show Claude Code's titles as they are, not cut down to "Keyword: a few words"
 
 ~/.config/amarchy/host (KEY=value lines): NAME= and BIND= (how your devices reach what a session serves,
-else this machine's Tailscale name and address), APP_USERS= (the Tailscale logins the app lets in, else
-this machine's owner), APP_PORT= and APP_HTTPS= (the app's ports), APP_LINKS= (the port a
-Mac's links out go through, 7398), AUTO_UPDATE=off.
+else this machine's Tailscale name and address), APP_USERS= (your other Tailscale logins the app lets
+in, besides this machine's owner: yours on another tailnet), URL= (the address your other machines
+reach this one's app at), APP_PORT= and APP_HTTPS= (the app's ports), APP_LINKS= (the port a Mac's
+links out go through, 7398, or off), AUTO_UPDATE=off.
 
 A session's Claude and terminal have AMARCHY=1, AMARCHY_SESSION (its id), $AMARCHY_PATH
 (the worktree), $AMARCHY_NAME, $AMARCHY_BRANCH, $AMARCHY_REPO and $AMARCHY_ROOT (the
@@ -554,6 +562,26 @@ def projects(remotes=True):
 # or moved one at a time from any list): the
 # pickers. One you haven't placed goes after the ones you have, by name, so
 # a project you add shows up last until you move it.
+
+_github_memo = {}
+
+
+def project_github(name):
+    """A project's GitHub address (owner/repo), or None: what another machine
+    clones it from (a new chat there, "Where"). Read again only when its git
+    config changes; never the remote itself (it may carry a token)."""
+    conf = WORK / name / ".git" / "config"
+    try:
+        sig = conf.stat().st_mtime_ns
+    except OSError:
+        return None
+    kept = _github_memo.get(name)
+    if kept and kept[0] == sig:
+        return kept[1]
+    slug = github_slug(sh("git", "remote", "get-url", "origin", cwd=WORK / name).stdout.strip())
+    _github_memo[name] = (sig, slug)
+    return slug
+
 
 def project_order():
     """The projects you put in order, first first (names; one may be gone)."""
@@ -3333,7 +3361,7 @@ def cmd_new(args):
     that, from its start (amarchy agents). --no-jump, from when a desktop
     showed the new session, is still taken, and changes nothing: nothing
     opens anywhere."""
-    prompt, model, effort, agent, rest, attach = None, None, None, None, [], []
+    prompt, model, effort, agent, rest, attach, on = None, None, None, None, [], [], None
     it = iter(args)
     for a in it:
         if a == "--no-jump":
@@ -3361,8 +3389,12 @@ def cmd_new(args):
             agent = (a.split("=", 1)[1] if "=" in a else next(it, None) or "").strip()
             if not agent or len(agent) > 40:
                 return fail("--agent takes what to call it (40 characters at most)")
+        elif a == "--on" or a.startswith("--on="):
+            on = a.split("=", 1)[1] if "=" in a else next(it, None)
+            if not on:
+                return fail("--on needs a machine (amarchy machines lists them)")
         elif a.startswith("--"):
-            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach, --model, --effort and --agent)")
+            return fail(f"amarchy new doesn't know {a} (it takes --prompt, --attach, --model, --effort, --agent and --on)")
         else:
             rest.append(a)
     if not rest or len(rest) > 2:
@@ -3388,10 +3420,45 @@ def cmd_new(args):
     if isinstance(blocks, str):
         return fail(f"--attach: {blocks}")
     repo = rest[0]
+    if on and on != machine_name():
+        return new_on(on, repo, rest[1] if len(rest) > 1 else None, prompt, model, images, effort, agent)
     sid = create(repo, rest[1] if len(rest) > 1 else auto_name(repo), prompt, model, blocks, effort, agent)
     if not sid:
         return 1
     print(sid)
+    return 0
+
+
+def new_on(name, repo, chat_name, prompt, model, images, effort, agent):
+    """amarchy new --on <machine>: the chat started on another machine of
+    yours, through its app (as this machine), its project cloned there first
+    from GitHub when it isn't there. Prints <machine>:<id>."""
+    m = machine_find(name)
+    if not m:
+        return fail(f"no machine {name} is paired with this one (amarchy machines lists them)")
+    try:
+        status, there = peer_json(m, "GET", "/api/peer/state")
+        if status != 200:
+            return fail(there.get("error") or f"{m['label']} said no ({status})")
+        if repo not in {p.get("name") for p in there.get("projects") or [] if isinstance(p, dict)}:
+            slug = project_github(repo) if (WORK / repo / ".git").exists() else (repo if re.fullmatch(r"[\w.-]+/[\w.-]+", repo) else None)
+            if not slug:
+                return fail(f"{repo} isn't on {m['label']}, and has no GitHub address here to clone it from: add it there first")
+            print(f"cloning {slug} on {m['label']} first…", file=sys.stderr, flush=True)
+            status, added = peer_json(m, "POST", "/api/add", {"repo": slug}, timeout=930)
+            if status != 200:
+                return fail(f"couldn't clone {slug} on {m['label']}: {added.get('error') or status}")
+            repo = added.get("name") or repo
+        body = {"repo": repo, **{k: v for k, v in (("prompt", prompt), ("model", model), ("effort", effort), ("agent", agent)) if v},
+                **({"images": images} if images else {})}
+        if chat_name:
+            body["name"] = chat_name
+        status, d = peer_json(m, "POST", "/api/new", body, timeout=330)
+    except PeerError as e:
+        return fail(f"{m['label']} is off: {e}")
+    if status != 200 or not d.get("id"):
+        return fail(d.get("error") or f"{m['label']} couldn't start it ({status})")
+    print(f"{m['name']}:{d['id']}")
     return 0
 
 
@@ -7926,7 +7993,7 @@ def cmd_automations(args):
 # It's reachable from your tailnet only: the server listens on localhost, and
 # `tailscale serve` puts it on https://<this machine>.<tailnet>.ts.net, where
 # Tailscale says who's asking (the Tailscale-User-Login header). Only you (the
-# machine's owner on Tailscale, or APP_USERS= in ~/.config/amarchy/host) get
+# machine's owner on Tailscale, and APP_USERS= in ~/.config/amarchy/host) get
 # in, and only pages of its own can change anything (Origin), so a website
 # open on your phone can't drive your sessions.
 #
@@ -9732,15 +9799,20 @@ def app_address(status=None):
 
 
 def app_users(status=None):
-    """The Tailscale logins let in: APP_USERS= (comma separated), else the
-    owner of this machine."""
-    users = host_setting("APP_USERS")
-    if users:
-        return {u.strip() for u in users.split(",") if u.strip()}
-    status = status if status is not None else tailscale_status()
+    """The Tailscale logins let in: the owner of this machine, and APP_USERS=
+    (comma separated: your other logins, one person's on two tailnets, say)."""
+    users = {u.strip() for u in (host_setting("APP_USERS") or "").split(",") if u.strip()}
+    owner = app_owner(status if status is not None else tailscale_status())
+    return users | ({owner} if owner else set())
+
+
+def app_owner(status=None):
+    """This machine's owner on Tailscale (its login), or None."""
+    if status is None:
+        return None
     me = status.get("Self") or {}
     login = ((status.get("User") or {}).get(str(me.get("UserID"))) or {}).get("LoginName", "")
-    return {login} if login and "@" in login else set()
+    return login if login and "@" in login else None
 
 
 def app_port():
@@ -12041,7 +12113,8 @@ def app_watch(st):
         try:
             if st.projects_stale.is_set() or time.time() - projects_at > 10:     # a project added: now, not in ten seconds
                 st.projects_stale.clear()
-                ps = [{"name": p["name"], "sessions": p.get("sessions", 0)} for p in projects(remotes=False)]
+                ps = [{"name": p["name"], "sessions": p.get("sessions", 0), "github": project_github(p["name"])}
+                      for p in projects(remotes=False)]
                 projects_at = time.time()
             ps = ordered_projects(ps)     # in your order, now: you may just have moved one
             ss = session_view()
@@ -13731,6 +13804,7 @@ PROTOCOL = 1                    # the contract between machines (docs/plan-omarc
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy"
 MACHINES = CONFIG / "machines.json"
 MACHINE_LABEL = CONFIG / "label"        # this machine's label, when you gave it one
+MACHINE_NAME = CONFIG / "name"          # its name, kept once paired (a tailnet that renames it breaks no pair)
 PEERS_SEEN = APP / "peers"              # <name>.json: each machine's chats as last seen, for while it's off
 PEER_TIMEOUT = 8                        # seconds to reach a machine
 # Seconds a machine's stream may stay silent (it says "still here" every
@@ -13745,7 +13819,27 @@ class PeerError(Exception):
 
 
 def machine_name():
+    """This machine's name: NAME= (the tests'), else the one it was paired
+    under, else its Tailscale name (host_name)."""
+    if host_setting("NAME"):
+        return host_setting("NAME").lower()
+    try:
+        kept = MACHINE_NAME.read_text().strip().lower()
+        if re.fullmatch(MACHINE_NAME_RE, kept):
+            return kept
+    except OSError:
+        pass
     return host_name().lower()
+
+
+def machine_name_keep():
+    """Paired: this machine's name stays what the others know it by, even
+    when Tailscale gives it another (a move to another tailnet)."""
+    if host_setting("NAME") or MACHINE_NAME.exists():
+        return
+    name = machine_name()
+    if re.fullmatch(MACHINE_NAME_RE, name):
+        write_file(MACHINE_NAME, name + "\n")
 
 
 def machine_label():
@@ -13777,9 +13871,11 @@ def machine_url():
 
 
 def machine_user():
-    """This machine's owner on Tailscale (the login hello says)."""
-    users = app_users(tailnet_status())
-    return sorted(users)[0] if users else None
+    """This machine's owner on Tailscale (the login hello says): its node's
+    login, else the first of APP_USERS."""
+    status = tailnet_status()
+    users = app_users(status)
+    return app_owner(status) or (sorted(users)[0] if users else None)
 
 
 _version_memo = {}
@@ -13801,7 +13897,7 @@ def amarchy_version():
 def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
-            "protocol": PROTOCOL, "user": machine_user()}
+            "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True}
 
 
 def machine_url_ok(url):
@@ -13905,6 +14001,9 @@ def peer_headers(m, extra=None):
     """What a request to machine m carries: who's asking (this machine),
     the pair's key, and the protocol it speaks."""
     h = {"X-Amarchy-Peer": machine_name(), "X-Amarchy-Protocol": str(PROTOCOL), "User-Agent": f"amarchy/{PROTOCOL}"}
+    me = machine_url()
+    if me:
+        h["X-Amarchy-Peer-URL"] = me        # where it's reached now (a tailnet changed: kept by the other)
     if m.get("key"):
         h["Authorization"] = f"Bearer {m['key']}"
     return {**h, **(extra or {})}
@@ -13940,8 +14039,11 @@ def peer_why(e):
         return "it didn't answer in time"
     if isinstance(e, ConnectionRefusedError) or "refused" in text.lower():
         return "nothing answers there (is amarchy's app on there?)"
-    if isinstance(e, socket.gaierror) or "Name or service not known" in text or "nodename nor servname" in text:
-        return "its name isn't known here (is it on your tailnet, with MagicDNS on?)"
+    if isinstance(e, socket.gaierror) or "Name or service not known" in text or "nodename nor servname" in text \
+            or "Temporary failure in name resolution" in text:
+        return f"can't reach it from {machine_label()}: its name isn't known here (on another tailnet, or MagicDNS off?)"
+    if isinstance(e, OSError) and e.errno in (101, 113):     # network / host unreachable
+        return f"can't reach it from {machine_label()}: no route there"
     if "CERTIFICATE" in text.upper():
         return f"its HTTPS certificate isn't right ({text})"
     return text or type(e).__name__
@@ -13984,9 +14086,12 @@ def machine_hello(url, timeout=PEER_TIMEOUT):
     why = protocol_words(h.get("protocol"), label)
     if why:
         raise PeerError(why)
+    # Its owner must be one of yours (this machine's owner, or in APP_USERS:
+    # your login on another tailnet): pairing gives it this machine's chats.
     mine = app_users(tailnet_status())
     if mine and h.get("user") not in mine:
-        raise PeerError(f"{label} is {h.get('user') or 'nobody'}'s, not yours")
+        raise PeerError(f"{label} is {h.get('user') or 'nobody'}'s, not yours (if that's you too, on another "
+                        f"tailnet: APP_USERS={h.get('user') or '<that login>'} in {HOST_CONFIG}, then add it again)")
     if not re.fullmatch(MACHINE_NAME_RE, h["name"]):
         raise PeerError(f"its name ({h['name']}) isn't a machine's")
     return {**h, "label": label}
@@ -14009,6 +14114,39 @@ def machine_address(target):
     raise PeerError(f"{target!r} isn't a machine's name or address")
 
 
+def machine_url_here(url):
+    """An address this machine can reach a peer at: on its own tailnet (its
+    MagicDNS name), or this machine itself (a test's second server). Not one
+    on another tailnet a peer gives (it may reach this one through a proxy)."""
+    u = urllib.parse.urlsplit(url)
+    if u.scheme == "http":
+        return u.hostname in ("127.0.0.1", "localhost")
+    status = tailnet_status()
+    suffix = (status.get("MagicDNSSuffix") or (status.get("CurrentTailnet") or {}).get("MagicDNSSuffix") or "").strip(".").lower()
+    return bool(suffix) and (u.hostname or "").lower().endswith("." + suffix)
+
+
+def machine_moved(m):
+    """A machine that stopped answering at its address: is it at its name's
+    address on this tailnet now (a tailnet moved)? Kept there if so."""
+    if not re.fullmatch(MACHINE_NAME_RE, m["name"]) or urllib.parse.urlsplit(m["url"]).scheme != "https":
+        return False
+    try:
+        url = machine_address(m["name"])
+    except PeerError:
+        return False
+    if url == m["url"]:
+        return False
+    try:
+        h = machine_hello(url, timeout=4)
+    except PeerError:
+        return False
+    if h["name"] != m["name"]:
+        return False
+    machine_keep({**m, "url": url})
+    return True
+
+
 def machines_add(target):
     """Pair this machine with another (amarchy machines add): the machine
     as kept. Raises PeerError saying why not."""
@@ -14023,6 +14161,7 @@ def machines_add(target):
         raise PeerError("this machine isn't on your tailnet yet, so the other can't reach it back "
                         "(amarchy app on, with Tailscale up)")
     key = b64u(os.urandom(32))
+    machine_name_keep()
     status, said = peer_json({"url": url, "key": key}, "POST", "/api/peer/pair",
                              {"name": machine_name(), "label": machine_label(), "url": me, "protocol": PROTOCOL})
     if status != 200:
@@ -14083,8 +14222,10 @@ def machine_state(m):
 def machines_listed(check=True):
     """This machine, then the ones paired with it, each with its state
     (asked of each at once), never a key."""
+    # merges: this amarchy's app shows another machine's chats and acts on
+    # them (the desktop app opens this machine's board only then).
     me = {"name": machine_name(), "label": machine_label(), "url": machine_url(), "me": True,
-          "state": "on", "version": amarchy_version(), "error": None}
+          "state": "on", "version": amarchy_version(), "error": None, "merges": True}
     rows = machines_read()
     states = {}
     if check and rows:
@@ -14271,6 +14412,8 @@ class Peers:
                     why = str(e)
                 except Exception as e:  # a stream cut mid-event, its data not JSON
                     why = str(e) or type(e).__name__
+                if machine_find(name) and machine_moved(m):
+                    continue            # its address changed (another tailnet): there, at once
                 if machine_find(name):
                     self.update(name, on=False, error=why)
                 wake.wait(wait)
@@ -14365,7 +14508,8 @@ def board_view(st):
         return memo[1]
     me = machine_name()
     machines = [{"name": me, "label": machine_label(), "me": True, "on": True, "since": None, "error": None,
-                 "update": None, "version": amarchy_version(), "projects": [p["name"] for p in view.get("projects") or []]}]
+                 "update": None, "version": amarchy_version(), "seen": True,
+                 "projects": [{"name": p["name"], "github": p.get("github")} for p in view.get("projects") or []]}]
     sessions = list(view.get("sessions") or [])
     tasks = list((view.get("today") or {}).get("tasks") or [])
     peers = st.peers.snapshot() if getattr(st, "peers", None) else {}
@@ -14379,17 +14523,73 @@ def board_view(st):
         machines.append({"name": name, "label": str(h.get("label") or m["label"])[:LABEL_MAX], "me": False,
                          "on": not off, "since": p.get("since"), "error": p.get("error"), "update": p.get("update"),
                          "version": h.get("version") or "", "seen": bool(p.get("sessions") or p.get("at")),
-                         "projects": [x.get("name") for x in p.get("projects") or [] if isinstance(x, dict)]})
+                         "projects": [{"name": x.get("name"), "github": x.get("github")} for x in p.get("projects") or []
+                                      if isinstance(x, dict) and isinstance(x.get("name"), str)]})
         if p.get("update"):
             continue            # another protocol: what to update, not its chats (they may not read the same)
         for s in p.get("sessions") or []:
             sessions.append({**s, "machine": name, **({"machine_off": True} if off else {})})
         tasks += [{**x, "machine": name} for x in p.get("tasks") or [] if isinstance(x, dict) and not off]
-    board = {**view, "sessions": sessions, "machine": me, "machines": machines, "needs": needs_you(sessions)}
+    # What needs you: not a chat on a machine that's off (nothing to answer it with until it's back).
+    board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True,
+             "needs": needs_you([s for s in sessions if not s.get("machine_off")])}
     if len(machines) > 1:
         board["today"] = {**(view.get("today") or {}), "tasks": tasks}
     st.board = (version, board)
     return board
+
+
+def list_all():
+    """amarchy list --all: this machine's chats, then every paired machine's
+    (each asked at once), each with its machine; one that doesn't answer:
+    its chats as last seen (the app's server keeps them), machine_off."""
+    me = machine_name()
+    rows = [{**s, "machine": me} for s in session_view()]
+    found = {}
+
+    def ask(m):
+        try:
+            status, d = peer_json(m, "GET", "/api/peer/state", timeout=5)
+            if status == 200:
+                found[m["name"]] = [{**s, "machine": m["name"]} for s in d.get("sessions") or [] if isinstance(s, dict)]
+                return
+        except PeerError:
+            pass
+        try:
+            kept = json.loads((PEERS_SEEN / f"{m['name']}.json").read_text())
+        except (OSError, ValueError):
+            kept = {}
+        found[m["name"]] = [{**s, "machine": m["name"], "machine_off": True} for s in kept.get("sessions") or [] if isinstance(s, dict)]
+    ms = machines_read()
+    ts = [threading.Thread(target=ask, args=(m,), daemon=True) for m in ms]
+    for t_ in ts:
+        t_.start()
+    for t_ in ts:
+        t_.join(8)
+    for m in ms:
+        rows += found.get(m["name"], [])
+    return rows
+
+
+def peers_search(st, q, timeout=4):
+    """What was said in the chats of every paired machine that's on, with
+    each result's machine (Tasks' search)."""
+    found, ms = [], {m["name"]: m for m in machines_read()}
+    on = [ms[n] for n, p in st.peers.snapshot().items() if p.get("on") and n in ms]
+
+    def ask(m):
+        try:
+            status, d = peer_json(m, "GET", f"/api/search?q={urllib.parse.quote(q)}", timeout=timeout)
+        except PeerError:
+            return
+        if status == 200:
+            found.extend({**r, "machine": m["name"]} for r in d.get("results") or [] if isinstance(r, dict) and r.get("id"))
+    ts = [threading.Thread(target=ask, args=(m,), daemon=True) for m in on]
+    for t_ in ts:
+        t_.start()
+    for t_ in ts:
+        t_.join(timeout + 1)
+    return list(found)
 
 
 def peer_moments(st, board):
@@ -14613,6 +14813,13 @@ def app_handler(st, users, address):
                                 "protocol": PROTOCOL})
                 return False
             self.via, self.peer = "peer", name
+            # Where it's reached now (its tailnet changed): kept, so this one calls it there.
+            now = self.headers.get("X-Amarchy-Peer-URL", "").rstrip("/")
+            if now and now != m["url"] and machine_url_ok(now) and machine_url_here(now):
+                try:
+                    machine_keep({**m, "url": now})
+                except ValueError:
+                    pass
             return True
 
         def peer_hello(self):
@@ -14639,6 +14846,7 @@ def app_handler(st, users, address):
                 return self.send(409, {"error": protocol_words(data.get("protocol"), str(name)), "protocol": PROTOCOL})
             if name == machine_name():
                 return self.error(400, "that's this machine")
+            machine_name_keep()
             try:
                 m = machine_keep({"name": name, "label": data.get("label"), "url": url, "key": key})
             except ValueError:
@@ -14651,6 +14859,17 @@ def app_handler(st, users, address):
         def peer_post(self, what, data):
             """What a paired machine asks of this one: forget it (unpair), or
             this machine's label (label: {label})."""
+            if what == "send":      # amarchy send <this machine>:<id>, from another machine
+                sid, text, origin = data.get("id"), data.get("text"), data.get("from") or ""
+                if not isinstance(sid, str) or not self.session(sid):
+                    return None if isinstance(sid, str) else self.error(400, "which chat (id)")
+                if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
+                    return self.error(400, "nothing to send")
+                if not isinstance(origin, str) or not re.fullmatch(r"([\w.-]{1,63}:[\w.-]{1,120})?", origin):
+                    return self.error(400, "from: <machine>:<chat>")
+                r = run_amarchy("send", sid, "-", "--no-wait", input=text,
+                                env={"AMARCHY_SESSION": origin or f"{self.peer}:", **({"AMARCHY_SENT_BY": "you"} if data.get("you") is True else {})})
+                return self.send(200, {}) if r.returncode == 0 else self.error(409, gist(r.stderr) or "it couldn't be sent")
             if what == "unpair":
                 machine_drop(self.peer)
                 if st.peers:
@@ -14781,9 +15000,9 @@ def app_handler(st, users, address):
                             break
                         conn.send(chunk)
                         left -= len(chunk)
-                # Its answer: a new chat there takes minutes (it may clone the project first).
+                # Its answer: a new chat there takes minutes, a project cloned there longer.
                 sock = conn.sock
-                sock.settimeout(330 if method == "POST" else 60)
+                sock.settimeout(930 if rest.startswith("/api/add") else 330 if method == "POST" else 60)
                 r = conn.getresponse()
             except (OSError, ValueError, http.client.HTTPException) as e:
                 conn.close()
@@ -15341,7 +15560,13 @@ def app_handler(st, users, address):
                 q = (args.get("q") or [""])[0][:200]
                 with st.changed:
                     ss = list(st.view.get("sessions") or [])
-                return self.send(200, {"q": q, "results": search_chats(q, ss)})
+                results = [{**r, "machine": machine_name()} for r in search_chats(q, ss)]
+                # Every machine's chats (see "machines"), asked of each at once;
+                # a machine's own search only (a peer asking isn't passed on).
+                if self.via != "peer" and st.peers and q.strip():
+                    results += peers_search(st, q)
+                    results.sort(key=lambda r: (not r.get("name"), -min(r.get("hits") or 0, 20), -(r.get("at") or 0)))
+                return self.send(200, {"q": q, "results": results[:SEARCH_MAX]})
             if path == "/api/automations":      # what runs by itself (see "automations"), and the chats' previews
                 return self.send(200, {"automations": automation_list(), "previews": preview_running(), "at": time.time()})
             if path == "/api/automations/log":
@@ -15718,7 +15943,7 @@ def app_handler(st, users, address):
             if self.path.startswith("/api/m/"):     # a chat on another machine (the pass-through)
                 self.changed_nothing = True         # (that machine's list says what changed)
                 return self.pass_through()
-            if self.path in ("/api/peer/unpair", "/api/peer/label"):
+            if self.path in ("/api/peer/unpair", "/api/peer/label", "/api/peer/send"):
                 if self.via != "peer":
                     return self.error(403, "only from another machine of yours")
                 return self.peer_post(self.path.rsplit("/", 1)[1], self.body())
@@ -16364,6 +16589,9 @@ def app_handler(st, users, address):
             if effort is not None and not effort_choice(effort):
                 return self.error(400, "which effort")
             on += ["--effort", effort] if effort else []
+            named = data.get("name")        # (amarchy new <project> <name> --on, from another machine)
+            if named is not None and not (isinstance(named, str) and re.fullmatch(r"[\w.-]{1,60}", named) and not named.startswith("-")):
+                return self.error(400, "a chat's name: letters, digits, . _ -")
             agent = data.get("agent")
             if agent is not None:
                 if not isinstance(agent, str) or not agent.strip() or len(agent.strip()) > 40:
@@ -16376,7 +16604,7 @@ def app_handler(st, users, address):
             if prompt is None or isinstance(prompt, str) and not prompt.strip():
                 if images:
                     return self.error(400, "say what it's for: the pictures go with it")
-                r = run_amarchy("new", repo, *on, timeout=300)
+                r = run_amarchy("new", repo, *([named] if named else []), *on, timeout=300)
             elif not isinstance(prompt, str) or len(prompt) > 60_000:
                 return self.error(400, "say what it's for")
             else:
@@ -16388,7 +16616,7 @@ def app_handler(st, users, address):
                         f = Path(tmp) / f"{i + 1}{ext}"
                         f.write_bytes(base64.b64decode(b["source"]["data"]))
                         attach += ["--attach", str(f)]
-                    r = run_amarchy("new", repo, *on, "--prompt", "-", *attach, input=prompt, timeout=300)
+                    r = run_amarchy("new", repo, *([named] if named else []), *on, "--prompt", "-", *attach, input=prompt, timeout=300)
             sid = (r.stdout.strip().splitlines() or [""])[-1]
             if r.returncode != 0 or not sid:
                 return self.error(500, gist(r.stderr) or "couldn't start it")
@@ -16621,14 +16849,15 @@ def app_serve():
     links_serve()                       # a Mac's links out (see links_handler)
 
     def tailnet():
-        """Tailscale came up (or its owner showed) after the server started."""
-        while not (handler.net["address"] and handler.net["users"]):
-            time.sleep(15)
+        """Tailscale came up after the server started, or this machine moved
+        to another tailnet (its address, its owner): followed."""
+        while True:
+            time.sleep(15 if not handler.net["address"] else 60)
             now = tailscale_status()
             found, who = app_address(now), app_users(now)
-            if found and who:
+            if found and who and (found, who) != (handler.net["address"], handler.net["users"]):
                 handler.net.update(address=found, users=who)
-                print(f"amarchy app: on the tailnet now, {app_url(found)}", file=sys.stderr, flush=True)
+                print(f"amarchy app: on the tailnet as {app_url(found)}, for {', '.join(sorted(who))}", file=sys.stderr, flush=True)
 
     threading.Thread(target=tailnet, daemon=True).start()
     st.peers = Peers(st)                # every paired machine's chats on the board (see "machines")
@@ -17027,6 +17256,10 @@ def cmd_send(args):
     text = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     if not text.strip():
         return fail("nothing to send")
+    where, _, local = sid.rpartition(":")
+    if where and where != machine_name():
+        return send_on(where, local, text)
+    sid = local
     if not session(sid):
         return fail(f"No session {sid!r}")
     # From the session's own Claude, waiting would wait on itself: its turn
@@ -17050,6 +17283,27 @@ def cmd_send(args):
     return 0
 
 
+def send_on(name, sid, text):
+    """amarchy send <machine>:<id>: the message to a chat on another machine
+    of yours, handed to amarchy send there (/api/peer/send): it wakes the
+    chat for it and delivers it once its Claude is free, as a message from
+    a script or another chat (from this one, here). Doesn't wait."""
+    m = machine_find(name)
+    if not m:
+        return fail(f"no machine {name} is paired with this one (amarchy machines lists them)")
+    me = os.environ.get("AMARCHY_SESSION")
+    try:
+        status, d = peer_json(m, "POST", "/api/peer/send", {"id": sid, "text": text,
+                                                            "from": f"{machine_name()}:{me}" if me else "",
+                                                            "you": os.environ.get("AMARCHY_SENT_BY") == "you"}, timeout=60)
+    except PeerError as e:
+        return fail(f"{m['label']} is off: {e}")
+    if status != 200:
+        return fail(d.get("error") or f"{m['label']} said no ({status})")
+    print(f"queued for {name}:{sid}: its Claude gets it once it's free")
+    return 0
+
+
 SENT_BY_KEPT = 300      # what amarchy send sent each session, remembered (the newest)
 
 
@@ -17067,7 +17321,9 @@ def sent_by_note(sid, text, origin, deadline=None):
         f = SENT_BY / f"{sid}.jsonl"
         with open(f, "a") as fh:
             fh.write(json.dumps({"at": time.time(), "hash": sent_hash(text),
-                                 "from": origin if origin and session(origin) and origin != sid else "",
+                                 # (another machine's chat: <machine>:<id>, as the board keys it)
+                                 "from": origin if origin and (session(origin) or re.fullmatch(r"[\w.-]+:[\w.-]+", origin))
+                                 and origin != sid else "",
                                  **({"until": round(deadline)} if deadline else {})}) + "\n")
         if f.stat().st_size > SENT_BY_KEPT * 200:
             lines = f.read_text().splitlines()[-SENT_BY_KEPT:]
@@ -20244,10 +20500,10 @@ def cmd_agent(args):
 # prompt), left alone. Commands with None are plumbing whose arguments come
 # from amarchy itself or from Claude Code: only a first --help is theirs (none for editor).
 OPTIONS = {
-    "new": ({"--prompt", "--no-jump", "--model", "--effort", "--attach", "--agent"}, {"--prompt", "--model", "--effort", "--attach", "--agent"}, set()),
+    "new": ({"--prompt", "--no-jump", "--model", "--effort", "--attach", "--agent", "--on"}, {"--prompt", "--model", "--effort", "--attach", "--agent", "--on"}, set()),
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
-    "list": ({"--compact"}, set(), set()),
+    "list": ({"--compact", "--all"}, set(), set()),
     "close": ({"--force"}, set(), set()),
     "rename": ({"--id", "--reset"}, {"--id"}, set()),
     "run": ({"--show", "--set", "--save", "--forget", "--list"}, {"--forget"}, {"--set", "--save"}),
@@ -20376,7 +20632,8 @@ def main(argv):
     elif cmd == "priority":
         return cmd_priority(args)
     elif cmd == "list":
-        print(json.dumps(session_view(), indent=None if "--compact" in args else 2))
+        rows = list_all() if "--all" in args else session_view()
+        print(json.dumps(rows, indent=None if "--compact" in args else 2))
     elif cmd == "run":
         return cmd_run(args)
     elif cmd == "preview":

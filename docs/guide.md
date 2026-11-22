@@ -559,9 +559,30 @@ amarchy machines remove omarchy   # both forget the other
   else it says what to update. Both machines keep the other in
   `~/.config/amarchy/machines.json` (readable by you only), with one key the
   pair shares.
-- **The board** shows each chat with its machine. A machine that doesn't
-  answer (shut, asleep, off the network: silent for 45 s) keeps its chats as
-  last seen, marked off, until it's back; it comes back by itself.
+- **The board** shows each chat with its machine (a screen and its name on
+  the card and over the chat, once there are two or more). Every chat action
+  works wherever the chat runs: its conversation, its questions, its terminal,
+  its previews, its changes, search and your agents' tasks, all through the
+  machine you opened the app on. A machine that doesn't answer (shut, asleep,
+  off the network: silent for 45 s) keeps its chats as last seen: their cards
+  dimmed, "<name> is off", no buttons, and its chats say so in place of the box
+  until it's back. It comes back by itself.
+- **Settings → Machines**: each machine and how it stands (This machine, On,
+  Off, Update needed), **Add a machine…** (the machines of yours on the
+  tailnet that answer as amarchy, or one by its name or address), and on each
+  one, Rename and Remove.
+- **A new chat's Where** (by the model, with two or more machines): the
+  machine it runs on. The last one you used for that project comes first; a
+  project that isn't on the machine you pick is cloned there first, from
+  GitHub ("cloned on <name> first"). The new chat's projects are every
+  machine's. From the command line: `amarchy new <project> --on <machine>`.
+- **Two Tailscale logins, one person** (a work tailnet and a personal one):
+  list the other login in `APP_USERS=` (see [Configure](#configure)); a
+  machine's owner is always one of yours. A machine whose address changes
+  (it moved to another tailnet) is found again at its name, and tells the
+  others where it is now.
+- **From the command line**: `amarchy list --all` (every machine's chats,
+  each with its machine), `amarchy send <machine>:<id> "<text>"`.
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
@@ -1433,7 +1454,7 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
 | --- | --- | --- |
 | `NAME=` | this machine's Tailscale name | How your devices reach what a chat serves. |
 | `BIND=` | this machine's Tailscale address | The same. Without Tailscale, a chat serves on localhost only, and you forward the port (`ssh -L 3000:localhost:3000 <host>`). |
-| `APP_USERS=` | this machine's owner | The Tailscale logins the app lets in. |
+| `APP_USERS=` | (none) | Your other Tailscale logins the app lets in, besides this machine's owner (comma separated: yours on another tailnet). Also who a machine you pair with may belong to. |
 | `APP_PORT=` | `7397` | The app's port, on localhost. |
 | `APP_HTTPS=` | `443` | The port on your tailnet (443, 8443 or 10000). |
 | `URL=` | `https://<this machine>.<tailnet>.ts.net` | The address your other machines reach this one's app at (see [Machines](#machines)). |

@@ -426,7 +426,7 @@ function boardSentToast(id) {
 // to say what to do. Type to narrow them; a new project from here too.
 // One project (or none yet): straight to the box.
 function boardNew() {
-  const ps = (app.view && app.view.projects) || [];
+  const ps = whereProjects();         // every machine's (machines.js)
   if (ps.length < 2) return boardCompose();
   const last = (desk.newChat && desk.newChat.repo()) || store.get("last-project");
   const lit = ps.some((p) => p.name === last) ? last : ps[0].name;
@@ -518,7 +518,9 @@ function boardSearch(q) {
       const r = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { headers: { Accept: "application/json" }, signal: ask.signal });
       const d = await r.json();
       if (ask.signal.aborted || asked !== board.query) return;      // you typed on
-      board.found = r.ok ? { q: asked, results: d.results || [] } : { q: asked, results: [], error: d.error || "Amarchy didn't answer" };
+      // Each chat found by its key (another machine's: <machine>:<id>).
+      const results = (d.results || []).map((x) => ({ ...x, id: chatKeyOf(x.machine, x.id) }));
+      board.found = r.ok ? { q: asked, results } : { q: asked, results: [], error: d.error || "Amarchy didn't answer" };
     } catch (e) {
       if (ask.signal.aborted) return;
       board.found = { q: asked, results: [], error: "Can't reach Amarchy" };

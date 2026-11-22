@@ -49,6 +49,10 @@ One board says which one needs you and what for. You answer with a tap.
   Two or more (an app and its storybook)? The button is Previews: pick one from its dropdown.
 - **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
   working while your laptop or phone sleeps.
+- **Every machine's chats on one board.** Your server, your desktop, a laptop: pair them
+  (`amarchy machines add <name>`) and every chat from every machine is on the same board, each
+  card saying where it runs. Start a new chat on any of them; a machine that's off keeps its
+  chats on the board, dimmed, until it's back.
 - **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
   It texts you like a coworker and puts what needs you on **Tasks**.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home

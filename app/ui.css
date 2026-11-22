@@ -22,6 +22,9 @@
   --unseen-wash: 24%;         /* how much of it the card's ground has */
   /* A pill (uiPill): where something stands. */
   --pill-radius: var(--button-radius);     /* square as the buttons */
+  --machine-color: var(--text-muted);       /* the machine a chat is on (with two or more) */
+  --machine-off-color: var(--text-muted);
+  --machine-off-opacity: .55;               /* a card whose machine doesn't answer: as last seen */
   --pill-border-width: 1px;
   --pill-border-mix: 45%;     /* how much of its tone its border has */
   /* A button (uiButton). */
@@ -235,6 +238,21 @@ html { touch-action: manipulation; }
 @keyframes tcard-unseen {
   50% { box-shadow: inset 4px 0 0 var(--unseen), 0 0 26px -2px color-mix(in srgb, var(--unseen) 70%, transparent); }
 }
+/* The machine it's on (with two or more): a word with a screen, quieter
+   than its project. Off: its card dimmed, as last seen. */
+.ui-machine { flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 28%; min-width: 0;
+              font-size: var(--caption); font-weight: 600; color: var(--machine-color); }
+.ui-machine .glyph { flex: none; width: 1.05em; height: 1.05em; display: inline-grid; }
+.ui-machine .glyph svg { width: 100%; height: 100%; display: block; }
+.ui-machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-machine.off { color: var(--machine-off-color); }
+.ui-machine.head { max-width: 30%; }
+.tcard.machine-off > :not(.tcard-head), .tcard.machine-off > .tcard-head > :not(.tpill) { opacity: var(--machine-off-opacity); }
+/* A machine in Settings (and one found to add): its screen, its name, how it stands. */
+.machine-row { display: flex; align-items: center; gap: 10px; text-align: left; }
+.machine-row .machine { flex: none; width: 1.2em; height: 1.2em; display: inline-grid; color: var(--machine-color); }
+.machine-row .machine svg { width: 100%; height: 100%; display: block; }
+.machine-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Its project (or who), in its own color: a word, not a box. */
 .tcard-chip { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
@@ -648,7 +666,7 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-chart-bar.on .ui-chart-fill { background: var(--chart-on); }
 .ui-chart-bar.on .ui-chart-n, .ui-chart-bar.on .ui-chart-label { color: var(--text); font-weight: 700; }
 /* Narrow (a phone): the chat's name has the room; its project is on its card. */
-@media (max-width: 719px) { .chat-head .head-title .tcard-chip { display: none; } .chat-head .head-state { padding: 0 10px; } }
+@media (max-width: 719px) { .chat-head .head-title .tcard-chip, .chat-head .head-title .ui-machine { display: none; } .chat-head .head-state { padding: 0 10px; } }
 
 /* ---- a chat's preview: its button (turning while it starts), its sheet
    (ui.js uiPreviewSheet) */

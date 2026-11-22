@@ -15,6 +15,7 @@ the change.
 | `uiPresence(s)` | What your assistant or an agent is up to, as you'd say it of someone: typing…, asks you something; else nothing (`{text, tone}`). | its row, its chat's bar |
 | `avatar(s, cls)`, `isAgent(s)` | Your assistant's or an agent's picture, round: yours by its hash (`/picture/<hash>-192.png`, the 512 one for `big`), else amarchy's own for your assistant and an agent's initial on its project's color (`--ph`); `cls` `small`, `head` (an open chat's bar), `row` (a conversation's row), `big`. `isAgent(s)`: your assistant or an agent, a chat that lives on (no Complete, no Stalled, no priority: on top). | cards' `lead`, an open chat's bar, the agent sheet, Settings → Agents |
 | `uiPill(text, tone, {long, title})` | Where something stands: `ask`, `late`, `done`, `working`, `running` (these two spin), `accent`, `warn`, `quiet`, `new` (filled in `--unseen`, a dot beating in it: what you haven't seen). `long` cuts its words short with … where they don't fit. | every card's state |
+| `uiMachine(s, {head})` | The machine a chat is on, a word with a screen by it, on its card (in `uiCard`'s head) and over its chat (`uiChatHead`); only when the board has chats from two or more machines. A machine that doesn't answer: its card dimmed (`machine-off`), its pill "<label> is off", no buttons (it's read, not acted on); `uiMachineOff(s)` says so. | every chat's card and head |
 | `uiMergedWords(merged)` | A chat's merge in words: "Merged ✓ 3:42 PM", "Merged ✓ ×3 · Fri 6:05 PM". | a merged chat's pill, its chat's strip |
 | `uiButton(label, act, primary, cls)` | An action on a card or a section (`quiet`: words only; `complete`: Complete mission, its ✓, outlined like the rest). | cards, sections |
 | `uiSection(kind, title, {count, fold, extra}, ...cards)` | A small head with a count and an action at its end, its cards; folded (kept as you left it) or not. Nothing in it: nothing drawn. | Today's parts, the board's groups, search |
@@ -73,6 +74,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--card-pad-x`, `--card-gap` | Inside a card, between cards |
 | `--unseen`, `--unseen-wash` | A chat that answered and you haven't opened (an unseen card, the New pill): its color (the accent) and how much of it the card's ground has |
 | `--pill-radius`, `--pill-border-width`, `--pill-border-mix` | A pill's corners and rule (square as the buttons: `--button-radius`) (how much of its tone the rule has) |
+| `--machine-color`, `--machine-off-color`, `--machine-off-opacity` | The machine a chat is on (`uiMachine`), and a card whose machine doesn't answer: dimmed this much |
 | `--button-bg`, `--button-border`, `--button-hover-bg`, `--button-press-bg`, `--button-radius`, `--button-primary-bg`, `--button-primary-text` | A button at rest, hovered, pressed, the primary one |
 | `--section-head`, `--section-head-yours` | A section's head, and Needs you's |
 | `--fold-border`, `--fold-rule`, `--fold-radius`, `--fold-head`, `--fold-mark`, `--fold-hover-bg`, `--fold-press-bg` | Folds: the box, the line between two, a head, its mark, under the pointer or a finger |

@@ -454,6 +454,16 @@ the user to paste something into another session: send it yourself.
   it's asleep, when it should read as the user's own prompt, or from a script or
   timer.
 
+**Other machines.** The user may run amarchy on several computers (a server, a
+desktop), paired with `amarchy machines`; the app shows every machine's chats on
+one board. `amarchy list --all` lists them all, each with its `machine` (one that
+doesn't answer: as last seen, `machine_off`). `amarchy send <machine>:<id> "<text>"`
+reaches a chat on another machine (it doesn't wait), and `amarchy new <project>
+--on <machine> --prompt "..."` starts one there (its project cloned there first
+from GitHub when it isn't there); it prints `<machine>:<id>`. ListAgents and
+SendMessage reach this machine's sessions only. A chat stays on its machine: what
+it changes there (its files, that machine's config) is only testable there.
+
 To give a **new** session a task (only when the user asks for a session):
 
 1. `amarchy new <project> [name] --prompt "<the whole brief>"`, one call per

@@ -104,8 +104,10 @@ function secretCard(chat, m) {
 
 // ---- Settings → Secrets
 
-async function secretsGet() {
-  const r = await fetch("/api/secrets");
+// on: a chat (its key), for its machine's secrets (they're kept where its
+// commands run); else this machine's.
+async function secretsGet(on) {
+  const r = await fetch(machinePath(on || "", "/api/secrets"));
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || "Can't read the secrets");
   return d;
@@ -148,10 +150,12 @@ async function secretsSheet() {
 }
 
 // Add one: its name (suggestions to tap), the value, and for which project.
-// opts.project: the session's project, picked to start with.
+// opts.project: the session's project, picked to start with; opts.on: the
+// chat it's added from (kept on its machine, where its commands run).
 async function addSecretSheet(opts) {
   let d = { suggestions: [], projects_known: [] };
-  try { d = await secretsGet(); } catch (e) { /* still: a name of your own */ }
+  try { d = await secretsGet(opts.on); } catch (e) { /* still: a name of your own */ }
+  const off = opts.on ? machineOf(opts.on) : null;
   const projects = d.projects_known || [];
   let project = opts.project && projects.includes(opts.project) ? opts.project : null;
   const name = field({ placeholder: "Its name, like OPENAI_API_KEY", maxlength: "100", autocapitalize: "characters" }, () => value.input.focus());
@@ -166,9 +170,9 @@ async function addSecretSheet(opts) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) { name.focus(); return toast("A name of letters, digits and _, like OPENAI_API_KEY"); }
     if (!value.input.value.trim()) { value.input.focus(); return toast("And its value"); }
     try {
-      await api("/api/secrets", { name: n, value: value.input.value, project });
+      await api(machinePath(opts.on || "", "/api/secrets"), { name: n, value: value.input.value, project });
       value.input.value = "";
-      toast(`${n} saved for ${project ? projectName(project) : "all projects"}`);
+      toast(`${n} saved for ${project ? projectName(project) : "all projects"}${off && !off.me && machinesShown().length > 1 ? ` on ${off.label}` : ""}`);
       closeSheet();
     } catch (e) { toast(e.message); }
   };

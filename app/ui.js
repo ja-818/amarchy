@@ -249,17 +249,25 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
+  // On a machine that doesn't answer: as last seen, dimmed, "<label> is off";
+  // to read, not to act on (its buttons would go nowhere) until it's back.
+  const off = s ? uiMachineOff(s) : "";
+  if (off) {
+    pill = uiPill(off, "quiet", { long: true, title: `${off}: what it shows is from when it last answered` });
+    actions = [];
+    count = 0;
+  }
   if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
   const prio = s && !isAgent(s) && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const name = h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title);
   const two = sub !== null || count;
   const head = h("button", { class: `tcard-head today-go${two ? " two" : ""}`, type: "button", onclick: open, "aria-label": label || null },
-    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
+    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null, s ? uiMachine(s) : null,
     two ? h("span", { class: "tcard-main" }, name, sub !== null ? h("span", { class: "tcard-sub" }, sub) : null) : name,
     two ? h("span", { class: "tcard-side" }, pill, uiUnread(count)) : pill);
   // The whole card opens it (its buttons, links and boxes do their own thing).
-  const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen ? " unseen" : ""}`, "data-id": id || null,
+  const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen && !off ? " unseen" : ""}${off ? " machine-off" : ""}`, "data-id": id || null,
                               onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
     ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
   // A chat's: held down on a phone, a right click on a computer (the menu key
@@ -267,6 +275,19 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
   return card;
 }
+
+// The machine a chat is on (docs/plan-omarchy-and-machines.md): a word with
+// a screen by it, on its card and its head, only when the board has chats
+// from two or more machines (with one there's nothing to tell apart).
+function uiMachine(s, { head = false } = {}) {
+  if (!s || typeof machinesShown !== "function" || machinesShown().length < 2) return null;
+  const m = machineOf(s);
+  return h("span", { class: `ui-machine${head ? " head" : ""}${uiMachineOff(s) ? " off" : ""}`, title: `On ${m.label}` },
+    glyph("machine"), h("span", { class: "ui-machine-name" }, m.label));
+}
+
+// "<label> is off" (or what to update) for a chat on a machine that doesn't answer, else "".
+function uiMachineOff(s) { return s && typeof machineOff === "function" ? machineOff(s) : ""; }
 
 // How many of a chat's messages you haven't read, as a messaging app counts
 // them: a round count, filled (99+ past 99); nothing for none.
@@ -524,7 +545,7 @@ function avatar(s, cls) {
     svg.append(el("circle", { cx: "50", cy: "50", r: "50" }), t);
     return svg;
   }
-  const src = own ? `/picture/${s.picture}-${size}.png` : "/assistant.svg";
+  const src = own ? machinePath(s, `/picture/${s.picture}-${size}.png`) : "/assistant.svg";
   return h("img", { class: `avatar${cls ? ` ${cls}` : ""}`, src, alt: "", draggable: "false" });
 }
 
@@ -550,7 +571,7 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
   return [
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
     h("button", { class: `head-title${main ? " who" : ""}`, type: "button", title: `${where(s)} · rename`, onclick: rename },
-      main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
+      main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)), uiMachine(s, { head: true }),
       main ? h("span", { class: "head-name" }, taskText(s.assistant_name || "Assistant"),
                now ? h("span", { class: `head-sub t-${now.tone}`, role: "status" }, now.text) : null)
         : taskText(s.task || "New chat", s.task ? "" : "untitled")),
@@ -612,7 +633,7 @@ function uiPreviewStart(s, p) {
   const id = s.id, key = p.key || "", at = uiPreviewAt(id, p);
   if (uiPreviewStarted.has(at)) return;
   uiPreviewStarted.set(at, { id, key });
-  const done = api(`/api/session/${encodeURIComponent(id)}/preview`, { action: "start", key });
+  const done = api(chatPath(id, "/preview"), { action: "start", key });
   done.catch(() => uiPreviewStarted.delete(at));      // it didn't start: aheadOf says why
   const previews = uiPreviews(rowOf(id) || s).map((x) => ((x.key || "") === key ? { ...x, state: "starting" } : x));
   aheadOf(id, { previews }, (r) => { const q = uiPreviewFind(r, key); return !q || q.state !== "stopped"; }, done).catch(() => {});
@@ -780,7 +801,7 @@ async function uiPreviewSheet(s, which = null) {
     busy = action;
     draw();
     try {
-      const d = await api(`/api/session/${encodeURIComponent(id)}/preview`, { action, key: p.key || "" });
+      const d = await api(chatPath(id, "/preview"), { action, key: p.key || "" });
       p = d.preview || p;
     } catch (e) {
       toast(e.message);
@@ -821,7 +842,7 @@ async function uiPreviewSheet(s, which = null) {
   };
   const load = async () => {
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(id)}/preview${key !== null ? `?key=${encodeURIComponent(key)}` : ""}`);
+      const r = await fetch(chatPath(id, `/preview${key !== null ? `?key=${encodeURIComponent(key)}` : ""}`));
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Couldn't read it");
       p = d;

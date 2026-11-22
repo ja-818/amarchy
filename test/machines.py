@@ -94,8 +94,9 @@ class Machine:
         git("add", ".")
         git("commit", "-q", "-m", "first")
 
-    def amarchy(self, *args, input=None, timeout=60):
-        return subprocess.run([sys.executable, BIN, *args], env=self.env, capture_output=True, text=True, input=input, timeout=timeout)
+    def amarchy(self, *args, input=None, timeout=60, env_extra=None):
+        return subprocess.run([sys.executable, BIN, *args], env={**self.env, **(env_extra or {})}, capture_output=True, text=True,
+                              input=input, timeout=timeout)
 
     def start(self):
         self.log = open(self.home / "server.log", "a")
@@ -277,7 +278,7 @@ try:
 
     print("hello")
     code, _, h = beta.ask("GET", "/api/peer/hello", cookie=False)
-    check(code == 200 and h.get("name") == "beta" and h.get("protocol") == 1 and h.get("user") == USER and "version" in h,
+    check(code == 200 and h.get("name") == "beta" and h.get("protocol") == 1 and USER in h.get("users", []) and "user" in h and "version" in h,
           f"beta says who it is ({h})")
     code, _, h = beta.ask("GET", "/api/peer/hello", cookie=False, headers={"X-Forwarded-For": "100.1.2.3"})
     check(code == 403, f"through a proxy that isn't Tailscale: refused ({code})")
@@ -373,6 +374,30 @@ try:
     lst = next((d for n, d in got if n == "list"), {})
     check(any(s["id"] == sid and s["machine"] == "beta" for s in lst.get("sessions", [])), "alpha's /api/events: beta's chat too")
 
+    print("the command line, across machines")
+    r = alpha.amarchy("new", "proj", "three", "--on", "beta", "--prompt", "started from alpha")
+    key = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+    check(key == "beta:proj-three", f"amarchy new --on beta: {key or r.stderr.strip()[-160:]}")
+    three = until(lambda: next((s for s in beta.state()["sessions"] if s["id"] == "proj-three" and not s.get("setup")), None), limit=30)
+    check(bool(three), "the chat is on beta")
+    check(bool(three) and bool(until(lambda: "started from alpha" in (Path(three["path"]) / "got.txt").read_text(), limit=20)),
+          "its Claude there got the prompt")
+    r = alpha.amarchy("new", "nope", "--on", "beta")
+    check(r.returncode != 0 and "GitHub" in r.stderr, f"a project on neither, with no GitHub address: said ({r.stderr.strip()[-120:]})")
+    r = alpha.amarchy("new", "proj", "--on", "gamma")
+    check(r.returncode != 0 and "no machine gamma" in r.stderr, "a machine not paired: said")
+    r = alpha.amarchy("list", "--all", "--compact")
+    rows = json.loads(r.stdout) if r.returncode == 0 else []
+    check({(s["machine"], s["id"]) for s in rows} >= {("alpha", aid), ("beta", sid), ("beta", "proj-three")},
+          f"amarchy list --all: both machines' chats, each with its machine ({sorted((s['machine'], s['id']) for s in rows)})")
+    r = alpha.amarchy("send", f"beta:{sid}", "sent by alpha's command line", env_extra={"AMARCHY_SESSION": aid})
+    check(r.returncode == 0 and "queued for beta:" in r.stdout, f"amarchy send beta:{sid} ({(r.stdout or r.stderr).strip()[:100]})")
+    check(bool(until(lambda: "sent by alpha's command line" in (wt / "got.txt").read_text(), limit=20)), "its Claude on beta got it")
+    sent_by = beta.home / f"state/amarchy/sent-by/{sid}.jsonl"
+    check(sent_by.is_file() and f'"from": "alpha:{aid}"' in sent_by.read_text(), "noted there as from alpha's chat, not from you")
+    r = alpha.amarchy("send", "beta:nope-chat", "x")
+    check(r.returncode != 0 and "no such chat" in r.stderr, f"a chat that isn't there: said ({r.stderr.strip()[-80:]})")
+
     print("the pass-through: REST")
     code, _, direct = beta.ask("GET", f"/api/session/{sid}/composer")
     code2, _, via = alpha.ask("GET", f"/api/m/beta/api/session/{sid}/composer")
@@ -428,8 +453,8 @@ try:
     ws_send(s, b"echo size-$(stty size | tr ' ' x)\r")
     check(ws_read_until(f, b"size-40x120", limit=10), "a resize reaches its terminal")
     s.close()
-    s, head, _, _ = ws_open(alpha, "/api/m/beta/api/session/nope-chat/tty/term")
-    check(" 404 " in head.splitlines()[0], f"a chat that isn't there: beta's 404 ({head.splitlines()[0]})")
+    s, head, rest, _ = ws_open(alpha, "/api/m/beta/api/session/nope-chat/tty/term")
+    check(" 404 " in head.splitlines()[0], f"a chat that isn't there: beta's 404 ({head.splitlines()[0]} {rest[:200]!r})")
     s.close()
 
     print("beta goes away in the middle of a stream, and comes back")
@@ -457,6 +482,11 @@ try:
     check(code == 502 and said.get("machine_off") and "beta is off" in said.get("error", ""), f"the pass-through says it's off ({said.get('error')})")
     kept = alpha.home / "state/amarchy/app/peers/beta.json"
     check(kept.is_file() and sid in kept.read_text(), "its last chats kept on disk (for after a restart)")
+    r = alpha.amarchy("list", "--all", "--compact")
+    rows = json.loads(r.stdout) if r.returncode == 0 else []
+    check(any(s["id"] == sid and s.get("machine_off") for s in rows), "amarchy list --all: beta's chats as last seen, off")
+    r = alpha.amarchy("send", f"beta:{sid}", "x")
+    check(r.returncode != 0 and "beta is off" in r.stderr, f"amarchy send to it: says it's off ({r.stderr.strip()[-80:]})")
     alpha.stop()
     alpha.start()
     after = until(lambda: (v := alpha.state()) and any(s["id"] == sid for s in v["sessions"]) and v, limit=10)

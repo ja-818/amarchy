@@ -221,6 +221,12 @@ if ((uninstall)); then
   if compgen -G "$secrets/*.env" >/dev/null || compgen -G "$secrets/projects/*.env" >/dev/null; then
     echo "Your secrets (the keys you gave in the app) are still in $secrets: delete that folder if they shouldn't stay."
   fi
+  # The machines paired with this one (amarchy machines) and their keys: kept,
+  # for an install again; the other machines show this one as off meanwhile.
+  machines="${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/machines.json"
+  if [[ -s $machines ]] && [[ $(<"$machines") != "[]" ]]; then
+    echo "The machines paired with this one stay paired ($machines, with their keys): they show it as off. To unpair, run amarchy machines remove <name> before uninstalling, or on each of them."
+  fi
   exit 0
 fi
 
