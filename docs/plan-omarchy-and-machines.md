@@ -149,6 +149,40 @@ and tell the other tracks.
 - Board keys (order, seen, per-chat settings) use `<machine>:<id>`. A chat with
   no machine is this machine's (old data keeps working).
 
+### The desktop app: how it's opened, what it opens
+
+- **One way in**: `amarchy-desktop [amarchy://chat/<machine>/<id>]`. One
+  instance: a second one hands its link to the first, which shows its window
+  (from the tray too) and opens that chat; with no link it just shows it.
+  Wayland app id and X11 class `amarchy`, launcher entry `amarchy.desktop`
+  (its `MimeType=x-scheme-handler/amarchy`). The bar widget, the Hyprland
+  key and the Omarchy menu all open it this way (`amarchy open`).
+- **What it opens**, the first that applies, decided when it starts (and
+  again from the tray's Reload):
+  1. `--url <url>` or `AMARCHY_URL`.
+  2. **This machine's amarchy**, when its board has something and its app
+     server answers on `127.0.0.1:<APP_PORT>`: `amarchy list --compact` isn't
+     empty (chats here), or `amarchy machines --json` has more than one row
+     (row 0 is this machine, `me: true`; the others are paired machines whose
+     chats it merges in). Opened with the local key (`/local?key=`).
+  3. The first paired machine (`amarchy machines --json`, not `me`) whose
+     `state` is `on`.
+  4. The address set by hand, `amarchy-desktop --server <url>` (kept in
+     `~/.config/amarchy/desktop.json`, `{"server"}`).
+  5. Found on the tailnet: `amarchy machines found --json`. One: paired with
+     `amarchy machines add <name>` and opened, and the window says so once.
+     Several: the window asks which, once.
+  Else the window says why (Tailscale isn't there or on, nothing answers) and
+  takes an address.
+- **A chat's link** `amarchy://chat/<machine>/<id>`: on this machine's
+  amarchy, `/local?key=…&next=/%23/s/<id>` when `<machine>` is this
+  machine's name, else `next=/%23/s/<machine>:<id>`; on a server's address,
+  `/#/s/<id>` when it's that server's chat, else `/#/s/<machine>:<id>`.
+- **The page knows it's in the desktop app**: `window.amarchyDesktop`
+  (`{"version", "platform"}`), set before the app's scripts run. There the
+  app's own browser notifications are off: the desktop app shows them,
+  natively, window closed or not.
+
 ### What lives where
 
 | What | Where |
