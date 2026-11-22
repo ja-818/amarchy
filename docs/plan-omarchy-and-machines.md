@@ -83,12 +83,27 @@ and tell the other tracks.
 
 - A **machine** is a computer running amarchy. Its **name** is its Tailscale
   MagicDNS short name (`amarchy`, `omarchy`); its **label** is what the app
-  shows (the name until you change it).
+  shows (the name until you change it). The label is kept on the machine
+  itself (`~/.config/amarchy/label`), so every machine shows the same one:
+  renaming another machine asks it to rename itself.
 - `GET /api/peer/hello` → `{"name", "label", "version" (git commit),
-  "protocol": 1, "user" (Tailscale login)}`. Pairing checks `protocol` and that
-  `user` is the caller's.
-- Paired machines live in `~/.config/amarchy/machines.json`:
+  "protocol": 1, "user" (Tailscale login)}`, to you before pairing too.
+  Pairing checks `protocol` and that `user` is the caller's.
+- Paired machines live in `~/.config/amarchy/machines.json` (0600):
   `[{"name", "label", "url": "https://<name>.<tailnet>.ts.net", "key"}]`.
+  **One key per pair, the same on both**, so either machine calls the other
+  with it.
+- **Pairing**: the machine that adds asks the other's `/api/peer/hello`, makes
+  the key and sends `POST /api/peer/pair` `{"name", "label", "url",
+  "protocol"}` (its own; the new key as `Authorization: Bearer`, its name as
+  `X-Amarchy-Peer`); the other keeps it and answers its hello. Pairing needs no
+  app server on the machine that adds (a desktop that runs no chats yet can
+  pair with the server). `POST /api/peer/unpair` (a peer forgets the caller)
+  and `POST /api/peer/label` `{"label"}` (rename the machine called) need the
+  peer's key.
+- A request between machines carries `X-Amarchy-Protocol: 1`; a machine on
+  another protocol answers 409 with what to update ("Update amarchy on
+  <label>").
 - `amarchy machines [--json]`, `amarchy machines add <name|url>`,
   `amarchy machines remove <name>`, `amarchy machines rename <name> <label>`.
   Settings → Machines in the app: the list, each one's state, Add (machines of
@@ -100,7 +115,13 @@ and tell the other tracks.
 - **A peer machine**: through the other machine's `tailscale serve` (so it
   carries the Tailscale login), plus `X-Amarchy-Peer: <caller's name>` and
   `Authorization: Bearer <pairing key>`. A web page can't send those headers
-  without a CORS yes, which the server never gives.
+  without a CORS yes, which the server never gives. A peer's writes need no
+  Origin. Two amarchys on one machine (the tests) call each other straight on
+  `127.0.0.1:<port>` with the same headers, from the same user (`URL=` in the
+  host settings is the address a machine gives its peers).
+  In the app's server: `self.allowed(write)` takes it, then `self.via ==
+  "peer"` and `self.peer` is the caller's name. Calling one:
+  `peer_request(machine, method, path, body=, headers=)`.
 - **The desktop app on the same machine**: straight to `127.0.0.1:<APP_PORT>`,
   no Tailscale needed (works offline). It reads `STATE/app/local.key` (0600)
   and opens `http://127.0.0.1:<port>/local?key=<key>`, which sets an HttpOnly,
@@ -110,10 +131,15 @@ and tell the other tracks.
 ### Chats from every machine
 
 - Every chat in `/api/state` and `/api/events` carries `"machine": "<name>"`.
-- `/api/peer/state` and `/api/peer/events`: the machine's **own** chats only
-  (never ones it passes through, so machines don't echo each other).
-- An app server merges its own chats with each peer's. A peer that doesn't
-  answer keeps its last chats, marked `"machine_off": true`.
+  The board also has `"machine"` (this server's name) and `"machines"`: this
+  one first, then each paired one, `{"name", "label", "me", "on", "since",
+  "error", "update" (words, or null), "version", "projects"}`.
+- `/api/peer/state` and `/api/peer/events` (event `state`): `{"machine"
+  (its hello), "sessions", "projects", "tasks"}`, the machine's **own** chats
+  only (never ones it passes through, so machines don't echo each other).
+- An app server merges its own chats with each peer's (and its agents' tasks,
+  each with `"machine"`). A peer that doesn't answer keeps its last chats,
+  marked `"machine_off": true` (kept on disk too); one silent for 45 s is off.
 - **The pass-through**: `/api/m/<machine>/<rest>` on any app server is
   `/<rest>` on that machine: REST, SSE streamed as it comes, WebSockets tunneled
   both ways, uploads and images too.
