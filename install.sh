@@ -19,14 +19,15 @@
 #     ~/.local/state/amarchy/wallpapers), and cuts the fonts and your own
 #     wallpapers smaller for the app (amarchy theme --cut: kept in
 #     ~/.local/state/amarchy/cuts)
-#   - takes away what an amarchy from before left on an Omarchy desktop (its
-#     Hyprland keys, shell plugin, menu entries and theme hook), and brings
-#     its state up to date (amarchy migrate)
+#   - on an Omarchy desktop (Omarchy 4), omarchy/install.sh: the Ⓐ in the
+#     bar, Super+Alt+A and Amarchy in the Omarchy menu; elsewhere, it takes
+#     away what an amarchy from before left there. Brings the state of an
+#     amarchy from before up to date (amarchy migrate)
 #
 #   ./install.sh             install / update (--host, from when there were
 #                            desktops too, does the same)
-#   ./install.sh --uninstall remove all of the above, an Omarchy desktop's
-#                            amarchy from before too (sessions and worktrees
+#   ./install.sh --uninstall remove all of the above, amarchy's pieces of
+#                            Omarchy too (sessions and worktrees
 #                            untouched, and the secrets you gave in the app;
 #                            the dictation model, Omarchy's wallpapers and
 #                            the look's cuts, only downloads, go)
@@ -55,12 +56,11 @@ skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/amarchy"
 sessions="$state/sessions"
-# What an amarchy from before put on an Omarchy desktop.
+# ---- Omarchy home (track C): what amarchy puts on an Omarchy desktop
+# (omarchy/install.sh), read here only to know which checkout it runs from.
 hypr_conf="$HOME/.config/hypr/hyprland.lua"
-plugin_dir="$HOME/.config/omarchy/plugins/amarchy"
-shell_json="$HOME/.config/omarchy/shell.json"
-menu_ext="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
-theme_hook="$HOME/.config/omarchy/hooks/theme-set.d/amarchy"
+omarchy_plugins="$HOME/.config/omarchy/plugins"
+# ---- end of Omarchy home
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -87,14 +87,17 @@ replace_if_changed() {
 }
 
 # The checkouts the installed amarchy runs from now, one per line, as its links
-# say (and an Omarchy desktop's from before: its shell plugin and Hyprland's
-# load line).
+# say (and on Omarchy: its bar plugin and Hyprland's load line, today's or
+# those of an amarchy from before).
 live_checkouts() {
   local t
   if t=$(readlink "$bin_dir/amarchy"); then echo "${t%/bin/amarchy}"; fi
-  if t=$(readlink "$plugin_dir"); then echo "${t%/omarchy/plugin}"; fi
+  for t in amarchy.chats amarchy; do
+    if t=$(readlink "$omarchy_plugins/$t"); then echo "${t%/omarchy/plugin}"; fi
+  done
   if [[ -f $hypr_conf ]]; then
-    sed -n 's|^dofile("\(.*\)/hypr/amarchy\.lua") -- amarchy$|\1|p' "$hypr_conf"
+    sed -n -e 's|^dofile("\(.*\)/omarchy/hypr/amarchy\.lua") -- amarchy$|\1|p' \
+      -e 's|^dofile("\(.*\)/hypr/amarchy\.lua") -- amarchy$|\1|p' "$hypr_conf"
   fi
 } 2>/dev/null
 
@@ -156,60 +159,6 @@ guard_live() {
   exit 1
 }
 
-# Take away what an amarchy from before put on an Omarchy desktop: the load
-# line of its keys in hyprland.lua (and the blank lines it leaves at the
-# end), its shell plugin and its place in the bar, its entries in the Omarchy
-# menu, its theme hook. Each only if it's there; nothing else is touched.
-remove_desktop() {
-  local tmp changed=0
-  if [[ -f $hypr_conf ]] && grep -q -- '-- amarchy$' "$hypr_conf"; then
-    backup "$hypr_conf"
-    sed -i '/-- amarchy$/d' "$hypr_conf"
-    sed -i -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' "$hypr_conf"
-    changed=1
-  fi
-  if [[ -L $plugin_dir ]]; then
-    rm -f "$plugin_dir"
-    changed=1
-  fi
-  # The shell watches shell.json and applies the change live.
-  if [[ -f $shell_json ]] && command -v jq >/dev/null &&
-    jq -e '[.plugins[]?.id, .bar.layout[]?[]?.id] | index("amarchy")' "$shell_json" >/dev/null 2>&1; then
-    tmp=$(mktemp)
-    if jq '.plugins |= map(select(.id != "amarchy")) | .bar.layout |= with_entries(.value |= map(select(.id != "amarchy")))' \
-      "$shell_json" >"$tmp" && jq -e '.version' "$tmp" >/dev/null; then
-      replace_if_changed "$shell_json" "$tmp"
-    fi
-    rm -f "$tmp"
-    changed=1
-  fi
-  if [[ -f $menu_ext ]] && grep -q '// >>> amarchy' "$menu_ext"; then
-    tmp=$(mktemp)
-    python3 - "$menu_ext" >"$tmp" <<'EOF'
-import re, sys
-from pathlib import Path
-t = re.sub(r"\n?  // >>> amarchy.*?// <<< amarchy\n?", "\n", Path(sys.argv[1]).read_text(), flags=re.S)
-i = t.rfind("}")
-sys.stdout.write(t[:i].rstrip().rstrip(",") + "\n}\n")
-EOF
-    replace_if_changed "$menu_ext" "$tmp"
-    rm -f "$tmp"
-    command -v omarchy-menu >/dev/null && omarchy-menu refresh >/dev/null 2>&1 || true
-    changed=1
-  fi
-  if [[ -f $theme_hook ]]; then
-    rm -f "$theme_hook"
-    changed=1
-  fi
-  if ((changed)); then
-    # Hyprland drops the keys (a reload without the load line); only where it runs.
-    if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && command -v hyprctl >/dev/null; then
-      hyprctl reload >/dev/null 2>&1 || true
-    fi
-    say "Took away amarchy's pieces of an Omarchy desktop (keys, shell plugin, menu, theme hook)."
-  fi
-}
-
 if ((uninstall)); then
   guard_live "uninstalling takes it away"
   live=$(live_checkouts | sed -n 1p)
@@ -242,7 +191,9 @@ if ((uninstall)); then
       "$repo/skill" | "${live:-$repo}/skill") rm -f "$skill_link" ;;
     esac
   fi
-  remove_desktop
+  # ---- Omarchy home (track C): its pieces of Omarchy, all of them.
+  "$repo/omarchy/install.sh" --uninstall || say "Couldn't take away all of amarchy's pieces of Omarchy (omarchy/install.sh --uninstall)"
+  # ---- end of Omarchy home
   # The dictation model is only a download (670 MB): fetched again by
   # amarchy dictation setup.
   rm -rf "$state/dictation"
@@ -314,7 +265,10 @@ else
   ln -sfn "$repo/skill" "$skill_link"
 fi
 
-remove_desktop
+# ---- Omarchy home (track C): on an Omarchy desktop, the Ⓐ in the bar, the key
+# and the menu entry; elsewhere, what an amarchy from before left there goes.
+"$repo/omarchy/install.sh" || say "Couldn't set amarchy up on Omarchy (omarchy/install.sh)"
+# ---- end of Omarchy home
 # The state an amarchy from before left (a desktop's look for the app, say),
 # brought up to date once.
 "$bin_dir/amarchy" migrate

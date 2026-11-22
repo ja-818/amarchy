@@ -567,6 +567,41 @@ amarchy machines remove omarchy   # both forget the other
 - **Versions**: machines on another version of the contract say "Update
   amarchy on <label>" instead of breaking.
 
+## On Omarchy
+
+On an [Omarchy](https://omarchy.org) desktop (Omarchy 4), `install.sh` makes
+amarchy at home there. It finds Omarchy by itself; `install.sh --uninstall`
+takes every piece away again (all of it is in `omarchy/install.sh`, which keeps
+a backup of each file it changes).
+
+- **The Ⓐ in the bar** lights up when a chat needs you and says how many (the
+  same count as the app's). Hover it for which chats and what each waits on.
+  Click it and the desktop app opens on the first of them; with none waiting,
+  on your chats. A right click always opens your chats. It's the shell plugin
+  `amarchy.chats`, put at the end of the bar's left side the first time; move
+  it or take it off like any widget (Setup › Plugins, or drag it), and an
+  update leaves it where you put it.
+- **Super + Alt + A** brings amarchy to the front: the desktop app's window if
+  it has one, else the app started. (Super + A and Super + Shift + A are
+  Omarchy's.) For another key, set it before amarchy's line in
+  `~/.config/hypr/hyprland.lua`: `amarchy = { open_key = "SUPER + CTRL + ALT + A" }`
+  (`false`: no key).
+- **Amarchy in the Omarchy menu** (Super + Space) does the same.
+
+All three run `amarchy open`, which takes a chat too (`amarchy open
+amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
+a browser window (an Omarchy web app).
+
+**Which chats**: the board the desktop app shows. This machine's own amarchy
+when it has chats (or merges your other machines' in); else the first machine
+you paired with it that answers (`amarchy machines add <your server>`; see
+[Machines](#machines)). The Ⓐ follows that board's events as they come (it
+never asks every few seconds), and dims when the board doesn't answer: its
+tooltip says why, and it comes back by itself. `amarchy bar` prints what it
+shows.
+
+Notifications come from the desktop app, not the bar.
+
 ## Sleep
 
 Every Claude Code holds a few hundred MB of memory, also while it waits for you. So
@@ -1291,9 +1326,9 @@ the last three). It:
   and `amarchy-update.timer`, which keeps amarchy up to date;
 - restarts the app if it's on, fetches Omarchy's wallpapers in the background, and
   says whether dictation is set up;
-- takes away what an amarchy from before left on an Omarchy desktop (its keys, shell
-  plugin, menu entries and theme hook), and brings its state up to date
-  (`amarchy migrate`).
+- on an Omarchy desktop, puts amarchy in its bar, its keys and its menu (see
+  [On Omarchy](#on-omarchy)); elsewhere, takes away what an amarchy from before left
+  there. It brings the state of an amarchy from before up to date (`amarchy migrate`).
 
 `install.sh --host` does the same (it's from when there were desktops too), and
 `amarchy app on` starts the app's service (see [Quick start](#quick-start)).
@@ -1440,6 +1475,10 @@ amarchy machines add <name|address>   pair with another machine of yours on the 
 amarchy machines remove <name>        unpair (both forget the other)
 amarchy machines rename <name> <label>   what the app calls a machine (kept on that machine)
 amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
+
+On Omarchy (see On Omarchy):
+amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]   the desktop app at the front, on that chat
+amarchy bar [--follow]                what the Ⓐ in the bar shows (JSON); --follow: again on every change
 
 Look and sound:
 amarchy theme [--show]                print the theme, the font and the wallpaper

@@ -1,0 +1,18 @@
+{
+  "tooltip.needs": {
+    "one": "%1 chat te necesita",
+    "other": "%1 chats te necesitan"
+  },
+  "tooltip.chat": "%1 · %2",
+  "tooltip.more": {
+    "one": "y %1 más",
+    "other": "y %1 más"
+  },
+  "tooltip.openFirst": "Clic: abrirlo · Clic derecho: todos tus chats",
+  "tooltip.none": "Amarchy · ningún chat te necesita",
+  "tooltip.openBoard": "Clic: tus chats",
+  "tooltip.starting": "Amarchy",
+  "tooltip.down": "Amarchy · %1",
+  "why.missing": "amarchy no está instalado",
+  "why.stopped": "amarchy se detuvo; arrancándolo de nuevo"
+}

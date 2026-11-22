@@ -53,6 +53,9 @@ One board says which one needs you and what for. You answer with a tap.
   It texts you like a coworker and puts what needs you on **Tasks**.
 - **On your phone and in your browser.** An app you add to your home screen, and the same
   app on a computer. Both work over your private Tailscale network, not the internet.
+- **At home on Omarchy.** The **Ⓐ** in the bar lights up when a chat needs you and says how
+  many; click it and you're on that chat. **Super + Alt + A** brings amarchy to the front, and
+  it's in the Omarchy menu.
 
 ## Install
 
@@ -72,7 +75,8 @@ amarchy app on
 offers every git repo in `~/Work`, or clones one of your GitHub repos.
 
 Run `install.sh` again at any time to update. `install.sh --uninstall` removes amarchy and
-leaves your projects and chats alone.
+leaves your projects and chats alone. On an Omarchy desktop it also puts the Ⓐ in the bar, the
+key and the menu entry ([On Omarchy](docs/guide.md#on-omarchy)).
 
 ## The app
 
@@ -114,7 +118,7 @@ The **[full guide](docs/guide.md)** covers all of it: [how it works](docs/guide.
 [the chat](docs/guide.md#the-chat), [your phone](docs/guide.md#your-phone),
 [the browser](docs/guide.md#in-a-browser-on-your-computer),
 [dictation](docs/guide.md#dictation), [secrets](docs/guide.md#secrets),
-[sleep](docs/guide.md#sleep), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
+[sleep](docs/guide.md#sleep), [Omarchy](docs/guide.md#on-omarchy), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
 [configuration](docs/guide.md#configure) and [the CLI](docs/guide.md#cli).
 
 [MIT](LICENSE)

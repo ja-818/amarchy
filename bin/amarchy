@@ -264,6 +264,19 @@ Terminals:
                                         on for one from before; off, a session's menu still opens them
                                         (Advanced). Prints it without one
 
+On Omarchy (a desktop of yours, on Omarchy 4; install.sh sets it up when Omarchy is there, its --uninstall
+takes it away; docs/guide.md, "On Omarchy"):
+  amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]
+                                        the desktop app (amarchy-desktop) at the front, on that chat: the
+                                        window it has, else the app started. Super+Alt+A, Amarchy in the
+                                        Omarchy menu and the Ⓐ in the bar run it. Without the desktop app,
+                                        the board in a browser window (an Omarchy web app)
+  amarchy bar [--follow]                what the Ⓐ in Omarchy's bar shows, as JSON: how many chats need you
+                                        and which (the first is what a click opens), from the board: this
+                                        machine's own app server, else the first of your machines (amarchy
+                                        machines), else AMARCHY_URL's. --follow prints it again on every
+                                        change, from the board's events, and says when it doesn't answer
+
 Updating:
   amarchy protocol-check [--broker]     run the chat engine's protocol test (about 3 minutes, a few cheap turns
                                         on your login) for the Claude Code installed, and record the result: a
@@ -12853,10 +12866,8 @@ def chat_reply(s):
 def needs_you(ss):
     """How many things wait on you: a chat asking (a permission, a question,
     a secret), or one whose last reply asks you something you haven't
-    answered. Today's count."""
-    return sum(1 for s in ss if not s.get("setup") and (
-        s.get("status") == "waiting" or s.get("secret_asks")
-        or (s.get("status") != "working" and (s.get("today") or {}).get("asks"))))
+    answered (asks_you, as the Ⓐ in Omarchy's bar counts them). Today's count."""
+    return sum(1 for s in ss if asks_you(s))
 
 
 def app_badge(ss):
@@ -17433,6 +17444,369 @@ def migrate_look():
     shutil.rmtree(old, ignore_errors=True)
 
 
+# ------------------------------------------------------------------ Omarchy home
+#
+# What makes amarchy at home on an Omarchy desktop (track C of
+# docs/plan-omarchy-and-machines.md). install.sh puts the pieces in place when
+# Omarchy is there, and its --uninstall takes them all away:
+#
+# - `amarchy open [chat]`: the desktop app (amarchy-desktop) at the front, on
+#   that chat. Super+Alt+A (omarchy/hypr/amarchy.lua), Amarchy in the Omarchy
+#   menu and the Ⓐ in the bar all run it. Without the desktop app, the board
+#   in a browser window.
+# - `amarchy bar --follow`: what the Ⓐ in Omarchy's bar shows (omarchy/plugin):
+#   how many chats need you and which, printed again on every change of the
+#   board's events (/api/events), never polled.
+# - The board both find the way the desktop app does (board_source): this
+#   machine's own app server when it answers (in with the local key), else
+#   the first of your machines (`amarchy machines`).
+
+CHAT_LINK = re.compile(r"amarchy://chat/([a-z0-9][a-z0-9-]{0,62})/([\w][\w.-]{0,119})")
+CHAT_ID = re.compile(r"[\w][\w.-]{0,119}")
+MACHINE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+DESKTOP_CONF = CONFIG / "desktop.json"     # the desktop app's server set by hand ({"server"}: amarchy-desktop --server)
+BAR_SHOWN = 8           # the chats that need you the Ⓐ names in its tooltip, at most
+BAR_RETRY = (1, 2, 5, 10, 30)   # seconds before trying the board again, while it doesn't answer
+
+
+def port_answers(host, port, timeout=0.5):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def board_source():
+    """The board this desktop shows, found as the desktop app finds it
+    (docs/plan-omarchy-and-machines.md, "The desktop app: how it's opened,
+    what it opens"): AMARCHY_URL; else this machine's own amarchy when its
+    board has something (chats here, or other machines' it merges in) and
+    its app server answers on 127.0.0.1 (in with the local key); else the
+    first paired machine that answers; else the server set by hand in the
+    desktop app. {"url", "local": this machine's own, "machine": whose
+    board} or None, with why in "why" ({"url": None, "why"}) when there's
+    one but it doesn't answer."""
+    url = os.environ.get("AMARCHY_URL", "").strip().rstrip("/")
+    if re.fullmatch(r"https?://[\w.-]+(:\d+)?", url):
+        host = urllib.parse.urlsplit(url).hostname
+        local = host in ("127.0.0.1", "localhost")
+        return {"url": url, "local": local, "machine": machine_name() if local else host.split(".")[0]}
+    me = machines_listed(check=False)[0]
+    paired = machines_read()
+    if (sessions() or (paired and me.get("merges"))) and LOCAL_KEY.is_file() and port_answers("127.0.0.1", app_port()):
+        return {"url": f"http://127.0.0.1:{app_port()}", "local": True, "machine": machine_name()}
+    why = None
+    for m in paired:
+        state = machine_state(m)
+        if state.get("state") == "on":
+            return {"url": m["url"], "local": False, "machine": m["name"]}
+        why = why or f"{state.get('label') or m['label']}: {state.get('error') or 'it does not answer'}"
+    try:
+        server = json.loads(DESKTOP_CONF.read_text()).get("server")
+    except (OSError, ValueError, AttributeError):
+        server = None
+    if isinstance(server, str) and re.fullmatch(r"https://[\w.-]+(:\d+)?/?", server):
+        return {"url": server.rstrip("/"), "local": False, "machine": urllib.parse.urlsplit(server).hostname.split(".")[0]}
+    return {"url": None, "why": why} if why else None
+
+
+_local_cookie = {}
+
+
+def board_request(src, path, headers=None, timeout=10):
+    """A GET of path on the board, in as you: on this machine's own server
+    the local key's cookie (GET /local?key=, as the contract has it); on
+    another machine's, your Tailscale login (its tailscale serve says who)."""
+    import urllib.error
+    import urllib.request
+    headers = dict(headers or {})
+    if src["local"]:
+        if src["url"] not in _local_cookie:
+            class Stay(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *a, **k):
+                    return None     # the cookie is on the redirect itself
+            try:
+                key = LOCAL_KEY.read_text().strip()
+            except OSError as e:
+                raise OSError(f"no local key ({e.strerror})")
+            try:
+                with urllib.request.build_opener(Stay).open(
+                        f"{src['url']}/local?key={urllib.parse.quote(key)}", timeout=timeout) as r:
+                    cookies = r.headers.get_all("Set-Cookie") or []
+            except urllib.error.HTTPError as e:
+                cookies = e.headers.get_all("Set-Cookie") or [] if e.code in (301, 302, 303, 307) else []
+            cookie = next((c.split(";")[0] for c in cookies if c.startswith(LOCAL_COOKIE)), None)
+            if not cookie:
+                raise OSError("this machine's amarchy didn't take the local key")
+            _local_cookie[src["url"]] = cookie
+        headers["Cookie"] = _local_cookie[src["url"]]
+    return urllib.request.urlopen(urllib.request.Request(src["url"] + path, headers=headers), timeout=timeout)
+
+
+def asks_you(s):
+    """Whether a chat waits on you (needs_you counts them; the Ⓐ lights up
+    for them): it asks (a permission, a question, a secret), or its last
+    reply asks you something you haven't answered."""
+    return not s.get("setup") and bool(
+        s.get("status") == "waiting" or s.get("secret_asks")
+        or (s.get("status") != "working" and (s.get("today") or {}).get("asks")))
+
+
+def bar_state(view, src):
+    """What the Ⓐ shows of a board (/api/state, or one of its "list"
+    events): how many chats need you and which, in the board's order (the
+    first is the one a click opens). A machine that's off can't be answered:
+    its chats wait, but not on you now."""
+    here = str(view.get("machine") or view.get("hostname") or src.get("machine") or "")
+
+    def words(v, n):
+        return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+    chats = []
+    for s in view.get("sessions") or []:
+        if not isinstance(s, dict) or s.get("machine_off") or not asks_you(s):
+            continue
+        sid, machine = str(s.get("id") or ""), str(s.get("machine") or here)
+        if CHAT_ID.fullmatch(sid) and MACHINE_NAME.fullmatch(machine):
+            chats.append({"machine": machine, "id": sid, "name": words(s.get("task") or s.get("name") or sid, 60),
+                          "why": words(s.get("asks") or "Needs your answer", 80),
+                          "link": f"amarchy://chat/{machine}/{sid}"})
+    return {"up": True, "board": src["url"], "needs": len(chats), "chats": chats[:BAR_SHOWN]}
+
+
+def bar_events(src):
+    """The board's "list" events as they come (/api/events), each one's data
+    parsed: gzipped, as a browser takes them (a list is tens of KB, a tenth
+    of that zipped); plain when the zip doesn't come through (a proxy holding
+    it back), as the app does. Ends when the stream does; a stream silent
+    past three of its keepalives is taken as gone."""
+    for plain in (False, True):
+        r = board_request(src, "/api/events" + ("?plain=1" if plain else ""),
+                          {"Accept": "text/event-stream", **({} if plain else {"Accept-Encoding": "gzip"})},
+                          timeout=KEEPALIVE * 3)
+        with r:
+            unzip = zlib.decompressobj(31) if r.headers.get("Content-Encoding") == "gzip" else None
+            buf, event, data, began, got = b"", None, [], time.time(), False
+            while True:
+                try:
+                    chunk = r.read1(65536)
+                except TimeoutError:
+                    if got or plain:
+                        return
+                    break       # nothing at all, zipped: plain instead
+                if not chunk:
+                    return
+                if reader_gone():
+                    raise BrokenPipeError("no one reads it")
+                buf += unzip.decompress(chunk) if unzip else chunk
+                *lines, buf = buf.split(b"\n")
+                for raw in lines:
+                    line = raw.decode("utf-8", "replace").rstrip("\r")
+                    if not line:
+                        if event == "list" and data:
+                            try:
+                                view = json.loads("\n".join(data))
+                            except ValueError:
+                                view = None
+                            if isinstance(view, dict):
+                                got = True
+                                yield view
+                        event, data = None, []
+                    elif line.startswith("event:"):
+                        event = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data.append(line[5:].removeprefix(" "))
+                if not got and not plain and unzip and time.time() - began > 8:
+                    break       # keepalives but no list, zipped: plain instead
+
+
+def reader_gone():
+    """Whether no one reads what this prints any more: the widget that
+    started it is gone (a pipe's reader closed shows on its writer)."""
+    try:
+        p = select.poll()
+        p.register(sys.stdout.fileno(), select.POLLERR | select.POLLHUP)
+        return any(ev & (select.POLLERR | select.POLLHUP) for _, ev in p.poll(0))
+    except (OSError, ValueError):
+        return False
+
+
+def bar_say(state):
+    print(json.dumps(state), flush=True)
+
+
+def cmd_bar(args):
+    """`amarchy bar [--follow]`: what the Ⓐ in Omarchy's bar shows, as JSON.
+    --follow: again on every change, from the board's events, for as long as
+    it runs (the widget's own process); while the board doesn't answer, it
+    says so and tries again, a little later each time."""
+    import urllib.error
+    follow = "--follow" in args
+    tries, last = 0, None
+    while True:
+        src = board_source()
+        try:
+            if not src:
+                raise LookupError("No board here yet: pair this desktop with your server (amarchy machines add <server>)")
+            if not src["url"]:
+                raise LookupError(src["why"])
+            if not follow:
+                with board_request(src, "/api/state") as r:
+                    bar_say(bar_state(json.loads(r.read()), src))
+                return 0
+            for view in bar_events(src):
+                tries = 0
+                state = bar_state(view, src)
+                if state != last:
+                    bar_say(state)
+                    last = state
+            why = "The board's events ended"
+        except BrokenPipeError:
+            return 0        # the widget is gone
+        except urllib.error.HTTPError as e:
+            why = f"The board said no ({e.code})" + (": this desktop isn't one of yours there" if e.code == 403 else "")
+            _local_cookie.clear()
+        except (LookupError, OSError, ValueError) as e:
+            why = str(getattr(e, "reason", None) or e) or "The board doesn't answer"
+            _local_cookie.clear()
+        state = {"up": False, "board": (src or {}).get("url"), "why": why[:200]}
+        if not follow:
+            bar_say(state)
+            return 1
+        if state != last:
+            try:
+                bar_say(state)
+            except BrokenPipeError:
+                return 0
+            last = state
+        time.sleep(BAR_RETRY[min(tries, len(BAR_RETRY) - 1)])
+        tries += 1
+
+
+def hypr_env():
+    """The environment hyprctl reaches Hyprland with: as it is, or with the
+    running Hyprland's instance found (a systemd service, ssh, the app's
+    server have none). None without Hyprland."""
+    env = dict(os.environ)
+    if not env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        run = Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "hypr"
+        try:
+            socks = sorted(run.glob("*/.socket.sock"), key=lambda p: p.stat().st_mtime)
+        except OSError:
+            socks = []
+        if not socks:
+            return None
+        env["HYPRLAND_INSTANCE_SIGNATURE"] = socks[-1].parent.name
+    if not env.get("WAYLAND_DISPLAY"):
+        found = sorted(Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}").glob("wayland-[0-9]"))
+        if found:
+            env["WAYLAND_DISPLAY"] = found[0].name
+    return env if shutil.which("hyprctl") else None
+
+
+def hypr_windows(cls, env):
+    """The addresses of Hyprland's windows of a class, the one it focused
+    last first."""
+    try:
+        r = subprocess.run(["hyprctl", "clients", "-j"], env=env, capture_output=True, text=True, timeout=5)
+        clients = json.loads(r.stdout or "[]")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return []
+    found = [c for c in clients if isinstance(c, dict) and c.get("class") == cls
+             and re.fullmatch(r"0x[0-9a-f]+", str(c.get("address") or ""))]
+    return [c["address"] for c in sorted(found, key=lambda c: c.get("focusHistoryID", 1 << 30))]
+
+
+def hypr_focus(address, env):
+    """Bring a window to the front, the way Omarchy's launch-or-focus does
+    (its Lua dispatcher, or the one from before)."""
+    try:
+        r = subprocess.run(["hyprctl", "dispatch", f'hl.dsp.focus({{ window = "address:{address}" }})'],
+                           env=env, capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip() in ("ok", ""):
+            return True
+        r = subprocess.run(["hyprctl", "dispatch", "focuswindow", f"address:{address}"],
+                           env=env, capture_output=True, text=True, timeout=5)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def launch_app(argv, env=None):
+    """Start an app apart from us, as Omarchy starts one: through uwsm-app
+    (a scope of its own) when it's there."""
+    if shutil.which("uwsm-app"):
+        argv = ["uwsm-app", "--", *argv]
+    subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def chat_link(target, board=lambda: None):
+    """amarchy://chat/<machine>/<id> for what `amarchy open` was given (that
+    link, <machine>/<id>, or a chat's id: this machine's if it has it, else
+    the board's machine's, board() asked only then); "" for nothing; None
+    for what isn't a chat."""
+    if not target:
+        return ""
+    if CHAT_LINK.fullmatch(target):
+        return target
+    machine, slash, sid = target.rpartition("/")
+    if slash and MACHINE_NAME.fullmatch(machine) and CHAT_ID.fullmatch(sid):
+        return f"amarchy://chat/{machine}/{sid}"
+    if slash or not CHAT_ID.fullmatch(target):
+        return None
+    src = None if session(target) else board()
+    return f"amarchy://chat/{(src or {}).get('machine') or machine_name()}/{target}"
+
+
+def cmd_open(args):
+    """`amarchy open [chat]`: the desktop app at the front, on that chat."""
+    target = args[0] if args else ""
+    found = []
+
+    def board():
+        """The board (board_source), looked for once, and only when needed."""
+        if not found:
+            found.append(board_source())
+        return found[0]
+    link = chat_link(target, board)
+    if link is None:
+        return fail(f"{target!r} isn't a chat: give its id, <machine>/<id> or amarchy://chat/<machine>/<id>")
+    env = hypr_env()
+    windows = hypr_windows("amarchy", env) if env else []
+    desktop = shutil.which("amarchy-desktop")
+    if desktop:
+        # Wayland lets no app take the focus itself: Hyprland gives it. The
+        # app, single instance, takes the link from the second one it starts.
+        if windows:
+            hypr_focus(windows[0], env)
+        if link or not windows:
+            launch_app([desktop, *([link] if link else [])], env)
+        return 0
+    # No desktop app here: the board, in a browser window of its own, at the
+    # chat (the routes the desktop app takes).
+    src = board()
+    if not src or not src["url"]:
+        return fail(((src or {}).get("why") or "no board here yet") + ": pair this desktop with your server "
+                    "(amarchy machines add <server>), or install the desktop app")
+    m = CHAT_LINK.fullmatch(link) if link else None
+    route = (m.group(2) if m.group(1) == src["machine"] else f"{m.group(1)}:{m.group(2)}") if m else ""
+    if src["local"]:
+        url = (f"{src['url']}/local?key={urllib.parse.quote(LOCAL_KEY.read_text().strip())}&next=/"
+               + (urllib.parse.quote(f"#/s/{route}", safe="") if route else ""))
+    else:
+        url = src["url"] + "/" + (f"#/s/{urllib.parse.quote(route, safe=':')}" if route else "")
+    if not m and shutil.which("omarchy-launch-or-focus-webapp"):
+        launch_app(["omarchy-launch-or-focus-webapp", "Amarchy", url], env)
+    elif shutil.which("omarchy-launch-webapp"):
+        launch_app(["omarchy-launch-webapp", url], env)
+    elif shutil.which("xdg-open"):
+        launch_app(["xdg-open", url], env)
+    else:
+        print(url)
+    return 0
+
+
 # ------------------------------------------------------------------ the chat engine (amarchy agent)
 #
 # Phases A1 and A2 of docs/plan-chat-app.md. Any session can opt in ("Try
@@ -19420,6 +19794,8 @@ OPTIONS = {
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
     "machines": ({"--json"}, set(), set()),
+    "open": (set(), set(), set()),
+    "bar": ({"--follow"}, set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
     "reap": None, "preview-exec": None, "previews-off": None, "shorten": None, "attach": None, "held": None,
@@ -19593,6 +19969,10 @@ def main(argv):
         return cmd_protocol_check(args)
     elif cmd == "shell" and args:
         return cmd_shell(args)
+    elif cmd == "open" and len(args) <= 1:
+        return cmd_open(args)
+    elif cmd == "bar" and not [a for a in args if a != "--follow"]:
+        return cmd_bar(args)
     else:   # a command it knows, with the wrong number of arguments
         print(usage(cmd), file=sys.stderr)
         return 1

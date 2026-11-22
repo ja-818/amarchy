@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "amarchy.chats",
+  "name": "Amarchy",
+  "version": "1.0.0",
+  "author": "amarchy",
+  "license": "MIT",
+  "description": "Stop babysitting your agents. Manage them. The Ⓐ lights up when a chat needs you, says how many, and opens it.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Amarchy",
+    "description": "Your amarchy chats: lights up when one needs you, with how many; a click opens it in the desktop app.",
+    "category": "AI",
+    "aliases": ["amarchy", "chats", "agents"],
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
