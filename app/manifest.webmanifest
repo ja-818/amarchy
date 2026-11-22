@@ -1,7 +1,7 @@
 {
   "name": "Amarchy",
   "short_name": "Amarchy",
-  "description": "Your amarchy chats",
+  "description": "Stop babysitting your agents. Manage them.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

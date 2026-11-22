@@ -1,5 +1,7 @@
 # amarchy
 
+**Positioning: "Stop babysitting your agents. Manage them."** amarchy is a management tool for coding agents (Claude Code, today), opinionated to make one person run a dozen of them from a box that never sleeps: a board that says who needs you and what for, replies that open with a briefing, answers and shipping with a tap, from the phone. Every word that says what amarchy is (the README, the tour, the welcome, the guide, the link card, the help) leads with that line; keep new copy in it. The look is Omarchy's (its themes and wallpapers).
+
 ## How to work here
 
 - **No shortcuts: always build the most complete, highest-quality solution.** With AI doing the coding, thoroughness is cheap, so it is the rule rather than the exception. Fix the root cause and every related gap you find (races, failure paths, recovery, install/uninstall, docs), not just the symptom that was reported, and verify the result in the real app (on the phone and in a browser) before calling it done.

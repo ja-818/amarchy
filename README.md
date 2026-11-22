@@ -2,9 +2,10 @@
 
 # Ⓐ amarchy
 
-**Run a dozen Claude Codes at once, each in a chat of its own.**
+## Stop babysitting your agents. Manage them.
 
-From your phone or any browser, on a Linux box that never sleeps.
+A dozen Claude Codes on your own box, run from your phone or any browser.
+One board says which one needs you and what for. You answer with a tap.
 
 <img src="docs/images/hero.png" alt="amarchy on a computer and a phone: a board of Claude Code chats at work, and one asking to ship its fix" width="100%">
 
@@ -14,21 +15,28 @@ From your phone or any browser, on a Linux box that never sleeps.
 
 ## Why
 
-- **One Claude at a time, you wait on it. A dozen at once, they wait on you.** Each chat
-  works on its own git worktree and branch, so they never step on each other.
-- **You answer from your phone.** Questions, permissions and "Ship it?" come as buttons, and
-  your phone buzzes when a chat needs you or is done.
-- **It keeps going with the lid shut.** It runs on any Linux box with tmux (a server, a PC at
-  home), private to your devices over Tailscale.
+- **One agent, you babysit it.** You watch its terminal, wait on it, read every word. A dozen
+  that way is a full-time job.
+- **A dozen, you manage them.** The board says who needs you and what for. Every reply opens
+  with a briefing. Questions, permissions and "Ship it?" are buttons.
+- **They keep working without you.** Each chat has its own git worktree and branch, on a Linux
+  box that stays on. Shut the laptop: your phone buzzes when one needs you.
 
 ## What you get
 
-- **A chat for each piece of work.** Pick a project, type what you want, and Claude starts on it.
-  Each chat has its own copy of the project, so ten chats can change ten things at once.
+- **A board that says who needs you.** **Needs you** filters to the chats waiting on you,
+  **At work** has the busy ones, and **Now** and **For later** are in the order you decide. A
+  chat's question shows on its card: answer it there, without opening the chat.
+- **Briefings, not walls of text.** Every reply opens with what happened, what was checked and
+  what's on you. Your choices are buttons; the details stay folded until you want them.
 - **Questions and permissions as buttons.** When Claude needs a yes, a choice or a plan
   approved, it shows a card. You tap a button and it carries on.
-- **Knows who needs you.** A chat that is waiting for you says so in the list, and a chime
-  plays (or your phone notifies you). Tap the notification and you land on the card.
+- **Ship it is a button.** One tap: merged into main and pushed. Streaks and badges count
+  every merge.
+- **A chat for each piece of work.** Pick a project, type what you want, and Claude starts on it.
+  Each chat has its own copy of the project, so ten chats can change ten things at once.
+- **Your phone buzzes when it matters.** A chat that needs you or is done notifies you (or a
+  chime plays). Tap the notification and you land on the card.
 - **Talk instead of typing.** The mic by the box writes what you say into it. A speech model
   on your own machine does the writing, so the audio stays there.
 - **Keys and passwords stay out of the chat.** When a project needs one, Claude asks in an
@@ -41,6 +49,8 @@ From your phone or any browser, on a Linux box that never sleeps.
   Two or more (an app and its storybook)? The button is Previews: pick one from its dropdown.
 - **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
   working while your laptop or phone sleeps.
+- **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
+  It texts you like a coworker and puts what needs you on **Tasks**.
 - **On your phone and in your browser.** An app you add to your home screen, and the same
   app on a computer. Both work over your private Tailscale network, not the internet.
 

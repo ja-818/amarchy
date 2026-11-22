@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""amarchy: parallel Claude Code sessions, one git worktree each, on a server you reach from your phone and browser.
+"""amarchy: stop babysitting your agents, manage them. Claude Code sessions in parallel, one git worktree each, on a server you reach from your phone and browser.
 
 Every session is a branch + worktree off the latest main, with its Claude Code and a dev terminal in tmux on
 this machine. The amarchy app (amarchy app on) shows them on your phone, as an app on the home screen, and in

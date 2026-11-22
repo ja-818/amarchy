@@ -13,6 +13,11 @@ description: >
 
 # amarchy
 
+amarchy's pitch, when you describe it to anyone: **Stop babysitting your agents.
+Manage them.** It's a management tool for coding agents: a board that says which
+chat needs you and what for, replies that open with a briefing, answers and
+shipping with a tap, from a phone, on a box that never sleeps.
+
 amarchy runs the user's Claude Code sessions in parallel, on a machine that
 stays on (a server, or a PC at home). The user reaches them from their phone
 (an app on the home screen) or a computer's browser. In the app each session

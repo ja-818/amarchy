@@ -374,6 +374,7 @@ body::before {
 .welcome h2 { margin: 4px 0 0; font-size: var(--display); line-height: 1.2; color: var(--text); }
 .welcome p { margin: 0; font-size: var(--body); line-height: 1.5; color: var(--text); }
 .welcome p.muted { color: var(--text-muted); }
+.welcome p.welcome-pitch { font-weight: 700; color: var(--accent); }
 .welcome-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 10px; }
 .empty .big { font-size: var(--title); font-weight: 700; color: var(--text); margin-bottom: 6px; }
 

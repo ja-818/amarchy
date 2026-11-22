@@ -1,7 +1,8 @@
 // amarchy's pictures for GitHub, drawn by the app itself, with demo chats
 // only (never a real one: real chats name clients):
 //
-//   docs/images/social-preview.png  1280×640, the link's card: what X, Slack
+//   docs/images/social-preview.png  1280×640, the link's card ("Stop babysitting
+//                                   your agents. Manage them."): what X, Slack
 //                                   and iMessage show for github.com/ja-818/amarchy
 //                                   (uploaded by hand: repo Settings → General →
 //                                   Social preview; GitHub has no API for it)
@@ -200,9 +201,9 @@ const CSS = `
   .gh-mark { display: flex; align-items: center; gap: 16px; font-size: 32px; font-weight: 700; color: var(--text-strong, #c0caf5); }
   .gh-mark img { width: 52px; height: 52px; display: block; }
   .gh-bots { display: flex; align-items: flex-end; gap: 16px; }
-  .gh h1 { margin: 0; font-size: 60px; line-height: 1.06; font-weight: 800; letter-spacing: -0.04em; color: #c0caf5; }
+  .gh h1 { margin: 0; font-size: 58px; line-height: 1.06; font-weight: 800; letter-spacing: -0.04em; color: #c0caf5; }
   .gh h1 em { font-style: normal; color: var(--accent); }
-  .gh-sub { margin: 0; font-size: 24px; line-height: 1.4; color: var(--text); letter-spacing: -0.01em; }
+  .gh-sub { margin: 0; max-width: 540px; font-size: 24px; line-height: 1.4; color: var(--text); letter-spacing: -0.01em; }
   .gh-chips { display: flex; gap: 10px; }
   .gh-chip { font-size: 17px; font-weight: 600; padding: 8px 13px; border: 1px solid var(--border); color: var(--text); background: color-mix(in srgb, var(--surface) 80%, transparent); }
   .gh-chip b { color: var(--accent); }
@@ -243,8 +244,8 @@ async function compose(browser, port, { file, width, height, scale, shots, kind 
       card.append(
         h("div", { class: "gh-words" },
           h("div", { class: "gh-mark" }, h("img", { src: "icon.svg", alt: "" }), "amarchy"),
-          h("h1", {}, "Run ", h("em", {}, "a dozen"), h("br"), "Claude Codes", h("br"), "at once."),
-          h("p", { class: "gh-sub" }, "Each in a chat of its own, on its own branch. Answer them from your phone."),
+          h("h1", {}, "Stop babysitting", h("br"), "your agents.", h("br"), h("em", {}, "Manage"), " them."),
+          h("p", { class: "gh-sub" }, "One board says who needs you and what for. Every reply is a briefing. Shipping is a button."),
           h("div", { class: "gh-bots" }, uiPixels(tourBot("a"), { scale: 5 }), uiPixels(tourBot("g"), { scale: 5 }), uiPixels(tourBot("p"), { scale: 5 }),
             uiPixels(tourBot("y"), { scale: 5 }), uiPixels(tourBot("r"), { scale: 5 }), uiPixels(tourBot("c"), { scale: 5 }))),
         win(shots.wide, "left: 640px; top: 60px; width: 820px;"),

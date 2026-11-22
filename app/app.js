@@ -774,8 +774,8 @@ function renderHome() {
   view.offline.hidden = app.online || !app.view;
 }
 
-// A new user's first screen, with no projects yet: what Amarchy is, in a
-// sentence or two, and the two ways to start: a project of theirs from
+// A new user's first screen, with no projects yet: what Amarchy is (stop
+// babysitting your agents, manage them), in a sentence or two, and the two ways to start: a project of theirs from
 // GitHub, or an empty one for something new. added(name): the project
 // they added, for the new chat to start in.
 function welcome(added) {
@@ -783,7 +783,8 @@ function welcome(added) {
   return h("div", { class: "welcome" },
     h("div", { class: "welcome-mark", "aria-hidden": "true" }, "Ⓐ"),
     h("h2", {}, "Welcome to Amarchy"),
-    h("p", {}, "Tell Claude what you want, and it does the work on your projects: reads them, writes the code, runs it, and asks you whenever it needs you."),
+    h("p", { class: "welcome-pitch" }, "Stop babysitting your agents. Manage them."),
+    h("p", {}, "Start as many Claude Code chats as you like. Each works on its own copy of a project; amarchy tells you which one needs you and what for, and you answer with a tap."),
     h("p", { class: "muted" }, "Claude works in a project: a folder of your work. Add one of your GitHub repos, or start an empty folder for something new."),
     h("div", { class: "welcome-actions" },
       h("button", { class: "cta", onclick: () => add("github") }, "Add a project from GitHub"),

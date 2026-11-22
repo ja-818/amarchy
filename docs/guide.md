@@ -3,6 +3,11 @@
 Everything amarchy does, in detail. New here? The [README](../README.md) is the
 two-minute version.
 
+**Stop babysitting your agents. Manage them.** One Claude Code at a time, you
+babysit it: you watch it, wait on it and read every word. A dozen at once, you
+manage them: the board says which chat needs you and what for, every reply opens
+with a briefing, and you answer with a tap.
+
 amarchy runs Claude Code on a machine that stays on, and you talk to it in a
 **chat**: from your phone (an app on the home screen) or from a computer's
 browser. Each chat is a conversation with Claude about one project. The words
@@ -42,8 +47,8 @@ remove amarchy, run `install.sh --uninstall`; your projects and chats are left a
 
 ### The tour
 
-**amarchy in 100 seconds**: why amarchy (a dozen Claude Codes, on a computer that
-never sleeps, from your pocket), how it works (a website that computer serves,
+**amarchy in 100 seconds**: why amarchy (stop babysitting your agents, manage
+them: a dozen Claude Codes on a computer that never sleeps, from your pocket), how it works (a website that computer serves,
 private over Tailscale), how to make it an app from Safari (on an iPhone and on a
 Mac), then its features, a few to a slide, each a joke and what it does (chats in
 parallel, each in its worktree; napping chats; briefings with buttons; dictation;

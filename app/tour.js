@@ -1,7 +1,7 @@
 // ---- the tour: amarchy in 100 seconds
 //
-// Why amarchy (a dozen Claude Codes, on a computer that never sleeps, from
-// your pocket), how it works (a website that box serves, private over
+// Why amarchy (stop babysitting your agents, manage them: a dozen Claude
+// Codes on a computer that never sleeps, from your pocket), how it works (a website that box serves, private over
 // Tailscale) and making it an app; then its features, a few to a slide, each
 // a joke and what it does; then making it yours (a theme; agents and
 // projects, and a new one of either). As slides (ui.js uiSlides) with pixel
@@ -436,11 +436,12 @@ function tourSlides() {
   return [
     {
       kicker: "amarchy in 100 seconds",
-      title: "Run a dozen Claude Codes from your pocket.",
+      title: "Stop babysitting your agents. Manage them.",
       art: () => [art(tourBot("A"), { scale: 7, cls: "bob" }), art(tourBot("G"), { scale: 9, cls: "bob d1" }), art(tourBot("P"), { scale: 7, cls: "bob d2" })],
       body: [
-        "amarchy runs your **Claude Code** chats on a computer that never sleeps, and puts all of them on your phone and your laptop.",
-        "One Claude at a time, you wait on it. A dozen at once, they wait on you. You stop writing code and start approving it. It's called a promotion.",
+        "amarchy runs your **Claude Code** agents on a computer that never sleeps, and puts every one of them on your phone and your laptop.",
+        "One agent, you babysit it: watch it, wait on it, read every word. A dozen, you **manage** them: the board says who needs you and what for, every reply is a briefing, and you answer with a tap.",
+        "You stop writing code and start approving it. It's called a promotion.",
         h("p", { class: "ui-slide-aside" }, "Next: swipe, →, or the button. Esc or ✕ to bail. We won't be offended. (We will.)"),
       ],
     },

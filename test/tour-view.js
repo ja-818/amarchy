@@ -92,7 +92,7 @@ async function run(browser, port, layout) {
   check(where, await open(p), "the tour opens by itself, the first time");
   check(where, await p.evaluate((n) => document.querySelectorAll(".ui-slides-seg").length === n, SLIDES), `${SLIDES} slides, a segment each`);
   const first = await slide(p);
-  check(where, first.kicker.toLowerCase() === "amarchy in 100 seconds" && /dozen Claude Codes/.test(first.title), `its first, why: ${first.title}`);
+  check(where, first.kicker.toLowerCase() === "amarchy in 100 seconds" && /Stop babysitting your agents\. Manage them\./.test(first.title), `its first, why: ${first.title}`);
   check(where, first.back && first.count === `1 / ${SLIDES}` && first.next === "Next", "Back hidden on the first, 1 of all, Next");
   await p.screenshot({ path: path.join(SHOTS, `${where}-tour-01.png`) });
 
