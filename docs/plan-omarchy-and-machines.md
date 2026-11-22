@@ -142,6 +142,17 @@ Each is its own chat, on its own branch, and ships when done (CLAUDE.md: tests
 in both layouts, verified in the real app). Wave 1 runs in parallel now; wave 2
 starts when what it needs has landed.
 
+**Priority (Julian, 2026-11-22): amarchy running on his Omarchy desktop first.**
+Everything in wave 1 is ordered to reach these two milestones as soon as each
+piece is complete and verified; the rest comes after.
+
+1. **On Omarchy, with the server's chats**: the desktop app installed on his
+   Omarchy (B), opening the server's chats; its key, the Ⓐ in the bar and the
+   live theme (C).
+2. **On Omarchy, running chats of its own**: the desktop's own amarchy, the
+   local key, its chats and the server's on one board, "Where" for a new chat
+   (A, with B loading the local machine).
+
 ### Wave 1
 
 **A. Machines: chats from every machine on one board.** (`bin/amarchy`, `app/`)
@@ -191,6 +202,9 @@ starts when what it needs has landed.
 
 ### Wave 2
 
+In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
+and the phone apps (G) last.
+
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
 synced, last change wins per item; works with any machine off.
@@ -206,8 +220,8 @@ size; the provider's token through `amarchy secret ask`; the machine made in
 the user's account, amarchy installed by cloud-init, joined to their tailnet,
 then "Sign in to Claude" there.
 
-**G. Phone apps and the push relay** (needs a Mac with Xcode and an Apple
-Developer account): thin iOS and Android shells around `app/` (Tauri 2 mobile,
+**G. Phone apps and the push relay** (last; Julian has an Apple Developer
+account; the iOS build needs a Mac with Xcode): thin iOS and Android shells around `app/` (Tauri 2 mobile,
 or Swift and Kotlin), widgets, live status, share sheet, notification buttons;
 the relay (open source, free, self-hostable) between the machines and Apple's
 and Google's push.
