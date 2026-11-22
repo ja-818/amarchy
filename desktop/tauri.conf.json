@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Amarchy",
+  "mainBinaryName": "amarchy-desktop",
+  "version": "0.1.0",
+  "identifier": "io.github.ja818.amarchy",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["amarchy"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "dmg", "app", "nsis"],
+    "category": "DeveloperTool",
+    "shortDescription": "Stop babysitting your agents. Manage them.",
+    "longDescription": "amarchy is a management tool for coding agents: a board that says who needs you and what for, replies that open with a briefing, answers and shipping with a tap. This is its desktop app.",
+    "license": "MIT",
+    "homepage": "https://github.com/ja-818/amarchy",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
+    "linux": {
+      "deb": { "desktopTemplate": "amarchy.desktop.hbs" },
+      "rpm": { "desktopTemplate": "amarchy.desktop.hbs" }
+    }
+  }
+}

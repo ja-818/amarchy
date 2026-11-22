@@ -23,6 +23,10 @@
 #     bar, Super+Alt+A and Amarchy in the Omarchy menu; elsewhere, it takes
 #     away what an amarchy from before left there. Brings the state of an
 #     amarchy from before up to date (amarchy migrate)
+#   - on a computer with a desktop (Omarchy, or any Wayland or X session):
+#     the desktop app, amarchy-desktop (desktop/install.sh: built here, in
+#     your launcher, amarchy:// links, in the tray from login), kept up to
+#     date with amarchy; an update builds it in the background
 #
 #   ./install.sh             install / update (--host, from when there were
 #                            desktops too, does the same)
@@ -34,16 +38,20 @@
 #   ./install.sh --force     either, without asking first when amarchy is
 #                            installed from another session's worktree (it
 #                            asks in a terminal, and stops without one)
+#   ./install.sh --desktop   the desktop app too, wherever this runs (over
+#                            SSH, say); --no-desktop: not it
 
 set -euo pipefail
 
 usage() { sed -n '3,/^$/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
 
-uninstall=0 force=0
+uninstall=0 force=0 desktop=auto
 for arg in "$@"; do
   case $arg in
     --uninstall) uninstall=1 ;;
     --force) force=1 ;;
+    --desktop) desktop=yes ;;
+    --no-desktop) desktop=no ;;
     --host) ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -161,6 +169,9 @@ guard_live() {
 
 if ((uninstall)); then
   guard_live "uninstalling takes it away"
+  # ---- the desktop app (track B): gone with amarchy, wherever it was installed.
+  [[ -x $repo/desktop/install.sh ]] && "$repo/desktop/install.sh" --uninstall || true
+  # ---- end of the desktop app (track B)
   live=$(live_checkouts | sed -n 1p)
   # The chats' previews: stopped, and off the tailnet (nothing would look after them).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" previews-off >/dev/null 2>&1 || true
@@ -346,6 +357,25 @@ systemctl --user try-restart amarchy-app.service >/dev/null 2>&1 || true
 # and your own wallpapers cut for a phone, in the background: until they
 # are, the app is sent them whole.
 "$bin_dir/amarchy" theme --cut --in-background --quiet >/dev/null 2>&1 || true
+
+# ---- the desktop app (track B): on a computer with a desktop (Omarchy, or a
+# Wayland or X session; or asked with --desktop), or kept up to date where
+# it's installed. Built here (desktop/install.sh): in a terminal you see it
+# build (the first time takes minutes); else (an update) in the background,
+# so this ends at once. Its failing never fails amarchy's install.
+desktop_here() {
+  case $desktop in yes) return 0 ;; no) return 1 ;; esac
+  [[ -x $bin_dir/amarchy-desktop || -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} || -d $HOME/.local/share/omarchy ]] && return 0
+  systemctl --user is-active --quiet graphical-session.target 2>/dev/null
+}
+if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
+  if [[ -t 0 && -t 1 ]]; then
+    "$repo/desktop/install.sh" || true
+  else
+    "$repo/desktop/install.sh" --background || true
+  fi
+fi
+# ---- end of the desktop app (track B)
 
 say "amarchy installed."
 if [[ -f $units/amarchy-app.service ]]; then

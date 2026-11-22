@@ -1,0 +1,29 @@
+/* The desktop app's own page, in amarchy's default look (Omarchy's Tokyo
+   Night, the app's icon): the window opens dark, as the app does. */
+:root {
+  color-scheme: dark;
+  --bg: #1a1b26; --surface: #24283b; --border: #414868; --text: #c0caf5;
+  --muted: #7982a9; --accent: #7aa2f7; --error: #f7768e;
+  --font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); }
+main { min-height: 100%; max-width: 30rem; margin: 0 auto; padding: 2rem 1.25rem;
+       display: flex; flex-direction: column; justify-content: center; gap: 1rem; }
+.mark { width: 3.5rem; height: 3.5rem; }
+h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+p { margin: 0; color: var(--muted); }
+.error { color: var(--error); }
+.row { display: flex; gap: 0.5rem; }
+.list { display: flex; flex-direction: column; gap: 0.5rem; }
+label { color: var(--muted); font-size: 0.9rem; display: block; margin-bottom: 0.35rem; }
+input { flex: 1; min-width: 0; padding: 0.55rem 0.7rem; font: inherit; color: var(--text);
+        background: var(--surface); border: 1px solid var(--border); border-radius: 0; outline: none; }
+input:focus { border-color: var(--accent); }
+button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border);
+         border-radius: 0; padding: 0.55rem 0.9rem; cursor: pointer; text-align: left; }
+button:hover, button:focus-visible { border-color: var(--accent); outline: none; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.machine { display: flex; flex-direction: column; width: 100%; }
+.machine small { color: var(--muted); }
+[hidden] { display: none !important; }

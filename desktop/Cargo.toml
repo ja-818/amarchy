@@ -1,0 +1,48 @@
+[package]
+name = "amarchy-desktop"
+version = "0.1.0"
+description = "amarchy's desktop app: the same app as the phone's, in a window of its own"
+authors = ["Julian Arango"]
+license = "MIT"
+repository = "https://github.com/ja-818/amarchy"
+edition = "2021"
+rust-version = "1.85"
+
+[[bin]]
+name = "amarchy-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+ureq = "3"
+
+# A chat's link (amarchy://) comes as a second start's argument on Linux and
+# Windows (single instance hands it over), as an Apple event on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-deep-link = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2", features = ["v2_40"] }
+gtk = "0.18"
+
+[features]
+# Lets the tests drive the window: JavaScript from stdin, its results on stdout
+# (desktop/test). Never in a build for people.
+test-hooks = []
+
+# Built on the machine it runs on (install.sh), and again on each update:
+# thin LTO keeps a rebuild to the app's own code quick.
+[profile.release]
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

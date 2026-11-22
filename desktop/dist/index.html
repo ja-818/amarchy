@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amarchy</title>
+  <link rel="stylesheet" href="shell.css">
+  <script src="shell.js" defer></script>
+</head>
+<!-- The desktop app's own page, while the window isn't showing amarchy:
+     looking for it, which one (several found), or why not (none, or it
+     didn't load), with what to do. Everything else is amarchy's app. -->
+<body>
+  <main id="page" aria-live="polite">
+    <img class="mark" src="icon.svg" alt="">
+    <h1 id="title">Opening Amarchy…</h1>
+    <p id="why" hidden></p>
+    <div id="machines" class="list" hidden></div>
+    <form id="address" hidden>
+      <label for="addr">Your amarchy's address</label>
+      <div class="row">
+        <input id="addr" name="addr" placeholder="amarchy.your-tailnet.ts.net" autocomplete="off" spellcheck="false">
+        <button type="submit" class="primary">Open</button>
+      </div>
+    </form>
+    <div id="actions" class="row" hidden>
+      <button id="retry" type="button">Try again</button>
+    </div>
+    <p id="error" class="error" hidden></p>
+  </main>
+</body>
+</html>

@@ -567,6 +567,43 @@ amarchy machines remove omarchy   # both forget the other
 - **Versions**: machines on another version of the contract say "Update
   amarchy on <label>" instead of breaking.
 
+## The desktop app
+
+amarchy's app in a window of its own, on Linux first (Omarchy), with macOS and
+Windows built from the same code. It's the same app as on your phone and in a
+browser, not another one: the window shows the board and the chats your
+amarchy serves, drawn by the system's own web view (WebKitGTK on Linux). It
+adds what a page can't: its own window and launcher entry, `amarchy://` links,
+a tray, the microphone for dictation, and (next) notifications that come with
+its window closed.
+
+- **Install**: on a computer with a desktop (Omarchy, or any Wayland or X
+  session), `install.sh` builds it there (`desktop/install.sh`: Rust and
+  WebKitGTK; a few minutes the first time). On Arch it offers to install what
+  the build needs with pacman (sudo asks for your password). It's **Amarchy** in
+  your launcher, or `amarchy-desktop`. `install.sh --desktop` builds it anywhere
+  (over SSH, say); `--no-desktop` leaves it out.
+- **Updates**: with amarchy. An update builds it again in the background when
+  it changed, and a running one starts again on the new build, where it was.
+- **What it opens**: this computer's amarchy when it has chats (or merges your
+  other machines' in); else the first machine you paired that's on; else the
+  address you gave it (`amarchy-desktop --server <address>`, or typed into its
+  window); else it looks for your amarchy on your tailnet: one found is paired
+  (`amarchy machines add`) and opened, of several it asks which, once. When it
+  finds nothing, or the one it opens doesn't answer, its window says why, takes
+  an address, and has Try again.
+- **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
+  in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
+  A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+- **The tray**: closing the window keeps it running in the tray (Open, Reload,
+  Quit), and it starts there at login (`~/.config/autostart/amarchy.desktop`;
+  delete it and it isn't put back), so its notifications can reach you.
+- **Links out** (a reply's, a preview's) open in your browser, not in the window.
+- **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
+  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+- **Uninstall**: `install.sh --uninstall` takes it away with amarchy
+  (`desktop/install.sh --uninstall` takes only it).
+
 ## On Omarchy
 
 On an [Omarchy](https://omarchy.org) desktop (Omarchy 4), `install.sh` makes
@@ -1357,6 +1394,8 @@ the last three). It:
 - on an Omarchy desktop, puts amarchy in its bar, its keys and its menu (see
   [On Omarchy](#on-omarchy)); elsewhere, takes away what an amarchy from before left
   there. It brings the state of an amarchy from before up to date (`amarchy migrate`).
+- on a computer with a desktop, builds and installs the desktop app (see
+  [The desktop app](#the-desktop-app)); an update builds it in the background.
 
 `install.sh --host` does the same (it's from when there were desktops too), and
 `amarchy app on` starts the app's service (see [Quick start](#quick-start)).

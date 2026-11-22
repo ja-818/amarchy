@@ -1,0 +1,737 @@
+// amarchy's desktop app: one window around the same app the phone and the
+// browser show (app/, served by an amarchy app server), this machine's or a
+// server's (docs/plan-omarchy-and-machines.md, track B, and the contract's
+// "The desktop app: how it's opened, what it opens"). It only adds what a
+// web page can't do: a window of its own, a link scheme, a tray, the
+// microphone answered, and notifications with the window closed.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod links;
+mod platform;
+mod target;
+mod tray;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse};
+use tauri::window::Color;
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
+
+use links::Link;
+use target::{Found, Target};
+
+const USAGE: &str = "\
+amarchy-desktop: amarchy's app, in a window of its own
+
+  amarchy-desktop                          open it (or show it, when it's running)
+  amarchy-desktop amarchy://chat/<machine>/<id>
+                                           open it on that chat
+  amarchy-desktop --server <address>       open that amarchy, and keep it (when
+                                           this computer has none of its own)
+  amarchy-desktop --server ''              forget it
+  amarchy-desktop --url <address>          open that one, this time only
+  amarchy-desktop --hidden                 start in the tray (at login)
+  amarchy-desktop --restart                the running one starts again, on the
+                                           build installed now (install.sh)
+
+What it opens, when not told: this computer's amarchy if it has chats (or
+machines merged in), else the first machine paired with it that's on, else
+the address kept with --server, else one of yours found on your tailnet.
+";
+
+const WINDOW_STATE: StateFlags = StateFlags::SIZE.union(StateFlags::POSITION).union(StateFlags::MAXIMIZED);
+
+/// What the window's own page (dist/) shows while it isn't showing amarchy.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Status {
+    /// Looking for it.
+    Opening,
+    /// Several of yours answer: which one.
+    Choose { machines: Vec<target::Candidate> },
+    /// None found: why.
+    Nothing { why: String },
+    /// It was found, then didn't load: why.
+    Failed { label: String, why: String },
+}
+
+pub struct Shell {
+    /// The address it was started with (--url), if any.
+    given: Option<Url>,
+    /// What's open, and where its pages come from (for the navigation rule).
+    target: Mutex<Option<Target>>,
+    origin: Arc<Mutex<Option<Url>>>,
+    status: Mutex<Status>,
+    /// A chat asked for before the target was known.
+    pending: Mutex<Option<Link>>,
+    /// Said once when the page is up (a machine just paired).
+    said: Mutex<Option<String>>,
+    /// Where the window was before --restart (its route), back there.
+    route: Mutex<Option<String>>,
+    quitting: AtomicBool,
+    finding: AtomicBool,
+}
+
+struct Args {
+    url: Option<Url>,
+    server: Option<String>,
+    hidden: bool,
+    link: Option<Link>,
+    /// install.sh, after an update: the running one starts again on the new build.
+    restart: bool,
+    /// Started again by --restart: once the one before has ended (its pid),
+    /// where it was (its route).
+    after: Option<u32>,
+    route: Option<String>,
+}
+
+fn args(argv: &[String]) -> Result<Args, String> {
+    let mut a = Args { url: None, server: None, hidden: false, link: Link::from_args(argv), restart: false, after: None, route: None };
+    let mut it = argv.iter().skip(1);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--url" => {
+                let v = it.next().ok_or("--url needs an address")?;
+                a.url = Some(target::parse_address(v)?);
+            }
+            "--server" => a.server = Some(it.next().ok_or("--server needs an address ('' forgets it)")?.clone()),
+            "--hidden" => a.hidden = true,
+            "--restart" => a.restart = true,
+            "--after" => a.after = it.next().and_then(|p| p.parse().ok()),
+            "--route" => a.route = it.next().filter(|r| r.starts_with("#/") && r.len() < 300).cloned(),
+            s if s.starts_with("amarchy://") => {
+                if Link::parse(s).is_none() {
+                    return Err(format!("{s} isn't a chat's link (amarchy://chat/<machine>/<id>)"));
+                }
+            }
+            s => return Err(format!("unknown: {s}")),
+        }
+    }
+    if a.url.is_none() {
+        if let Ok(v) = std::env::var("AMARCHY_URL") {
+            if !v.trim().is_empty() {
+                a.url = Some(target::parse_address(&v).map_err(|e| format!("AMARCHY_URL: {e}"))?);
+            }
+        }
+    }
+    Ok(a)
+}
+
+/// --server: keep the address (or forget it).
+fn keep_server(raw: &str) -> Result<(), String> {
+    let mut s = target::read_settings();
+    s.server = if raw.trim().is_empty() { None } else { Some(target::parse_address(raw)?.to_string()) };
+    target::write_settings(&s).map_err(|e| format!("couldn't keep it: {e}"))
+}
+
+fn main() {
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.iter().any(|a| a == "-h" || a == "--help") {
+        print!("{USAGE}");
+        return;
+    }
+    if argv.iter().any(|a| a == "--version") {
+        println!("amarchy-desktop {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    let start = match args(&argv) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("amarchy-desktop: {e}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
+    if let Some(server) = &start.server {
+        if let Err(e) = keep_server(server) {
+            eprintln!("amarchy-desktop: {e}");
+            std::process::exit(1);
+        }
+    }
+    // Started again by --restart: the one before lets go first (its single
+    // instance, its window's place).
+    if let Some(pid) = start.after {
+        wait_gone(pid);
+    }
+    platform::prepare();
+
+    let shell = Shell {
+        given: start.url.clone(),
+        target: Mutex::new(None),
+        origin: Arc::new(Mutex::new(None)),
+        status: Mutex::new(Status::Opening),
+        pending: Mutex::new(start.link.clone()),
+        route: Mutex::new(start.route.clone()),
+        said: Mutex::new(None),
+        quitting: AtomicBool::new(false),
+        finding: AtomicBool::new(false),
+    };
+    let hidden = start.hidden;
+    let restart_only = start.restart;
+
+    let builder = tauri::Builder::default()
+        // First: a second start hands its arguments here and ends.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| again(app, &argv)))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(WINDOW_STATE)
+                .skip_initial_state("main")
+                .build(),
+        )
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
+    let app = builder
+        .manage(shell)
+        .on_permission_request(|webview, kind| {
+            // Only amarchy's own pages, and only what the app uses: the
+            // microphone (dictation) and reading what you copied (Paste).
+            let theirs = webview.url().ok().map(|u| u.origin());
+            let ours = webview.app_handle().state::<Shell>().origin.lock().unwrap().as_ref().map(|o| o.origin());
+            if theirs.is_none() || theirs != ours {
+                return PermissionResponse::Deny;
+            }
+            match kind {
+                PermissionKind::Microphone | PermissionKind::ClipboardRead => PermissionResponse::Allow,
+                // The app's own browser notifications are off here: the
+                // desktop app shows them itself, so nothing comes twice.
+                _ => PermissionResponse::Deny,
+            }
+        })
+        .invoke_handler(tauri::generate_handler![status, choose, use_address, retry])
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            // --restart with none running: nothing to start again.
+            if restart_only {
+                std::process::exit(0);
+            }
+            let win = window(&handle, hidden)?;
+            platform::webview(&win);
+            tray::make(&handle)?;
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let h = handle.clone();
+                app.deep_link().on_open_url(move |e| {
+                    if let Some(l) = e.urls().iter().find_map(|u| Link::parse(u.as_str())) {
+                        open_link(&h, l);
+                    }
+                });
+            }
+            #[cfg(feature = "test-hooks")]
+            test_hooks(win.clone());
+            find(&handle);
+            Ok(())
+        })
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                page_loaded(webview.app_handle(), payload.url());
+            }
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                if !app.state::<Shell>().quitting.load(Ordering::SeqCst) {
+                    // Closed, it stays in the tray: its notifications go on.
+                    api.prevent_close();
+                    let _ = app.save_window_state(WINDOW_STATE);
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("amarchy-desktop couldn't start");
+    app.run(|app, event| {
+        if let RunEvent::ExitRequested { api, code, .. } = event {
+            // The window hidden isn't the app ending: only Quit (or a signal) is.
+            if code.is_none() && !app.state::<Shell>().quitting.load(Ordering::SeqCst) {
+                api.prevent_exit();
+            }
+        }
+    });
+}
+
+/// Until the process pid has ended (up to 10 s).
+fn wait_gone(pid: u32) {
+    #[cfg(target_os = "linux")]
+    for _ in 0..100 {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+}
+
+/// The one window: amarchy, or while it's looked for, the window's own page.
+fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
+    let origin = app.state::<Shell>().origin.clone();
+    let opener = app.clone();
+    let out = app.clone();
+    let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("Amarchy")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(360.0, 480.0)
+        // The app's look while a page loads (not WebKit's white): the last
+        // one it wore, else Omarchy's default.
+        .background_color(saved_background())
+        .visible(false)
+        .initialization_script(format!(
+            "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?} }});",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS
+        ))
+        .on_navigation(move |u| {
+            if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
+                return true;
+            }
+            if origin.lock().unwrap().as_ref().map(|o| o.origin()) == Some(u.origin()) {
+                return true;
+            }
+            // Anywhere else (a link in a reply, a sign-in): your browser.
+            outward(&opener, u);
+            false
+        })
+        .on_new_window(move |u, _| {
+            outward(&out, &u);
+            NewWindowResponse::Deny
+        })
+        .on_download(|webview, event| {
+            if let DownloadEvent::Requested { url, destination } = event {
+                if let Ok(dir) = webview.app_handle().path().download_dir() {
+                    let name = destination
+                        .file_name()
+                        .map(|n| n.to_owned())
+                        .or_else(|| url.path_segments().and_then(|mut s| s.next_back().map(|l| l.into())))
+                        .unwrap_or_else(|| "download".into());
+                    *destination = free_name(&dir, &name);
+                }
+            }
+            true
+        })
+        .build()?;
+    let _ = win.restore_state(WINDOW_STATE);
+    if !hidden {
+        win.show()?;
+    }
+    Ok(win)
+}
+
+/// A file name in dir that isn't taken: name, name (2), ...
+fn free_name(dir: &std::path::Path, name: &std::ffi::OsStr) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let p = std::path::Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
+}
+
+/// The window's own page (dist/index.html), as the system's web view names it.
+fn own_page(u: &Url) -> bool {
+    u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost")
+}
+
+fn own_page_url() -> Url {
+    let base = if cfg!(windows) { "http://tauri.localhost/" } else { "tauri://localhost/" };
+    Url::parse(base).unwrap().join("index.html").unwrap()
+}
+
+fn outward(app: &AppHandle, u: &Url) {
+    if matches!(u.scheme(), "http" | "https" | "mailto") {
+        let _ = app.opener().open_url(u.as_str(), None::<&str>);
+    }
+}
+
+fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
+    app.get_webview_window("main")
+}
+
+/// The window, in front.
+pub fn show(app: &AppHandle) {
+    if let Some(w) = main_window(app) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+pub fn quit(app: &AppHandle) {
+    app.state::<Shell>().quitting.store(true, Ordering::SeqCst);
+    let _ = app.save_window_state(WINDOW_STATE);
+    app.exit(0);
+}
+
+/// Started again while running: its link, its address, or just the window.
+fn again(app: &AppHandle, argv: &[String]) {
+    match args(argv) {
+        Ok(a) if a.restart => restart(app, argv.first().map(String::as_str)),
+        Ok(a) => {
+            if let Some(server) = a.server {
+                if keep_server(&server).is_ok() {
+                    *app.state::<Shell>().target.lock().unwrap() = None;
+                    find(app);
+                }
+            }
+            if let Some(l) = a.link {
+                open_link(app, l);
+            }
+            if !a.hidden {
+                show(app);
+            }
+        }
+        Err(_) => show(app),
+    }
+}
+
+/// Starts again on the build installed now (the one that asked, argv0):
+/// hidden if it was, on the chat it was on.
+fn restart(app: &AppHandle, exe: Option<&str>) {
+    let exe = exe
+        .filter(|e| std::path::Path::new(e).is_absolute() && std::path::Path::new(e).is_file())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_exe().ok().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)"))));
+    let Some(exe) = exe else { return };
+    let w = main_window(app);
+    let hidden = !w.as_ref().and_then(|w| w.is_visible().ok()).unwrap_or(true);
+    let route = w.and_then(|w| w.url().ok()).filter(|u| !own_page(u)).and_then(|u| u.fragment().map(|f| format!("#{f}")));
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--after").arg(std::process::id().to_string());
+    if hidden {
+        cmd.arg("--hidden");
+    }
+    if let Some(r) = route.filter(|r| r.starts_with("#/")) {
+        cmd.arg("--route").arg(r);
+    }
+    if let Some(u) = app.state::<Shell>().given.clone() {
+        cmd.arg("--url").arg(u.as_str());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    if cmd.spawn().is_ok() {
+        quit(app);
+    }
+}
+
+/// Opens a chat: in the app if it's up (its route, no reload), else once it is.
+pub fn open_link(app: &AppHandle, link: Link) {
+    show(app);
+    let shell = app.state::<Shell>();
+    let target = shell.target.lock().unwrap().clone();
+    let Some(t) = target else {
+        *shell.pending.lock().unwrap() = Some(link);
+        return;
+    };
+    let Some(w) = main_window(app) else { return };
+    let on_app = w.url().ok().map(|u| u.origin()) == Some(t.origin().origin());
+    if on_app {
+        let hash = link.hash(t.machine());
+        let _ = w.eval(format!("location.hash = {};", serde_json::to_string(&hash).unwrap()));
+    } else {
+        go(app, &t, Some(&link));
+    }
+}
+
+/// Looks for the amarchy to open, off the window's thread (amarchy's CLI,
+/// the tailnet), then opens it, or shows why not.
+pub fn find(app: &AppHandle) {
+    let shell = app.state::<Shell>();
+    if shell.finding.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    *shell.status.lock().unwrap() = Status::Opening;
+    if shell.target.lock().unwrap().is_none() {
+        to_own_page(app);
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let given = app.state::<Shell>().given.clone();
+        let found = target::find(given, true);
+        settle(&app, found);
+    });
+}
+
+fn settle(app: &AppHandle, found: Found) {
+    let shell = app.state::<Shell>();
+    shell.finding.store(false, Ordering::SeqCst);
+    match found {
+        Found::Open { target, said } => {
+            *shell.said.lock().unwrap() = said;
+            let link = shell.pending.lock().unwrap().take();
+            if link.is_none() {
+                if let Some(route) = shell.route.lock().unwrap().take() {
+                    return go_route(app, &target, &route);
+                }
+            }
+            let same = shell.target.lock().unwrap().as_ref() == Some(&target);
+            let on_app = main_window(app).and_then(|w| w.url().ok()).map(|u| u.origin()) == Some(target.origin().origin());
+            // Reload found what's open already: the page as it is, but
+            // fresh (a server that came back), on the chat asked for.
+            if same && on_app && link.is_none() {
+                if let Some(w) = main_window(app) {
+                    let _ = w.eval("location.reload();");
+                }
+                return;
+            }
+            go(app, &target, link.as_ref());
+        }
+        Found::Choose { machines } => {
+            *shell.status.lock().unwrap() = Status::Choose { machines };
+            to_own_page(app);
+        }
+        Found::Nothing { why } => {
+            *shell.status.lock().unwrap() = Status::Nothing { why };
+            *shell.target.lock().unwrap() = None;
+            to_own_page(app);
+        }
+    }
+}
+
+/// Opens a target (on a chat). This machine's gets its cookie first, off the
+/// window's thread (the web view's cookies are set from another).
+fn go(app: &AppHandle, t: &Target, link: Option<&Link>) {
+    go_url(app, t, t.open_url(link));
+}
+
+fn go_url(app: &AppHandle, t: &Target, url: Url) {
+    let shell = app.state::<Shell>();
+    *shell.origin.lock().unwrap() = Some(t.origin());
+    *shell.target.lock().unwrap() = Some(t.clone());
+    let Target::Local { port, .. } = t else {
+        if let Some(w) = main_window(app) {
+            let _ = w.navigate(url);
+        }
+        return;
+    };
+    let (app, port, t) = (app.clone(), *port, t.clone());
+    std::thread::spawn(move || {
+        let Some(w) = main_window(&app) else { return };
+        match target::local_cookie(port).and_then(|c| w.set_cookie(c).map_err(|e| format!("its cookie: {e}"))) {
+            Ok(()) => {
+                let _ = w.navigate(url);
+            }
+            Err(why) => {
+                let shell = app.state::<Shell>();
+                *shell.status.lock().unwrap() = Status::Failed { label: t.label(), why };
+                *shell.target.lock().unwrap() = None;
+                to_own_page(&app);
+            }
+        }
+    });
+}
+
+/// Opens a target on a route of the app (where --restart left it).
+fn go_route(app: &AppHandle, t: &Target, route: &str) {
+    let mut u = t.open_url(None);
+    u.set_fragment(Some(route.trim_start_matches('#')));
+    go_url(app, t, u);
+}
+
+fn to_own_page(app: &AppHandle) {
+    if let Some(w) = main_window(app) {
+        if !w.url().map(|u| own_page(&u)).unwrap_or(false) {
+            let _ = w.navigate(own_page_url());
+        }
+    }
+}
+
+/// amarchy's page didn't load: the window's own page says why, with Retry.
+pub fn load_failed(app: &AppHandle, uri: &str, why: &str) {
+    let app = app.clone();
+    let (uri, why) = (uri.to_string(), why.to_string());
+    let _ = app.clone().run_on_main_thread(move || {
+        if Url::parse(&uri).map(|u| own_page(&u)).unwrap_or(false) {
+            return;
+        }
+        let shell = app.state::<Shell>();
+        let label = shell.target.lock().unwrap().as_ref().map(|t| t.label()).unwrap_or_else(|| uri.clone());
+        *shell.status.lock().unwrap() = Status::Failed { label, why };
+        *shell.target.lock().unwrap() = None;
+        to_own_page(&app);
+    });
+}
+
+// ---- the look's background, kept for the next start (look.json)
+
+fn look_file() -> std::path::PathBuf {
+    target::state_dir().join("desktop/look.json")
+}
+
+fn saved_background() -> Color {
+    std::fs::read_to_string(look_file())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["background"].as_str().and_then(parse_color))
+        .unwrap_or(Color(0x1a, 0x1b, 0x26, 0xff))
+}
+
+/// #rrggbb, or rgb()/rgba() as a page computes it.
+fn parse_color(s: &str) -> Option<Color> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() == 6 {
+            let n = u32::from_str_radix(hex, 16).ok()?;
+            return Some(Color((n >> 16) as u8, (n >> 8) as u8, n as u8, 0xff));
+        }
+        return None;
+    }
+    let inner = s.strip_prefix("rgba(").or_else(|| s.strip_prefix("rgb("))?.strip_suffix(')')?;
+    let mut parts = inner.split([',', ' ', '/']).filter(|p| !p.is_empty()).map(|p| p.trim().parse::<f32>().ok());
+    let (r, g, b) = (parts.next()??, parts.next()??, parts.next()??);
+    Some(Color(r as u8, g as u8, b as u8, 0xff))
+}
+
+/// The look the app wears now (its bars' color), worn by the window between
+/// pages and kept for the next start.
+fn keep_background(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let Some(w) = main_window(&app) else { return };
+        let w2 = w.clone();
+        let _ = w.eval_with_callback(
+            "(document.querySelector('meta[name=\"theme-color\"]') || {}).content || getComputedStyle(document.body).backgroundColor",
+            move |v| {
+                let Some(raw) = serde_json::from_str::<String>(&v).ok() else { return };
+                let Some(c) = parse_color(&raw) else { return };
+                let _ = w2.set_background_color(Some(c));
+                let hex = format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
+                let f = look_file();
+                if std::fs::read_to_string(&f).map(|s| s.contains(&hex)).unwrap_or(false) {
+                    return;
+                }
+                let _ = std::fs::create_dir_all(f.parent().unwrap());
+                let _ = std::fs::write(f, serde_json::json!({ "background": hex }).to_string() + "\n");
+            },
+        );
+    });
+}
+
+fn page_loaded(app: &AppHandle, url: &Url) {
+    if own_page(url) {
+        return;
+    }
+    keep_background(app);
+    if let Some(said) = app.state::<Shell>().said.lock().unwrap().take() {
+        if let Some(w) = main_window(app) {
+            // Once the app is up (its board read), in its own toast.
+            let _ = w.eval(format!(
+                "(function said(n) {{ if (typeof toast === 'function' && typeof app !== 'undefined' && app.view) \
+                   return setTimeout(() => toast({}), 300); if (n < 100) setTimeout(() => said(n + 1), 100); }})(0);",
+                serde_json::to_string(&said).unwrap()
+            ));
+        }
+    }
+}
+
+// ---- what the window's own page (dist/) asks
+
+#[tauri::command]
+fn status(app: AppHandle) -> Status {
+    app.state::<Shell>().status.lock().unwrap().clone()
+}
+
+/// One of several found: paired with, and opened.
+#[tauri::command]
+fn choose(app: AppHandle, name: String) -> Result<(), String> {
+    let Status::Choose { machines } = app.state::<Shell>().status.lock().unwrap().clone() else {
+        return Err("nothing to choose from".into());
+    };
+    let c = machines.into_iter().find(|m| m.name == name).ok_or("not one of them")?;
+    let cli = target::amarchy_cli().ok_or("amarchy isn't installed on this computer")?;
+    *app.state::<Shell>().status.lock().unwrap() = Status::Opening;
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let found = match target::pair_with(&cli, &c) {
+            Ok(t) => Found::Open { target: t, said: Some(format!("Paired with {}.", c.label.as_deref().unwrap_or(&c.name))) },
+            Err(why) => Found::Nothing { why },
+        };
+        settle(&app2, found);
+    });
+    Ok(())
+}
+
+/// An address typed in: kept (as --server) and opened.
+#[tauri::command]
+fn use_address(app: AppHandle, address: String) -> Result<(), String> {
+    keep_server(&address)?;
+    find(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn retry(app: AppHandle) {
+    find(&app);
+}
+
+// The tests' way in: each line on stdin is {"id", "js"}, JavaScript to run in
+// the window (its value comes back on stdout as "@@<id> <json>"), or
+// {"id", "do"}: what the shell itself does or is ("close", "url", "visible").
+#[cfg(feature = "test-hooks")]
+fn test_hooks(win: WebviewWindow) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            let id = cmd["id"].as_str().unwrap_or("").to_string();
+            if let Some(what) = cmd["do"].as_str() {
+                let v = match what {
+                    "close" => serde_json::json!(win.close().is_ok()),
+                    "url" => serde_json::json!(win.url().map(|u| u.to_string()).unwrap_or_default()),
+                    "visible" => serde_json::json!(win.is_visible().unwrap_or(false)),
+                    "size" => {
+                        let s = win.inner_size().unwrap_or_default();
+                        serde_json::json!([s.width, s.height])
+                    }
+                    _ => serde_json::json!(null),
+                };
+                println!("@@{id} {v}");
+                continue;
+            }
+            let js = cmd["js"].as_str().unwrap_or("null").to_string();
+            let fail = id.clone();
+            if let Err(e) = win.eval_with_callback(js, move |v| println!("@@{id} {v}")) {
+                println!("@@{fail} {}", serde_json::json!({"error": e.to_string()}));
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colors() {
+        assert_eq!(parse_color("#1a1b26"), Some(Color(0x1a, 0x1b, 0x26, 0xff)));
+        assert_eq!(parse_color("rgb(26, 27, 38)"), Some(Color(26, 27, 38, 0xff)));
+        assert_eq!(parse_color("rgba(26, 27, 38, 0.5)"), Some(Color(26, 27, 38, 0xff)));
+        assert_eq!(parse_color("rgb(26 27 38 / 50%)"), Some(Color(26, 27, 38, 0xff)));
+        assert_eq!(parse_color("red"), None);
+        assert_eq!(parse_color("#fff"), None);
+    }
+
+    #[test]
+    fn arguments() {
+        let a = args(&["x".into(), "--hidden".into(), "amarchy://chat/m/i".into()]).unwrap();
+        assert!(a.hidden && a.link.is_some());
+        assert!(args(&["x".into(), "amarchy://nope".into()]).is_err());
+        assert!(args(&["x".into(), "--bogus".into()]).is_err());
+        let r = args(&["x".into(), "--after".into(), "12".into(), "--route".into(), "#/s/a".into()]).unwrap();
+        assert_eq!((r.after, r.route.as_deref()), (Some(12), Some("#/s/a")));
+        assert_eq!(args(&["x".into(), "--route".into(), "javascript:x".into()]).unwrap().route, None);
+    }
+}

@@ -2091,6 +2091,10 @@ async function shareSetup() {
 // ---- notifications
 
 const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+// In amarchy's desktop app (desktop/, which sets it before this runs): its
+// notifications are the app's own, not this page's (the contract's "The
+// desktop app").
+const desktopApp = window.amarchyDesktop || null;
 
 function keyBytes(b64) {
   const s = atob(b64.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - b64.length % 4) % 4));
@@ -2252,6 +2256,8 @@ async function openSettings() {
     const kids = [h("div", { class: "section" }, "Notifications")];
     if (state === "checking") {
       kids.push(h("p", {}, "…"));
+    } else if (desktopApp) {
+      kids.push(h("p", {}, "This desktop app's own notifications come with its next update. Your phone's keep coming."));
     } else if (!standalone && !app.desk) {
       kids.push(h("p", {}, "To get notifications, add Amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
     } else if (state === "unsupported") {

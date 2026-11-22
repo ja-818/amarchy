@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Omarchy's default look (Tokyo Night): a window in its accent border, an A and a cursor. -->
+  <rect width="512" height="512" fill="#1a1b26"/>
+  <rect x="60" y="60" width="392" height="392" fill="none" stroke="#7aa2f7" stroke-width="14"/>
+  <path fill="#c0caf5" fill-rule="evenodd"
+        d="M196 140 H256 L340 372 H300 L282 322 H170 L152 372 H112 Z M182 288 H270 L226 166 Z"/>
+  <rect x="354" y="350" width="64" height="22" fill="#7aa2f7"/>
+</svg>
