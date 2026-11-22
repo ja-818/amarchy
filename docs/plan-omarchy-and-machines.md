@@ -82,13 +82,18 @@ and tell the other tracks.
 ### Machines
 
 - A **machine** is a computer running amarchy. Its **name** is its Tailscale
-  MagicDNS short name (`amarchy`, `omarchy`); its **label** is what the app
+  MagicDNS short name (`amarchy`, `omarchy`), kept once it's paired
+  (`~/.config/amarchy/name`), so a tailnet that renames it breaks no pair; its **label** is what the app
   shows (the name until you change it). The label is kept on the machine
   itself (`~/.config/amarchy/label`), so every machine shows the same one:
   renaming another machine asks it to rename itself.
 - `GET /api/peer/hello` → `{"name", "label", "version" (git commit),
-  "protocol": 1, "user" (Tailscale login)}`, to you before pairing too.
-  Pairing checks `protocol` and that `user` is the caller's.
+  "protocol": 1, "user" (its owner's Tailscale login), "users" (every login
+  it lets in), "merges"}`, to you before pairing too. Pairing checks
+  `protocol` and that `user` is one of the caller's.
+- **Yours** is a machine's owner on Tailscale plus the logins in its
+  `APP_USERS=` (one person's other login, on another tailnet). Nothing names a
+  tailnet or a login in the code.
 - Paired machines live in `~/.config/amarchy/machines.json` (0600):
   `[{"name", "label", "url": "https://<name>.<tailnet>.ts.net", "key"}]`.
   **One key per pair, the same on both**, so either machine calls the other
@@ -103,7 +108,10 @@ and tell the other tracks.
   peer's key.
 - A request between machines carries `X-Amarchy-Protocol: 1`; a machine on
   another protocol answers 409 with what to update ("Update amarchy on
-  <label>").
+  <label>"). It also carries `X-Amarchy-Peer-URL` (where the caller is
+  reached now): the other keeps it when it's on its own tailnet, so a machine
+  that moved tailnets is followed; one that stops answering at its address is
+  also looked for at its name's address on this tailnet.
 - `amarchy machines [--json]`, `amarchy machines add <name|url>`,
   `amarchy machines remove <name>`, `amarchy machines rename <name> <label>`.
   Settings → Machines in the app: the list, each one's state, Add (machines of
@@ -131,9 +139,11 @@ and tell the other tracks.
 ### Chats from every machine
 
 - Every chat in `/api/state` and `/api/events` carries `"machine": "<name>"`.
-  The board also has `"machine"` (this server's name) and `"machines"`: this
-  one first, then each paired one, `{"name", "label", "me", "on", "since",
-  "error", "update" (words, or null), "version", "projects"}`.
+  The board also has `"machine"` (this server's name), `"merges": true` and
+  `"machines"`: this one first, then each paired one, `{"name", "label",
+  "me", "on", "seen" (it has answered once), "since", "error", "update"
+  (words, or null), "version", "projects": [{"name", "github"
+  (owner/repo, or null)}]}`.
 - `/api/peer/state` and `/api/peer/events` (event `state`): `{"machine"
   (its hello), "sessions", "projects", "tasks"}`, the machine's **own** chats
   only (never ones it passes through, so machines don't echo each other).
@@ -145,9 +155,21 @@ and tell the other tracks.
   both ways, uploads and images too.
 - The app builds every chat path with one helper,
   `chatPath(chat, "/stream")` → `/api/session/<id>/stream` for this machine's,
-  `/api/m/<machine>/api/session/<id>/stream` for another's.
+  `/api/m/<machine>/api/session/<id>/stream` for another's (and
+  `machinePath(chat, path)` for the rest of a chat's machine: its clipboard,
+  its secrets, its agents' tasks, its pictures).
 - Board keys (order, seen, per-chat settings) use `<machine>:<id>`. A chat with
-  no machine is this machine's (old data keeps working).
+  no machine is this machine's (old data keeps working): the app keys this
+  machine's chats by their id alone and another's as `<machine>:<id>`, and
+  reads `<this machine>:<id>` as `<id>`. So a chat's route is `#/s/<id>` or
+  `#/s/<machine>:<id>`, and a notification's `tag` and `ask` are that key.
+- **A new chat on another machine** (the app's Where, `amarchy new --on`): the
+  pass-through's `/api/add` `{repo: "<owner/repo>"}` there first when the
+  project isn't on it (cloned from GitHub), then its `/api/new` (which takes
+  `"name"` too). `amarchy send <machine>:<id>` is `POST /api/peer/send`
+  `{"id", "text", "from": "<machine>:<chat>"}` (peers only): `amarchy send`
+  there, noted as from that chat. `/api/search` on a machine asks every
+  paired one too (not when a peer asks), each result with `"machine"`.
 
 ### Omarchy: the bar, the key, the theme live
 
