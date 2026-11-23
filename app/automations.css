@@ -21,11 +21,14 @@
   background: var(--success);
 }
 .auto-mark.failed { background: var(--danger); }
-.auto-mark.running { background: var(--accent); animation: auto-pulse 1.2s ease-in-out infinite; }
+.auto-mark.running { background: var(--accent); }
+/* Running: it fades and comes back, a step on each beat (app.js, with the spinners). */
+@media (prefers-reduced-motion: no-preference) {
+  .auto-mark.running:is([data-b="1"], [data-b="5"]) { opacity: .7; }
+  .auto-mark.running:is([data-b="2"], [data-b="3"], [data-b="4"]) { opacity: .35; }
+}
 .auto-mark.paused, .auto-mark.stopped { background: none; border: 2px solid var(--text-muted); }
 .auto-mark.never { background: none; border: 2px solid var(--success); }
-@keyframes auto-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .auto-mark.running { animation: none; } }
 
 .auto-alert { color: var(--danger); }
 

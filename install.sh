@@ -216,8 +216,9 @@ if ((uninstall)); then
   # ---- Omarchy home (track C): its pieces of Omarchy, all of them.
   "$repo/omarchy/install.sh" --uninstall || say "Couldn't take away all of amarchy's pieces of Omarchy (omarchy/install.sh --uninstall)"
   # ---- end of Omarchy home
-  # The dictation model is only a download (670 MB): fetched again by
-  # amarchy dictation setup.
+  # The dictation model is only a download (670 MB), and the whisper.cpp
+  # built there where no package has it: both made again by amarchy
+  # dictation setup.
   rm -rf "$state/dictation"
   # Omarchy's wallpapers too, only downloads (amarchy theme
   # --refresh-wallpapers): a fetch under way stops once they're gone.

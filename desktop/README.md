@@ -14,7 +14,7 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, what draws its GL (no GPU: its page painted on the CPU, the page told, `--graphics`), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it) |
 | `src/sound.rs` | What its page can play: GStreamer asked at start; without its plugins, no media in the page (one would end it), its sounds played by the app (`pw-play`), said once, and a start again once they're installed |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
@@ -62,6 +62,16 @@ an error nothing caught, with where; a promise nothing caught;
   and when dictation can't start; once they're installed it sees GStreamer's
   plugins change and starts again by itself. `AMARCHY_DESKTOP_SOUND=1` lets
   the page play them even so.
+- **No GPU to draw with** (a GPU whose Linux driver isn't there yet, as
+  Apple's M5 today; a virtual machine): Mesa runs WebKit's GL on the CPU
+  (llvmpipe), every frame a GPU's work emulated. It asks EGL what draws its
+  GL before the window, in a process of its own (`amarchy-desktop
+  --graphics` says it too), and there its page's tiles are painted with
+  Skia's CPU raster (`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1`), compositing kept
+  (without it WebKit 2.54 paints on the page's own thread, and held keys came
+  out seconds late). `AMARCHY_DESKTOP_GPU=1` paints through GL anyway. The
+  page itself draws as few frames as it can, anywhere: what moves for as long
+  as it's on screen moves with the spinners' tick (app.js, the beat).
 - **Its window's thread stuck** (a start handed over not taken up in 8 s, or
   no answer for 45 s): it starts again as a new process, on the chat it was
   asked for, and the stuck one ends.

@@ -223,14 +223,21 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         without one
 
 Dictation (the app's mic button: what you say, written into the box you type in, by a speech-to-text model
-on this machine that knows Spanish, English and 23 more languages and tells them apart by itself):
-  amarchy dictation [--status]          whether it's set up, and how to set it up if not
-  amarchy dictation setup               fetch the model (Parakeet TDT 0.6B v3, 670 MB) into the state; needs
-                                        whisper.cpp 1.9 or newer, with its libparakeet (Arch: whisper-cpp)
-  amarchy dictation remove              delete the model again
+on this machine that knows Spanish, English and 23 more languages and tells them apart by itself; on a
+machine without it, by another machine of yours that has it, paired with amarchy machines):
+  amarchy dictation [--status]          whether it's set up, where it's written down, and how to set it up if not
+  amarchy dictation setup [--build]     fetch the model (Parakeet TDT 0.6B v3, 670 MB) into the state; needs
+                                        whisper.cpp 1.9 or newer, with its libparakeet (Arch on x86_64:
+                                        whisper-cpp). Where there's no package for it (aarch64, Debian...),
+                                        or with --build, it builds whisper.cpp here first (git, cmake and a
+                                        C++ compiler; a few minutes), into the state
+  amarchy dictation remove              delete the model again, and the whisper.cpp built here
   amarchy dictation log [--json]        the last dictations, from any phone or browser: how each went (which
-                                        way it was written down, how long it took) and what came of it
-  amarchy dictation transcribe <file>   write down a recording (anything ffmpeg reads), as a dictation would be
+                                        way it was written down, for which machine, how long it took) and
+                                        what came of it
+  amarchy dictation transcribe [--on <machine>] <file>
+                                        write down a recording (anything ffmpeg reads), as a dictation would
+                                        be: here, or on the machine that writes this one's down (or the one named)
 
 Secrets (a key or password a project needs, given in the app, never in the chat; kept in
 ~/.config/amarchy/secrets, 0600, outside every repo; the session's commands, its terminal and its run
@@ -9630,10 +9637,24 @@ def cuts_kick(force=False):
     return True
 
 
+def own_home():
+    """Whether amarchy runs in the account's own home, not one made up for a
+    test (HOME elsewhere: the tests' app servers and CLIs)."""
+    import pwd
+    try:
+        return os.path.realpath(os.path.expanduser("~")) == os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except (KeyError, OSError):
+        return True
+
+
 def apart(unit, argv):
     """Run a command in the background, in a unit of its own where there's
     systemd (so restarting the app, which started it, doesn't stop it).
-    Whether it started."""
+    Whether it started. Never from a test's home: it would run on the
+    account's systemd, outliving the test (a whole fetch of Omarchy's
+    wallpapers, cut with ImageMagick, for each test's app server)."""
+    if not own_home():
+        return False
     if shutil.which("systemd-run"):
         env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
         if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}-{int(time.time())}",
@@ -11567,17 +11588,26 @@ def claude_prompt(s):
 # only a session's terminal Claude has (see "dictation from the phone"). The
 # phone's or the browser's microphone, 16 kHz 16-bit mono as for that
 # (voice.js), is written down here, by NVIDIA's Parakeet TDT 0.6B v3 through
-# whisper.cpp's libparakeet (Arch: the whisper-cpp package). It knows 25
-# European languages, Spanish and English among them, and tells them apart
-# by itself; on the CPU it writes ~10 seconds of speech in one. Free, and
-# the audio never leaves this machine.
+# whisper.cpp's libparakeet (Arch on x86_64: the whisper-cpp package). It
+# knows 25 European languages, Spanish and English among them, and tells
+# them apart by itself; on the CPU it writes ~10 seconds of speech in one.
+# Free, and the audio never leaves your machines.
 #
 # The model (670 MB) is fetched once (amarchy dictation setup, or Settings in
-# the app) into the state. A worker (amarchy dictation worker) keeps it loaded
+# the app) into the state. Where no package has whisper.cpp (Arch Linux ARM,
+# Debian...), setup builds it first, from its source at a known commit, into
+# the state too (DICTATE_BUILT): a few minutes, with git, cmake and a C++
+# compiler. A worker (amarchy dictation worker) keeps the model loaded
 # while dictations come, and exits DICTATE_KEEP after the last one. What's
 # said is cut at its pauses as it comes, and each piece written down while
 # the next is said: the words come up as you talk, and letting go leaves only
 # the last piece to do.
+#
+# A machine without the model (not set up yet, or a laptop that shouldn't
+# hold it) sends a dictation to another machine of yours that has it (see
+# "machines"): its /api/dictate is that machine's, passed on (dictate_helper),
+# and the app's mic works there as here. Never further than one: the machine
+# that's asked writes it down itself or says no.
 
 DICTATE = STATE / "dictation"
 DICTATE_MODEL = {
@@ -11588,6 +11618,12 @@ DICTATE_MODEL = {
     "sha256": "4d64e9e96c2792186d072fde0034df0ad670cf680a2f53069052ead827fd600e",
 }
 DICTATE_LIB = "libparakeet.so.1"            # whisper.cpp 1.9 or newer
+DICTATE_BUILT = DICTATE / "whisper.cpp"     # whisper.cpp as setup built it here, where no package has it
+DICTATE_SOURCE = {                          # what it builds: this release, checked by its commit
+    "version": "1.9.5", "url": "https://github.com/ggml-org/whisper.cpp", "tag": "v1.9.5",
+    "commit": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+}
+DICTATE_BUILD_LOG = DICTATE / "build.log"   # the last build's output (why it failed)
 DICTATE_SETUP = DICTATE / "setup.json"      # a download under way: how far, or why it stopped
 DICTATE_LOG = DICTATE / "log.jsonl"         # the last dictations: how they went (amarchy dictation log)
 DICTATE_LOG_KEEP = 500                      # lines of it kept
@@ -11622,22 +11658,97 @@ _dictate_lib = {"at": 0, "found": None}
 
 
 def dictate_lib():
-    """The library that writes speech down (libparakeet), or None. Looked
-    for again a minute later (installed meanwhile)."""
+    """The library that writes speech down (libparakeet), or None: the
+    system's (a package), else the one setup built here. Looked for again
+    a minute later (installed meanwhile)."""
     if time.time() - _dictate_lib["at"] > 60:
         import ctypes.util
         found = None
-        for d in ("/usr/lib", "/usr/local/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu"):
+        # (AMARCHY_DICTATE_SYSTEM=off: as on a machine without the package, for the tests.)
+        system = os.environ.get("AMARCHY_DICTATE_SYSTEM") != "off"
+        dirs = ("/usr/lib", "/usr/local/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu") \
+            if system else ()
+        for d in (*dirs, DICTATE_BUILT / "lib", DICTATE_BUILT / "lib64"):
             if Path(d, DICTATE_LIB).exists():
                 found = str(Path(d, DICTATE_LIB))
                 break
-        _dictate_lib.update(at=time.time(), found=found or ctypes.util.find_library("parakeet"))
+        _dictate_lib.update(at=time.time(), found=found or (ctypes.util.find_library("parakeet") if system else None))
     return _dictate_lib["found"]
 
 
+def dictate_built():
+    """Whether the library in use is the one setup built here."""
+    lib = dictate_lib()
+    return bool(lib) and Path(lib).resolve().is_relative_to(DICTATE_BUILT.resolve())
+
+
+def dictate_arch():
+    """This machine's processor, as packages name it (x86_64, aarch64)."""
+    import platform
+    return platform.machine() or "this processor"
+
+
+def os_family():
+    """Which packages this machine has: arch, debian, fedora, or None."""
+    for tool, family in (("pacman", "arch"), ("apt-get", "debian"), ("dnf", "fedora")):
+        if shutil.which(tool):
+            return family
+    return None
+
+
+_dictate_pkg = {"at": 0, "line": None}
+
+
+def dictate_package():
+    """The command that installs whisper.cpp with its libparakeet from this
+    machine's packages, or None where none has it (Arch Linux ARM, Debian,
+    Fedora...): only Arch's whisper-cpp does, 1.9 or newer. Looked at again
+    10 minutes later."""
+    if time.time() - _dictate_pkg["at"] < 600:
+        return _dictate_pkg["line"]
+    line = None
+    if os_family() == "arch":
+        try:
+            r = subprocess.run(["pacman", "-Si", "whisper-cpp"], capture_output=True, text=True, timeout=20,
+                               env={**os.environ, "LC_ALL": "C"})
+            v = re.search(r"(?m)^Version\s*:\s*(?:\d+:)?(\d+)\.(\d+)", r.stdout) if r.returncode == 0 else None
+            if v and (int(v.group(1)), int(v.group(2))) >= (1, 9):
+                line = "sudo pacman -S whisper-cpp"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    _dictate_pkg.update(at=time.time(), line=line)
+    return line
+
+
+def dictate_tools():
+    """What building whisper.cpp needs and this machine lacks: [] when it
+    has it all (git, cmake, a C++ compiler, make)."""
+    need = [t for t in ("git", "cmake") if not shutil.which(t)]
+    if not any(shutil.which(c) for c in ("c++", "g++", "clang++")):
+        need.append("a C++ compiler")
+    if not any(shutil.which(m) for m in ("make", "ninja")):
+        need.append("make")
+    return need
+
+
+def and_words(xs):
+    """a, b and c."""
+    xs = list(xs)
+    return " and ".join(xs) if len(xs) <= 2 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def dictate_tools_line():
+    """The command that installs what building whisper.cpp needs, here."""
+    return {"arch": "sudo pacman -S --needed base-devel cmake git",
+            "debian": "sudo apt install build-essential cmake git",
+            "fedora": "sudo dnf install gcc-c++ make cmake git"}.get(os_family() or "", "")
+
+
 def dictate_status():
-    """Whether the host can write dictations down, and if not why: the
-    library, the model, or the model's download under way."""
+    """Whether this machine can write dictations down, and if not why: the
+    library, the model, or the setup under way (whisper.cpp built, the
+    model fetched); how to set it up (dictate_how), and whether setup can
+    build whisper.cpp here (buildable: no package has it, the tools are here)."""
     lib, model = bool(dictate_lib()), dictate_model_path().is_file()
     setup = None
     try:
@@ -11645,11 +11756,13 @@ def dictate_status():
         if not isinstance(setup, dict):
             setup = None
         elif setup.get("pid") and not setup.get("error") and not pid_alive(setup["pid"]):
-            setup = {**setup, "error": "the download stopped"}
+            setup = {**setup, "error": "the build stopped" if setup.get("build") else "the download stopped"}
     except (OSError, ValueError):
         pass
+    how, fix = dictate_how(both=True) if not (lib and model) else (None, None)
     return {"ready": lib and model, "lib": lib, "model": model, "engine": DICTATE_MODEL["name"],
-            "size": DICTATE_MODEL["size"], "setup": None if model else setup}
+            "size": DICTATE_MODEL["size"], "setup": None if lib and model else setup, "how": how, "fix": fix,
+            "buildable": not lib and not dictate_package() and not dictate_tools(), "arch": dictate_arch()}
 
 
 def pid_alive(pid):
@@ -11660,17 +11773,34 @@ def pid_alive(pid):
         return False
 
 
-def dictate_how():
-    """What to do so the host can write dictations down, in a line."""
-    if not dictate_lib():
-        return ("install whisper.cpp 1.9 or newer, with its libparakeet (Arch: sudo pacman -S whisper-cpp), "
-                "then amarchy dictation setup")
-    return f"amarchy dictation setup (fetches {DICTATE_MODEL['name']}, {dictate_mb()} MB)"
+def dictate_how(both=False):
+    """What to do so this machine can write dictations down, in a line, as
+    it is here: the package where there's one, else setup builds whisper.cpp
+    (and what that needs first). both: (the line, the command to run)."""
+    model = f"{DICTATE_MODEL['name']}, {dictate_mb()} MB"
+    if dictate_lib():
+        line, fix = f"amarchy dictation setup (fetches {model})", "amarchy dictation setup"
+    elif dictate_package():
+        pkg = dictate_package()
+        line, fix = f"install whisper.cpp ({pkg}), then amarchy dictation setup", f"{pkg} && amarchy dictation setup"
+    else:
+        none = f"no package has it for {dictate_arch()}"
+        need, tools = dictate_tools(), dictate_tools_line()
+        if not need:
+            line = f"run amarchy dictation setup, which builds whisper.cpp here ({none}; a few minutes), then fetches {model}"
+            fix = "amarchy dictation setup"
+        else:
+            line = (f"install what building whisper.cpp needs ({tools or and_words(need)}), then run amarchy dictation "
+                    f"setup, which builds it here ({none})")
+            fix = f"{tools} && amarchy dictation setup" if tools else "amarchy dictation setup"
+    return (line, fix) if both else line
 
 
-def dictate_setup(quiet=False):
-    """Fetch the model (again from where it stopped, if it did), check it,
-    and put it in place. How far it got goes to DICTATE_SETUP for the app."""
+def dictate_setup(quiet=False, build=False):
+    """Build whisper.cpp first if asked (build: no package has it here),
+    then fetch the model (again from where it stopped, if it did), check it,
+    and put it in place. How far it got goes to DICTATE_SETUP for the app.
+    None once it's done, else why not."""
     import urllib.request
     DICTATE.mkdir(parents=True, exist_ok=True)
     final, part = dictate_model_path(), DICTATE / (DICTATE_MODEL["file"] + ".part")
@@ -11679,16 +11809,25 @@ def dictate_setup(quiet=False):
     def note(**kw):
         write_file(DICTATE_SETUP, json.dumps({"pid": os.getpid(), "size": size, **kw}) + "\n")
 
-    if final.is_file():
+    if final.is_file() and not build:
         DICTATE_SETUP.unlink(missing_ok=True)
         return None
-    # One download at a time (the app's button and a terminal, say).
+    # One setup at a time (the app's button and a terminal, say).
     lock = open(DICTATE / "setup.lock", "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        return "a download is already under way (amarchy dictation shows how far)"
+        return "a setup is already under way (amarchy dictation shows how far)"
     try:
+        if build:
+            why = dictate_build(note, quiet)
+            if why:
+                note(build="whisper.cpp", error=why)
+                return why
+        if final.is_file():
+            DICTATE_SETUP.unlink(missing_ok=True)
+            (DICTATE / "setup.lock").unlink(missing_ok=True)
+            return None
         have = part.stat().st_size if part.exists() else 0
         if have > size:
             part.unlink()
@@ -11736,6 +11875,104 @@ def dictate_setup(quiet=False):
         return why
     finally:
         lock.close()
+
+
+def dictate_build(note, quiet=False):
+    """Build whisper.cpp (DICTATE_SOURCE) here, with its libparakeet, into
+    DICTATE_BUILT: its source at the release's commit, ggml for this very
+    processor (or, should that fail, for any of its kind), the libraries
+    finding each other where they are ($ORIGIN), at a low priority (the
+    chats go on). None once it's in place, else why not; what it said goes
+    to DICTATE_BUILD_LOG."""
+    need = dictate_tools()
+    if need:
+        return f"building whisper.cpp needs {and_words(need)}: {dictate_tools_line() or 'install them'}"
+    src_info = DICTATE_SOURCE
+    work = DICTATE / "build"
+    src, out, new = work / "src", work / "out", DICTATE / "whisper.cpp.new"
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.rmtree(new, ignore_errors=True)
+    (work / "tmp").mkdir(parents=True)
+    env = {**clean_env(), "TMPDIR": str(work / "tmp"), "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
+    shown = [None]
+
+    def say(step, pct=None):
+        note(build=step, **({"pct": pct} if pct is not None else {}))
+        words = f"  {step}" + (f": {pct}%" if pct is not None else "…")
+        if not quiet and sys.stderr.isatty() and words != shown[0]:
+            shown[0] = words
+            print(f"\r\033[K{words}", end="", file=sys.stderr, flush=True)
+
+    with open(DICTATE_BUILD_LOG, "w") as log:
+        def run(cmd, step=None):
+            """cmd, what it says to the log (how far a build is, to the app): its exit code."""
+            log.write(f"$ {' '.join(map(str, cmd))}\n")
+            log.flush()
+            try:
+                proc = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        stdin=subprocess.DEVNULL, text=True, errors="replace", env=env, cwd=work)
+            except OSError as e:
+                log.write(f"{e}\n")
+                return 127
+            for line in proc.stdout:
+                log.write(line)
+                m = re.match(r"\[\s*(\d+)%\]", line)
+                if m and step:
+                    say(step, int(m.group(1)))
+            return proc.wait()
+
+        try:
+            say(f"fetching whisper.cpp {src_info['version']}")
+            if run(["git", "-c", "advice.detachedHead=false", "clone", "--quiet", "--depth", "1",
+                    "--branch", src_info["tag"], src_info["url"], src]) != 0:
+                return f"whisper.cpp's source didn't come from {src_info['url']} (no internet?)"
+            head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, env=env)
+            if head.stdout.strip() != src_info["commit"]:
+                return f"what came isn't whisper.cpp {src_info['version']} (not the commit it is)"
+            jobs = str(max(1, min(os.cpu_count() or 2, 8)))
+            low = ["nice", "-n", "10"] if shutil.which("nice") else []
+            for native in ("ON", "OFF"):
+                shutil.rmtree(out, ignore_errors=True)
+                shutil.rmtree(new, ignore_errors=True)
+                say(f"building whisper.cpp {src_info['version']}", 0)
+                if run(["cmake", "-S", src, "-B", out, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=ON",
+                        "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_EXAMPLES=OFF", "-DWHISPER_BUILD_SERVER=OFF",
+                        "-DWHISPER_ALL_WARNINGS=OFF", "-DWHISPER_CURL=OFF", "-DWHISPER_SDL2=OFF", f"-DGGML_NATIVE={native}",
+                        f"-DCMAKE_INSTALL_PREFIX={new}", "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_RPATH=$ORIGIN"]) == 0 \
+                        and run([*low, "cmake", "--build", out, "-j", jobs], f"building whisper.cpp {src_info['version']}") == 0 \
+                        and run(["cmake", "--install", out]) == 0 and (new / "lib" / DICTATE_LIB).exists():
+                    break
+                log.write(f"\n(it didn't build with GGML_NATIVE={native})\n\n")
+            else:
+                return f"whisper.cpp didn't build here (what it said: {DICTATE_BUILD_LOG})"
+            # It loads: the libraries find each other, and this processor runs them.
+            r = subprocess.run([sys.executable, "-c", "import ctypes, sys; ctypes.CDLL(sys.argv[1])", str(new / "lib" / DICTATE_LIB)],
+                               capture_output=True, text=True, env=env)
+            if r.returncode != 0:
+                log.write(r.stderr)
+                return f"whisper.cpp built, but doesn't load here (what it said: {DICTATE_BUILD_LOG})"
+            write_file(new / "amarchy.json", json.dumps({**src_info, "built": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                                                         "arch": dictate_arch()}) + "\n")
+            for d in ("include", "bin"):        # only the libraries are used
+                shutil.rmtree(new / d, ignore_errors=True)
+            shutil.rmtree(DICTATE_BUILT, ignore_errors=True)
+            new.rename(DICTATE_BUILT)
+            _dictate_lib["at"] = 0      # found at once
+            return None
+        finally:
+            if not quiet and sys.stderr.isatty() and shown[0]:
+                print(file=sys.stderr)
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(new, ignore_errors=True)
+
+
+def dictate_built_info():
+    """What setup built here ({version, commit, built, arch}), or None."""
+    try:
+        d = json.loads((DICTATE_BUILT / "amarchy.json").read_text())
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
 
 
 def dictate_worker():
@@ -12059,6 +12296,129 @@ def dictate_log(entry):
         pass
 
 
+# Which kind of machine is asked first to write another's dictations down:
+# one that's always on.
+DICTATE_HELPER_FIRST = ("server", "cloud", "desktop", "laptop")
+
+
+def dictate_helper(st=None, name=None):
+    """Another machine of yours that writes this one's dictations down when
+    this one can't (no model here): a paired one that's on, has its own
+    model, and speaks this protocol; a server first (it's always on), then
+    as paired. name: that machine or none. Its machines.json row with its
+    label and engine, or None. The app's server knows how each stands
+    (st.peers); without it (the CLI), each is asked."""
+    ms = [m for m in machines_read() if name in (None, m["name"])]
+    if not ms:
+        return None
+    hellos = {}
+    if st is not None:          # (never a request of its own: the app's server follows each machine)
+        for n, p_ in (st.peers.snapshot() if getattr(st, "peers", None) else {}).items():
+            if p_.get("on") and not p_.get("update"):
+                hellos[n] = p_.get("hello") or {}
+    else:
+        def ask(m):
+            try:
+                code, h = peer_json(m, "GET", "/api/peer/hello", timeout=4)
+            except PeerError:
+                return
+            if code == 200 and isinstance(h, dict) and h.get("protocol") == PROTOCOL:
+                hellos[m["name"]] = h
+        ts = [threading.Thread(target=ask, args=(m,), daemon=True) for m in ms]
+        for t_ in ts:
+            t_.start()
+        for t_ in ts:
+            t_.join(6)
+    ready = [(m, h) for m in ms if isinstance((h := hellos.get(m["name"]) or {}).get("dictation"), dict)
+             and h["dictation"].get("ready")]
+    if not ready:
+        return None
+    ready.sort(key=lambda mh: DICTATE_HELPER_FIRST.index(mh[1].get("kind")) if mh[1].get("kind") in DICTATE_HELPER_FIRST
+               else len(DICTATE_HELPER_FIRST))
+    m, h = ready[0]
+    return {**m, "label": str(h.get("label") or m["label"])[:LABEL_MAX],
+            "engine": str(h["dictation"].get("engine") or DICTATE_MODEL["name"])[:80]}
+
+
+def dictate_via(helper):
+    """What the app is told of the machine that writes dictations down for this one."""
+    return {"name": helper["name"], "label": helper["label"], "engine": helper["engine"]} if helper else None
+
+
+def dictate_view(st, status):
+    """Dictation as the app's board has it: this machine's (dictate_status),
+    and, when it can't, the machine that writes them down for it (via)."""
+    helper = None if status.get("ready") else dictate_helper(st)
+    return {**status, "via": dictate_via(helper)}
+
+
+def ws_frame(data, op=2):
+    """A WebSocket frame from a client (masked, as a client's must be)."""
+    mask, n = os.urandom(4), len(data)
+    size = (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + n.to_bytes(2, "big") if n < 1 << 16
+            else bytes([0x80 | 127]) + n.to_bytes(8, "big"))
+    key = (mask * (n // 4 + 1))[:n]
+    return bytes([0x80 | op]) + size + mask + (int.from_bytes(data, "big") ^ int.from_bytes(key, "big")).to_bytes(n, "big")
+
+
+def dictate_remote(m, pcm, heard=None, timeout=300):
+    """A recording (16 kHz 16-bit mono) written down on machine m, through
+    its /api/dictate as the app's mic sends it: the text. Raises OSError
+    with why not."""
+    key = base64.b64encode(os.urandom(16)).decode()
+    try:
+        sock, code, head, early = peer_ws_open(m, "/api/dictate", key)
+    except PeerError as e:
+        raise OSError(str(e)) from None
+    except OSError as e:
+        raise OSError(f"{m['label']} is off: {peer_why(e)}") from None
+    if code != 101:
+        said = peer_ws_refusal(sock, head, early)
+        raise OSError(said.get("error") or f"{m['label']} said no ({code})")
+    buf, end = early, time.time() + timeout
+    try:
+        sock.settimeout(30)
+        for i in range(0, len(pcm), 6400):      # 0.2 s at a time
+            sock.sendall(ws_frame(pcm[i:i + 6400]))
+        sock.sendall(ws_frame(b"end", op=1))
+        while time.time() < end:
+            while len(buf) >= 2:
+                n, at = buf[1] & 0x7F, 2
+                if n == 126:
+                    n, at = (int.from_bytes(buf[2:4], "big"), 4) if len(buf) >= 4 else (None, 0)
+                elif n == 127:
+                    n, at = (int.from_bytes(buf[2:10], "big"), 10) if len(buf) >= 10 else (None, 0)
+                if n is None or len(buf) < at + n:
+                    break
+                op, data, buf = buf[0] & 0x0F, buf[at:at + n], buf[at + n:]
+                if op == 8:
+                    raise OSError(f"{m['label']} hung up before it said what it heard")
+                if op != 1:
+                    continue
+                try:
+                    d = json.loads(data)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                if d.get("error"):
+                    raise OSError(str(d["error"]))
+                if isinstance(d.get("text"), str):
+                    return d["text"]
+                if heard and isinstance(d.get("interim"), str):
+                    heard(d["interim"])
+            sock.settimeout(max(1.0, end - time.time()))     # (writing it all down may take a while there)
+            chunk = sock.recv(65536)
+            if not chunk:
+                raise OSError(f"{m['label']} hung up before it said what it heard")
+            buf += chunk
+        raise OSError(f"{m['label']} took too long")
+    except socket.timeout:
+        raise OSError(f"{m['label']} took too long") from None
+    finally:
+        sock.close()
+
+
 def device_name(ua, standalone=False):
     """The device and browser a User-Agent is, in a few words."""
     ua = ua or ""
@@ -12071,27 +12431,50 @@ def device_name(ua, standalone=False):
 
 
 def cmd_dictation(args):
-    """amarchy dictation [--status] | setup | remove | log [--json] | transcribe <file> | worker"""
+    """amarchy dictation [--status] | setup [--build] | remove | log [--json] | transcribe [--on <m>] <file> | worker"""
     what = args[0] if args and not args[0].startswith("--") else ""
     if what == "worker":
         return dictate_worker()
     if what == "setup":
-        if not dictate_lib():
-            return fail(f"whisper.cpp isn't installed: {dictate_how()}")
-        if dictate_model_path().is_file():
+        build = "--build" in args[1:]
+        lib = dictate_lib()
+        if lib and build and not dictate_built():
+            print(f"whisper.cpp is installed already ({lib}): nothing to build.", file=sys.stderr)
+            build = False
+        elif not lib:
+            pkg = dictate_package()
+            if pkg and not build:
+                return fail(f"whisper.cpp isn't installed: {pkg}, then amarchy dictation setup "
+                            f"(or amarchy dictation setup --build builds it here, a few minutes)")
+            need = dictate_tools()
+            if need:
+                return fail(f"{'' if build else f'no package has whisper.cpp for {dictate_arch()} here, so setup builds it, and '}"
+                            f"building it needs {and_words(need)}: "
+                            f"{dictate_tools_line() or 'install them'}, then amarchy dictation setup")
+            build = True
+        if build:
+            why = "no package has it for " + dictate_arch() if not lib else "rebuilt"
+            print(f"Building whisper.cpp {DICTATE_SOURCE['version']} here ({why}), into {DICTATE_BUILT}: "
+                  f"a few minutes…", file=sys.stderr)
+        elif dictate_model_path().is_file():
             print(f"Dictation is set up: {DICTATE_MODEL['name']}, in {dictate_model_path()}.")
             return 0
-        print(f"Fetching {DICTATE_MODEL['name']} ({dictate_mb()} MB) into {DICTATE}…",
-              file=sys.stderr)
-        why = dictate_setup()
+        if not dictate_model_path().is_file():
+            print(f"{'Then f' if build else 'F'}etching {DICTATE_MODEL['name']} ({dictate_mb()} MB) into {DICTATE}…",
+                  file=sys.stderr)
+        why = dictate_setup(build=build)
         if why:
             return fail(f"dictation isn't set up: {why}")
         print("Dictation is set up: hold the mic in the app and speak (English, Spanish and 23 more).")
         return 0
     if what == "remove":
-        for f in (dictate_model_path(), DICTATE / (DICTATE_MODEL["file"] + ".part"), DICTATE_SETUP):
+        for f in (dictate_model_path(), DICTATE / (DICTATE_MODEL["file"] + ".part"), DICTATE_SETUP, DICTATE_BUILD_LOG):
             f.unlink(missing_ok=True)
-        print("Removed the dictation model (amarchy dictation setup fetches it again).")
+        built = DICTATE_BUILT.exists()
+        shutil.rmtree(DICTATE_BUILT, ignore_errors=True)
+        _dictate_lib["at"] = 0
+        print(f"Removed the dictation model{' and the whisper.cpp built here' if built else ''} "
+              f"(amarchy dictation setup {'builds and ' if built else ''}fetches it again).")
         return 0
     if what == "log":
         try:
@@ -12112,23 +12495,52 @@ def cmd_dictation(args):
         for e in entries:
             took = f"{e['wait_ms'] / 1000:.1f}s after letting go" if isinstance(e.get("wait_ms"), (int, float)) else ""
             said = f"{e['said_s']:.0f}s said" if isinstance(e.get("said_s"), (int, float)) else ""
-            head = " · ".join(x for x in (e.get("at", "")[:16].replace("T", " "), e.get("engine", ""), e.get("device", ""),
-                                          e.get("lang", ""), said, took) if x)
+            whose = f"for {e['for']}" if e.get("for") else f"sent to {e['sent_to']}" if e.get("sent_to") else ""
+            head = " · ".join(x for x in (e.get("at", "")[:16].replace("T", " "), e.get("engine", ""), whose,
+                                          e.get("device", ""), e.get("lang", ""), said, took) if x)
             print(f"{head}\n  {e['error'] if e.get('error') else e.get('text', '')}")
+        helper = None if dictate_status()["ready"] else dictate_helper()
+        if helper:
+            print(f"(What {helper['label']} writes down for this machine is in its own log: amarchy dictation log, there.)")
         return 0
     if what == "transcribe":
-        if len(args) != 2:
+        rest, on = list(args[1:]), None
+        if "--on" in rest:
+            i = rest.index("--on")
+            on = rest[i + 1] if i + 1 < len(rest) else ""
+            del rest[i:i + 2]
+        if len(rest) != 1 or on == "":
             print(usage("dictation"), file=sys.stderr)
             return 1
-        if not dictate_status()["ready"]:
-            return fail(f"dictation isn't set up: {dictate_how()}")
-        r = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", args[1], "-f", "s16le", "-ac", "1",
+        helper = None
+        if on and on != machine_name():
+            helper = dictate_helper(name=on)
+            if not helper:
+                known = machine_find(on)
+                return fail(f"{known['label'] if known else on} can't write it down: "
+                            f"{'it is off, or has no speech model' if known else 'no such machine is paired'}")
+        elif not on and not dictate_status()["ready"]:
+            helper = dictate_helper()
+            if not helper:
+                return fail(f"dictation isn't set up: {dictate_how()}")
+        elif not dictate_status()["ready"]:
+            return fail(f"dictation isn't set up here: {dictate_how()}")
+        r = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", rest[0], "-f", "s16le", "-ac", "1",
                             "-ar", str(DICTATE_RATE), "-"], capture_output=True)
         if r.returncode != 0:
             return fail(r.stderr.decode(errors="replace").strip() or "ffmpeg couldn't read it")
+        started = time.time()
+        if helper:
+            try:
+                text = dictate_remote(helper, r.stdout)
+            except OSError as e:
+                return fail(f"{helper['label']} didn't write it down: {e}")
+            print(text)
+            print(f"({len(r.stdout) / 2 / DICTATE_RATE:.1f} s of audio, written down on {helper['label']} "
+                  f"in {time.time() - started:.1f} s)", file=sys.stderr)
+            return 0
         tr = Transcriber()
         d = Dictation(tr, None)        # no words as they come: only what's kept
-        started = time.time()
         for i in range(0, len(r.stdout), DICTATE_FRAME):
             d.add(r.stdout[i:i + DICTATE_FRAME])
         try:
@@ -12144,15 +12556,31 @@ def cmd_dictation(args):
     if what:
         print(usage("dictation"), file=sys.stderr)
         return 1
-    s = dictate_status()
-    if s["ready"]:
-        print(f"Dictation is set up: {s['engine']}, on this machine (the app's mic button).")
-    elif s["setup"] and not s["setup"].get("error"):
-        print(f"Fetching {s['engine']}: {s['setup'].get('done', 0) // 1_000_000} of {s['size'] // 1_000_000} MB.")
-    else:
-        why = f" ({s['setup']['error']})" if s["setup"] else ""
-        print(f"Dictation isn't set up{why}: {dictate_how()}")
-        print("Until it is, the app's mic uses the browser's own speech recognition where it has it.")
+    st_ = dictate_status()
+    built = dictate_built_info() if st_["lib"] and dictate_built() else None
+    if st_["ready"]:
+        through = f", through the whisper.cpp {built.get('version', '')} built here" if built else ""
+        print(f"Dictation is set up: {st_['engine']}, on this machine (the app's mic button){through}.")
+        return 0
+    setup = st_["setup"]
+    if setup and not setup.get("error"):
+        if setup.get("build"):
+            pct = f": {setup['pct']}%" if isinstance(setup.get("pct"), int) else ""
+            print(f"Setting dictation up: {setup['build']}{pct} (then {st_['engine']}, {dictate_mb()} MB).")
+        else:
+            print(f"Fetching {st_['engine']}: {setup.get('done', 0) // 1_000_000} of {st_['size'] // 1_000_000} MB.")
+        return 0
+    helper = dictate_helper()
+    why = f" ({setup['error']})" if setup else ""
+    if helper:
+        print(f"Dictation works through {helper['label']}: this machine has no speech model{why}, so the app's mic "
+              f"sends what you say to {helper['label']}, which writes it down ({helper['engine']}).")
+        print(f"To write it down on this machine itself: {st_['how']}.")
+        return 0
+    print(f"Dictation isn't set up{why}: {st_['how']}.")
+    print("Until it is, the app's mic works only in a browser with speech recognition of its own (Chrome, Safari), "
+          "not in the desktop app; or pair a machine of yours that has the model (amarchy machines add), "
+          "and it writes it down for this one.")
     return 0
 
 
@@ -14431,7 +14859,10 @@ def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
             "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True,
-            "moves": True, "kind": machine_kind(), "icon": machine_icon()}
+            "moves": True, "kind": machine_kind(), "icon": machine_icon(),
+            # Its own model, never another's (see "dictation on the host"): a machine
+            # without one sends dictations here.
+            "dictation": {"ready": bool(dictate_lib()) and dictate_model_path().is_file(), "engine": DICTATE_MODEL["name"]}}
 
 
 def machine_url_ok(url):
@@ -14556,6 +14987,58 @@ def peer_connect(url, timeout=PEER_TIMEOUT):
             sock.close()
             raise
     return sock
+
+
+def peer_ws_open(m, rest, key, ua=None):
+    """A WebSocket to machine m's rest, opened as this machine (key: the
+    Sec-WebSocket-Key): the socket, the answer's status, its head, and what
+    came after the head. Raises PeerError (or OSError) when it doesn't
+    answer as amarchy does."""
+    u = urllib.parse.urlsplit(m["url"])
+    sock = peer_connect(m["url"])
+    try:
+        hs = {"Host": u.hostname + (f":{u.port}" if u.port else ""), "Upgrade": "websocket", "Connection": "Upgrade",
+              "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13",
+              **peer_headers(m, {"User-Agent": ua or f"amarchy/{PROTOCOL}"})}
+        sock.sendall((f"GET {rest} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in hs.items()) + "\r\n").encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = sock.recv(16384)
+            if not chunk:
+                raise PeerError("it hung up")
+            head += chunk
+            if len(head) > 65536:
+                raise PeerError("it didn't answer as amarchy does")
+    except (OSError, PeerError):
+        sock.close()
+        raise
+    head, _, early = head.partition(b"\r\n\r\n")
+    try:
+        code = int(head.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        code = 502
+    return sock, code, head, early
+
+
+def peer_ws_refusal(sock, head, early):
+    """What a machine said when it wouldn't open a WebSocket (its JSON, {}
+    if none), the socket closed after it."""
+    length = re.search(rb"(?im)^content-length:\s*(\d+)", head)
+    body = early
+    try:
+        while length and len(body) < int(length.group(1)):
+            more = sock.recv(65536)
+            if not more:
+                break
+            body += more
+    except OSError:
+        pass
+    sock.close()
+    try:
+        said = json.loads(body or b"{}")
+    except ValueError:
+        said = {}
+    return said if isinstance(said, dict) else {}
 
 
 def peer_headers(m, extra=None):
@@ -15163,6 +15646,7 @@ def board_view(st):
                 "pictures": i.get("pictures") or 0, "at": i["at"]} for i in outbox_list()]
     board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True, "machines_as": machines_as(),
              "outbox": waiting,
+             "dictation": dictate_view(st, view.get("dictation") or dictate_status()),
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
@@ -18152,49 +18636,15 @@ def app_handler(st, users, address):
             there as this machine, then its frames both ways as they come."""
             if not self.ws_check():
                 return
-            u = urllib.parse.urlsplit(peer["url"])
-            sock = None
             try:
-                sock = peer_connect(peer["url"])
-                hs = {"Host": u.hostname + (f":{u.port}" if u.port else ""), "Upgrade": "websocket", "Connection": "Upgrade",
-                      "Sec-WebSocket-Key": self.headers["Sec-WebSocket-Key"], "Sec-WebSocket-Version": "13",
-                      **peer_headers(peer, {"User-Agent": self.headers.get("User-Agent") or f"amarchy/{PROTOCOL}"})}
-                sock.sendall((f"GET {rest} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in hs.items()) + "\r\n").encode())
-                head = b""
-                while b"\r\n\r\n" not in head:
-                    chunk = sock.recv(16384)
-                    if not chunk:
-                        raise PeerError("it hung up")
-                    head += chunk
-                    if len(head) > 65536:
-                        raise PeerError("it didn't answer as amarchy does")
+                sock, code, head, early = peer_ws_open(peer, rest, self.headers["Sec-WebSocket-Key"],
+                                                       self.headers.get("User-Agent"))
             except (OSError, PeerError) as e:
-                if sock:
-                    sock.close()
                 return self.off_answer(peer["name"], label, peer_why(e) if isinstance(e, OSError) else str(e))
-            head, _, early = head.partition(b"\r\n\r\n")
-            try:
-                code = int(head.split(b" ", 2)[1])
-            except (IndexError, ValueError):
-                code = 502
             if code != 101:
                 # Its refusal as it said it (a chat gone: 404; not set up: 409).
-                length = re.search(rb"(?im)^content-length:\s*(\d+)", head)
-                body = early
-                try:
-                    while length and len(body) < int(length.group(1)):
-                        more = sock.recv(65536)
-                        if not more:
-                            break
-                        body += more
-                except OSError:
-                    pass
-                sock.close()
-                try:
-                    said = json.loads(body or b"{}")
-                except ValueError:
-                    said = {}
-                return self.send(code, said if isinstance(said, dict) and said else {"error": f"{label} said no ({code})"})
+                said = peer_ws_refusal(sock, head, early)
+                return self.send(code, said or {"error": f"{label} said no ({code})"})
             self.ws_handshake()
             # A terminal there pings every TTY_PING s: silent much longer, it's gone.
             sock.settimeout(TTY_PING * 3 if "/tty/" in rest else 900)
@@ -18486,12 +18936,17 @@ def app_handler(st, users, address):
             on and "end" when it's let go. Back come {"state": "listening"},
             {"interim"} (all of it written down so far) as you talk,
             {"state": "transcribing"} and then {"text"}, or {"error"}. Without
-            the WebSocket: whether it's set up (dictate_status)."""
+            the WebSocket: whether it's set up (dictate_view). Without a
+            model here, it's another machine's that has one, passed on
+            (dictate_helper); asked by another machine, never further."""
             status = dictate_status()
+            helper = None if status["ready"] or self.via == "peer" else dictate_helper(st)
             if self.headers.get("Upgrade", "").lower() != "websocket":
-                return self.send(200, {**status, "how": None if status["ready"] else dictate_how()})
+                return self.send(200, {**status, "via": dictate_via(helper)})
             if not status["ready"]:
-                return self.error(409, f"Dictation isn't set up on the host: {dictate_how()}")
+                if helper:
+                    return self.tunnel(helper, self.path, helper["label"])
+                return self.error(409, f"Dictation isn't set up on {machine_label()}: {status['how']}")
             if not self.ws_check():
                 return
             device = device_name(self.headers.get("User-Agent"), args.get("standalone", [""])[0] == "1")
@@ -18544,7 +18999,8 @@ def app_handler(st, users, address):
                 pass
             finally:
                 d.drop()
-                dictate_log({"engine": "host", "device": device, "said_s": round(said / 32000, 1),
+                dictate_log({"engine": "host", **({"for": self.peer} if self.via == "peer" else {}), "device": device,
+                             "said_s": round(said / 32000, 1),
                              "wait_ms": int((time.time() - let_go) * 1000) if let_go else None,
                              "pieces": d.pieces, "text": text, **({"error": outcome} if outcome else {})})
 
@@ -18583,11 +19039,13 @@ def app_handler(st, users, address):
 
         def dictate_fetch(self):
             """Settings' "Set up dictation": the model's download, in the
-            background (amarchy dictation setup); the list says how far."""
+            background (amarchy dictation setup), whisper.cpp built first
+            where no package has it; the list says how far."""
             status = dictate_status()
-            if not status["lib"]:
-                return self.error(409, f"whisper.cpp isn't installed on the host: {dictate_how()}")
-            if not status["model"] and not (status["setup"] and not status["setup"].get("error")):
+            if not status["lib"] and not status["buildable"]:
+                return self.error(409, f"whisper.cpp isn't installed on {machine_label()}: {status['how']}")
+            under_way = status["setup"] and not status["setup"].get("error")
+            if not status["ready"] and not under_way:
                 try:
                     detach([sys.executable, SELF, "dictation", "setup"])
                 except OSError as e:
@@ -24425,7 +24883,7 @@ OPTIONS = {
     "update": ({"--auto"}, set(), set()),
     "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),
-    "dictation": ({"--status", "--json"}, set(), set()),
+    "dictation": ({"--status", "--json", "--build", "--on"}, {"--on"}, set()),
     "automations": ({"--json"}, set(), set()),
     "today": ({"--json", "--loops"}, set(), set()),
     "task": ({"--agent", "--title", "--note", "--link", "--button", "--until", "--key", "--notify", "--json"},

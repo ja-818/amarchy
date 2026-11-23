@@ -20,6 +20,7 @@ entry = str(Path(__file__).resolve().parent.parent / "bin/amarchy")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", entry)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 
 failed = []
 def check(ok, what):

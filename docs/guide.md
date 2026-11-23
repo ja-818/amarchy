@@ -752,8 +752,8 @@ window closed.
   in, its window says so, with **Sign in to Tailscale** (Tailscale's own page,
   in your browser), and goes on by itself once you have.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
-  in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
-  A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+  in the window already open (there's only ever one). The bar's Ⓐ, Super + D
+  and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
 - **Notifications**: the same ones your phone gets (what **Tell me** in
   Settings says), as your desktop's own, window open or closed. A chat that asks
   for a permission has **Allow** and **Deny** on its notification, a question its
@@ -772,7 +772,12 @@ window closed.
   too). `amarchy app off` turns it off, and it stays off.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
-  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). On a
+  computer with no GPU to draw with (a new GPU whose Linux driver isn't
+  there yet, a virtual machine), it paints its page on the CPU, the way a CPU
+  does it best, so a chat at work doesn't take a core and the keys you hold
+  don't stick (`amarchy-desktop --graphics` says which; `AMARCHY_DESKTOP_GPU=1`
+  draws through GL anyway).
 - **Sounds**: its window plays them through GStreamer. On a computer without
   GStreamer's plugins (`gst-plugins-good`, `gst-plugins-base`,
   `gst-plugin-pipewire`), where a sound would crash its page, the app plays
@@ -1126,17 +1131,34 @@ on each phone or browser picks another:
   whisper.cpp's `libparakeet`, writes it down. It knows 25 European languages, Spanish
   and English among them, and tells them apart by itself: dictate in either, or start
   in one and go on in the other after a pause. It costs nothing, and the audio never
-  leaves the host. It needs whisper.cpp 1.9 or newer installed there (Arch:
-  `sudo pacman -S whisper-cpp`) and the model (670 MB, fetched into
-  `~/.local/state/amarchy/dictation`). The model is loaded (about 1 GB of memory) when
-  a dictation starts, while you speak, and let go of ten minutes after the last one.
-  While you talk, each piece between your pauses is written down for you to see; what's
-  kept is written again from longer stretches with their context, and once you let go
-  the text is there in about half a second.
+  leaves your machines. It needs whisper.cpp 1.9 or newer there and the model (670 MB,
+  fetched into `~/.local/state/amarchy/dictation`). On Arch on x86_64, install
+  whisper.cpp first (`sudo pacman -S whisper-cpp`). Where no package has it (Arch Linux
+  ARM, an Apple Silicon Mac on Omarchy, Debian, Fedora), `amarchy dictation setup`
+  builds it there itself, from whisper.cpp's source at a known commit, into that same
+  folder (a minute or a few; it needs git, cmake and a C++ compiler, which it names
+  with the command that installs them if they're missing). The model is loaded (about
+  1 GB of memory) when a dictation starts, while you speak, and let go of ten minutes
+  after the last one. While you talk, each piece between your pauses is written down
+  for you to see; what's kept is written again from longer stretches with their
+  context, and once you let go the text is there in about half a second.
+- **On another machine of yours**: a host without the model (not set up yet, or a
+  laptop you'd rather not give 1 GB to) sends what you say to a paired machine that has
+  it ([Machines](#machines)), a server first, over your own tailnet; the words come back
+  as they would from the host itself. Nothing to set up: pair them, and the mic works.
+  Settings → Dictation says which machine writes it down, and that machine's
+  `amarchy dictation log` says for which one.
 - **This browser's**: the browser's own speech recognition (Web Speech: Apple's in
   Safari, Google's in Chrome), in one language you pick in Settings, and sending what
-  you say to Apple or Google. It's the fallback where there's no model on the host.
-  Not in the home-screen app on an iPhone, where WebKit's often hears nothing.
+  you say to Apple or Google. It's the fallback where no machine of yours has the
+  model. Not in the home-screen app on an iPhone, where WebKit's often hears nothing,
+  nor in the desktop app on Linux (its WebKitGTK has none).
+
+The mic is always there. Where it can't work (no model on any of your machines, or
+the desktop app on a computer without GStreamer's microphone, `gst-plugin-pipewire`),
+it's dimmed, and a tap says why in a line, with what to do: **Set it up** (Settings →
+Dictation, which builds or fetches it with one button, or gives the command to copy),
+or **Copy the command** that installs what's missing.
 
 The keyboard's own dictation (its mic key) works in every box too. On a computer,
 `Ctrl+Alt+Space` (or `Ctrl+Alt+Enter`) dictates into the chat's box: hold it, or tap it
@@ -1154,11 +1176,11 @@ speakers), writing about 10 seconds of speech per second. Whisper small did 3.4%
 time on that CPU (a 10-second dictation would take 15 to write down).
 
 ```sh
-amarchy dictation [--status]          # whether it's set up, and how to set it up if not
-amarchy dictation setup               # fetch the model (670 MB)
-amarchy dictation log [--json]        # the last dictations, from any phone or browser: which way, how long, what came of it
-amarchy dictation transcribe <file>   # write down a recording, as a dictation would be
-amarchy dictation remove              # delete the model
+amarchy dictation [--status]          # whether it's set up, where it's written down, and how to set it up if not
+amarchy dictation setup [--build]     # fetch the model (670 MB); build whisper.cpp first where no package has it
+amarchy dictation log [--json]        # the last dictations, from any phone or browser: which way, for which machine, what came of it
+amarchy dictation transcribe [--on <machine>] <file>   # write down a recording, as a dictation would be (here, or where it goes)
+amarchy dictation remove              # delete the model, and the whisper.cpp built here
 ```
 
 ## Secrets
@@ -1799,11 +1821,11 @@ amarchy agents <id> off               not an agent any more
 amarchy alerts [all|needs-you|assistant]   what the other sessions tell you about (prints it without one)
 
 Dictation:
-amarchy dictation [--status]          whether it's set up, and how to set it up if not
-amarchy dictation setup               fetch the speech model (Parakeet TDT 0.6B v3, 670 MB)
-amarchy dictation remove              delete the model again
+amarchy dictation [--status]          whether it's set up, where it's written down, and how to set it up if not
+amarchy dictation setup [--build]     fetch the speech model (Parakeet TDT 0.6B v3, 670 MB); builds whisper.cpp first where no package has it
+amarchy dictation remove              delete the model again, and the whisper.cpp built here
 amarchy dictation log [--json]        the last dictations and how each went
-amarchy dictation transcribe <file>   write down a recording, as a dictation would be
+amarchy dictation transcribe [--on <machine>] <file>   write down a recording, as a dictation would be
 
 Today:
 amarchy today [--json]                what needs you, what's due, who you wait on, each chat's goal and state
