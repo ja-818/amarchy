@@ -54,10 +54,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
     /// `p` opened with this phone's keys, or nil (no keys, not ours, tampered).
     static func open(_ userInfo: [AnyHashable: Any]) -> Notice? {
-        guard let p = userInfo["p"] as? String, let record = Data(base64URL: p),
-              let keys = KeyStore.load(),
-              let plain = try? PushCrypto.decrypt(record, keys: keys) else { return nil }
-        return Notice(json: plain)
+        Notice(delivered: userInfo, keys: KeyStore.load())
     }
 
     static func content(for notice: Notice) -> UNMutableNotificationContent {

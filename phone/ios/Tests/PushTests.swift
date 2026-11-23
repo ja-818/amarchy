@@ -87,6 +87,47 @@ final class PushCryptoTests: XCTestCase {
         let again = try KeyStore.loadOrMake()
         XCTAssertEqual(again.p256dh, made.p256dh, "made once, then kept")
         XCTAssertEqual(KeyStore.load()?.auth, made.auth)
+        // In the group the notification extension reads, when the build is signed with it.
+        if let group = Amarchy.keychainGroup {
+            XCTAssertEqual(KeyStore.keptGroup, group)
+        }
+    }
+
+    /// What the notification extension does with what the relay delivers:
+    /// `p` opened with the keys the Keychain keeps.
+    func testWhatTheRelayDeliversOpensWithTheKeptKeys() throws {
+        let all = try vectors()
+        let v = all[1], tampered = try XCTUnwrap(all.first { $0.plaintext == nil })
+        let keys = try PushKeys(raw: XCTUnwrap(Data(base64URL: v.ua_private)), auth: XCTUnwrap(Data(base64URL: v.auth)))
+        XCTAssertEqual(Notice(delivered: ["p": v.record], keys: keys)?.title, "Fix the login")
+        XCTAssertNil(Notice(delivered: ["p": v.record], keys: nil), "no keys: nothing to open it with")
+        XCTAssertNil(Notice(delivered: [:], keys: keys))
+        XCTAssertNil(Notice(delivered: ["p": "not base64url!"], keys: keys))
+        let other = try PushKeys(raw: XCTUnwrap(Data(base64URL: tampered.ua_private)), auth: XCTUnwrap(Data(base64URL: tampered.auth)))
+        XCTAssertNil(Notice(delivered: ["p": tampered.record], keys: other), "changed on the way")
+        XCTAssertNil(Notice(delivered: ["p": v.record], keys: other), "for another phone")
+
+        KeyStore.delete()
+        do {
+            try KeyStore.keep(keys)
+        } catch {
+            throw XCTSkip("No Keychain in this simulator run: \(error.localizedDescription)")
+        }
+        defer { KeyStore.delete() }
+        XCTAssertEqual(Notice(delivered: ["p": v.record], keys: KeyStore.load())?.tag, "houston-os-fix-login")
+    }
+
+    /// The app group the app, the extension and the widget share, when the
+    /// build is signed with it: the widget's status written there.
+    func testTheAppGroupIsShared() throws {
+        guard let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Amarchy.appGroup) else {
+            throw XCTSkip("No app group in this simulator run (an unsigned build)")
+        }
+        XCTAssertEqual(SharedStore.folder.standardizedFileURL, group.standardizedFileURL)
+        let status = WidgetStatus(needs: 1, chats: [.init(key: "x", name: "X", why: nil)], machine: "m", at: Date())
+        try status.write()
+        defer { try? FileManager.default.removeItem(at: SharedStore.statusFile) }
+        XCTAssertEqual(WidgetStatus.read(from: group.appendingPathComponent("status.json")).chats, status.chats)
     }
 
     func testBase64URL() {

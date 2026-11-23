@@ -98,13 +98,16 @@ jobs:
           xcrun simctl boot "$udid" || true
           xcrun simctl bootstatus "$udid" -b
 
+      # Signed to run locally (ad hoc, no Apple account): the simulator then
+      # gives the app its entitlements, so the tests use the Keychain group
+      # and the app group the notification extension shares, as on a phone.
       - name: Every target, for the simulator (Debug, with its tests)
         run: |
           xcodebuild build-for-testing -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO -quiet
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= -quiet
 
-      - name: Every target, for the simulator (Release)
+      - name: Every target, for the simulator (Release, unsigned)
         run: |
           xcodebuild build -project Amarchy.xcodeproj -scheme Amarchy -configuration Release \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build-release \
@@ -126,7 +129,7 @@ jobs:
         run: |
           xcodebuild test-without-building -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
-            -resultBundlePath "$RUNNER_TEMP/Amarchy.xcresult" CODE_SIGNING_ALLOWED=NO
+            -resultBundlePath "$RUNNER_TEMP/Amarchy.xcresult"
 
       - name: Screenshots
         if: always()

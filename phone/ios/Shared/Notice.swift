@@ -55,6 +55,15 @@ struct Notice: Equatable {
         self.title = title
     }
 
+    /// What the relay delivered (`p`, the encrypted payload), opened with
+    /// these keys; nil when there's nothing to open it with, or it isn't
+    /// for them, or it was changed on the way.
+    init?(delivered userInfo: [AnyHashable: Any], keys: PushKeys?) {
+        guard let p = userInfo["p"] as? String, let record = Data(base64URL: p), let keys,
+              let plain = try? PushCrypto.decrypt(record, keys: keys) else { return nil }
+        self.init(json: plain)
+    }
+
     private static func text(_ v: Any?) -> String? {
         guard let s = v as? String, !s.isEmpty else { return nil }
         return s

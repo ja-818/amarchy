@@ -127,7 +127,12 @@ enum KeyStore {
     /// The kept keys, else new ones, kept.
     static func loadOrMake() throws -> PushKeys {
         if let keys = load() { return keys }
-        let keys = PushKeys.make()
+        return try keep(PushKeys.make())
+    }
+
+    /// Keys kept (the ones already kept win: made once).
+    @discardableResult
+    static func keep(_ keys: PushKeys) throws -> PushKeys {
         var last: OSStatus = errSecSuccess
         for group in groups {
             var item = base(group)
@@ -140,6 +145,17 @@ enum KeyStore {
             if last != errSecMissingEntitlement { break }
         }
         throw Failure(status: last)
+    }
+
+    /// The group the keys are kept in, as the Keychain says (nil: none kept).
+    static var keptGroup: String? {
+        var query = base(nil)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let attributes = out as? [String: Any] else { return nil }
+        return attributes[kSecAttrAccessGroup as String] as? String
     }
 
     static func delete() {
