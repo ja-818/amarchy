@@ -68,11 +68,11 @@ internal data class Hello(val name: String, val label: String) {
 internal object Words {
     const val NOT_YOURS = "It says this phone isn't yours: sign in to the Tailscale app with the account your amarchy is on."
     private const val VPN = "Turn on the Tailscale app's VPN: this phone reaches your amarchy through it."
-    private const val LINK = "Settings → Phone app, in amarchy on your computer, has the address and a link that opens it here."
+    private const val LINK = "It's in amarchy's Settings → Phone app, with a link that opens it here."
 
     /** Nothing to open yet: no address kept, none typed. */
     fun noAddress(vpnOn: Boolean): ShellStatus =
-        ShellStatus(ShellStatus.Kind.Nothing, why = if (vpnOn) "Type your amarchy's address. $LINK" else "$VPN Then type its address. $LINK")
+        ShellStatus(ShellStatus.Kind.Nothing, why = (if (vpnOn) "Type" else "Turn on the Tailscale app's VPN, then type") + " your amarchy's address. $LINK")
 
     /** The own node is on the tailnet, and none of the machines there answers as amarchy. */
     fun noneFound(): ShellStatus =

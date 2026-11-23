@@ -222,6 +222,7 @@ class MainActivity : ComponentActivity() {
             is Link.Chat -> open(Open(go = link.route(machine)))
             is Link.Open -> {
                 val now = kept.server
+                if (target == link.server && onMachine()) return     // it's open already
                 if (now == null || now == link.server) return reach(link.server)
                 // A link may come from anywhere: another machine only when you say so.
                 if (target == null) reach(now)
@@ -278,6 +279,9 @@ class MainActivity : ComponentActivity() {
                 throw e
             } catch (e: Exception) {
                 status = Words.unreached(at, e, vpnOn(), OwnNode.proxy != null)
+                if (withContext(Dispatchers.IO) { ShareInbox.waiting(applicationContext) }) {
+                    toast("Kept what you shared: it goes to ${Address.host(at)} once it answers")
+                }
                 return@launch
             }
             kept.keep(at, said)
@@ -718,7 +722,7 @@ class MainActivity : ComponentActivity() {
     // ---- the machine's page's commands (window.amarchyPhone.call)
 
     private fun phoneCall(call: BridgeCall, reply: JavaScriptReplyProxy) {
-        val server = target ?: return
+        val server = target ?: return reply.answer(call.error("The app isn't on a machine"))
         lifecycleScope.launch {
             val answer = try {
                 call.result(phoneAnswer(server, call))
@@ -786,17 +790,18 @@ class MainActivity : ComponentActivity() {
 
     private fun share(intent: Intent) {
         lifecycleScope.launch {
-            val kept = withContext(Dispatchers.IO) {
+            val any = withContext(Dispatchers.IO) {
                 try {
                     ShareInbox.keep(applicationContext, intent)
                 } catch (e: IOException) {
                     null
                 }
             }
-            when (kept) {
-                null -> toast("Couldn't keep what you shared: is the phone's storage full?")
-                false -> toast("There's nothing in that to share")
-                true -> sendShares()
+            when {
+                any == null -> toast("Couldn't keep what you shared: is the phone's storage full?")
+                !any -> toast("There's nothing in that to share")
+                onMachine() -> sendShares()
+                reaching?.isActive != true -> reach(target ?: kept.server)      // it goes once the machine's page opens
             }
         }
     }

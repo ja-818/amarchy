@@ -1,0 +1,4 @@
+# The Play Console's service account key (JSON), from the environment:
+# CI writes the PLAY_JSON_KEY secret to a file and points here (store/README.md).
+json_key_file(ENV["PLAY_JSON_KEY_FILE"])
+package_name("io.github.ja818.amarchy")

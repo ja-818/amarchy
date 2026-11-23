@@ -41,6 +41,9 @@ internal object BridgeScripts {
     const val SHELL_PORT = "amarchyShellPort"
 
     // One promise per call; the port is the web message listener's object.
+    // amarchyPhone rejects with an Error (the contract); amarchyShell with the
+    // words alone, as the desktop app's invoke does (its page shows them as
+    // they come).
     private fun caller(port: String) = """
         const port = window.$port;
         let next = 0;
@@ -51,7 +54,7 @@ internal object BridgeScripts {
           const w = waiting.get(m.id);
           if (!w) return;
           waiting.delete(m.id);
-          if ("error" in m) w.reject(new Error(String(m.error)));
+          if ("error" in m) w.reject(${if (port == PHONE_PORT) "new Error(String(m.error))" else "String(m.error)"});
           else w.resolve(m.result === undefined ? null : m.result);
         });
         const call = (command, args) => new Promise((resolve, reject) => {
@@ -65,7 +68,7 @@ internal object BridgeScripts {
     fun phone(version: String, relay: String): String = """
         (() => {
           if (!window.$PHONE_PORT || window.amarchyPhone) return;
-        ${caller(PHONE_PORT).prependIndent("  ")}
+          @CALLER@
           Object.defineProperty(window, "amarchyPhone", {
             value: Object.freeze({ version: ${quote(version)}, platform: "android", relay: ${quote(relay)}, call }),
             enumerable: true,
@@ -79,16 +82,16 @@ internal object BridgeScripts {
             new MutationObserver(bars).observe(document.head, { subtree: true, childList: true, attributes: true, attributeFilter: ["content"] });
           });
         })();
-    """.trimIndent()
+    """.trimIndent().withCaller(PHONE_PORT)
 
     /** `window.amarchyShell` on the own page (desktop/dist), as the desktop app's. */
     fun shell(): String = """
         (() => {
           if (!window.$SHELL_PORT || window.amarchyShell) return;
-        ${caller(SHELL_PORT).prependIndent("  ")}
+          @CALLER@
           Object.defineProperty(window, "amarchyShell", { value: Object.freeze({ invoke: call }), enumerable: true });
         })();
-    """.trimIndent()
+    """.trimIndent().withCaller(SHELL_PORT)
 
     /**
      * Tells a loaded page to open something (`amarchy-open`); its value is
@@ -102,6 +105,8 @@ internal object BridgeScripts {
           return true;
         })();
     """.trimIndent()
+
+    private fun String.withCaller(port: String) = replace("  @CALLER@", caller(port).prependIndent("  "))
 
     private fun quote(s: String) = Json.encodeToString(JsonElement.serializer(), JsonPrimitive(s))
 }
