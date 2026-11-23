@@ -204,9 +204,24 @@ class Shell:
             time.sleep(0.2)
         raise RuntimeError("its window never showed: " + "\n".join(self.lines[-20:]))
 
+    def win(self):
+        """Its window: found again when the one it had is gone (a restart,
+        or a window made again, is a new window: input sent to the old one's
+        id goes nowhere)."""
+        if self.window and self.xdo("getwindowname", self.window):
+            return self.window
+        end = time.time() + 30
+        while time.time() < end:
+            ids = self.xdo("search", "--onlyvisible", "--name", "Amarchy").split()
+            if ids:
+                self.window = ids[0]
+                return self.window
+            time.sleep(0.2)
+        raise RuntimeError("its window isn't there: " + "\n".join(self.lines[-20:]))
+
     def resize(self, w, h):
-        self.xdo("windowmove", self.window, 0, 0)
-        self.xdo("windowsize", self.window, w, h)
+        self.xdo("windowmove", self.win(), 0, 0)
+        self.xdo("windowsize", self.win(), w, h)
         time.sleep(0.3)
 
     # ---- JavaScript in its window
@@ -269,7 +284,7 @@ class Shell:
     # what's sent to a window (xdotool's --window), so the window is focused
     # first and gets what the screen gets.
     def focus(self):
-        self.xdo("windowfocus", "--sync", self.window)
+        self.xdo("windowfocus", "--sync", self.win())
 
     def key(self, *keys):
         self.focus()
@@ -280,7 +295,7 @@ class Shell:
         self.xdo("type", "--delay", delay, text)
 
     def click(self, x, y, button=1):
-        self.xdo("mousemove", "--window", self.window, int(x), int(y), "click", button)
+        self.xdo("mousemove", "--window", self.win(), int(x), int(y), "click", button)
 
     def click_el(self, selector, button=1):
         r = self.js(f"(() => {{ const e = document.querySelector({json.dumps(selector)}); if (!e) return null;"
@@ -290,7 +305,7 @@ class Shell:
         self.click(r[0], r[1], button)
 
     def scroll(self, x, y, down=True, times=1):
-        self.xdo("mousemove", "--window", self.window, int(x), int(y))
+        self.xdo("mousemove", "--window", self.win(), int(x), int(y))
         for _ in range(times):
             self.xdo("click", 5 if down else 4)
 
