@@ -342,15 +342,20 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
     let origin = app.state::<Shell>().origin.clone();
     let opener = app.clone();
     let out = app.clone();
+    let omarchy = platform::omarchy();
     let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Amarchy")
         .inner_size(1280.0, 860.0)
-        .min_inner_size(360.0, 480.0)
-        // The app's look while a page loads (not WebKit's white): the last
-        // one it wore, else Omarchy's default.
-        .background_color(saved_background())
+        .min_inner_size(360.0, 480.0);
+    // On an Omarchy desktop the window is see-through: what its page leaves
+    // unpainted shows the desktop behind it (wearing the desktop's look live,
+    // its wallpaper, as a browser shows the app's). Elsewhere, the app's look
+    // while a page loads (not WebKit's white): the last one it wore, else
+    // Omarchy's default.
+    let win = if omarchy { win.transparent(true) } else { win.background_color(saved_background()) };
+    let win = win
         .visible(false)
-        .initialization_script(init_script(platform::omarchy()))
+        .initialization_script(init_script(omarchy))
         .on_navigation(move |u| {
             if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
                 return true;
@@ -863,7 +868,7 @@ fn parse_color(s: &str) -> Option<Color> {
 }
 
 /// The look the app wears now (its bars' color), worn by the window between
-/// pages and kept for the next start.
+/// pages (unless it's see-through, on Omarchy) and kept for the next start.
 fn keep_background(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -875,7 +880,10 @@ fn keep_background(app: &AppHandle) {
             move |v| {
                 let Some(raw) = serde_json::from_str::<String>(&v).ok() else { return };
                 let Some(c) = parse_color(&raw) else { return };
-                let _ = w2.set_background_color(Some(c));
+                // (A see-through window stays so: its page paints what it covers.)
+                if !platform::omarchy() {
+                    let _ = w2.set_background_color(Some(c));
+                }
                 let hex = format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
                 let f = look_file();
                 if std::fs::read_to_string(&f).map(|s| s.contains(&hex)).unwrap_or(false) {

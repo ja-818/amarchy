@@ -327,11 +327,13 @@ and tell the other tracks.
   (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
   natively, window closed or not. `omarchy`: the window is on an Omarchy
-  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  desktop (Hyprland's session, Omarchy's current theme); the window is then
+  see-through (what the page leaves unpainted shows the desktop), `<html>` is
   marked `on-omarchy` before the page is drawn, and theme.css, when the look
-  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
-  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
-  the window, which Hyprland makes see-through as the terminals
+  is Omarchy (live) with its own wallpaper, takes the wallpaper and the ground
+  under it away there (`html.on-omarchy { --wallpaper: none; ...;
+  --wallpaper-ground: transparent; }`): the desktop's own wallpaper shows
+  through the app's panes, and Hyprland fades the window as the terminals
   (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,

@@ -2752,7 +2752,7 @@ async function openLook() {
       // The desktop app on an Omarchy desktop, wearing its look live: the
       // desktop's own wallpaper is behind the window (theme.css, app.css).
       desktopApp && desktopApp.omarchy && worn.key === "omarchy-live" && wall() === "theme"
-        ? h("p", {}, "In this window, your desktop's own wallpaper, behind it, as behind your terminals.") : null,
+        ? h("p", {}, "In this window, your desktop's own wallpaper, seen through it.") : null,
       h("p", {}, (worn.backgrounds || []).length
         ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
           (info.own ? "the picture you chose." : "choose a picture.")

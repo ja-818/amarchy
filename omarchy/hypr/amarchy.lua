@@ -15,11 +15,12 @@
 -- amarchy while it's picked; another pick, or `amarchy key default`, gives it
 -- back (a reload binds everything afresh).
 --
--- The desktop app's window (class amarchy) is see-through as Omarchy's
--- terminals are, in each of Omarchy's window modes (Appearance > Windows >
--- Window Opacity): Transparent, Omarchy's standard transparency; Opaque,
--- solid; Glassy, as glassy as every window. Wearing the desktop's look live,
--- it draws no wallpaper of its own: the desktop's shows through.
+-- The desktop app's window (class amarchy) is faded as Omarchy's terminals
+-- are, in each of Omarchy's window modes (Appearance > Windows > Window
+-- Opacity): Transparent, Omarchy's standard transparency; Opaque, solid;
+-- Glassy, as glassy as every window. The window itself is see-through:
+-- wearing the desktop's look live, it draws no wallpaper of its own, and the
+-- desktop's shows through its panes.
 
 if type(o) ~= "table" or type(o.bind) ~= "function" then
   return -- not Omarchy's Lua config: nothing to bind with

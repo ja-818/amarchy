@@ -9117,9 +9117,9 @@ def app_theme_css():
     out.append("}")
     if look["wallpaper"] and look["theme"] == OMARCHY_LIVE and look["wallpapers"] == "theme":
         # The Omarchy desktop's own wallpaper: the desktop app's window on an
-        # Omarchy desktop (html.on-omarchy) has it right behind it, see-through
-        # as the terminals are, so it draws none (app.css, body::before).
-        out.append("html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; }")
+        # Omarchy desktop (html.on-omarchy) is see-through, with it right
+        # behind, so it paints none and nothing under it (app.css, body::before).
+        out.append("html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; --wallpaper-ground: transparent; }")
     # One file: the browser makes the bold.
     weights = {"regular": "100 900" if "bold" not in files else "400", "bold": "700"}
     text, icons = font_ranges()
