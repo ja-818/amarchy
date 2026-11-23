@@ -6,7 +6,7 @@
 #   - the Ⓐ in the bar: the shell plugin amarchy.chats (omarchy/plugin),
 #     linked into ~/.config/omarchy/plugins and put on the bar the first
 #     time (where you move it, or whether you take it off, is yours after)
-#   - the key, Super+Alt+A unless `amarchy key` says another (or off), and
+#   - the key, Super+D unless `amarchy key` says another (or off), and
 #     the desktop app's window see-through as Omarchy's terminals are:
 #     omarchy/hypr/amarchy.lua, loaded from ~/.config/hypr/hyprland.lua by a
 #     line ending in "-- amarchy"
@@ -363,7 +363,7 @@ install_home() {
 }
 
 # The key that brings amarchy to the front, in words (amarchy key: the
-# setting in ~/.config/amarchy/key, else Super+Alt+A), or nothing when off.
+# setting in ~/.config/amarchy/key, else Super+D), or nothing when off.
 key_words() {
   python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/key" <<'PY'
 import re, sys
@@ -372,7 +372,7 @@ try:
 except OSError:
     said = ""
 if said != "off":
-    chord = said if said and re.fullmatch(r"\w+[\w +:]*", said) else "SUPER + ALT + A"
+    chord = said if said and re.fullmatch(r"\w+[\w +:]*", said) else "SUPER + D"
     print("+".join(p.capitalize() if p.isupper() and len(p) > 1 else p for p in chord.split(" + ")))
 PY
 }
@@ -427,6 +427,9 @@ if omarchy_here; then
   ((${#did[@]})) && say "On Omarchy: $(IFS=,; echo "${did[*]}" | sed 's/,/, /g')."
   key=$(key_words)
   echo "  ${key:-No key}${key:+  amarchy at the front (the desktop app); another: amarchy key <keys>}${key:-: amarchy key <keys> sets one}"
+  # Something else of this machine's Hyprland on that key too (its own
+  # bindings, a newer Omarchy): said, with how to pick another.
+  [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" key --check 2>/dev/null | sed 's/^/  /' || true
   echo "  Ⓐ in the bar: lights up when a chat needs you, and says how many"
 else
   remove_home
