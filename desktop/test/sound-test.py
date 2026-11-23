@@ -7,6 +7,7 @@
 # they're installed it starts again by itself, its page playing them. And
 # its page's process crashing: with GStreamer's words before it, the GPU
 # isn't blamed (no media from then on); with no sign why, it loads again.
+# The same with less still: GStreamer's core elements only, and no plugins.
 #
 #   python3 desktop/test/sound-test.py          exits 0 when every check passed
 #
@@ -73,6 +74,21 @@ class Gst:
     def env(self):
         return {"GST_PLUGIN_SYSTEM_PATH_1_0": str(self.dir), "GST_PLUGIN_PATH_1_0": "", "GST_REGISTRY_1_0": str(self.registry)}
 
+
+# What a page may do with Web Audio, each in words when it can't: a context
+# started with a tone, and a .wav decoded (without GStreamer's decoders
+# WebKit's decoding never ends: "pending"). [the tone's, the decoding's]
+WEB_AUDIO = """
+  const within = (p) => Promise.race([p, new Promise((ok) => setTimeout(() => ok('pending'), 3000))]);
+  const out = [];
+  try { const c = new AudioContext(); const o = c.createOscillator(); o.connect(c.destination); o.start();
+        await within(c.resume()); out.push(c.state); o.stop(); await within(c.close()); }
+  catch (e) { out.push(e.name); }
+  try { const b = await (await fetch('/sound/herald')).arrayBuffer();
+        out.push(await within(new OfflineAudioContext(1, 100, 44100).decodeAudioData(b).then(() => 'decoded'))); }
+  catch (e) { out.push(e.name); }
+  return out;
+"""
 
 # What it says to install, on this computer (sound.rs).
 if shutil.which("pacman"):
@@ -173,6 +189,8 @@ def main():
             r = w.js("const v = document.createElement('video'); v.muted = true; v.src = '/sound/herald#t=0.1'; document.body.append(v);"
                      " try { await v.play(); return 'played'; } catch (e) { return e.name; } finally { v.remove(); }")
             check(r == "NotSupportedError", f"nor a <video> ({r})")
+            r = w.js(WEB_AUDIO)
+            check(isinstance(r, list) and len(r) == 2, f"Web Audio (a context, a tone, a .wav decoded) fails in words ({r})")
             w.js("window.__stop = playSound('/sound/kalimba'); 1")
             got = wait_for(lambda: played(pb), timeout=10)
             check(bool(got) and "--media-role=Notification" in got[0], f"a chime: the app plays it (pw-play {got[:1]})")
@@ -224,7 +242,34 @@ def main():
                 w.resize(1280, 800)
                 w.key("Escape")
 
+        # ---- less still: GStreamer's core elements only, then no plugins at all.
+        for what, names in (("GStreamer's core elements only", ["coreelements", "coretracers"]), ("no GStreamer plugins at all", [])):
+            print(what)
+            home2 = tempfile.mkdtemp(prefix="desktop-home-")
+            pb2 = player(home2)
+            env2 = {**st.env_for(st.fake_cli(home2)), **Gst(names).env()}
+            env2["PATH"] = f"{pb2}:{env2['PATH']}"
+            with Shell(remote.url, home=home2, env=env2) as w:
+                st.on_app(w)
+                lacks = w.js("window.amarchyDesktopMedia && JSON.parse(JSON.stringify(window.amarchyDesktopMedia))")
+                check(isinstance(lacks, dict) and lacks.get("sounds") is False and lacks.get("native") is True and "decodebin" in lacks.get("missing", []),
+                      f"it knows what's missing ({lacks and lacks.get('missing')})")
+                csp = w.js("(document.querySelector('meta[http-equiv=\"Content-Security-Policy\"]') || {}).content || null")
+                check(csp == "media-src 'none'", "its page loads no media")
+                before = web(w)
+                w.click(300, 300)
+                a = w.js("try { await new Audio('/sound/herald').play(); return 'played'; } catch (e) { return e.name; }")
+                v = w.js("const v = document.createElement('video'); v.src = '/sound/herald'; document.body.append(v);"
+                         " try { await v.play(); return 'played'; } catch (e) { return e.name; } finally { v.remove(); }")
+                r = w.js(WEB_AUDIO)
+                w.js("playSound('/sound/kalimba'); 1")
+                check(a == v == "NotSupportedError" and isinstance(r, list), f"an <audio>, a <video>, Web Audio: refused in words ({a}, {v}, {r})")
+                check(bool(wait_for(lambda: played(pb2), timeout=10)), "a chime: the app plays it")
+                time.sleep(5)
+                check(web(w) == before and before and "crashed" not in logged(home2), f"its page's process lives on ({before} → {web(w)})")
+
         # Started again, the same: not said twice.
+        print("started again")
         with Shell(remote.url, home=home, env=env, notifyd=True) as w:
             st.on_app(w)
             n = w.note(lambda n: n["summary"].startswith("This computer lacks"), timeout=6)
