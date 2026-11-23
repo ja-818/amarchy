@@ -1894,7 +1894,7 @@ function showKeys() {
       ["s", "Seen: off Needs you without opening it"],
       ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["Tab / Shift+Tab  in a new chat", "The next / previous project"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
     ...part("In a chat", [["Enter / Shift+Enter  in the box", "Send / a new line"],
-      ["Esc  in the box", "Stop Claude while it works; else up onto the messages"], ["↑  in the box, nothing above", "Up onto the messages"],
+      ["Esc  in the box", "Up onto the messages (never a stop)"], ["↑  in the box, nothing above", "Up onto the messages"],
       ["Page Up / Down  in the box", "Scroll the messages, still writing"],
       ["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],

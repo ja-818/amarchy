@@ -194,9 +194,8 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   - **The mic** writes what you say into the box: see [Dictation](#dictation).
   - **Send** turns into **Stop** while Claude works. What you send while it works
     waits over the box, "Will send when Claude finishes", with **Send now**, **Edit**
-    (back into the box, its pictures too) and ✕ (not sent). **Stop** (or `Esc`
-    in the box) brings what was waiting back into the box, as Esc does in Claude
-    Code.
+    (back into the box, its pictures too) and ✕ (not sent). **Stop** brings what
+    was waiting back into the box, as Esc does in Claude Code.
 - **On a computer, Enter sends and Shift+Enter is a new line**; on a phone, the
   Send button sends. Typing goes into the box when the keys aren't on a message.
 
@@ -452,9 +451,9 @@ host's chats without anything else installed.
   done. `Esc` in its empty box puts it away.
 - **A chat opened**, with a click or the keys (`Enter` on its card), takes the
   whole window, the keys in its box: write (or, when it asks you something, on
-  its card: answer, approve). In the box, `Esc` **stops Claude** while it works,
-  as in Claude Code; else it goes up onto the latest message, as `↑` does with
-  nothing above it in the box. `Page Up` / `Page Down` scroll the conversation
+  its card: answer, approve). In the box, `Esc` goes up onto the latest message
+  (never a stop: that's the **Stop** button), as `↑` does with nothing above it
+  in the box. `Page Up` / `Page Down` scroll the conversation
   while you write. On the messages, as on the board's cards: `j` / `k` (or `↓` /
   `↑`) from message to message, `l` (or `→`) into one, along its buttons and
   links, `h` (or `←`) back and out, `Enter` on a button presses it, `g` / `G` the
