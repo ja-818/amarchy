@@ -251,9 +251,13 @@ class Dictate {
       await micOpen();
     } catch (e) {
       this.done(r);
-      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: ${e.name === "NotAllowedError" ? "not allowed" : e.message}` });
+      // No microphone at all (WebKit says "Invalid constraint"), or one another app holds.
+      const none = e.name === "NotFoundError" || e.name === "OverconstrainedError";
+      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: ${e.name === "NotAllowedError" ? "not allowed" : none ? `no microphone found (${e.message})` : e.message}` });
       toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in Settings"
-                                        : `The microphone didn't start: ${e.message}`);
+          : none ? "No microphone found on this computer: plug one in, or turn it on in its sound settings"
+          : e.name === "NotReadableError" ? "The microphone can't be read: another app may have it"
+          : `The microphone didn't start: ${e.message}`);
       return;
     }
     if (r.cancelled || this.run !== r) {
