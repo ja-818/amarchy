@@ -69,7 +69,7 @@ You need a Linux machine that stays on (a server, or a PC at home), with
 **[Claude Code](https://docs.claude.com/en/docs/claude-code)** installed and logged in, plus
 `git`, `tmux` (3.5 or newer) and `python3`. To use it from your phone or a browser you also
 need [Tailscale](https://tailscale.com) on that machine and on your devices, with HTTPS
-certificates turned on for your tailnet.
+certificates turned on for your tailnet: `amarchy tailscale` sets it up and opens what's left.
 
 ```sh
 git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy && ~/.local/share/amarchy/install.sh

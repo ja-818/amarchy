@@ -588,6 +588,28 @@ amarchy machines remove omarchy   # both forget the other
 - **Versions**: machines on another version of the contract say "Update
   amarchy on <label>" instead of breaking.
 
+**Tailscale, set up for you.** Your machines and devices meet on Tailscale, each
+on your own account. `amarchy tailscale` takes a machine through it, a step at
+a time: installed (on Omarchy with Omarchy's own installer, which also puts its
+Tailscale panel in the bar; on Arch with pacman), its service running, amarchy
+allowed to drive it, signed in (it gets the sign-in link and opens it), on, and
+your tailnet's MagicDNS and HTTPS certificates on (it opens the admin page where
+each is turned on). What needs root it asks before doing, in a terminal; run by
+Claude or a script, it says what to run instead. **Settings → Tailscale** in the
+app shows the same, with the sign-in link and the admin pages as buttons and the
+root commands to copy.
+
+More than one Tailscale account on a machine (fast user switching): it says which
+one is in use, and when your other machines are on another tailnet than this one.
+`amarchy tailscale switch <account>` switches, as does Settings → Tailscale in the
+desktop app on that machine (from another device it would cut that device off,
+so there it only says how), or Omarchy's Tailscale panel.
+
+```
+amarchy tailscale                 # where it stands, and the next step, done or said
+amarchy tailscale switch          # the accounts signed in here; switch <account> to use another
+```
+
 ## The desktop app
 
 amarchy's app in a window of its own, on Linux first (Omarchy), with macOS and
@@ -1571,6 +1593,8 @@ amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]   the desktop a
 amarchy bar [--follow]                what the Ⓐ in the bar shows (JSON); --follow: again on every change
 amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's look and send it to your machines
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
+amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
+amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:
 amarchy theme [--show]                print the theme, the font and the wallpaper

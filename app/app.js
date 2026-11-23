@@ -2437,7 +2437,8 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => tourShow() }, "Take the tour: amarchy in 100 seconds"),
       h("div", { class: "section" }, "Host"),
       h("p", {}, `${(machineOf("").label) || (app.view && app.view.hostname) || location.hostname}, as ${app.user || "you"}. ` +
-                 (location.hostname === "127.0.0.1" ? "The desktop app on this machine." : "Reachable only on your tailnet.")));
+                 (location.hostname === "127.0.0.1" ? "The desktop app on this machine." : "Reachable only on your tailnet.")),
+      ...tailscaleSettings());      // tailscale.js
     kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
     else if (store.get("layout")) kids.push(...layoutSettings());

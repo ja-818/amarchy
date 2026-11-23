@@ -244,6 +244,7 @@ body::before {
 .control.accent { border-color: var(--accent); color: var(--accent); }
 .control.accent:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .control.wide { width: 100%; margin-top: 10px; min-height: var(--control-h); font-weight: 700; }
+a.control { color: inherit; text-decoration: none; }     /* a page to open, worn as a button */
 .control.danger { border-color: var(--danger); color: var(--danger); }
 .control.danger:active { background: color-mix(in srgb, var(--danger) 18%, transparent); }
 
