@@ -186,6 +186,14 @@ if ((uninstall)); then
   [[ -x $repo/desktop/install.sh ]] && "$repo/desktop/install.sh" --uninstall || true
   # ---- end of the desktop app (track B)
   live=$(live_checkouts | sed -n 1p)
+  # ---- a cloud machine (track F): the watchers of the ones being made, and a
+  # sign-in (Claude's, GitHub's) left waiting, stopped. The machines themselves
+  # stay (they're yours, and billed by your provider): said below.
+  systemctl --user stop 'amarchy-cloud-*.service' >/dev/null 2>&1 || true
+  tmux -L amarchy-signin kill-server >/dev/null 2>&1 || true
+  cloud_made=""
+  [[ -x $bin_dir/amarchy ]] && cloud_made=$("$bin_dir/amarchy" machines cloud 2>/dev/null | grep -v '^none yet' || true)
+  # ---- end of a cloud machine (track F)
   # The chats' previews: stopped, and off the tailnet (nothing would look after them).
   [[ -x $bin_dir/amarchy ]] && "$bin_dir/amarchy" previews-off >/dev/null 2>&1 || true
   # The app: no longer served on the tailnet, its service gone.
@@ -235,6 +243,14 @@ if ((uninstall)); then
   if compgen -G "$secrets/*.env" >/dev/null || compgen -G "$secrets/projects/*.env" >/dev/null; then
     echo "Your secrets (the keys you gave in the app) are still in $secrets: delete that folder if they shouldn't stay."
   fi
+  # ---- a cloud machine (track F): the ones made here still run, and are billed.
+  if [[ -n $cloud_made ]]; then
+    say "The cloud machines made here still run, billed by their provider until you remove them:"
+    printf '%s\n' "$cloud_made" | sed 's/^/  /'
+    echo "  Remove each at its provider's console (or install again and: amarchy machines cloud remove <name>)."
+    echo "  Their records and tokens stay in ${XDG_CONFIG_HOME:-$HOME/.config}/amarchy (cloud.json, secrets/cloud.env)."
+  fi
+  # ---- end of a cloud machine (track F)
   # The machines paired with this one (amarchy machines) and their keys: kept,
   # for an install again; the other machines show this one as off meanwhile.
   machines="${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/machines.json"

@@ -953,6 +953,7 @@ function refresh() {
   // what waited for it there (sent now, or still waiting).
   const open = (app.session && app.session.chat) || (app.desk && typeof desk !== "undefined" && desk.chat);
   if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) { open.renderDock(); open.outboxSeen(); } });
+  cloudLive();      // a cloud machine's sheet, as it comes up (cloud.js)
   keptListScroll();
 }
 

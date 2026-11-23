@@ -680,6 +680,83 @@ amarchy machines remove omarchy   # both forget the other
 - **Versions**: machines on another version of the contract say "Update
   amarchy on <label>" instead of breaking.
 
+### A cloud machine
+
+No box that stays on? Get one in your **own** cloud account, in one tap:
+**Settings → Machines → Add a cloud machine…**. amarchy never runs a machine or
+bills anyone: the provider bills you, and Remove deletes it there.
+
+1. **The provider**: Hetzner Cloud, DigitalOcean or Hostinger VPS. The first
+   time, its API token, in the sheet's own field (with a link to the page where
+   it's made; it's checked with the provider at once). Hetzner: your project →
+   Security → API tokens, Read & Write. DigitalOcean: API → Generate New Token
+   (droplet, regions, sizes, image, tag and account scopes, or Full Access).
+   Hostinger: hPanel → your profile → API (it pays with your default payment
+   method).
+2. **Where and how big**, with the provider's own monthly price for each size
+   (Hetzner's with its IPv4 address). 8 GB is the floor for a dozen chats: the
+   cheapest size from there is picked for you, marked Recommended.
+3. **A name** (`cloud` to start with): its name on your tailnet, on the board
+   and at the provider.
+4. **A one-off Tailscale key**, so it joins your tailnet with no hand work:
+   the sheet links straight to Tailscale's Keys page; Generate auth key, one-off,
+   pre-approved, a day's expiry, no tags. It's used once and forgotten. (Why a
+   key like that: it can add one machine, once, then it's spent; nothing with
+   standing power over your tailnet is kept anywhere, nor handed to the
+   provider.)
+5. **Create**, its price on the button. Its sheet then shows each step as it
+   comes: created at the provider, started up, installing, on your tailnet,
+   paired with this machine (about 10 minutes). Close it whenever: Settings →
+   Machines says where it stands.
+
+What it gets, by cloud-init (Hostinger: its post-install script), from
+`cloud/bootstrap.sh`: Debian 13, Tailscale (on your tailnet, Tailscale SSH on),
+git, tmux, python3, gh, security upgrades by themselves, a swap file, a user of
+your login name with sudo and your git name and email, Claude Code (its own
+installer) and amarchy (cloned from GitHub, kept up to date as every machine
+is), its app on. **Nothing listens on the public internet**: the firewall lets
+in only your tailnet, and sshd is off (`tailscale ssh <you>@<name>` instead).
+It reports each step to the machine that made it; if one fails, its sheet says
+what, in words, with the end of its log, and offers Remove.
+
+Then, on its sheet: **Sign in to Claude** (Anthropic's sign-in page opens; paste
+the code it gives you) and **Sign in to GitHub** (copy the code it shows, paste
+it on GitHub's page; its chats then clone, push and move through it). Each
+machine signs in on its own: no credential is copied between machines. Any
+machine whose Claude isn't signed in says **Sign in to Claude** in Settings →
+Machines, with the same sheet. One more thing, once: on Tailscale's Machines
+page, its ⋯ → **Disable key expiry**, or it drops off your tailnet in 180 days.
+
+**The cost** is where it matters: on each size, on Create, on its row in
+Settings → Machines, on its sheet, and on Remove. Hetzner and DigitalOcean bill
+by the hour, never more than the monthly price; Hostinger is paid ahead each
+month.
+
+**Remove** (its sheet, or `amarchy machines cloud remove`) says what goes with
+it (its chats: their worktrees, what isn't pushed, their conversations) and
+offers to **move its chats here first** (each once it's free; your assistant and
+agents live on their machine and can't). Then it leaves your tailnet, both
+machines forget each other, and it's deleted at the provider, which stops its
+billing. Hostinger can't delete one at once: it's stopped, and its subscription
+isn't renewed. Its node stays in Tailscale's Machines list as offline: remove it
+there.
+
+Its tokens stay on the machine that made it, in
+`~/.config/amarchy/secrets/cloud.env` (yours only), never given to a chat's
+commands, masked wherever the app would show one. From a chat, Claude asks you
+for one with a card (`amarchy secret ask HCLOUD_TOKEN --cloud`), never in the
+chat; making one costs money, so it's never done without your say (`--yes`).
+
+```
+amarchy machines cloud                      # the cloud machines made here: size, price, where each stands
+amarchy machines cloud providers            # each provider, connected or not
+amarchy machines cloud token hetzner        # its API token (typed, not shown); `tailscale`: the one-off key
+amarchy machines cloud sizes hetzner fsn1   # a region's sizes and their monthly prices
+amarchy machines cloud add --provider hetzner --region fsn1 --size cx33 --name cloud --yes --wait
+amarchy machines cloud status cloud         # each step, and its log when it failed
+amarchy machines cloud remove cloud --move-chats --yes
+```
+
 **Tailscale, set up for you.** Your machines and devices meet on Tailscale, each
 on your own account. `amarchy tailscale` takes a machine through it, a step at
 a time. With no Tailscale on it yet, it offers **amarchy's own node** first
@@ -1883,6 +1960,11 @@ amarchy machines rename <name> <label>   what the app calls a machine (kept on t
 amarchy machines icon <name> <icon>   a machine's icon: server, desktop, laptop, cloud, tower or mini
 amarchy machines show icon|name       how the board shows a chat's machine
 amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
+amarchy machines cloud [--json]       the cloud machines made here, in your own accounts: size, price, step
+amarchy machines cloud providers | regions <p> | sizes <p> <region>   what each provider offers, its prices
+amarchy machines cloud token <provider|tailscale> [--forget]   a provider's API token, or the one-off Tailscale key
+amarchy machines cloud add [--provider p] [--region r] [--size s] [--name n] [--yes] [--wait]   make one (it costs money)
+amarchy machines cloud status <name> | remove <name> [--move-chats|--lose-chats] [--yes] | user-data <name>
 amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]   move a chat to another machine of yours
 amarchy move [<id>] --check --to <machine> [--json]   what moving it would do; --cancel | --dismiss
 
