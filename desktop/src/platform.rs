@@ -678,7 +678,12 @@ mod linux {
             "its page's process crashed, with no sign why{}",
             if all.is_empty() { " (it said nothing in the last minute)".to_string() } else { format!("; it said last: {}", super::last_words(&all, 3)) }
         );
-        if super::unexplained_again() && super::safe_rendering().is_none() {
+        // No GPU here (its GL is the CPU's, Mesa's llvmpipe): no GPU driver
+        // to blame, and drawn without compositing WebKit 2.54 is slower still
+        // (held keys came out seconds late): it draws on as it does.
+        if !super::gpu() {
+            log::info!("no GPU here to blame (its GL is drawn on the CPU): it keeps drawing as it does");
+        } else if super::unexplained_again() && super::safe_rendering().is_none() {
             let why = "its page's process crashed twice in ten minutes with no sign why";
             super::keep_safe_rendering(why);
             if let Some(s) = WebViewExt::settings(view) {

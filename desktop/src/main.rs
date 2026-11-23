@@ -190,7 +190,7 @@ fn main() {
     if start.restart {
         return;
     }
-    journal::start();
+    journal::start(start.after.is_some());
     platform::prepare();
 
     let shell = Shell {
@@ -537,7 +537,7 @@ fn watchdog(app: &AppHandle) {
                 cmd.arg("--url").arg(u.as_str());
             }
             if let Some(e) = journal::stderr_for_child() {
-                cmd.stderr(e);
+                cmd.stderr(e).env("AMARCHY_DESKTOP_STDERR", "given");
             }
             #[cfg(unix)]
             {
@@ -644,7 +644,7 @@ pub fn restart(app: &AppHandle, exe: Option<&str>) {
         cmd.arg("--url").arg(u.as_str());
     }
     if let Some(e) = journal::stderr_for_child() {
-        cmd.stderr(e);
+        cmd.stderr(e).env("AMARCHY_DESKTOP_STDERR", "given");
     }
     #[cfg(unix)]
     {
@@ -1029,7 +1029,8 @@ fn sign_in(app: AppHandle) -> Result<(), String> {
 // the window (its value comes back on stdout as "@@<id> <json>"), or
 // {"id", "do"}: what the shell itself does or is ("close", "url",
 // "visible", "size", "destroy": its window gone, "hang": its window's
-// thread stuck for a minute, "pid", "drawing": with compositing or not).
+// thread stuck for a minute, "pid", "drawing": with compositing or not,
+// "stderr": 200 KB written to it).
 #[cfg(feature = "test-hooks")]
 fn test_hooks(app: AppHandle) {
     std::thread::spawn(move || {
@@ -1042,6 +1043,13 @@ fn test_hooks(app: AppHandle) {
             if let Some(what) = cmd["do"].as_str() {
                 let v = match (what, &win) {
                     ("pid", _) => serde_json::json!(std::process::id()),
+                    // 200 KB on its stderr, as GTK and WebKit write theirs: true once written (never, if it blocks).
+                    ("stderr", _) => {
+                        for i in 0..2000 {
+                            eprintln!("a test's line {i} on stderr {}", "x".repeat(80));
+                        }
+                        serde_json::json!(true)
+                    }
                     ("hang", _) => {
                         let _ = app.run_on_main_thread(|| std::thread::sleep(Duration::from_secs(60)));
                         serde_json::json!(true)

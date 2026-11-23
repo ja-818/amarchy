@@ -789,8 +789,9 @@ window closed.
   `~/.local/state/amarchy/desktop/desktop.log` (the tray's **Its log**). A
   start always brings its window up: if its window is gone it's made again,
   if its page crashed it loads again and the log says why (what the page
-  wrote last; twice with no sign why, it draws without the GPU from then on;
-  `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
+  wrote last; twice with no sign why on a computer with a GPU, it draws
+  without the GPU from then on; `AMARCHY_DESKTOP_GPU=1` tries the GPU again),
+  and if it's stuck it starts
   again by itself. What goes wrong in its page (an error, with where) is
   in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
