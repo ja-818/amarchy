@@ -16927,10 +16927,13 @@ def sync_items_look():
                 continue
             kept = items.get(key)
             if kept is None or kept.get("value") != value:
-                # The first look: as old as its file (when it was set last;
-                # never set: as old as can be), so the latest change of any
-                # machine's wins, whichever looked first.
-                items[key] = {"value": value, "at": now if kept is not None else sync_set_at(key), "by": me}
+                # When it was changed: its file's time (found a while after,
+                # a machine stopped in between: still its own time, so a later
+                # change elsewhere wins); one taken away, now. The first look:
+                # as old as its file (never set: as old as can be), so the
+                # latest change of any machine's wins, whichever looked first.
+                at = sync_set_at(key)
+                items[key] = {"value": value, "at": at if kept is None else (at if value is not None and at else now), "by": me}
                 changed.append(key)
         if changed:
             write_file(SYNC_ITEMS, json.dumps(items))
@@ -17241,6 +17244,7 @@ class Sync:
     def __init__(self, st):
         self.st, self.wake, self.asked = st, threading.Event(), {}
         self.lock = threading.Lock()
+        self.sets = None        # the sets and the missions as last looked at (a change: pushed)
 
     def start(self):
         threading.Thread(target=self.run, daemon=True).start()
@@ -17256,9 +17260,11 @@ class Sync:
         while True:
             try:
                 changed = sync_items_look()
-                themes_value()
-                if changed:
+                sets = json.dumps([mission_badges_kept(), sync_json(MISSION_TOLD, {}), sounds_value(), themes_value(),
+                                   missions_have()], sort_keys=True)
+                if changed or (self.sets is not None and sets != self.sets):
                     self.push(changed)
+                self.sets = sets
                 ms = machines_read()
                 peers = self.st.peers.snapshot() if self.st.peers else {}
                 for m in ms:
@@ -17286,12 +17292,12 @@ class Sync:
         doesn't asks again when it's back; one that missed it, at its next
         pull)."""
         state = sync_state()
-        body = {k: state[k] for k in ("items", "badges", "told", "sounds", "themes")}
+        body = {k: state[k] for k in ("items", "badges", "told", "sounds", "themes", "have")}
         body["items"] = {k: v for k, v in state["items"].items() if k in keys}
-        peers = self.st.peers.snapshot() if self.st.peers else {}
+        # Every machine paired (one taken for off a moment may answer; one
+        # that's off doesn't, and pulls it when it's back).
         for m in machines_read():
-            if (peers.get(m["name"]) or {}).get("on"):
-                threading.Thread(target=self.send, args=(m, body), daemon=True).start()
+            threading.Thread(target=self.send, args=(m, body), daemon=True).start()
 
     def send(self, m, body):
         for wait in (0, 1, 3, 10):      # (a machine busy a moment: again)
@@ -17647,21 +17653,23 @@ def app_handler(st, users, address):
 
         def peer_events(self):
             """GET /api/peer/events: this machine's own chats (never the ones
-            it shows from others), and again on every change."""
+            it shows from others), and again on every change; "still here"
+            well within the silence a machine is taken as gone after."""
             self.stream_start()
             version, beat = -1, time.time()
+            every = min(KEEPALIVE, PEER_SILENT / 3)
             try:
                 while True:
                     with st.changed:
                         if st.own_version == version or not st.view:
-                            st.changed.wait(KEEPALIVE)
+                            st.changed.wait(every)
                         if not st.view:
                             continue
                         view, changed, version = st.view, st.own_version != version, st.own_version
                     if changed:
                         self.event("state", peer_state(view))
                         beat = time.time()
-                    elif time.time() - beat >= KEEPALIVE:
+                    elif time.time() - beat >= every:
                         self.out(b": still here\n\n")
                         beat = time.time()
             except OSError:
@@ -18808,6 +18816,11 @@ def app_handler(st, users, address):
                     try:
                         if sync_take(theirs, peer_fetch(m)):
                             st.poke.set()
+                        # Records it has that this one hasn't (a merge there): asked for now.
+                        mine = missions_have()
+                        if getattr(st, "sync", None) and any(isinstance(n, int) and n > mine.get(o, -1)
+                                                             for o, n in (theirs.get("have") or {}).items()):
+                            st.sync.soon(self.peer)
                     except Exception as e:
                         print(f"amarchy app: sync from {self.peer}: {e}", file=sys.stderr, flush=True)
                 threading.Thread(target=take, daemon=True).start()

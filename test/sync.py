@@ -137,7 +137,14 @@ try:
     print("a machine off during a change")
     beta.stop()
     alpha.amarchy("alerts", "needs-you")
-    check(bool(until(lambda: st(gamma).get("alerts") == "needs-you", limit=20)), "gamma has it at once")
+    ok_ = bool(until(lambda: st(gamma).get("alerts") == "needs-you", limit=20))
+    if not ok_ and os.environ.get("SYNC_DEBUG"):
+        for m in (alpha, gamma):
+            print("   ", m.name, "alerts item:", json.loads((m.home / "state/amarchy/sync/items.json").read_text()).get("alerts"),
+                  "file:", (m.home / "state/amarchy/alerts").read_text().strip() if (m.home / "state/amarchy/alerts").exists() else None,
+                  "now:", time.time())
+        print("    alpha's machines:", [(x["name"], x["on"]) for x in st(alpha)["machines"]])
+    check(ok_, "gamma has it at once")
     beta.start()
     check(bool(until(lambda: st(beta).get("alerts") == "needs-you", limit=40)), "beta, back: has it too")
 
@@ -151,16 +158,26 @@ try:
     alpha.start()
 
     print("two edits made apart: the later one, everywhere")
+    MARKS = {}
     alpha.stop()
+    MARKS["low"] = time.time()
     beta.ask("POST", "/api/new/effort", {"effort": "low"})
     time.sleep(1.5)
     beta.stop()
     gamma.stop()
     alpha.start()
+    MARKS["max"] = time.time()
     alpha.ask("POST", "/api/new/effort", {"effort": "max"})      # later, made apart
     beta.start()
     gamma.start()
-    check(bool(same(lambda m: st(m).get("new_effort"), "max", limit=60)),
+    ok_ = bool(same(lambda m: st(m).get("new_effort"), "max", limit=60))
+    if not ok_ and os.environ.get("SYNC_DEBUG"):
+        for m in ms:
+            f = m.home / "state/amarchy/new-effort"
+            print("   ", m.name, json.loads((m.home / "state/amarchy/sync/items.json").read_text()).get("new-effort"),
+                  "file", f.read_text().strip(), f.stat().st_mtime)
+        print("    marks:", MARKS)
+    check(ok_,
           f"max (alpha's, later) on all three ({[st(m).get('new_effort') for m in ms]})")
 
     print("a reset: the same score everywhere")
