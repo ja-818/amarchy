@@ -50,8 +50,28 @@ val ownPage = tasks.register<OwnPageTask>("copyOwnPage") {
 
 // A release is signed when the build's environment has the key (CI's
 // secrets); else it stays unsigned, to be signed elsewhere or not at all.
+// The key is written out by a task, when a release is built: the
+// configuration cache may skip the build script, never a task.
 val keystoreBase64 = providers.environmentVariable("ANDROID_KEYSTORE_BASE64").orNull?.trim().orEmpty()
 val keystoreFile = layout.buildDirectory.file("signing/release.keystore").get().asFile
+
+abstract class KeystoreTask : DefaultTask() {
+    @get:Input
+    abstract val base64: Property<String>
+
+    @get:OutputFile
+    abstract val keystore: RegularFileProperty
+
+    @TaskAction
+    fun write() {
+        keystore.get().asFile.writeBytes(Base64.getMimeDecoder().decode(base64.get()))
+    }
+}
+
+val releaseKeystore = tasks.register<KeystoreTask>("releaseKeystore") {
+    base64.set(keystoreBase64)
+    keystore.set(keystoreFile)
+}
 
 android {
     namespace = "io.github.ja818.amarchy"
@@ -74,8 +94,6 @@ android {
     signingConfigs {
         if (keystoreBase64.isNotEmpty()) {
             create("release") {
-                keystoreFile.parentFile.mkdirs()
-                keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreBase64))
                 storeFile = keystoreFile
                 storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
                 keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
@@ -124,6 +142,13 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(ownPage, OwnPageTask::output)
+    }
+}
+
+// Whatever reads the release key comes after it's written.
+if (keystoreBase64.isNotEmpty()) {
+    tasks.configureEach {
+        if (name in setOf("validateSigningRelease", "packageRelease", "signReleaseBundle")) dependsOn(releaseKeystore)
     }
 }
 

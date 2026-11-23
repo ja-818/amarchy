@@ -338,8 +338,9 @@ class MainActivity : ComponentActivity() {
             last = state ?: last
             when {
                 state?.running == true -> {
-                    proxyWebView()
-                    return true
+                    val why = proxyWebView() ?: return true
+                    status = ShellStatus(ShellStatus.Kind.Failed, label = OWN_NODE, why = why)
+                    return false
                 }
                 state?.needsLogin == true -> {
                     status = ShellStatus(ShellStatus.Kind.SignIn, why = state.words.ifEmpty { null })
@@ -365,15 +366,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** The web view reaches the tailnet (only) through the own node's proxy. */
-    private fun proxyWebView() {
-        val p = OwnNode.proxy ?: return
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) return
+    /** The web view reaches the tailnet (only) through the own node's proxy: null, or why not. */
+    private fun proxyWebView(): String? {
+        val p = OwnNode.proxy ?: return "It's on your tailnet, but gave the app no way through it. Turn on the Tailscale app's VPN instead."
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            return "This phone's Android System WebView is too old to go through it: update it in Google Play, or turn on the Tailscale app's VPN."
+        }
         val config = ProxyConfig.Builder().addProxyRule("${p.host}:${p.port}")
         if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE_REVERSE_BYPASS)) {
             config.addBypassRule("*.ts.net").addBypassRule("100.64.0.0/10").setReverseBypassEnabled(true)
         }
         ProxyController.getInstance().setProxyOverride(config.build(), ContextCompat.getMainExecutor(this)) {}
+        return null
     }
 
     private fun signIn(call: BridgeCall, reply: JavaScriptReplyProxy) {
