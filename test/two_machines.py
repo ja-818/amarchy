@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BIN = str(ROOT / "bin/amarchy")
 BASE = Path(tempfile.mkdtemp(prefix="machines-"))
+os.chdir(BASE)     # what the servers and their fakes start from: never the checkout (the fake claude's argv.txt)
 USER = "tester@example.com"
 
 failed = []
