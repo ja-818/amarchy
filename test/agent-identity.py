@@ -172,6 +172,52 @@ am.app_subscriptions = lambda: [{}]
 am.board_notify({"id": "calcifer-calcifer", "lead": "calcifer-calcifer"}, {"id": "c1", "title": "Approve the post", "note": "n", "agent": "calcifer-calcifer"})
 check(sent[-1]["title"] == "🔥 Calcifer: Approve the post", f"a card on your phones: the same ({sent[-1]['title']})")
 
+# The real pushes: one of your team here that finished its turn, and one on
+# another machine (from its row there), each under its emoji and name.
+import types
+pushed = []
+am.push_all = lambda payload, desktop=None: pushed.append(payload) or 1
+am.finished_now = lambda sid: True
+am.app_asking = lambda s: []
+am.notice_chime = lambda s, mine: ""
+am.notice_actions = lambda *a, **k: []
+st = types.SimpleNamespace(statuses={"calcifer-calcifer": "working"}, asked={}, seen={})
+rows = [dict(r, status="idle", said="The build's done, no thanks to you") for r in am.session_view() if r["id"] == "calcifer-calcifer"]
+am.app_moments(st, rows)
+for _ in range(50):
+    if pushed:
+        break
+    time.sleep(0.05)
+check(pushed and pushed[-1]["title"] == "🔥 Calcifer" and pushed[-1]["body"] == "The build's done, no thanks to you",
+      f"done, here: its push under its emoji and name ({pushed[-1:]})")
+pushed.clear()
+st = types.SimpleNamespace(peer_statuses={"ja:calcifer-calcifer": ("working", False)}, seen={})
+row = {"id": "calcifer-calcifer", "machine": "ja", "status": "idle", "unseen": True, "assistant": "agent", "assistant_name": "Calcifer",
+       "emoji": "🔥", "said": "Logs burned. You're welcome", "picture": "62310b2f6206"}
+am.peer_moments(st, {"machine": am.machine_name(), "sessions": [row], "machines": [{"name": "ja", "label": "Castle"}]})
+for _ in range(50):
+    if pushed:
+        break
+    time.sleep(0.05)
+check(pushed and pushed[-1]["title"] == "🔥 Calcifer" and pushed[-1]["icon"].endswith("/picture/62310b2f6206-192.png"),
+      f"done, on another machine: the same, its picture by it ({pushed[-1:]})")
+pushed.clear()
+am.peer_moments(st, {"machine": am.machine_name(), "sessions": [dict(row, status="working", unseen=False)], "machines": []})
+am.peer_moments(st, {"machine": am.machine_name(), "sessions": [{k: v for k, v in row.items() if k != "emoji"}], "machines": []})
+for _ in range(50):
+    if pushed:
+        break
+    time.sleep(0.05)
+check(pushed and pushed[-1]["title"] == "Calcifer", f"a machine with an older amarchy (no emoji in its row): its name, as before ({pushed[-1:]})")
+
+# Monday's recap: your assistant's, under its emoji and name.
+import datetime
+am.missions_view = lambda: {"streak": 0, "today": []}
+am.missions_last_week = lambda today: {"n": 4, "best": (today, 3), "fast": 0}
+monday = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+r = am.missions_nudge(datetime.datetime(monday.year, monday.month, monday.day, 9, 30))
+check(r and r["title"] == "🐸 Jaken: your week", f"Monday's recap: under your assistant's emoji and name ({r})")
+
 # ---- made your assistant: it keeps who it is
 run("assistant", "calcifer-calcifer")
 check(am.assistant()["emoji"] == "🔥" and am.assistant()["tone"].startswith("proud") and am.assistant()["name"] == "Calcifer",

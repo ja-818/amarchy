@@ -126,7 +126,8 @@ today = datetime.date.today()
 eve = datetime.datetime(today.year, today.month, today.day, 20, 30)
 n1 = am.missions_nudge(eve)
 check(n1 and "3-day streak" in n1["title"], f"8pm, a 3-day streak at risk: reminded ({n1})")
-check(am.missions_nudge(eve) is None, "once a day")
+n2 = am.missions_nudge(eve)
+check(n2 is None or n2.get("tag") != "amarchy-streak", f"once a day (a Monday's recap may come next: {n2})")
 check(am.missions_nudge(datetime.datetime(today.year, today.month, today.day, 15)) is None or today.weekday() == 0, "not before 8pm")
 
 # The recap: on a Monday, last week's.

@@ -5596,7 +5596,7 @@ def missions_nudge(now=None):
                 body += f" · {week['fast']} fast repl{'ies' if week['fast'] != 1 else 'y'}"
             if v["streak"]:
                 body += f" · a {v['streak']}-day streak going"
-            payload = {"title": f"{mine['name']}: your week" if mine else "Your week", "body": body,
+            payload = {"title": team_title(mine, "your week") if mine else "Your week", "body": body,
                        "tag": "amarchy-recap", "url": "/"}
             if mine:
                 payload["icon"] = assistant_icon()
