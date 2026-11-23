@@ -48,7 +48,9 @@ struct NodeState: Decodable, Equatable {
 final class TailnetNode: OwnNode {
     func start(dir: String, hostname: String) throws {
         var error: NSError?
-        if !MobileStart(dir, hostname, &error) { throw error ?? Net.Failure(errorDescription: "amarchy's own node didn't start") }
+        if !MobileStart(dir, hostname, &error) {
+            throw error.map { $0 as Error } ?? Net.Failure(errorDescription: "amarchy's own node didn't start")
+        }
     }
 
     func stop() { MobileStop() }
