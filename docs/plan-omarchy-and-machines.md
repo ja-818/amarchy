@@ -527,7 +527,11 @@ reopen, Super+Shift+A as the key, Where cloning a project first).
 In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
 and the phone apps (G) last. Started 2026-11-22: D in the `amarchy-machines`
 chat, E in `amarchy-move-chat`, H in `amarchy-desktop-app` once its fixes are
-in. I and F wait on Julian's OK (publishing, spending).
+in. E and H shipped on 2026-11-22. Overnight (Julian's go: "everything shipped"):
+F in `amarchy-cloud-machines`, G in `amarchy-phone-apps`, I prepared in
+`amarchy-omarchy-home`. What needs his accounts or money (a provider token, the
+AUR and omarchy-pkgs, signing and the stores, the relay's host) is prepared to
+the last step and left for him.
 
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
