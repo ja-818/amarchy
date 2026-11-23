@@ -1231,7 +1231,9 @@ class SessionView {
 
   open() {
     this.chat.open();
-    if (lastInput.keys) this.chat.navStart();      // opened with the keys: on its latest message
+    // On a computer, the keys in its box (or its card), to write; on a
+    // phone's touch, none: its keyboard would come up over the chat.
+    if (lastInput.keys || matchMedia("(hover: hover) and (pointer: fine)").matches) this.chat.takeKeys();
   }
 
   close() {

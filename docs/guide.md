@@ -194,8 +194,9 @@ A chat is a conversation, and it works the same on the phone and in a browser.
   - **The mic** writes what you say into the box: see [Dictation](#dictation).
   - **Send** turns into **Stop** while Claude works. What you send while it works
     waits over the box, "Will send when Claude finishes", with **Send now**, **Edit**
-    (back into the box, its pictures too) and ✕ (not sent). **Stop** brings what
-    was waiting back into the box, as Esc does in Claude Code.
+    (back into the box, its pictures too) and ✕ (not sent). **Stop** (or `Esc`
+    in the box) brings what was waiting back into the box, as Esc does in Claude
+    Code.
 - **On a computer, Enter sends and Shift+Enter is a new line**; on a phone, the
   Send button sends. Typing goes into the box when the keys aren't on a message.
 
@@ -449,17 +450,21 @@ host's chats without anything else installed.
   and you stay on the board, on with the rest (as after sending any chat
   something): it works under **At work**, and shows under **Needs you** once it's
   done. `Esc` in its empty box puts it away.
-- **A chat opened** with a click takes the whole window, its box ready: answer,
-  approve, write. Opened with the keys (`Enter` on its card), the keys are on its
-  latest message, as on the board's cards: `j` / `k` (or `↓` / `↑`) from message
-  to message, `l` (or `→`) into one, along its buttons and links, `h` (or `←`)
-  back and out, `Enter` on a button presses it, `g` / `G` the first and the
-  latest, `d` / `u` half a page, and `i` the box to write in (`Ctrl+Alt+Enter`
-  dictates from anywhere). On a message the letters are these keys, not words. As on the board,
-  one message is lit (the latest, until you move): a click elsewhere, the bar,
-  another window leave it lit, and the keys go on from it. `Esc` in the box
-  goes out of it onto the latest message; on a message, **← Back** or `Esc`
-  (always, but in a terminal: what you were writing stays) is the board again, where you were, the keys on the card you opened; so is sending
+- **A chat opened**, with a click or the keys (`Enter` on its card), takes the
+  whole window, the keys in its box: write (or, when it asks you something, on
+  its card: answer, approve). In the box, `Esc` **stops Claude** while it works,
+  as in Claude Code; else it goes up onto the latest message, as `↑` does with
+  nothing above it in the box. `Page Up` / `Page Down` scroll the conversation
+  while you write. On the messages, as on the board's cards: `j` / `k` (or `↓` /
+  `↑`) from message to message, `l` (or `→`) into one, along its buttons and
+  links, `h` (or `←`) back and out, `Enter` on a button presses it, `g` / `G` the
+  first and the latest, `d` / `u` half a page, and `i` (or `↓` on the latest) the
+  box again (`Ctrl+Alt+Enter` dictates from anywhere). On a message the letters
+  are these keys, not words. As on the board, one message is lit (the latest,
+  until you move): a click elsewhere, the bar, another window leave it lit, and
+  the keys go on from it. On a message, **← Back** or `Esc` (never a stop: a
+  chat at work you only looked at goes on) is the board again, where you were,
+  the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. The browser's Back is the
   board too, a reload stays on the chat, and a link to a chat opens it.
   `Ctrl+Alt+J` / `K` open the next or previous chat in the board's order,
