@@ -1,0 +1,13 @@
+# amarchy's own Tailscale node in the app: tailnet/mobile built with
+# gomobile into Frameworks/Tailnet.xcframework (not in git). Included by
+# project.yml only when it's there (generate.sh sets AMARCHY_TAILNET).
+#
+#   cd tailnet && gomobile bind -target ios,iossimulator -o ../phone/ios/Frameworks/Tailnet.xcframework ./mobile
+
+targets:
+  Amarchy:
+    dependencies:
+      - framework: Frameworks/Tailnet.xcframework
+        embed: false
+      # Go's runtime on iOS resolves names with libresolv.
+      - sdk: libresolv.tbd

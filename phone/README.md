@@ -176,9 +176,13 @@ an app widget, updated the same way.
   from `phone/android/firebase.properties` (not in git) or the build's
   environment (`FIREBASE_*`); without them the app builds and runs, and says
   notifications aren't in this build.
-- iOS: on a Mac, `cd phone/ios && xcodegen && xcodebuild ...`; in CI,
-  `.github/workflows/phone.yml` builds it for the simulator and runs its
-  tests.
+- iOS: on a Mac, `cd phone/ios && ./generate.sh` (XcodeGen: `brew install
+  xcodegen`), then open `Amarchy.xcodeproj`, or `xcodebuild test -scheme
+  Amarchy -destination 'platform=iOS Simulator,name=iPhone 17'`; in CI,
+  `.github/workflows/phone-ios.yml` builds every target for the simulator
+  and runs its unit tests and its UI tests (against this checkout's
+  `bin/amarchy`), and keeps their screenshots. TestFlight: by hand only,
+  `phone/ios/store/README.md`.
 - The relay's address is built in: `AMARCHY_RELAY` (iOS: a build setting,
   in the app's `Info.plist` as `AmarchyRelay`; Android: a Gradle property or
   the environment, `BuildConfig.AMARCHY_RELAY`). Without it, notifications

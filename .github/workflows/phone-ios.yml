@@ -1,0 +1,191 @@
+# The iPhone app (phone/ios/): every target built for the simulator, its
+# unit tests (the push vectors every side decrypts, the bridge, links,
+# categories, the share sheet's upload) and its UI tests (the app against a
+# real amarchy app server, this checkout's bin/amarchy), screenshots kept as
+# this run's artifacts. Unsigned: no Apple account is needed for any of it.
+#
+# `release` (by hand only: Run workflow, with "release" ticked) signs a
+# build and uploads it to TestFlight with fastlane; the secrets it needs are
+# in phone/ios/store/README.md. Nothing here ever runs it by itself.
+name: iPhone app
+
+on:
+  push:
+    paths: ["phone/ios/**", "phone/testdata/**", "desktop/dist/**", "sounds/*.wav", "bin/amarchy",
+            ".github/workflows/phone-ios.yml"]
+  pull_request:
+    paths: ["phone/ios/**", "phone/testdata/**", "desktop/dist/**", "sounds/*.wav", "bin/amarchy",
+            ".github/workflows/phone-ios.yml"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Also sign a build and upload it to TestFlight (needs the secrets in phone/ios/store/README.md)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phone-ios-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  XCODE_MAJOR: "26"           # the newest stable Xcode of this major on the runner
+  SERVER_PORT: "8765"
+
+jobs:
+  test:
+    name: Simulator build and tests
+    runs-on: macos-26
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: phone/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_${XCODE_MAJOR}*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: XcodeGen, and tmux for the app server
+        run: brew install xcodegen tmux
+
+      - name: The Xcode project
+        run: ./generate.sh
+
+      - name: An iPhone simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              for d in devices if m else []:
+                  if d.get("isAvailable") and d["name"].startswith("iPhone"):
+                      key = (int(m[1]), int(m[2]), "Pro" in d["name"] and "Max" not in d["name"])
+                      if best is None or key > best[0]:
+                          best = (key, d["udid"], d["name"], runtime)
+          print(best[1]); print(best[2], best[3], file=sys.stderr)
+          ')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+
+      - name: Every target, for the simulator (Debug, with its tests)
+        run: |
+          xcodebuild build-for-testing -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: Every target, for the simulator (Release)
+        run: |
+          xcodebuild build -project Amarchy.xcodeproj -scheme Amarchy -configuration Release \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build-release \
+            CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: The amarchy the UI tests open
+        run: |
+          python3 UITests/server.py "$SERVER_PORT" "$RUNNER_TEMP/amarchy-home" > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 60); do
+            curl -sf "http://127.0.0.1:$SERVER_PORT/api/peer/hello" && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/server.log"
+          exit 1
+
+      - name: Unit and UI tests
+        env:
+          TEST_RUNNER_AMARCHY_TEST_SERVER: http://127.0.0.1:${{ env.SERVER_PORT }}
+        run: |
+          xcodebuild test-without-building -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
+            -resultBundlePath "$RUNNER_TEMP/Amarchy.xcresult" CODE_SIGNING_ALLOWED=NO
+
+      - name: Screenshots
+        if: always()
+        run: |
+          shots="$RUNNER_TEMP/shots"
+          mkdir -p "$shots/tests"
+          # The UI tests' own (XCTAttachment), by the names they gave them.
+          if [ -d "$RUNNER_TEMP/Amarchy.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Amarchy.xcresult" --output-path "$shots/tests" || true
+            python3 - "$shots/tests" <<'EOF' || true
+          import json, os, sys
+          d = sys.argv[1]
+          for test in json.load(open(os.path.join(d, "manifest.json"))):
+              for a in test.get("attachments", []):
+                  src = os.path.join(d, a["exportedFileName"])
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  if os.path.exists(src):
+                      os.rename(src, os.path.join(d, name.replace("/", "-")))
+          EOF
+          fi
+          # The installed app as the simulator shows it, opened by its link.
+          udid="${{ steps.sim.outputs.udid }}"
+          if xcrun simctl get_app_container "$udid" io.github.ja818.amarchy >/dev/null 2>&1; then
+            xcrun simctl openurl "$udid" "amarchy://open?server=http://127.0.0.1:$SERVER_PORT" || true
+            sleep 12
+            xcrun simctl io "$udid" screenshot "$shots/simulator-board.png" || true
+            xcrun simctl openurl "$udid" "amarchy://chat/testbox/desk-fix" || true
+            sleep 6
+            xcrun simctl io "$udid" screenshot "$shots/simulator-chat.png" || true
+          fi
+          ls -la "$shots" "$shots/tests"
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-ios-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: warn
+
+      - name: Keep the test results and the server's log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-ios-results
+          path: |
+            ${{ runner.temp }}/Amarchy.xcresult
+            ${{ runner.temp }}/server.log
+          if-no-files-found: ignore
+
+  release:
+    name: TestFlight (by hand only)
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: phone/ios
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+      IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+      AMARCHY_RELAY: ${{ secrets.AMARCHY_RELAY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_${XCODE_MAJOR}*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: XcodeGen and fastlane
+        run: brew install xcodegen fastlane
+
+      - name: The Xcode project
+        run: ./generate.sh
+
+      - name: Signed, and uploaded to TestFlight
+        run: fastlane beta
