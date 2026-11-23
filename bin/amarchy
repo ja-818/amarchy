@@ -18066,10 +18066,16 @@ def app_handler(st, users, address):
 
             def out():          # the terminal, as it draws, to the page
                 try:
-                    while True:
+                    # Never a read once the page is gone (done): its pty is
+                    # closed then, and its number may already be another
+                    # connection's (a request read here would never be answered).
+                    while not done.is_set():
                         try:
+                            ready, _, _ = select.select([master], [], [], 0.5)
+                            if not ready:
+                                continue
                             data = os.read(master, 65536)
-                        except OSError:         # attach has ended
+                        except (OSError, ValueError):   # attach has ended
                             break
                         if not data:
                             break
@@ -18092,9 +18098,10 @@ def app_handler(st, users, address):
                         self.ws_send(b"", op=9)
                     except OSError:
                         return
+            reader = threading.Thread(target=out, daemon=True)
             try:
                 self.ws_handshake()
-                threading.Thread(target=out, daemon=True).start()
+                reader.start()
                 threading.Thread(target=ping, daemon=True).start()
                 while not done.is_set():
                     try:
@@ -18130,15 +18137,18 @@ def app_handler(st, users, address):
                 done.set()
                 st.looking(sid, False)
                 try:
-                    os.close(master)
-                except OSError:
-                    pass
-                try:
                     proc.terminate()
                     proc.wait(3)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()
+                except OSError:
+                    pass
+                # Its reader stopped first (done: within half a second), then its pty closed.
+                if reader.is_alive():
+                    reader.join(2)
+                try:
+                    os.close(master)
                 except OSError:
                     pass
 
