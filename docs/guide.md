@@ -621,9 +621,13 @@ amarchy machines remove omarchy   # both forget the other
 
 **Tailscale, set up for you.** Your machines and devices meet on Tailscale, each
 on your own account. `amarchy tailscale` takes a machine through it, a step at
-a time: installed (on Omarchy with Omarchy's own installer, which also puts its
-Tailscale panel in the bar; on Arch with pacman), its service running, amarchy
-allowed to drive it, signed in (it gets the sign-in link and opens it), on, and
+a time. With no Tailscale on it yet, it offers **amarchy's own node** first
+(`amarchy-tailnet`: Tailscale without installing it, built here and run as a
+service of yours, started for you; see "Tailscale inside the apps" in the plan),
+and installing the system's Tailscale as the other way (on Omarchy with Omarchy's
+own installer, which also puts its Tailscale panel in the bar; on Arch with
+pacman). Then: its service running, amarchy allowed to drive it, signed in (it
+gets the sign-in link and opens it), on, and
 your tailnet's MagicDNS and HTTPS certificates on (it opens the admin page where
 each is turned on). What needs root it asks before doing, in a terminal; run by
 Claude or a script, it says what to run instead. **Settings → Tailscale** in the
@@ -674,10 +678,11 @@ window closed.
 - **Install**: on a computer with a desktop (Omarchy, or any Wayland or X
   session), `install.sh` builds it there (`desktop/install.sh`: Rust and
   WebKitGTK; a few minutes the first time). On Arch it offers to install what
-  the build needs with pacman (sudo asks for your password); the microphone's
-  GStreamer plugins are asked for apart and never stop the build: when pacman
-  can't get them, the app is built anyway and says dictation in it waits on
-  them. When pacman can't get Rust, it offers mise's instead (just for you).
+  the build needs with pacman (sudo asks for your password); the GStreamer
+  plugins its sounds and microphone need are asked for apart and never stop
+  the build: when pacman can't get them, the app is built anyway and says its
+  sounds and dictation wait on them. When pacman can't get Rust, it offers
+  mise's instead (just for you).
   It never runs a system update (`pacman -Syu`): when your package list is too
   old for your mirror, it says so and leaves that to you. Its install ends by
   saying how it went ("The desktop app: …"). It's **Amarchy** in your launcher,
@@ -719,10 +724,18 @@ window closed.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
   DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+- **Sounds**: its window plays them through GStreamer. On a computer without
+  GStreamer's plugins (`gst-plugins-good`, `gst-plugins-base`,
+  `gst-plugin-pipewire`), where a sound would crash its page, the app plays
+  them itself (with PipeWire's `pw-play`) and its page plays no media; it says
+  so once in a notification and in Settings → Sound, with the command that
+  installs them (dictation needs them too). Once they're installed it starts
+  again by itself.
 - **When something goes wrong**: its log is
   `~/.local/state/amarchy/desktop/desktop.log` (the tray's **Its log**). A
   start always brings its window up: if its window is gone it's made again,
-  if its page crashed it loads again (drawing without the GPU from then on;
+  if its page crashed it loads again and the log says why (what the page
+  wrote last; twice with no sign why, it draws without the GPU from then on;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
   again by itself.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
@@ -743,11 +756,12 @@ a backup of each file it changes).
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
 - **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. (Super + A and Super + Shift + A are
-  Omarchy's.) For another key, set it before amarchy's line in
-  `~/.config/hypr/hyprland.lua`: `amarchy = { open_key = "SUPER + CTRL + ALT + A" }`
-  (`false`: no key).
-- **Amarchy in the Omarchy menu** (Super + Space) does the same.
+  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
+  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
+  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
+  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
+  under it.
 
 All three run `amarchy open`, which takes a chat too (`amarchy open
 amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
@@ -1687,6 +1701,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

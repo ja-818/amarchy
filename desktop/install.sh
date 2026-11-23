@@ -121,7 +121,7 @@ not_built() {
   exit 1
 }
 
-# ---- what building it needs, and what its microphone needs
+# ---- what building it needs, and what its sounds and microphone need
 
 # Rust's cargo: on the PATH, in ~/.cargo, or mise's (Omarchy has mise).
 cargo=""
@@ -151,9 +151,12 @@ build_missing() {
   echo "${m[@]}"
 }
 
-# What its microphone (dictation) needs, only when it runs: GStreamer's
-# PipeWire source, its base and good plugins. Never in the way of building it.
-mic_missing() {
+# What its sounds and microphone (dictation) need, only when it runs:
+# GStreamer's good plugins (the audio WebKit plays through: without them a
+# sound would end the page, so the app plays its chimes itself and its page
+# no media), its base plugins (the .oga chimes) and its PipeWire source (the
+# microphone). Never in the way of building it.
+media_missing() {
   command -v pacman >/dev/null || return 0
   local m=()
   pacman -Qq gst-plugin-pipewire >/dev/null 2>&1 || m+=(gst-plugin-pipewire)
@@ -192,9 +195,9 @@ pacman_get() {
 need=$(build_missing)
 if [[ -n $need ]]; then
   if ! command -v pacman >/dev/null; then
-    say "The desktop app needs Rust (cargo), WebKitGTK 4.1 and libayatana-appindicator to build (and GStreamer's PipeWire plugin for its microphone)."
-    echo "On Debian or Ubuntu: sudo apt install cargo libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-pipewire"
-    echo "On Fedora: sudo dnf install cargo webkit2gtk4.1-devel libayatana-appindicator-gtk3-devel gstreamer1-plugins-good"
+    say "The desktop app needs Rust (cargo), WebKitGTK 4.1 and libayatana-appindicator to build (and GStreamer's good, base and PipeWire plugins for its sounds and microphone)."
+    echo "On Debian or Ubuntu: sudo apt install cargo libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-base gstreamer1.0-pipewire"
+    echo "On Fedora: sudo dnf install cargo webkit2gtk4.1-devel libayatana-appindicator-gtk3-devel gstreamer1-plugins-good gstreamer1-plugins-base pipewire-gstreamer"
     echo "Then run $here/install.sh."
     not_built "it needs $need to build"
   fi
@@ -218,21 +221,21 @@ if [[ -n $need ]]; then
   fi
 fi
 
-# The microphone's, apart: if pacman can't get them, the app is built
-# anyway, and says dictation in it waits on them.
-mic=$(mic_missing)
-if [[ -n $mic && -t 0 && -t 1 ]]; then
-  say "For dictation in the desktop app (its microphone) this computer needs: $mic"
+# The sounds' and microphone's, apart: if pacman can't get them, the app is
+# built anyway, and says its sounds and dictation wait on them.
+media=$(media_missing)
+if [[ -n $media && -t 0 && -t 1 ]]; then
+  say "For its sounds and dictation the desktop app needs: $media"
   why=""
   # One transaction is all or nothing: after a failure, each on its own,
   # so the ones pacman can get still come (PipeWire's is what hears you).
-  if ! pacman_get $mic; then
-    for p in $mic; do
-      [[ $(mic_missing) == *"$p"* ]] && { pacman_get "$p" || true; }
+  if ! pacman_get $media; then
+    for p in $media; do
+      [[ $(media_missing) == *"$p"* ]] && { pacman_get "$p" || true; }
     done
   fi
-  mic=$(mic_missing)
-  [[ -n $mic && -n $why ]] && echo "$why"
+  media=$(media_missing)
+  [[ -n $media && -n $why ]] && echo "$why"
 fi
 
 # ---- built only when desktop/ changed (what's in it, the build not)
@@ -303,10 +306,10 @@ fi
 if ((fresh)); then
   say "The desktop app is installed: Amarchy in your launcher, or amarchy-desktop."
 fi
-if [[ -n $mic ]]; then
-  say "Dictation in the desktop app waits on: $mic"
-  echo "The app works without them. Once pacman can install them (sudo pacman -S --needed $mic), it hears you: no rebuild."
-  told "installed (Amarchy in your launcher); dictation in it waits on $mic (sudo pacman -S --needed $mic)"
+if [[ -n $media ]]; then
+  say "The desktop app's sounds and dictation wait on: $media"
+  echo "The app works without them: it plays its chimes itself meanwhile. Once pacman can install them (sudo pacman -S --needed $media), it sees them and starts again: no rebuild."
+  told "installed (Amarchy in your launcher); its sounds and dictation wait on $media (sudo pacman -S --needed $media)"
 else
   told "installed (Amarchy in your launcher, or amarchy-desktop)"
 fi

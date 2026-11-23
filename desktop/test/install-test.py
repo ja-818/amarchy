@@ -1,7 +1,8 @@
 # desktop/install.sh when pacman can't get what it asks for, as on an Omarchy
-# whose package list is older than its mirror (a 404): the microphone's
-# GStreamer plugins never stand in the way of building the app (built anyway,
-# and it says dictation waits on them, with the command); Rust that pacman
+# whose package list is older than its mirror (a 404): the GStreamer plugins
+# of its sounds and microphone never stand in the way of building the app
+# (built anyway, and it says its sounds and dictation wait on them, with the
+# command); Rust that pacman
 # can't get comes from mise instead (asked first); a package the build needs
 # that pacman can't get: not built, why in plain words, no system update
 # suggested (no -Sy, no -Syu); each says how it went in the line amarchy's
@@ -155,23 +156,24 @@ def main():
     tempfile.tempdir = str(CACHE)
     homes = []
 
-    # ---- the mic's plugins 404 (Julian's M5): built anyway.
-    print("the microphone's plugins: a 404")
+    # ---- the sounds' and mic's plugins 404 (Julian's M5): built anyway.
+    print("the sounds' and microphone's plugins: a 404")
     home, fake, path = sandbox({"installed": [], "gone": ["gst-plugins-good"]})
     homes.append(home)
     out, code = run(home, path)
     asked = (fake / "asked.log").read_text()
     check(code == 0 and (home / ".local/bin/amarchy-desktop").is_file(), f"built and installed all the same (exit {code})")
     check("pacman -S --needed gst-plugin-pipewire gst-plugins-base gst-plugins-good" in asked and "rust" not in asked,
-          "the build's packages and the microphone's asked for apart (here only the microphone's)")
+          "the build's packages and the sounds' and microphone's asked for apart (here only theirs)")
     state = json.loads((fake / "state.json").read_text())
     check("gst-plugin-pipewire" in state["installed"] and "gst-plugins-base" in state["installed"],
           "after the 404, each on its own: the ones pacman can get come (PipeWire's)")
     check("older than its mirror" in out and "a 404" in out, "pacman's 404 said in words")
-    check("Dictation in the desktop app waits on: gst-plugins-good" in out
-          and "sudo pacman -S --needed gst-plugins-good" in out, "dictation waits on the one missing, with the command")
+    check("The desktop app's sounds and dictation wait on: gst-plugins-good" in out
+          and "sudo pacman -S --needed gst-plugins-good" in out and "plays its chimes itself" in out,
+          "its sounds and dictation wait on the one missing, with the command")
     check("-Sy" not in out.replace("-Syu), yours to decide", ""), "no partial update suggested (-Sy)")
-    check(status(home).startswith("installed") and "dictation in it waits on gst-plugins-good" in status(home),
+    check(status(home).startswith("installed") and "its sounds and dictation wait on gst-plugins-good" in status(home),
           f"the summary line says so ({status(home)})")
 
     # ---- Rust: pacman can't get it, mise can (asked first).
@@ -208,7 +210,7 @@ def main():
     snippet = (ROOT / "install.sh").read_text()
     piece = snippet[snippet.index("# ---- the desktop app (track B): how it went"):snippet.index("# ---- end of the desktop app (track B)\n", snippet.index("# ---- the desktop app (track B): how it went"))]
     for said, bold in (("not built: it needs rust to build. pacman couldn't download them", True),
-                       ("installed (Amarchy in your launcher); dictation in it waits on gst-plugins-good", False)):
+                       ("installed (Amarchy in your launcher); its sounds and dictation wait on gst-plugins-good", False)):
         r = subprocess.run(["bash", "-c", "set -euo pipefail; say() { printf 'BOLD:%s\\n' \"$*\"; }; desktop_said=\"$1\"\n" + piece
                             + "\necho done", "x", said], capture_output=True, text=True)
         line = r.stdout.splitlines()[0] if r.stdout else ""
