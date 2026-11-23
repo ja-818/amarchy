@@ -1,8 +1,10 @@
-# The iPhone app (phone/ios/): every target built for the simulator, its
-# unit tests (the push vectors every side decrypts, the bridge, links,
-# categories, the share sheet's upload) and its UI tests (the app against a
-# real amarchy app server, this checkout's bin/amarchy), screenshots kept as
-# this run's artifacts. Unsigned: no Apple account is needed for any of it.
+# The iPhone app (phone/ios/): every target built for the simulator, with
+# amarchy's own Tailscale node and without it, its unit tests (the push
+# vectors every side decrypts, the Keychain and the app group, the bridge,
+# links, categories, the share sheet's upload) and its UI tests (the app
+# against a real amarchy app server, this checkout's bin/amarchy),
+# screenshots kept as this run's artifacts. No Apple account is needed for
+# any of it: unsigned, or signed to run locally (ad hoc) for the tests.
 #
 # `release` (by hand only: Run workflow, with "release" ticked) signs a
 # build and uploads it to TestFlight with fastlane; the secrets it needs are
