@@ -24,15 +24,29 @@ function machineState(m) {
   return { words: m.since ? `Off · ${autoPast(m.since)}` : "Off", tone: "quiet" };
 }
 
+// The icons a machine can wear (bin/amarchy MACHINE_ICONS), in words.
+const MACHINE_ICONS = [["server", "Server"], ["desktop", "Desktop"], ["laptop", "Laptop"], ["cloud", "Cloud"], ["tower", "Tower"], ["mini", "Mini"]];
+
+// A machine's own icon, as a glyph.
+function machineGlyph(m, cls = "machine") { return glyph(`m-${(m && m.icon) || "desktop"}`, cls); }
+
 function machinesSettings() {
   const ms = machinesAll();
   const many = ms.length > 1;
+  const as = (app.view && app.view.machines_as) || "icon";
   return [h("div", { class: "section" }, "Machines"),
     ...ms.map((m) => {
       const st = machineState(m);
       return h("button", { class: "control wide machine-row", onclick: () => machineSheet(m.name) },
-        glyph("machine", "machine"), h("span", { class: "machine-row-name" }, m.label), uiPill(st.words, st.tone));
+        machineGlyph(m), h("span", { class: "machine-row-name" }, m.label), uiPill(st.words, st.tone));
     }),
+    // How a chat's machine shows on its card and over it: its icon, or its name.
+    many ? h("p", { class: "hint" }, "On each chat, its machine as") : null,
+    many ? h("div", { class: "seg", role: "radiogroup", "aria-label": "Show machines as" }, ...[["icon", "Icons"], ["name", "Names"]].map(([v, label]) =>
+      h("button", { class: `control${as === v ? " on" : ""}`, type: "button", role: "radio", "aria-checked": String(as === v), onclick: async () => {
+        try { await api("/api/machines", { action: "show", as: v }); app.view.machines_as = v; refresh(); openSettings(); }
+        catch (e) { toast(e.message); }
+      } }, label))) : null,
     h("button", { class: "control wide", onclick: () => addMachineSheet() }, "Add a machine…"),
     h("p", {}, many ? "Every machine's chats are on one board, each with the machine it runs on. A chat stays on its machine."
                     : "Amarchy on your other computers (your desktop, a laptop): pair them and every machine's chats are on one board.")];
@@ -60,11 +74,27 @@ function machineSheet(name) {
       catch (e) { toast(e.message); }
     });
   const count = ((app.view && app.view.sessions) || []).filter((s) => machineOf(s).name === m.name).length;
+  // Its icon: on the machine itself (every machine shows the same), so it's
+  // picked while it answers.
+  const canChange = m.me || m.on;
+  const icons = h("div", { class: "machine-icons", role: "radiogroup", "aria-label": `${m.label}'s icon` }, ...MACHINE_ICONS.map(([key, words]) =>
+    h("button", { class: `control machine-icon${m.icon === key ? " on" : ""}`, type: "button", role: "radio", "aria-checked": String(m.icon === key),
+                  title: words, "aria-label": words, disabled: !canChange, onclick: async () => {
+      try {
+        await api("/api/machines", { action: "icon", name: m.name, icon: key });
+        m.icon = key;
+        refresh();
+        closeSheet();
+        machineSheet(m.name);
+      } catch (e) { toast(e.message); }
+    } }, glyph(`m-${key}`, "machine"), h("span", {}, words))));
   sheet({ key: "machine" }, sheetHead(m.label, m.me ? "This machine" : `${m.name}${m.version ? ` · ${m.version.slice(0, 7)}` : ""}`),
     h("p", {}, uiPill(st.words, st.tone), " ", m.update || (m.on || m.me ? `${count} chat${count === 1 ? "" : "s"} here.`
       : m.seen ? `It doesn't answer: its chats stay on the board as they last were, until it's back.`
       : "Paired, but it hasn't answered yet: is amarchy's app on there (amarchy app on)?")),
     !m.me && !m.on && m.error && !m.update ? h("p", { class: "hint" }, `Why: ${m.error}.`) : null,
+    h("div", { class: "section" }, "Icon"),
+    icons,
     h("div", { class: "section" }, "Name"),
     label,
     h("button", { class: "control wide accent", onclick: rename, disabled: !m.me && !m.on }, "Rename"),

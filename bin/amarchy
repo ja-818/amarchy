@@ -132,6 +132,10 @@ board, in the app on any of them; docs/guide.md, "Machines"):
   amarchy machines rename <name> <label>
                                         what the app calls a machine (this one, or another that answers):
                                         kept on that machine, so every machine shows the same
+  amarchy machines icon <name> <icon>   a machine's icon on the board: server, desktop, laptop, cloud, tower or
+                                        mini (kept on that machine; until picked, one that fits it)
+  amarchy machines show icon|name       how the board shows a chat's machine: its icon (its name on a hover),
+                                        or its name
   amarchy machines found [--json]       machines of yours on the tailnet that answer as amarchy, not paired yet
   amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]
                                         move a chat to another machine of yours, never on its own: once its
@@ -12441,7 +12445,7 @@ def app_watch(st):
                     mark_seen(s["id"])
                     s["unseen"] = False
                     s["unread"] = 0
-            view = {"hostname": host_name(), "sessions": [app_row(s) for s in ss], "projects": ps, "machine": machine_name(), "label": machine_label(),
+            view = {"hostname": host_name(), "sessions": [app_row(s) for s in ss], "projects": ps, "machine": machine_name(), "label": machine_label(), "icon": machine_icon(), "machines_as": machines_as(),
                     "look": look_stamp(look), "nerd": look["font"]["nerd"],
                     "sound": sound_name(),
                     "assistant_sound": assistant_sound_name(), "alerts": alerts(), "build": app_build(),
@@ -14118,6 +14122,9 @@ PROTOCOL = 1                    # the contract between machines (docs/plan-omarc
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "amarchy"
 MACHINES = CONFIG / "machines.json"
 MACHINE_LABEL = CONFIG / "label"        # this machine's label, when you gave it one
+MACHINE_ICON = CONFIG / "icon"          # this machine's icon on the board, when you picked one (see machine_icon)
+MACHINES_AS = STATE / "machines-as"     # how the board shows a chat's machine: icon (the default) or name
+MACHINE_ICONS = ("server", "desktop", "laptop", "cloud", "tower", "mini")
 MACHINE_NAME_FILE = CONFIG / "name"          # its name, kept once paired (a tailnet that renames it breaks no pair)
 PEERS_SEEN = APP / "peers"              # <name>.json: each machine's chats as last seen, for while it's off
 PEER_TIMEOUT = 8                        # seconds to reach a machine
@@ -14154,6 +14161,54 @@ def machine_name_keep():
     name = machine_name()
     if re.fullmatch(MACHINE_NAME_RE, name):
         write_file(MACHINE_NAME_FILE, name + "\n")
+
+
+def machine_kind():
+    """What this machine is, for its icon until you pick one: a laptop (it
+    has a battery), a machine in a cloud (a cloud's VM), a server (another
+    VM, or no desktop), or a desktop."""
+    try:
+        if any(Path("/sys/class/power_supply").glob("*/capacity")) or \
+                any(d.name.upper().startswith("BAT") for d in Path("/sys/class/power_supply").iterdir()):
+            return "laptop"
+    except OSError:
+        pass
+    try:
+        vendor = " ".join(Path(f"/sys/class/dmi/id/{k}").read_text().strip().lower() for k in ("sys_vendor", "product_name")
+                          if Path(f"/sys/class/dmi/id/{k}").exists())
+    except OSError:
+        vendor = ""
+    if any(c in vendor for c in ("google", "amazon", "ec2", "digitalocean", "hetzner", "linode", "vultr", "oracle", "azure",
+                                 "microsoft corporation virtual", "scaleway", "ovh", "hostinger")):
+        return "cloud"
+    virt = sh("systemd-detect-virt").stdout.strip() if shutil.which("systemd-detect-virt") else ""
+    if virt and virt != "none":
+        return "server"
+    if any(Path(p_).exists() for p_ in ("/usr/bin/Hyprland", "/usr/bin/hyprland", "/usr/bin/gnome-shell", "/usr/bin/plasmashell",
+                                        "/usr/bin/sway", "/usr/bin/Xorg")):
+        return "desktop"
+    return "server"
+
+
+def machine_icon():
+    """Its icon on the board: the one you picked (amarchy machines icon),
+    else its kind's."""
+    try:
+        icon = MACHINE_ICON.read_text().strip()
+        if icon in MACHINE_ICONS:
+            return icon
+    except OSError:
+        pass
+    return machine_kind()
+
+
+def machines_as():
+    """How the board shows a chat's machine: its icon (its name in words
+    with it on a hover or a long press), or its name."""
+    try:
+        return "name" if MACHINES_AS.read_text().strip() == "name" else "icon"
+    except OSError:
+        return "icon"
 
 
 def machine_label():
@@ -14212,7 +14267,7 @@ def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
             "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True,
-            "moves": True}
+            "moves": True, "kind": machine_kind(), "icon": machine_icon()}
 
 
 def machine_url_ok(url):
@@ -14320,6 +14375,23 @@ def peer_open(url, timeout=PEER_TIMEOUT):
         conn.set_tunnel(u.hostname, port, headers={"Proxy-Authorization": via[2]})
         return conn
     return http.client.HTTPConnection(u.hostname, u.port, timeout=timeout)
+
+
+def peer_connect(url, timeout=PEER_TIMEOUT):
+    """A raw socket to a machine's app (TLS for https), for what http.client
+    doesn't carry: a WebSocket passed through (Handler.tunnel)."""
+    import ssl
+    u = urllib.parse.urlsplit(url)
+    tls = u.scheme == "https"
+    # (Straight, or through amarchy's own Tailscale node where it's this machine's: tailnet_dial.)
+    sock = tailnet_dial(u.hostname, u.port or (443 if tls else 80), timeout)
+    if tls:
+        try:
+            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
+        except (OSError, ssl.SSLError):
+            sock.close()
+            raise
+    return sock
 
 
 def peer_headers(m, extra=None):
@@ -14530,6 +14602,23 @@ def machines_rename(name, label):
     return label
 
 
+def machines_icon(name, icon):
+    """A machine's icon, on the machine itself (every machine shows the
+    same one): this one's, or another's that answers."""
+    if icon not in MACHINE_ICONS:
+        raise PeerError(f"an icon: {', '.join(MACHINE_ICONS)}")
+    if name == machine_name():
+        write_file(MACHINE_ICON, icon + "\n")
+        return icon
+    m = machine_find(name)
+    if not m:
+        raise PeerError(f"no machine {name} (amarchy machines lists them)")
+    status, said = peer_json(m, "POST", "/api/peer/icon", {"icon": icon}, timeout=5)
+    if status != 200:
+        raise PeerError(said.get("error") or f"{m['label']} said no ({status})")
+    return icon
+
+
 def machine_state(m):
     """Whether machine m answers, as `amarchy machines` says it: {state:
     on|off|update, version, label, error}."""
@@ -14626,6 +14715,14 @@ def cmd_machines(args):
         if what == "rename" and len(args) == 3:
             label = machines_rename(args[1], args[2])
             print(f"{args[1]} is {label} now")
+            return 0
+        if what == "icon" and len(args) == 3:
+            icon = machines_icon(args[1], args[2])
+            print(f"{args[1]}'s icon is {icon} now")
+            return 0
+        if what == "show" and len(args) == 2 and args[1] in ("icon", "name"):
+            write_file(MACHINES_AS, args[1] + "\n")
+            print(f"the board shows a chat's machine by its {args[1]}")
             return 0
         if what == "found" and len(args) == 1:
             found = machines_found()
@@ -14834,7 +14931,7 @@ def board_view(st):
     if memo and memo[0] == version:
         return memo[1]
     me = machine_name()
-    machines = [{"name": me, "label": machine_label(), "me": True, "on": True, "since": None, "error": None,
+    machines = [{"name": me, "label": machine_label(), "icon": machine_icon(), "me": True, "on": True, "since": None, "error": None,
                  "update": None, "version": amarchy_version(), "seen": True,
                  "projects": [{"name": p["name"], "github": p.get("github")} for p in view.get("projects") or []]}]
     sessions = list(view.get("sessions") or [])
@@ -14848,6 +14945,7 @@ def board_view(st):
         h = p.get("hello") or {}
         off = not p.get("on")
         machines.append({"name": name, "label": str(h.get("label") or m["label"])[:LABEL_MAX], "me": False,
+                         "icon": h.get("icon") if h.get("icon") in MACHINE_ICONS else "desktop",
                          "on": not off, "since": p.get("since"), "error": p.get("error"), "update": p.get("update"),
                          "version": h.get("version") or "", "seen": bool(p.get("sessions") or p.get("at")),
                          "projects": [{"name": x.get("name"), "github": x.get("github")} for x in p.get("projects") or []
@@ -14875,7 +14973,7 @@ def board_view(st):
             sessions.append({**row, "id": to_id, "machine": where, "moved_from": r["from"]})
             board_keys.add(to)
     # What needs you: not a chat on a machine that's off (nothing to answer it with until it's back).
-    board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True,
+    board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True, "machines_as": machines_as(),
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
@@ -16824,6 +16922,13 @@ def app_handler(st, users, address):
                 r = run_amarchy("send", sid, "-", "--no-wait", input=text,
                                 env={"AMARCHY_SESSION": origin or f"{self.peer}:", **({"AMARCHY_SENT_BY": "you"} if data.get("you") is True else {})})
                 return self.send(200, {}) if r.returncode == 0 else self.error(409, gist(r.stderr) or "it couldn't be sent")
+            if what == "icon":      # this machine's icon, picked on another machine
+                try:
+                    icon = machines_icon(machine_name(), data.get("icon") if isinstance(data.get("icon"), str) else "")
+                except PeerError as e:
+                    return self.error(400, str(e))
+                st.poke.set()
+                return self.send(200, {"icon": icon})
             if what == "unpair":
                 machine_drop(self.peer)
                 if st.peers:
@@ -16957,8 +17062,13 @@ def app_handler(st, users, address):
             elif action == "rename" and isinstance(data.get("name"), str) and re.fullmatch(MACHINE_NAME_RE, data["name"]) \
                     and isinstance(data.get("label"), str):
                 r = run_amarchy("machines", "rename", data["name"], data["label"], timeout=30)
+            elif action == "icon" and isinstance(data.get("name"), str) and re.fullmatch(MACHINE_NAME_RE, data["name"]) \
+                    and data.get("icon") in MACHINE_ICONS:
+                r = run_amarchy("machines", "icon", data["name"], data["icon"], timeout=30)
+            elif action == "show" and data.get("as") in ("icon", "name"):
+                r = run_amarchy("machines", "show", data["as"], timeout=30)
             else:
-                return self.error(400, "add (target), remove (name) or rename (name, label)")
+                return self.error(400, "add (target), remove (name), rename (name, label), icon (name, icon) or show (as)")
             if r.returncode != 0:
                 return self.error(409, gist(r.stderr or r.stdout) or "it didn't work")
             if st.peers:
@@ -17067,16 +17177,12 @@ def app_handler(st, users, address):
         def tunnel(self, peer, rest, label):
             """A WebSocket on another machine (a terminal, dictation): opened
             there as this machine, then its frames both ways as they come."""
-            import ssl
             if not self.ws_check():
                 return
             u = urllib.parse.urlsplit(peer["url"])
-            tls = u.scheme == "https"
             sock = None
             try:
-                sock = socket.create_connection((u.hostname, u.port or (443 if tls else 80)), timeout=PEER_TIMEOUT)
-                if tls:
-                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
+                sock = peer_connect(peer["url"])
                 hs = {"Host": u.hostname + (f":{u.port}" if u.port else ""), "Upgrade": "websocket", "Connection": "Upgrade",
                       "Sec-WebSocket-Key": self.headers["Sec-WebSocket-Key"], "Sec-WebSocket-Version": "13",
                       **peer_headers(peer, {"User-Agent": self.headers.get("User-Agent") or f"amarchy/{PROTOCOL}"})}
@@ -18060,7 +18166,7 @@ def app_handler(st, users, address):
             if self.path.startswith("/api/m/"):     # a chat on another machine (the pass-through)
                 self.changed_nothing = True         # (that machine's list says what changed)
                 return self.pass_through()
-            if self.path in ("/api/peer/unpair", "/api/peer/label", "/api/peer/send"):
+            if self.path in ("/api/peer/unpair", "/api/peer/label", "/api/peer/send", "/api/peer/icon"):
                 if self.via != "peer":
                     return self.error(403, "only from another machine of yours")
                 return self.peer_post(self.path.rsplit("/", 1)[1], self.body())

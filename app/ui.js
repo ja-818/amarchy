@@ -245,7 +245,9 @@ function uiPatchPart(old, next) {
 // sub: a line under its name (a conversation's: its last message, or what
 // it's doing), its pill and count (uiUnread) stacked at its end, as a
 // messaging app's list has them.
-function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = null, count = 0, body = [], actions = [], open, id, label, unseen = null }) {
+// on: the chat whose machine a card shows when it isn't the card's own (an
+// agent's task: its agent's).
+function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = null, count = 0, body = [], actions = [], open, id, label, unseen = null, on = null }) {
   // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
   // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
@@ -253,7 +255,8 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   // to read, not to act on (its buttons would go nowhere) until it's back.
   const off = s ? uiMachineOff(s) : "";
   if (off) {
-    pill = uiPill(off, "quiet", { long: true, title: `${off}: what it shows is from when it last answered` });
+    // "Off" by its machine's icon (dimmed), the whole of it in its label.
+    pill = uiPill(/^Update/.test(off) ? "Update needed" : "Off", "quiet", { title: `${off}: what it shows is from when it last answered` });
     actions = [];
     count = 0;
   }
@@ -270,10 +273,14 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
   const name = h("span", { class: "tcard-title" }, typeof title === "string" ? taskText(title) : title);
   const two = sub !== null || count;
+  // Its machine (with two or more): on the right, by where it stands (its
+  // state, an agent's time), as small as its pill.
+  const where = s || on ? uiMachine(s || on) : null;
   const head = h("button", { class: `tcard-head today-go${two ? " two" : ""}`, type: "button", onclick: open, "aria-label": label || null },
-    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null, s ? uiMachine(s) : null,
+    lead, prio, chip ? h("span", { class: "tcard-chip" }, chip) : null,
     two ? h("span", { class: "tcard-main" }, name, sub !== null ? h("span", { class: "tcard-sub" }, sub) : null) : name,
-    two ? h("span", { class: "tcard-side" }, pill, uiUnread(count)) : pill);
+    two ? h("span", { class: "tcard-side" }, where || pill ? h("span", { class: "tcard-side-top" }, where, pill) : null, uiUnread(count))
+        : where ? h("span", { class: "tcard-side-one" }, where, pill) : pill);
   // The whole card opens it (its buttons, links and boxes do their own thing).
   const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen && !off ? " unseen" : ""}${off ? " machine-off" : ""}`, "data-id": id || null,
                               onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
@@ -284,14 +291,20 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   return card;
 }
 
-// The machine a chat is on (docs/plan-omarchy-and-machines.md): a word with
-// a screen by it, on its card and its head, only when the board has chats
-// from two or more machines (with one there's nothing to tell apart).
+// The machine a chat is on (docs/plan-omarchy-and-machines.md): its icon
+// (a server, a laptop...: the one picked for it in Settings → Machines), or
+// its name (Show machines as: names), on its card and over its chat, by
+// where it stands; its name is its label (a hover says it; a card held, its
+// menu). Only when the board has chats from two or more machines: with one
+// there's nothing to tell apart.
 function uiMachine(s, { head = false } = {}) {
   if (!s || typeof machinesShown !== "function" || machinesShown().length < 2) return null;
   const m = machineOf(s);
-  return h("span", { class: `ui-machine${head ? " head" : ""}${uiMachineOff(s) ? " off" : ""}`, title: `On ${m.label}` },
-    glyph("machine"), h("span", { class: "ui-machine-name" }, m.label));
+  const byName = app.view && app.view.machines_as === "name";
+  const off = uiMachineOff(s);
+  return h("span", { class: `ui-machine${head ? " head" : ""}${off ? " off" : ""}${byName ? " named" : ""}`, title: off || `On ${m.label}`,
+                     role: "img", "aria-label": off || `On ${m.label}`, "data-machine": m.name, "data-icon": m.icon || "desktop" },
+    byName ? null : glyph(`m-${m.icon || "desktop"}`), byName ? h("span", { class: "ui-machine-name" }, m.label) : null);
 }
 
 // "<label> is off" (or what to update) for a chat on a machine that doesn't answer, else "".
@@ -614,12 +627,13 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
   return [
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
     h("button", { class: `head-title${main ? " who" : ""}`, type: "button", title: `${where(s)} · rename`, onclick: rename },
-      main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)), uiMachine(s, { head: true }),
+      main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
       main ? h("span", { class: "head-name" }, taskText(s.assistant_name || "Assistant"),
                now ? h("span", { class: `head-sub t-${now.tone}`, role: "status" }, now.text) : null)
         : taskText(s.task || "New chat", s.task ? "" : "untitled")),
     h("div", { class: "head-btns" },
-      // Where it stands: a box as the buttons are, its tone a dot in it.
+      // Its machine, then where it stands (a box as the buttons are, its tone a dot in it): as on its card.
+      uiMachine(s, { head: true }),
       main ? null : h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
       h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
