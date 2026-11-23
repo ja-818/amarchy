@@ -5645,7 +5645,7 @@ def cmd_reap(sid):
     if had_branch:
         sh("git", "branch", "-d", s["branch"], cwd=repo_dir)    # kept when it isn't merged
     shutil.rmtree(claude_dir(sid), ignore_errors=True)
-    for x in (PREVIEWS / f"{sid}.json", PREVIEWS / f"{sid}.log"):
+    for x in (PREVIEWS / f"{sid}.json", PREVIEWS / f"{sid}.log", MOVES / f"{sid}.gate"):
         x.unlink(missing_ok=True)
     set_trust(path, False)
     f.unlink(missing_ok=True)
@@ -15684,6 +15684,10 @@ def board_view(st):
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
+        # Every machine's in the order tasks_view gives one's (then by machine):
+        # the same on each machine's board, not this one's first.
+        tasks.sort(key=lambda t: (not t.get("until"), t.get("until") or t.get("at") or 0, t.get("at") or 0,
+                                  t.get("machine") or me, str(t.get("id") or "")))
         board["today"] = {**(view.get("today") or {}), "tasks": tasks}
     st.board = (version, board)
     return board
@@ -15975,6 +15979,30 @@ def move_lock(sid):
         lock.close()
         return None
     return lock
+
+
+def move_gate(sid, exclusive=False, wait=30):
+    """The gate between a chat's move and what reaches it here (a message,
+    an answer, a wake): held shared by each request to the chat from before
+    it asks move_holds until it's done (its message with Claude, or queued),
+    and an instant exclusively by a move once it says it's under way, so it
+    looks at a chat with nothing left on its way in (move_busy sees it): a
+    message sent as the move starts is either refused (move_holds) or in
+    before it looks, never cut by the move stopping its Claude. The open
+    file (closing it lets go), or None if it wasn't free within wait
+    seconds."""
+    MOVES.mkdir(parents=True, exist_ok=True)
+    gate = open(MOVES / f"{sid}.gate", "a")
+    end = time.time() + wait
+    while True:
+        try:
+            fcntl.flock(gate, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+            return gate
+        except OSError:
+            if time.time() >= end:
+                gate.close()
+                return None
+            time.sleep(0.05)
 
 
 def move_running(sid):
@@ -16437,6 +16465,13 @@ def move_project_there(m, s, say):
         raise MoveError(f"couldn't clone {slug} on {m['label']}: {added.get('error') or status}")
 
 
+def move_die(at):
+    """The tests: a move's process killed right here (AMARCHY_MOVE_DIE=at, a
+    step's words or one of the points in between), as one killed would be."""
+    if os.environ.get("AMARCHY_MOVE_DIE") == at:
+        os._exit(9)
+
+
 def move_go(s, m, rec, say):
     sid, label, path = s["id"], m["label"], Path(s["path"])
     if (move_read(sid) or {}).get("cancel"):
@@ -16444,13 +16479,17 @@ def move_go(s, m, rec, say):
     rec.update(started=True, move=uuid.uuid4().hex)
 
     def step(text):
-        if os.environ.get("AMARCHY_MOVE_DIE") == text:
-            os._exit(9)         # (the tests: a mover that dies here, as one killed would)
+        move_die(text)
         rec["step"] = text
         move_write(sid, rec)
         say(text)
 
     step("Getting ready")
+    # What was sent it as this started: in first (or refused), then looked at.
+    gate = move_gate(sid, exclusive=True, wait=60)
+    if not gate:
+        raise MoveError("a message is on its way in")
+    gate.close()
     why = move_refused(s)
     if why:
         raise MoveError(why)
@@ -16495,12 +16534,15 @@ def move_go(s, m, rec, say):
         left = preview_close(s)
         if left:
             raise MoveError(PREVIEW_LEFT + "; ".join(left))
+        # Each written down before git does it: a mover killed in the middle
+        # (move --tend undoes it) knows what it had begun.
+        def noted(**what):
+            undo.update(what)
+            move_write(sid, rec)
         step("Committing its work")
-        undo.update(move_commit(s, label, files))
-        move_write(sid, rec)
+        move_commit(s, label, files, noted)
         step("Pushing its branch")
-        undo.update(move_push(path, undo["branch"]))
-        move_write(sid, rec)
+        move_push(path, undo["branch"], noted)
         step("Packing its conversation")
         pkg = MOVES / f"{sid}.pkg.tar.gz"
         move_pack(s, rec, files, [{**x, "value": session_secrets(s["repo"]).get(x["name"])} for x in asked], pkg)
@@ -16534,11 +16576,15 @@ def move_go(s, m, rec, say):
     return {"key": said.get("key"), "id": said.get("id"), "notes": [*(said.get("notes") or []), *notes]}
 
 
-def move_commit(s, label, files):
+MOVE_WIP = "WIP: moving to "      # a move's WIP commit's subject begins so
+
+
+def move_commit(s, label, files, noted):
     """What isn't committed in the chat's worktree, as one WIP commit on its
     branch (but the files that hold keys: files["private"], carried instead).
-    {branch, head (before it), index (the index as it was, a tree), wip (the
-    commit, or None: nothing to commit)}."""
+    Noted (for move_undo) before each step: {branch, head (before it), index
+    (the index as it was, a tree)}, then {wip: the commit} once it's made (none:
+    nothing to commit). All of it, too."""
     path = Path(s["path"])
     branch = move_branch(path)
     if not branch:
@@ -16548,6 +16594,7 @@ def move_commit(s, label, files):
     if r.returncode != 0:
         raise MoveError(f"couldn't read its index: {gist(r.stderr) or 'git write-tree failed'}")
     out = {"branch": branch, "head": head, "index": r.stdout.strip(), "wip": None}
+    noted(**out)
     r = move_git(path, "add", "-A")
     if r.returncode != 0:
         move_git(path, "read-tree", out["index"])
@@ -16558,7 +16605,7 @@ def move_commit(s, label, files):
         move_git(path, "read-tree", out["index"])
         return out
     task = session_task(s, "") or s["name"]
-    message = (f"WIP: moving to {label} (amarchy move)\n\nWhat \"{task}\" hadn't committed yet when it moved from "
+    message = (f"{MOVE_WIP}{label} (amarchy move)\n\nWhat \"{task}\" hadn't committed yet when it moved from "
                f"{machine_label()} to {label}, so its work goes with it. Amend or squash it before it's merged.\n")
     ident = []
     if not move_git(path, "config", "user.email").stdout.strip():
@@ -16568,12 +16615,15 @@ def move_commit(s, label, files):
         move_git(path, "read-tree", out["index"])
         raise MoveError(f"couldn't commit its work: {gist(r.stderr or r.stdout)}")
     out["wip"] = move_git(path, "rev-parse", "HEAD").stdout.strip()
+    move_die("committed")
+    noted(wip=out["wip"])
     return out
 
 
-def move_push(path, branch):
-    """The branch pushed to origin, forward only: {origin (its branch there
-    before, or None), pushed (what's there now)}."""
+def move_push(path, branch, noted):
+    """The branch pushed to origin, forward only. Noted (for move_undo) before
+    it pushes: {origin (its branch there before, or None), pushed (what it
+    pushes)}. All of it, too."""
     r = move_git(path, "ls-remote", "origin", f"refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
     if r.returncode != 0:
         raise MoveError(f"couldn't reach origin: {gist(r.stderr) or 'git ls-remote failed'}")
@@ -16588,11 +16638,14 @@ def move_push(path, branch):
             raise MoveError(f"origin's {branch} has commits this chat doesn't: bring them in first (git pull), then move it")
     out = {"origin": before, "pushed": None}
     if before != head:
+        out["pushed"] = head
+        noted(**out)
         p = move_git(path, "push", "-q", "--no-verify", "-u", "origin", f"HEAD:refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
         if p.returncode != 0:
             raise MoveError(f"couldn't push its branch to origin: {gist(p.stderr) or 'git push failed'}")
-        out["pushed"] = head
+        move_die("pushed")
     else:
+        noted(**out)
         move_git(path, "branch", "-q", f"--set-upstream-to=origin/{branch}")
     return out
 
@@ -16723,19 +16776,32 @@ def move_undo(s, rec, say=None):
     say = say or (lambda text: None)
     sid, path, undo = s["id"], Path(s["path"]), rec.get("undo") or {}
     notes = []
-    if path.is_dir() and undo.get("wip"):
-        if move_git(path, "rev-parse", "HEAD").stdout.strip() == undo["wip"]:
+    if path.is_dir() and undo.get("head") and undo.get("index"):
+        now = move_git(path, "rev-parse", "HEAD").stdout.strip()
+        wip = undo.get("wip")
+        if not wip and now != undo["head"]:
+            # Its mover went right after committing, before it said so: the
+            # WIP commit is the one on what it had, by its subject.
+            parent = move_git(path, "rev-parse", "--verify", "--quiet", f"{now}^").stdout.strip()
+            if parent == undo["head"] and move_git(path, "log", "-1", "--format=%s", now).stdout.startswith(MOVE_WIP):
+                wip = now
+        if wip and now == wip:
             move_git(path, "reset", "-q", "--soft", undo["head"])
             move_git(path, "read-tree", undo["index"])
-        else:
-            notes.append(f"its WIP commit {undo['wip'][:9]} stays: its branch moved on since")
+        elif wip:
+            notes.append(f"its WIP commit {wip[:9]} stays: its branch moved on since")
+        elif now == undo["head"]:
+            move_git(path, "read-tree", undo["index"])      # (its changes taken in, not committed yet: the index as it was)
     if undo.get("pushed") and path.is_dir():
         branch = undo["branch"]
         lease = f"--force-with-lease=refs/heads/{branch}:{undo['pushed']}"
         target = f"{undo['origin']}:refs/heads/{branch}" if undo.get("origin") else f":refs/heads/{branch}"
         p = move_git(path, "push", "-q", "--no-verify", lease, "origin", target, net=True, timeout=MOVE_GIT_TIMEOUT)
         if p.returncode != 0:
-            notes.append(f"origin's {branch} has its WIP commit still ({gist(p.stderr)})")
+            # Never pushed (its mover went before it did): origin's as it was.
+            there = move_git(path, "ls-remote", "origin", f"refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
+            if there.returncode != 0 or ((there.stdout.split() or [None])[0] or None) != (undo.get("origin") or None):
+                notes.append(f"origin's {branch} has its WIP commit still ({gist(p.stderr)})")
         elif not undo.get("origin"):
             move_git(path, "branch", "-q", "--unset-upstream")
     for key in undo.get("previews") or []:
@@ -16766,6 +16832,7 @@ def move_drop(s, m, answer, rec):
     (STATUS / sid).unlink(missing_ok=True)
     (UNSEEN / sid).unlink(missing_ok=True)
     (SEEN / sid).unlink(missing_ok=True)
+    (MOVES / f"{sid}.gate").unlink(missing_ok=True)
     move_merges_drop(sid)
     stop_background(s, only_idle=False)
     pane, term = host_pane(s), term_pane(s)
@@ -16917,7 +16984,9 @@ def move_take(pkg, peer):
 
 def move_install(man, stage, rec):
     """Everything of a moving chat in place here, each step written down in
-    rec["undo"] as it's done; then its Claude started. Its answer."""
+    rec["undo"] before it's done (a step cut short, by this server killed in
+    the middle of it, is undone too: a worktree git had only begun, a file
+    half copied); then its Claude started. Its answer."""
     label, here = rec["label"], machine_label()
     undo = rec["undo"]
 
@@ -16957,18 +17026,19 @@ def move_install(man, stage, rec):
     listed = move_git(repo_dir, "worktree", "list", "--porcelain").stdout
     if f"branch refs/heads/{branch}\n" in listed + "\n":
         raise MoveError(f"its branch {branch} is checked out somewhere else on {here}")
+    did("branch", branch, tip or None, str(repo_dir))
     if tip:
         move_git(repo_dir, "branch", "-q", "-f", branch, commit)
     else:
         move_git(repo_dir, "branch", "-q", branch, commit)
-    did("branch", branch, tip or None, str(repo_dir))
     move_git(repo_dir, "branch", "-q", f"--set-upstream-to=origin/{branch}", branch)
     path.parent.mkdir(parents=True, exist_ok=True)
     move_git(repo_dir, "worktree", "prune")
+    did("worktree", str(path), str(repo_dir))
     r = move_git(repo_dir, "worktree", "add", "-q", str(path), branch)
+    move_die("worktree made")
     if r.returncode != 0:
         raise MoveError(f"couldn't make its worktree on {here}: {gist(r.stderr)}")
-    did("worktree", str(path), str(repo_dir))
     # What git doesn't carry: as it was there.
     carried = stage / "worktree"
     if carried.is_dir():
@@ -17029,8 +17099,8 @@ def move_install(man, stage, rec):
         os.utime(UNSEEN / sid, (man["unseen"], man["unseen"]))
     save_session(s)
     moved_back(f"{machine_name()}:{sid}")
-    set_trust(path, True)
     did("trust", str(path))
+    set_trust(path, True)
     # Its Claude, on the conversation: up (its broker idle, Claude running) before it answers.
     clear_asleep(sid)
     host_start(s, wake=True)
@@ -17046,14 +17116,17 @@ def move_install(man, stage, rec):
 
 def move_put(src, dst, backup, did):
     """One of Claude Code's files of the chat (a conversation, its folder), in
-    place: what was there kept in backup first, for its undo."""
+    place: what was there kept in backup first, for its undo (written down
+    before: move_take_undo puts back what's in backup, and leaves what never
+    got there)."""
     keep = None
     if dst.exists() or dst.is_symlink():
         keep = backup / hashlib.sha1(str(dst).encode()).hexdigest()
         keep.parent.mkdir(parents=True, exist_ok=True)
         shutil.rmtree(keep, ignore_errors=True) if keep.is_dir() else keep.unlink(missing_ok=True)
-        shutil.move(str(dst), str(keep))
     did("file", str(dst), str(keep) if keep else None)
+    if keep:
+        shutil.move(str(dst), str(keep))
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
         shutil.copytree(src, dst, symlinks=True)
@@ -17093,15 +17166,15 @@ def move_run_here(repo, run, did):
     if isinstance(command, str) and command.strip():
         mine = (RUN / repo).read_text().strip() if (RUN / repo).is_file() else None
         if mine is None:
-            set_run_command(repo, command)
             did("run", repo)
+            set_run_command(repo, command)
         elif mine != command.strip():
             notes.append(f"its run command here is {machine_label()}'s own ({mine})")
     have = saved_commands(repo)
     for name, cmd in saved.items():
         if isinstance(name, str) and isinstance(cmd, str) and name not in have and cmd.strip():
-            save_command(repo, name, cmd)
             did("saved", repo, name)
+            save_command(repo, name, cmd)
     return notes
 
 
@@ -17116,11 +17189,10 @@ def move_secrets_here(repo, secrets, did):
         if x["name"] in secrets_read(secret_file(scope)):
             notes.append(f"{x['name']}: {machine_label()} has its own, kept")
             continue
+        did("secret", scope, x["name"])      # (written down first: one set as this was cut short is undone too)
         why = secret_set(scope, x["name"], x["value"])
         if why:
             notes.append(f"{x['name']}: {why}")
-            continue
-        did("secret", scope, x["name"])
     return notes
 
 
@@ -17193,8 +17265,10 @@ def move_take_undo(rec):
             elif kind == "worktree":
                 path, repo_dir = Path(action[1]), Path(action[2])
                 stop_leftovers(path)
-                sh("git", "worktree", "remove", "--force", str(path), cwd=repo_dir)
+                # (One git was still making stays locked, "initializing": --force twice.)
+                sh("git", "worktree", "remove", "--force", "--force", str(path), cwd=repo_dir)
                 shutil.rmtree(path, ignore_errors=True)
+                sh("git", "worktree", "unlock", str(path), cwd=repo_dir)
                 sh("git", "worktree", "prune", cwd=repo_dir)
             elif kind == "branch":
                 branch, was, repo_dir = action[1], action[2], action[3]
@@ -17204,8 +17278,11 @@ def move_take_undo(rec):
                     sh("git", "branch", "-q", "-D", branch, cwd=repo_dir)
             elif kind == "file":
                 dst, keep = Path(action[1]), action[2]
+                # What was there: put back from backup; never moved there (cut short before), it's still in place.
+                if keep and not (Path(keep).exists() or Path(keep).is_symlink()):
+                    continue
                 shutil.rmtree(dst, ignore_errors=True) if dst.is_dir() and not dst.is_symlink() else dst.unlink(missing_ok=True)
-                if keep and Path(keep).exists():
+                if keep:
                     shutil.move(keep, str(dst))
             elif kind == "run":
                 (RUN / action[1]).unlink(missing_ok=True)
@@ -17326,7 +17403,17 @@ def move_tend():
                              "error": "amarchy stopped in the middle of moving it: it's here as it was"})
         finally:
             lock.close()
+    move_in_tend(now)
+
+
+def move_in_tend(now=None, only=None):
+    """The takes here cut short (the process taking it gone in the middle):
+    undone. Old records forgotten. only: that move's, now (its take's process
+    died before it answered)."""
+    now = now or time.time()
     for f in sorted(MOVES_IN.glob("*.json")) if MOVES_IN.is_dir() else []:
+        if only and f.stem != only:
+            continue
         rec = move_in_read(f.stem)
         if not rec:
             continue
@@ -17335,7 +17422,7 @@ def move_tend():
                 rec = move_in_read(f.stem) or rec
                 if rec.get("state") == "taking" and not pid_alive(rec.get("pid")):
                     move_take_undo(rec)
-                    rec["state"] = "undone"
+                    rec.update(state="undone", error=rec.get("error") or "it stopped in the middle of taking it")
                     move_in_write(rec)
         elif rec.get("state") != "taking" and now - (rec.get("at") or 0) > MOVED_KEEP:
             f.unlink(missing_ok=True)
@@ -18487,6 +18574,10 @@ def app_handler(st, users, address):
                 said = json.loads(r.stdout.strip().splitlines()[-1])
             except (ValueError, IndexError):
                 said = {"error": gist(r.stderr) or "it failed here"}
+                # Its process went without a word (killed): what it had done
+                # undone now, so "undone" is so when the other machine hears it.
+                if token:
+                    move_in_tend(only=token)
             st.poke.set()
             if r.returncode == 0 and said.get("key"):
                 return self.send(200, said)
@@ -19577,14 +19668,27 @@ def app_handler(st, users, address):
             # (Not when it changed nothing: a chat that was seen already, seen.)
             self.here()
             self.changed_nothing = False
+            self.gate = None
             try:
                 self.post_request()
             finally:
+                if self.gate:       # (gate_in: what it sent the chat is in)
+                    self.gate.close()
+                    self.gate = None
                 if not self.changed_nothing:
                     st.poke.set()
                     later = threading.Timer(0.4, st.poke.set)
                     later.daemon = True
                     later.start()
+
+        def gate_in(self, s):
+            """Through the chat's move gate (move_gate), held until this
+            request is done; False (answered) when a move holds it too long."""
+            self.gate = move_gate(s["id"])
+            if self.gate:
+                return True
+            self.error(409, move_holds(s["id"]) or "It's moving to another machine: try again in a moment")
+            return False
 
         def tailscale_post(self, data):
             """POST /api/tailscale {do: login | up | switch, account}: what
@@ -19818,6 +19922,8 @@ def app_handler(st, users, address):
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|effort|mode|unqueue|engine|classic)", self.path)
             if m:
                 s = self.session(m.group(1))
+                if s and not self.gate_in(s):
+                    return
                 held = move_holds(s["id"]) if s else None
                 if held:
                     return self.error(409, held)
@@ -19830,8 +19936,10 @@ def app_handler(st, users, address):
             if what == "move":
                 return self.move_post(s, data)
             # Moving to another machine: nothing reaches it here until it's there.
-            held = move_holds(s["id"]) if what in ("send", "keys", "priority", "close", "rename", "run", "commands",
-                                                   "assistant", "agent", "wake", "sleep", "preview") else None
+            gated = what in ("send", "keys", "priority", "close", "rename", "run", "commands", "assistant", "agent", "wake", "sleep", "preview")
+            if gated and not self.gate_in(s):
+                return
+            held = move_holds(s["id"]) if gated else None
             if held:
                 return self.error(409, held)
             if what in ("rename", "run", "commands"):
@@ -23625,6 +23733,12 @@ class Agent:
     def __init__(self, s):
         self.s, self.sid = s, s["id"]
         self.lock = threading.RLock()
+        # The status file (the list's working, waiting, idle) written one at a
+        # time, each as what's known says it when it's written: one worked out
+        # a moment earlier (working, as a message went in) never lands after
+        # one worked out since (idle: that turn ended in the instant between),
+        # which left a chat "working" with nothing at work until its next turn.
+        self.status_lock = threading.Lock()
         self.write_lock = threading.Lock()
         self.live_lock = threading.Lock()
         self.dir = claude_dir(self.sid)
@@ -23709,22 +23823,32 @@ class Agent:
 
     def set_state(self):
         """state from what's known: waiting (something asked), working, idle."""
-        with self.lock:
-            if self.live["state"] in ("starting", "exited"):
-                return
-            state = "waiting" if self.live["pending"] else "working" if self.busy else "idle"
-            if state == self.live["state"]:
-                return
-            if state == "idle":
-                self.live["working_since"] = None
-            elif not self.live["working_since"]:
-                self.live["working_since"] = time.time()
-            self.live["state"] = state
-        if state == "waiting":
-            agent_status(self.sid, "waiting")
-        elif state == "working":
-            agent_status(self.sid, "working")
+        with self.status_lock:
+            with self.lock:
+                if self.live["state"] in ("starting", "exited"):
+                    return
+                state = "waiting" if self.live["pending"] else "working" if self.busy else "idle"
+                if state == self.live["state"]:
+                    return
+                if state == "idle":
+                    self.live["working_since"] = None
+                elif not self.live["working_since"]:
+                    self.live["working_since"] = time.time()
+                self.live["state"] = state
+            if state == "waiting":
+                agent_status(self.sid, "waiting")
+            elif state == "working":
+                agent_status(self.sid, "working")
         self.changed(True)
+
+    def status_as(self, decide, done=True):
+        """The status file as decide() (under the lock) says it now, if it says
+        one: written in its turn (status_lock), never over one decided since."""
+        with self.status_lock:
+            with self.lock:
+                state = decide()
+            if state:
+                agent_status(self.sid, state, done)
 
     # ---- talking to claude
 
@@ -23861,7 +23985,7 @@ class Agent:
         # your message on its way. Not one taken into a turn under way: that
         # one says how it stands (working, or waiting for your answer).
         if priority is None:
-            agent_status(self.sid, "working")
+            self.status_as(lambda: "working" if self.busy else None)
         self.write({"type": "user", "message": {"role": "user", "content": message["content"]},
                     "parent_tool_use_id": None, "session_id": "", "uuid": message["uuid"],
                     **({"priority": priority} if priority else {})})
@@ -24127,7 +24251,7 @@ class Agent:
                 self.live["turn"]["asked"] = True       # it needs you: shown, and never quiet
         self.draw_request(pending)
         self.set_state()
-        agent_status(self.sid, "waiting")      # again: a hook may have said working since the first
+        self.status_as(lambda: "waiting" if self.live["pending"] else None)      # again: a hook may have said working since the first
         self.changed(True)
 
     def draw_request(self, p):
@@ -24272,10 +24396,7 @@ class Agent:
         self.changed(True)
         # The Stop hook says idle (and done) after a turn that ended on its
         # own; one you stopped, or one that failed, ends without it.
-        with self.lock:
-            idle = not self.busy and not self.live["pending"] and not self.queue
-        if idle:
-            agent_status(self.sid, "idle", done=not stopped)
+        self.status_as(lambda: "idle" if not self.busy and not self.live["pending"] and not self.queue else None, done=not stopped)
         self.next_queued()
         if not self.titled:
             self.titled = True
@@ -24644,10 +24765,7 @@ class Agent:
         # chat was working while it was set up). With a message to start on
         # (its first prompt, what you sent while it slept), or one that came
         # in meanwhile, it's working all along: deliver says so.
-        with self.lock:
-            starts = bool(first or self.queue or self.busy)
-        if not starts:
-            agent_status(self.sid, "idle", done=False)
+        self.status_as(lambda: None if first or self.queue or self.busy else "idle", done=False)
         self.changed(True)
         for text in first:
             self.send(text)
