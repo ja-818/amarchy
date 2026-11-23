@@ -295,6 +295,21 @@ async function scenario(browser, layout, base, names) {
   await ctx.close();
 }
 
+// n of Omarchy's wallpapers for a theme, here in a test's home as if
+// fetched: a picture of the size backgrounds.json says (all "here" asks of
+// one, bin/amarchy wall_here), a pixel's PNG and nothing after it.
+function fetched(home, theme, n) {
+  const list = (JSON.parse(fs.readFileSync(path.join(ROOT, "themes", "backgrounds.json"), "utf8")).themes || {})[theme] || [];
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const dir = path.join(home, "state", "amarchy", "wallpapers", theme);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const b of list.slice(0, n)) {
+    const f = Buffer.alloc(Math.max(b.size, pixel.length));
+    pixel.copy(f);
+    fs.writeFileSync(path.join(dir, b.file), f);
+  }
+}
+
 (async () => {
   const chromium = loadPlaywright().chromium;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "amarchy-look-test-"));
@@ -308,6 +323,11 @@ async function scenario(browser, layout, base, names) {
     const start = info.theme;
     const pool = info.themes.filter((t) => t.key !== start).map((t) => t.name);
     const picks = pool.slice(0, THEMES);
+    // The theme worn when the wallpapers are picked (the last of the slow
+    // taps): two of Omarchy's for it here, as if fetched. A test's home
+    // fetches none (that ran on the account's systemd, outliving the test).
+    const last = info.themes.find((t) => t.name === picks[picks.length - 1]);
+    if (last) fetched(home, last.key, 2);
     for (const layout of Object.keys(LAYOUTS)) await scenario(browser, layout, base, picks);
   } catch (err) {
     failures.push(err.stack || String(err));

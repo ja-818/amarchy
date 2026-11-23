@@ -189,7 +189,7 @@ class SessionTerminal {
   lineTyped(keep = true) {
     if (keep && this.id) store.set(`term-draft:${this.id}:${this.shown}`, this.field.value);
     uiFitField(this.field, { max: Math.max(80, window.innerHeight * 0.3) });
-    this.micBtn.hidden = !this.talk.available();
+    this.talk.draw();
     // Empty, it's Enter (⏎); with words, Send (↑).
     const empty = !this.field.value.trim();
     this.sendBtn.replaceChildren(glyph(empty ? "enter" : "send"));

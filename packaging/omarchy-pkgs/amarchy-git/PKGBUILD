@@ -71,7 +71,7 @@ package_amarchy-git() {
               'imagemagick: wallpapers cut for a phone and a computer'
               'ffmpeg: wallpapers cut without ImageMagick, and dictation from any recording'
               'python-fonttools: the fonts cut smaller for the app'
-              'whisper-cpp: dictation written down on this machine'
+              'whisper-cpp: dictation written down on this machine (without it, amarchy dictation setup builds whisper.cpp itself)'
               'quickshell: the Ⓐ in the bar on Omarchy (Omarchy has it)')
   provides=('amarchy')
   conflicts=('amarchy')
