@@ -620,6 +620,17 @@ amarchy machines remove omarchy   # both forget the other
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+- **Your stuff is the same on every machine**: the look (your own wallpaper
+  and themes too, Omarchy (live) among them), the order of your projects, what
+  a new chat starts on (model, effort), what tells you, your chimes, Show
+  terminals, how machines show, and your missions: every machine's merges,
+  streaks and badges count once, the same score everywhere, and a reset is
+  everyone's. Change it on any machine, in the app or from the command line,
+  and the others have it in a moment; one that was off catches up when it's
+  back (through any other). Two changes made apart: the later one wins. What
+  stays a machine's own: when its idle chats sleep, its dictation, its
+  secrets, the phones it notifies, its automations. A browser keeps its own
+  layout, notifications and drafts.
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
