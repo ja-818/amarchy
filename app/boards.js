@@ -148,7 +148,7 @@ function boardsLeadRow(b) {
 // ---- your commitments, as a board: your loops file, kept by your assistant
 
 function boardsLoops(v = app.view) {
-  if (!v || !v.today || !v.today.source) return null;
+  if (!v || !v.today || (!v.today.source && !(v.today.loops || []).length)) return null;
   const p = todayParts(v);
   const name = (v.today.assistant || {}).name || "your assistant";
   const cols = [["Now", [...p.chaseNow, ...p.dueNow], true], ["Waiting on others", p.waiting], ["This week", p.week],
