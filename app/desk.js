@@ -663,7 +663,7 @@ function deskRoute() {
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
   if (m) {
-    const id = normKey(decodeURIComponent(m[1]));       // <this machine>:<id> is <id>
+    const id = routeKey(m[1]);       // <this machine>:<id> is <id>; a moved chat, where it is (app.js)
     if (row(id)) { board.waitFor = null; show(id); }
     else if (app.view) { board.waitFor = id; boardBack(true); }      // just started: once the list has it (boardRefresh)
     return;
@@ -1848,6 +1848,7 @@ function sessionItems(s) {
     { label: "Add a picture or a file…", detail: "it goes with your next message",
       act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
     { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo, on: s.id }) },
+    ...moveItems(s),        // Move to <machine>… (manage.js)
     ...(uiPreviews(s).length > 1 ? [{ label: "Previews", icon: "preview", detail: "start, stop, what each wrote", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewSheet(s, p)) }) }]
       : uiPreviews(s).length ? [{ label: "Preview…", icon: "preview", detail: "start, stop, what it wrote", act: () => uiPreviewSheet(s, uiPreviews(s)[0]) }] : []),
     ...(s.setup || s.waking ? [] : [s.sleeping ? { label: "Wake", act: () => wakeSession(s) }

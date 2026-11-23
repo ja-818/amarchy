@@ -383,6 +383,7 @@ function todayStatePill(s) {
   const t = s.today || {};
   const off = uiMachineOff(s);        // its machine doesn't answer: that, first
   if (off) return uiPill(off, "quiet", { long: true });
+  if (uiMoving(s)) return uiMovePill(s);      // moving to another machine: nothing else until it's there
   if (s.status === "waiting" || (s.secret_asks || []).length || (s.status !== "working" && (t.asks || []).length && !todayIsAnswered(s)))
     return uiPill(s.permission ? "Permission" : "Asks you", "ask");
   if (s.status === "working") return uiPill("Working", "working");
@@ -1098,7 +1099,9 @@ function todayRowKey(s) {
     s.assistant_name, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
     uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)]),
     // Its machine: shown with two or more, off or not, its label.
-    machinesShown().length > 1 ? [machineOf(s).label, uiMachineOff(s)] : null]);
+    machinesShown().length > 1 ? [machineOf(s).label, uiMachineOff(s)] : null,
+    // Moving to another machine, or one that didn't (uiMoveNote).
+    s.moving || null, s.move_error || null]);
 }
 
 // What a task's card shows: the task, its time as said, its agent's name and picture.

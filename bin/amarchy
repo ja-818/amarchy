@@ -15228,7 +15228,7 @@ def move_check(s, to=None):
     label = m["label"] if m else to or ""
     out = {"id": s["id"], "to": to, "label": label, "on": False, "busy": [], "refused": None, "changes": 0,
            "secrets": [], "previews": [preview_label(p) for p in previews(s) if p.get("run")], "left": [], "size": 0,
-           "moving": move_shown(s["id"])[0]}
+           "moving": move_shown(s["id"])[0], "origin": "GitHub" if project_github(s["repo"]) else "origin"}
     if to and to == machine_name():
         out["refused"] = "it's on this machine already"
     elif to and not m:

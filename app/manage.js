@@ -52,6 +52,87 @@ function base64Of(blob) {
   });
 }
 
+// ---- moving it to another machine (amarchy move; docs/plan-omarchy-and-
+// machines.md, "Moving a chat"): only when you say so, never on its own.
+// Its menu has "Move to <label>…" for each other machine on the board that
+// answers; the sheet says what goes with it, asks before copying a secret,
+// and offers to move it once it's free when it's at work.
+
+// The machines a chat can move to: the others on the board that answer.
+// Not your assistant or an agent (they live on their machine), not one being
+// set up, moving already, or on a machine that's off.
+function moveTargets(s) {
+  if (!s || isAgent(s) || s.setup || s.moved_from || uiMachineOff(s) || uiMoving(s) || typeof machinesShown !== "function") return [];
+  const here = machineOf(s).name;
+  return machinesShown().filter((m) => m.name !== here && m.on && !m.update);
+}
+
+// Its lines in a chat's menu: the wide layout's (uiMenu items) and the phone's sheet (buttons).
+function moveItems(s) {
+  return moveTargets(s).map((m) => ({ label: `Move to ${m.label}…`, icon: "machine", detail: "its branch and its conversation go too",
+                                      act: () => moveSheet(s, m) }));
+}
+function moveButtons(s) {
+  return moveTargets(s).map((m) => h("button", { class: "control wide", onclick: () => moveSheet(s, m) }, `Move to ${m.label}…`));
+}
+
+const moveCap = (t) => String(t || "").replace(/^./, (c) => c.toUpperCase());
+
+async function moveSheet(s, m) {
+  const label = m.label;
+  const cancel = () => h("button", { class: "control wide", onclick: closeSheet }, "Cancel");
+  const wait = h("p", { class: "hint" }, "Looking at what goes with it…");
+  const back = sheet({ key: "move" }, sheetHead(`Move to ${label}?`, where(s)), wait, cancel());
+  let c;
+  try {
+    const res = await fetch(chatPath(s, `/move?to=${encodeURIComponent(m.name)}`));
+    c = await res.json();
+    if (!res.ok) throw new Error(c.error || "Amarchy didn't answer");
+  } catch (e) {
+    wait.textContent = e instanceof TypeError ? "Can't reach Amarchy" : e.message;
+    return;
+  }
+  if (!back.isConnected) return;      // closed meanwhile
+  if (c.refused) {
+    sheet({ key: "move" }, sheetHead(`It can't move to ${label}`, where(s)), h("p", { class: "hint" }, `${moveCap(c.refused)}.`.replace(/([.…!?])\.$/, "$1")), cancel());
+    return;
+  }
+  const n = c.changes || 0;
+  const busy = (c.busy || [])[0] || "";
+  const secrets = c.secrets || [];
+  const them = secrets.length === 1 ? "it" : "them";
+  const rows = [
+    { label: "Its work", value: `Its branch${n ? `, with ${n} file${n === 1 ? "" : "s"} not committed as one WIP commit` : ""}, pushed to ${c.origin || "GitHub"}` },
+    { label: "Its chat", value: `The conversation (its Claude picks it up there), its name, priority and place on the board` },
+    ...(c.previews.length ? [{ label: c.previews.length > 1 ? "Its previews" : "Its preview", value: `Stopped here, ready there` }] : []),
+    ...(c.left.length ? [{ label: "Not carried", value: `${c.left.slice(0, 3).join(", ")}${c.left.length > 3 ? "…" : ""}: made again there`, tone: "none" }] : []),
+    ...(secrets.length ? [{ label: "Secrets", value: `It asked you for ${secrets.join(", ")}. Copy ${them} to ${label} too?`, tone: "you" }] : []),
+    ...(busy ? [{ label: "Not now", value: `${moveCap(busy)}: it moves once it's free`, tone: "you" }] : []),
+  ];
+  const go = (withSecrets) => async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    const when = busy ? "free" : "now";
+    const moving = { to: m.name, label, step: busy ? `Waiting: ${busy}` : "Getting ready", when, since: Date.now() / 1000 };
+    try {
+      await aheadOf(s.id, { moving, move_error: null }, (r) => !!r.moving,
+                    api(chatPath(s, "/move"), { to: m.name, secrets: withSecrets, when }), { quiet: true });
+      closeSheets();
+      toast(busy ? `It moves to ${label} once it's free` : `Moving to ${label}…`);
+    } catch (x) {
+      b.disabled = false;
+      if (x.status === 409 && x.data && x.data.busy) return moveSheet(s, m);      // at work since: asked again
+      toast(x.message);
+    }
+  };
+  const act = busy ? "Move when it's free" : `Move to ${label}`;
+  const buttons = secrets.length
+    ? [h("button", { class: "control wide accent", onclick: go(true) }, `${act}, with ${secrets.length === 1 ? secrets[0] : "its secrets"}`),
+       h("button", { class: "control wide", onclick: go(false) }, `${act}, without ${them}`)]
+    : [h("button", { class: "control wide accent", onclick: go(false) }, act)];
+  sheet({ key: "move" }, sheetHead(`Move to ${label}?`, where(s)), uiBrief(rows), ...buttons, cancel());
+}
+
 // ---- its name (amarchy rename)
 
 function renameSheet(s) {

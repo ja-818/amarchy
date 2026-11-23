@@ -582,8 +582,38 @@ amarchy machines remove omarchy   # both forget the other
   machine's owner is always one of yours. A machine whose address changes
   (it moved to another tailnet) is found again at its name, and tells the
   others where it is now.
+- **Moving a chat** to another machine is yours to do, never amarchy's on its
+  own (a chat that changes this machine, its Omarchy config say, is only
+  testable here): **Move to <machine>…** in its menu, or `amarchy move [<id>]
+  --to <machine>`. The sheet says what goes with it, then:
+  - It moves once its Claude's step is over. At work, asking you something,
+    running something in the background or with a message on its way in, it
+    says so and offers **Move when it's free** (`--when-free`); its box says it
+    moves once it's free, with Cancel.
+  - What it hadn't committed goes as one commit, `WIP: moving to <machine>
+    (amarchy move)`, on its branch, pushed to origin (GitHub); the other
+    machine makes its worktree from that branch, in the same place
+    (`~/Work/.worktrees/<project>/<name>`), cloning the project first when it
+    isn't there. A file that holds a key (`.env`, `credentials.json`...) is
+    never committed: it's carried as it is, with what git ignores, but for
+    dependencies and builds (`node_modules`, `.venv`, `dist`...), which you
+    make again there. A changed file with one of your secrets in it stops the
+    move, saying so.
+  - Its conversation goes too: its Claude picks it up there, and is told, with
+    your next message, that it moved and what the WIP commit is. So do its
+    name, priority, seen and unread, its card's place on the board, the
+    project's run commands that machine hasn't got, and its preview (stopped
+    here, ready there at that machine's address). The secrets it asked you for
+    only when you say so (the sheet asks; `--secrets` or `--no-secrets`).
+  - It leaves this machine only once it's up on the other one; anything wrong
+    before that, and it's here as it was (the WIP commit undone, origin's
+    branch as it was, its preview started again), saying what happened on its
+    card and in its box. Old links and notifications open it where it is now,
+    and `amarchy send <old id>` goes on there.
+  - Your assistant and your agents live on their machine: they don't move.
 - **From the command line**: `amarchy list --all` (every machine's chats,
-  each with its machine), `amarchy send <machine>:<id> "<text>"`.
+  each with its machine), `amarchy send <machine>:<id> "<text>"`,
+  `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
@@ -1615,6 +1645,8 @@ amarchy machines add <name|address>   pair with another machine of yours on the 
 amarchy machines remove <name>        unpair (both forget the other)
 amarchy machines rename <name> <label>   what the app calls a machine (kept on that machine)
 amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
+amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]   move a chat to another machine of yours
+amarchy move [<id>] --check --to <machine> [--json]   what moving it would do; --cancel | --dismiss
 
 On Omarchy (see On Omarchy):
 amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]   the desktop app at the front, on that chat

@@ -463,6 +463,12 @@ reaches a chat on another machine (it doesn't wait), and `amarchy new <project>
 from GitHub when it isn't there); it prints `<machine>:<id>`. ListAgents and
 SendMessage reach this machine's sessions only. A chat stays on its machine: what
 it changes there (its files, that machine's config) is only testable there.
+Moving one is the user's call, never yours on your own: only when they ask, run
+`amarchy move --to <machine>` (from your own chat it waits until this turn ends,
+then your Claude stops here and picks the conversation up there; what isn't
+committed goes as a WIP commit pushed to origin, so say so first). After a move
+you're told so with the next message: you're on that machine now, its files and
+config are its own, and what git ignores but dependencies came with you.
 
 To give a **new** session a task (only when the user asks for a session):
 
