@@ -143,7 +143,15 @@ the tailnet (each peer's `GET /api/peer/hello`). It reaches it:
   when the build has it: its proxy on `127.0.0.1` set on the web view (iOS 17
   `WKWebsiteDataStore.proxyConfigurations`, Android androidx.webkit
   `ProxyController`) and on the shell's own requests, only for tailnet names
-  and addresses.
+  and addresses. The build has it when the node's library is in place:
+  `phone/android/app/libs/tailnet.aar` and
+  `phone/ios/Frameworks/Tailnet.xcframework`, each the "Tailscale node"
+  workflow's artifact (`tailnet-android`, `tailnet-ios`), or bound here from
+  `tailnet/`: `gomobile bind -target=android -androidapi 26 -trimpath
+  -ldflags "-s -w" -o tailnet.aar ./mobile` (the Android NDK), and
+  `-target=ios,iossimulator -iosversion 17.0 -o Tailnet.xcframework` on a Mac
+  with Xcode. On Android it stands in for what Android keeps from an app's
+  own code (its network interfaces, its DNS) with Tailscale's `androidbin`.
 
 `amarchy://chat/<machine>/<id>` opens that chat (`#/s/<id>` when `<machine>`
 is the machine it opens, else `#/s/<machine>:<id>`).
@@ -171,11 +179,13 @@ an app widget, updated the same way.
 
 ## Builds
 
-- Android: `cd phone/android && ./gradlew assembleDebug testDebugUnitTest`
+- Android: `cd phone/android && ./gradlew assembleDebug testDebugUnitTest lint`
   (JDK 17, the Android SDK). Push needs a Firebase project: its values come
   from `phone/android/firebase.properties` (not in git) or the build's
   environment (`FIREBASE_*`); without them the app builds and runs, and says
-  notifications aren't in this build.
+  notifications aren't in this build. In CI, `.github/workflows/phone-android.yml`
+  builds it, runs its tests and lint; run by hand, it releases it to Play's
+  internal track (`android/store/README.md` says what's set up first).
 - iOS: on a Mac, `cd phone/ios && xcodegen && xcodebuild ...`; in CI,
   `.github/workflows/phone.yml` builds it for the simulator and runs its
   tests.

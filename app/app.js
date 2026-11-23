@@ -2761,7 +2761,7 @@ async function openLook() {
       // The desktop app on an Omarchy desktop, wearing its look live: the
       // desktop's own wallpaper is behind the window (theme.css, app.css).
       desktopApp && desktopApp.omarchy && worn.key === "omarchy-live" && wall() === "theme"
-        ? h("p", {}, "In this window, your desktop's own wallpaper, behind it, as behind your terminals.") : null,
+        ? h("p", {}, "In this window, your desktop's own wallpaper, seen through it.") : null,
       h("p", {}, (worn.backgrounds || []).length
         ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
           (info.own ? "the picture you chose." : "choose a picture.")
@@ -2859,6 +2859,9 @@ const routed = { hash: location.hash };
 
 function go(hash) {
   if (!standalone) {
+    // The address there already (the view didn't follow it): no hashchange
+    // would come, so it's gone to all the same.
+    if (location.hash === hash) return route();
     location.hash = hash;
     return;
   }
@@ -2888,7 +2891,45 @@ function routeKey(raw) {
   return id;
 }
 
+// A chat that can't be closed or opened (an error in it) mustn't leave every
+// chat unopenable (Julian's M5, 2026-11-23: no chat opened, by a click or
+// by Enter, until the app started again): it's said (the desktop app keeps
+// it in its log), the open one let go, and it's tried once more; failing
+// still, the page loads again (once a minute at most).
 function route() {
+  try {
+    routeNow();
+  } catch (e) {
+    console.error(`Couldn't go to ${here()}:`, e);
+    routeLetGo();
+    try {
+      routeNow();
+    } catch (again) {
+      console.error(`Couldn't go to ${here()}, again:`, again);
+      routeReload();
+    }
+  }
+}
+
+// The chat open, let go of (closed if it can be).
+function routeLetGo() {
+  const open = [app.session, typeof desk !== "undefined" ? desk.chat : null].filter(Boolean);
+  app.session = null;
+  if (typeof desk !== "undefined") { desk.chat = null; desk.current = null; }
+  for (const c of open) try { c.close(); } catch (e) { /* let go of all the same */ }
+}
+
+function routeReload() {
+  const key = "amarchy-route-reload";
+  try {
+    if (Date.now() - Number(sessionStorage.getItem(key) || 0) < 60000) return;
+    sessionStorage.setItem(key, String(Date.now()));
+  } catch (e) { /* no storage: loaded again all the same */ }
+  keepForReload();
+  location.reload();
+}
+
+function routeNow() {
   if (app.desk) return deskRoute();
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);

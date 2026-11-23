@@ -101,6 +101,16 @@ and the theme cards' `--card-bg` `--card-fg` `--dot` `--thumb`. The wide
 layout's panes wear `--pane-bg` (`.desk-root`: `--surface` as see-through as
 the terminals, `--term-alpha`) and `--head-height` (their heads).
 
+## The wallpaper
+
+theme.css gives the look's wallpaper as `--wallpaper` (a phone's) and
+`--wallpaper-wide` (a computer's), drawn behind it all (`body::before`), over
+`--wallpaper-ground` (the color under it, and the page's own: `--surface`
+unless set). In the desktop app's see-through window on an Omarchy desktop
+(`html.on-omarchy`), wearing Omarchy (live) with its own wallpaper, theme.css
+sets all three to none and transparent: the desktop's own wallpaper shows
+through the panes instead.
+
 ## The terminals
 
 The real terminals (xterm.js, desk.js) wear their own group, from the

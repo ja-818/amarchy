@@ -1,0 +1,6 @@
+# The image needs the Go source only.
+*
+!go.mod
+!cmd
+!internal
+**/*_test.go

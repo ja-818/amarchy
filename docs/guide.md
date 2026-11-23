@@ -324,6 +324,35 @@ It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see
 [Configure](#configure) for `APP_USERS=`).
 
+### The phone apps
+
+amarchy's app for iPhone and Android is the same app inside a thin native shell
+([phone/](../phone/README.md)): the same board, chats and Settings. It adds only
+what a home-screen web app can't do:
+
+- **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
+  on the notification itself, without opening the app. On a locked phone it asks
+  for Face ID (or your code) first. If it can't reach your amarchy, a
+  notification says so and opens the chat.
+- **The share sheet.** A screenshot, a photo, a link or some text: tap
+  **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
+  No Shortcut to set up.
+- **A widget.** "2 need you" and their names, on the home screen and (iPhone)
+  the lock screen.
+
+**First open**: on the phone's browser, **Settings → The phone app → Open in the
+app** opens it on that machine; or type its address
+(`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
+app when its VPN is on; a build that has amarchy's own Tailscale node signs in
+inside the app instead. Then **Turn on notifications**, as in the web app.
+
+**Private**: each notification is encrypted on your machine for that phone
+alone (the same encryption as Web Push). It goes through amarchy's push relay
+([relay/](../relay/README.md)), a tiny open-source service that hands it to
+Apple's or Google's push. The relay keeps nothing and can't read it: it sees
+the phone's push token and which machine may send to it, never what a
+notification says. Anyone can run their own.
+
 ## In a browser on your computer
 
 The same app on a computer's wide screen is **the board**: your chats and your tasks
@@ -757,7 +786,8 @@ window closed.
   if its page crashed it loads again and the log says why (what the page
   wrote last; twice with no sign why, it draws without the GPU from then on;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
-  again by itself.
+  again by itself. What goes wrong in its page (an error, with where) is
+  in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
@@ -775,11 +805,13 @@ a backup of each file it changes).
   `amarchy.chats`, put at the end of the bar's left side the first time; move
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
-- **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
-  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
-  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
-  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Super + D** brings amarchy to the front: the desktop app's window if it has
+  one, else the app started. Omarchy leaves it free, and one hand reaches it.
+  It's a setting: `amarchy key Super+Ctrl+M` picks another (one Omarchy uses
+  gives way to amarchy while it's picked), `amarchy key off` none, `amarchy key
+  default` Super + D again; it changes at once. `amarchy key` (and the install)
+  says when this machine's Hyprland has something else on it, your own bindings
+  say. A machine that never picked a key follows the default when it changes.
 - **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
   under it.
 
@@ -809,11 +841,11 @@ It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
 **The window, one of the desktop's**: the desktop app's window is
-see-through as your terminals are, in each of Omarchy's window modes
-(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
-wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
-solid, as a terminal's, and your desktop's own wallpaper is behind it
-(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
+your desktop's own shows through its panes and cards, as a browser shows the
+app's wallpaper, lined up with the rest of the screen (Settings › Look says
+so). Hyprland fades it as your terminals, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy). For a solid window, Omarchy's Opaque mode, or its
 transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy
@@ -1740,7 +1772,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
-amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+D)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

@@ -299,13 +299,15 @@ On Omarchy (a desktop of yours, on Omarchy 4; install.sh sets it up when Omarchy
 takes it away; docs/guide.md, "On Omarchy"):
   amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]
                                         the desktop app (amarchy-desktop) at the front, on that chat: the
-                                        window it has, else the app started. Super+Alt+A, Amarchy in the
+                                        window it has, else the app started. Super+D, Amarchy in the
                                         Omarchy menu and the Ⓐ in the bar run it. Without the desktop app,
                                         the board in a browser window (an Omarchy web app)
-  amarchy key [<keys>|off|default]      the key that brings amarchy to the front (amarchy open): Super+Alt+A,
+  amarchy key [<keys>|off|default] [--check]
+                                        the key that brings amarchy to the front (amarchy open): Super+D,
                                         which Omarchy leaves free, or the one you pick (Super+Ctrl+M: one
                                         Omarchy uses gives way to amarchy while it's picked), or none; prints
-                                        it without one. It changes at once, the Omarchy menu's hint too
+                                        it without one, and what else this machine's Hyprland binds there
+                                        (--check: only that). It changes at once, the Omarchy menu's hint too
   amarchy bar [--follow]                what the Ⓐ in Omarchy's bar shows, as JSON: how many chats need you
                                         and which (the first is what a click opens), from the board: this
                                         machine's own app server, else the first of your machines (amarchy
@@ -9131,9 +9133,9 @@ def app_theme_css():
     out.append("}")
     if look["wallpaper"] and look["theme"] == OMARCHY_LIVE and look["wallpapers"] == "theme":
         # The Omarchy desktop's own wallpaper: the desktop app's window on an
-        # Omarchy desktop (html.on-omarchy) has it right behind it, see-through
-        # as the terminals are, so it draws none (app.css, body::before).
-        out.append("html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; }")
+        # Omarchy desktop (html.on-omarchy) is see-through, with it right
+        # behind, so it paints none and nothing under it (app.css, body::before).
+        out.append("html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; --wallpaper-ground: transparent; }")
     # One file: the browser makes the bold.
     weights = {"regular": "100 900" if "bold" not in files else "400", "bold": "700"}
     text, icons = font_ranges()
@@ -20309,13 +20311,16 @@ def app_status():
     running = sh("systemctl", "--user", "is-active", APP_UNIT).stdout.strip() == "active"
     served = serve_config() == f"http://127.0.0.1:{app_port()}"
     address = app_address()
-    phones = len(app_subscriptions())
+    subs = app_subscriptions()
+    phones = len(subs)
+    apps = sum(1 for x in subs if isinstance(x.get("app"), dict))     # the phone apps among them (see "the phone apps")
     if not running and not served:
         print("off (amarchy app on starts it)")
         return 1
     where = app_url(address) if address and served else \
         "this machine only (the desktop app here): not on your tailnet (amarchy app on)"
-    print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified")
+    print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified"
+          + (f" ({apps} through the phone app{'' if apps == 1 else 's'})" if apps else ""))
     return 0 if running and served else 1
 
 
@@ -21099,7 +21104,7 @@ def migrate_look():
 # Omarchy is there, and its --uninstall takes them all away:
 #
 # - `amarchy open [chat]`: the desktop app (amarchy-desktop) at the front, on
-#   that chat. Super+Alt+A (omarchy/hypr/amarchy.lua), Amarchy in the Omarchy
+#   that chat. Super+D (amarchy key; omarchy/hypr/amarchy.lua), Amarchy in the Omarchy
 #   menu and the Ⓐ in the bar all run it. Without the desktop app, the board
 #   in a browser window.
 # - `amarchy bar --follow`: what the Ⓐ in Omarchy's bar shows (omarchy/plugin):
@@ -21458,13 +21463,16 @@ def cmd_open(args):
 # ---- the key (Omarchy)
 #
 # One key brings amarchy to the front on an Omarchy desktop (omarchy/hypr/
-# amarchy.lua binds it to `amarchy open`): Super+Alt+A, which Omarchy leaves
-# free, unless you set another (one Omarchy uses gives way to amarchy while
-# it's picked). Kept in ~/.config/amarchy/key as a chord the way Omarchy's
+# amarchy.lua binds it to `amarchy open`): Super+D, which Omarchy leaves free
+# (one hand reaches it), unless you set another (one Omarchy uses gives way to
+# amarchy while it's picked). With no setting it's the default, so a new
+# default reaches every machine that never picked one. `amarchy key` says when
+# this machine's Hyprland has something else on the key (hyprctl binds). Kept in ~/.config/amarchy/key as a chord the way Omarchy's
 # Lua config writes them ("SUPER + CTRL + M"), or "off"; no file: the default.
 
 OMARCHY_KEY_FILE = CONFIG / "key"
-OMARCHY_KEY_DEFAULT = "SUPER + ALT + A"
+OMARCHY_KEY_DEFAULT = "SUPER + D"
+HYPR_MODMASK = {"SHIFT": 1, "CAPS": 2, "CTRL": 4, "ALT": 8, "MOD2": 16, "MOD3": 32, "SUPER": 64, "MOD5": 128}
 KEY_MODS = {"super": "SUPER", "win": "SUPER", "meta": "SUPER", "shift": "SHIFT", "ctrl": "CTRL", "control": "CTRL",
             "alt": "ALT", "mod3": "MOD3", "mod5": "MOD5"}
 KEY_LOWER = {"comma", "period", "slash", "backslash", "semicolon", "apostrophe", "grave", "minus", "equal",
@@ -21498,6 +21506,35 @@ def key_words(chord):
     return "+".join(p.capitalize() if p.isupper() and len(p) > 1 else p for p in chord.split(" + "))
 
 
+def key_taken(chord):
+    """What else this machine's Hyprland binds to a chord (hyprctl binds:
+    each one's description, or what it runs), amarchy's own left out; None
+    when there's no Hyprland to ask."""
+    env = hypr_env()
+    if not env:
+        return None
+    try:
+        binds = json.loads(subprocess.run(["hyprctl", "binds", "-j"], env=env, capture_output=True, text=True,
+                                          timeout=5).stdout or "[]")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    parts = chord.split(" + ")
+    mods, key = sum(HYPR_MODMASK.get(p, 0) for p in parts[:-1]), parts[-1]
+    code = key.lower().removeprefix("code:") if key.lower().startswith("code:") else None
+    taken = []
+    for b in binds if isinstance(binds, list) else []:
+        if not isinstance(b, dict) or b.get("modmask") != mods or b.get("submap"):
+            continue
+        if not (str(b.get("keycode")) == code if code else str(b.get("key") or "").lower() == key.lower()):
+            continue
+        said = f"{b.get('description') or ''} {b.get('arg') or ''}"
+        if "amarchy" in said.lower():
+            continue
+        taken.append(re.sub(r"\s+", " ", str(b.get("description") or f"{b.get('dispatcher') or ''} {b.get('arg') or ''}")).strip()[:80]
+                     or "something")
+    return taken
+
+
 def omarchy_key():
     """The key now: a chord, or "off"; and whether it's the default."""
     try:
@@ -21511,7 +21548,15 @@ def omarchy_key():
 
 
 def cmd_key(args):
-    """`amarchy key [<keys>|off|default]`."""
+    """`amarchy key [<keys>|off|default] [--check]`."""
+    check = "--check" in args
+    args = [a for a in args if a != "--check"]
+    if check and not args:      # only what else is on the key here (install.sh says it)
+        chord, _ = omarchy_key()
+        taken = key_taken(chord) if chord != "off" else None
+        if taken:
+            print(f"{key_words(chord)} is also bound here: {'; '.join(taken)}. Another key: amarchy key <keys>")
+        return 0
     if len(args) > 1:
         return fail("usage: amarchy key [<keys>|off|default]   (keys like Super+Shift+A)")
     if args:
@@ -21540,6 +21585,10 @@ def cmd_key(args):
     else:
         print(f"{key_words(chord)} brings amarchy to the front" + (" (the default)" if default else
               ", in place of anything Omarchy had there") + ". Another: amarchy key <keys>; none: amarchy key off")
+        taken = key_taken(chord) if default else None
+        if taken:
+            print(f"But this machine's Hyprland has something else on {key_words(chord)} too: {'; '.join(taken)}. "
+                  "Pick another key: amarchy key <keys>")
     return 0
 
 
@@ -24391,7 +24440,7 @@ OPTIONS = {
     "awake": ({"--json"}, set(), set()),
     "tailscale": ({"--json", "--no-open"}, set(), set()),
     "ghostty": (set(), set(), set()),
-    "key": (set(), set(), set()),
+    "key": ({"--check"}, set(), set()),
     "setup": None,
     "bar": ({"--follow"}, set(), set()),
     "shell": None,

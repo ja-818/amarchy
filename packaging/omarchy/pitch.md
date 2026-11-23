@@ -1,12 +1,3 @@
-# amarchy: stop babysitting your agents. Manage them.
-
-*A draft for an issue (or a discussion) on basecamp/omarchy. Not posted:
-that's Julian's call.*
-
----
-
-**Title:** amarchy: run a dozen Claude Code agents from Omarchy, and from your phone
-
 **Stop babysitting your agents. Manage them.**
 
 One Claude Code at a time, you babysit it: you watch it, wait on it and read
@@ -30,7 +21,7 @@ It's built out of Omarchy's own parts, and changes none of Omarchy's files:
 - **The Ⓐ in the bar**: a shell plugin (Quickshell, `omarchy plugin` rules,
   its strings in `i18n/`) that lights up when a chat needs you and says how
   many. It follows amarchy's events; it never polls.
-- **Super + Alt + A**: one key in Omarchy's Lua bindings (a free one, a
+- **Super + D**: one key in Omarchy's Lua bindings (a free one, a
   setting), through `o.bind`. A row in the Omarchy menu, through the user's
   `omarchy-menu.jsonc`.
 - **The theme live**: "Omarchy (live)" is amarchy's look made from the
@@ -95,7 +86,7 @@ echo "Opening amarchy..."
 setsid uwsm-app -- /usr/bin/amarchy-desktop >/dev/null 2>&1 &
 
 echo ""
-echo "amarchy has been installed. Super+Alt+A brings it up; the Ⓐ in the bar lights up when a chat needs you."
+echo "amarchy has been installed. Super+D brings it up; the Ⓐ in the bar lights up when a chat needs you."
 ```
 
 ```jsonc
@@ -104,8 +95,8 @@ echo "amarchy has been installed. Super+Alt+A brings it up; the Ⓐ in the bar l
 
 ## What we'd ask
 
-1. Take the omarchy-pkgs recipe (the PR is ready; it builds both packages on
-   x86_64 and aarch64).
+1. Take the omarchy-pkgs recipe (a draft PR there, `amarchy-git`: both
+   packages, built in a clean chroot and tested installed).
 2. If you like it, the installer above and its row in Install › AI. Happy to
    send that PR too, in Omarchy's style, with its i18n.
 3. Anything about it that doesn't feel like Omarchy: we'd rather fix it than

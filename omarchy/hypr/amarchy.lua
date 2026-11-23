@@ -6,8 +6,8 @@
 --
 -- One key brings amarchy to the front (`amarchy open`: the desktop app's
 -- window, or the app started; without the desktop app, your chats in a
--- browser window): Super + Alt + A, which Omarchy leaves free (Super + A and
--- Super + Shift + A are its own).
+-- browser window): Super + D, which Omarchy leaves free (amarchy key says
+-- when this machine's Hyprland has something else there).
 --
 -- The key is a setting, `amarchy key`, kept in ~/.config/amarchy/key (a
 -- chord as Omarchy writes them, "SUPER + CTRL + M", or "off"); it changes
@@ -15,11 +15,12 @@
 -- amarchy while it's picked; another pick, or `amarchy key default`, gives it
 -- back (a reload binds everything afresh).
 --
--- The desktop app's window (class amarchy) is see-through as Omarchy's
--- terminals are, in each of Omarchy's window modes (Appearance > Windows >
--- Window Opacity): Transparent, Omarchy's standard transparency; Opaque,
--- solid; Glassy, as glassy as every window. Wearing the desktop's look live,
--- it draws no wallpaper of its own: the desktop's shows through.
+-- The desktop app's window (class amarchy) is faded as Omarchy's terminals
+-- are, in each of Omarchy's window modes (Appearance > Windows > Window
+-- Opacity): Transparent, Omarchy's standard transparency; Opaque, solid;
+-- Glassy, as glassy as every window. The window itself is see-through:
+-- wearing the desktop's look live, it draws no wallpaper of its own, and the
+-- desktop's shows through its panes.
 
 if type(o) ~= "table" or type(o.bind) ~= "function" then
   return -- not Omarchy's Lua config: nothing to bind with
@@ -31,7 +32,7 @@ if config == nil or config == "" then
   config = home .. "/.config"
 end
 
-local key, picked = "SUPER + ALT + A", false
+local key, picked = "SUPER + D", false
 local setting = io.open(config .. "/amarchy/key")
 if setting then
   local said = (setting:read("*l") or ""):gsub("^%s+", ""):gsub("%s+$", "")

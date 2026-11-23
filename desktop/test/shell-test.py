@@ -4,14 +4,15 @@
 # tailnet: paired, or asked which), its own page when there's nothing to
 # open or it didn't load (Try again, an address typed in), a chat's link
 # handed to the running one, closing to the tray and coming back, the page
-# knowing it's the app (and on an Omarchy desktop: no wallpaper of its own
-# when it wears the desktop's look live), what it may and may not do (the microphone yes,
+# knowing it's the app (and on an Omarchy desktop: see-through, the desktop's
+# wallpaper through it when it wears the desktop's look live), what it may and may not do (the microphone yes,
 # notifications and the shell's own commands no), its window size kept.
 #
 #   python3 desktop/test/shell-test.py          exits 0 when every check passed
 #
 # Needs the app built for tests (cargo build --features test-hooks, in
-# desktop/), Xvfb, xdotool, dbus-daemon. Its app servers have homes of their
+# desktop/), Xvfb, xdotool, dbus-daemon (and picom, to see a see-through window
+# on a desktop: those checks are skipped without it). Its app servers have homes of their
 # own; amarchy's CLI is this checkout's (on a test home) or a made-up one,
 # never the machine's, so nothing here pairs with a real machine.
 
@@ -201,6 +202,56 @@ def listening(server, w, timeout=40):
     raise TimeoutError("the desktop app never listened for notices")
 
 
+def wait_for(test, timeout=30, every=0.3):
+    """test()'s first true value within timeout, else None."""
+    end = time.time() + timeout
+    while time.time() < end:
+        v = test()
+        if v:
+            return v
+        time.sleep(every)
+    return None
+
+
+# A chat open, in sight: the phone's layout's (app.session) or the wide one's (desk.chat).
+CHAT_OPEN = ("(app.desk ? !!desk.chat && !!desk.current && desk.chat.el.isConnected && desk.chat.el.offsetParent !== null"
+             " : !!app.session && [...document.querySelectorAll('.chat-head')].some((e) => e.offsetParent !== null))")
+
+
+def opens_chats(w, server, how):
+    """On the board, a chat opens: by a click on its card, and by the keys
+    (j to its card, Enter); what's written in it is sent (Julian's M5: no
+    chat opened, by either). how: when (after a restart...)."""
+    def board():
+        w.js("location.hash = '#/'; 1")
+        return w.wait("!(app.desk ? desk.current : app.session) && !!document.querySelector('.tcard[data-id] .today-go')", timeout=20)
+    board()
+    w.click_el(".tcard[data-id] .today-go")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a click on a chat opens it")
+    board()
+    w.js("document.activeElement && document.activeElement.blur(); 1")
+    for _ in range(8):
+        w.key("j")
+        time.sleep(0.25)
+        if w.js("!!document.activeElement && document.activeElement.matches('.today-go') && !!document.activeElement.closest('.tcard[data-id]')"):
+            break
+    w.key("Return")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: j to a chat and Enter open it too")
+    sid = w.js("app.desk ? desk.current : app.session.id")
+    # Its address there already, the board shown (the view didn't follow
+    # it): a click on it opens it all the same.
+    board()
+    w.js(f"history.replaceState(history.state, '', '#/s/' + encodeURIComponent({json.dumps(sid)})); 1")
+    w.click_el(f".tcard[data-id={json.dumps(sid)}] .today-go")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a chat whose address is there already opens too")
+    words = f"sent from the window, {how}"
+    w.js(f"const t = (app.desk ? desk.chat : app.session.chat).input; t.focus(); t.value = {json.dumps(words)}; t.dispatchEvent(new Event('input')); 1")
+    w.click_el(".cbtn.send")
+    got = wait_for(lambda: any(l.startswith(f"acted /api/session/{sid}/send ") and words in l for l in server.lines), timeout=15)
+    check(bool(got), f"{how}: and what's written in it is sent")
+    board()
+
+
 def on_app(w, timeout=30):
     return w.wait("!!document.querySelector('#look') && typeof app !== 'undefined' && !!app.view", timeout=timeout)
 
@@ -346,13 +397,51 @@ def fake_opener(home):
     return b
 
 
+def desktop_behind(w, color):
+    """A desktop behind the window, as Hyprland composes one: a window of one
+    color under it, and a compositor (picom) blending what the window leaves
+    see-through. None when there's no picom here (the checks that need it
+    are skipped); else what stops them."""
+    if not shutil.which("picom") or not shutil.which("display"):
+        return None
+    tool = ["magick"] if shutil.which("magick") else ["convert"]
+    pic = Path(tempfile.mkdtemp(prefix="desktop-behind-")) / "desktop.png"
+    subprocess.run([*tool, "-size", "1280x800", f"xc:{color}", str(pic)], check=True)
+    behind = subprocess.Popen(["display", "-geometry", "1280x800+0+0", "-title", "desktop", str(pic)], env=w.env,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.5)
+    comp = subprocess.Popen(["picom", "--backend", "xrender", "--no-fading-openclose"], env=w.env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.5)
+    subprocess.run(["xdotool", "windowraise", str(w.window)], env=w.env)
+    time.sleep(1)
+
+    def stop():
+        for p in (comp, behind):
+            p.terminate()
+            p.wait()
+    return stop
+
+
+def tint(f, box="300x120+100+600"):
+    """How much bluer than red a part of a screenshot is (-1 to 1): the
+    desktop behind, blue, showing through; the theme's wallpaper, orange,
+    drawn; or neither."""
+    tool = ["magick"] if shutil.which("magick") else ["convert"]
+    out = subprocess.run([*tool, str(f), "-crop", box, "+repage", "-format", "%[fx:mean.b-mean.r]", "info:"],
+                         capture_output=True, text=True).stdout
+    return float(out or 0)
+
+
 def omarchy_desktop(remote):
     """On an Omarchy desktop (Hyprland's session, Omarchy's current theme):
-    the page is told so, and <html> marked before it's drawn. Wearing the
-    desktop's look live, the window draws no wallpaper of its own (Hyprland
-    makes it see-through as the terminals: the desktop's own is behind it),
-    and Settings → Look says so; another theme keeps its wallpaper. Off
-    Omarchy, the live look's wallpaper is drawn."""
+    the page is told so, and <html> marked before it's drawn, and the window
+    is see-through. Wearing the desktop's look live, its page paints no
+    wallpaper and nothing under it, so the desktop's own wallpaper shows
+    through its panes as a browser shows the app's (seen under a compositor,
+    picom, when it's here), the GPU's way and the safe way; Settings → Look
+    says so; another theme keeps its wallpaper. Off Omarchy, the live look's
+    wallpaper is drawn."""
     print("on an Omarchy desktop")
     # Omarchy (live) on the server, its wallpaper a loud orange: plain in a screenshot when it's drawn.
     live = Path(remote.home) / ".local/state/amarchy/app/custom/omarchy-live"
@@ -371,6 +460,8 @@ def omarchy_desktop(remote):
         time.sleep(0.5)
         return w.js("getComputedStyle(document.body, '::before').backgroundImage")
 
+    under = "[getComputedStyle(document.documentElement).backgroundColor, getComputedStyle(document.body, '::before').backgroundColor]"
+    clear = ["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]
     tokyo = "#1a1b26"
     try:
         home = tempfile.mkdtemp(prefix="desktop-home-")
@@ -383,18 +474,49 @@ def omarchy_desktop(remote):
             check(w.js("document.documentElement.classList.contains('on-omarchy')"), "<html> is marked on-omarchy")
             bg = wear(w, {"theme": "omarchy-live", "wallpaper": "theme"}, "#121212")
             check(bg == "none", f"wearing Omarchy (live): no wallpaper of its own, the desktop's behind it ({bg[:80]})")
-            shot = w.shot(SHOTS / "omarchy-live.png")
-            light = brightness(shot)
-            check(light < 0.25, f"its background solid and dark, as a terminal's, not the orange wallpaper ({light:.2f})")
+            got = w.js(under)
+            check(got == clear, f"and nothing painted under its panes ({got})")
+            stop = desktop_behind(w, "#3050ff")
+            if stop:
+                time.sleep(3)       # past keep_background, which mustn't make it solid again
+                shot = w.shot(SHOTS / "omarchy-live.png")
+                t = tint(shot)
+                check(t > 0.03, f"the desktop (blue) shows through the window, as a wallpaper through the app's panes ({t:.3f})")
+                w.js("location.hash = '#/s/desk-long'; 1")
+                time.sleep(2)
+                t = tint(w.shot(SHOTS / "omarchy-live-chat.png"), "200x200+40+300")
+                check(t > 0.03, f"and through a chat's ({t:.3f})")
+                w.js("location.hash = '#/'; 1")
+                stop()
+            else:
+                print("  (no picom here: the desktop through the window not looked at)")
             w.js("openLook(); 1")
             said = w.wait("[...document.querySelectorAll('.sheet p')].map(p => p.textContent).find(t => t.includes('your desktop')) || ''")
-            check("behind your terminals" in said, f"Settings → Look says where its wallpaper is ({said[:90]})")
-            w.shot(SHOTS / "omarchy-live-look.png")
+            check("seen through it" in said, f"Settings → Look says where its wallpaper is ({said[:90]})")
             w.key("Escape")
             bg = wear(w, {"theme": "tokyo-night", "wallpaper": "theme"}, tokyo)
             check(bg not in ("", "none"), f"another theme: its own wallpaper, drawn ({bg[:80]})")
-            w.js("lookWorn(await api('/api/look', {theme: 'omarchy-live'})); return 1;")
+            bg = wear(w, {"theme": "omarchy-live", "wallpaper": "none"}, "#121212")
+            got = w.js(under)
+            check(bg == "none" and got[1] not in ("", "rgba(0, 0, 0, 0)"), f"Omarchy (live) with no wallpaper: solid ({got})")
+            w.js("lookWorn(await api('/api/look', {theme: 'omarchy-live', wallpaper: 'theme'})); return 1;")
             w.wait("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === '#121212'")
+            w.do("close")
+            time.sleep(0.5)
+        # Drawn the safe way (after a crash; no GPU): see-through all the same.
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        (Path(home) / ".local/state/omarchy/current/theme").mkdir(parents=True)
+        (Path(home) / ".local/state/amarchy/desktop").mkdir(parents=True)
+        (Path(home) / ".local/state/amarchy/desktop/rendering.json").write_text('{"safe": true, "why": "a test"}')
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "HYPRLAND_INSTANCE_SIGNATURE": "test"}) as w:
+            on_app(w)
+            w.wait("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === '#121212'")
+            stop = desktop_behind(w, "#3050ff")
+            if stop:
+                time.sleep(3)
+                t = tint(w.shot(SHOTS / "omarchy-live-safe.png"))
+                check(t > 0.03, f"drawn the safe way: the desktop shows through all the same ({t:.3f})")
+                stop()
             w.do("close")
             time.sleep(0.5)
         home = tempfile.mkdtemp(prefix="desktop-home-")
@@ -477,6 +599,7 @@ def main():
             ended = not Path(f"/proc/{old}").exists() or Path(f"/proc/{old}/cmdline").read_bytes() == b""     # gone, or a zombie
             check(code == 0 and ended, "--restart: the running one ends")
             check(bool(back) and w.do("visible") is True, "and starts again, on the chat it was on")
+            opens_chats(w, remote, "after a restart (an update)")
             w.do("close")
             time.sleep(0.5)
             w.again("--restart")
@@ -522,6 +645,22 @@ def main():
             check(not rendering.exists() and "drawing with the GPU again" in log and "drawing the safe way" not in log,
                   "the safe way an earlier build kept after any crash: forgotten (the GPU again)")
             check("sound: GStreamer" in log, "its log says what its page can play (GStreamer)")
+            # What goes wrong in its page: a click whose handler throws, a
+            # promise nothing caught, console.error; a picture that doesn't load isn't one.
+            w.js("const b = document.createElement('button'); b.id = 'oops'; b.textContent = 'oops';"
+                 " b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:99999';"
+                 " b.onclick = () => { missionsSheetNot(); }; document.body.append(b);"
+                 " Promise.reject(new Error('nobody caught me')); console.error('said', {a: 1});"
+                 " const i = new Image(); i.src = '/nothing-here.png'; document.body.append(i); 1")
+            w.click_el("#oops")
+            said = wait_for(lambda: "missionsSheetNot" in logf.read_text() and "nobody caught me" in logf.read_text(), timeout=10)
+            log = logf.read_text()
+            check(bool(said) and "page: error: ReferenceError: Can't find variable: missionsSheetNot" in log,
+                  "a click whose handler throws: in its log, with where")
+            check("page: a promise nothing caught: Error: nobody caught me" in log and 'page: console.error: said {"a":1}' in log,
+                  "a promise nothing caught and console.error too")
+            check("nothing-here.png" not in log, "a picture that doesn't load isn't the page's error")
+            w.js("document.getElementById('oops').remove(); 1")
             w.do("destroy")
             time.sleep(0.5)
             check(w.do("visible") is None, "(its window destroyed)")
@@ -590,6 +729,11 @@ def main():
                 w.js("window.__routes = []; addEventListener('hashchange', (e) => __routes.push(new URL(e.newURL).hash)); 1")
                 w.again("amarchy://chat/elsewhere/web-fix")
                 check(bool(w.wait("__routes.includes('#/s/elsewhere:web-fix')")), "a link to another machine's chat: its <machine>:<id> route")
+                # Its chats open, through the local key's cookie, as on Julian's M5; and after an update's restart.
+                opens_chats(w, local, "this machine's board")
+                w.again("--restart")
+                w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+                opens_chats(w, local, "this machine's board, after a restart")
         finally:
             local.stop()
 

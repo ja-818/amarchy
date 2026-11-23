@@ -1,0 +1,17 @@
+Stop babysitting your agents. Manage them.
+
+Amarchy is a management tool for coding agents (Claude Code, today), made so one person can run a dozen of them from a box that never sleeps.
+
+• A board that says who needs you, and what for.
+• Replies that open with a briefing: what was done, what's open, what's yours.
+• Answers and shipping with a tap: Allow, Deny, a question's answer or Ship it, right on the notification, without opening the app.
+• Share a screenshot, a link or some text straight into a chat.
+• A home screen widget: "2 need you".
+
+Amarchy runs on your own machine, a server or a computer that stays on, and this app is how you reach it from your phone. It needs:
+• your own amarchy machine (it's open source: github.com/ja-818/amarchy), and
+• your own Tailscale network, with the Tailscale app on this phone.
+
+Your chats never pass through us. Notifications are end-to-end encrypted: your machine encrypts each one for this phone, and only this phone can read it. The push relay that carries them, and Google's push, see nothing but noise. There's no account with us and nothing to sign up for.
+
+The look is Omarchy's: its themes and wallpapers, the ones your amarchy wears.
