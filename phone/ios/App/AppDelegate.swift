@@ -45,7 +45,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = shell
         window.makeKeyAndVisible()
         self.window = window
+        // Its page and its connection set up before a link it was opened with.
+        shell.loadViewIfNeeded()
         Router.shared.shell = shell
+        trace("scene, \(options.urlContexts.count) link(s)")
         options.urlContexts.forEach { open($0.url) }
     }
 
@@ -58,6 +61,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     private func open(_ url: URL) {
+        trace("open \(url.absoluteString)")
         guard let link = AmarchyLink(url) else { return }
         Router.shared.with { $0.handle(link) }
     }

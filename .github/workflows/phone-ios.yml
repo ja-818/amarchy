@@ -39,6 +39,9 @@ jobs:
     name: Simulator build and tests
     runs-on: macos-26
     timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read         # the own node's framework, from tailnet.yml's runs
     defaults:
       run:
         working-directory: phone/ios
@@ -53,6 +56,25 @@ jobs:
 
       - name: XcodeGen, and tmux for the app server
         run: brew install xcodegen tmux
+
+      # tailnet.yml builds tailnet/mobile into Tailnet.xcframework (artifact
+      # tailnet-ios, its contents at its root). None yet: the app is built
+      # without its own node, as a build without the framework is.
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-ios \
+                    && { echo "$id"; break; }
+                done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-ios -D Frameworks/Tailnet.xcframework
+            echo "Tailnet.xcframework from run $run"
+          else
+            echo "No Tailnet.xcframework yet: built without amarchy's own node"
+          fi
 
       - name: The Xcode project
         run: ./generate.sh
@@ -111,18 +133,20 @@ jobs:
         run: |
           shots="$RUNNER_TEMP/shots"
           mkdir -p "$shots/tests"
-          # The UI tests' own (XCTAttachment), by the names they gave them.
+          # The UI tests' own (XCTAttachment): the pictures, by the names they
+          # gave them (in characters an artifact takes).
           if [ -d "$RUNNER_TEMP/Amarchy.xcresult" ]; then
-            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Amarchy.xcresult" --output-path "$shots/tests" || true
-            python3 - "$shots/tests" <<'EOF' || true
-          import json, os, sys
-          d = sys.argv[1]
-          for test in json.load(open(os.path.join(d, "manifest.json"))):
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Amarchy.xcresult" --output-path "$RUNNER_TEMP/attachments" || true
+            python3 - "$RUNNER_TEMP/attachments" "$shots/tests" <<'EOF' || true
+          import json, os, re, shutil, sys
+          src, out = sys.argv[1], sys.argv[2]
+          for test in json.load(open(os.path.join(src, "manifest.json"))):
+              where = re.sub(r"[^\w.-]+", "_", test.get("testIdentifier", "test"))
               for a in test.get("attachments", []):
-                  src = os.path.join(d, a["exportedFileName"])
+                  f = os.path.join(src, a["exportedFileName"])
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
-                  if os.path.exists(src):
-                      os.rename(src, os.path.join(d, name.replace("/", "-")))
+                  if os.path.exists(f) and f.lower().endswith((".png", ".jpg", ".jpeg", ".heic")):
+                      shutil.copy(f, os.path.join(out, where + "-" + re.sub(r"[^\w.-]+", "_", name)))
           EOF
           fi
           # The installed app as the simulator shows it, opened by its link.
@@ -155,11 +179,11 @@ jobs:
             ${{ runner.temp }}/server.log
           if-no-files-found: ignore
 
-  # amarchy's own Tailscale node is built in only when tailnet/mobile's
-  # gomobile framework is there (tailnet.yml). Until it is, its wrapper is
-  # compiled here against a stub with the same API, so it can't rot.
-  own-node:
-    name: Own node's wrapper (a stub framework)
+  # The test job builds with amarchy's own node when tailnet.yml has made
+  # its framework; this one builds without it, as a checkout without
+  # Frameworks/ does: both ways compile.
+  without-own-node:
+    name: Built without amarchy's own node
     runs-on: macos-26
     timeout-minutes: 45
     defaults:
@@ -177,43 +201,10 @@ jobs:
       - name: XcodeGen
         run: brew install xcodegen
 
-      - name: A stub Tailnet.xcframework (tailnet/mobile's API, doing nothing)
-        run: |
-          stub="$RUNNER_TEMP/stub"
-          fw="$stub/Tailnet.framework"
-          mkdir -p "$fw/Headers" "$fw/Modules"
-          cat > "$fw/Headers/Tailnet.h" <<'EOF'
-          #import <Foundation/Foundation.h>
-          FOUNDATION_EXPORT BOOL MobileStart(NSString* _Nullable dir, NSString* _Nullable hostname, NSError* _Nullable* _Nullable error);
-          FOUNDATION_EXPORT void MobileStop(void);
-          FOUNDATION_EXPORT NSString* _Nonnull MobileState(void);
-          FOUNDATION_EXPORT NSString* _Nonnull MobileLoginURL(NSError* _Nullable* _Nullable error);
-          FOUNDATION_EXPORT NSString* _Nonnull MobileProxyURL(void);
-          EOF
-          printf 'framework module Tailnet {\n  umbrella header "Tailnet.h"\n  export *\n}\n' > "$fw/Modules/module.modulemap"
-          cat > "$stub/stub.m" <<'EOF'
-          #import "Tailnet.h"
-          BOOL MobileStart(NSString *dir, NSString *hostname, NSError **error) { return YES; }
-          void MobileStop(void) {}
-          NSString *MobileState(void) { return @"{\"state\":\"NeedsLogin\",\"words\":\"\",\"peers\":[]}"; }
-          NSString *MobileLoginURL(NSError **error) { return @"https://login.tailscale.com/a/stub"; }
-          NSString *MobileProxyURL(void) { return @"http://amarchy:stub@127.0.0.1:1080"; }
-          EOF
-          xcrun --sdk iphonesimulator clang -c "$stub/stub.m" -o "$stub/stub.o" -I "$fw/Headers" -fobjc-arc \
-            -arch arm64 -arch x86_64 -mios-simulator-version-min=17.0
-          xcrun libtool -static -o "$fw/Tailnet" "$stub/stub.o"
-          plutil -create xml1 "$fw/Info.plist"
-          plutil -insert CFBundleExecutable -string Tailnet "$fw/Info.plist"
-          plutil -insert CFBundleIdentifier -string io.github.ja818.amarchy.tailnet-stub "$fw/Info.plist"
-          plutil -insert CFBundlePackageType -string FMWK "$fw/Info.plist"
-          plutil -insert MinimumOSVersion -string 17.0 "$fw/Info.plist"
-          mkdir -p Frameworks
-          xcodebuild -create-xcframework -framework "$fw" -output Frameworks/Tailnet.xcframework
-
-      - name: The project with it (tailnet.yml), built for the simulator
+      - name: Every target, for the simulator
         run: |
           ./generate.sh
-          grep -q Tailnet.xcframework Amarchy.xcodeproj/project.pbxproj
+          ! grep -q Tailnet.xcframework Amarchy.xcodeproj/project.pbxproj
           xcodebuild build -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
             -destination "generic/platform=iOS Simulator" -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet
 
@@ -223,6 +214,9 @@ jobs:
     needs: test
     runs-on: macos-26
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         working-directory: phone/ios
@@ -245,6 +239,22 @@ jobs:
 
       - name: XcodeGen and fastlane
         run: brew install xcodegen fastlane
+
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-ios \
+                    && { echo "$id"; break; }
+                done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-ios -D Frameworks/Tailnet.xcframework
+            echo "Tailnet.xcframework from run $run"
+          else
+            echo "No Tailnet.xcframework yet: built without amarchy's own node"
+          fi
 
       - name: The Xcode project
         run: ./generate.sh

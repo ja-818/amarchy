@@ -164,7 +164,9 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         pageReady = false
         pageLoading = true
         showingOwn = false
-        machineLoad = webView.load(URLRequest(url: Address.page(server.url, go: o?.go, ask: o?.ask)))
+        let url = Address.page(server.url, go: o?.go, ask: o?.ask)
+        trace("load \(url.absoluteString)")
+        machineLoad = webView.load(URLRequest(url: url))
         if shareWanted { sendShared(tellPage: true) }
     }
 
@@ -191,6 +193,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     private func tell(_ o: OpenRequest) {
+        trace("tell \(o.go ?? "") \(o.ask ?? "") \(o.share)")
         webView.evaluateJavaScript(Bridge.openScript(go: o.go, ask: o.ask, share: o.share)) { _, _ in }
         #if DEBUG
         probe?.run(after: 1.2)
@@ -198,6 +201,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     func handle(_ link: AmarchyLink) {
+        trace("link \(link)")
         switch link {
         case .open(let url):
             connection.reach(url)
@@ -281,6 +285,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoading = false
+        trace("loaded \(webView.url?.lastPathComponent ?? "?")")
         if let server, let url = webView.url, Address.sameOrigin(url, server.url) {
             pageReady = true
             machineLoad = nil
@@ -299,6 +304,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         pageLoading = false
+        trace("load failed: \(error.localizedDescription)")
         guard navigation == machineLoad, let server, !Self.superseded(error) else { return }
         machineLoad = nil
         connection.failed(server.url, why: Net.words(for: error, host: server.url.host ?? "it"))
@@ -307,6 +313,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         // Its page's process ended (memory, most often): the page again.
+        trace("web content process ended")
         if let server {
             load(server)
         } else {

@@ -137,16 +137,22 @@ final class Connection {
         let mine = attempt
         trying = url
         base = ShellStatus(kind: .opening, label: url.host)
+        trace("reach \(url.absoluteString) #\(mine)")
         Task {
             let result = await Hello.check(url)
-            guard mine == attempt else { return }       // a newer one was asked for since
+            guard mine == attempt else {            // a newer one was asked for since
+                trace("reach #\(mine) superseded")
+                return
+            }
             switch result {
             case .success(let name):
+                trace("hello \(name)")
                 let server = Server(url: url, machine: name)
                 Server.kept = server
                 trying = nil
                 onOpen(server)
             case .failure(let failure):
+                trace("hello failed: \(failure.errorDescription ?? "?")")
                 base = unreachable(url, why: failure.errorDescription ?? "It didn't answer")
                 startNode()
             }

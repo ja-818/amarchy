@@ -12,14 +12,16 @@ import WebKit
 import Tailnet
 #endif
 
-/// What the app needs of a node (the framework's Go API).
-protocol OwnNode: AnyObject {
+/// What the app needs of a node (the framework's Go API). Its calls may
+/// take seconds: never on the main thread.
+protocol OwnNode: AnyObject, Sendable {
     func start(dir: String, hostname: String) throws
     func stop()
     /// `{"state", "words", "login_url", "self", "peers": [{"name", "dns", "online"}]}`
     func stateJSON() -> String
+    /// Tailscale's sign-in page, or "" when it's signed in already.
     func loginURL() throws -> String
-    /// "http://amarchy:<secret>@127.0.0.1:<port>"
+    /// "http://amarchy:<secret>@127.0.0.1:<port>", or "" while it isn't up.
     func proxyURL() -> String
 }
 
@@ -45,7 +47,7 @@ struct NodeState: Decodable, Equatable {
 
 #if canImport(Tailnet)
 /// The gomobile framework's functions (package mobile: MobileStart...).
-final class TailnetNode: OwnNode {
+final class TailnetNode: OwnNode, @unchecked Sendable {
     func start(dir: String, hostname: String) throws {
         var error: NSError?
         if !MobileStart(dir, hostname, &error) {
@@ -75,7 +77,7 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
     private(set) var state: NodeState?
     private var started = false
     private var signingIn: ASWebAuthenticationSession?
-    private var onRunning: () -> Void = {}
+    private var onRunning: @MainActor () -> Void = {}
     private var poll: Task<Void, Never>?
     private var proxied = false
 
@@ -84,6 +86,10 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
     }
 
     nonisolated static func builtIn() -> OwnNode? {
+        #if DEBUG
+        // The UI tests of the flows without it, in a build that has it.
+        if ProcessInfo.processInfo.arguments.contains("-AmarchyNoOwnNode") { return nil }
+        #endif
         #if canImport(Tailnet)
         return TailnetNode()
         #else
@@ -99,46 +105,43 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
                            waiting: signingIn != nil)
     }
 
-    func startIfAvailable(onRunning: @escaping () -> Void) {
+    func startIfAvailable(onRunning: @escaping @MainActor () -> Void) {
         guard let node else { return }
         self.onRunning = onRunning
         guard !started else { return }
+        started = true
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("tailnet", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        do {
-            try node.start(dir: dir.path, hostname: "amarchy-iphone")
-            started = true
-        } catch {
-            return
-        }
         poll = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.refresh()
+            let up: Bool = await Task.detached {
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                return (try? node.start(dir: dir.path, hostname: "amarchy-iphone")) != nil
+            }.value
+            guard up else {
+                self?.started = false       // tried again the next time it's needed
+                return
+            }
+            while !Task.isCancelled, self != nil {
+                let json = await Task.detached { node.stateJSON() }.value
+                await self?.took(NodeState.parse(json))
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }
 
-    private func refresh() {
-        guard let node, let now = NodeState.parse(node.stateJSON()) else { return }
-        let wasRunning = state?.running == true
+    private func took(_ now: NodeState?) async {
+        guard let node, let now else { return }
         state = now
-        if now.running, !wasRunning {
-            signingIn?.cancel()
-            signingIn = nil
-            applyProxy(ProxySettings(node.proxyURL()))
-            onRunning()
-        }
-    }
-
-    /// The proxy on the web view (iOS 17) and the app's own requests, for
-    /// tailnet names only.
-    private func applyProxy(_ proxy: ProxySettings?) {
-        guard let proxy else { return }
+        guard now.running, !proxied else { return }
+        // On the tailnet: its proxy where the app's requests go (once it has one).
+        let text = await Task.detached { node.proxyURL() }.value
+        guard let proxy = ProxySettings(text) else { return }
         WKWebsiteDataStore.default().proxyConfigurations = [proxy.configuration]
         Net.use(proxy: proxy)
         proxied = true
+        signingIn?.cancel()
+        signingIn = nil
+        onRunning()
     }
 
     /// The own page's Sign in to Tailscale: Tailscale's login page, in the
@@ -146,10 +149,7 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
     func signIn() async throws {
         guard let node else { throw Net.Failure(errorDescription: "This build signs in through the Tailscale app: turn its VPN on") }
         let text = try await Task.detached { try node.loginURL() }.value
-        if text.isEmpty {       // signed in already: the node says so next
-            refresh()
-            return
-        }
+        if text.isEmpty { return }      // signed in already: its state says so next
         guard let url = URL(string: text), url.scheme == "https" else {
             throw Net.Failure(errorDescription: "Tailscale didn't give a sign-in page: try again in a moment")
         }

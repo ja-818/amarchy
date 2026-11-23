@@ -3,8 +3,10 @@
 // AMARCHY_TEST_SERVER): its own page with no address; an address typed
 // there opening the machine's app with window.amarchyPhone in it and
 // push.state answering through it; the app's links (amarchy://open,
-// amarchy://chat). What the page sees is read through the real bridge by
-// the debug build's probe (-AmarchyProbe), into a label read here.
+// amarchy://chat, the app started by one); amarchy's own Tailscale node's
+// sign-in, in a build that has it. What the page sees is read through the
+// real bridge by the debug build's probe (-AmarchyProbe), into a label read
+// here, with the app's last steps.
 
 import XCTest
 
@@ -16,9 +18,13 @@ final class AmarchyUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch() -> XCUIApplication {
+    /// The app, started afresh; without its own Tailscale node unless asked
+    /// (a build with it would show its sign-in, with no VPN in the simulator).
+    private func launch(ownNode: Bool = false, forget: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-AmarchyForget", "-AmarchyProbe"]
+        app.launchArguments += ["-AmarchyProbe"]
+        if forget { app.launchArguments += ["-AmarchyForget"] }
+        if !ownNode { app.launchArguments += ["-AmarchyNoOwnNode"] }
         app.launch()
         return app
     }
@@ -33,7 +39,7 @@ final class AmarchyUITests: XCTestCase {
         let result = XCTWaiter().wait(for: [wait], timeout: seconds)
         let text = label.exists ? label.label : "(no probe)"
         if result != .completed {
-            shot(app, "failed-\(name)")
+            shot(app, "failed")
             XCTFail("the page never said \(wanted); it says: \(text)", file: file, line: line)
         }
         return text
@@ -48,27 +54,30 @@ final class AmarchyUITests: XCTestCase {
 
     func testItsOwnPageWithoutAnAddress() {
         let app = launch()
-        let text = probe(app, says: #""page":"own""#)
+        let text = probe(app, says: #""title":"Can't find your amarchy""#)
         XCTAssertTrue(text.contains(#""shell":"object""#), "window.amarchyShell on its own page: \(text)")
         XCTAssertTrue(text.contains(#""phone":"undefined""#), "no window.amarchyPhone there: \(text)")
-        XCTAssertTrue(app.staticTexts["Can't find your amarchy"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Can't find your amarchy"].exists)
         XCTAssertTrue(app.webViews.textFields.firstMatch.exists, "the address box")
         XCTAssertTrue(app.webViews.buttons["Try again"].exists)
         shot(app, "1-own-page")
 
-        // A wrong address says why, on the page.
+        // A wrong address says why, on the page, and it stays.
         let field = app.webViews.textFields.firstMatch
         field.tap()
         field.typeText("http://elsewhere.example")
         app.webViews.buttons["Open"].tap()
-        XCTAssertTrue(app.staticTexts["Your amarchy's address starts with https:// (Tailscale gives it its certificate)"]
-            .waitForExistence(timeout: 10))
+        let why = app.staticTexts["Your amarchy's address starts with https:// (Tailscale gives it its certificate)"]
+        XCTAssertTrue(why.waitForExistence(timeout: 10))
+        sleep(3)
+        XCTAssertTrue(why.exists, "the page's next status doesn't wipe it")
         shot(app, "2-own-page-wrong-address")
     }
 
     func testAnAddressTypedOpensTheMachine() throws {
         try XCTSkipIf(server.isEmpty, "no test server (AMARCHY_TEST_SERVER)")
         let app = launch()
+        probe(app, says: #""title":"Can't find your amarchy""#)
         let field = app.webViews.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         field.tap()
@@ -87,21 +96,31 @@ final class AmarchyUITests: XCTestCase {
     func testTheAppsLinks() throws {
         try XCTSkipIf(server.isEmpty, "no test server (AMARCHY_TEST_SERVER)")
         let app = launch()
-        probe(app, says: #""page":"own""#)
+        probe(app, says: #""title":"Can't find your amarchy""#)
+        // (XCTest starts the app again for a link: the app opened by one.)
         app.open(try XCTUnwrap(URL(string: "amarchy://open?server=\(server)")))
         probe(app, says: #""bridge":true"#, within: 60)
         shot(app, "4-opened-by-link")
 
         // A chat's link: told to the page, which goes to the chat.
         app.open(try XCTUnwrap(URL(string: "amarchy://chat/testbox/desk-fix")))
-        probe(app, says: ##""hash":"#/s/desk-fix""##)
+        probe(app, says: ##""hash":"#/s/desk-fix""##, within: 45)
         shot(app, "5-a-chat-by-link")
 
         // Kept: the next start opens the machine without asking.
         app.terminate()
-        let again = XCUIApplication()
-        again.launchArguments += ["-AmarchyProbe"]
-        again.launch()
+        let again = launch(forget: false)
         probe(again, says: #""bridge":true"#, within: 60)
+    }
+
+    func testItsOwnNodesSignIn() throws {
+        let app = launch(ownNode: true)
+        let text = probe(app, says: #""page":"own""#)
+        try XCTSkipIf(text.contains(#""ownNode":false"#), "built without amarchy's own node (no Tailnet.xcframework)")
+        // No VPN in the simulator: the node starts, and asks to be signed in.
+        probe(app, says: #""status":"signin""#, within: 90)
+        XCTAssertTrue(app.staticTexts["Sign in to Tailscale"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.webViews.buttons["Sign in to Tailscale"].exists)
+        shot(app, "6-own-node-sign-in")
     }
 }

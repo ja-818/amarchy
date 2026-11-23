@@ -83,14 +83,19 @@ final class Bridge {
 
     /// `window.amarchyShell.invoke(cmd, args)` for desktop/dist/shell.js, on
     /// the bundle's own page: rejected with the words, as the desktop's.
+    /// shell.js redraws when a status's JSON changes, and a status from
+    /// Swift has its keys in any order: they're put in one order here.
     static let shellScript = """
     (() => {
       if (location.protocol !== "file:" || window.amarchyShell) return;
       const handler = window.webkit.messageHandlers.amarchyShell;
+      const status = (s) => ({ kind: s.kind, label: s.label, why: s.why, waiting: !!s.waiting,
+        machines: (s.machines || []).map((m) => ({ name: m.name, label: m.label, url: m.url })) });
       window.amarchyShell = Object.freeze({
         invoke(cmd, args) {
           return handler.postMessage({ command: String(cmd), args: args || {} })
-            .then((v) => v === undefined ? null : v, (e) => { throw (e && e.message) || String(e); });
+            .then((v) => v === undefined || v === null ? null : cmd === "status" ? status(v) : v,
+                  (e) => { throw (e && e.message) || String(e); });
         },
       });
     })();

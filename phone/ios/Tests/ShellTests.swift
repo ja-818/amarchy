@@ -263,7 +263,8 @@ final class BridgeTests: XCTestCase {
         }
         window.webkit = { messageHandlers: {
           amarchy: { postMessage: function (m) { return answer(m, "on", "no such"); } },
-          amarchyShell: { postMessage: function (m) { return answer(m, { kind: "nothing" }, "words"); } },
+          amarchyShell: { postMessage: function (m) {
+            return answer(m, { why: "w", machines: [{ url: "u", name: "n" }], kind: "nothing", label: null }, "words"); } },
         } };
         """)
         return js
@@ -304,10 +305,12 @@ final class BridgeTests: XCTestCase {
         let js = page(origin: "null", protocol: "file:")
         js.evaluateScript(Bridge.shellScript)
         js.evaluateScript("""
-        amarchyShell.invoke("status").then(function (v) { globalThis.got = v.kind; });
+        amarchyShell.invoke("status").then(function (v) { globalThis.got = JSON.stringify(v); });
         amarchyShell.invoke("bad").catch(function (e) { globalThis.err = typeof e === "string" ? e : "not words"; });
         """)
-        XCTAssertEqual(js.evaluateScript("got").toString(), "nothing")
+        XCTAssertEqual(js.evaluateScript("got").toString(),
+                       #"{"kind":"nothing","label":null,"why":"w","waiting":false,"machines":[{"name":"n","url":"u"}]}"#,
+                       "a status's keys in one order, whatever order the app gave them in")
         XCTAssertEqual(js.evaluateScript("err").toString(), "words", "rejected with the words, as the desktop's")
         XCTAssertEqual(js.evaluateScript("JSON.stringify(sent[0])").toString(), #"{"command":"status","args":{}}"#)
 
