@@ -86,7 +86,14 @@ try:
     check(code == 200 and bool(same(lambda m: st(m).get("new_model"), "sonnet")),
           "a new chat's model, set in beta's app: on alpha and gamma")
     code, _, _ = gamma.ask("POST", "/api/new/effort", {"effort": "high"})
-    check(code == 200 and bool(same(lambda m: st(m).get("new_effort"), "high")), "its effort, from gamma")
+    ok_ = code == 200 and bool(same(lambda m: st(m).get("new_effort"), "high"))
+    if not ok_ and os.environ.get("SYNC_DEBUG"):
+        for m in ms:
+            f = m.home / "state/amarchy/new-effort"
+            print("   ", m.name, json.loads((m.home / "state/amarchy/sync/items.json").read_text()).get("new-effort"),
+                  "file", f.read_text().strip() if f.exists() else None, f.stat().st_mtime if f.exists() else None, "view", st(m).get("new_effort"))
+            print("    log:", "\n".join(l for l in (m.home / "server.log").read_text().splitlines() if "sync" in l)[-600:])
+    check(ok_, "its effort, from gamma")
     for m in ms:
         (m.work / "site").mkdir(exist_ok=True)
     r = alpha.amarchy("projects", "order", "proj")

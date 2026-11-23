@@ -17281,6 +17281,7 @@ class Sync:
         self.st, self.wake, self.asked = st, threading.Event(), {}
         self.lock = threading.Lock()
         self.sets = None        # the sets and the missions as last looked at (a change: pushed)
+        self.pending = set()    # items changed here and not pushed yet (kept through a failure)
 
     def start(self):
         threading.Thread(target=self.run, daemon=True).start()
@@ -17295,11 +17296,12 @@ class Sync:
     def run(self):
         while True:
             try:
-                changed = sync_items_look()
+                self.pending.update(sync_items_look())
                 sets = json.dumps([mission_badges_kept(), sync_json(MISSION_TOLD, {}), sounds_value(), themes_value(),
                                    missions_have()], sort_keys=True)
-                if changed or (self.sets is not None and sets != self.sets):
-                    self.push(changed)
+                if self.pending or (self.sets is not None and sets != self.sets):
+                    self.push(set(self.pending))
+                    self.pending.clear()        # (only once it's on its way)
                 self.sets = sets
                 ms = machines_read()
                 peers = self.st.peers.snapshot() if self.st.peers else {}
