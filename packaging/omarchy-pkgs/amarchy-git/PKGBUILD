@@ -8,9 +8,9 @@
 pkgbase=amarchy-git
 pkgname=('amarchy-git' 'amarchy-desktop-git')
 _repo=amarchy
-pkgver=r463.g6e71db1
+pkgver=r500.g3adcb77
 pkgrel=1
-_commit=6e71db143690a61166ea7e25aea71ff14d3da29e
+_commit=3adcb7776ecd33ec4c79e094b51f763d73f8f5f5
 pkgdesc="Stop babysitting your agents. Manage them: Claude Code chats in parallel, on one board"
 arch=('x86_64' 'aarch64')
 url="https://github.com/ja-818/amarchy"
@@ -20,7 +20,7 @@ makedepends=('git' 'go' 'cargo' 'webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator
              'python' 'tmux' 'jq' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire' 'xdg-utils')
 options=('!lto' '!debug')
 source=("$_repo::git+$url.git#commit=${_commit}")
-sha256sums=('ebb645fe82a14c79e4bfb4566e7ca3f9567af6661cf15e81b230a260caac1567')
+sha256sums=('07f53f7b3d19c906d8fe296de171a1785214c807b30cb15e38bb0d079faa67ec')
 
 prepare() {
   cd "$_repo/desktop"
