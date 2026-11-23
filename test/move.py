@@ -18,15 +18,26 @@
 #     boards, and a message sent to the old id goes on to beta;
 #   - back, beta to alpha, with nothing to commit (no WIP commit);
 #   - busy: --when-free waits for the turn to end, then moves it;
+#   - a message on its way in as a move starts (the app's send, still
+#     delivering it: its gate held): the move waits for it before it looks,
+#     doing nothing meanwhile; one sent after it started is refused;
 #   - dies halfway: beta's Claude doesn't come up, so beta undoes all of it
 #     and alpha undoes the WIP commit, origin's branch, as they were, and its
-#     preview starts again; beta's server dies in the middle of taking it:
-#     alpha undoes, beta drops it once it's back, alpha's abort is answered;
-#     alpha's mover dies after pushing: amarchy move --tend undoes it.
+#     preview starts again; beta's server dies in the middle of taking it
+#     (as its Claude starts): alpha undoes, beta drops all of it once it's
+#     back, alpha's abort is answered; beta's take dies right after git made
+#     its worktree: beta undoes it all before it answers;
+#     alpha's mover dies right after committing, right after pushing, and
+#     after packing: amarchy move --tend undoes each.
+#
+# Deterministic: each move waits until the chat is free as the move sees it
+# (amarchy move --check: free()), its Claude done with all it was sent; each
+# kill at a named point (AMARCHY_MOVE_DIE), or once the take is where it's
+# meant to be cut.
 #
 #   python3 test/move.py        exits 0 when every check passed (a few minutes)
 
-import hashlib, http.client, json, os, shutil, signal, socket, subprocess, sys, tempfile, time
+import fcntl, hashlib, http.client, json, os, shutil, signal, socket, subprocess, sys, tempfile, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -250,6 +261,25 @@ def new_chat(m, name, first="remember the blue door"):
     return sid, ready
 
 
+def free(m, sid, path, to, limit=40):
+    """The chat free to move (what a move checks: amarchy move --check says
+    nothing keeps it busy), its Claude done with all it was sent (what it got
+    last, answered)."""
+    def ok():
+        g = got(m, path).rstrip("\n").splitlines()
+        if g and not g[-1].startswith("ANSWER: "):
+            return False
+        r = m.amarchy("move", sid, "--check", "--to", to, "--json")
+        return r.returncode == 0 and not json.loads(r.stdout).get("busy")
+    return bool(until(ok, limit=limit))
+
+
+def worktrees_of(m):
+    """The worktrees git knows of in m's project (a locked one left by a
+    worktree cut short too)."""
+    return [l.split(" ", 1)[1] for l in git(m.repo, "worktree", "list", "--porcelain").stdout.splitlines() if l.startswith("worktree ")]
+
+
 def say_to(m, sid, text):
     code, _, said = m.ask("POST", f"/api/session/{sid}/send", {"text": text})
     return code, said
@@ -326,6 +356,7 @@ try:
     head_before = git(wt, "rev-parse", "HEAD").stdout.strip()
 
     print("alpha to beta")
+    check(free(alpha, sid, wt, "beta"), "free to move")
     t0 = time.time()
     r = alpha.amarchy("move", sid, "--to", "beta", "--secrets")
     key = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
@@ -396,7 +427,7 @@ try:
     check(bool(until(lambda: "sent to the old id" in got(beta, bwt), limit=20)), "its Claude on beta got it")
 
     print("back again, beta to alpha (nothing to commit)")
-    until(lambda: (beta.own(sid) or {}).get("status") == "idle", limit=20)
+    check(free(beta, sid, bwt, "alpha"), "free to move (its Claude done with what was sent to its old id)")
     r = beta.amarchy("move", sid, "--to", "alpha", "--no-secrets")
     key = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
     check(key == f"alpha:{sid}", f"moved back: {key or r.stderr.strip()[-300:]}")
@@ -411,7 +442,7 @@ try:
         check(bool(until(lambda: "You said first: remember the blue door" in got(alpha, wt), limit=20)), "and it still remembers")
 
     print("when it's free")
-    until(lambda: alpha.own(sid)["status"] == "idle", limit=20)
+    free(alpha, sid, wt, "beta")
     say_to(alpha, sid, "another slow one")
     until(lambda: alpha.own(sid)["status"] == "working", limit=10)
     r = alpha.amarchy("move", sid, "--to", "beta", "--when-free", "--no-secrets")
@@ -425,10 +456,10 @@ try:
           "ANSWER: ok" in (alpha.projects_dir(wt) / f"{conv}.jsonl").read_text(), "after its turn, which it finished")
 
     print("dies halfway: beta's Claude doesn't come up")
-    until(lambda: (beta.own(sid) or {}).get("status") == "idle", limit=20)
+    free(beta, sid, beta.work / ".worktrees/proj/door", "alpha")
     r = beta.amarchy("move", sid, "--to", "alpha", "--no-secrets")
     check(r.returncode == 0, f"back on alpha first ({r.stderr.strip()[-200:]})")
-    until(lambda: alpha.own(sid) and alpha.own(sid)["status"] == "idle", limit=20)
+    free(alpha, sid, wt, "beta")
     (wt / "app.txt").write_text("one\ntwo\nthree, half staged\n")
     git(wt, "add", "app.txt")
     (wt / "app.txt").write_text("one\ntwo\nthree, half staged\nfour, not staged\n")
@@ -461,9 +492,9 @@ try:
     (beta.home / "slow-start").write_text("40")
     mover = subprocess.Popen([sys.executable, BIN, "move", sid, "--to", "beta", "--no-secrets"], env=alpha.env,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    taking = until(lambda: any(json.loads(f.read_text()).get("state") == "taking" for f in (beta.state_dir() / "moves-in").glob("*.json")),
-                   limit=60, step=0.2)
-    check(bool(taking), "beta is taking it (its Claude slow to start)")
+    taking = until(lambda: any((r := json.loads(f.read_text())).get("state") == "taking" and any(a[0] == "session" for a in r.get("undo") or [])
+                               for f in (beta.state_dir() / "moves-in").glob("*.json")), limit=60, step=0.2)
+    check(bool(taking), "beta is taking it, all of it in place, its Claude slow to start")
     beta.stop(signal.SIGKILL)
     subprocess.run(["tmux", "-L", beta.socket, "kill-server"], capture_output=True)
     out, err = mover.communicate(timeout=120)
@@ -476,12 +507,42 @@ try:
     check(bool(until(lambda: all(json.loads(f.read_text()).get("state") != "taking"
                                  for f in (beta.state_dir() / "moves-in").glob("*.json")), limit=30)),
           "beta, back, undid what it was taking")
-    left = until(lambda: beta.own(sid) is None and not (beta.work / ".worktrees/proj/door").exists(), limit=15)
-    check(bool(left), f"nothing of it left on beta ({beta.own(sid) is not None}, {(beta.work / '.worktrees/proj/door').exists() and sorted(x.name for x in (beta.work / '.worktrees/proj/door').iterdir())})")
+    bdoor = beta.work / ".worktrees/proj/door"
+    left = until(lambda: beta.own(sid) is None and not bdoor.exists() and str(bdoor) not in worktrees_of(beta), limit=15)
+    check(bool(left), f"nothing of it left on beta ({beta.own(sid) is not None}, {bdoor.exists() and sorted(x.name for x in bdoor.iterdir())}, "
+                      f"{str(bdoor) in worktrees_of(beta)})")
     alpha.amarchy("move", "--tend")
     rec = json.loads((alpha.state_dir() / f"moves/{sid}.json").read_text())
     check(not rec.get("abort"), "alpha's ask answered (move --tend)")
     alpha.amarchy("move", sid, "--dismiss")
+
+    print("dies halfway: beta's take goes right after git made its worktree (killed)")
+    beta.stop()
+    beta.env["AMARCHY_MOVE_DIE"] = "worktree made"
+    beta.start()
+    r = alpha.amarchy("move", sid, "--to", "beta", "--no-secrets", timeout=180)
+    check(r.returncode != 0 and alpha.own(sid) is not None and git_state(wt) == was and origin_branch(branch) == origin_was,
+          f"alpha: it's here as it was, origin too ({r.stderr.strip()[-120:]})")
+    recs = [json.loads(f.read_text()) for f in (beta.state_dir() / "moves-in").glob("*.json")]
+    check(all(x.get("state") != "taking" for x in recs) and beta.own(sid) is None and not bdoor.exists() and str(bdoor) not in worktrees_of(beta),
+          f"beta undid it before it answered: the worktree it had just made gone, git's record of it too ({bdoor.exists()}, {worktrees_of(beta)})")
+    check(git(beta.repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").returncode != 0, "and its branch")
+    beta.stop()
+    del beta.env["AMARCHY_MOVE_DIE"]
+    beta.start()
+    alpha.amarchy("move", sid, "--dismiss")
+
+    for at, what in (("committed", "right after committing"), ("pushed", "right after pushing")):
+        print(f"dies halfway: alpha's mover goes {what}, before it wrote it down")
+        r = alpha.amarchy("move", sid, "--to", "beta", "--no-secrets", env_extra={"AMARCHY_MOVE_DIE": at})
+        check(r.returncode != 0 and git_state(wt) != was, "the mover died, its WIP commit made")
+        if at == "pushed":
+            check(origin_branch(branch) != origin_was, "and pushed")
+        alpha.amarchy("move", "--tend")
+        check(git_state(wt) == was and origin_branch(branch) == origin_was, "amarchy move --tend undid it: as it was (half staged), origin too")
+        row = alpha.own(sid)
+        check(bool(row) and row.get("move_error") and "in the middle" in row["move_error"]["error"], "its card says what happened")
+        alpha.amarchy("move", sid, "--dismiss")
 
     print("dies halfway: alpha's mover goes after pushing")
     was = git_state(wt)
@@ -494,6 +555,29 @@ try:
     row = alpha.own(sid)
     check(bool(row) and row.get("move_error") and "in the middle" in row["move_error"]["error"], "its card says what happened")
     check(beta.own(sid) is None, "never on beta")
+
+    print("a message on its way in as it starts: in first, then the move")
+    alpha.amarchy("move", sid, "--dismiss")
+    free(alpha, sid, wt, "beta")
+    gate = open(alpha.state_dir() / f"moves/{sid}.gate", "a")
+    fcntl.flock(gate, fcntl.LOCK_SH)        # (as the app's send holds it while it delivers)
+    was = git_state(wt)
+    mover = subprocess.Popen([sys.executable, BIN, "move", sid, "--to", "beta", "--no-secrets"], env=alpha.env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    step_ = lambda: (json.loads((alpha.state_dir() / f"moves/{sid}.json").read_text()) or {}).get("step")
+    started = until(lambda: step_() == "Getting ready", limit=20, step=0.1)
+    time.sleep(2)
+    check(bool(started) and step_() == "Getting ready" and mover.poll() is None and git_state(wt) == was and alpha.own(sid) is not None,
+          f"the move waits for it, nothing done yet ({step_()})")
+    code, _, said = alpha.ask("POST", f"/api/session/{sid}/send", {"text": "sent after it started"})
+    check(code == 409 and "moving to beta" in (said.get("error") or ""), f"a message sent after it started: refused, saying why ({code} {said})")
+    gate.close()
+    out, err = mover.communicate(timeout=180)
+    check(mover.returncode == 0 and bool(until(lambda: beta.own(sid), limit=10)), f"then it moves ({err.strip()[-120:]})")
+    check("sent after it started" not in got(beta, bdoor), "without what was refused")
+    free(beta, sid, bdoor, "alpha")
+    r = beta.amarchy("move", sid, "--to", "alpha", "--no-secrets")
+    check(r.returncode == 0 and bool(until(lambda: alpha.own(sid), limit=10)), f"and back ({r.stderr.strip()[-120:]})")
 
     print("refused")
     r = alpha.amarchy("agents", sid, "--name", "Doorman")
