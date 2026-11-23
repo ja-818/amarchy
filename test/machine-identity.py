@@ -87,6 +87,12 @@ check(code == 1 and calls[:1] == ["service"] and "HTTPS certificates" in said an
       f"no HTTPS certificates: on here all the same, the tailnet's part said, 1 ({said.strip()[:90]})")
 code, said = on({**STATUS, "CertDomains": ["box.tail1234.ts.net"]})
 check(code == 0 and calls[0] == "service" and ("tailscale", "serve") in calls, "all there: on here, and on the tailnet")
+check("Add to Home Screen" in said, "not paired: how to put it on the phone")
+am.machines_read = lambda: [{"name": "srv", "label": "Server", "url": "https://srv.tail1234.ts.net", "key": "k" * 43}]
+code, said = on({**STATUS, "CertDomains": ["box.tail1234.ts.net"]})
+check("Add to Home Screen" not in said and "Paired with Server" in said, f"paired: its chats are on the other's board, no phone steps ({said.strip().splitlines()[-1][:80]})")
+os.environ["WAYLAND_DISPLAY"] = "wayland-1"
+check("enable-linger" not in on({**STATUS, "CertDomains": ["x"]})[1], "on a desktop: no note about logging out")
 
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed'}")
 sys.exit(1 if failed else 0)

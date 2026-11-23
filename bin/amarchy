@@ -3459,7 +3459,7 @@ def new_on(name, repo, chat_name, prompt, model, images, effort, agent):
             status, added = peer_json(m, "POST", "/api/add", {"repo": slug}, timeout=930)
             if status != 200:
                 return fail(f"couldn't clone {slug} on {m['label']}: {added.get('error') or status}")
-            repo = added.get("name") or repo
+            repo = Path(str(added.get("name") or repo)).name     # (one from before: its path)
         body = {"repo": repo, **{k: v for k, v in (("prompt", prompt), ("model", model), ("effort", effort), ("agent", agent)) if v},
                 **({"images": images} if images else {})}
         if chat_name:
@@ -16803,7 +16803,9 @@ def app_handler(st, users, address):
             if r.returncode != 0:
                 return self.error(500, gist(r.stderr or r.stdout) or "couldn't add it")
             st.projects_stale.set()
-            return self.send(200, {"name": (r.stdout.strip().splitlines() or [""])[-1]})
+            # (amarchy add prints its path: the project's name is its folder's.)
+            where = (r.stdout.strip().splitlines() or [""])[-1]
+            return self.send(200, {"name": Path(where).name if where else "", "path": where})
 
         def new(self, data):
             """{repo, prompt, model, effort, images: [{type, data (base64)}],
@@ -17222,11 +17224,23 @@ def app_on():
             if "access denied" in (r.stderr + r.stdout).lower():
                 why = "Tailscale won't let you change it: run `sudo tailscale set --operator=$USER` once, then this again"
             return fail(f"{here}, but couldn't serve it on your tailnet: {why}")
-    if sh("loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger").stdout.strip() == "Linger=no":
+    print(app_url(address))
+    # A server, with no desktop session of yours: logging out stops it unless
+    # it lingers. (On a desktop you log out of, its chats ending with it is
+    # what any app does.)
+    desktop = any(os.environ.get(k) for k in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP"))
+    if not desktop and sh("loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger").stdout.strip() == "Linger=no":
         print("  Note: it stops when you log out of this machine. `sudo loginctl enable-linger $USER` keeps it running.")
-    print(f"{app_url(address)}\n"
-          f"  On your phone (on your tailnet): open it in Safari, then Share → Add to Home Screen.\n"
-          f"  Open it from the home screen and turn on notifications there.")
+    paired = machines_read()
+    if paired:
+        # Your phone has a board already (another machine's): this one's chats are on it.
+        names = ", ".join(m["label"] for m in paired)
+        print(f"  Paired with {names}: this machine's chats are on {'their boards' if len(paired) > 1 else 'its board'}, "
+              f"on your phone too (amarchy machines)")
+    else:
+        print("  On your phone (on your tailnet): open it in Safari, then Share → Add to Home Screen.\n"
+              "  Open it from the home screen and turn on notifications there. Another machine of yours running\n"
+              "  amarchy: pair them instead (amarchy machines add <name>), and its board has this one's chats.")
     return 0
 
 
