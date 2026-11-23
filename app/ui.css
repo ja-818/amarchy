@@ -27,6 +27,7 @@
   --machine-off-opacity: .55;               /* a card whose machine doesn't answer: as last seen */
   --move-color: var(--text-muted);          /* a chat moving to another machine, or waiting to (uiMoveNote) */
   --move-failed-color: var(--warn, var(--warning));      /* one that didn't move: its mark */
+  --machine-icon-size: 15px;
   --pill-border-width: 1px;
   --pill-border-mix: 45%;     /* how much of its tone its border has */
   /* A button (uiButton). */
@@ -244,6 +245,14 @@ html { touch-action: manipulation; }
    than its project. Off: its card dimmed, as last seen. */
 .ui-machine { flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 28%; min-width: 0;
               font-size: var(--caption); font-weight: 600; color: var(--machine-color); }
+.ui-machine .glyph { font-size: var(--machine-icon-size); }
+/* On the right, by where it stands: its machine, then its pill (an agent's
+   time over its count). */
+.tcard-side-one, .tcard-side-top { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.tcard-side-one { max-width: 60%; }
+.tcard-side-one .ui-machine, .tcard-side-top .ui-machine { max-width: 14ch; }
+.tcard-side-one .tpill.long { flex: 0 1 auto; min-width: 0; max-width: none; }
+.tcard-side-one .tpill:not(.long), .tcard-side-top .tpill { flex: none; }
 .ui-machine .glyph { flex: none; width: 1.05em; height: 1.05em; display: inline-grid; }
 .ui-machine .glyph svg { width: 100%; height: 100%; display: block; }
 .ui-machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -266,6 +275,12 @@ html { touch-action: manipulation; }
 .machine-row .machine { flex: none; width: 1.2em; height: 1.2em; display: inline-grid; color: var(--machine-color); }
 .machine-row .machine svg { width: 100%; height: 100%; display: block; }
 .machine-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A machine's icon, picked: the six, each with its word. */
+.machine-icons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.machine-icon { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; }
+.machine-icon .machine { width: 22px; height: 22px; display: inline-grid; color: var(--machine-color); }
+.machine-icon .machine svg { width: 100%; height: 100%; display: block; }
+.machine-icon.on .machine { color: var(--accent); }
 /* Its project (or who), in its own color: a word, not a box. */
 .tcard-chip { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               font-size: var(--caption); font-weight: 800; letter-spacing: 0.04em; color: var(--ph); }
@@ -679,7 +694,9 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-chart-bar.on .ui-chart-fill { background: var(--chart-on); }
 .ui-chart-bar.on .ui-chart-n, .ui-chart-bar.on .ui-chart-label { color: var(--text); font-weight: 700; }
 /* Narrow (a phone): the chat's name has the room; its project is on its card. */
-@media (max-width: 719px) { .chat-head .head-title .tcard-chip, .chat-head .head-title .ui-machine { display: none; } .chat-head .head-state { padding: 0 10px; } }
+@media (max-width: 719px) { .chat-head .head-title .tcard-chip { display: none; } .chat-head .head-state { padding: 0 10px; } }
+/* Over a chat: its machine by where it stands, as on its card. */
+.chat-head .head-btns > .ui-machine { align-self: center; padding: 0 2px; }
 
 /* ---- a chat's preview: its button (turning while it starts), its sheet
    (ui.js uiPreviewSheet) */

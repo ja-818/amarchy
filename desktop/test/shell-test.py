@@ -4,7 +4,8 @@
 # tailnet: paired, or asked which), its own page when there's nothing to
 # open or it didn't load (Try again, an address typed in), a chat's link
 # handed to the running one, closing to the tray and coming back, the page
-# knowing it's the app, what it may and may not do (the microphone yes,
+# knowing it's the app (and on an Omarchy desktop: no wallpaper of its own
+# when it wears the desktop's look live), what it may and may not do (the microphone yes,
 # notifications and the shell's own commands no), its window size kept.
 #
 #   python3 desktop/test/shell-test.py          exits 0 when every check passed
@@ -345,6 +346,71 @@ def fake_opener(home):
     return b
 
 
+def omarchy_desktop(remote):
+    """On an Omarchy desktop (Hyprland's session, Omarchy's current theme):
+    the page is told so, and <html> marked before it's drawn. Wearing the
+    desktop's look live, the window draws no wallpaper of its own (Hyprland
+    makes it see-through as the terminals: the desktop's own is behind it),
+    and Settings → Look says so; another theme keeps its wallpaper. Off
+    Omarchy, the live look's wallpaper is drawn."""
+    print("on an Omarchy desktop")
+    # Omarchy (live) on the server, its wallpaper a loud orange: plain in a screenshot when it's drawn.
+    live = Path(remote.home) / ".local/state/amarchy/app/custom/omarchy-live"
+    live.mkdir(parents=True, exist_ok=True)
+    tool = ["magick"] if shutil.which("magick") else ["convert"]
+    for f in ("wallpaper.png", "wallpaper-wide.png"):
+        subprocess.run([*tool, "-size", "64x64", "xc:#ff8800", str(live / f)], check=True)
+    (live / "theme.json").write_text(json.dumps({
+        "name": "Omarchy (live)", "mode": "dark", "vars": {"surface": "#121212", "text": "#bebebe", "accent": "#e68e0d"},
+        "terminal": {}, "wallpaper": {"phone": "wallpaper.png", "wide": "wallpaper-wide.png"}, "font": None,
+        "from": "matte-black on desk", "omarchy": {"theme": "matte-black", "machine": "desk"}}))
+
+    def wear(w, look, surface):
+        w.js(f"lookWorn(await api('/api/look', {json.dumps(look)})); return 1;")
+        w.wait(f"getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === {json.dumps(surface)}")
+        time.sleep(0.5)
+        return w.js("getComputedStyle(document.body, '::before').backgroundImage")
+
+    tokyo = "#1a1b26"
+    try:
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        (Path(home) / ".local/state/omarchy/current/theme").mkdir(parents=True)
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "HYPRLAND_INSTANCE_SIGNATURE": "test"},
+                   size=(1280, 800)) as w:
+            on_app(w)
+            d = w.js("window.amarchyDesktop")
+            check(isinstance(d, dict) and d.get("omarchy") is True, f"the page knows it's on an Omarchy desktop ({d})")
+            check(w.js("document.documentElement.classList.contains('on-omarchy')"), "<html> is marked on-omarchy")
+            bg = wear(w, {"theme": "omarchy-live", "wallpaper": "theme"}, "#121212")
+            check(bg == "none", f"wearing Omarchy (live): no wallpaper of its own, the desktop's behind it ({bg[:80]})")
+            shot = w.shot(SHOTS / "omarchy-live.png")
+            light = brightness(shot)
+            check(light < 0.25, f"its background solid and dark, as a terminal's, not the orange wallpaper ({light:.2f})")
+            w.js("openLook(); 1")
+            said = w.wait("[...document.querySelectorAll('.sheet p')].map(p => p.textContent).find(t => t.includes('your desktop')) || ''")
+            check("behind your terminals" in said, f"Settings → Look says where its wallpaper is ({said[:90]})")
+            w.shot(SHOTS / "omarchy-live-look.png")
+            w.key("Escape")
+            bg = wear(w, {"theme": "tokyo-night", "wallpaper": "theme"}, tokyo)
+            check(bg not in ("", "none"), f"another theme: its own wallpaper, drawn ({bg[:80]})")
+            w.js("lookWorn(await api('/api/look', {theme: 'omarchy-live'})); return 1;")
+            w.wait("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === '#121212'")
+            w.do("close")
+            time.sleep(0.5)
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "HYPRLAND_INSTANCE_SIGNATURE": ""}) as w:
+            on_app(w)
+            w.wait("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === '#121212'")
+            time.sleep(0.5)
+            bg = w.js("getComputedStyle(document.body, '::before').backgroundImage")
+            check(w.js("window.amarchyDesktop.omarchy") is False and "url(" in bg,
+                  f"off Omarchy, Omarchy (live) draws its wallpaper ({bg[:80]})")
+            w.shot(SHOTS / "omarchy-live-elsewhere.png")
+            w.js("lookWorn(await api('/api/look', {theme: 'tokyo-night'})); return 1;")
+    finally:
+        shutil.rmtree(live, ignore_errors=True)       # the rest of the tests in amarchy's own look
+
+
 def main():
     need("Xvfb", "xdotool", "dbus-daemon", "import")
     remote = Server()
@@ -365,6 +431,8 @@ def main():
             check(w.do("url").startswith(remote.url), f"it opens the address given ({w.do('url')})")
             d = w.js("window.amarchyDesktop")
             check(isinstance(d, dict) and d.get("platform") == "linux" and bool(d.get("version")), f"the page knows it's the desktop app ({d})")
+            check(d.get("omarchy") is False and not w.js("document.documentElement.classList.contains('on-omarchy')"),
+                  "off Omarchy, the page knows it isn't on an Omarchy desktop")
             check(" Amarchy/" in w.js("navigator.userAgent"), "its user agent says Amarchy/<version>")
             check(w.js("return await Notification.requestPermission();") == "denied", "the app's own browser notifications: denied")
             r = w.js("try { await window.__TAURI_INTERNALS__.invoke('status'); return 'allowed'; } catch (e) { return 'refused: ' + e; }")
@@ -725,6 +793,8 @@ def main():
             tsnet_srv.stop()
 
         # ---- the window's size, kept.
+        omarchy_desktop(remote)
+
         print("its window")
         home = tempfile.mkdtemp(prefix="desktop-home-")
         with Shell(remote.url, home=home, env=env_for(fake_cli(home)), size=(1400, 900)) as w:

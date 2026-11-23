@@ -560,18 +560,24 @@ amarchy machines remove omarchy   # both forget the other
   else it says what to update. Both machines keep the other in
   `~/.config/amarchy/machines.json` (readable by you only), with one key the
   pair shares.
-- **The board** shows each chat with its machine (a screen and its name on
-  the card and over the chat, once there are two or more). Every chat action
+- **The board** shows each chat's machine, once there are two or more: its
+  icon on the right of its card, by where the chat stands, and over the open
+  chat by its state. Each machine has an icon of its own (a server, a desktop,
+  a laptop, a cloud, a tower, a mini), picked to fit it until you pick another
+  (Settings → Machines, or `amarchy machines icon <name> <icon>`; kept on that
+  machine, so every machine shows the same). Hover it for the machine's name,
+  or hold the card (its menu says where it runs); or show machines by name
+  instead (Settings → Machines → Names, `amarchy machines show name`). Every chat action
   works wherever the chat runs: its conversation, its questions, its terminal,
   its previews, its changes, search and your agents' tasks, all through the
   machine you opened the app on. A machine that doesn't answer (shut, asleep,
   off the network: silent for 45 s) keeps its chats as last seen: their cards
   dimmed, "<name> is off", no buttons, and its chats say so in place of the box
   until it's back. It comes back by itself.
-- **Settings → Machines**: each machine and how it stands (This machine, On,
-  Off, Update needed), **Add a machine…** (the machines of yours on the
-  tailnet that answer as amarchy, or one by its name or address), and on each
-  one, Rename and Remove.
+- **Settings → Machines**: each machine with its icon and how it stands
+  (This machine, On, Off, Update needed), Icons or Names on the cards, **Add a
+  machine…** (the machines of yours on the tailnet that answer as amarchy, or
+  one by its name or address), and on each one, its icon, Rename and Remove.
 - **A new chat's Where** (by the model, with two or more machines): the
   machine it runs on. The last one you used for that project comes first; a
   project that isn't on the machine you pick is cloned there first, from
@@ -621,9 +627,13 @@ amarchy machines remove omarchy   # both forget the other
 
 **Tailscale, set up for you.** Your machines and devices meet on Tailscale, each
 on your own account. `amarchy tailscale` takes a machine through it, a step at
-a time: installed (on Omarchy with Omarchy's own installer, which also puts its
-Tailscale panel in the bar; on Arch with pacman), its service running, amarchy
-allowed to drive it, signed in (it gets the sign-in link and opens it), on, and
+a time. With no Tailscale on it yet, it offers **amarchy's own node** first
+(`amarchy-tailnet`: Tailscale without installing it, built here and run as a
+service of yours, started for you; see "Tailscale inside the apps" in the plan),
+and installing the system's Tailscale as the other way (on Omarchy with Omarchy's
+own installer, which also puts its Tailscale panel in the bar; on Arch with
+pacman). Then: its service running, amarchy allowed to drive it, signed in (it
+gets the sign-in link and opens it), on, and
 your tailnet's MagicDNS and HTTPS certificates on (it opens the admin page where
 each is turned on). What needs root it asks before doing, in a terminal; run by
 Claude or a script, it says what to run instead. **Settings → Tailscale** in the
@@ -752,11 +762,12 @@ a backup of each file it changes).
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
 - **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. (Super + A and Super + Shift + A are
-  Omarchy's.) For another key, set it before amarchy's line in
-  `~/.config/hypr/hyprland.lua`: `amarchy = { open_key = "SUPER + CTRL + ALT + A" }`
-  (`false`: no key).
-- **Amarchy in the Omarchy menu** (Super + Space) does the same.
+  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
+  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
+  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
+  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
+  under it.
 
 All three run `amarchy open`, which takes a chat too (`amarchy open
 amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
@@ -782,6 +793,14 @@ hook and a systemd path unit (`amarchy-omarchy-look.path`, the kernel telling it
 a file changed) run `amarchy theme --omarchy`; nothing checks every few seconds.
 It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
+
+**The window, one of the desktop's**: the desktop app's window is
+see-through as your terminals are, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
+wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
+solid, as a terminal's, and your desktop's own wallpaper is behind it
+(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy
 when it has chats (or merges your other machines' in); else the first machine
@@ -966,7 +985,8 @@ browser. Every phone and browser wears it at once.
   Mono on Apple's).
 - **Omarchy (live)**: your Omarchy desktop's own look, as it is now (see
   [On Omarchy](#on-omarchy)): it changes when the desktop's does. Picked, it
-  wears the desktop's font too.
+  wears the desktop's font too. In the desktop app on that desktop, its
+  wallpaper is the desktop's own, behind the window, never drawn twice.
 - **Wallpaper**: one of Omarchy's own for the theme, every one Omarchy ships with it
   (a little picture of each to pick from; a theme remembers which), your own
   (choose a picture: it's cut to a phone's screen and a computer's, in the browser),
@@ -1685,6 +1705,8 @@ amarchy machines [--json]             this machine, then the paired ones: name, 
 amarchy machines add <name|address>   pair with another machine of yours on the tailnet
 amarchy machines remove <name>        unpair (both forget the other)
 amarchy machines rename <name> <label>   what the app calls a machine (kept on that machine)
+amarchy machines icon <name> <icon>   a machine's icon: server, desktop, laptop, cloud, tower or mini
+amarchy machines show icon|name       how the board shows a chat's machine
 amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
 amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]   move a chat to another machine of yours
 amarchy move [<id>] --check --to <machine> [--json]   what moving it would do; --cancel | --dismiss
@@ -1696,6 +1718,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

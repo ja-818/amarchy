@@ -203,8 +203,11 @@ const LAYOUTS = {
       const seen = await until(() => has(card("beta:proj-one")), 15000);
       check(where, !!seen, "beta's chat is on alpha's board, keyed beta:proj-one");
       check(where, await has(card("proj-mine")), "alpha's own beside it, keyed as before");
-      const marks = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".tcard[data-id]")].map((c) => [c.dataset.id, (c.querySelector(".ui-machine") || {}).textContent || ""])));
-      check(where, marks["beta:proj-one"] === "beta" && marks["proj-mine"] === "alpha", `each card says its machine (${JSON.stringify(marks)})`);
+      const marks = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".tcard[data-id]")].map((c) => {
+        const m = c.querySelector(".ui-machine");
+        return [c.dataset.id, m ? `${m.getAttribute("aria-label")}${m.querySelector(".glyph svg") ? " (icon)" : ""}` : ""];
+      })));
+      check(where, marks["beta:proj-one"] === "On beta (icon)" && marks["proj-mine"] === "On alpha (icon)", `each card shows its machine's icon, named (${JSON.stringify(marks)})`);
       await sleep(600);
       await p.screenshot({ path: path.join(SHOTS, `${where}-board.png`) });
 
@@ -212,8 +215,8 @@ const LAYOUTS = {
       await p.evaluate(() => { document.querySelector('.tcard[data-id="beta:proj-one"] .tcard-head').click(); });
       const open = await until(() => p.evaluate(() => { const c = (app.session && app.session.chat) || desk.chat; return c && c.id === "beta:proj-one" && c.es && c.row && c.row.machine === "beta" ? c.es.url : null; }));
       check(where, !!open && open.includes("/api/m/beta/api/session/proj-one/stream"), `opened: its stream through alpha (${open})`);
-      const head = await p.evaluate(() => { const h = document.querySelector(".chat-head .ui-machine, .desk-head .ui-machine"); return h ? h.textContent : ""; });
-      check(where, head === "beta", `its head says beta (${head})`);
+      const head = await p.evaluate(() => { const h = document.querySelector(".chat-head .ui-machine, .desk-head .ui-machine"); return h ? h.getAttribute("aria-label") : ""; });
+      check(where, head === "On beta", `its head says beta (${head})`);
       const text = `hello from ${where}`;
       await p.evaluate((text) => { const c = (app.session && app.session.chat) || desk.chat; c.input.value = text; c.send(); }, text);
       check(where, !!(await until(() => beta.got(betaPath).includes(text), 15000)), "a message sent from the chat reaches beta's Claude");
@@ -275,9 +278,13 @@ const LAYOUTS = {
 
       // Beta goes away: its chats as last seen, dimmed, read only.
       await beta.stop();
-      const dim = await until(() => p.evaluate((sel) => { const c = document.querySelector(sel); return c && c.classList.contains("machine-off") ? c.textContent.replace(/\s+/g, " ") : null; }, card("beta:proj-one")), 20000);
+      const dim = await until(() => p.evaluate((sel) => {
+        const c = document.querySelector(sel);
+        const m = c && c.querySelector(".ui-machine.off");
+        return c && c.classList.contains("machine-off") && m ? `${m.getAttribute("aria-label")} · ${c.querySelector(".tpill").textContent}` : null;
+      }, card("beta:proj-one")), 20000);
       await p.evaluate(() => { for (const d of document.querySelectorAll("details.today-working")) d.open = true; });     // (it's at work: under At work, folded)
-      check(where, !!dim && /beta is off/.test(dim), `beta off: its card dimmed, "beta is off" (${dim})`);
+      check(where, !!dim && /^beta is off · Off$/.test(dim), `beta off: its card dimmed, its icon "beta is off", its badge Off (${dim})`);
       check(where, await p.evaluate((sel) => !document.querySelector(`${sel} .tcard-actions`), card("beta:proj-one")), "no buttons on it");
       check(where, await p.evaluate((sel) => !document.querySelector(sel).classList.contains("machine-off"), card("proj-mine")), "alpha's own card as it was");
       await sleep(500);

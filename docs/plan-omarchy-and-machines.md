@@ -90,7 +90,15 @@ and tell the other tracks.
   renaming another machine asks it to rename itself.
 - `GET /api/peer/hello` → `{"name", "label", "version" (git commit),
   "protocol": 1, "user" (its owner's Tailscale login), "users" (every login
-  it lets in), "merges"}`, to you before pairing too. Pairing checks
+  it lets in), "merges", "kind", "icon"}`, to you before pairing too.
+- **Its icon**: one of `server`, `desktop`, `laptop`, `cloud`, `tower`,
+  `mini`, kept on the machine itself (`~/.config/amarchy/icon`) like its
+  label; until you pick one, its `kind`'s (a battery: laptop; a cloud's VM:
+  cloud; another VM, or no desktop: server; else desktop). Picked for
+  another machine with `POST /api/peer/icon` `{"icon"}` (peers only);
+  `amarchy machines icon <name> <icon>`. The board's `machines` carry it,
+  and `"machines_as"` (`icon` or `name`: how a chat shows its machine,
+  `amarchy machines show icon|name`; yours, so synced by track D). Pairing checks
   `protocol` and that `user` is one of the caller's.
 - **Yours** is a machine's owner on Tailscale plus the logins in its
   `APP_USERS=` (one person's other login, on another tailnet). Nothing names a
@@ -316,9 +324,15 @@ and tell the other tracks.
   machine's name, else `next=/%23/s/<machine>:<id>`; on a server's address,
   `/#/s/<id>` when it's that server's chat, else `/#/s/<machine>:<id>`.
 - **The page knows it's in the desktop app**: `window.amarchyDesktop`
-  (`{"version", "platform"}`), set before the app's scripts run. There the
+  (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
-  natively, window closed or not.
+  natively, window closed or not. `omarchy`: the window is on an Omarchy
+  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  marked `on-omarchy` before the page is drawn, and theme.css, when the look
+  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
+  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
+  the window, which Hyprland makes see-through as the terminals
+  (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,
   `amarchy notify`, Settings' test) is also kept for the desktop apps, and
@@ -374,6 +388,56 @@ and tell the other tracks.
   `amarchy-tailnet status` says where it stands in words.
 - **Phones (G)**: the same Go package (`tailnet/`), bound with gomobile, a
   node of the phone's own and its proxy for the app's web view (no serving).
+
+### Your stuff on every machine (track D)
+
+What's yours, not a chat's, is the same on every machine: each keeps a copy,
+changes go to the others as they're made, and a machine that was off catches
+up when it's back. No main machine; any one can be off.
+
+- **Items**, last change wins: `{"key", "value", "at" (seconds, when it was
+  changed, wherever), "by" (the machine it was changed on)}`. The later `at`
+  wins; the same `at`, the greater `by`, so every machine picks the same. A
+  machine applies an item it takes as if it had been changed there (its file,
+  then the board), without stamping it again. The keys:
+  - `look`: the choice (`theme`, `font`, `wallpaper`, `background`), your own
+    wallpaper by its files' hashes;
+  - `project-order`: your projects' names, in your order (a name a machine
+    hasn't: kept in its place, for when it has it);
+  - `new-model`, `new-effort`: what a new chat starts on;
+  - `alerts`, `sound`, `sound-assistant`, `show-terminals`, `machines-as`;
+  - `missions-goal`, `missions-since` (a reset: from then on, the same on
+    every machine), `missions-told` (the streak's reminder and the week's
+    recap: told once, on the machine that told it).
+- **Sets**, kept whole (nothing taken back by a machine that hadn't seen it):
+  - `missions`: every machine's records (a merge, a chat completed, an all
+    clear, a reply), each with `"rid": "<machine>:<n>"` (its machine's
+    count, rising; a record from before machines: its line's), learned once
+    each; the score is made from all of them on every machine (a chat named
+    in another machine's record is `<machine>:<id>` there);
+  - `badges`: key → when first earned (the earliest wins);
+  - `sounds`: your own chimes, name → the file's hash;
+  - `themes`: your own themes (`omarchy-live` among them), key → its
+    `theme.json` and its files' hashes; the newest of each wins.
+- **Files** (a wallpaper, a chime, a theme's font) go by their SHA-256:
+  `GET /api/peer/sync/file/<sha256>` (peers only), fetched by a machine that
+  hasn't it, checked against the hash.
+- **The exchange** (peers only, `X-Amarchy-Peer` and the key):
+  `GET /api/peer/sync?have=<{"<machine>": n, ...}>` → `{"items", "badges",
+  "sounds", "themes", "missions": [records it has that `have` hasn't],
+  "have"}`: everything the machine knows, its own and what it learned from
+  others (a change reaches a machine that was off through any other), and
+  `POST /api/peer/sync` with the same shape: what just changed, pushed to each
+  machine that answers. A machine pulls from each peer when it's paired, when
+  that peer comes back on, and every 5 minutes; it pushes each change at once.
+- **Per device on purpose** (never synced): a browser's layout (phone or
+  wide), its notifications on or off, its drafts, the side panel and what's
+  folded (the app's own storage). **Per machine on purpose**: when its idle
+  chats sleep (its memory), dictation (its model), secrets (its projects'),
+  the loops file (on your assistant's machine), the phones it notifies, its
+  automations, Claude's arguments (`claude-args`). Per chat, as before, on
+  its machine: its priority (Now, For later, pinned), seen and unread, its
+  name: the same on every board already.
 
 ### What lives where
 
@@ -463,7 +527,11 @@ reopen, Super+Shift+A as the key, Where cloning a project first).
 In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
 and the phone apps (G) last. Started 2026-11-22: D in the `amarchy-machines`
 chat, E in `amarchy-move-chat`, H in `amarchy-desktop-app` once its fixes are
-in. I and F wait on Julian's OK (publishing, spending).
+in. E and H shipped on 2026-11-22. Overnight (Julian's go: "everything shipped"):
+F in `amarchy-cloud-machines`, G in `amarchy-phone-apps`, I prepared in
+`amarchy-omarchy-home`. What needs his accounts or money (a provider token, the
+AUR and omarchy-pkgs, signing and the stores, the relay's host) is prepared to
+the last step and left for him.
 
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
@@ -472,7 +540,12 @@ synced, last change wins per item; works with any machine off.
 **E. Move a chat** (after A): "Move to <machine>" in a chat's menu. Commit
 (work in progress) and push the branch, make the worktree there from it, copy
 Claude's conversation file (same `$HOME` and `~/Work` layout), resume; its card
-keeps its place. Only after Claude's current step ends.
+keeps its place. Only after Claude's current step ends. **Shipped 2026-11-22**
+(`amarchy move`, the contract's "Moving a chat"; `test/move.py`,
+`test/move-view.js`), and moved for real between `amarchy` and `ja` both ways,
+its Claude remembering each time. `ja`'s home is `/home/julian`, not
+`/home/ja`: each machine puts the worktree and the conversation under its own
+home, so the layout only has to match from `~` down.
 
 **F. A cloud machine in one click** (after A; Julian's OK to spend): Settings →
 Machines → "Add a cloud machine": provider (Hetzner, DigitalOcean, Hostinger),

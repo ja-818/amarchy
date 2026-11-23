@@ -211,6 +211,12 @@ body::before {
 @media (min-width: 1000px) and (hover: hover) and (pointer: fine) {
   body::before { background-image: var(--wallpaper-wide, var(--wallpaper, none)); }
 }
+/* The desktop app's window on an Omarchy desktop (html.on-omarchy, from the
+   window itself) is one of the desktop's: Hyprland makes it see-through, as
+   it does the terminals (omarchy/hypr/amarchy.lua). Wearing the desktop's
+   look live, the desktop's own wallpaper is right behind it, so it draws
+   none of its own (theme.css takes --wallpaper away there): its background
+   is solid, as a terminal's is. */
 
 /* The visible part of the screen (above the keyboard, when it's up), the
    app's glass over all of it: under the status bar and the home bar too. */

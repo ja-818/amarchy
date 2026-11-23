@@ -1,6 +1,8 @@
 // Tailscale: the network your devices and machines meet on. Settings →
 // Tailscale shows where it stands on the host (bin/amarchy's "amarchy
-// tailscale": GET /api/tailscale) and takes it a step further each time:
+// tailscale": GET /api/tailscale), the system's Tailscale or amarchy's own
+// node (track H: offered first where there's none, started with a tap),
+// and takes it a step further each time:
 // sign in (the sign-in link, opened in your browser), turn it on, the
 // tailnet's MagicDNS and HTTPS certificates (the admin page where each is
 // turned on), and which account it uses when more than one is signed in.
@@ -48,12 +50,18 @@ async function tailscaleSheet() {
     const kids = [h("p", {}, `${d.words || ""}.`)];
     for (const step of d.steps || []) {
       kids.push(h("div", { class: "section" }, step.words));
-      if (step.command) {
+      if (step.do === "own-start") {
+        kids.push(h("button", { class: "control wide accent", onclick: (e) => act(e.currentTarget, "own") }, "Start it"),
+          h("p", {}, `amarchy's own node, a service of yours on ${host}: Tailscale without installing it.`));
+      } else if (step.command) {
         const copy = h("button", { class: "control wide", onclick: async () => {
           try { await navigator.clipboard.writeText(step.command); toast("Copied: paste it in a terminal there"); }
           catch (e) { toast("Couldn't copy it: hold it to copy it"); }
         } }, "Copy the command");
-        kids.push(h("p", {}, `In a terminal on ${host}${step.do === "install" && d.omarchy ? " (Omarchy's own installer, with its Tailscale panel in the bar)" : ""}:`),
+        const why = step.do === "own-install" ? " (it builds the node there, with Go, and asks before installing Go)"
+          : step.do === "install" && d.omarchy ? " (Omarchy's own installer, with its Tailscale panel in the bar)"
+          : step.root ? " (it asks for your password)" : "";
+        kids.push(h("p", {}, `In a terminal on ${host}${why}:`),
           h("code", { class: "share-url" }, step.command), copy);
       } else if (step.do === "install") {
         kids.push(h("p", {}, `Tailscale's instructions for ${host}'s system:`), tailscaleLink("How to install Tailscale", step.url));
