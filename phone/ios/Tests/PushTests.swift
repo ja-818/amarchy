@@ -206,11 +206,55 @@ final class NoticeTests: XCTestCase {
         XCTAssertNil(Notice(userInfo: ["p": "something else's"]))
     }
 
-    func testItsSound() {
-        XCTAssertNil(notice(#"{"title": "t", "sound": "off"}"#)?.notificationSound, "off: silent")
-        XCTAssertNotNil(notice(#"{"title": "t"}"#)?.notificationSound)
-        XCTAssertNotNil(notice(#"{"title": "t", "sound": "../x"}"#)?.notificationSound)
-        XCTAssertNotNil(notice(#"{"title": "t", "sound": "kalimba"}"#)?.notificationSound)
+    func testAsTheExtensionShowsIt() throws {
+        let n = try XCTUnwrap(notice("""
+        {"title": "Ship it?", "body": "Fix the login is done", "tag": "fix", "waiting": 3, "urgent": true, "sound": "Herald",
+         "server": "https://m.example.ts.net", "actions": [{"label": "Ship it", "path": "/api/session/fix/send", "body": {"text": "ship it"}}]}
+        """))
+        let c = n.content
+        XCTAssertEqual(c.title, "Ship it?")
+        XCTAssertEqual(c.body, "Fix the login is done")
+        XCTAssertEqual(c.threadIdentifier, "fix", "one per chat")
+        XCTAssertEqual(c.badge, 3)
+        XCTAssertEqual(c.interruptionLevel, .timeSensitive, "urgent keeps its level, with its chime")
+        XCTAssertNotNil(c.sound)
+        XCTAssertEqual(Notice(userInfo: c.userInfo)?.actions.first?.label, "Ship it")
+        XCTAssertEqual(notice(#"{"title": "t"}"#)?.content.interruptionLevel, .active)
+    }
+}
+
+/// The chime picked in amarchy's Settings, rung by the notification as the
+/// desktop app rings it.
+final class ChimeTests: XCTestCase {
+    func testEachOfAmarchysChimesHasItsSound() {
+        for name in Notice.chimes {
+            XCTAssertEqual(Notice.chimeFile(name), "\(name).caf")
+        }
+        XCTAssertEqual(Notice.chimeFile("Herald"), "herald.caf", "whatever its case")
+        XCTAssertEqual(Notice.chimeFile("KALIMBA"), "kalimba.caf")
+        XCTAssertNil(Notice.chimeFile("my-own-chime"), "a chime of yours the app hasn't: iOS's own")
+        XCTAssertNil(Notice.chimeFile("../herald"))
+        XCTAssertNil(Notice.chimeFile(""))
+        XCTAssertNil(Notice.chimeFile(nil), "none named: iOS's own")
+        XCTAssertNotNil(Notice(json: Data(#"{"title": "t"}"#.utf8))?.notificationSound)
+    }
+
+    /// bin/amarchy's CHIMES, as the machine names them: each one's sound in
+    /// the app's bundle (a chime added there without its .caf fails here:
+    /// phone/ios/sounds.sh makes it).
+    func testEveryChimeOfTheMachinesIsInTheApp() throws {
+        let script = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "amarchy", withExtension: nil), "bin/amarchy in the tests")
+        let source = try String(contentsOf: script, encoding: .utf8)
+        let line = try XCTUnwrap(source.split(separator: "\n").first { $0.hasPrefix("CHIMES = (") }, "CHIMES in bin/amarchy")
+        let names = line.split(separator: "\"").enumerated().filter { $0.offset % 2 == 1 }.map { String($0.element) }
+        XCTAssertFalse(names.isEmpty)
+        XCTAssertEqual(Set(names), Set(Notice.chimes), "the app's list is bin/amarchy's")
+        for name in names {
+            // The tests run inside the app: its bundle is the one iOS looks in.
+            let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "caf"), "\(name).caf in the app")
+            let head = try FileHandle(forReadingFrom: file).read(upToCount: 4)
+            XCTAssertEqual(head, Data("caff".utf8), "\(name).caf is a Core Audio file")
+        }
     }
 }
 

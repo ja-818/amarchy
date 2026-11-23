@@ -7,11 +7,13 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 
 /**
  * The notifications on the phone: one per chat (its `tag`, a newer one
@@ -21,6 +23,10 @@ import androidx.core.content.ContextCompat
 internal object Notes {
     const val CHATS = "chats"
     const val URGENT = "urgent"
+    const val CHATS_NAME = "Chats that need you"
+    const val URGENT_NAME = "Urgent"
+    private const val CHATS_WHY = "A chat asks you something, or is done"
+    private const val URGENT_WHY = "What can't wait: it stays on the screen until you look"
     private const val ID = 1
     private const val UNREAD_TAG = "amarchy"
 
@@ -38,12 +44,8 @@ internal object Notes {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannels(
             listOf(
-                NotificationChannel(CHATS, "Chats that need you", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "A chat asks you something, or is done"
-                },
-                NotificationChannel(URGENT, "Urgent", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "What can't wait: it stays on the screen until you look"
-                },
+                NotificationChannel(CHATS, CHATS_NAME, NotificationManager.IMPORTANCE_HIGH).apply { description = CHATS_WHY },
+                NotificationChannel(URGENT, URGENT_NAME, NotificationManager.IMPORTANCE_HIGH).apply { description = URGENT_WHY },
             ),
         )
     }
@@ -51,7 +53,7 @@ internal object Notes {
     /** A notification from a machine (or the unread one, when it couldn't be read). */
     fun show(context: Context, n: Notice) {
         val tag = n.tag ?: UNREAD_TAG
-        val builder = NotificationCompat.Builder(context, if (n.urgent) URGENT else CHATS)
+        val builder = NotificationCompat.Builder(context, channel(context, Chimes.of(n.sound), n.urgent))
             .setSmallIcon(R.drawable.ic_note)
             .setColor(ContextCompat.getColor(context, R.color.accent))
             .setContentTitle(n.title)
@@ -106,6 +108,31 @@ internal object Notes {
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
         post(context, tag, builder)
+    }
+
+    /**
+     * The channel that rings the chime (made the first time it's needed: only
+     * chimes actually rung get one in Android's settings), else the default's.
+     */
+    private fun channel(context: Context, chime: String?, urgent: Boolean): String {
+        val id = Chimes.channel(chime, urgent)
+        if (chime == null) return id
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return id
+        if (manager.getNotificationChannel(id) != null) return id
+        // Turned off in Android's settings: a new chime doesn't turn it back on.
+        val off = manager.getNotificationChannel(if (urgent) URGENT else CHATS)?.importance == NotificationManager.IMPORTANCE_NONE
+        val ring = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        manager.createNotificationChannel(
+            NotificationChannel(id, Chimes.channelName(chime, urgent), if (off) NotificationManager.IMPORTANCE_NONE else NotificationManager.IMPORTANCE_HIGH)
+                .apply {
+                    description = "${if (urgent) URGENT_WHY else CHATS_WHY}, with amarchy's ${Chimes.label(chime)} chime"
+                    setSound(Chimes.uri(context.packageName, chime).toUri(), ring)
+                },
+        )
+        return id
     }
 
     fun cancel(context: Context, tag: String) = NotificationManagerCompat.from(context).cancel(tag, ID)

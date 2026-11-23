@@ -1,16 +1,22 @@
-// The mic where it can't work, on the phone and on a computer: always there,
-// dimmed, and a tap says why in a line, with what to do. As on a laptop
-// not set up yet (an Apple Silicon Mac on Omarchy) whose desktop app has no
-// speech recognition of its own (WebKitGTK): no Web Speech here at all.
+// The mic before the host has its speech model, on the phone and on a
+// computer: always there; the first tap has the host fetch it, a ring on
+// the mic fills as it comes, and it says when it's ready; where it can't
+// work, dimmed, and a tap says why in a line, with what to do. As on a
+// laptop not set up yet (an Apple Silicon Mac on Omarchy) whose desktop app
+// has no speech recognition of its own (WebKitGTK): no Web Speech here.
 //
-//   - no model anywhere: the chat's mic and the new chat's are dimmed; a tap
-//     says the host needs a speech model, and Set it up opens Settings at
-//     Dictation, which offers to fetch it (the engine too: 770 MB), with its
-//     button; Ctrl+Alt+Space says the same on a computer;
-//   - a processor amarchy has no engine for: Settings says what would do;
-//   - a setup under way: the tap says so, Settings how far;
-//   - another machine has the model (via): the mic is lit, and Settings
-//     says that machine writes it down for this one;
+//   - no model, the engine to fetch (auto): the chat's mic and the new
+//     chat's are lit; the first tap starts the setup on the host and says
+//     so (770 MB, once), the ring fills as the board says how far, a tap
+//     meanwhile says how far, and "Dictation is ready" once it's there;
+//     Ctrl+Alt+Space does the same on a computer; Settings offers it too;
+//   - a processor amarchy has no engine for: dimmed; a tap says the host
+//     needs a speech model, Set it up opens Settings at Dictation, which
+//     says what would do;
+//   - a setup under way: the ring, the tap says how far, Settings too;
+//   - another machine has the model (via): the mic is lit, the tap
+//     dictates through it and has the host fetch its own meanwhile, and
+//     Settings says that machine writes it down for this one;
 //   - the desktop app without GStreamer's microphone: dimmed even so, and a
 //     tap names the package, with Copy the command.
 //
@@ -161,7 +167,7 @@ async function page(browser, layout, port) {
       if (v && typeof v === "object" && Array.isArray(v.sessions) && "share" in v) {
         v.sessions = chats;
         v.projects = [{ name: "proj", sessions: 2 }];
-        v.dictation = states[step];
+        v.dictation = window.__dict || states[step];        // (window.__dict: the host's board after a step)
         if (step === "via") { v.machine = "ja"; v.machines = machines; }
       }
       return v;
@@ -185,7 +191,8 @@ async function at(p, step, { lacks = false } = {}) {
 
 const mic = (p) => p.evaluate(() => {
   const b = [...document.querySelectorAll(".cbtn.mic")].find((x) => x.offsetParent);
-  return b ? { shown: !b.hidden, cant: b.classList.contains("cant"), opacity: getComputedStyle(b).opacity, title: b.title } : null;
+  return b ? { shown: !b.hidden, cant: b.classList.contains("cant"), getting: b.classList.contains("getting"), got: b.style.getPropertyValue("--got"),
+               opacity: getComputedStyle(b).opacity, title: b.title } : null;
 });
 const toastText = (p) => p.evaluate(() => { const t = document.querySelector(".toast"); return t ? t.innerText.replace(/\s+/g, " ").trim() : ""; });
 const settingsText = (p) => p.evaluate(() => {
@@ -211,39 +218,57 @@ async function run(browser, layout, port) {
   const p = await page(browser, layout, port);
   await p.goto("/");
 
-  // No model here, none on another machine: dimmed, and a tap says why.
+  // No model yet, the engine to fetch: the first tap fetches it.
   await at(p, "auto");
   let m = await mic(p);
-  check(where, m && m.shown && m.cant && Number(m.opacity) < 0.6, `the chat's mic is there, dimmed (${JSON.stringify(m)})`);
-  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-dimmed.png`) });
+  check(where, m && m.shown && !m.cant && !m.getting, `the chat's mic is there, lit (${JSON.stringify(m)})`);
+  let posted = 0;
+  await p.route("**/api/dictate/setup", (r) => { posted++; r.fulfill({ json: {} }); });
   await tapMic(p, layout);
   let t = await toastText(p);
-  check(where, /Dictation needs a speech model on your host/.test(t) && /Set it up/.test(t), `a tap: why, and Set it up ("${t}")`);
+  check(where, posted === 1 && /Getting dictation ready on your host: 770 MB, once\. The mic works as soon as it's here\./.test(t),
+        `the first tap: the host fetches it, and says so (${posted}, "${t}")`);
   check(where, await p.evaluate(() => !document.body.classList.contains("dictating") && !document.querySelector(".cbtn.mic.on")),
-        "nothing starts: no microphone, no listening");
-  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-toast.png`) });
-  await p.evaluate(() => document.querySelector(".toast.act").click());
-  check(where, await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]')), "Set it up: Settings opens");
-  const seen = await p.evaluate(() => {
-    const s = document.querySelector('.sheet-back.settings [data-section="dictation"]').getBoundingClientRect();
-    const head = document.querySelector(".sheet-back.settings .sheet .head").getBoundingClientRect();
-    return s.top >= head.bottom - 1 && s.top < innerHeight / 2;
-  });
-  check(where, seen, "at Dictation, its title just under the sheet's head");
+        "nothing listens meanwhile");
+  m = await mic(p);
+  check(where, m && m.getting && !m.cant && Number(m.got) === 0, `a ring on the mic, empty (${JSON.stringify(m)})`);
+  // The host's board: 300 MB of 770 there.
+  await p.evaluate((st) => { window.__dict = st; app.view.dictation = st; dictationViewed(); }, STATES.fetching);
+  m = await mic(p);
+  check(where, m && m.getting && Math.abs(Number(m.got) - 300e6 / SIZE) < 0.01, `the ring fills as it comes (${m && m.got})`);
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-ring.png`) });
+  await tapMic(p, layout);
+  t = await toastText(p);
+  check(where, posted === 1 && /Getting dictation ready on your host: 300 of 770 MB/.test(t) && /See how far/.test(t),
+        `a tap meanwhile: how far, not asked again ("${t}")`);
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-ring-toast.png`) });
+  // There: said so, and the mic is the mic.
+  await p.evaluate(() => { document.querySelectorAll(".toast").forEach((x) => x.remove());
+                           const st = { ...app.view.dictation, ready: true, lib: true, model: true, setup: null };
+                           window.__dict = st; app.view.dictation = st; dictationViewed(); });
+  t = await toastText(p);
+  m = await mic(p);
+  check(where, /Dictation is ready: hold the mic and speak/.test(t) && m && !m.getting && !m.cant, `once it's there: "${t}", the mic as ever (${JSON.stringify(m)})`);
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-ready.png`) });
+  await p.evaluate(() => { window.__dict = null; });
+
+  // Settings offers it too.
+  await at(p, "auto");
+  await p.evaluate(() => openSettings({ at: "dictation" }));
+  await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
   let s = await settingsText(p);
   check(where, /Your host can write down what you say, in Spanish, English and 23 more languages, told apart by themselves, once it has the speech model \(770 MB\)/.test(s)
-        && /Set up dictation on your host/.test(s), `it offers to fetch it, with its button (${JSON.stringify(s.slice(0, 260))})`);
+        && /Set up dictation on your host/.test(s), `Settings offers it, with its button (${JSON.stringify(s.slice(0, 260))})`);
   check(where, !/whisper|pacman|build/i.test(s), "nothing to install or build");
   await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-setup.png`) });
-  let posted = null;
-  await p.route("**/api/dictate/setup", (r) => { posted = true; r.fulfill({ json: {} }); });
+  posted = 0;
   await p.evaluate(() => [...document.querySelectorAll(".sheet-back.settings button")].find((b) => /Set up dictation/.test(b.innerText)).click());
-  check(where, await until(p, () => /Fetching the speech model: 0 of 770 MB/.test(document.querySelector(".sheet-back.settings").innerText)) && posted,
+  check(where, await until(p, () => /Fetching the speech model: 0 of 770 MB/.test(document.querySelector(".sheet-back.settings").innerText)) && posted === 1,
         "its button: setup starts, and Settings says so");
-  await p.unroute("**/api/dictate/setup");
   await p.keyboard.press("Escape");
 
   // The new chat's mic: the same.
+  await at(p, "auto");
   if (layout === "wide") {
     await p.evaluate(() => { if (desk.current) boardBack(true); });
     await until(p, () => !desk.current);
@@ -261,24 +286,37 @@ async function run(browser, layout, port) {
     const b = [...document.querySelectorAll(".start-chat .mic:not(.pic)")].find((x) => x.offsetParent);
     return b ? { shown: !b.hidden, cant: b.classList.contains("cant") } : null;
   });
-  check(where, nm && nm.shown && nm.cant, `the new chat's mic: there, dimmed (${JSON.stringify(nm)})`);
+  check(where, nm && nm.shown && !nm.cant, `the new chat's mic: there, lit (${JSON.stringify(nm)})`);
 
-  // Ctrl+Alt+Space on a computer: the same why.
+  // Ctrl+Alt+Space on a computer: the same first tap.
   if (layout === "wide") {
     await at(p, "auto");
+    posted = 0;
     await p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
-    await p.locator(".cbtn.mic:visible").first().evaluate(() => {});
     await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("Space");
     await p.keyboard.up("Alt"); await p.keyboard.up("Control");
     await sleep(250);
     t = await toastText(p);
-    check(where, /Dictation needs a speech model/.test(t), `Ctrl+Alt+Space: the same why ("${t}")`);
+    check(where, posted === 1 && /Getting dictation ready/.test(t), `Ctrl+Alt+Space: the same (${posted}, "${t}")`);
   }
 
-  // A processor amarchy has no engine for: what would do, no button that can't work.
+  // A processor amarchy has no engine for: dimmed, and what would do.
   await at(p, "none");
-  await p.evaluate(() => openSettings({ at: "dictation" }));
-  await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
+  m = await mic(p);
+  check(where, m && m.shown && m.cant && Number(m.opacity) < 0.6, `no engine for it: the mic is there, dimmed (${JSON.stringify(m)})`);
+  posted = 0;
+  await tapMic(p, layout);
+  t = await toastText(p);
+  check(where, /Dictation needs a speech model on your host/.test(t) && /Set it up/.test(t) && !posted, `a tap: why, and Set it up ("${t}")`);
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-dimmed.png`) });
+  await p.evaluate(() => document.querySelector(".toast.act").click());
+  check(where, await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]')), "Set it up: Settings opens");
+  const seen = await p.evaluate(() => {
+    const s = document.querySelector('.sheet-back.settings [data-section="dictation"]').getBoundingClientRect();
+    const head = document.querySelector(".sheet-back.settings .sheet .head").getBoundingClientRect();
+    return s.top >= head.bottom - 1 && s.top < innerHeight / 2;
+  });
+  check(where, seen, "at Dictation, its title just under the sheet's head");
   s = await settingsText(p);
   check(where, /amarchy has no speech engine for riscv64: build transcribe\.cpp 0\.4\.2/.test(s) && /AMARCHY_DICTATE_ENGINE/.test(s),
         `no engine for it: what would do (${JSON.stringify(s.slice(0, 200))})`);
@@ -289,19 +327,28 @@ async function run(browser, layout, port) {
 
   // A setup under way.
   await at(p, "fetching");
+  m = await mic(p);
+  check(where, m && m.getting && !m.cant, `under way: the ring (${JSON.stringify(m)})`);
+  posted = 0;
   await tapMic(p, layout);
   t = await toastText(p);
-  check(where, /being set up on your host/.test(t), `under way: the tap says so ("${t}")`);
+  check(where, /Getting dictation ready on your host: 300 of 770 MB/.test(t) && !posted, `the tap says how far ("${t}")`);
   await p.evaluate(() => openSettings({ at: "dictation" }));
   await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
   s = await settingsText(p);
   check(where, /Fetching the speech model: 300 of 770 MB/.test(s), `Settings: how far (${JSON.stringify(s.slice(0, 160))})`);
   await p.keyboard.press("Escape");
+  // One that ends without the model (an install's: the engine alone): the tap asked for it, so it comes next.
+  await p.evaluate(() => { const st = { ...app.view.dictation, lib: true, setup: null, size: 739508576 }; window.__dict = st; app.view.dictation = st; dictationViewed(); });
+  await sleep(200);
+  m = await mic(p);
+  check(where, posted === 1 && m && m.getting, `an install's setup ended without the model: the model comes next, by itself (${posted}, ${JSON.stringify(m)})`);
+  await p.evaluate(() => { window.__dict = null; });
 
   // Another machine has the model: lit, and Settings says who writes it down.
   await at(p, "via");
   m = await mic(p);
-  check(where, m && m.shown && !m.cant, `amarchy writes it down: the mic is lit (${JSON.stringify(m)})`);
+  check(where, m && m.shown && !m.cant && !m.getting, `amarchy writes it down: the mic is lit (${JSON.stringify(m)})`);
   await p.evaluate(() => openSettings({ at: "dictation" }));
   await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
   s = await settingsText(p);
@@ -310,6 +357,11 @@ async function run(browser, layout, port) {
   check(where, /Set up dictation on ja/.test(s) && /itself/.test(s), "and how to have ja do it itself");
   await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-via.png`) });
   await p.keyboard.press("Escape");
+  posted = 0;
+  await tapMic(p, layout);
+  t = await toastText(p);
+  check(where, posted === 1 && !/Getting dictation ready/.test(t), `a tap dictates through amarchy, and has this host fetch its own quietly (${posted}, "${t}")`);
+  await p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
 
   // The desktop app without GStreamer's microphone: dimmed even so.
   await at(p, "via", { lacks: true });

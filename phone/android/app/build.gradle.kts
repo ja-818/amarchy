@@ -48,6 +48,48 @@ val ownPage = tasks.register<OwnPageTask>("copyOwnPage") {
     source.set(layout.projectDirectory.dir("../../../desktop/dist"))
 }
 
+// amarchy's chimes (bin/amarchy's CHIMES, their files in sounds/), copied
+// into the app's raw resources at every build, never by hand: what a
+// notification naming one rings (Chimes.kt). Ogg Vorbis goes in as .ogg,
+// which Android keeps uncompressed, as it must to play it from the APK.
+val repo = layout.projectDirectory.dir("../../..")
+val chimeNames: List<String> = Regex("""^CHIMES = \(([^)]*)\)""", RegexOption.MULTILINE)
+    .find(providers.fileContents(repo.file("bin/amarchy")).asText.get())
+    ?.groupValues?.get(1)
+    ?.let { names -> Regex("\"([a-z0-9_]+)\"").findAll(names).map { it.groupValues[1] }.toList() }
+    ?: error("bin/amarchy has no CHIMES = (...) line: where are amarchy's chimes?")
+
+fun chimeFile(name: String): File? =
+    listOf("wav", "oga", "ogg").map { repo.file("sounds/$name.$it").asFile }.firstOrNull { it.isFile }
+
+// A chime without its file is left out (and the unit tests say so).
+val chimes: List<String> = chimeNames.filter { chimeFile(it) != null }
+
+abstract class ChimesTask : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val sounds: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val output: DirectoryProperty
+
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun copy() {
+        files.sync {
+            from(sounds)
+            into(output.dir("raw"))
+            rename { "chime_" + it.replace(Regex("\\.oga$"), ".ogg") }
+        }
+    }
+}
+
+val copyChimes = tasks.register<ChimesTask>("copyChimes") {
+    sounds.from(chimes.mapNotNull { chimeFile(it) })
+}
+
 // A release is signed when the build's environment has the key (CI's
 // secrets); else it stays unsigned, to be signed elsewhere or not at all.
 // The key is written out by a task, when a release is built: the
@@ -89,6 +131,11 @@ android {
         buildConfigField("String", "FIREBASE_APP_ID", javaString(setting("FIREBASE_APP_ID")))
         buildConfigField("String", "FIREBASE_PROJECT_ID", javaString(setting("FIREBASE_PROJECT_ID")))
         buildConfigField("String", "FIREBASE_SENDER_ID", javaString(setting("FIREBASE_SENDER_ID")))
+        buildConfigField("String[]", "CHIMES", chimes.joinToString(", ", "{", "}") { javaString(it) })
+    }
+
+    androidResources {
+        noCompress += listOf("wav", "ogg")
     }
 
     signingConfigs {
@@ -127,10 +174,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
-        // The push vectors every side decrypts (phone/testdata).
+        // The push vectors every side decrypts (phone/testdata), and
+        // bin/amarchy, whose chimes the app must all have (ChimesTest).
         val testdata = layout.projectDirectory.dir("../../testdata").asFile
+        val amarchy = repo.file("bin/amarchy").asFile
         unitTests.all {
             it.systemProperty("amarchy.testdata", testdata.absolutePath)
+            it.systemProperty("amarchy.bin", amarchy.absolutePath)
+            it.inputs.file(amarchy).withPathSensitivity(PathSensitivity.NAME_ONLY)
             // Android's HttpURLConnection sends the Origin the shell sets; the
             // JDK's (these tests') drops it unless told otherwise.
             it.systemProperty("sun.net.http.allowRestrictedHeaders", "true")
@@ -142,6 +193,7 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(ownPage, OwnPageTask::output)
+        variant.sources.res?.addGeneratedSourceDirectory(copyChimes, ChimesTask::output)
     }
 }
 

@@ -42,16 +42,14 @@ targets:
     type: application
     platform: iOS
     sources:
+      # App/Sounds/*.caf, amarchy's chimes (sounds.sh), go to the bundle's
+      # root, where iOS looks for a notification's named sound.
       - path: App
       - path: Shared
       # The own page is the desktop app's (desktop/dist), copied in at
       # each build, never by hand.
       - path: ../../desktop/dist
         type: folder
-        buildPhase: resources
-      # The chimes a notification may ring with (its "sound").
-      - path: ../../sounds
-        includes: ["*.wav"]
         buildPhase: resources
     settings:
       base:
@@ -112,6 +110,9 @@ targets:
       - path: Tests
       # Every side decrypts the same notifications (make-vectors.py).
       - path: ../testdata/push-vectors.json
+        buildPhase: resources
+      # Its CHIMES: each must have its sound in the app (ChimeTests).
+      - path: ../../bin/amarchy
         buildPhase: resources
     dependencies:
       - target: Amarchy
