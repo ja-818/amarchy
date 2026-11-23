@@ -2014,7 +2014,7 @@ class Chat {
       this.earlierBtn = h("button", { class: "earlier", type: "button", onclick: () => this.earlier() }, "Show earlier messages");
       if (this.start > 0) this.conv.prepend(this.earlierBtn);
       this.emptyEl = d.items.length ? null
-        : this.bubbles ? h("div", { class: "chat-empty" }, avatar(this.row, "big"), h("div", { class: "big" }, `Say hi to ${this.who()}`),
+        : this.bubbles ? h("div", { class: "chat-empty" }, avatar(this.row, "big"), h("div", { class: "big" }, `Say hi to ${teamName(this.row)}`),
             h("div", {}, "Write below, or hold the mic and say it."))
         : h("div", { class: "chat-empty" }, h("div", { class: "big" }, "What should Claude do?"),
             h("div", {}, "Write it below, or hold the mic and say it."));

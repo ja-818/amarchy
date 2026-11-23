@@ -134,7 +134,7 @@ function todayHue(repo) {
 }
 
 function projectChip(s) {
-  const name = s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo);
+  const name = s.assistant ? teamName(s, projectName(s.repo)) : projectName(s.repo);
   return h("span", { class: `pchip ph-${todayHue(s.repo)}`, title: `In ${projectName(s.repo)}`, "aria-label": `Project: ${name}` }, name);
 }
 
@@ -406,7 +406,7 @@ function todayInterruptedPill(s) {
     : "Its last turn was cut off before it finished: send it something to carry on" });
 }
 
-function todayChip(s) { return s.assistant ? s.assistant_name || projectName(s.repo) : projectName(s.repo); }
+function todayChip(s) { return s.assistant ? teamName(s, projectName(s.repo)) : projectName(s.repo); }
 
 // The first few, then "+N more" for the rest.
 function todayFirst(key, kids, n = TODAY_SHOW) {
@@ -480,7 +480,7 @@ function todayAgent(s) {
   const sub = now ? h("span", { class: `tcard-presence t-${now.tone}` }, now.text)
     : said ? h("span", { class: "tcard-last" }, said) : h("span", { class: "tcard-last none" }, "No messages yet");
   const time = s.said_at ? h("span", { class: `tcard-time${n ? " on" : ""}` }, uiChatTime(s.said_at)) : null;
-  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "list"), title: s.assistant_name || s.task || "Assistant",
+  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "list"), title: teamName(s, s.task || "Assistant"),
     sub, pill: time, count: n, id: s.id, open: () => todayOpen(s), unseen: false,
     label: [s.assistant_name || "Assistant", now ? now.text : said ? `said: ${said}` : "", n ? `${n} unread` : ""].filter(Boolean).join(", "),
     body: ask ? ask.body : [], actions: ask ? ask.actions : [uiPreview(s)] });
@@ -609,7 +609,7 @@ function todayChat(s, kind) {
   const complete = finished && !main ? uiButton("Complete mission", () => todayComplete(s), false, "complete") : null;
   const seenBtn = kind === "fresh" && !finished ? uiButton("Seen", () => todaySeen(s), false, "quiet seen") : null;
   return uiCard({ kind: kind === "fresh" ? (finished ? "done" : "fresh") : stalled ? "stale" : kind, hue: todayHue(s.repo), chip: main ? "" : todayChip(s),
-    title: main ? s.assistant_name || s.task : s.task || "New chat",
+    title: main ? teamName(s, s.task) : s.task || "New chat",
     lead: main ? avatar(s, "small") : null, id: s.id, open: () => todayOpen(s), pill,
     body: [!main && t.goal ? h("p", { class: "tcard-text" }, t.goal) : null, said && kind !== "done" ? h("p", { class: "tcard-text muted said" }, said) : null],
     actions: s.interrupted && !main ? [uiPreview(s), told === "resuming" || told === "resumed" ? h("span", { class: "tcard-note" }, told === "resuming" ? "Resuming…" : "Resumed")
@@ -1033,7 +1033,7 @@ function todayKey(v) {
 function todayRowKey(s) {
   return JSON.stringify([s.id, s.task, s.status, s.running, s.setup, s.sleeping, s.waking, s.unseen, s.interrupted, s.cut, s.asks,
     { ...s.today, at: Math.floor(((s.today || {}).at || 0) / 60) }, s.merged, s.permission, (s.secret_asks || []).length, s.assistant,
-    s.assistant_name, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
+    s.assistant_name, s.emoji, s.picture, s.priority, s.repo, boardOn() || isAgent(s) ? s.said : "", isAgent(s) ? [s.unread || 0, uiChatTime(s.said_at)] : null,
     uiPreviews(s).map((p) => [p.url, p.label, uiPreviewOf(p), uiPreviewAsking(s, p)]),
     // Its machine: shown with two or more, off or not, its label.
     machinesShown().length > 1 ? [machineOf(s).label, uiMachineOff(s)] : null,

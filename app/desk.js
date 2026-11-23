@@ -1874,7 +1874,7 @@ function menuChats() {
   if (!v) return [];
   return v.sessions.filter((s) => !s.setup && !todayUI.closing.has(s.id)).map((s) => ({
     typed: true,
-    label: isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat",
+    label: isAgent(s) ? teamName(s) : s.task || "New chat",
     detail: [projectName(s.repo), statusWords(s)].filter(Boolean).join(" · "),
     icon: s.id === openId() ? "check" : s.status === "waiting" ? "waiting" : "project",
     act: () => boardOpen(s.id) }));

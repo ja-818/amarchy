@@ -707,6 +707,10 @@ body.desk .sheet .head::before { display: none; }
 .command .menu-item { flex: 1; min-width: 0; }
 .row-btns { display: flex; gap: 6px; flex: none; }
 .picture-line { display: flex; align-items: center; gap: 14px; }
+/* An agent's sheet: who it is, its emoji (one, a box of its own) and its tone in a row. */
+.identity-line { display: flex; gap: 8px; align-items: stretch; }
+.identity-line > .input { flex: 1; min-width: 0; }
+.identity-line > .input.emoji-field { flex: none; width: 3.4em; padding-left: 0; padding-right: 0; text-align: center; font-size: 1.25em; }
 .crop-frame {
   position: relative;
   width: min(100%, 320px); aspect-ratio: 1;

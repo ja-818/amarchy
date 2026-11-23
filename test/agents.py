@@ -177,7 +177,8 @@ check(rc == 0 and sid == "inbox-watcher", f"made: its id ({out.strip()!r} {err.s
 inbox = next((a for a in am.team() if a["id"] == sid), None)
 check(inbox and inbox["role"] == "agent" and inbox["name"] == "Inbox", f"one of your agents, called that ({inbox})")
 check(inbox and inbox["sound"] not in {a["sound"] for a in am.team() if a["id"] != sid}, "with a chime of its own")
-check(started == [(sid, am.CHAT_FORMAT)], "its Claude starts writing as someone you text")
+check(len(started) == 1 and started[0][0] == sid and started[0][1].startswith(am.CHAT_FORMAT) and "Who should I be?" in started[0][1],
+      "its Claude starts writing as someone you text, and picks who it is with you first")
 check(am.session(sid).get("prompt") == "Keep my inbox at zero", "its job: its first message")
 rc, _, err = run("new", "inbox", "watcher", "--agent", "Other")
 check(rc == 1 and "amarchy agents" in err and am.team()[-1]["name"] == "Inbox", "a chat already there: not made one by surprise")

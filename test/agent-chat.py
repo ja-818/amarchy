@@ -45,15 +45,16 @@ run("agents", "scout-scout", "--name", "Scout")
 S = {sid: am.session(sid) for sid in ("jaken-jaken", "scout-scout", "scout-ideas", "proj-a")}
 
 # ---- the format each one's Claude writes in
-check(am.reply_format(S["scout-scout"]) == am.CHAT_FORMAT and am.reply_format(S["jaken-jaken"]) == am.CHAT_FORMAT,
-      "your assistant and your agents: the chat format")
+check(am.reply_format(S["scout-scout"]).startswith(am.CHAT_FORMAT) and am.reply_format(S["jaken-jaken"]).startswith(am.CHAT_FORMAT),
+      "your assistant and your agents: the chat format (then who each is: test/agent-identity.py)")
 check(am.reply_format(S["proj-a"]) == am.REPLY_FORMAT and am.reply_format(S["scout-ideas"]) == am.REPLY_FORMAT,
       "every other chat (an agent's project's too): the reply format")
-check(am.format_version(S["scout-scout"]) == am.CHAT_VERSION != am.FORMAT_VERSION == am.format_version(S["proj-a"]), "each its own version")
+check(am.format_version(S["scout-scout"]) not in (am.FORMAT_VERSION, am.format_version(S["jaken-jaken"]))
+      and am.FORMAT_VERSION == am.format_version(S["proj-a"]), "each its own version (an agent's, with who it is)")
 check(am.CHAT_FORMAT.startswith("amarchy shows") and am.REPLY_FORMAT.startswith("amarchy shows"),
       "both read back from a running Claude's arguments (claude_format_version)")
 argv = am.agent_argv(S["scout-scout"])
-check(argv[argv.index("--append-system-prompt") + 1] == am.CHAT_FORMAT, "an agent's Claude starts with it")
+check(argv[argv.index("--append-system-prompt") + 1] == am.reply_format(S["scout-scout"]), "an agent's Claude starts with it")
 argv = am.agent_argv(S["proj-a"])
 check(argv[argv.index("--append-system-prompt") + 1] == am.REPLY_FORMAT, "a chat's with the reply format")
 cf = am.CHAT_FORMAT
@@ -160,14 +161,19 @@ am.host_pane = lambda s: {"pid": 1}
 run("agents", "proj-a")
 run("agents", "proj-a", "--name", "Ops")
 run("agents", "proj-a", "off")
-check([a[-1] for a in started] == ["proj-a", "proj-a"] and all(a[1] == "claude-reload" for a in started),
-      f"made an agent, then not: started again each time, not for a rename ({started})")
+check([a[2] for a in started] == ["proj-a"] * 3 and all(a[1] == "claude-reload" and a[3:] == ["--asked"] for a in started),
+      f"made an agent, renamed (its name is in who it's told it is), then not: started again each time ({started})")
+started.clear()
+run("agents", "proj-a")
+run("agents", "proj-a", "--sound", "ocean")
+check(len(started) == 1, f"a new chime: its Claude left alone ({started})")
+run("agents", "proj-a", "off")
 started.clear()
 run("assistant", "proj-a")
-check(sorted(a[-1] for a in started) == ["jaken-jaken", "proj-a"], f"a new assistant: it and the one it replaces ({started})")
+check(sorted(a[2] for a in started) == ["jaken-jaken", "proj-a"], f"a new assistant: it and the one it replaces ({started})")
 started.clear()
 run("assistant", "off")
-check([a[-1] for a in started] == ["proj-a"], "no assistant: the one it was")
+check([a[2] for a in started] == ["proj-a"], "no assistant: the one it was")
 run("assistant", "jaken-jaken")
 
 shutil.rmtree(home, ignore_errors=True)

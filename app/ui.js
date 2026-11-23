@@ -663,15 +663,18 @@ function uiChart(items) {
 // changes); the big one only where it's shown big. cls: its size (ui.css
 // --avatar-*): small (in a button), list (its line in Chats), head (over
 // its chat), big; on any card, the card's (--avatar-card) but list.
+// Without a picture of yours, its emoji (amarchy agents --emoji) is its
+// picture, your assistant's too, on its project's color.
 function avatar(s, cls) {
   const size = cls === "big" ? 512 : 192;
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");
-  if (!own && s.assistant === "agent") {
+  const emoji = isAgent(s) && s.emoji ? s.emoji : "";
+  if (!own && (s.assistant === "agent" || emoji)) {
     const NS = "http://www.w3.org/2000/svg";
     const el = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
-    const svg = el("svg", { viewBox: "0 0 100 100", class: `avatar letter ph-${todayHue(s.repo)}${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
-    const t = el("text", { x: "50", y: "50", "text-anchor": "middle", "dominant-baseline": "central" });
-    t.textContent = (Array.from(String(s.assistant_name || s.task || projectName(s.repo) || "?").trim())[0] || "?").toUpperCase();
+    const svg = el("svg", { viewBox: "0 0 100 100", class: `avatar letter${emoji ? " emoji" : ""} ph-${todayHue(s.repo)}${cls ? ` ${cls}` : ""}`, "aria-hidden": "true" });
+    const t = el("text", { x: "50", y: emoji ? "54" : "50", "text-anchor": "middle", "dominant-baseline": "central" });
+    t.textContent = emoji || (Array.from(String(s.assistant_name || s.task || projectName(s.repo) || "?").trim())[0] || "?").toUpperCase();
     svg.append(el("circle", { cx: "50", cy: "50", r: "50" }), t);
     return svg;
   }
@@ -682,6 +685,14 @@ function avatar(s, cls) {
 // Your assistant or one of your agents: a chat that lives on, never a
 // mission to complete (no Complete, no Stalled, no priority: on top).
 function isAgent(s) { return !!s && (s.assistant === "main" || s.assistant === "agent"); }
+
+// Your assistant's or an agent's name as the app shows it: its name, then
+// its emoji (Calcifer 🔥), as a contact's in a messaging app. (Its
+// notifications lead with the emoji instead: bin/amarchy team_title.)
+function teamName(s, fallback) {
+  const name = (s && s.assistant_name) || fallback || (s && s.assistant === "main" ? "Assistant" : "Agent");
+  return s && s.emoji ? `${name} ${s.emoji}` : name;
+}
 
 // What a chat's box says before you type: your assistant or an agent by its name.
 function composerPlaceholder(s) { return isAgent(s) ? `Message ${s.assistant_name || "Assistant"}` : "Message Claude"; }
@@ -702,7 +713,7 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
     h("button", { class: "control ui-action board-back", type: "button", title: backTitle, "aria-label": "Back", onclick: back }, glyph("back")),
     h("button", { class: `head-title${main ? " who" : ""}`, type: "button", title: `${where(s)} · rename`, onclick: rename },
       main ? avatar(s, "head") : h("span", { class: `tcard-chip ph-${todayHue(s.repo)}` }, todayChip(s)),
-      main ? h("span", { class: "head-name" }, taskText(s.assistant_name || "Assistant"),
+      main ? h("span", { class: "head-name" }, taskText(teamName(s)),
                now ? h("span", { class: `head-sub t-${now.tone}`, role: "status" }, now.text) : null)
         : taskText(s.task || "New chat", s.task ? "" : "untitled")),
     h("div", { class: "head-btns" },
