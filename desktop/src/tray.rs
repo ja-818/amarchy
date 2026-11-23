@@ -8,8 +8,9 @@ use tauri::AppHandle;
 pub fn make(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Amarchy", true, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
+    let log = MenuItem::with_id(app, "log", "Its log", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Amarchy", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &reload, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &reload, &log, &PredefinedMenuItem::separator(app)?, &quit])?;
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
     TrayIconBuilder::with_id("amarchy")
         .icon(icon)
@@ -21,6 +22,10 @@ pub fn make(app: &AppHandle) -> tauri::Result<()> {
             "reload" => {
                 crate::show(app);
                 crate::find(app);
+            }
+            "log" => {
+                use tauri_plugin_opener::OpenerExt;
+                let _ = app.opener().open_path(crate::journal::file().to_string_lossy(), None::<&str>);
             }
             "quit" => crate::quit(app),
             _ => {}

@@ -169,6 +169,8 @@ guard_live() {
 
 if ((uninstall)); then
   guard_live "uninstalling takes it away"
+  # ---- amarchy's own Tailscale node (track H): stopped and gone (its sign-in kept).
+  [[ -x $repo/tailnet/install.sh ]] && "$repo/tailnet/install.sh" --uninstall || true
   # ---- the desktop app (track B): gone with amarchy, wherever it was installed.
   [[ -x $repo/desktop/install.sh ]] && "$repo/desktop/install.sh" --uninstall || true
   # ---- end of the desktop app (track B)
@@ -374,6 +376,22 @@ desktop_here() {
   [[ -x $bin_dir/amarchy-desktop || -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} || -d $HOME/.local/share/omarchy ]] && return 0
   systemctl --user is-active --quiet graphical-session.target 2>/dev/null
 }
+# ---- amarchy's own Tailscale node (track H): on a computer without the
+# system's Tailscale, amarchy's own (tailnet/install.sh: built here, its user
+# service); with the system's, nothing (and a node of amarchy's from before
+# stops). Before the desktop app, which reaches the tailnet through it.
+tailnet_said=""
+if [[ -x $repo/tailnet/install.sh ]]; then
+  rm -f "$state/tailnet-install/status"
+  if [[ -t 0 && -t 1 ]]; then
+    "$repo/tailnet/install.sh" || true
+  else
+    "$repo/tailnet/install.sh" --background || true
+  fi
+  tailnet_said=$(cat "$state/tailnet-install/status" 2>/dev/null || true)
+fi
+# ---- end of amarchy's own Tailscale node (track H)
+
 desktop_said=""
 if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
   rm -f "$state/desktop/status"
@@ -400,6 +418,11 @@ fi
 # ---- end of the desktop app (track B)
 
 say "amarchy installed."
+# ---- amarchy's own Tailscale node (track H): how it went, when it's this computer's.
+if [[ -n $tailnet_said && $tailnet_said != "not needed"* ]]; then
+  echo "  amarchy's own Tailscale node: $tailnet_said"
+fi
+# ---- end of amarchy's own Tailscale node (track H)
 # ---- the desktop app (track B): how it went, said plainly when it wasn't built.
 if [[ $desktop_said == "not built"* ]]; then
   say "  The desktop app: $desktop_said"

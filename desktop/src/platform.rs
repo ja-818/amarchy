@@ -6,6 +6,33 @@ pub fn prepare() {
     linux::prepare();
 }
 
+// ---- safe rendering, after its page's process crashed
+//
+// A web process that crashes is most often the graphics path (a new or
+// experimental GPU driver: Apple Silicon's, NVIDIA's). After one crash the
+// desktop app draws without the GPU's DMA-BUF and compositing, from then on
+// (rendering.json); AMARCHY_DESKTOP_GPU=1 tries the GPU again.
+
+fn rendering_file() -> std::path::PathBuf {
+    crate::target::state_dir().join("desktop/rendering.json")
+}
+
+/// Whether it draws the safe way (and why), as kept.
+pub fn safe_rendering() -> Option<String> {
+    if std::env::var_os("AMARCHY_DESKTOP_GPU").is_some() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(rendering_file()).ok()?).ok()?;
+    v["safe"].as_bool().filter(|s| *s).map(|_| v["why"].as_str().unwrap_or("its page crashed").to_string())
+}
+
+/// From now on, the safe way (why: what crashed).
+pub fn keep_safe_rendering(why: &str) {
+    let f = rendering_file();
+    let _ = std::fs::create_dir_all(f.parent().unwrap());
+    let _ = std::fs::write(&f, serde_json::json!({ "safe": true, "why": why }).to_string() + "\n");
+}
+
 /// The web view's own settings, once it's made.
 pub fn webview(win: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
@@ -30,6 +57,16 @@ mod linux {
         if Path::new("/proc/driver/nvidia/version").exists() && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
+        log::info!("graphics: {}", graphics());
+        // Its page crashed before: drawn the safe way (no DMA-BUF, no compositing).
+        if let Some(why) = super::safe_rendering() {
+            log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
+            for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
+                if std::env::var_os(var).is_none() {
+                    std::env::set_var(var, "1");
+                }
+            }
+        }
 
         // No PulseAudio answering (a machine without PipeWire's pulse
         // server): GStreamer's pulse probe looks for one every way it knows,
@@ -46,11 +83,39 @@ mod linux {
         }
     }
 
+    /// The machine and its GPU's driver, for the log: what a crash was on.
+    fn graphics() -> String {
+        let mut out = Vec::new();
+        if let Ok(c) = std::fs::read("/proc/device-tree/compatible") {
+            let c = String::from_utf8_lossy(&c).replace('\0', " ");
+            out.push(c.trim().to_string());
+        }
+        if let Ok(dir) = std::fs::read_dir("/sys/class/drm") {
+            let mut drivers: Vec<String> = dir
+                .flatten()
+                .filter_map(|e| std::fs::read_link(e.path().join("device/driver")).ok())
+                .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+            drivers.sort();
+            drivers.dedup();
+            out.push(format!("drm drivers: {}", if drivers.is_empty() { "none".into() } else { drivers.join(", ") }));
+        }
+        for var in ["WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
+            if let Ok(v) = std::env::var(var) {
+                out.push(format!("{var}={v}"));
+            }
+        }
+        out.join("; ")
+    }
+
     pub fn webview(win: &tauri::WebviewWindow) {
         let _ = win.with_webview(|wv| {
             use webkit2gtk::{SettingsExt, WebViewExt};
             let view = wv.inner();
             let Some(s) = WebViewExt::settings(&view) else { return };
+            if super::safe_rendering().is_some() {
+                s.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
+            }
             // The microphone (dictation): WebKitGTK has it off unless asked,
             // and denies it unless the app answers its permission request
             // (main.rs, on_permission_request).
@@ -69,6 +134,37 @@ mod linux {
             }
         });
         load_failures(win);
+        process_ends(win);
+    }
+
+    /// Its page's process ended (a crash, out of memory): it's said in the
+    /// log, a crash makes it draw the safe way from now on, and the page
+    /// comes back (crate::web_died: unless it keeps crashing).
+    fn process_ends(win: &tauri::WebviewWindow) {
+        use tauri::Manager;
+        let handle = win.app_handle().clone();
+        let _ = win.with_webview(move |wv| {
+            use webkit2gtk::{SettingsExt, WebProcessTerminationReason, WebViewExt};
+            wv.inner().connect_web_process_terminated(move |view, reason| {
+                let why = match reason {
+                    WebProcessTerminationReason::Crashed => "its page's process crashed",
+                    WebProcessTerminationReason::ExceededMemoryLimit => "its page's process ran out of memory",
+                    WebProcessTerminationReason::TerminatedByApi => return,
+                    _ => "its page's process ended",
+                };
+                if reason == WebProcessTerminationReason::Crashed && super::safe_rendering().is_none() {
+                    super::keep_safe_rendering(why);
+                    if let Some(s) = WebViewExt::settings(view) {
+                        s.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
+                    }
+                    log::warn!("{why}: drawing the safe way from now on (no GPU compositing)");
+                }
+                // Not inside WebKit's signal: what it does asks the window
+                // things (its address), which answers once the signal is over.
+                let (h, why) = (handle.clone(), why.to_string());
+                std::thread::spawn(move || crate::web_died(&h, &why));
+            });
+        });
     }
 
     /// A page that can't load (the server away, no network): the window's

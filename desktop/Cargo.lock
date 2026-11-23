@@ -37,6 +37,7 @@ name = "amarchy-desktop"
 version = "0.1.0"
 dependencies = [
  "gtk",
+ "libc",
  "log",
  "notify-rust",
  "serde",

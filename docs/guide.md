@@ -641,6 +641,25 @@ amarchy tailscale                 # where it stands, and the next step, done or 
 amarchy tailscale switch          # the accounts signed in here; switch <account> to use another
 ```
 
+**No Tailscale installed? amarchy's own node.** On a computer without the
+system's Tailscale, `install.sh` builds amarchy's own Tailscale node
+(`amarchy-tailnet`, on Tailscale's tsnet; Go builds it, offered with pacman or
+mise) and runs it as your user service `amarchy-tailnet.service`: a node of
+this computer's on your tailnet, nothing installed system-wide. Sign it in
+with `amarchy-tailnet login` (Tailscale's own sign-in page, in your browser).
+Then everything amarchy does with Tailscale works through it, unchanged: your
+phone and your other machines reach this computer's amarchy (`amarchy app on`
+serves it there, with your tailnet's HTTPS certificates), its chats'
+previews, and its calls to your other machines (through the node's proxy, for
+the tailnet only). The system's Tailscale always comes first: while it
+answers, amarchy uses it and its own node stays off (its sign-in kept).
+
+```
+amarchy-tailnet login             # sign this computer's node in to Tailscale
+amarchy-tailnet status            # where it stands
+amarchy-tailnet cli <...>         # Tailscale's own CLI, on this node (as `tailscale <...>`)
+```
+
 ## The desktop app
 
 amarchy's app in a window of its own, on Linux first (Omarchy), with macOS and
@@ -694,6 +713,12 @@ window closed.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
   DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+- **When something goes wrong**: its log is
+  `~/.local/state/amarchy/desktop/desktop.log` (the tray's **Its log**). A
+  start always brings its window up: if its window is gone it's made again,
+  if its page crashed it loads again (drawing without the GPU from then on;
+  `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
+  again by itself.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
@@ -1535,6 +1560,7 @@ The host's own settings are in `~/.config/amarchy/host`, one `KEY=value` line ea
 | `NAME=` | this machine's Tailscale name | How your devices reach what a chat serves. |
 | `BIND=` | this machine's Tailscale address | The same. Without Tailscale, a chat serves on localhost only, and you forward the port (`ssh -L 3000:localhost:3000 <host>`). |
 | `APP_USERS=` | (none) | Your other Tailscale logins the app lets in, besides this machine's owner (comma separated: yours on another tailnet). Also who a machine you pair with may belong to. |
+| `TAILSCALE=` | (the system's, when it answers) | `own`: amarchy uses its own Tailscale node (`amarchy-tailnet`) even on a computer that has the system's (to try it; its service then needs `amarchy-tailnet run --beside-system`). |
 | `APP_PORT=` | `7397` | The app's port, on localhost. |
 | `APP_HTTPS=` | `443` | The port on your tailnet (443, 8443 or 10000). |
 | `URL=` | `https://<this machine>.<tailnet>.ts.net` | The address your other machines reach this one's app at (see [Machines](#machines)). |

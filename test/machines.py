@@ -428,6 +428,15 @@ try:
     check(bool(until(lambda: "hello from alpha" in (wt / "got.txt").read_text(), limit=15)), "beta's Claude got it")
     code, _, _ = alpha.ask("POST", f"/api/m/beta/api/session/{sid}/send", {"text": "x"}, headers={"Origin": "https://evil.example"})
     check(code == 403, f"from a page elsewhere: alpha refuses it, as its own ({code})")
+    other = alpha.work / "site"
+    other.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=other, capture_output=True)
+    (other / "a.txt").write_text("a\n")
+    subprocess.run(["git", "add", "."], cwd=other, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a"], cwd=other, capture_output=True)
+    code, _, said = alpha.ask("POST", "/api/m/beta/api/add", {"repo": str(other)}, timeout=120)
+    check(code == 200 and said.get("name") == "site" and said.get("path", "").endswith("/site") and (beta.work / "site/a.txt").is_file(),
+          f"a project cloned on beta through alpha: its name, and its path ({said})")
     blob = os.urandom(300_000)
     code, _, said = alpha.ask("POST", f"/api/m/beta/api/session/{sid}/upload", {"name": "big.bin", "data": base64.b64encode(blob).decode()})
     up = wt / ".amarchy/uploads/big.bin"

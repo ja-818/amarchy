@@ -171,7 +171,7 @@ async function whereStart(m, body, how) {
     if (!gh) throw new Error(`${projectName(repo)} isn't on ${m.label}, and has no GitHub address to clone it from: add it there first`);
     if (how) how(`Cloning ${projectName(repo)} on ${m.label} first…`);
     const added = await api(at("/api/add"), { repo: gh });
-    repo = added.name || repo;
+    repo = String(added.name || repo).split("/").pop();     // (a machine from before says its path)
   }
   const d = await api(at("/api/new"), { ...body, repo });
   return d.id ? chatKeyOf(mine ? "" : m.name, d.id) : "";

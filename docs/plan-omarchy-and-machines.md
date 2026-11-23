@@ -336,6 +336,45 @@ and tell the other tracks.
   page rings no chime of its own: the desktop app rings `sound` when it shows
   the notice (window closed or not).
 
+### Tailscale inside the apps (track H)
+
+- **Which Tailscale.** The system's, whenever there is one: its daemon
+  answers (`tailscale status --json` has a `BackendState`, signed in or
+  not). amarchy uses it as today and never runs a node of its own beside it.
+  Only on a computer without it, **amarchy's own node**: `amarchy-tailnet`,
+  a small Go program on Tailscale's tsnet (a sidecar, not linked into the
+  apps: the node is the computer's, up for its app server whether a window is
+  open or not, and no Go runtime inside the WebKit process), run by the
+  user's service manager (`amarchy-tailnet.service`). Its state is
+  `~/.local/state/amarchy/tailnet/` (0700). When the system's Tailscale
+  starts answering, amarchy's node stops (its sign-in is kept, unused).
+- **One node per computer**, signed in as the user (Tailscale's own login
+  page, in the browser), named for the computer (its hostname), so it shows
+  in the board and in `amarchy machines` as any other machine.
+- **The same API as the system's.** The node serves Tailscale's own LocalAPI
+  on `~/.local/state/amarchy/tailnet/tailscaled.sock` (0600), and
+  `amarchy-tailnet cli …` is Tailscale's own CLI pointed at it. So every
+  `tailscale …` amarchy runs (status, serve, the app and the previews)
+  runs as `amarchy-tailnet cli …` on a computer that uses amarchy's node,
+  unchanged. The node does what `tailscale serve` sets (HTTPS on the
+  tailnet with the tailnet's certificates, proxied to `127.0.0.1:<port>`
+  with `Tailscale-User-Login` and its siblings), so the app server lets the
+  tailnet in exactly as it does through the system's; it already trusts
+  connections from its own user.
+- **Reaching the tailnet** without the system's (the app server's calls to
+  its peers, `amarchy machines found`, the desktop app's window and its
+  notices): the node's proxy, HTTP `CONNECT` on `127.0.0.1`, its address and
+  credential in `~/.local/state/amarchy/tailnet/proxy.json` (0600,
+  `{"url": "http://amarchy:<secret>@127.0.0.1:<port>"}`), for tailnet names
+  and addresses only (`*.ts.net`, `100.64.0.0/10`, `fd7a:115c:a1e0::/48`);
+  never for `127.0.0.1`.
+- **Signing in**: `amarchy-tailnet login` prints Tailscale's login address
+  (and opens it on a desktop); `amarchy tailscale` and the desktop app's own
+  page ("Sign in to Tailscale", when the node waits for it) use it.
+  `amarchy-tailnet status` says where it stands in words.
+- **Phones (G)**: the same Go package (`tailnet/`), bound with gomobile, a
+  node of the phone's own and its proxy for the app's web view (no serving).
+
 ### What lives where
 
 | What | Where |

@@ -6,6 +6,7 @@
 // microphone answered, and notifications with the window closed.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod journal;
 mod links;
 mod notify;
 mod platform;
@@ -14,6 +15,7 @@ mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse};
@@ -77,6 +79,12 @@ pub struct Shell {
     route: Mutex<Option<String>>,
     quitting: AtomicBool,
     finding: AtomicBool,
+    /// The window's thread last seen answering (the watchdog), and a start
+    /// handed over that it hasn't taken up yet (when, its arguments).
+    beat: Arc<Mutex<Instant>>,
+    handoff: Mutex<Option<(Instant, Vec<String>)>>,
+    /// When its page's process last ended, to tell a crash from a crash loop.
+    crashes: Mutex<Vec<Instant>>,
 }
 
 struct Args {
@@ -159,6 +167,7 @@ fn main() {
     if let Some(pid) = start.after {
         wait_gone(pid);
     }
+    journal::start();
     platform::prepare();
 
     let shell = Shell {
@@ -172,13 +181,16 @@ fn main() {
         saying: AtomicBool::new(false),
         quitting: AtomicBool::new(false),
         finding: AtomicBool::new(false),
+        beat: Arc::new(Mutex::new(Instant::now())),
+        handoff: Mutex::new(None),
+        crashes: Mutex::new(Vec::new()),
     };
     let hidden = start.hidden;
     let restart_only = start.restart;
 
     let builder = tauri::Builder::default()
         // First: a second start hands its arguments here and ends.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| again(app, &argv)))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| handoff(app, argv)))
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(WINDOW_STATE)
@@ -227,9 +239,10 @@ fn main() {
                 });
             }
             #[cfg(feature = "test-hooks")]
-            test_hooks(win.clone());
+            test_hooks(handle.clone());
             find(&handle);
             notify::follow(&handle);
+            watchdog(&handle);
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -362,16 +375,145 @@ fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("main")
 }
 
-/// The window, in front.
+/// The window, in front: made again if it's gone (whatever ended it).
 pub fn show(app: &AppHandle) {
+    let Some(w) = ensure_window(app) else { return };
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+}
+
+/// The window, there: if it's gone, made again and on what it showed.
+fn ensure_window(app: &AppHandle) -> Option<WebviewWindow> {
     if let Some(w) = main_window(app) {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+        return Some(w);
+    }
+    log::warn!("its window was gone: made again");
+    let w = match window(app, false) {
+        Ok(w) => w,
+        Err(e) => {
+            log::error!("couldn't make its window again: {e}");
+            return None;
+        }
+    };
+    platform::webview(&w);
+    let target = app.state::<Shell>().target.lock().unwrap().clone();
+    match target {
+        Some(t) => go(app, &t, None),
+        None => find(app),
+    }
+    Some(w)
+}
+
+/// Started again (a launcher, a key, a link): answered at once, so the
+/// start that handed over ends at once, and done on the window's thread;
+/// the watchdog sees to it if that thread doesn't take it up.
+fn handoff(app: &AppHandle, argv: Vec<String>) {
+    log::info!("started again: {:?}", argv.iter().skip(1).collect::<Vec<_>>());
+    *app.state::<Shell>().handoff.lock().unwrap() = Some((Instant::now(), argv.clone()));
+    let app2 = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || {
+        app2.state::<Shell>().handoff.lock().unwrap().take();
+        again(&app2, &argv);
+    }) {
+        log::error!("couldn't take up a start handed over: {e}");
+    }
+}
+
+/// The window's thread must answer: a start handed over taken up within
+/// HANDOFF_WAIT, and a beat at least every HUNG. If not, it's stuck (the
+/// window gone with it): it starts again as a new process, with what was
+/// handed over, and this one ends. (The monotonic clock: a laptop asleep
+/// isn't stuck.)
+const HANDOFF_WAIT: Duration = Duration::from_secs(8);
+const HUNG: Duration = Duration::from_secs(45);
+
+fn watchdog(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let shell = app.state::<Shell>();
+        if shell.quitting.load(Ordering::SeqCst) {
+            return;
+        }
+        let beat = shell.beat.clone();
+        let _ = app.run_on_main_thread(move || *beat.lock().unwrap() = Instant::now());
+        let quiet = shell.beat.lock().unwrap().elapsed();
+        let waiting = shell.handoff.lock().unwrap().clone().filter(|(at, _)| at.elapsed() > HANDOFF_WAIT);
+        if quiet < HUNG && waiting.is_none() {
+            continue;
+        }
+        let args = waiting.map(|(_, a)| a).unwrap_or_default();
+        log::error!(
+            "its window's thread hasn't answered for {}s{}: starting again",
+            quiet.as_secs(),
+            if args.is_empty() { "" } else { " (a start handed over waits)" }
+        );
+        let exe = std::env::current_exe().ok().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)")));
+        if let Some(exe) = exe {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--after").arg(std::process::id().to_string());
+            for a in args.iter().skip(1).filter(|a| a.starts_with("amarchy://")) {
+                cmd.arg(a);
+            }
+            if let Some(u) = shell.given.clone() {
+                cmd.arg("--url").arg(u.as_str());
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+            }
+            if let Err(e) = cmd.spawn() {
+                log::error!("couldn't start again: {e}");
+            }
+        }
+        std::process::exit(1);
+    });
+}
+
+/// Its page's process ended (platform.rs): the page loaded again, unless it
+/// keeps ending (three times in two minutes), then its own page says so.
+pub fn web_died(app: &AppHandle, why: &str) {
+    let shell = app.state::<Shell>();
+    let recent = {
+        let mut c = shell.crashes.lock().unwrap();
+        c.retain(|t| t.elapsed() < Duration::from_secs(120));
+        c.push(Instant::now());
+        c.len()
+    };
+    log::error!("{why} ({recent} in the last two minutes)");
+    if recent >= 3 {
+        let label = shell.target.lock().unwrap().as_ref().map(|t| t.label()).unwrap_or_else(|| "amarchy".into());
+        *shell.status.lock().unwrap() = Status::Failed {
+            label,
+            why: format!("{why}, again and again. Its log says more: {}", journal::file().display()),
+        };
+        *shell.target.lock().unwrap() = None;
+        to_own_page(app);
+        return;
+    }
+    let Some(w) = main_window(app) else { return };
+    let was = w.url().ok();
+    log::info!("its page loaded again (it was on {})", was.as_ref().map(|u| u.as_str()).unwrap_or("nothing"));
+    let target = shell.target.lock().unwrap().clone();
+    match target {
+        Some(t) if !was.as_ref().map(own_page).unwrap_or(false) => {
+            // Back where it was (its route), its cookie again if it's this machine's.
+            let mut u = t.open_url(None);
+            if let Some(f) = was.as_ref().and_then(|u| u.fragment()) {
+                u.set_fragment(Some(f));
+            }
+            go_url(app, &t, u);
+        }
+        _ => {
+            let _ = w.reload();
+        }
     }
 }
 
 pub fn quit(app: &AppHandle) {
+    log::info!("quit");
     app.state::<Shell>().quitting.store(true, Ordering::SeqCst);
     let _ = app.save_window_state(WINDOW_STATE);
     app.exit(0);
@@ -761,22 +903,32 @@ fn retry(app: AppHandle) {
 
 // The tests' way in: each line on stdin is {"id", "js"}, JavaScript to run in
 // the window (its value comes back on stdout as "@@<id> <json>"), or
-// {"id", "do"}: what the shell itself does or is ("close", "url", "visible").
+// {"id", "do"}: what the shell itself does or is ("close", "url",
+// "visible", "size", "destroy": its window gone, "hang": its window's
+// thread stuck for a minute, "pid").
 #[cfg(feature = "test-hooks")]
-fn test_hooks(win: WebviewWindow) {
+fn test_hooks(app: AppHandle) {
     std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
             let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
             let id = cmd["id"].as_str().unwrap_or("").to_string();
+            let win = main_window(&app);
             if let Some(what) = cmd["do"].as_str() {
-                let v = match what {
-                    "close" => serde_json::json!(win.close().is_ok()),
-                    "url" => serde_json::json!(win.url().map(|u| u.to_string()).unwrap_or_default()),
-                    "visible" => serde_json::json!(win.is_visible().unwrap_or(false)),
-                    "size" => {
-                        let s = win.inner_size().unwrap_or_default();
+                let v = match (what, &win) {
+                    ("pid", _) => serde_json::json!(std::process::id()),
+                    ("hang", _) => {
+                        let _ = app.run_on_main_thread(|| std::thread::sleep(Duration::from_secs(60)));
+                        serde_json::json!(true)
+                    }
+                    (_, None) => serde_json::json!(null),
+                    ("close", Some(w)) => serde_json::json!(w.close().is_ok()),
+                    ("destroy", Some(w)) => serde_json::json!(w.destroy().is_ok()),
+                    ("url", Some(w)) => serde_json::json!(w.url().map(|u| u.to_string()).unwrap_or_default()),
+                    ("visible", Some(w)) => serde_json::json!(w.is_visible().unwrap_or(false)),
+                    ("size", Some(w)) => {
+                        let s = w.inner_size().unwrap_or_default();
                         serde_json::json!([s.width, s.height])
                     }
                     _ => serde_json::json!(null),
@@ -784,6 +936,10 @@ fn test_hooks(win: WebviewWindow) {
                 println!("@@{id} {v}");
                 continue;
             }
+            let Some(win) = win else {
+                println!("@@{id} {}", serde_json::json!({"error": "no window"}));
+                continue;
+            };
             let js = cmd["js"].as_str().unwrap_or("null").to_string();
             let fail = id.clone();
             if let Err(e) = win.eval_with_callback(js, move |v| println!("@@{id} {v}")) {

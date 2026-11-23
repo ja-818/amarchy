@@ -261,6 +261,54 @@ def main():
             time.sleep(1)
             check(w.do("url").startswith(remote.url), "a page elsewhere isn't opened in the window (it's the browser's)")
 
+        # ---- it heals itself: its log; a window gone, a crashed page, a
+        # stuck window thread: a start always brings it back.
+        print("it heals itself")
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        logf = Path(home, ".local/state/amarchy/desktop/desktop.log")
+        with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
+            on_app(w)
+            log = logf.read_text() if logf.exists() else ""
+            check("amarchy-desktop" in log and " started (pid " in log and "graphics:" in log,
+                  "its log, readable without a terminal (~/.local/state/amarchy/desktop/desktop.log)")
+            w.do("destroy")
+            time.sleep(0.5)
+            check(w.do("visible") is None, "(its window destroyed)")
+            code, _ = w.again()
+            back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+            check(code == 0 and bool(back) and w.do("visible") is True, "its window gone: a start makes it again, on the app")
+            # Its page's process crashes: the page comes back, drawn the safe way from now on.
+            web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
+            for p in web:
+                os.kill(p, 9)       # as a crash ends it (JavaScriptCore catches a SIGSEGV of its own)
+            time.sleep(1)
+            back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+            rendering = Path(home, ".local/state/amarchy/desktop/rendering.json")
+            check(bool(web) and bool(back), f"its page's process crashed ({len(web)}): the page comes back")
+            check(rendering.exists() and json.loads(rendering.read_text()).get("safe") is True, "and it draws the safe way from now on")
+            check("its page's process crashed" in logf.read_text(), "the crash is in its log")
+            # Its window's thread stuck: a start hands over and ends at once,
+            # and the watchdog starts it again, on the app.
+            old = w.do("pid")
+            w.do("hang")
+            t0 = time.time()
+            code, _ = w.again()
+            check(code == 0 and time.time() - t0 < 5, f"a start handed to a stuck one ends at once ({time.time() - t0:.1f}s)")
+            new = None
+            for _ in range(60):
+                try:
+                    new = w.do("pid", timeout=2)
+                except TimeoutError:
+                    new = None
+                if new and new != old:
+                    break
+                time.sleep(0.5)
+            back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40) if new and new != old else False
+            check(bool(new) and new != old and bool(back) and w.do("visible") is True,
+                  f"stuck: it starts again by itself, its window up (pid {old} → {new})")
+            check("hasn't answered" in logf.read_text(), "and says so in its log")
+            w.shot(SHOTS / "healed.png")
+
         # ---- this machine's amarchy, with chats: through the local key.
         print("this machine's amarchy, with chats")
         local = Server("--local")

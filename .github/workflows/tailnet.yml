@@ -1,0 +1,43 @@
+# amarchy's own Tailscale node (tailnet/): built, vetted and tested on a
+# tailnet of the test's own (Tailscale's test control server and DERP, in
+# the test), with bin/amarchy driven on it (test/tailnet-own.py).
+name: Tailscale node
+
+on:
+  push:
+    branches: [main]
+    paths: ["tailnet/**", "bin/amarchy", "test/tailnet-own.py", ".github/workflows/tailnet.yml"]
+  pull_request:
+    paths: ["tailnet/**", "bin/amarchy", "test/tailnet-own.py", ".github/workflows/tailnet.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tailnet-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x86_64, os: ubuntu-24.04 }
+          - { name: Linux aarch64, os: ubuntu-24.04-arm }
+          - { name: macOS, os: macos-latest }
+    defaults:
+      run:
+        working-directory: tailnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tailnet/go.mod
+          cache-dependency-path: tailnet/go.sum
+      - run: go vet ./...
+      - run: go build -trimpath -ldflags "-s -w" -o amarchy-tailnet ./cmd/amarchy-tailnet
+      - run: go test ./...
