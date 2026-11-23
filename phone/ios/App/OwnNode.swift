@@ -94,7 +94,9 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
     /// The own page's sign-in, while the node waits for it.
     var signinStatus: ShellStatus? {
         guard let state, !state.running, state.needsLogin else { return nil }
-        return ShellStatus(kind: .signin, why: state.words, waiting: signingIn != nil)
+        return ShellStatus(kind: .signin, why: "This phone reaches your amarchy through Tailscale, with amarchy's own node "
+                           + "(no Tailscale app needed). Sign in with the Tailscale account your other machines use.",
+                           waiting: signingIn != nil)
     }
 
     func startIfAvailable(onRunning: @escaping () -> Void) {
@@ -144,6 +146,10 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
     func signIn() async throws {
         guard let node else { throw Net.Failure(errorDescription: "This build signs in through the Tailscale app: turn its VPN on") }
         let text = try await Task.detached { try node.loginURL() }.value
+        if text.isEmpty {       // signed in already: the node says so next
+            refresh()
+            return
+        }
         guard let url = URL(string: text), url.scheme == "https" else {
             throw Net.Failure(errorDescription: "Tailscale didn't give a sign-in page: try again in a moment")
         }
