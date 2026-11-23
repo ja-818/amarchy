@@ -84,10 +84,11 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart), its self-healing, amarchy's own
                                                     # Tailscale node (its sign-in, through its proxy)
-python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5): no media
-                                                    # in the page, nothing ends it, its sounds played by the
-                                                    # app, said once; installed: it starts again; a sound's
-                                                    # crash isn't blamed on the GPU
+python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5; its core
+                                                    # elements only; none at all): no media in the page,
+                                                    # nothing ends it, its sounds played by the app, said
+                                                    # once; installed: it starts again; a sound's crash
+                                                    # isn't blamed on the GPU
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
 python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
                                                     # built anyway without the sounds' and mic's, mise's
@@ -113,6 +114,8 @@ with playwright-core, as the app's view tests).
 
 CI (`.github/workflows/desktop.yml`) builds and tests it on Linux (x86_64 and
 aarch64), macOS and Windows, and keeps its packages (deb, rpm, AppImage, dmg,
-the Windows installer) as the run's artifacts. `packaging/arch/PKGBUILD` is
+the Windows installer) as the run's artifacts. The deb and the rpm depend on
+GStreamer's good, base and PipeWire plugins (its sounds and microphone); it
+stays up without them all the same. `packaging/arch/PKGBUILD` is
 `amarchy-desktop-git` for the AUR and omarchy-pkgs, built from amarchy's main
 (`makepkg -si`). Nothing is published: that's Julian's call.
