@@ -383,7 +383,9 @@ dev server). Restart the terminal (`amarchy run`) so the user sees the result to
   or `amarchy preview --clear --id <id>` if it isn't that chat's), then stops every
   process still running from that worktree (dev servers started in the background too),
   removes the worktree, and refuses if it has uncommitted changes. Never add
-  `--force` without explicit approval: it discards them.
+  `--force` without explicit approval: it discards them. A chat on another
+  machine (one you started with `new --on`): `amarchy close <machine>:<id>` (or
+  `amarchy close <id> --on <machine>`), with the same care, done there.
 - `amarchy automations run|pause|resume <timer>`: run a job now, or pause it
   (until resumed, even across restarts) and resume it.
 - `amarchy alerts`, `amarchy sound`, `amarchy theme`, `amarchy assistant`,
@@ -493,8 +495,11 @@ one board. `amarchy list --all` lists them all, each with its `machine` (one tha
 doesn't answer: as last seen, `machine_off`). `amarchy send <machine>:<id> "<text>"`
 reaches a chat on another machine (it doesn't wait), and `amarchy new <project>
 --on <machine> --prompt "..."` starts one there (its project cloned there first
-from GitHub when it isn't there); it prints `<machine>:<id>`. ListAgents and
-SendMessage reach this machine's sessions only. A chat stays on its machine: what
+from GitHub when it isn't there); it prints `<machine>:<id>`. Close the ones you
+started there once they're done, as you would here: `amarchy close
+<machine>:<id>` (or `--on <machine>`) closes it on its machine, its preview
+stopped first, refused while it has uncommitted changes (`--force` only when the
+user says so). ListAgents and SendMessage reach this machine's sessions only. A chat stays on its machine: what
 it changes there (its files, that machine's config) is only testable there.
 Moving one is the user's call, never yours on your own: only when they ask, run
 `amarchy move --to <machine>` (from your own chat it waits until this turn ends,

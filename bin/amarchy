@@ -61,6 +61,10 @@ Sessions:
   amarchy list --all [--compact]        this machine's, then every paired machine's, each with its machine
                                         (one that doesn't answer: as last seen, machine_off)
   amarchy close [id] [--force]          close a session (current one if no id); --force discards uncommitted changes
+  amarchy close <machine>:<id> [--force]
+                                        the same for a chat on another machine of yours (amarchy machines), closed
+                                        there as here: its preview stopped first, refused with uncommitted changes
+                                        unless --force; --on <machine> after the id says the same
   amarchy rename <title>                name the current session
   amarchy rename --id <id> <title>      the same for another session; --reset instead of a title goes back to the
                                         one made from Claude's title
@@ -5771,17 +5775,105 @@ def cmd_reap(sid):
 
 
 def cmd_close(args):
-    sid = args[0] if args and not args[0].startswith("-") else own_session_id()
+    """amarchy close [id] [--force]; <machine>:<id>, or <id> --on <machine>:
+    a chat on another machine of yours (close_on). The id is the one word
+    that isn't an option, wherever it is (--force first never makes it this
+    chat)."""
+    force, on, rest = False, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--force":
+            force = True
+        elif a == "--on" or a.startswith("--on="):
+            on = a.split("=", 1)[1] if "=" in a else next(it, None)
+            if not on:
+                return fail("--on needs a machine (amarchy machines lists them)")
+        else:
+            rest.append(a)
+    if len(rest) > 1:
+        print(usage("close"), file=sys.stderr)
+        return 1
+    sid = rest[0] if rest else None
+    if sid and ":" in sid:
+        where, _, sid = sid.rpartition(":")
+        if on and on != where:
+            return fail(f"{where}:{sid} is on {where}, not {on}")
+        on = where
+        if not sid:
+            return fail(f"which chat on {where}? (amarchy close {where}:<id>)")
+    if on and on != machine_name():
+        if not sid:
+            return fail(f"which chat on {on}? (amarchy close <id> --on {on})")
+        return close_on(on, sid, force)
+    return close_here(sid, force)
+
+
+def close_here(sid, force=False):
+    """amarchy close for one of this machine's chats (none named: the one
+    it runs in). One that moved away from here is closed where it is now."""
+    named = sid
+    sid = sid or own_session_id()
     s = session(sid) if sid else None
     if not s:
+        to = moved_to(named) if named and re.fullmatch(r"[\w][\w.-]{0,119}", named) else None
+        if to and ":" in to:
+            print(f"{named} moved to {to}: closing it there", file=sys.stderr)
+            return close_on(*to.split(":", 1), force)
         return fail(f"No session {sid!r}" if sid else "Not in a session (name one: amarchy close <id>)")
-    err = close(sid, force="--force" in args)
+    held = move_holds(sid)
+    if held:
+        return fail(f"{sid}: {held}")
+    err = close(sid, force=force)
     if err and err.startswith(PREVIEW_LEFT):
         return fail(f"{sid}: {err}. Stop that (amarchy preview stop, or what started it), then close it again; "
                     f"if it isn't this chat's, amarchy preview --clear forgets its previews")
     if err:
         return fail(f"{sid}: {err} (amarchy close {sid} --force discards them)")
     return 0
+
+
+CLOSE_ON_WAIT = 300     # seconds another machine may take to close a chat (its previews stopped, then the close)
+
+
+def close_on(name, sid, force=False, hops=0):
+    """amarchy close <machine>:<id>: a chat on another machine of yours,
+    closed there the way the app's Complete closes it (/api/session/<id>/close,
+    as this machine), with the same care as here: refused while it has
+    uncommitted changes unless force (discard), its previews stopped first
+    and refused while something else still holds one of their ports, not
+    while it moves. One that moved on from there is followed to where it
+    is now (that machine's moved chats), a few machines at most."""
+    m = machine_find(name)
+    if not m:
+        return fail(f"no machine {name} is paired with this one (amarchy machines lists them)")
+    key, label = f"{name}:{sid}", m["label"]
+    if not re.fullmatch(r"[\w][\w.-]{0,119}", sid):
+        return fail(f"No session {key!r}")
+    try:
+        status, d = peer_json(m, "POST", f"/api/session/{sid}/close", {"discard": force}, timeout=CLOSE_ON_WAIT)
+        to = None
+        if status == 404 and hops < 3:
+            code, there = peer_json(m, "GET", "/api/peer/state", timeout=15)
+            if code == 200:
+                to = next((r.get("to") for r in reversed(there.get("moved") or [])
+                           if isinstance(r, dict) and r.get("from") == key and isinstance(r.get("to"), str)), None)
+    except PeerError as e:
+        return fail(f"{label} is off: {e}")
+    if to and re.fullmatch(r"[\w.-]{1,63}:[\w][\w.-]{0,119}", to):
+        print(f"{key} moved to {to}: closing it there", file=sys.stderr)
+        where, _, there_id = to.partition(":")
+        return close_here(there_id, force) if where == machine_name() else close_on(where, there_id, force, hops + 1)
+    if status == 200:
+        return 0
+    if status == 404:
+        return fail(f"No session {key!r}: {label} has no such chat")
+    left = d.get("preview_left")
+    if status == 409 and isinstance(left, list) and left:
+        return fail(f"{key}: {PREVIEW_LEFT}{'; '.join(str(x) for x in left)}. Stop that on {label} (its chat can: "
+                    f"amarchy preview stop), then close it again")
+    if status == 409 and isinstance(d.get("changes"), int) and d["changes"] > 0 and not force:
+        return fail(f"{key}: uncommitted changes (amarchy close {key} --force discards them)")
+    return fail(f"{key}: {d.get('error') or f'{label} said no ({status})'}")
 
 
 def cmd_rename(args):
@@ -28681,7 +28773,7 @@ OPTIONS = {
     "add": ({"--new", "--github"}, set(), set()),
     "projects": ({"--github", "--json"}, set(), set()),
     "list": ({"--compact", "--all"}, set(), set()),
-    "close": ({"--force"}, set(), set()),
+    "close": ({"--force", "--on"}, {"--on"}, set()),
     "rename": ({"--id", "--reset"}, {"--id"}, set()),
     "run": ({"--show", "--set", "--save", "--forget", "--list"}, {"--forget"}, {"--set", "--save"}),
     "preview": ({"--id", "--clear", "--run", "--stop", "--url", "--port", "--memory", "--idle", "--lines", "--no-start", "--name", "--rename"},
@@ -28778,7 +28870,9 @@ def check_args(cmd, args):
         if a in HELP:
             print(usage(cmd))
             return 0
-        name = a.split("=", 1)[0] if cmd == "new" and re.match(r"--(prompt|model|attach)=", a) else a     # new's --option=value
+        # new's --option=value, close's --on=<machine>
+        name = a.split("=", 1)[0] if (cmd == "new" and re.match(r"--(prompt|model|attach|effort|agent|on)=", a)
+                                      or cmd == "close" and a.startswith("--on=")) else a
         if name in text:
             break
         if name in values and name == a:

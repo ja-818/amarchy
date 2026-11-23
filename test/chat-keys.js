@@ -8,9 +8,9 @@
 //   the latest back down, i too; Page Up / Page Down scroll them from the box.
 //   Esc: Claude at work, a stop (from the box, a message, nowhere in it; on
 //   its question too, a no); Claude done, nothing at all (not back, not out
-//   of the box). Ctrl+Alt+← back to the board, → into the chat again, ↑ ↓ the
-//   chat before or after, Space the menu (a chat by its name as you type),
-//   T its terminal and back, K the keys. Plain letters on the board do
+//   of the box). Ctrl+Alt+← (H) back to the board, → (L) into the chat again,
+//   ↑ ↓ (K J) the board's Chats and Tasks, M the menu (a chat by its name as you
+//   type), T its terminal and back, / the keys. Plain letters on the board do
 //   nothing but move.
 //
 // Three layouts: the phone's (touch), the phone layout on a computer (a
@@ -236,11 +236,34 @@ async function run(browser, layout, port) {
   k = await keys(p);
   check(as, k.where === "box" && k.value === "half a thought", `the keys in its box, what you wrote still there (${JSON.stringify(k)})`);
   await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
+
+  // Ctrl+Alt+↓ / ↑: Tasks / Chats, the board's tabs (from a chat: the board, on that tab). Not chat to chat.
+  const tabNow = () => p.evaluate(() => (!(app.desk ? desk.current : app.session) ? board.tab : "chat"));
   await p.keyboard.press("Control+Alt+ArrowDown");
-  check(as, await opened(p, TWO), "Ctrl+Alt+↓: the next chat");
+  check(as, await until(p, () => !(app.desk ? desk.current : app.session) && board.tab === "tasks"), `Ctrl+Alt+↓ from a chat: the board, on Tasks (${await tabNow()})`);
+  await p.keyboard.press("Control+Alt+ArrowDown");
+  await sleep(200);
+  check(as, (await tabNow()) === "tasks", "again: Tasks still (the last tab)");
   await p.keyboard.press("Control+Alt+ArrowUp");
-  check(as, await opened(p, ID), "Ctrl+Alt+↑: the one before");
+  check(as, await until(p, () => board.tab === "chats"), `Ctrl+Alt+↑: Chats (${await tabNow()})`);
+
+  // h j k l, as the arrows: J Tasks, K Chats, L into the chat lit, H back; from the box, typing.
+  await p.keyboard.press("Control+Alt+KeyJ");
+  check(as, await until(p, () => board.tab === "tasks"), "Ctrl+Alt+J: Tasks");
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(as, await until(p, () => board.tab === "chats"), "Ctrl+Alt+K: Chats");
+  await p.evaluate((id) => boardSelectId(id), ID);
+  await p.keyboard.press("Control+Alt+KeyL");
+  check(as, await opened(p, ID), "Ctrl+Alt+L: into the chat lit");
   await sleep(400);
+  await p.keyboard.type("hjkl");
+  await p.keyboard.press("Control+Alt+KeyH");
+  check(as, await isHome(p), "Ctrl+Alt+H from the box, typing: back to the board");
+  await p.keyboard.press("Control+Alt+KeyL");
+  check(as, await opened(p, ID), "Ctrl+Alt+L: into it again");
+  await sleep(400);
+  check(as, (await keys(p)).value === "hjkl", "and nothing typed by them (the box has what you typed)");
+  await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
 
   // Ctrl+Alt+T: its terminal, the keyboard in it; again, back to the chat, the keys in its box.
   await p.keyboard.press("Control+Alt+KeyT");
@@ -273,9 +296,9 @@ async function run(browser, layout, port) {
     [...m.querySelectorAll(".picker-row, .menu-item")].find((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)).click(); });
   check(as, await opened(p, TWO), "picked: it opens");
 
-  // Ctrl+Alt+K: the keys, the same on both.
-  await p.keyboard.press("Control+Alt+KeyK");
-  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /Esc/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  // Ctrl+Alt+/: the keys, the same on both.
+  await p.keyboard.press("Control+Alt+Slash");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H J K L/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, h j k l in them");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

@@ -67,10 +67,6 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
 .desk-chat > .chat { flex: 1; }
 .desk-chat .chat-dock { padding-bottom: 14px; }
 .desk-chat .chat-conv { padding-top: 22px; }
-/* Ctrl+Alt+↓ held: the head says which chat it's on, the one under it
-   waits until you let go. */
-.column.stepping .desk-chat { opacity: 0.45; transition: opacity 0.1s ease; }
-.column.stepping .desk-head { pointer-events: none; }
 /* Over the chat: Back to the board, its project and name (click: rename),
    where it stands and what it's for; the side panel's tabs, Complete, ⋯. */
 .desk-head {

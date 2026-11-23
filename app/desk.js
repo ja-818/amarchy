@@ -20,7 +20,6 @@ const desk = {
   sideWidth: 0,
   sideOn: null,         // the tab and the chat the side panel's view was opened on
   revealed: false,      // a terminal asked for with Show terminals off: shown, for this session
-  stepping: null,       // the chat Ctrl+Alt+↑ / ↓, held, is on: opened when let go
   terminal: null,       // the side panel's views
   changes: null,
   details: null,
@@ -680,11 +679,6 @@ function deskRoute() {
 // The chat over the board (id), or the board (null).
 function show(id) {
   if (id && app.view && !row(id)) id = null;
-  if (desk.stepping) {      // somewhere else meanwhile: not where Ctrl+Alt+↓ was held
-    clearTimeout(desk.stepTimer);
-    desk.stepping = null;
-    desk.column.classList.remove("stepping");
-  }
   const changed = id !== desk.current;
   if (changed && id && !desk.current) board.from = board.scroll.scrollTop;      // where the board was
   if (changed && desk.chat) letGoOf(desk.chat.el);
@@ -763,7 +757,7 @@ function markSeen() {
 
 function deskHead() {
   if (!desk.head) return;
-  const s = row(desk.stepping || desk.current);      // (Ctrl+Alt+↓ held: the one it's on)
+  const s = row(desk.current);
   if (!s) { desk.head.replaceChildren(); return; }
   // The box calls your assistant or an agent by its name, as the phone's does.
   if (desk.chat && desk.chat.id === s.id) desk.chat.setPlaceholder(composerPlaceholder(s));
@@ -1491,32 +1485,37 @@ function chime(v) {
 // has it: Omarchy only Ctrl+Alt+Del and Tab, a browser lets a page have it,
 // a Mac too (Option alone types é and ñ, and jumps words), a box and a
 // terminal type nothing with it. The arrows move: ← back, → into the chat
-// lit, ↑ ↓ the chat before or after. The rest each do one thing; what else
-// there is to do is in the menu (M). Never Space: Alt+Space (and Right Alt)
+// lit, ↑ ↓ Chats or Tasks; h l k j too, as vim's and the board's plain keys
+// are. (Not from chat to chat: the board's order changes as they work, so
+// where that would land is anyone's guess.) The rest each do one thing; what else there is to do is in
+// the menu (M), and / (or ?) shows them all. Never Space: Alt+Space (and Right Alt)
 // is Omarchy's dictation, and a desktop can take Ctrl+Alt+Space for it too.
 // Esc is Claude Code's: it stops Claude (chat.js navKey); plain keys only
 // move, or type.
 
 const APP_KEYS = {
   ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
-  ArrowUp: (e) => step(-1, e.repeat), ArrowDown: (e) => step(1, e.repeat),
+  ArrowUp: () => keysTab(-1), ArrowDown: () => keysTab(1),
+  KeyH: () => keysBack(), KeyL: () => keysInto(),
+  KeyK: () => keysTab(-1), KeyJ: () => keysTab(1),
   Enter: () => boardNew(), NumpadEnter: () => boardNew(),
   KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
   KeyT: () => keysTerminal(),
   KeyP: () => keysPreview(),
-  KeyK: () => showKeys(),
+  Slash: () => showKeys(),
 };
 
 function deskKeys(e) {
   if (!(e.ctrlKey && e.altKey) || e.metaKey) return;
   if (e.getModifierState && e.getModifierState("AltGraph")) return;      // (AltGr, as Windows has it: a character)
   if (TALK_KEYS.includes(e.code)) return talkKey(e);
-  const act = APP_KEYS[e.code];
+  // (/ wherever a keyboard has it, ? too: Shift+7 on a Spanish one.)
+  const act = APP_KEYS[e.code] || (e.key === "/" || e.key === "?" ? APP_KEYS.Slash : null);
   if (!act) return;
   e.preventDefault();
   e.stopPropagation();
-  if (e.repeat && !["ArrowUp", "ArrowDown"].includes(e.code)) return;
+  if (e.repeat) return;
   closeSheets();
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
   act(e);
@@ -1535,7 +1534,7 @@ function openChat() {
   return app.session && app.session.mode === "chat" ? app.session.chat : null;
 }
 
-// Ctrl+Alt+←: back. A chat: the board, where you were (the phone's
+// Ctrl+Alt+← (H): back. A chat: the board, where you were (the phone's
 // terminal: its chat first, as its ‹ does); a board open in Tasks: Tasks;
 // the new chat's box: put away (what you wrote stays).
 function keysBack() {
@@ -1548,7 +1547,7 @@ function keysBack() {
   if (board.composing) return leaveNewChat();
 }
 
-// Ctrl+Alt+→: into the chat lit on the board (back from a chat, the one you
+// Ctrl+Alt+→ (L): into the chat lit on the board (back from a chat, the one you
 // left: it's lit), as Enter on its card.
 function keysInto() {
   if (openId()) return;
@@ -1599,7 +1598,6 @@ function talkKey(e) {
 }
 
 function deskKeysUp(e) {
-  if (desk.stepping && ["ArrowUp", "ArrowDown", "ControlLeft", "ControlRight", "AltLeft", "AltRight"].includes(e.code)) stepDone();
   if (e.code !== desk.talkCode || desk.talkDown === undefined || desk.talkDown === null) return;
   const c = openChat(), fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
   const t = fresh ? fresh.dictate : c && c.talk;
@@ -1616,32 +1614,15 @@ function deskKeysUp(e) {
   t.stop();
 }
 
-// Ctrl+Alt+↑ / ↓: the chat before or after, in the board's order (tasks.js).
-// Held down (the key repeating) in the wide layout, only the head says which
-// it's on: the chat it stops on opens when you let go (or it stops a
-// moment), not every one it went by (each its stream, its terminals). The
-// phone layout goes one a press.
-const STEP_SETTLE = 150;      // ms with no key: there
-
-function step(n, repeat) {
-  if (!app.desk) return repeat ? null : boardStep(n);
-  if (!desk.current || (!repeat && !desk.stepping)) return boardStep(n);
-  const id = boardStep(n, desk.stepping || desk.current);
-  if (!id) return;
-  desk.stepping = id;
-  desk.column.classList.add("stepping");
-  deskHead();
-  clearTimeout(desk.stepTimer);
-  desk.stepTimer = setTimeout(stepDone, STEP_SETTLE);
-}
-
-function stepDone() {
-  clearTimeout(desk.stepTimer);
-  const id = desk.stepping;
-  desk.stepping = null;
-  desk.column.classList.remove("stepping");
-  if (id && id !== desk.current && row(id)) boardOpen(id);
-  else deskHead();
+// Ctrl+Alt+↑ / ↓ (K / J): the board's tab before or after, Chats then Tasks
+// (from a chat: the board, on that tab). At the first or the last, it stays.
+function keysTab(n) {
+  const at = BOARD_TABS.indexOf(board.tab);
+  const tab = BOARD_TABS[Math.max(0, Math.min(BOARD_TABS.length - 1, at + n))];
+  const open = openId();
+  if (tab === board.tab && !open) return;
+  if (open && !app.desk) go("#/");
+  boardTab(tab);
 }
 
 // The side panel closed, or back on the tab it had.
@@ -1862,7 +1843,7 @@ function deskMenu() {
     { label: "New agent…", icon: "plus", detail: "a chat that lives on", act: () => newAgentSheet() },
     { label: "Settings", icon: "gear", act: () => openSettings() },
     { label: "Tour", icon: "tour", detail: "amarchy in 100 seconds", act: () => tourShow() },
-    { label: "Keys", icon: "keys", key: "Ctrl+Alt+K", act: () => showKeys() },
+    { label: "Keys", icon: "keys", key: "Ctrl+Alt+/", act: () => showKeys() },
     ...menuChats(),
   ], { search: "A chat, or what to do" });
 }
@@ -1942,9 +1923,9 @@ function showKeys() {
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
   sheet(sheetHead("Keys", "Ctrl+Alt does, Esc stops"),
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
-      ["Ctrl+Alt+↑ / ↓", "The chat before / after"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
+      ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H J K L", "The same, as vim's ← ↓ ↑ →"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+K", "These keys"]]),
+      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],

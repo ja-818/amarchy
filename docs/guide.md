@@ -469,12 +469,13 @@ host's chats without anything else installed.
   never back, never out of the box, so an `Esc` pressed out of habit can't stop
   a chat you only looked at, and one pressed to stop always does. What's open
   over the chat takes it first (a menu, a dictation), and a terminal has its own.
-- **Back** is **‹**, or `Ctrl+Alt+←` from anywhere: the board, where you were,
+- **Back** is **‹**, or `Ctrl+Alt+←` (or `H`) from anywhere: the board, where you were,
   the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. `Ctrl+Alt+→` goes back
   into it. The browser's Back is the board too, a reload stays on the chat, and
-  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` open the chat before or after in
-  the board's order, and `Ctrl+Alt+M` any chat by its name. Dictating, the
+  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `K` / `J`) are the board's
+  Chats and Tasks (from a chat too), and `Ctrl+Alt+M` opens any chat by its name
+  (not the chat before or after: the board's order changes as they work). Dictating, the
   keys go to the box: `Enter` stops it, the next `Enter` sends.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
   project and name (click: rename), where it stands (its tone a dot), `⋯` its
@@ -552,7 +553,9 @@ Three rules, the same in every layout:
 
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
-  there's a twin: `↵` a new thing, `W` close, `K` the keys; `M` is the menu).
+  there's a twin: `↵` a new thing, `W` close; `M` is the menu, `/` the keys).
+  The arrows move, and so do `h` `j` `k` `l`, as vim's and the board's plain
+  keys do: `Ctrl+Alt+H` is back as `←` is.
   Never `Space`: `Alt+Space` and Right Alt are Omarchy's dictation, and a desktop
   can take `Ctrl+Alt+Space` for it too.
   `Ctrl+Alt` because nothing else has it: Omarchy only `Ctrl+Alt+Del` and `Tab`,
@@ -564,15 +567,15 @@ Three rules, the same in every layout:
 
 | Key | |
 | --- | --- |
-| `Ctrl+Alt+←` / `→` | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
-| `Ctrl+Alt+↑` / `↓` | The chat before / after, in the board's order (held, in the wide layout: it opens where you let go). |
+| `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
+| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The board's Chats / Tasks (from a chat: the board, on that tab). |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
 | `Ctrl+Alt+P` | Open the chat's preview (of several: its dropdown, to pick one). |
 | `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
-| `Ctrl+Alt+K` | All the keys. |
+| `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
 
 On a board's card in Tasks, `1`–`4` press its buttons, and `Ctrl+Alt+←` is Tasks
@@ -665,7 +668,12 @@ amarchy machines remove omarchy   # both forget the other
   - Your assistant and your agents live on their machine: they don't move.
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
+  `amarchy close <machine>:<id>` (closed there as the app's Complete closes
+  it: its preview stopped first, refused while it has uncommitted changes
+  unless `--force`; `amarchy close <id> --on <machine>` is the same),
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+  A chat that moved is followed: `amarchy close <old id>` closes it where it
+  is now.
 - **Your stuff is the same on every machine**: the look (your own wallpaper
   and themes too, Omarchy (live) among them), the order of your projects, what
   a new chat starts on (model, effort), what tells you, your chimes, Show
@@ -1953,6 +1961,7 @@ amarchy new <project> [name] --agent <name>      one of your agents from its sta
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]   a message for its Claude, once Claude is free
 amarchy list [--compact]              sessions as JSON, in list order (task, age, agent, engine...)
 amarchy close [id] [--force]          close a session (the current one if no id); --force discards uncommitted changes
+amarchy close <machine>:<id> [--force]   the same for a chat on another machine of yours (or <id> --on <machine>)
 amarchy rename <title>                name the current session
 amarchy rename --id <id> <title>      the same for another; --reset goes back to the name from Claude's title
 amarchy run                           run the project in the session's terminal (again: restart it)

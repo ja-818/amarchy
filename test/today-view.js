@@ -1023,18 +1023,18 @@ async function wide(browser, port) {
 
   await sortChecks(p, where);
 
-  // Ctrl+Alt+↓ / ↑: from chat to chat in the board's order.
+  // Ctrl+Alt+↓ / ↑: Tasks / Chats, from the board and from a chat.
   await p.evaluate(() => { board.scroll.focus(); });
   await p.keyboard.press("Control+Alt+ArrowDown");
-  const j1 = await p.evaluate(() => keyedId());
-  await p.keyboard.press("Control+Alt+ArrowDown");
-  const j2 = await p.evaluate(() => keyedId());
-  check(where, !!j1 && !!j2 && j1 !== j2, `Ctrl+Alt+↓ moves from card to card (${j1} → ${j2})`);
-  await p.keyboard.press("Enter");
-  await until(p, (id) => desk.current === id, j2);
+  check(where, await until(p, () => board.tab === "tasks"), "Ctrl+Alt+↓: Tasks");
   await p.keyboard.press("Control+Alt+ArrowUp");
-  check(where, await until(p, (id) => desk.current === id, j1), "with one open, Ctrl+Alt+↑ opens the one before");
-  await p.evaluate(() => boardBack());
+  check(where, await until(p, () => board.tab === "chats"), "Ctrl+Alt+↑: Chats");
+  await p.evaluate(() => todayOpen(row("proj-work")));
+  await until(p, () => desk.current === "proj-work");
+  await p.keyboard.press("Control+Alt+ArrowDown");
+  check(where, await until(p, () => !desk.current && board.tab === "tasks"), "with a chat open, Ctrl+Alt+↓: the board, on Tasks");
+  await p.keyboard.press("Control+Alt+ArrowUp");
+  await until(p, () => board.tab === "chats");
   check(where, await p.evaluate(() => board.search.placeholder === "Search"), "the search box says only Search");
 
   // Ctrl+Alt+W: the open chat closes (with Undo), from its box too.
@@ -1080,7 +1080,7 @@ async function wide(browser, port) {
   await p.keyboard.press("Escape");
   check(where, await until(p, () => !board.query && !!board.box.querySelector(".ui-filter")), "Esc: Today again");
 
-  // Keys: j / k move; Ctrl+Alt+K the keys, Ctrl+Alt+↵ a new chat, Ctrl+Alt+← away.
+  // Keys: j / k move; Ctrl+Alt+/ the keys, Ctrl+Alt+↵ a new chat, Ctrl+Alt+← away.
   await p.evaluate(() => { document.activeElement.blur(); board.scroll.focus(); });
   await p.keyboard.press("j");
   const first = await p.evaluate(() => document.activeElement.closest(".ticket") && document.activeElement.closest(".ticket").dataset.id);
@@ -1108,8 +1108,8 @@ async function wide(browser, port) {
   check(where, await until(p, () => board.tab === "tasks"), "Shift+Tab: Tasks");
   await p.keyboard.press("Tab");
   check(where, await until(p, () => board.tab === "chats"), "Tab again: round to Chats");
-  await p.keyboard.press("Control+Alt+KeyK");
-  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+M\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  await p.keyboard.press("Control+Alt+Slash");
+  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+M\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
   for (const k of ["n", "x", "?"]) await p.keyboard.press(k);
