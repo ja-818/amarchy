@@ -324,6 +324,35 @@ It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see
 [Configure](#configure) for `APP_USERS=`).
 
+### The phone apps
+
+amarchy's app for iPhone and Android is the same app inside a thin native shell
+([phone/](../phone/README.md)): the same board, chats and Settings. It adds only
+what a home-screen web app can't do:
+
+- **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
+  on the notification itself, without opening the app. On a locked phone it asks
+  for Face ID (or your code) first. If it can't reach your amarchy, a
+  notification says so and opens the chat.
+- **The share sheet.** A screenshot, a photo, a link or some text: tap
+  **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
+  No Shortcut to set up.
+- **A widget.** "2 need you" and their names, on the home screen and (iPhone)
+  the lock screen.
+
+**First open**: on the phone's browser, **Settings → The phone app → Open in the
+app** opens it on that machine; or type its address
+(`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
+app when its VPN is on; a build that has amarchy's own Tailscale node signs in
+inside the app instead. Then **Turn on notifications**, as in the web app.
+
+**Private**: each notification is encrypted on your machine for that phone
+alone (the same encryption as Web Push). It goes through amarchy's push relay
+([relay/](../relay/README.md)), a tiny open-source service that hands it to
+Apple's or Google's push. The relay keeps nothing and can't read it: it sees
+the phone's push token and which machine may send to it, never what a
+notification says. Anyone can run their own.
+
 ## In a browser on your computer
 
 The same app on a computer's wide screen is **the board**: your chats and your tasks
@@ -620,6 +649,17 @@ amarchy machines remove omarchy   # both forget the other
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+- **Your stuff is the same on every machine**: the look (your own wallpaper
+  and themes too, Omarchy (live) among them), the order of your projects, what
+  a new chat starts on (model, effort), what tells you, your chimes, Show
+  terminals, how machines show, and your missions: every machine's merges,
+  streaks and badges count once, the same score everywhere, and a reset is
+  everyone's. Change it on any machine, in the app or from the command line,
+  and the others have it in a moment; one that was off catches up when it's
+  back (through any other). Two changes made apart: the later one wins. What
+  stays a machine's own: when its idle chats sleep, its dictation, its
+  secrets, the phones it notifies, its automations. A browser keeps its own
+  layout, notifications and drafts.
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
@@ -686,11 +726,14 @@ window closed.
   WebKitGTK; a few minutes the first time). On Arch it offers to install what
   the build needs with pacman (sudo asks for your password); the GStreamer
   plugins its sounds and microphone need are asked for apart and never stop
-  the build: when pacman can't get them, the app is built anyway and says its
-  sounds and dictation wait on them. When pacman can't get Rust, it offers
-  mise's instead (just for you).
+  the build: when pacman can't get them, the app is built anyway and says it
+  has no microphone (dictation) and no video until they're in (it plays its
+  chimes itself meanwhile). When pacman can't get Rust, it offers mise's
+  instead (just for you).
   It never runs a system update (`pacman -Syu`): when your package list is too
-  old for your mirror, it says so and leaves that to you. Its install ends by
+  old for your mirror, or a system update was left half done ("breaks
+  dependency"), it says so, with the command to finish it (on Apple Silicon,
+  its own kernel and boot packages held back), and leaves that to you. Its install ends by
   saying how it went ("The desktop app: …"). It's **Amarchy** in your launcher,
   or `amarchy-desktop`. `install.sh --desktop` builds it anywhere (over SSH,
   say); `--no-desktop` leaves it out.
@@ -718,7 +761,7 @@ window closed.
   there too; a click opens the window on that chat, at its card. Its chime rings
   with it (the window's page rings none of its own, so nothing rings twice).
   The app's server counts it as a device notified (`amarchy notify`, Settings →
-  Send a test). A secret is only ever asked for in the app.
+  Send a test, which rings your chime there). A secret is only ever asked for in the app.
 - **The tray**: closing the window keeps it running in the tray (Open, Reload,
   Quit; its tooltip says how many need you), and it starts there at login
   (`~/.config/autostart/amarchy.desktop`; delete it and it isn't put back), so
@@ -748,7 +791,8 @@ window closed.
   if its page crashed it loads again and the log says why (what the page
   wrote last; twice with no sign why, it draws without the GPU from then on;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
-  again by itself.
+  again by itself. What goes wrong in its page (an error, with where) is
+  in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
@@ -766,11 +810,13 @@ a backup of each file it changes).
   `amarchy.chats`, put at the end of the bar's left side the first time; move
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
-- **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
-  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
-  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
-  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Super + D** brings amarchy to the front: the desktop app's window if it has
+  one, else the app started. Omarchy leaves it free, and one hand reaches it.
+  It's a setting: `amarchy key Super+Ctrl+M` picks another (one Omarchy uses
+  gives way to amarchy while it's picked), `amarchy key off` none, `amarchy key
+  default` Super + D again; it changes at once. `amarchy key` (and the install)
+  says when this machine's Hyprland has something else on it, your own bindings
+  say. A machine that never picked a key follows the default when it changes.
 - **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
   under it.
 
@@ -800,11 +846,11 @@ It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
 **The window, one of the desktop's**: the desktop app's window is
-see-through as your terminals are, in each of Omarchy's window modes
-(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
-wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
-solid, as a terminal's, and your desktop's own wallpaper is behind it
-(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
+your desktop's own shows through its panes and cards, as a browser shows the
+app's wallpaper, lined up with the rest of the screen (Settings › Look says
+so). Hyprland fades it as your terminals, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy). For a solid window, Omarchy's Opaque mode, or its
 transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy
@@ -1574,6 +1620,14 @@ runs the chat engine's test against the Claude Code installed, about three minut
 few cheap turns on your login, and records the result; a failure shows in Settings. The
 update starts it when Claude Code has changed.
 
+**As Arch packages** (`packaging/arch`: `amarchy-git`, and the desktop app's
+`amarchy-desktop-git`), amarchy lives in `/usr/share/amarchy` and `amarchy setup`
+is `install.sh`, run as you: it sets up your part (the timers, the skill, Omarchy's
+pieces). A package updates with your packages, never from git; after an update
+your part is set up again by itself within five minutes (`amarchy update`), and
+the app reloads. `amarchy setup --uninstall` takes your part away before you
+remove the package. How they're built and published: `packaging/README.md`.
+
 `install.sh --uninstall` takes all of that out again (the chats' previews stop, and come
 off your tailnet); your worktrees, your chats,
 `~/.local/state/amarchy` and the secrets you gave in the app are left alone (the
@@ -1723,7 +1777,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
-amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+D)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

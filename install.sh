@@ -20,7 +20,7 @@
 #     wallpapers smaller for the app (amarchy theme --cut: kept in
 #     ~/.local/state/amarchy/cuts)
 #   - on an Omarchy desktop (Omarchy 4), omarchy/install.sh: the Ⓐ in the
-#     bar, Super+Alt+A and Amarchy in the Omarchy menu; elsewhere, it takes
+#     bar, Super+D and Amarchy in the Omarchy menu; elsewhere, it takes
 #     away what an amarchy from before left there. Brings the state of an
 #     amarchy from before up to date (amarchy migrate)
 #   - on a computer with a desktop (Omarchy, or any Wayland or X session):
@@ -59,6 +59,15 @@ for arg in "$@"; do
 done
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# ---- a packaged amarchy (packaging/arch): /usr/share/amarchy, no .git. It
+# updates with your packages, so the timer below only checks Claude Code;
+# `amarchy setup` runs this.
+packaged=""
+if [[ ! -e $repo/.git ]]; then
+  packaged=$(pacman -Qqo "$repo/bin/amarchy" 2>/dev/null | head -1 || true)
+  packaged=${packaged:-a package}
+fi
+# ---- end of a packaged amarchy
 bin_dir="$HOME/.local/bin"
 skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -335,12 +344,17 @@ Type=oneshot
 Environment=PATH=$bin_dir:$PATH
 ExecStart=$bin_dir/amarchy update --auto
 UNIT
+if [[ -n $packaged ]]; then
+  update_about="Every 5 minutes, checks whether Claude Code changed (then tests amarchy's chat with it again). amarchy itself is installed by $packaged: it updates with your packages (pacman -Syu, or your AUR helper)."
+else
+  update_about="Every 5 minutes, brings amarchy up to the latest on GitHub (its main), when the checkout it runs from is on main with nothing uncommitted, and installs it; the app reloads by itself. Paused, amarchy stays as it is until you run amarchy update."
+fi
 cat >"$units/amarchy-update.timer" <<UNIT
 # Installed by amarchy ($repo/install.sh); removed by its --uninstall.
 [Unit]
 Description=Update amarchy to the latest on GitHub, every 5 minutes
 X-Amarchy-Name=Updates
-X-Amarchy-About=Every 5 minutes, brings amarchy up to the latest on GitHub (its main), when the checkout it runs from is on main with nothing uncommitted, and installs it; the app reloads by itself. Paused, amarchy stays as it is until you run amarchy update.
+X-Amarchy-About=$update_about
 
 [Timer]
 OnBootSec=2min
@@ -417,7 +431,17 @@ if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
 fi
 # ---- end of the desktop app (track B)
 
+# What this set up, so a package's update is set up again by itself (amarchy
+# update --auto, see "a packaged amarchy").
+mkdir -p "$state"
+if [[ -n $packaged ]]; then
+  cat "$repo/.version" 2>/dev/null >"$state/setup-version" || true
+else
+  git -C "$repo" rev-parse --short=12 HEAD 2>/dev/null >"$state/setup-version" || true
+fi
+
 say "amarchy installed."
+[[ -n $packaged ]] && echo "  Installed by $packaged: it updates with your packages, and sets itself up again after (amarchy update)."
 # ---- amarchy's own Tailscale node (track H): how it went, when it's this computer's.
 if [[ -n $tailnet_said && $tailnet_said != "not needed"* ]]; then
   echo "  amarchy's own Tailscale node: $tailnet_said"

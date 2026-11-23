@@ -601,11 +601,27 @@ function markWaiting() {
   const waiting = unread + (typeof todayCount === "function" ? todayCount(v, "chats")
     : typeof v.needs === "number" ? v.needs : v.sessions.filter((s) => s.status === "waiting").length);
   const done = v.sessions.filter((s) => s.status === "idle" && s.unseen).length;
+  phoneStatus(v, waiting);
   const t = waiting ? `(${waiting}) Amarchy` : done ? "• Amarchy" : "Amarchy";
   if (t !== titleWas) { document.title = titleWas = t; markIcon(waiting ? "waiting" : done ? "done" : ""); }
   if (waiting === badgeWas) return;
   badgeWas = waiting;
   if (navigator.setAppBadge) (waiting ? navigator.setAppBadge(waiting) : navigator.clearAppBadge()).catch(() => {});
+}
+
+// The phone app's widget and badge ("2 need you", phone/): what needs you, the
+// first chats by name, told each time it changes.
+let phoneWas = null;
+function phoneStatus(v, needs) {
+  if (!window.amarchyPhone || typeof todayParts !== "function") return;
+  const p = todayParts(v);
+  const why = (s) => p.asks.includes(s) ? "Asks you" : p.blocked.includes(s) ? "Blocked" : s.interrupted === true ? "Interrupted" : "Done";
+  const chats = [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)).slice(0, 4)
+    .map((s) => ({ key: chatKeyOf(s.machine, s.id), name: title(s), why: why(s) }));
+  const said = JSON.stringify({ needs, chats });
+  if (said === phoneWas) return;
+  phoneWas = said;
+  window.amarchyPhone.call("status", { needs, chats }).catch(() => { phoneWas = null; });
 }
 
 // The tab's icon with a dot on it: the accent's for a finished one, red for one that needs you.

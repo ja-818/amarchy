@@ -180,6 +180,16 @@ fn main() {
     if let Some(pid) = start.after {
         wait_gone(pid);
     }
+    // A second start hands its arguments to the running one and ends, before
+    // anything of GTK starts (a start without a display: an update's
+    // --restart from a service, which GTK's init would abort). With none
+    // running, --restart has nothing to do.
+    if start.after.is_none() && hand_over(&argv) {
+        return;
+    }
+    if start.restart {
+        return;
+    }
     journal::start();
     platform::prepare();
 
@@ -238,6 +248,9 @@ fn main() {
             if restart_only {
                 std::process::exit(0);
             }
+            // The one that runs (a start handed over ended before this):
+            // what it draws with and what its page can play, in the log.
+            platform::started();
             let win = window(&handle, hidden)?;
             platform::webview(&win);
             tray::make(&handle)?;
@@ -290,6 +303,31 @@ fn main() {
     });
 }
 
+/// The app's identifier (tauri.conf.json): its single instance's D-Bus name.
+const IDENTIFIER: &str = "io.github.ja818.amarchy";
+
+/// Hands argv to the running one, as tauri-plugin-single-instance does (its
+/// D-Bus name and method), when one is running: whether it took them.
+#[cfg(target_os = "linux")]
+fn hand_over(argv: &[String]) -> bool {
+    let name = format!("{IDENTIFIER}.SingleInstance");
+    let path = format!("/{}", name.replace('.', "/").replace('-', "_"));
+    let Ok(conn) = zbus::blocking::Connection::session() else { return false };
+    let Ok(dbus) = zbus::blocking::fdo::DBusProxy::new(&conn) else { return false };
+    let Ok(bus_name) = zbus::names::BusName::try_from(name.as_str()) else { return false };
+    if !dbus.name_has_owner(bus_name).unwrap_or(false) {
+        return false;
+    }
+    let cwd = std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned();
+    conn.call_method(Some(name.as_str()), path.as_str(), Some("org.SingleInstance.DBus"), "ExecuteCallback", &(argv.to_vec(), cwd))
+        .is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn hand_over(_argv: &[String]) -> bool {
+    false
+}
+
 /// Until the process pid has ended (up to 10 s).
 fn wait_gone(pid: u32) {
     #[cfg(target_os = "linux")]
@@ -311,15 +349,20 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
     let origin = app.state::<Shell>().origin.clone();
     let opener = app.clone();
     let out = app.clone();
+    let omarchy = platform::omarchy();
     let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Amarchy")
         .inner_size(1280.0, 860.0)
-        .min_inner_size(360.0, 480.0)
-        // The app's look while a page loads (not WebKit's white): the last
-        // one it wore, else Omarchy's default.
-        .background_color(saved_background())
+        .min_inner_size(360.0, 480.0);
+    // On an Omarchy desktop the window is see-through: what its page leaves
+    // unpainted shows the desktop behind it (wearing the desktop's look live,
+    // its wallpaper, as a browser shows the app's). Elsewhere, the app's look
+    // while a page loads (not WebKit's white): the last one it wore, else
+    // Omarchy's default.
+    let win = if omarchy { win.transparent(true) } else { win.background_color(saved_background()) };
+    let win = win
         .visible(false)
-        .initialization_script(init_script(platform::omarchy(), platform::gpu()))
+        .initialization_script(init_script(omarchy, platform::gpu()))
         .on_navigation(move |u| {
             if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
                 return true;
@@ -493,6 +536,9 @@ fn watchdog(app: &AppHandle) {
             if let Some(u) = shell.given.clone() {
                 cmd.arg("--url").arg(u.as_str());
             }
+            if let Some(e) = journal::stderr_for_child() {
+                cmd.stderr(e);
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -596,6 +642,9 @@ pub fn restart(app: &AppHandle, exe: Option<&str>) {
     }
     if let Some(u) = app.state::<Shell>().given.clone() {
         cmd.arg("--url").arg(u.as_str());
+    }
+    if let Some(e) = journal::stderr_for_child() {
+        cmd.stderr(e);
     }
     #[cfg(unix)]
     {
@@ -827,7 +876,7 @@ fn parse_color(s: &str) -> Option<Color> {
 }
 
 /// The look the app wears now (its bars' color), worn by the window between
-/// pages and kept for the next start.
+/// pages (unless it's see-through, on Omarchy) and kept for the next start.
 fn keep_background(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -839,7 +888,10 @@ fn keep_background(app: &AppHandle) {
             move |v| {
                 let Some(raw) = serde_json::from_str::<String>(&v).ok() else { return };
                 let Some(c) = parse_color(&raw) else { return };
-                let _ = w2.set_background_color(Some(c));
+                // (A see-through window stays so: its page paints what it covers.)
+                if !platform::omarchy() {
+                    let _ = w2.set_background_color(Some(c));
+                }
                 let hex = format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
                 let f = look_file();
                 if std::fs::read_to_string(&f).map(|s| s.contains(&hex)).unwrap_or(false) {
@@ -1026,6 +1078,12 @@ fn test_hooks(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifier_is_the_configs() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], IDENTIFIER);
+    }
 
     #[test]
     fn colors() {

@@ -304,9 +304,10 @@ def peer_test(base, desk):
         url = next((part.split('"')[1] for part in css.split("--wallpaper: url(")[1:2]), "")
         code, h, pic = box.ask("GET", url, raw=True)
         check("its wallpaper served", code == 200 and (pic[:4] == b"RIFF" or pic[:3] == b"\xff\xd8\xff"), (url, code))
-        # The desktop app's window on an Omarchy desktop (html.on-omarchy): the
-        # desktop's own wallpaper is behind it, so none drawn; only for this look's own.
-        blank = "html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; }"
+        # The desktop app's window on an Omarchy desktop (html.on-omarchy) is
+        # see-through, the desktop's own wallpaper behind it: nothing drawn
+        # under the panes; only for this look's own wallpaper.
+        blank = "html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; --wallpaper-ground: transparent; }"
         check("in a window on the Omarchy desktop, its wallpaper not drawn again", blank in css, css[-300:])
         for change, why in (({"wallpaper": "none"}, "no wallpaper"), ({"theme": "tokyo-night", "wallpaper": "theme"},
                                                                        "another theme's wallpaper")):

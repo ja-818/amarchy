@@ -1,9 +1,17 @@
 // What each system needs before the window, and of its web view.
 
 /// Before anything starts (no threads yet: the environment is set here).
+/// Every start does it, one that only hands its arguments over too.
 pub fn prepare() {
     #[cfg(target_os = "linux")]
     linux::prepare();
+}
+
+/// In the one that runs (not a start that hands over and ends), before its
+/// window: said in the log once, and what its page can play asked.
+pub fn started() {
+    #[cfg(target_os = "linux")]
+    linux::started();
 }
 
 // ---- safe rendering, after its page's process crashed with no sign why
@@ -148,9 +156,12 @@ pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
 
 /// Whether its window is on an Omarchy desktop: Hyprland's session, with
 /// Omarchy's look in place (its current theme, where Omarchy 4 keeps it).
-/// There the window is one of the desktop's, as its terminals are: Hyprland
-/// makes it see-through (omarchy/hypr/amarchy.lua), so wearing the desktop's
-/// look live it draws no wallpaper of its own (app.css, html.on-omarchy).
+/// There the window is one of the desktop's: see-through (what its page leaves
+/// unpainted shows the desktop behind it), faded as its terminals are
+/// (omarchy/hypr/amarchy.lua); wearing the desktop's look live, its page
+/// paints no wallpaper and nothing under it, so the desktop's own wallpaper
+/// shows through its panes and cards as a browser shows the app's (app.css,
+/// html.on-omarchy).
 pub fn omarchy() -> bool {
     #[cfg(target_os = "linux")]
     return linux::omarchy();
@@ -198,7 +209,11 @@ mod linux {
     use std::cell::RefCell;
     use std::os::unix::net::UnixStream;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
+
+    /// The safe way an earlier build kept, forgotten by prepare (said by started).
+    static FORGOT: AtomicBool = AtomicBool::new(false);
 
     pub fn prepare() {
         // The app id Hyprland, the launcher and the bar know it by
@@ -212,32 +227,24 @@ mod linux {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
         if super::forget_blind_safe_rendering() {
-            log::info!("drawing with the GPU again: the safe way was kept by an earlier build after a crash, without asking why (a sound's, most likely)");
+            FORGOT.store(true, Ordering::SeqCst);
         }
-        // What draws its GL (EGL, asked in a process of its own: --graphics).
-        let gpu_asked = std::env::var_os("AMARCHY_DESKTOP_GPU").is_some();
-        let renderer = if gpu_asked { None } else { gl_probe() };
-        log::info!("graphics: {}; GL: {}", graphics(), renderer.as_deref().unwrap_or("unknown"));
-        if omarchy() {
-            log::info!("on an Omarchy desktop: the window is see-through as its terminals are, its look live drawn without a wallpaper of its own");
-        }
-        let no_gpu = if gpu_asked { None } else { super::no_gpu_why(renderer.as_deref(), render_node()) };
-        let _ = super::NO_GPU.set(no_gpu.is_some());
         // Its page crashed before with no sign why: drawn the safe way (no DMA-BUF, no compositing).
-        if let Some(why) = super::safe_rendering() {
-            log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
+        if super::safe_rendering().is_some() {
             for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
                 if std::env::var_os(var).is_none() {
                     std::env::set_var(var, "1");
                 }
             }
         }
-        if let Some(why) = no_gpu {
-            // No GPU to draw with: its tiles painted by Skia's CPU raster, not GL emulated on the CPU.
-            log::info!("its page painted on the CPU (Skia's raster, not GL emulated on it): {why}; AMARCHY_DESKTOP_GPU=1 paints through GL anyway");
-            if std::env::var_os("WEBKIT_SKIA_ENABLE_CPU_RENDERING").is_none() {
-                std::env::set_var("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1");
-            }
+        // No GPU to draw with (what draws its GL, as kept: graphics_kept):
+        // its tiles painted by Skia's CPU raster, not GL emulated on the CPU.
+        let renderer = if std::env::var_os("AMARCHY_DESKTOP_GPU").is_some() { None } else { graphics_kept() };
+        let no_gpu = renderer.as_ref().and_then(|r| super::no_gpu_why(r.as_deref(), render_node()));
+        let _ = RENDERER.set(renderer);
+        let _ = super::NO_GPU.set(no_gpu.is_some());
+        if no_gpu.is_some() && std::env::var_os("WEBKIT_SKIA_ENABLE_CPU_RENDERING").is_none() {
+            std::env::set_var("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1");
         }
 
         // No PulseAudio answering (a machine without PipeWire's pulse
@@ -254,6 +261,34 @@ mod linux {
             }
         }
 
+    }
+
+    pub fn started() {
+        if FORGOT.load(Ordering::SeqCst) {
+            log::info!("drawing with the GPU again: the safe way was kept by an earlier build after a crash, without asking why (a sound's, most likely)");
+        }
+        let renderer = RENDERER.get().cloned().flatten();
+        log::info!("graphics: {}; GL: {}", graphics(), renderer.as_ref().map(|r| r.as_deref().unwrap_or("unknown")).unwrap_or("not asked"));
+        if omarchy() {
+            log::info!("on an Omarchy desktop: the window is see-through as its terminals are, its look live drawn without a wallpaper of its own");
+        }
+        if let Some(why) = super::safe_rendering() {
+            log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
+        }
+        if let Some(why) = renderer.as_ref().and_then(|r| super::no_gpu_why(r.as_deref(), render_node())) {
+            log::info!("its page painted on the CPU (Skia's raster, not GL emulated on it): {why}; AMARCHY_DESKTOP_GPU=1 paints through GL anyway");
+        }
+        // Asked again meanwhile (a new Mesa that now drives this GPU, a driver
+        // gone): kept for the next start.
+        if std::env::var_os("AMARCHY_DESKTOP_GPU").is_none() {
+            std::thread::spawn(move || {
+                let now = gl_probe();
+                if Some(&now) != renderer.as_ref() {
+                    keep_graphics(&now);
+                    log::info!("what draws its GL changed ({} now): from its next start", now.as_deref().unwrap_or("unknown"));
+                }
+            });
+        }
         // What its page can play here (GStreamer's plugins), before the window.
         crate::sound::check();
     }
@@ -287,6 +322,52 @@ mod linux {
         if through {
             log::info!("its window reaches the tailnet through amarchy's own Tailscale node");
         }
+    }
+
+    /// What draws its GL, as prepare had it (None: not asked, AMARCHY_DESKTOP_GPU;
+    /// Some(None): EGL didn't say), for started to say.
+    static RENDERER: std::sync::OnceLock<Option<Option<String>>> = std::sync::OnceLock::new();
+
+    fn graphics_file() -> std::path::PathBuf {
+        crate::target::state_dir().join("desktop/graphics.json")
+    }
+
+    /// What tells this computer's graphics apart: its kernel, its GPUs' nodes
+    /// and drivers. A new kernel or GPU driver asks EGL again before the window.
+    fn graphics_sig() -> String {
+        let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+        let mut nodes: Vec<String> = std::fs::read_dir("/sys/class/drm")
+            .map(|d| {
+                d.flatten()
+                    .map(|e| {
+                        let driver = std::fs::read_link(e.path().join("device/driver")).ok();
+                        format!("{}={}", e.file_name().to_string_lossy(), driver.as_deref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        nodes.sort();
+        format!("{}|{}", kernel.trim(), nodes.join(","))
+    }
+
+    /// What draws its GL here, as kept for this computer's graphics (asked
+    /// of EGL before the window when it isn't: the first start, a new kernel
+    /// or GPU driver), so a start that only hands its arguments over (a key,
+    /// a link) never waits on it. The running one asks again (started).
+    fn graphics_kept() -> Option<Option<String>> {
+        let kept: Option<serde_json::Value> = std::fs::read_to_string(graphics_file()).ok().and_then(|s| serde_json::from_str(&s).ok());
+        if let Some(v) = kept.filter(|v| v["sig"].as_str() == Some(&graphics_sig())) {
+            return Some(v["renderer"].as_str().map(str::to_string));
+        }
+        let now = gl_probe();
+        keep_graphics(&now);
+        Some(now)
+    }
+
+    fn keep_graphics(renderer: &Option<String>) {
+        let f = graphics_file();
+        let _ = std::fs::create_dir_all(f.parent().unwrap());
+        let _ = std::fs::write(&f, serde_json::json!({ "sig": graphics_sig(), "renderer": renderer }).to_string() + "\n");
     }
 
     /// Whether this computer has a render node (a GPU Mesa can draw with,
@@ -469,9 +550,61 @@ mod linux {
                 });
             }
             media_script(&view);
+            page_errors(&view);
         });
         load_failures(win);
         process_ends(win);
+    }
+
+    /// What goes wrong in its page, in its log: an error nothing caught (a
+    /// click whose handler threw), a promise nothing caught, console.error.
+    /// Before the page's own scripts, each page it loads; at most 60 lines a
+    /// minute, so a page throwing in a loop can't fill it.
+    const PAGE_ERRORS: &str = r#"(() => {
+  if (window.__amarchyLog) return;
+  window.__amarchyLog = true;
+  const post = (kind, what) => {
+    try { window.webkit.messageHandlers.amarchyLog.postMessage(`${kind}: ${String(what).slice(0, 4000)}`); } catch (e) { /* not the app's */ }
+  };
+  const words = (x) => (x && x.stack) ? `${x.name || "Error"}: ${x.message}\n${x.stack}` : (x && typeof x === "object") ? (() => { try { return JSON.stringify(x); } catch (e) { return String(x); } })() : String(x);
+  addEventListener("error", (e) => {
+    if (e.target && e.target !== window && !(e instanceof ErrorEvent)) return;   // a picture or a script that didn't load: not the page's code
+    post("error", e.error ? words(e.error) : `${e.message} (${e.filename}:${e.lineno}:${e.colno})`);
+  }, true);
+  addEventListener("unhandledrejection", (e) => post("a promise nothing caught", words(e.reason)));
+  const said = console.error.bind(console);
+  console.error = (...a) => {
+    // Tauri's own complaint about a message to the app it couldn't read
+    // (wry hears every page message, this one's and amarchySound's too, as
+    // its IPC): not the page's error, and relaying it would make another.
+    if (a.length === 1 && typeof a[0] === "string" && a[0].startsWith("JSON error: ")) return said(...a);
+    const from = (new Error().stack || "").split("\n").slice(1, 4).join("\n");
+    post("console.error", a.map(words).join(" ") + (from ? `\n${from}` : ""));
+    said(...a);
+  };
+})();"#;
+
+    /// Its page's errors (PAGE_ERRORS) heard and written down, as "page: …".
+    fn page_errors(view: &webkit2gtk::WebView) {
+        use webkit2gtk::{UserContentInjectedFrames, UserContentManagerExt, UserScript, UserScriptInjectionTime, WebViewExt};
+        let Some(ucm) = view.user_content_manager() else { return };
+        ucm.register_script_message_handler("amarchyLog");
+        let budget = std::cell::Cell::new((std::time::Instant::now(), 0u32));
+        ucm.connect_script_message_received(Some("amarchyLog"), move |_, r| {
+            let (since, n) = budget.get();
+            let (since, n) = if since.elapsed() > Duration::from_secs(60) { (std::time::Instant::now(), 0) } else { (since, n) };
+            budget.set((since, n + 1));
+            if n == 60 {
+                log::warn!("page: more errors this minute, not written down");
+            }
+            if n >= 60 {
+                return;
+            }
+            if let Some(v) = r.js_value() {
+                log::warn!("page: {}", v.to_string().replace('\n', "\n    "));
+            }
+        });
+        ucm.add_script(&UserScript::new(PAGE_ERRORS, UserContentInjectedFrames::TopFrame, UserScriptInjectionTime::Start, &[], &[]));
     }
 
     thread_local! {

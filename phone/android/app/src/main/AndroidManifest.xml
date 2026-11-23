@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the Tailscale app's VPN is on, for the own page's words. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The web app's dictation (getUserMedia), asked for when you first use it. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <application
+        android:name=".AmarchyApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Amarchy"
+        tools:targetApi="33">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|layoutDirection|locale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- amarchy://open?server=<url> (Settings → Phone app), amarchy://chat/<machine>/<id> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="amarchy" />
+                <data android:host="open" />
+                <data android:host="chat" />
+            </intent-filter>
+            <!-- The share sheet: text, links, pictures. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".ActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".NeedsWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/needs_widget" />
+        </receiver>
+
+        <service
+            android:name=".PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Firebase starts by hand (Push.init), from the build's values: no google-services.json. -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
+        <!-- No push token until notifications are turned on. -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="chats" />
+    </application>
+</manifest>

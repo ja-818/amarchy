@@ -1612,6 +1612,8 @@ class Chat {
 
   // The notifications about this session: seen, now it's open.
   clearNotes() {
+    // The phone app's: its own (phone/, notes.clear).
+    if (window.amarchyPhone) window.amarchyPhone.call("notes.clear", { tags: [this.id, `assistant-${this.id}`] }).catch(() => {});
     if (!("serviceWorker" in navigator) || !navigator.serviceWorker.getRegistration) return;
     navigator.serviceWorker.getRegistration().then((reg) => {
       if (!reg || !reg.getNotifications) return;

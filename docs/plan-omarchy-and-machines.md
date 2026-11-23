@@ -265,7 +265,7 @@ and tell the other tracks.
 ### Omarchy: the bar, the key, the theme live
 
 - **`amarchy open [<id> | <machine>/<id> | amarchy://chat/<machine>/<id>]`**
-  is what the Ⓐ in the bar, Super+Alt+A and the Omarchy menu run: the window of
+  is what the Ⓐ in the bar, the key (Super+D; amarchy key) and the Omarchy menu run: the window of
   class `amarchy` to the front (Hyprland), else `amarchy-desktop [link]`
   started; without the desktop app, the board in a browser window at the
   chat, by the routes below. It finds the board in the desktop app's order.
@@ -327,11 +327,13 @@ and tell the other tracks.
   (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
   natively, window closed or not. `omarchy`: the window is on an Omarchy
-  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  desktop (Hyprland's session, Omarchy's current theme); the window is then
+  see-through (what the page leaves unpainted shows the desktop), `<html>` is
   marked `on-omarchy` before the page is drawn, and theme.css, when the look
-  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
-  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
-  the window, which Hyprland makes see-through as the terminals
+  is Omarchy (live) with its own wallpaper, takes the wallpaper and the ground
+  under it away there (`html.on-omarchy { --wallpaper: none; ...;
+  --wallpaper-ground: transparent; }`): the desktop's own wallpaper shows
+  through the app's panes, and Hyprland fades the window as the terminals
   (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,
@@ -389,6 +391,113 @@ and tell the other tracks.
 - **Phones (G)**: the same Go package (`tailnet/`), bound with gomobile, a
   node of the phone's own and its proxy for the app's web view (no serving).
 
+### The phone apps and the push relay (track G)
+
+**Swift and Kotlin, not Tauri mobile** (decided 2026-11-22). Everything a
+phone shell adds lives in the system's own extension points, each a native
+target of its own whatever wraps the web view: the Notification Service
+Extension that decrypts a notification, WidgetKit's widgets, the Share
+Extension; on Android, Firebase's messaging service, an app widget, a share
+intent. Tauri would wrap only the web view, and add a Rust toolchain for
+three architectures and its own generated Xcode and Gradle projects to fight
+for every one of those targets, while sharing nothing with `desktop/` (its
+Rust is the tray, one instance, the local key and the notices' stream, none
+of which a phone has). So each shell is a small native app: a web view on
+the machine's app (`app/`, never a second UI), the desktop's own page
+(`desktop/dist`, the same files) while it isn't showing amarchy, and the
+extensions. `phone/ios` (Swift, an XcodeGen project, iOS 17 and newer) and
+`phone/android` (Kotlin, Android 8 and newer); app id
+`io.github.ja818.amarchy` on both.
+
+- **The page knows it's in the phone app**: `window.amarchyPhone`
+  (`{"version", "platform": "ios"|"android", "relay"}`), set before the app's
+  scripts run, with `call(command, args)` → a promise of the shell's answer:
+  - `push.state` → `"on"|"off"|"denied"|"unsupported"`;
+  - `push.subscribe {"key"}` (the machine's VAPID key, `/api/state`'s `key`)
+    → a subscription as a browser's, `{"endpoint", "keys": {"p256dh",
+    "auth"}}`, plus `"app": {"platform", "version", "device"}`; it asks the
+    system for notifications first, while it's still your tap;
+  - `push.unsubscribe` → `{"endpoint"}` it dropped (or null);
+  - `notes.clear {"tags": [...]}` → that chat's notifications off the lock
+    screen (the page opened it);
+  - `status {"needs", "chats": [{"key", "name", "why"}]}` → the widget's
+    count and names, each time the board changes.
+  The shell tells the page with `amarchy-open` events (`{"go", "ask"}`, as
+  the service worker's message: a notification tapped, a chat's link), and
+  loads `/?ask=<key>#/s/<key>` when the page isn't up yet. There the page
+  registers no service worker for notifications (none can reach a web view)
+  and never says "add it to your Home Screen".
+- **A phone on a machine** is a subscription as a browser's: the page sends
+  `POST /api/push` with what `push.subscribe` gave. Its `endpoint` is the
+  relay's (`<relay>/v1/push/<handle>`), so the machine sends to it as to any
+  push service (RFC 8030, RFC 8291's aes128gcm, VAPID), and 404 or 410 ends
+  it the same way. `"app"` marks it a phone app's, kept with it, with
+  `"server"`: the address it was registered at (`https://<Host>`).
+- **What a phone app's notification carries**: a browser's (`title`,
+  `body`, `tag`, `url`, `ask`, `icon`, `waiting`, `urgent`) plus `server`,
+  `session`, `sound` and `actions` (the desktop notice's: up to three
+  `{"label", "path", "body"}`, each a POST of `body` to `server + path` as
+  the app's page would make it, with `Origin: <server>`). At most 2,700
+  bytes of JSON: the body is cut first, then the actions go. Sent with
+  `Topic` (the tag's SHA-256, its first 16 bytes in base64url: a newer
+  notification for a chat replaces the older), `Urgency: high`, `TTL`.
+- **The relay** (`relay/`, `amarchy-relay`: Go, its standard library only,
+  open source, anyone can run one) is a Web Push service in front of APNs
+  and FCM, and keeps nothing:
+  - `POST /v1/register` `{"platform": "apns"|"apns-sandbox"|"fcm",
+    "token", "app" (the app id), "server_key" (the machine's VAPID key,
+    65 bytes base64url)}` → `{"endpoint"}`. The handle in it is all of that
+    sealed with the relay's secret (AES-256-GCM): no database, and only the
+    machine with that key can send to it, as with Web Push.
+  - `POST /v1/push/<handle>`: `Content-Encoding: aes128gcm` (anything else
+    is refused: it never takes what it could read), at most 2,900 bytes;
+    `Authorization: vapid t=<JWT>, k=<key>`, the handle's key, its `aud` the
+    relay's address and `exp` within 24 hours; `TTL`, `Urgency`, `Topic`.
+    To APNs: `{"aps": {"alert": {"title": "Amarchy", "body": "Something
+    needs you"}, "mutable-content": 1, "sound": "default"}, "p": <the body,
+    base64url>}`, `apns-collapse-id` the topic; to FCM: a data message
+    `{"p"}`, `collapse_key` the topic, high priority. Answers 201; 404 a
+    handle it didn't make; 410 the token is gone (APNs or FCM say so); 400,
+    401, 403, 413, 415 what's wrong with the request; 429 with
+    `Retry-After` over its limits (per device 30 at once then 15 a minute,
+    per address 20 registrations an hour, all set by its environment); 502
+    when APNs or FCM failed.
+  - `GET /v1/health` → `{"ok", "apns", "fcm"}` (which it can send to).
+  - Never logs a token or a payload (a device is the first bytes of its
+    handle's hash). Its secret (`RELAY_SECRET`, older ones in
+    `RELAY_SECRETS` still opened), the APNs key (`APNS_KEY`, `APNS_KEY_ID`,
+    `APNS_TEAM_ID`, `APNS_TOPICS`), FCM's project (`FCM_PROJECT`, its
+    credentials from `FCM_CREDENTIALS` or Google Cloud's own) come from its
+    environment. Deploys: Google Cloud Run's free tier (one instance, so its
+    limits hold), any container host, or a systemd unit.
+- **On the phone**: its push key pair (P-256) and auth secret are made on
+  the phone and never leave it (iOS: the Keychain, shared with its
+  Notification Service Extension; Android: wrapped by the Keystore). The
+  extension (iOS) or the messaging service (Android) decrypts `p` and shows
+  the notification: its buttons (iOS: a category made for them, each asking
+  for Face ID on a locked phone), the badge (`waiting`), the widget's count.
+  Nothing it can decrypt: "Amarchy: open it to see", never content.
+- **A button pressed**: the shell (started in the background for it) POSTs
+  `body` to `server + path` with `Origin: <server>` and `Content-Type:
+  application/json`, as the page does. It fails: a notification says so, and
+  tapped opens the chat.
+- **Reaching the machine**: the Tailscale app, when its VPN is on; else
+  amarchy's own node in the app (`tailnet/mobile`, gomobile: the node and
+  its proxy), its proxy set on the web view (iOS 17's
+  `WKWebsiteDataStore.proxyConfigurations`, Android's `ProxyController`) and
+  on the shell's own requests. The machine's address: `amarchy://open?server=<url>`
+  (Settings in the web app has it), typed on its own page, or found on the
+  tailnet with its own node (each peer's `/api/peer/hello`). Chat links:
+  `amarchy://chat/<machine>/<id>`, as on the desktop.
+- **The share sheet**: what you share (text, a link, pictures) goes to that
+  machine's `POST /api/share?key=<share key>` (`GET /api/share/key`, kept by
+  the shell), as the iPhone's Shortcut does, and the app opens on "Send it
+  to a chat".
+- **The widget** (home and lock screen on iOS, an app widget on Android):
+  "2 need you", from each notification's `waiting` and the page's `status`.
+  No Live Activity: the system shows one from its push as it comes, so the
+  relay and Apple would read it.
+
 ### Your stuff on every machine (track D)
 
 What's yours, not a chat's, is the same on every machine: each keeps a copy,
@@ -439,6 +548,126 @@ up when it's back. No main machine; any one can be off.
   its machine: its priority (Now, For later, pinned), seen and unread, its
   name: the same on every board already.
 
+### A cloud machine (track F)
+
+A machine made for you in **your own** cloud account (Hetzner Cloud,
+DigitalOcean, Hostinger VPS), from Settings → Machines → **Add a cloud
+machine** or `amarchy machines cloud add`. The project never runs a machine
+or bills anyone: the provider bills you, and Remove deletes it there.
+
+- **Made by one of your machines** (the one you asked: its CLI, or its app
+  server for the app), which keeps it in `~/.config/amarchy/cloud.json`
+  (0600): `[{"name", "provider", "id" (the provider's), "region", "size",
+  "cores", "memory_gb", "disk_gb", "monthly", "currency", "billing"
+  (`hourly`: billed by the hour up to the monthly price, Hetzner and
+  DigitalOcean; `subscription`: paid ahead each period, Hostinger), "image", "user",
+  "made", "step", "steps": {<step>: at}, "error", "detail", "log", "ip",
+  "node" (its MagicDNS name once on the tailnet), "report" (its report
+  token)}]`. Steps, in order: `creating` → `booting` (the provider made it)
+  → `installing` (it runs: cloud-init at work) → `tailnet` (on your tailnet;
+  the report's `detail` says what it's installing) → `pairing` (its
+  amarchy answers) → `paired`; or `failed` (with `error`, words that say
+  what to do) and `removing` → gone. A watcher of its own
+  (`amarchy-cloud-<name>.service`, a user unit: it outlives the app
+  server's restarts; the app server starts it again for one left
+  unfinished) takes it through them.
+- **Tokens stay on that machine**: the provider's API token and the
+  Tailscale key in `~/.config/amarchy/secrets/cloud.env` (0600; never given
+  to a chat's commands, masked wherever the app would show one), each
+  under its usual name (`HCLOUD_TOKEN`, `DIGITALOCEAN_TOKEN`,
+  `HOSTINGER_API_TOKEN`, `TAILSCALE_AUTH_KEY`). Given in the app's own
+  password field, in a terminal (not echoed), or asked of you by a chat's
+  Claude with `amarchy secret ask <NAME> --cloud` (the card, as any
+  secret's): never in a chat.
+- **Joining the tailnet: a one-off auth key**, made by you on Tailscale's
+  Keys page (the app links straight to it: one-off, pre-approved, a day's
+  expiry), kept until the machine joins and then forgotten (spent). The
+  soundest way: it can add one device, once, and expires; nothing with
+  standing power over your tailnet is kept anywhere or handed to the
+  provider (an API token or an OAuth client would be: a tagged OAuth key
+  also makes a node that isn't yours, so it couldn't pair). The node is
+  yours (the key's), named for the machine. Not the VM signing in by itself
+  (track H's node): its sign-in link would be on a machine nothing can
+  reach yet.
+- **Its setup**: `cloud/bootstrap.sh`, one script for every provider,
+  carried by cloud-init (Hetzner, DigitalOcean: user data with the script
+  and its settings, `amarchy machines cloud user-data <name>` shows it,
+  secrets masked) or as the post-install script (Hostinger, which has no
+  cloud-init). On Debian 13 (tmux 3.5; else Ubuntu 26.04), as root:
+  Tailscale (its install script, then `tailscale up --auth-key --hostname
+  <name> --ssh`, the operator set to your user), a swap file, git, tmux,
+  python3, gh, unattended security upgrades; a user of your login name with
+  sudo, lingering, and your git name and email (this machine's); Claude
+  Code (its installer) and amarchy (`git clone` of this machine's origin,
+  `install.sh --no-desktop`, `amarchy app on`), its icon `cloud`, and
+  `~/.config/amarchy/cloud-self.json` `{"provider", "by", "made"}`.
+  Nothing listens on the public network: the firewall lets in only
+  `tailscale0` and Tailscale's UDP port, and sshd is off (Tailscale SSH
+  instead). Secrets are wiped from the VM once used.
+- **Its reports**: `POST /api/cloud/progress` on the machine that made it,
+  over the tailnet (`--resolve` to that machine's Tailscale address), with
+  `Authorization: Bearer <report token>` and `{"name", "step" (tailnet,
+  packages, claude, amarchy, app, ready, failed), "words", "log"}` (the last
+  lines of its log when it failed): let in through tailscale serve as you
+  (or straight, from you, on 127.0.0.1: the tests), no Origin (it isn't a
+  page). What the watcher can see for itself (the provider's state, the
+  node on `tailscale status`, its hello) moves it on without them.
+- **Pairing**: once its `/api/peer/hello` answers, the machine that made it
+  pairs as `amarchy machines add <node>` does. Then the board's row says
+  **Sign in to Claude** until its Claude is signed in, and **Sign in to
+  GitHub** until `gh` is (its chats clone, push and move through it).
+- **`hello`** says `"claude": "in" | "out" | null` (its Claude signed in,
+  `claude auth status`, read at most once a minute), `"github": "in" |
+  "out" | null` (`gh auth status`, the same) and `"cloud": {"provider",
+  "by", "made"} | null` (a cloud machine amarchy made). The board's
+  `machines` rows carry `claude` and `github`, and `cloud` for a cloud
+  machine:
+  `{"provider", "provider_label", "size", "cores", "memory_gb", "region",
+  "region_label", "monthly", "currency", "billing", "step", "steps", "error",
+  "detail", "made_here": true}` from `cloud.json` on the machine that made
+  it (a machine still being made is a row too, `"making": true`), else
+  just `{"provider", "provider_label"}` from its hello.
+- **Signing in on a machine** to Claude or GitHub, any machine (through the
+  pass-through for another): `GET /api/signin/<claude|github>` →
+  `{"signed_in", "who", "plan", "login": {"url", "code", "since", "error"}
+  | null}`; `POST /api/signin/<claude|github>` `{"do": "login"}` starts
+  `claude auth login` (or `gh auth login --web`) there, in amarchy's tmux,
+  and answers `{"url"}` (Anthropic's sign-in page) or `{"url", "code"}`
+  (GitHub's device page and the code to type there); `{"do": "code",
+  "code"}` types the code Anthropic's page gives into Claude's and answers
+  once signed in (`{"signed_in", "who"}`, or `{"error"}`); `{"do":
+  "cancel"}`. GitHub's ends by itself once you've typed its code (then
+  `gh auth setup-git`, so git pushes as you). Never a credential copied
+  between machines (each signs in on its own: a shared refresh token would
+  sign the other out).
+- **Removing one** (`amarchy machines cloud remove <name>`, or its sheet's
+  Remove): it says what's lost (its chats: their worktrees, what isn't
+  pushed, their conversations) and offers to move them to this machine
+  first (`--move-chats`: each as `amarchy move` would, waiting for each to
+  be free). Then `POST /api/peer/cloud/leave` (peers only, on a cloud
+  machine amarchy made: it logs out of Tailscale), unpaired, and deleted at
+  the provider, which stops its billing (Hostinger can't delete one at
+  once: it's stopped, and its subscription isn't renewed, so it ends with
+  the period you paid for).
+- **The app** (this machine's own API): `GET /api/cloud` → `{"providers":
+  [{"key", "label", "connected", "token_name", "token_url", "token_how",
+  "notes"}], "tailscale_key": bool, "keys_url", "machines": [...]}`;
+  `GET /api/cloud/options?provider=&region=` → `{"regions": [{"id",
+  "label"}], "sizes": [{"id", "label", "cores", "memory_gb", "disk_gb",
+  "monthly", "currency", "arch", "recommended"}]}` (the provider's own
+  prices); `POST /api/cloud` `{"action": "token", "provider", "value"}`
+  (checked with the provider first), `{"action": "tailscale-key",
+  "value"}`, `{"action": "forget", "provider"}`, `{"action": "create",
+  "provider", "region", "size", "name"}`, `{"action": "remove", "name",
+  "move_chats"}`, `{"action": "dismiss", "name"}` (a failed one that was
+  never made).
+- **CLI**: `amarchy machines cloud [list] [--json]`, `amarchy machines cloud
+  providers`, `... regions <provider>`, `... sizes <provider> <region>`,
+  `... token <provider|tailscale>`, `... add [--provider p --region r
+  --size s --name n] [--wait]`, `... status <name>`, `... remove <name>
+  [--move-chats | --lose-chats] [--yes]`, `... user-data <name>` (what
+  cloud-init would get, secrets masked).
+
 ### What lives where
 
 | What | Where |
@@ -449,8 +678,10 @@ up when it's back. No main machine; any one can be off.
 | Agents (Jaken...) and their tasks | The machine they run on (the server, by default) |
 | Automations | The machine they run on; listed together |
 | Web Push to a phone | The machine the phone subscribed on, for every machine's chats |
+| A phone app's notifications | The machine it registered on, for every machine's chats, through the relay (encrypted to the phone) |
 | Desktop notifications | The desktop app, for every machine's chats |
 | Claude's usage limits | Shared (same account): shown once |
+| A cloud machine's record, its provider token, the Tailscale key until used | The machine that made it (`cloud.json`, `secrets/cloud.env`) |
 
 ## The tracks
 
@@ -554,10 +785,13 @@ the user's account, amarchy installed by cloud-init, joined to their tailnet,
 then "Sign in to Claude" there.
 
 **G. Phone apps and the push relay** (last; Julian has an Apple Developer
-account; the iOS build needs a Mac with Xcode): thin iOS and Android shells around `app/` (Tauri 2 mobile,
-or Swift and Kotlin), widgets, live status, share sheet, notification buttons;
-the relay (open source, free, self-hostable) between the machines and Apple's
-and Google's push.
+account; the iOS build needs a Mac with Xcode): thin iOS and Android shells
+around `app/` in **Swift and Kotlin** (why not Tauri mobile: the contract's
+"The phone apps and the push relay"), widgets, live status, share sheet,
+notification buttons; the relay (open source, free, self-hostable) between
+the machines and Apple's and Google's push. iOS builds and tests in GitHub
+Actions (macOS runners); Android here and in CI. Signing, TestFlight, the
+stores and the relay's deploy are prepared to the last step for Julian.
 
 **H. Tailscale inside the apps** (after B): the desktop and phone apps join the
 tailnet themselves (tsnet / libtailscale), so the user installs nothing else.

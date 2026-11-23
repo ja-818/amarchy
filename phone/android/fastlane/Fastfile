@@ -1,0 +1,31 @@
+# amarchy's Android app on Google Play (store/README.md says what's set up
+# by hand first). Run from phone/android:
+#
+#   fastlane android build      the release bundle (AAB), signed when the
+#                               ANDROID_KEYSTORE_* variables are set
+#   fastlane android internal   that bundle, with the store listing, to Play's
+#                               internal testing track (needs PLAY_JSON_KEY_FILE)
+
+default_platform(:android)
+
+platform :android do
+  desc "Build the release bundle (AAB)"
+  lane :build do
+    gradle(task: "bundleRelease", project_dir: ".")
+  end
+
+  desc "Upload the release bundle and the listing to Play's internal track"
+  lane :internal do
+    UI.user_error!("PLAY_JSON_KEY_FILE isn't set: the Play service account's key (store/README.md)") if ENV["PLAY_JSON_KEY_FILE"].to_s.empty?
+    UI.user_error!("The bundle isn't signed: set ANDROID_KEYSTORE_BASE64 and the rest (store/README.md)") if ENV["ANDROID_KEYSTORE_BASE64"].to_s.empty?
+    build
+    upload_to_play_store(
+      track: "internal",
+      release_status: "completed",
+      aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH],
+      metadata_path: "fastlane/metadata/android",
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

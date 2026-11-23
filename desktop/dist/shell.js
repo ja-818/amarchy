@@ -1,8 +1,10 @@
 // The desktop app's own page: it asks the app (status) what's going on and
 // shows that; a machine picked, an address typed or Try again go back to it.
+// The phone apps show this same page (phone/: they set window.amarchyShell,
+// whose invoke takes the same commands).
 "use strict";
 
-const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+const invoke = (cmd, args) => (window.amarchyShell || window.__TAURI_INTERNALS__).invoke(cmd, args || {});
 const $ = (id) => document.getElementById(id);
 let shown = "";
 
@@ -16,7 +18,7 @@ function render(s) {
   document.title = s.kind === "opening" ? "Amarchy" : `Amarchy · ${title}`;
   const why = s.kind === "choose" ? "Several of yours answer on your tailnet. This computer opens the one you pick from now on."
     : s.kind === "signin" ? (s.waiting ? "Waiting for you to sign in, in your browser…"
-      : "This computer reaches your amarchy through Tailscale, with amarchy's own node (nothing else to install). Sign in with the Tailscale account your other machines use.")
+      : s.why || "This computer reaches your amarchy through Tailscale, with amarchy's own node (nothing else to install). Sign in with the Tailscale account your other machines use.")
     : s.why || "";
   $("why").textContent = why;
   $("why").hidden = !why;
