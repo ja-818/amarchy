@@ -1,7 +1,8 @@
 # amarchy's Android app (phone/android/): built, unit tested (with the push
 # vectors every side decrypts) and linted on every change to it, to the
 # vectors, or to what it ships from the rest of the repo: the own page
-# (desktop/dist) and the chimes (sounds/, named by bin/amarchy's CHIMES).
+# (desktop/dist) and the chimes (sounds/, named by bin/amarchy's CHIMES: a
+# change to that list alone is caught by the next run, not each server change).
 # Its debug APK and lint report are kept as this run's artifacts, for
 # trying, not published.
 #
@@ -13,9 +14,9 @@ name: Android app
 on:
   push:
     branches: [main]
-    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", "bin/amarchy", ".github/workflows/phone-android.yml"]
+    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", ".github/workflows/phone-android.yml"]
   pull_request:
-    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", "bin/amarchy", ".github/workflows/phone-android.yml"]
+    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", ".github/workflows/phone-android.yml"]
   workflow_dispatch:
     inputs:
       release:
