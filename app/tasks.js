@@ -232,6 +232,8 @@ function boardKeys(e) {
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
+  // Esc on a board open in Tasks: back to Tasks' list.
+  if (k === "Escape" && boardsUI.open && !board.query) { e.preventDefault(); return boardsClose(); }
   // Tab: Chats | Tasks, the other one (Shift+Tab too).
   if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
   // Enter on the card lit, the focus off it: it opens (on a button, a tab,
@@ -264,6 +266,8 @@ function boardKeys(e) {
     if (s && !isAgent(s)) { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
   } else if (k === "r") press("a.tbtn") || press(".tbtn.ui-previews");     // what it made: its Review, else its Preview (of several: pick one)
   else if (k === "s") press(".tbtn.seen");
+  else if (k === "c") press(".bcard-comment");      // a board's card: Comment
+  else if (k === "e") press(".bcard-edit-btn");     // and Edit
 }
 
 // Esc over an open chat: back to the board (what you were writing stays, as
@@ -293,6 +297,8 @@ function modeButtons() {
 
 // Chats or Tasks on the board, kept for the next time.
 function boardTab(tab) {
+  // Tasks again, a board open there: back to Tasks' list.
+  if (tab === "tasks" && board.tab === "tasks" && typeof boardsUI !== "undefined" && boardsUI.open) return boardsClose();
   board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   store.set("board-tab", board.tab);
   if (desk.current) boardBack(true);
@@ -311,6 +317,7 @@ function boardTab(tab) {
 // #/tasks (a task's notification, tapped): the board on Tasks, its address
 // the board's again (so the next one is a change of address too).
 function boardTasks() {
+  if (boardsUI.open) boardsClose();
   boardTab("tasks");
   if (standalone) routed.hash = "#/today";
   else history.replaceState(null, "", `${location.pathname}${location.search}#/today`);
@@ -563,10 +570,10 @@ function boardSearchDraw() {
     .map((id) => row(id)).filter(Boolean);
   // Your tasks that have them too (who and what; an agent's: it, what, its note), first on the Tasks tab.
   const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
-  const theirs = todayTasks(v).filter((t) => { const x = `${t.agent_name} ${t.title} ${t.note}`.toLowerCase(); return words.every((w) => x.includes(w)); });
+  const theirs = boardsFound(v, words);
   // Drawn again only when what it shows changed: the list comes every
   // second while chats work, and the same cards stay as they are.
-  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops, theirs.map(todayTaskKey),
+  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops, theirs.map(({ b, c }) => [b.key, c, boardsKey()]),
     ((v.today || {}).assistant || {}).name, (v.today || {}).sent, (found || []).map((r) => (r.at ? autoPast(r.at) : ""))])}`;
   if (board.box.dataset.key === key) return;
   const cards = rows.map((s) => {
@@ -580,7 +587,7 @@ function boardSearchDraw() {
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
                h("span", { html: lit(l.text, words) })))] }));
   });
-  const taskCards = [...theirs.map((t) => todayTask(t)), ...loops.map((l) => todayLoop(l, v))];
+  const taskCards = [...theirs.map(({ b, c }) => boardsCard(b, c, { list: true })), ...loops.map((l) => todayLoop(l, v))];
   const chatsSec = cards.length ? uiSection("found-chats", "Chats", { count: cards.length }, cards) : null;
   const tasksSec = taskCards.length ? uiSection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
   const n = rows.length + taskCards.length;

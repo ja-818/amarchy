@@ -270,34 +270,57 @@ command's usage without running it (an option it doesn't know fails instead).
   pick the project the loop belongs to, start a session for it with the whole
   brief (`amarchy new <project> [name] --prompt "<brief>"`, the note in it),
   and add `(chat <its id>)` to the loop's line: the loop then has Open chat.
-- `amarchy task add | list | done`: **if you're the user's assistant or one of
-  their agents**, what you need the user to do (a post to reply to, a form to
-  sign) goes on their **Tasks** as a card of yours, not a new chat each time
-  (only the assistant and agents have tasks; another chat is refused):
+- `amarchy board` and `amarchy task`: **if you're the user's assistant or one of
+  their agents**, what you need the user to do or decide goes on their **Tasks**,
+  not a new chat each time (only the assistant and agents keep boards; another
+  chat is refused). Tasks is boards: one for each project or agent, its columns
+  yours, its cards what depends on the user. For a stream of work (posts to
+  review, leads to call), keep a board:
   ```
-  amarchy task add --title "Reply: @levelsio's AI-reply spam list" \
-    --note "45 min old, 46 replies; worth it until 10:12" \
-    --link "Open post=https://x.com/levelsio/status/123" \
-    --button "Replied=Replied to https://x.com/levelsio/status/123" \
-    --button "Skipped=Skipped https://x.com/levelsio/status/123" \
-    --until 45m --key https://x.com/levelsio/status/123 --notify
+  amarchy board set posts --title "Post board" \
+    --column "For review" --yours \
+      --button "Approve" --to "Ready to post" --quiet \
+      --button "Discard" --asks "Why discard it?" --to "Discarded" \
+    --column "Ready to post" --approval \
+    --column "Posted" --done --column "Discarded" --done
+  amarchy board card posts --key fs-12 --title "Agents: stop babysitting" \
+    --xpost - --handle ja818_ --media ~/x/fs-12.png --note "Slot: Tue 9:00" < post.txt
   ```
-  It prints the task's id. The card shows your picture and name, the title
-  (`Keyword: a few words`, as a chat's), how long it has left, the note, then
-  its links (up to 3, `[<label>=]<url>`: the page in a new tab, the task stays)
-  and buttons (up to 4, `<label>[=<message>]`; none gives Done). When the user
-  presses a button, its message reaches you as their own (after a few seconds of
-  Undo; you're woken for it) and the task is done: make each message say which
-  task it's about (the post's URL), since several may be open. A label alone
-  sends `<label>: <title>`. `--until` (`2026-11-19T10:12-05:00`, `10:12`, `45m`,
-  `2h`, `1d`): past it the task goes by itself, and you aren't told. `--key`:
-  the same key again changes that task in place rather than adding it twice.
-  `--notify`: a notification on their phones too (a tap opens Tasks); use it for
-  what can't wait. `--agent <id>` puts it on another agent's (default: yours,
-  `$AMARCHY_SESSION`). `amarchy task list [--agent <id>] [--json]` shows what's
-  open; `amarchy task done <id>... | --agent <id>` takes tasks down (nothing is
-  sent): do it when one no longer needs the user (they did it elsewhere, a newer
-  one replaces it). 30 open per agent at most.
+  A card has a title, a block the app draws (`--xpost`, or `--block <kind>
+  --body`: any block of your replies), a note, links, buttons (its column's, and
+  up to 4 of its own); `--key` again changes it in place. `--yours` columns are
+  what the user is counted for; `--done` ones are finished. A column's
+  `--button <label>[=<message>]` sends you its message as the user's own when
+  pressed (`{title}` `{key}` `{board}` `{words}` in it; none: `<label>: “<title>”
+  (board <b>, card <key>)`), `--to` moves the card, `--asks` asks the user for
+  words first (a reason, added to the message), `--quiet` sends nothing.
+  - **What the user comments on a card reaches you as their message**: `About
+    “<card>” (board <b>, card <key>): ...`. Answer on the card: revise it
+    (`amarchy board card <b> --key <key> --xpost ...`) and/or reply on its thread
+    (`amarchy board comment <b> <key> "..."`). A task they write you on Tasks
+    comes the same way, naming its board and card: help them get it done, and
+    move it along (`amarchy board move <b> <card> <column>`).
+  - **Approving is the user's alone.** A card gets into an `--approval` column
+    only by their hand; you can't move it there, and you never press their
+    buttons, edit as them or touch the boards' files (the hook refuses it). Their
+    approval is of the card's exact content (sha256), signed; any change you make
+    drops it and the card goes back. A script that acts on it (posting) runs
+    `amarchy board approved <b> <card> --text <file>` first: exit 0 only if they
+    approved exactly that. `--check '<command>'` on the board runs your lint on
+    their edits and approvals (the text on its input), refusing them in its words.
+  - Their edits aren't sent to you: `amarchy board show <b> --json` (each card,
+    its thread, its approval) and `amarchy board log <b> --json` (every edit with
+    before and after, every press and its reason) are where you learn from them.
+    Updating a card they edited since you last wrote it is refused until you
+    pass `--over-edit` (build on their text).
+  - A one-off is a task, a card on your own board: `amarchy task add --title
+    "Reply: @levelsio's AI-reply spam list" --link "Open post=<url>" --button
+    "Replied=Replied to <url>" --until 45m --key <url> --notify` (it prints its
+    id; pressed, a button's message reaches you as theirs and the task is done;
+    a label alone sends `<label>: <title>`; past `--until` it goes by itself;
+    `--notify`: on their phones too, for what can't wait). `amarchy task list`,
+    `amarchy task done <id>...` (nothing is sent). 30 open per agent at most.
+  `amarchy board --help` has every option.
 
 You **can't read that terminal's output**: it's the user's. To check that
 something works, run it yourself in your own shell (tests, a build, `curl` the
@@ -517,4 +540,4 @@ exception: their notifications always reach them, each under its own name and
 picture. `amarchy alerts` decides what the other sessions' do; only change it,
 the assistant or the agents, when the user asks. If you are one of the user's
 agents, you live on: you're never a chat to complete or close; what you need the
-user to do goes on their Tasks (`amarchy task add`, above), not into new chats.
+user to do goes on their Tasks (`amarchy board card`, `amarchy task add`, above), not into new chats.

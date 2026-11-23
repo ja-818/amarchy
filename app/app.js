@@ -48,6 +48,9 @@ const ICONS = {
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
   paste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>',
+  // A board's card (boards.js): Comment (to its agent) and Edit (in place).
+  comment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-11.8 7L4 20l1.1-4A8 8 0 1 1 20 12z"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',
   select: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h9M4 17h12"/><path d="M18 10v10M16 10h4M16 20h4"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
@@ -1126,6 +1129,9 @@ function sessionActions(s) {
   return [
     h("button", { class: "control wide", onclick: () => renameSheet(s) }, "Rename…"),
     h("button", { class: "control wide", onclick: () => agentSheet(s) }, agentMenuLabel(s)),
+    // Its boards (Tasks): each a tap away.
+    ...boardsLedBy(s).map((b) => h("button", { class: "control wide", onclick: () => boardsGo(b.key) },
+      `${b.title}${b.yours ? ` · ${b.yours} for you` : ""}`)),
     sleepButton(s),
     ...moveButtons(s),      // Move to <machine>… (manage.js)
   ].filter(Boolean);
@@ -2989,6 +2995,7 @@ function routeNow() {
   if (app.desk) return deskRoute();
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
+  if (m) boardsUI.route = here();      // (a chat opened from a board: back from it, the board)
   const id = m ? routeKey(m[1]) : null;      // <this machine>:<id> is <id>; a moved chat, where it is
   if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
@@ -3001,6 +3008,7 @@ function routeNow() {
   } else {
     renderHome();
     if (here() === "#/tasks") boardTasks();
+    else boardsRouted(here());
   }
 }
 

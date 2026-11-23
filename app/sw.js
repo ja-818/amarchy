@@ -25,7 +25,7 @@ const LOOK_FILES = /^\/(fonts|cuts|wallpapers|themes|custom|own)\//;
 const LOOKS_KEPT = 24;
 // The page, the look and the icons aren't a build's own address (no ?b=).
 const UNSTAMPED = ["/", "/theme.css", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
-const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/blocks.css", "/terminal.css", "/secrets.css", "/automations.css", "/ui.css", "/today.css", "/theme.css", "/ui.js", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/blocks.js", "/xpost.js", "/chat.js", "/terminal.js", "/secrets.js", "/machines.js", "/automations.js", "/tailscale.js", "/today.js", "/tasks.js", "/tour.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
+const FILES = ["/", "/app.css", "/desk.css", "/chat.css", "/blocks.css", "/terminal.css", "/secrets.css", "/automations.css", "/ui.css", "/today.css", "/theme.css", "/ui.js", "/app.js", "/desk.js", "/manage.js", "/dictate.js", "/blocks.js", "/xpost.js", "/chat.js", "/terminal.js", "/secrets.js", "/machines.js", "/automations.js", "/tailscale.js", "/today.js", "/boards.js", "/tasks.js", "/tour.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-192.png", "/assistant.svg"];
 
 // A response that may be kept: it worked, and it's this build's (a file with
 // no build, as theme.css, belongs to none).

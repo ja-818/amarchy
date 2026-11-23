@@ -31,6 +31,12 @@
 // - uiChart: a few days' counts, as bars, the last one lit.
 // - uiChatHead: over an open chat, as its card's head: Back, its project
 //   and name (a tap: rename), its pill; its menu, Complete.
+// - uiPageHead: over a page in the board's place (a board open in Tasks):
+//   Back, who or what it is, a line under it, its actions.
+// - uiKanban: a board's columns, side by side where there's room, else one
+//   at a time under their tabs (a swipe sideways goes to the next).
+// - uiThread: what was said and done on something (a card's comments), the
+//   latest last, yours on the right as a messaging app has them.
 // - uiPreview: a chat's live preview, a tap away, on its head and its card
 //   (several: Previews, a dropdown of them); uiPreviewSheet, all of one (start,
 //   stop, its log); uiPreviewLeft, what Complete found still running.
@@ -1125,6 +1131,76 @@ function uiDropdownRedraw() { if (uiState.dropdown) uiState.dropdown.redraw(); }
 function uiDropdownClose() { if (uiState.dropdown) uiState.dropdown.close(); }
 // Whether that one is open (its button tapped again: it closes).
 function uiDropdownOpen(key) { return !!(uiState.dropdown && uiState.dropdown.key === key && uiState.dropdown.el.isConnected); }
+
+// ---- a page in the board's place, a board's columns, a thread
+
+// A page's head, under the bar (a board open in Tasks): Back, its picture
+// (lead), what it is (title), a line under it (sub), its actions (extra).
+function uiPageHead({ back, backLabel = "Back", lead = null, title, sub = "", extra = [] }) {
+  return h("div", { class: "ui-page-head" },
+    uiTool("back", backLabel, back, { cls: "ui-page-back", title: `${backLabel} (Esc)` }),
+    lead, h("div", { class: "ui-page-name" }, h("h2", { class: "ui-page-title" }, title), sub ? h("div", { class: "ui-page-sub" }, sub) : null),
+    ...[extra].flat().filter(Boolean));
+}
+
+// A board's columns: [{key, label, count, yours, kids}]. Wide, side by side
+// (each scrolls with the page); narrow, the one that's on (on), under the
+// columns' tabs, each with its count (a column of yours: its count in the
+// badge, your move), and a swipe sideways goes to the next or the one before:
+// pick(key). id: what it shows (a different board is drawn anew).
+function uiKanban(columns, on, pick, { id = "", label = "Columns" } = {}) {
+  const tabs = uiTabs(columns.map((c) => ({ key: c.key, label: c.label, count: c.yours ? c.count : 0,
+                                            title: `${c.label}: ${c.count}` })), on, pick, null, label, { scroll: true });
+  tabs.classList.add("ui-kanban-tabs");
+  const cols = h("div", { class: "ui-kanban-cols" }, ...columns.map((c) =>
+    h("section", { class: `ui-kanban-col${c.key === on ? " on" : ""}${c.yours ? " yours" : ""}`, "data-col": c.key, "aria-label": c.label },
+      h("h3", { class: "ui-kanban-head" }, h("span", { class: "ui-kanban-name" }, c.label), h("span", { class: "tsec-count" }, String(c.count))),
+      h("div", { class: "ui-kanban-cards" }, ...[c.kids].flat().filter(Boolean)))));
+  const box = h("div", { class: "ui-kanban", "data-kanban": id }, tabs, cols);
+  // The swipe reads where it is from the page (drawn again, what's kept of
+  // it is still this board's).
+  let from = null;
+  cols.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    from = e.touches.length === 1 && !e.target.closest("textarea, input, .ui-scroll-row, .xpost-media, .ui-kanban-tabs")
+      ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  cols.addEventListener("touchend", (e) => {
+    if (!from || getComputedStyle(tabs).display === "none") return;
+    const t = e.changedTouches[0], dx = t.clientX - from.x, dy = t.clientY - from.y;
+    from = null;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+    const all = [...cols.children], at = all.findIndex((c) => c.classList.contains("on"));
+    const next = all[at + (dx < 0 ? 1 : -1)];
+    if (next) pick(next.dataset.col);
+  }, { passive: true });
+  return box;
+}
+
+// What was said and done on something: items [{who: "you" | another, name,
+// at, text (what was said: words or a node), event (what was done, a line),
+// more (a node: what was there before, folded)}], the oldest first. earlier:
+// how many came before them, and what shows them (a node).
+function uiThread(items, { earlier = null } = {}) {
+  if (!items.length && !earlier) return null;
+  return h("ol", { class: "ui-thread" }, earlier ? h("li", { class: "ui-thread-earlier" }, earlier) : null,
+    ...items.map((x) => h("li", { class: `ui-thread-item${x.who === "you" ? " you" : ""}${x.event ? " event" : ""}` },
+      h("div", { class: "ui-thread-meta" }, h("b", {}, x.name), x.at ? h("span", {}, ` · ${uiThreadWhen(x.at)}`) : null),
+      x.event ? h("div", { class: "ui-thread-event" }, x.event) : null,
+      x.text ? (typeof x.text === "string" ? h("div", { class: "ui-thread-text", html: inline(x.text) }) : x.text) : null,
+      x.more || null)));
+}
+
+// When something on a thread was, short: now, 5m, 3h, Tue, 12 Nov.
+function uiThreadWhen(sec) {
+  const s = Date.now() / 1000 - sec;
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  const d = new Date(sec * 1000);
+  if (s < 6 * 86400) return d.toLocaleDateString([], { weekday: "short" });
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
 
 // ---- pictures: a thumbnail (uiShot) and full screen (uiPhoto)
 //

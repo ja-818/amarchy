@@ -55,7 +55,8 @@ One board says which one needs you and what for. You answer with a tap.
   choose (its branch, its conversation and its place on the board go with it); a machine that's
   off keeps its chats on the board, dimmed, until it's back.
 - **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
-  It texts you like a coworker and puts what needs you on **Tasks**.
+  It texts you like a coworker and keeps what needs you on **Tasks**, as boards: comment on a
+  card and it revises it, write it a task and it helps you get it done. Approving is yours alone.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home
   screen, the same app on a computer, and a desktop app of its own (Linux first, Omarchy at
   home). All of them work over your private Tailscale network, not the internet. The iPhone

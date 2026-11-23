@@ -599,6 +599,9 @@ async function common(p, where) {
   await sleep(300);
   const asked = p.posts.find((x) => /today\/loop/.test(x.url) && x.body.action === "ask");
   check(where, !!asked && asked.body.key === "tom1" && asked.body.text === "Draft it for me tonight", `what to do goes to your assistant (${JSON.stringify(asked && asked.body)})`);
+  // Later this week: on the Commitments board (Tasks' own Now has today's).
+  await p.evaluate(() => { boardsOpen("commitments"); boardsPickColumn(boardsLoops(), "This week"); });
+  check(where, await until(p, () => !!document.querySelector('.ui-kanban-col.on[data-col="This week"] .tcard.k-due')), "Commitments: its board, This week");
   // New chat…: a chat just for it, its note optional (Enter in an empty box starts it).
   check(where, await tapIn("Demo to Felipe", "New chat…"), "New chat… tapped");
   check(where, await until(p, () => document.activeElement && document.activeElement.matches(".tcard-ask") && /optional/.test(document.activeElement.placeholder)), "its box, the note optional");
@@ -614,6 +617,9 @@ async function common(p, where) {
   check(where, await until(p, () => desk.current === "proj-quiet" || here() === "#/s/proj-quiet"), "its chat opens");
   await p.evaluate(() => { if (desk.current) boardBack(true); else go("#/today"); });
   await until(p, () => !desk.current && !/^#\/s\//.test(here()) && !!document.querySelector(".today:not([hidden])"));
+  check(where, await until(p, () => boardsUI.open === "commitments" && !!document.querySelector(".board-today .ui-kanban")), "back from its chat: the board, where you were");
+  await p.evaluate(() => boardsClose());
+  check(where, await until(p, () => !boardsUI.open && !document.querySelector(".board-today .ui-kanban")), "Back: Tasks' list");
   await tab(p, "chats");
 
   check(where, await click(p, ".tcard.k-stale .tbtn", "Ask status"), "a stalled chat asked");

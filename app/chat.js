@@ -1143,6 +1143,183 @@ function placeSig(el) {
   return `${el.tagName}|${words.slice(0, 80)}`;
 }
 
+// A block's parts, wherever it's drawn (a reply's: Chat.artifactParts; a
+// board's card: boards.js): its icon, title, the line under it, its quick
+// action, what it shows open and the actions there; look: its class, when
+// it's not its kind's (a message's channels share one). chat: the chat it's
+// in (a session block's id is one on its machine); mediaUrl(src): where its
+// pictures come from.
+function blockParts(a, { chat = "", mediaUrl = (src) => src } = {}) {
+  const str = (x) => (typeof x === "string" ? x.trim() : "");
+  const at = a.attrs || {}, body = str(a.body), title = str(at.title);
+  const copy = (text, label = "Copy") => {
+    const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
+      e.stopPropagation();
+      copyText(text).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = label; }, 1500); });
+    } }, label);
+    return b;
+  };
+  // A picture itself on the clipboard (pictures[i]: xpostView's), to paste
+  // into X; name: what it does, num: its number alone, when it shows only
+  // that (one of several). Where the browser won't (or it's a GIF, which
+  // would be a still): full screen, to hold (or right-click) and save or
+  // copy it there. One that can't be shown has nothing to copy: its button
+  // goes (its group too, once it holds none).
+  const copyPicture = (pictures, i, name, num = "") => {
+    const label = num || name;
+    let busy = false;
+    const b = h("button", { class: `art-btn${num ? " num" : ""}`, type: "button", "data-name": name, title: name, "aria-label": name, onclick: (e) => {
+      e.stopPropagation();
+      if (busy) return;
+      busy = true;
+      b.textContent = num ? "…" : "Copying…";
+      xpostCopyImage(pictures[i].url).then(() => {
+        b.textContent = num ? "✓" : "Copied";
+        b.setAttribute("aria-label", `${name}: copied`);
+        setTimeout(() => { b.textContent = label; b.setAttribute("aria-label", name); busy = false; }, 1500);
+      }, (err) => {
+        b.textContent = label;
+        busy = false;
+        if (!b.isConnected) return;
+        const hold = matchMedia("(pointer: coarse)").matches ? "hold it" : "right-click it";
+        toast(err && err.gif ? `A GIF would copy as a still: ${hold} to save it` : `Can't copy the picture here: ${hold} to save or copy it`);
+        uiPhoto(pictures.map((p) => ({ src: p.url, label: "" })), i);
+      });
+    } }, label);
+    pictures[i].img.addEventListener("error", () => {
+      const group = b.closest(".xpost-copy-images");
+      b.remove();
+      if (group && !group.querySelector(".art-btn")) group.remove();
+    });
+    return b;
+  };
+  const open = (href, label, primary) => {
+    const safe = artifactHref(href);
+    return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
+      onclick: (e) => e.stopPropagation() }, label) : null;
+  };
+  const digits = (p) => str(p).replace(/[^\d]/g, "");
+  const pre = (text) => h("div", { class: "art-pre" }, text);
+  const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
+  switch (a.kind) {
+    case "whatsapp": case "email": case "slack": case "sms": {
+      const ch = a.kind, to = str(at.to);
+      const wa = ch === "whatsapp" ? `https://wa.me/${digits(at.phone)}?text=${encodeURIComponent(body)}` : null;
+      const mailTo = str(at.email) || (/@/.test(to) ? to : "");
+      const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(at.subject))}&body=${encodeURIComponent(body)}` : null;
+      const sms = ch === "sms" && digits(at.phone) ? `sms:+${digits(at.phone)}?&body=${encodeURIComponent(body)}` : null;
+      return { look: "message", icon: "message", title: title || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
+        quick: body ? copy(body) : null,
+        body: [at.subject ? field("Subject", str(at.subject)) : null, pre(body)],
+        actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
+          body ? copy(body, "Copy the message") : null] };
+    }
+    case "link": {
+      const href = artifactHref(a.url);
+      let host = "";
+      try { host = new URL(a.url).host; } catch { /* not a URL */ }
+      // A link is its row: Copy and Open at hand, its address a tap away.
+      return { folded: true, icon: "web", title: str(at.label) || title || host || "Link", sub: host,
+        quick: href ? [copy(href), open(href, "Open", true)] : null, body: [pre(str(a.url))], actions: [] };
+    }
+    case "command":
+      return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),
+        quick: copy(body), body: [h("div", { class: "art-code" }, body)], actions: [] };
+    case "event": {
+      const start = artifactDate(at.when), end = artifactDate(at.end) || (start ? new Date(start.getTime() + 3600000) : null);
+      const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(at.when);
+      const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+      const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title || "Event")}` +
+        `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(at.where))}&details=${encodeURIComponent(body)}` : null;
+      const map = str(at.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(at.where))}` : null;
+      return { icon: "clock", title: title || "Event", sub: [when, str(at.where)].filter(Boolean).join(" · "), quick: null,
+        body: [when ? field("When", when, end && at.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
+          str(at.where) ? field("Where", str(at.where)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
+    }
+    case "todos": {
+      const items = (a.items || []).filter((x) => str(x.text));
+      const left = items.filter((x) => !x.done).length;
+      return { icon: "list", title: title || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
+        body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
+          h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
+          str(x.due) ? h("span", { class: "meta" }, str(x.due)) : null)))],
+        actions: [] };
+    }
+    case "fields": {
+      const fields = a.fields || [];
+      return { icon: "fields", title: title || "Details", sub: `${fields.length} detail${fields.length === 1 ? "" : "s"}`,
+        quick: fields.length ? copy(fields.map((f) => `${f.label}: ${f.value}`).join("\n")) : null,
+        body: [h("dl", { class: "art-dl" }, ...fields.flatMap((f) => [h("dt", {}, f.label), h("dd", { html: inline(f.value) })]))],
+        actions: [] };
+    }
+    case "chart": {
+      const pts = a.points || [];
+      const tsv = [["", ...a.series], ...pts.map((p) => [p.label, ...p.values])].map((r) => r.join("\t")).join("\n");
+      return { icon: "chart", title: title || "Chart", sub: [/^[$€£¥%]$/.test(str(at.unit)) ? "" : str(at.unit), `${pts.length} ${(at.type || "bar") === "line" ? "points" : "values"}`,
+          a.series.length > 1 ? `${a.series.length} series` : ""].filter(Boolean).join(" · "),
+        quick: pts.length ? copy(tsv) : null, body: [chartView(a)], actions: [] };
+    }
+    case "contact": {
+      const ph = digits(at.phone);
+      return { icon: "helper", title: str(at.name) || title || "Contact", sub: str(at.role), quick: null,
+        body: [ph ? field("Phone", `+${ph}`) : null, str(at.email) ? field("Email", str(at.email)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(at.email) && open(`mailto:${str(at.email)}`, "Email"),
+          ph ? copy(`+${ph}`, "Copy the number") : null] };
+    }
+    case "place": {
+      const where = str(at.where);
+      const map = where || str(at.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(at.name), where].filter(Boolean).join(", "))}` : null;
+      const ph = digits(at.phone);
+      return { icon: "web", title: str(at.name) || title || "Place", sub: [str(at.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
+        body: [where ? field("Address", where) : null, str(at.hours) ? field("Hours", str(at.hours)) : null, ph ? field("Phone", `+${ph}`) : null,
+          body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(at.url) && open(str(at.url), "Website")] };
+    }
+    case "session": {
+      const id = str(at.id);
+      // Its id on this chat's machine (a reply names the chats beside it).
+      const key = id ? keyNamed(chat, id) : "";
+      return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${encodeURIComponent(key)}`, "Open") : null,
+        body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
+    }
+    case "file": {
+      // A picture: shown (from the server: a file in your home or /tmp), a tap away from full screen.
+      const where = str(at.path), pic = /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(where);
+      let shot = null;
+      if (pic) {
+        shot = uiShot({ src: mediaUrl(where), alt: baseName(where), cls: "art-shot" });
+        shot.querySelector("img").addEventListener("error", () => shot.remove());
+      }
+      return { icon: pic ? "image" : "file", title: title || baseName(where) || "File", sub: where, quick: copy(where, "Copy path"),
+        body: [shot, body ? pre(body) : null], actions: [] };
+    }
+    case "xpost": {
+      // The post as X will show it (xpost.js); under it, how X counts it and its draft's id,
+      // and what posting it by hand takes: Copy text (its exact text), Copy image (each picture).
+      const v = xpostView(a, mediaUrl);
+      const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
+      const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
+      const text = String(a.body || ""), pics = v.pictures;
+      return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
+        sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
+        body: [v.card, h("div", { class: "xpost-foot" },
+          h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
+          str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
+          h("span", { class: "xpost-copies" }, text.trim() ? copy(text, "Copy text") : null,
+            // (Several: "Copy image" and a number for each, its place in the grid, a video's counted.)
+            pics.length > 1 ? h("span", { class: "xpost-copy-images", role: "group", "aria-label": "Copy image" },
+              h("span", { class: "xpost-copy-label", "aria-hidden": "true" }, "Copy image"),
+              ...pics.map((p, i) => copyPicture(pics, i, `Copy image ${p.at + 1}`, String(p.at + 1))))
+              : pics.length ? copyPicture(pics, 0, "Copy image") : null))],
+        actions: [] };
+    }
+    default:
+      return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
+        body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };
+  }
+}
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views).
@@ -2084,176 +2261,7 @@ class Chat {
   // A block's parts (a reply's block: replyParts): its icon, title, the line
   // under it, its quick action, what it shows open and the actions there;
   // look: its class, when it's not its kind's (a message's channels share one).
-  artifactParts(a) {
-    const str = (x) => (typeof x === "string" ? x.trim() : "");
-    const at = a.attrs || {}, body = str(a.body), title = str(at.title);
-    const copy = (text, label = "Copy") => {
-      const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
-        e.stopPropagation();
-        copyText(text).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = label; }, 1500); });
-      } }, label);
-      return b;
-    };
-    // A picture itself on the clipboard (pictures[i]: xpostView's), to paste
-    // into X; name: what it does, num: its number alone, when it shows only
-    // that (one of several). Where the browser won't (or it's a GIF, which
-    // would be a still): full screen, to hold (or right-click) and save or
-    // copy it there. One that can't be shown has nothing to copy: its button
-    // goes (its group too, once it holds none).
-    const copyPicture = (pictures, i, name, num = "") => {
-      const label = num || name;
-      let busy = false;
-      const b = h("button", { class: `art-btn${num ? " num" : ""}`, type: "button", "data-name": name, title: name, "aria-label": name, onclick: (e) => {
-        e.stopPropagation();
-        if (busy) return;
-        busy = true;
-        b.textContent = num ? "…" : "Copying…";
-        xpostCopyImage(pictures[i].url).then(() => {
-          b.textContent = num ? "✓" : "Copied";
-          b.setAttribute("aria-label", `${name}: copied`);
-          setTimeout(() => { b.textContent = label; b.setAttribute("aria-label", name); busy = false; }, 1500);
-        }, (err) => {
-          b.textContent = label;
-          busy = false;
-          if (!b.isConnected) return;
-          const hold = matchMedia("(pointer: coarse)").matches ? "hold it" : "right-click it";
-          toast(err && err.gif ? `A GIF would copy as a still: ${hold} to save it` : `Can't copy the picture here: ${hold} to save or copy it`);
-          uiPhoto(pictures.map((p) => ({ src: p.url, label: "" })), i);
-        });
-      } }, label);
-      pictures[i].img.addEventListener("error", () => {
-        const group = b.closest(".xpost-copy-images");
-        b.remove();
-        if (group && !group.querySelector(".art-btn")) group.remove();
-      });
-      return b;
-    };
-    const open = (href, label, primary) => {
-      const safe = artifactHref(href);
-      return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
-        onclick: (e) => e.stopPropagation() }, label) : null;
-    };
-    const digits = (p) => str(p).replace(/[^\d]/g, "");
-    const pre = (text) => h("div", { class: "art-pre" }, text);
-    const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
-    switch (a.kind) {
-      case "whatsapp": case "email": case "slack": case "sms": {
-        const ch = a.kind, to = str(at.to);
-        const wa = ch === "whatsapp" ? `https://wa.me/${digits(at.phone)}?text=${encodeURIComponent(body)}` : null;
-        const mailTo = str(at.email) || (/@/.test(to) ? to : "");
-        const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(at.subject))}&body=${encodeURIComponent(body)}` : null;
-        const sms = ch === "sms" && digits(at.phone) ? `sms:+${digits(at.phone)}?&body=${encodeURIComponent(body)}` : null;
-        return { look: "message", icon: "message", title: title || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
-          quick: body ? copy(body) : null,
-          body: [at.subject ? field("Subject", str(at.subject)) : null, pre(body)],
-          actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
-            body ? copy(body, "Copy the message") : null] };
-      }
-      case "link": {
-        const href = artifactHref(a.url);
-        let host = "";
-        try { host = new URL(a.url).host; } catch { /* not a URL */ }
-        // A link is its row: Copy and Open at hand, its address a tap away.
-        return { folded: true, icon: "web", title: str(at.label) || title || host || "Link", sub: host,
-          quick: href ? [copy(href), open(href, "Open", true)] : null, body: [pre(str(a.url))], actions: [] };
-      }
-      case "command":
-        return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),
-          quick: copy(body), body: [h("div", { class: "art-code" }, body)], actions: [] };
-      case "event": {
-        const start = artifactDate(at.when), end = artifactDate(at.end) || (start ? new Date(start.getTime() + 3600000) : null);
-        const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(at.when);
-        const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-        const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title || "Event")}` +
-          `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(at.where))}&details=${encodeURIComponent(body)}` : null;
-        const map = str(at.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(at.where))}` : null;
-        return { icon: "clock", title: title || "Event", sub: [when, str(at.where)].filter(Boolean).join(" · "), quick: null,
-          body: [when ? field("When", when, end && at.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
-            str(at.where) ? field("Where", str(at.where)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
-      }
-      case "todos": {
-        const items = (a.items || []).filter((x) => str(x.text));
-        const left = items.filter((x) => !x.done).length;
-        return { icon: "list", title: title || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
-          body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
-            h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
-            str(x.due) ? h("span", { class: "meta" }, str(x.due)) : null)))],
-          actions: [] };
-      }
-      case "fields": {
-        const fields = a.fields || [];
-        return { icon: "fields", title: title || "Details", sub: `${fields.length} detail${fields.length === 1 ? "" : "s"}`,
-          quick: fields.length ? copy(fields.map((f) => `${f.label}: ${f.value}`).join("\n")) : null,
-          body: [h("dl", { class: "art-dl" }, ...fields.flatMap((f) => [h("dt", {}, f.label), h("dd", { html: inline(f.value) })]))],
-          actions: [] };
-      }
-      case "chart": {
-        const pts = a.points || [];
-        const tsv = [["", ...a.series], ...pts.map((p) => [p.label, ...p.values])].map((r) => r.join("\t")).join("\n");
-        return { icon: "chart", title: title || "Chart", sub: [/^[$€£¥%]$/.test(str(at.unit)) ? "" : str(at.unit), `${pts.length} ${(at.type || "bar") === "line" ? "points" : "values"}`,
-            a.series.length > 1 ? `${a.series.length} series` : ""].filter(Boolean).join(" · "),
-          quick: pts.length ? copy(tsv) : null, body: [chartView(a)], actions: [] };
-      }
-      case "contact": {
-        const ph = digits(at.phone);
-        return { icon: "helper", title: str(at.name) || title || "Contact", sub: str(at.role), quick: null,
-          body: [ph ? field("Phone", `+${ph}`) : null, str(at.email) ? field("Email", str(at.email)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(at.email) && open(`mailto:${str(at.email)}`, "Email"),
-            ph ? copy(`+${ph}`, "Copy the number") : null] };
-      }
-      case "place": {
-        const where = str(at.where);
-        const map = where || str(at.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(at.name), where].filter(Boolean).join(", "))}` : null;
-        const ph = digits(at.phone);
-        return { icon: "web", title: str(at.name) || title || "Place", sub: [str(at.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
-          body: [where ? field("Address", where) : null, str(at.hours) ? field("Hours", str(at.hours)) : null, ph ? field("Phone", `+${ph}`) : null,
-            body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(at.url) && open(str(at.url), "Website")] };
-      }
-      case "session": {
-        const id = str(at.id);
-        // Its id on this chat's machine (a reply names the chats beside it).
-        const key = id ? keyNamed(this.id, id) : "";
-        return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${encodeURIComponent(key)}`, "Open") : null,
-          body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
-      }
-      case "file": {
-        // A picture: shown (from the server: a file in your home or /tmp), a tap away from full screen.
-        const where = str(at.path), pic = /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(where);
-        let shot = null;
-        if (pic) {
-          shot = uiShot({ src: this.mediaUrl(where), alt: baseName(where), cls: "art-shot" });
-          shot.querySelector("img").addEventListener("error", () => shot.remove());
-        }
-        return { icon: pic ? "image" : "file", title: title || baseName(where) || "File", sub: where, quick: copy(where, "Copy path"),
-          body: [shot, body ? pre(body) : null], actions: [] };
-      }
-      case "xpost": {
-        // The post as X will show it (xpost.js); under it, how X counts it and its draft's id,
-        // and what posting it by hand takes: Copy text (its exact text), Copy image (each picture).
-        const v = xpostView(a, (src) => this.mediaUrl(src));
-        const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
-        const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
-        const text = String(a.body || ""), pics = v.pictures;
-        return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
-          sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
-          body: [v.card, h("div", { class: "xpost-foot" },
-            h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
-            str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
-            h("span", { class: "xpost-copies" }, text.trim() ? copy(text, "Copy text") : null,
-              // (Several: "Copy image" and a number for each, its place in the grid, a video's counted.)
-              pics.length > 1 ? h("span", { class: "xpost-copy-images", role: "group", "aria-label": "Copy image" },
-                h("span", { class: "xpost-copy-label", "aria-hidden": "true" }, "Copy image"),
-                ...pics.map((p, i) => copyPicture(pics, i, `Copy image ${p.at + 1}`, String(p.at + 1))))
-                : pics.length ? copyPicture(pics, 0, "Copy image") : null))],
-          actions: [] };
-      }
-      default:
-        return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
-          body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };
-    }
-  }
+  artifactParts(a) { return blockParts(a, { chat: this.id, mediaUrl: (src) => this.mediaUrl(src) }); }
 
   // What waits on you: each question and its options. One question: a tap
   // sends. Several: a tap marks it answered, and they go together once all

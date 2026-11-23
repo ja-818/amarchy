@@ -383,12 +383,12 @@ host's chats without anything else installed.
   that you haven't opened yet. A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes
   it, with Undo.
-- **Tasks**: your agents' tasks first (each with its agent's picture and name, how
-  long it has left, its links and its buttons: see [Your agents'
-  tasks](#your-agents-tasks)), then your own (your loops file: due now, waiting on
-  others, this week, further out, someday), each with **Follow up** (your assistant
-  drafts the message to whoever you wait on), **Ask Jaken…** (tell your assistant
-  what to do about it) and **Done**.
+- **Tasks**: your boards ([Tasks: boards](#tasks-boards)): a box to write a task
+  for an agent, then each board with what waits on you there (its buttons, Comment,
+  Edit), and your commitments (your loops file: due now, waiting on others, this
+  week, further out, someday) as a board of their own, each with **Follow up** (your
+  assistant drafts the message to whoever you wait on), **Ask Jaken…** (tell your
+  assistant what to do about it) and **Done**.
 - **Missions count once they're merged.** amarchy looks at every open chat each
   minute: its branch merged into its project's main (a merge commit naming the
   branch, or a fast-forward: amarchy's own "ship it"), or a GitHub pull request
@@ -568,7 +568,8 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+Space` / `Ctrl+Alt+Enter` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
 
 On the board, plain keys move and act (`j` / `k`, `Enter`, `x`…: see the board
-above, or `?`). Every menu takes the keys: a chat's menu (its •••), closing
+above, or `?`); on a board's card in Tasks, `1`–`4` press its buttons, `c` comments on
+it and `e` edits it, and `Esc` on an open board is Tasks again. Every menu takes the keys: a chat's menu (its •••), closing
 one, settings, the order of your projects, the project for a
 new chat, Claude's questions, and the phone's list itself. `↑`/`↓` go from line to
 line (buttons side by side, as High · Normal · Low, are one line: `←`/`→` go along
@@ -1254,8 +1255,8 @@ first, then the one you last wrote to), and one count over it:
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission's **Allow** and
   **Deny**, a secret to give (**Answer** opens the chat at its card), a chat that's
-  blocked, your agents' tasks (first in Tasks: [Your agents'
-  tasks](#your-agents-tasks)), the people to chase today (**Chase**: your assistant
+  blocked, the cards your agents' boards wait on you for ([Tasks:
+  boards](#tasks-boards)), the people to chase today (**Chase**: your assistant
   drafts the message), and your commitments due by tomorrow, late ones in red. The number on the tab
   counts them; the app's icon counts the chats asking you, plus the messages from
   your assistant and your agents you haven't read.
@@ -1435,7 +1436,7 @@ amarchy agents <id> off                      # a chat like the others again (its
 
 An agent has everything your assistant has but your loops file (Today's loops and
 their **Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay your
-assistant's); it has [tasks of its own](#your-agents-tasks) instead:
+assistant's); it has [boards and tasks of its own](#tasks-boards) instead:
 
 - **Its place**, on top of every list, right under your assistant, in the order you
   made them, whatever its priority or what it does (asking you, it stays there, with
@@ -1520,12 +1521,99 @@ sections, the steps, the buttons).
 - **Unread**: its row counts the messages it wrote since you last looked (none while
   it's on your screen), and so does the app's icon, with what needs you.
 
-## Your agents' tasks
+## Tasks: boards
 
-An agent that finds things for you to do (a post worth replying to, a lead to call,
-a form to sign) shouldn't start a chat for each one: they'd crowd your chats, and
-each would be a mission to complete. It puts each on **Tasks** instead, as a card of
-its own with buttons that answer it:
+**Tasks** is boards: one for each project or agent, of what depends on you. Your
+assistant and every agent of yours keep them (an agent's posts to review, a lead to
+call, a form to sign), and you answer from the board, on the phone as on a computer:
+press a card's buttons, **comment** on it (the agent answers by revising the card),
+**edit** it in place, move it, or write a task for an agent to help you get done.
+
+- **Tasks** lists each board with what waits on you there (the cards in a column of
+  yours, the first three), its lead's picture and name, and **Open**. On top, a box
+  to **write a task**: it goes on your assistant's board (or the one you pick under
+  it) and that agent is told, to help you get it done. Your commitments (your loops
+  file) are a board of their own. The Tasks tab counts every card of yours.
+- **A board, open** (`#/b/<board>`): its columns side by side on a computer, one at a
+  time on the phone (their tabs, or a swipe sideways), every card. **Back** or `Esc`
+  is Tasks again.
+- **A card**: its title, its block as a reply draws it (a post as X shows it, with
+  **Copy text** and **Copy image**; an email, a list, any block), its note, its
+  links, its thread (what you said, what the agent answered, what was done), then its
+  buttons, **Comment** (the bubble), **Edit** (the pencil) and its menu (**Move
+  to**, **Take it down**). Keys: `1`–`4` its buttons, `c` comment, `e` edit.
+- **Comment**: what you write goes to the card's agent as your own message, naming
+  the card (`About “<card>” (board posts, card fs-12): …`), and stays on the card's
+  thread. Its answer comes there too, and the card lights up, **Answered** or
+  **Revised**.
+- **A button**: its column's (the same on every card in it) or the card's own. It
+  sends its message to the agent (`amarchy send`: an agent asleep wakes for it),
+  moves the card, asks you for a word first (**Discard** asks why, and the reason
+  goes with it), or does only that (quiet). Pressed, the card ticks and goes, with
+  **Undo** for a few seconds.
+- **Edit**: its title and its text in place; for a post, X's count as you type (past
+  280, a warning: Premium takes it). Saved, nothing is sent: the agent finds it on the
+  card and in the log.
+- **Approving is yours alone.** A column can need your approval (**Ready to post**): a
+  card gets there only by your hand (a button, or **Move to**), never an agent's. Its
+  approval says who (your Tailscale login), when, and the sha256 of exactly what it
+  has, signed with a key only amarchy reads (in the secrets' folder); changed since
+  you looked (the agent revised it a moment ago), your Approve is refused. Any change to it
+  (your edit, the agent's revision) drops it, and the card goes back where it was. A
+  board can have a check (its agent's lint): it runs on your edit and your approval
+  first, and can refuse either, in its words. An agent's tools can't reach the app's
+  board actions or the boards' files.
+
+An agent keeps its boards with `amarchy board`:
+
+```sh
+# a board: its columns, in order; each column's buttons after it
+amarchy board set posts --title "Post board" \
+  --column "For review" --yours \
+    --button "Approve" --to "Ready to post" --quiet \
+    --button "Discard" --asks "Why discard it?" --to "Discarded" \
+  --column "Ready to post" --approval \
+    --button "Back to review" --to "For review" --quiet \
+    --button "Posted by hand=Posted {key} by hand: {words}" --asks "Its link?" --to "Posted" \
+  --column "Posted" --done \
+  --column "Discarded" --done --button "Restore" --to "For review" \
+  --check 'bin/fireship lint -'
+
+# a card (prints its id); --key again changes it in place
+amarchy board card posts --key fs-12 --title "Agents: stop babysitting" \
+  --xpost - --handle ja818_ --media ~/x/fs-12.png --note "Slot: Tue 9:00" < post.txt
+amarchy board comment posts fs-12 "Led with the hook, cut it to two lines"
+amarchy board move posts fs-12 Posted          # never into a column that needs approval
+amarchy board show posts [--card fs-12] --json # cards, threads, approvals {by, at, sha256}
+amarchy board approved posts fs-12 --text post.txt   # exit 0 only if you approved exactly that
+amarchy board log posts --json                 # every edit (before, after), press, reason, comment
+amarchy board rm posts fs-12 | amarchy board drop posts
+amarchy board list
+```
+
+- **Whose**: any of your team keeps boards (`$AMARCHY_SESSION`, or `--agent <id>`); a
+  plain chat is refused. The one that makes a board is its lead: it hears what you do
+  on a card of its own, as each agent does on its own cards.
+- **Columns**: `--yours` (its cards wait on you: Tasks counts them), `--done`
+  (finished: kept a month), `--approval` (above). Without columns a new board has
+  **To do**, **Doing** and **Done**. A column's `--button <label>[=<message>]`
+  (`{title}`, `{key}`, `{board}`, `{column}`, `{words}` in it; none:
+  `<label>: “<title>” (board <b>, card <key>)`), `--to <column>`, `--asks <words>`,
+  `--quiet` (nothing sent).
+- **Cards**: a block the app draws (`--xpost <text|->`, or `--block <kind> --body
+  <text|->` with `--attr <name>=<value>`), checked as a reply's are; a note, links
+  (up to 3), buttons of its own (up to 4; one without `--to` moves it to the done
+  column), `--until`, `--notify`. An agent's update over your edit is refused until
+  it says `--over-edit` (it sees your text); `--base <sha256>` refuses one over any
+  change since.
+- **A script that acts on your approval** (posting it) checks `amarchy board approved`
+  first. The hash is the card's block as JSON (`kind`, `attrs`, `body`), keys in
+  order, no spaces, UTF-8.
+
+### Your agents' tasks
+
+A one-off (a post worth replying to now) is a task: a card on the agent's own board
+(its id's: **For you**, **Done**), with buttons that answer it:
 
 ```sh
 amarchy task add --title "Reply: @levelsio's AI-reply spam list" \
@@ -1540,34 +1628,20 @@ amarchy task list [--agent <id>] [--json]     # what's open: id, agent, until, t
 amarchy task done <id>... | --agent <id>      # take it down (or all of an agent's): nothing is sent
 ```
 
-- **Whose**: the agent's own, run from its chat (`$AMARCHY_SESSION`), or `--agent
-  <id>`. Only your assistant and your agents have tasks: a plain chat is refused
-  (it asks you on its own card).
-- **The card**, first in Tasks' **Now** (the one going soonest first): the agent's
-  picture and name, the title (its keyword in bold, as a chat's), how long it has
-  left (red the last ten minutes; one with no time says how old it is), the note
-  (`**bold**`, `` `code` `` and links drawn), then its links and its buttons. The
-  Tasks tab counts it. On the phone the title has a line of its own.
-- **`--link [<label>=]<url>`** (up to 3; a bare URL is **Open**): a button that opens
-  the page in a new tab. The task stays.
-- **`--button <label>[=<message>]`** (up to 4; none gives **Done**): pressed, the card
-  ticks with its words and goes, with **Undo** for a few seconds; then the message
-  goes to the agent as if you'd typed it (`amarchy send`: an agent asleep wakes for
-  it) and the task is done. Without a message it sends `<label>: <title>`. Leaving
-  the app (a link, another app) sends it at once. Keys: `1`–`4` press its buttons,
-  `r` opens its first link, the card's head opens the agent's chat.
+- **`--link [<label>=]<url>`** (up to 3; a bare URL is **Open**): the page in a new
+  tab. The task stays.
+- **`--button <label>[=<message>]`** (up to 4; none gives **Done**): pressed, its
+  message goes to the agent and the task is done. Without a message it sends
+  `<label>: <title>`.
 - **`--until`**: a date and time (`2026-11-19T10:12-05:00`; the host's zone without
   one), a time today (`10:12`), or how long from now (`45m`, `2h`, `1h30m`, `1d`).
-  Past it, the task goes by itself (the agent isn't told: `amarchy task list` shows
-  what's left). A button pressed just before still goes.
-- **`--key`**: the same agent's task with that key is changed in place (same id,
-  same card) rather than added twice: a hunt that finds the same post again doesn't
-  double it.
+  Past it, the task goes by itself (red its last ten minutes; one with no time says
+  how old it is). A button pressed just before still goes.
+- **`--key`**: the same agent's task with that key is changed in place.
 - **`--notify`**: a notification on your phones too, under the agent's name and
-  picture; a tap opens Tasks. Without it, a task is quiet.
-- An agent has 30 open at most. One that's no longer an agent keeps its tasks out of
-  sight; a closed one's go. The search finds them too (the agent, the title, the
-  note).
+  picture; a tap opens its board.
+- An agent has 30 open at most. One that's no longer an agent keeps its board out of
+  sight; a closed one's tasks go. The search finds cards too.
 
 ## From scripts and agents
 
@@ -1579,8 +1653,9 @@ amarchy send <id> "<text>"                                     # to a chat's Cla
 amarchy notify "<title>" "<body>" [--session <id>] [--urgent]  # to your phones
 ```
 
-(An agent that needs you to do something puts it on Tasks instead, with buttons
-that answer it: `amarchy task add`, see [Your agents' tasks](#your-agents-tasks).)
+(An agent that needs you to do something puts it on Tasks instead, a card on its
+board with buttons that answer it: `amarchy board card` or `amarchy task add`, see
+[Tasks: boards](#tasks-boards).)
 
 **`amarchy send`** types the text into the chat's Claude the way the phone does
 (pasted, then Enter), `-` reading it from stdin. It waits until Claude is free: not in
@@ -1850,9 +1925,17 @@ Today:
 amarchy today [--json]                what needs you, what's due, who you wait on, each chat's goal and state
 amarchy today --loops [<file>|off]    your loops file, or none (prints it without one)
 
-Your agents' tasks:
+Tasks: boards (amarchy board --help has every option):
+amarchy board [list] [--json]         the boards: id, lead, name, each column's count
+amarchy board set <board> [--title <text>] [--check <command>] [--column <name> [--yours|--approval|--done]
+                  [--button <label>[=<message>] [--to <column>] [--asks <words>] [--quiet]]...]...
+amarchy board card <board> [--key <key>] [--title <text>] [--column <name>] [--xpost <text|->]
+                  [--block <kind> --body <text|->] [--note <text|->] [--link ...] [--button ...]   a card; prints its id
+amarchy board move <board> <card> <column> | comment <board> <card> <text|->
+amarchy board show <board> [--card <card>] [--json] | approved <board> <card> [--text <file|->] | log [<board>]
+amarchy board rm <board> <card>... | drop <board>
 amarchy task add --title <text> [--note <text>] [--link [<label>=]<url>]... [--button <label>[=<message>]]...
-                 [--until <when>] [--key <key>] [--notify] [--agent <id>]   a card on Tasks; prints its id
+                 [--until <when>] [--key <key>] [--notify] [--agent <id>]   a task on the agent's board; prints its id
 amarchy task list [--agent <id>] [--json]   what's open
 amarchy task done <id>... | --agent <id>    take tasks down (nothing is sent)
 

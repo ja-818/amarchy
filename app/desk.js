@@ -665,6 +665,7 @@ function row(id) { return app.view && app.view.sessions.find((s) => s.id === id)
 function deskRoute() {
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
+  if (m) boardsUI.route = here();      // (a chat opened from a board: back from it, the board)
   if (m) {
     const id = routeKey(m[1]);       // <this machine>:<id> is <id>; a moved chat, where it is (app.js)
     if (row(id)) { board.waitFor = null; show(id); }
@@ -675,6 +676,7 @@ function deskRoute() {
   show(null);
   if (here() === "#/new") boardCompose();
   if (here() === "#/tasks") boardTasks();
+  else boardsRouted(here());
 }
 
 // The chat over the board (id), or the board (null).
@@ -1860,6 +1862,8 @@ function sessionItems(s) {
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent…` : "Make it an agent…",
       detail: isAgent(s) ? "name, picture, chime" : "or your assistant", act: () => agentSheet(s) },
+    // Its boards (Tasks): each a tap away.
+    ...boardsLedBy(s).map((b) => ({ label: b.title, icon: "organize", detail: b.yours ? `its board · ${b.yours} for you` : "its board", act: () => boardsGo(b.key) })),
     // Your assistant and your agents are on top whatever their priority.
     ...(isAgent(s) ? [] : LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
@@ -1892,7 +1896,8 @@ function showKeys() {
       ["Enter", "Open the chat; on a button, press it (a folded group: unfold it)"], ["Esc", "Out of the card"],
       ["1 – 4", "Pick that answer on the card"],
       ["x", "Complete the chat's mission, with Undo"], ["r", "Open what it made: Review, or its Preview"],
-      ["s", "Seen: off Needs you without opening it"],
+      ["s", "Seen: off Needs you without opening it"], ["c / e", "A board's card: comment on it / edit it"],
+      ["Esc  on a board", "Back to Tasks"],
       ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["Tab / Shift+Tab  in a new chat", "The next / previous project"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
     ...part("In a chat", [["Enter / Shift+Enter  in the box", "Send / a new line"],
       ["Esc  in the box", "Stop Claude while it works; else up onto the messages"], ["↑  in the box, nothing above", "Up onto the messages"],
