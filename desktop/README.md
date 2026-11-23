@@ -45,6 +45,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart)
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
+python3 test/compare.py                             # the window next to Chromium, phone and wide: the
+                                                    # same layout (boxes to 3 px), side by side pictures
 ```
 
 `test/shell.py` runs the app in an X server of its own (Xvfb) with a D-Bus of
@@ -57,10 +59,13 @@ server through Tailscale or as this machine's own (`--local`, the real local
 key). Nothing in them reaches a real machine: amarchy's CLI there is a made-up
 one, or this checkout's on a test home with pairing refused. Its homes go under
 `~/.cache/amarchy-tests` (unless `TMPDIR` says) and away at the end. Needs Xvfb,
-xdotool, ImageMagick, dbus, tmux and PyGObject.
+xdotool, ImageMagick, dbus, tmux and PyGObject (and for compare.py, Chromium
+with playwright-core, as the app's view tests).
 
 ## Packages
 
 CI (`.github/workflows/desktop.yml`) builds and tests it on Linux (x86_64 and
 aarch64), macOS and Windows, and keeps its packages (deb, rpm, AppImage, dmg,
-the Windows installer) as the run's artifacts. Nothing is published.
+the Windows installer) as the run's artifacts. `packaging/arch/PKGBUILD` is
+`amarchy-desktop-git` for the AUR and omarchy-pkgs, built from amarchy's main
+(`makepkg -si`). Nothing is published: that's Julian's call.

@@ -1,0 +1,69 @@
+# amarchy's desktop app, built from amarchy's main on GitHub (for the AUR, and
+# omarchy-pkgs). Prepared, not published: that's Julian's call.
+# Maintainer: Julian Arango <julianarango1818 at gmail dot com>
+
+pkgname=amarchy-desktop-git
+_repo=amarchy
+pkgver=r0
+pkgrel=1
+pkgdesc="amarchy's desktop app: stop babysitting your agents, manage them (the board, chats and notifications of your amarchy)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ja-818/amarchy"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire'
+         'hicolor-icon-theme' 'xdg-utils')
+makedepends=('git' 'cargo')
+optdepends=('tailscale: to reach your amarchy on your tailnet'
+            'amarchy: run chats on this computer too (its install.sh)')
+provides=('amarchy-desktop')
+conflicts=('amarchy-desktop')
+options=('!lto' '!debug')
+source=("git+https://github.com/ja-818/amarchy.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_repo"
+  printf "r%s.%s" "$(git rev-list --count HEAD -- desktop)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "$_repo/desktop"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_repo/desktop"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$_repo/desktop"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "$_repo/desktop"
+  install -Dm755 target/release/amarchy-desktop "$pkgdir/usr/bin/amarchy-desktop"
+  install -Dm644 amarchy.desktop "$pkgdir/usr/share/applications/amarchy.desktop"
+  install -Dm644 icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/amarchy.png"
+  install -Dm644 icons/64x64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/amarchy.png"
+  install -Dm644 icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/amarchy.png"
+  install -Dm644 icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/amarchy.png"
+  install -Dm644 icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/amarchy.png"
+  install -Dm644 ../app/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/amarchy.svg"
+  # In the tray from login, so its notifications come with its window closed.
+  install -Dm644 /dev/stdin "$pkgdir/etc/xdg/autostart/amarchy.desktop" <<ENTRY
+[Desktop Entry]
+Type=Application
+Name=Amarchy
+Comment=amarchy in the tray, so its notifications come with its window closed
+Exec=amarchy-desktop --hidden
+Icon=amarchy
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+ENTRY
+  install -Dm644 ../LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

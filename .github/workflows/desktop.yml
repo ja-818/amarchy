@@ -15,8 +15,10 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push replaces its run; every commit on main is
+# tested (three chats push there, often minutes apart).
 concurrency:
-  group: desktop-${{ github.ref }}
+  group: desktop-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
