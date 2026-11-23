@@ -636,6 +636,30 @@ async function sleepSession(s) {
 }
 
 
+// A chat of this machine's in a real Ghostty window on its desktop (amarchy
+// ghostty): when the machine has Ghostty and a desktop (the view's ghostty).
+// One key, Ctrl+Alt+O, on a computer; a chat's menu on both.
+function ghosttyCan(s) {
+  return !!(s && !s.setup && app.view && app.view.ghostty && (!s.machine || s.machine === machineHere()));
+}
+
+function ghosttyWhere() {
+  return (typeof machineOf === "function" && machineOf("").label) || (app.view && app.view.hostname) || "this machine";
+}
+
+async function ghosttyOpen(s) {
+  if (!s) return;
+  if (!ghosttyCan(s)) {
+    toast(app.view && app.view.ghostty ? "That chat is on another machine: open it in Ghostty there"
+                                       : "Ghostty opens on a machine with a desktop and Ghostty: this one hasn't both");
+    return;
+  }
+  try {
+    await api(chatPath(s.id, "/ghostty"), { which: "term" });
+    toast(`Its terminal, in Ghostty on ${ghosttyWhere()}`);
+  } catch (e) { toast(e.message); }
+}
+
 // Wake or sleep, as the session is now.
 function sleepButton(s) {
   const st = sleepOf(s);
@@ -1196,7 +1220,8 @@ class SessionView {
     const terminals = h("div", { class: "menu" },
       ...(this.mode === "terminal" ? [item(false, "Back to the chat", () => this.setMode("chat"))] : []),
       item(shownTerm, "Open terminal", () => this.setMode("terminal", "term")),
-      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []));
+      ...(classicOk ? [item(shownClassic, "Open Claude's classic terminal", () => this.setMode("terminal", "classic"))] : []),
+      ...(ghosttyCan(row) ? [item(false, `Open in Ghostty on ${ghosttyWhere()}`, () => ghosttyOpen({ ...row, id: this.id }))] : []));
     const agent = isAgent(row);
     sheet(sheetHead(title(row), where(row)),
       agent ? null : h("div", { class: "section" }, "Priority"), agent ? null : seg,

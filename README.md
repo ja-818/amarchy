@@ -115,6 +115,7 @@ On a computer's browser:
 | `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned |
 | `Ctrl+Alt+A` | Go to a chat, by its name |
 | `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |
+| `Ctrl+Alt+O` | The chat's terminal in a Ghostty window (on a desktop with Ghostty) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
 Every action is also a command: `amarchy help`.

@@ -297,6 +297,9 @@ takes it away; docs/guide.md, "On Omarchy"):
                                         root it asks first, in a terminal, else says what to run. Exits 0
                                         once it's all ready. Settings → Tailscale in the app does the same
   amarchy tailscale switch [<account>]  the accounts signed in here (* the one in use), or switch to one
+  amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a real Ghostty window on its desktop: tmux
+                                        attached to its terminal (or Claude's pane); again, that window to the
+                                        front. Ctrl+Alt+O in the app, or a chat's menu → Advanced
   amarchy awake [on|off] [--json]       while a chat on this machine works, amarchy's app holds off its idle
                                         sleep (systemd-inhibit, "idle" only: the screen still locks, the lid
                                         still sleeps it) and lets go when none does: whether it holds it now,
@@ -12287,7 +12290,7 @@ def app_watch(st):
                     "new_model": new_model(), "new_effort": new_effort(),
                     "default_efforts": default_efforts(), "models": known_models(), "share": share_state(),
                     "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss),
-                    "missions": missions_view()}
+                    "missions": missions_view(), "ghostty": ghostty_here()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -16301,7 +16304,7 @@ def app_handler(st, users, address):
             if m:
                 s = self.session(m.group(1))
                 return self.chat(s, m.group(2), data) if s else None
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|agent|agent/picture|wake|sleep|preview)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|agent|agent/picture|wake|sleep|preview|ghostty)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
@@ -16332,6 +16335,10 @@ def app_handler(st, users, address):
                 return self.send(200, {"preview": preview_info(s, p)})
             if what == "assistant":
                 return self.assistant(s, data)
+            if what == "ghostty":     # this chat in a Ghostty window on this machine's desktop (see "a chat in Ghostty")
+                self.changed_nothing = True
+                why = ghostty_open(s, data.get("which") if data.get("which") in ("term", "claude") else "term")
+                return self.error(409, why) if why else self.send(200, {"opened": True})
             if what in ("agent", "agent/picture"):
                 return self.agent(s, what, data)
             if what == "seen":
@@ -19069,6 +19076,78 @@ def cmd_tailscale(args):
     return 0 if st["ready"] else 1
 
 
+# ---- a chat in Ghostty
+#
+# One key (Ctrl+Alt+O in the app, or a chat's menu → Advanced → Open in
+# Ghostty; `amarchy ghostty <id>` here) opens a chat of this machine's in a
+# real Ghostty window on this machine's desktop: tmux attached to its session
+# (its terminal, or with claude, Claude's pane), as the app's terminals are. One
+# window per chat: again, the one it has comes to the front (Hyprland).
+
+GHOSTTY_HERE = {"at": 0, "here": False}
+
+
+def display_env():
+    """The environment a window opens in on this machine's desktop:
+    Hyprland's (hypr_env), else a Wayland or X display it has; None when it
+    has none (a server)."""
+    env = hypr_env()
+    if env:
+        return env
+    env = dict(os.environ)
+    if env.get("WAYLAND_DISPLAY") or env.get("DISPLAY"):
+        return env
+    found = sorted(Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}").glob("wayland-[0-9]"))
+    if found:
+        env["WAYLAND_DISPLAY"] = found[0].name
+        return env
+    return None
+
+
+def ghostty_here():
+    """Whether a chat here can open in Ghostty: Ghostty installed, and a
+    desktop to open it on (looked at again every half minute)."""
+    if time.time() - GHOSTTY_HERE["at"] > 30:
+        GHOSTTY_HERE.update(at=time.time(), here=bool(shutil.which("ghostty")) and display_env() is not None)
+    return GHOSTTY_HERE["here"]
+
+
+def ghostty_open(s, which="term"):
+    """Chat s (this machine's) in a Ghostty window: the one it has to the
+    front, else a new one attached to its tmux. None, or why not."""
+    if which not in ("term", "claude"):
+        return "term or claude"
+    if not shutil.which("ghostty"):
+        return "Ghostty isn't installed here"
+    env = display_env()
+    if env is None:
+        return f"{machine_label()} has no desktop to open a window on"
+    # Its own window class (a GTK application id), so it's found again.
+    cls = "dev.amarchy." + ("term-" if which == "term" else "claude-") + re.sub(r"[^A-Za-z0-9_-]", "_", s["id"])[:80]
+    for address in hypr_windows(cls, env)[:1]:
+        hypr_focus(address, env)
+        return None
+    title = f"{s.get('title') or s.get('name') or s['id']} · {'Claude' if which == 'claude' else 'terminal'} · amarchy"
+    launch_app(["ghostty", f"--class={cls}", f"--title={title}", "-e", ENTRY, "attach", s["id"], which], env)
+    return None
+
+
+def cmd_ghostty(args):
+    """`amarchy ghostty [<id>] [term|claude]`."""
+    which = next((a for a in args if a in ("term", "claude")), "term")
+    ids = [a for a in args if a not in ("term", "claude")]
+    sid = ids[0] if ids else os.environ.get("AMARCHY_SESSION", "")
+    if len(ids) > 1 or not sid:
+        return fail("usage: amarchy ghostty [<id>] [term|claude] (from a chat's terminal, that chat)")
+    s = session(sid)
+    if not s:
+        m = CHAT_LINK.fullmatch(sid) or re.fullmatch(r"([a-z0-9][a-z0-9-]{0,62})[:/]([\w][\w.-]{0,119})", sid)
+        return fail(f"{m.group(2)} is on {m.group(1)}: open it in Ghostty there" if m and m.group(1) != machine_name()
+                    else f"no chat {sid} on this machine")
+    why = ghostty_open(s, which)
+    return fail(why) if why else 0
+
+
 # ------------------------------------------------------------------ the chat engine (amarchy agent)
 #
 # Phases A1 and A2 of docs/plan-chat-app.md. Any session can opt in ("Try
@@ -21059,6 +21138,7 @@ OPTIONS = {
     "open": (set(), set(), set()),
     "awake": ({"--json"}, set(), set()),
     "tailscale": ({"--json", "--no-open"}, set(), set()),
+    "ghostty": (set(), set(), set()),
     "bar": ({"--follow"}, set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
@@ -21238,6 +21318,8 @@ def main(argv):
         return cmd_awake(args)
     elif cmd == "tailscale":
         return cmd_tailscale(args)
+    elif cmd == "ghostty":
+        return cmd_ghostty(args)
     elif cmd == "open" and len(args) <= 1:
         return cmd_open(args)
     elif cmd == "bar" and not [a for a in args if a != "--follow"]:

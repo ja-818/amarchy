@@ -518,6 +518,7 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+A` | Go to a chat, by its name or its project. |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal. |
 | `Ctrl+Alt+L` | Claude's classic terminal in the side panel; again, back to the chat's terminal. |
+| `Ctrl+Alt+O` | The chat's terminal in a Ghostty window, on a machine with Ghostty and a desktop ([On Omarchy](#on-omarchy)). |
 | `Ctrl+Alt+G` / `I` | Changes / Details in the side panel (again: closed). |
 | `Ctrl+Alt+B` / `F` | Open or close the side panel / make it the window's whole width. |
 | `Ctrl+Alt+R` | Open the chat's preview (of several: its dropdown, to pick one). |
@@ -684,6 +685,14 @@ a backup of each file it changes).
 All three run `amarchy open`, which takes a chat too (`amarchy open
 amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
 a browser window (an Omarchy web app).
+
+**A chat in Ghostty.** On a machine with Ghostty and a desktop, a chat of that
+machine's opens in a real Ghostty window with one key: `Ctrl+Alt+O` in the app,
+or its menu → Advanced → Open in Ghostty (on the phone too: the window opens on
+the machine). The window is tmux attached to the chat's terminal, as the app's
+own terminal is, so both show the same; again, that window comes to the front
+instead of a second one. `amarchy ghostty [<id>] [term|claude]` does it from a
+terminal (from a chat's own, that chat; `claude`: Claude's pane).
 
 **The theme live**: a theme called **Omarchy (live)** made from the desktop's
 look as it is now: its colors and what its menus and popups look like (your
@@ -1607,6 +1616,7 @@ amarchy bar [--follow]                what the Ⓐ in the bar shows (JSON); --fo
 amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's look and send it to your machines
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
+amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

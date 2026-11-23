@@ -1508,6 +1508,7 @@ const DESK_KEYS = {
   ArrowUp: () => keyedId() && setPriority(row(keyedId()), "up"),
   ArrowDown: () => keyedId() && setPriority(row(keyedId()), "down"),
   KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(),
+  KeyO: () => ghosttyOpen(row(keyedId())),
 };
 
 function deskKeys(e) {
@@ -1860,6 +1861,7 @@ function sessionItems(s) {
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
       { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
       ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
+      ...(ghosttyCan(s) ? [{ label: `Open in Ghostty on ${ghosttyWhere()}`, detail: "its terminal, in a window of its own", key: "Ctrl+Alt+O", act: () => ghosttyOpen(s) }] : []),
       { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
     isAgent(s) ? null : { label: "Complete mission", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
   ].filter(Boolean);
@@ -1892,6 +1894,7 @@ function showKeys() {
       ["Enter / Shift+Enter  in the box", "Send / a new line"],
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
+      ...(app.view && app.view.ghostty ? [["Ctrl+Alt+O", "This chat's terminal in Ghostty"]] : []),
       ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
       ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Open its preview"],
       ["Ctrl+Alt+Space / Enter", "Dictate: hold, or tap and tap again"], ["⌘V / drop", "A picture goes with your message"]]),
