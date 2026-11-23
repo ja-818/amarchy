@@ -697,11 +697,14 @@ window closed.
   WebKitGTK; a few minutes the first time). On Arch it offers to install what
   the build needs with pacman (sudo asks for your password); the GStreamer
   plugins its sounds and microphone need are asked for apart and never stop
-  the build: when pacman can't get them, the app is built anyway and says its
-  sounds and dictation wait on them. When pacman can't get Rust, it offers
-  mise's instead (just for you).
+  the build: when pacman can't get them, the app is built anyway and says it
+  has no microphone (dictation) and no video until they're in (it plays its
+  chimes itself meanwhile). When pacman can't get Rust, it offers mise's
+  instead (just for you).
   It never runs a system update (`pacman -Syu`): when your package list is too
-  old for your mirror, it says so and leaves that to you. Its install ends by
+  old for your mirror, or a system update was left half done ("breaks
+  dependency"), it says so, with the command to finish it (on Apple Silicon,
+  its own kernel and boot packages held back), and leaves that to you. Its install ends by
   saying how it went ("The desktop app: …"). It's **Amarchy** in your launcher,
   or `amarchy-desktop`. `install.sh --desktop` builds it anywhere (over SSH,
   say); `--no-desktop` leaves it out.
@@ -729,7 +732,7 @@ window closed.
   there too; a click opens the window on that chat, at its card. Its chime rings
   with it (the window's page rings none of its own, so nothing rings twice).
   The app's server counts it as a device notified (`amarchy notify`, Settings →
-  Send a test). A secret is only ever asked for in the app.
+  Send a test, which rings your chime there). A secret is only ever asked for in the app.
 - **The tray**: closing the window keeps it running in the tray (Open, Reload,
   Quit; its tooltip says how many need you), and it starts there at login
   (`~/.config/autostart/amarchy.desktop`; delete it and it isn't put back), so
@@ -1579,6 +1582,14 @@ in `~/.config/amarchy/host` stops it; `amarchy update` does it now. `amarchy pro
 runs the chat engine's test against the Claude Code installed, about three minutes and a
 few cheap turns on your login, and records the result; a failure shows in Settings. The
 update starts it when Claude Code has changed.
+
+**As Arch packages** (`packaging/arch`: `amarchy-git`, and the desktop app's
+`amarchy-desktop-git`), amarchy lives in `/usr/share/amarchy` and `amarchy setup`
+is `install.sh`, run as you: it sets up your part (the timers, the skill, Omarchy's
+pieces). A package updates with your packages, never from git; after an update
+your part is set up again by itself within five minutes (`amarchy update`), and
+the app reloads. `amarchy setup --uninstall` takes your part away before you
+remove the package. How they're built and published: `packaging/README.md`.
 
 `install.sh --uninstall` takes all of that out again (the chats' previews stop, and come
 off your tailnet); your worktrees, your chats,

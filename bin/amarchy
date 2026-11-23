@@ -334,6 +334,10 @@ Updating:
                                         on your login) for the Claude Code installed, and record the result: a
                                         failure shows in Settings. --broker also runs a test session. amarchy
                                         update starts it when Claude Code has changed
+  amarchy setup [--uninstall] [--force] amarchy's install.sh, as you: what's yours of amarchy (its timers, the
+                                        skill for Claude Code, on Omarchy the Ⓐ, the key, the menu, the live
+                                        theme). After installing the amarchy package (once), or to take it
+                                        away again before removing the package (--uninstall)
   amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
                                         runs from (when it's on main, with nothing uncommitted) and install it.
                                         It does it by itself every 5 minutes (AUTO_UPDATE=off in
@@ -6970,13 +6974,64 @@ def last_said(s, limit=240):
 
 # ------------------------------------------------------------------ update
 
+# ---- a packaged amarchy
+#
+# amarchy runs from a git checkout (what install.sh links), or from a package
+# (packaging/arch: /usr/share/amarchy, read only, no .git, its commit in
+# .version, /usr/bin/amarchy). A package updates with your packages (pacman,
+# yay), never by itself: `amarchy update` says so, and the timer only checks
+# Claude Code. `amarchy setup` is install.sh there (your own part: the timers,
+# the skill, Omarchy's pieces), run as you.
+
+def packaged():
+    """The package amarchy is installed by ("amarchy-git"), or None when it
+    runs from a git checkout."""
+    root = Path(SELF).parent.parent
+    if (root / ".git").exists():
+        return None
+    if shutil.which("pacman"):
+        r = sh("pacman", "-Qqo", SELF)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip().splitlines()[0]
+    return "a package"
+
+
+def cmd_setup(args):
+    """`amarchy setup [install.sh's options]`: install.sh of the amarchy
+    that runs, as you (on a package, the part that's yours)."""
+    script = Path(SELF).parent.parent / "install.sh"
+    if not script.is_file():
+        return fail(f"no install.sh beside this amarchy ({script})")
+    if os.geteuid() == 0:
+        return fail("run amarchy setup as yourself, not root: it sets amarchy up for your user")
+    os.execv(str(script), [str(script), *args])
+
+
 def self_update():
     """Bring amarchy here up to origin's main (`amarchy update`, which a
     timer runs every few minutes). Only when amarchy runs from a checkout of
     main with nothing uncommitted (not a session's worktree, not work in
     progress): pull it and run its install.sh, as you would. Says what it
-    did, or why it didn't; "not updated: ..." when it couldn't."""
+    did, or why it didn't; "not updated: ..." when it couldn't. A package
+    isn't: it updates with your packages."""
     repo = Path(SELF).parent.parent
+    pkg = packaged()
+    if pkg:
+        # Your packages brought a new one: your part of it set up again (the
+        # timers, the skill, Omarchy's pieces, the node's service), as an
+        # update from git does.
+        try:
+            now, was = (repo / ".version").read_text().strip(), (STATE / "setup-version").read_text().strip()
+        except OSError:
+            now, was = None, None
+        if now and was and now != was:
+            r = subprocess.run([str(repo / "install.sh")], capture_output=True, text=True, env=clean_env(),
+                               stdin=subprocess.DEVNULL, timeout=600)
+            if r.returncode:
+                return f"not updated: {pkg} is new ({now}), but setting it up again failed: " \
+                       f"{(r.stderr or r.stdout).strip().splitlines()[-1:]}"
+            return f"set up again for {pkg} {now} (was {was})"
+        return f"installed by {pkg}: it updates with your packages (pacman -Syu, or your AUR helper)"
     env = {**clean_env(), "GIT_TERMINAL_PROMPT": "0"}
 
     def git(*args):
@@ -7104,7 +7159,7 @@ def cmd_update(args):
         except OSError:
             return 0 if auto else fail("already updating")
         said = self_update()
-    if not (auto and said == "up to date"):
+    if not (auto and (said == "up to date" or said.startswith("installed by"))):
         print(f"amarchy: {said}", file=sys.stderr if said.startswith("not updated") else sys.stdout)
     return 1 if said.startswith("not updated") else 0
 
@@ -8226,6 +8281,9 @@ PUSH_GONE = 200                 # ended subscriptions remembered, so a device th
 def push_device(sub):
     """A device in a log line: what it is (its browser's name for itself, cut
     short) and whose push service it's on."""
+    if isinstance(sub.get("app"), dict):      # a phone app (see "the phone apps")
+        host = urllib.parse.urlsplit(str(sub.get("endpoint") or "")).netloc
+        return f"{'iPhone' if sub['app'].get('platform') == 'ios' else 'Android'} app ({host})"
     ua = str(sub.get("device") or "")
     system = next((name for mark, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"),
                                            ("Macintosh", "Mac"), ("Windows", "Windows"), ("Linux", "Linux"))
@@ -8254,10 +8312,11 @@ def push_gone():
     return [e for e in gone if isinstance(e, str)] if isinstance(gone, list) else []
 
 
-def push_send(sub, payload):
+def push_send(sub, payload, topic=None):
     """Send one notification: True if the push service took it, False if
     that phone is gone for good (its subscription ended), None on any other
-    failure (it may work next time)."""
+    failure (it may work next time). topic: RFC 8030's Topic (a newer one
+    with the same replaces it on the way)."""
     import urllib.error
     import urllib.request
     endpoint = sub["endpoint"]
@@ -8266,11 +8325,14 @@ def push_send(sub, payload):
     head = b64u(b'{"typ":"JWT","alg":"ES256"}') + "." + b64u(json.dumps(claims).encode())
     key = app_key()
     jwt = head + "." + b64u(es256(key, head.encode()))
-    body = push_encrypt(sub["keys"], json.dumps(payload).encode())
-    req = urllib.request.Request(endpoint, data=body, method="POST", headers={
-        "TTL": "86400", "Urgency": "high", "Content-Encoding": "aes128gcm",
-        "Content-Type": "application/octet-stream",
-        "Authorization": f"vapid t={jwt}, k={app_public()}"})
+    data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+    body = push_encrypt(sub["keys"], data)
+    headers = {"TTL": "86400", "Urgency": "high", "Content-Encoding": "aes128gcm",
+               "Content-Type": "application/octet-stream",
+               "Authorization": f"vapid t={jwt}, k={app_public()}"}
+    if topic:
+        headers["Topic"] = topic
+    req = urllib.request.Request(endpoint, data=body, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20):
             return True
@@ -8293,10 +8355,14 @@ def push_all(payload, desktop=None):
     except OSError as e:
         print(f"amarchy app: couldn't keep a notice for the desktop apps: {e}", file=sys.stderr)
     payload = json.loads(mask_secrets(json.dumps(payload)))
+    extra = json.loads(mask_secrets(json.dumps(desktop))) if desktop else None
     sent, gone = 0, set()
     for sub in app_subscriptions():
         try:
-            ok = push_send(sub, payload)
+            if isinstance(sub.get("app"), dict):     # a phone app's: more, through the relay (see "the phone apps")
+                ok = push_send(sub, phone_payload(payload, extra, sub), topic=push_topic(payload.get("tag")))
+            else:
+                ok = push_send(sub, payload)
         except (OSError, KeyError, ValueError) as e:
             print(f"amarchy app: couldn't send a notification: {e}", file=sys.stderr)
             ok = None
@@ -8314,6 +8380,73 @@ def push_all(payload, desktop=None):
             finally:
                 os.umask(old)
     return sent + desktops_listening()
+
+
+# ---- the phone apps (track G; docs/plan-omarchy-and-machines.md, "The phone
+# apps and the push relay"; phone/). A phone app is a subscription as a
+# browser's, whose push service is amarchy's relay (relay/): it forwards the
+# encrypted notification to Apple's or Google's push, and only the phone can
+# read it. The app's page sends it with "app" (what the phone app is), kept
+# with the address it was sent to ("server"). Its notifications carry what
+# the desktop app's notices do (the chat, its chime, its buttons) and where
+# the buttons go, cut to what Apple's and Google's push take, with a Topic
+# so a newer one for a chat replaces the older on the way.
+
+PHONE_MAX = 2700            # bytes of a phone app's notification as JSON (the relay takes 2,900, encrypted)
+PHONE_PLATFORMS = ("ios", "android")
+PHONE_KEEP = ("session", "sound", "actions")    # what of a desktop notice a phone app's notification carries too
+
+
+def phone_app(data):
+    """What /api/push's "app" says of a phone app, checked:
+    {platform, version, device}, or None (not a phone app's, or not one)."""
+    if not isinstance(data, dict) or data.get("platform") not in PHONE_PLATFORMS:
+        return None
+    clean = lambda v, n: re.sub(r"[\x00-\x1f\x7f]", "", v)[:n] if isinstance(v, str) else ""
+    return {"platform": data["platform"], "version": clean(data.get("version"), 40), "device": clean(data.get("device"), 80)}
+
+
+def push_topic(tag):
+    """RFC 8030's Topic for a notification's tag (its chat): the first 16
+    bytes of its SHA-256, base64url (22 of the 32 characters a Topic may
+    have). Nothing of the chat's name in it: the relay sees topics."""
+    return b64u(hashlib.sha256(tag.encode()).digest()[:16]) if isinstance(tag, str) and tag else None
+
+
+def phone_payload(payload, extra, sub):
+    """A phone app's notification, as JSON bytes of PHONE_MAX at most: the
+    browser's, plus the desktop notice's chat, chime and buttons (extra) and
+    the address its buttons go to. Too long: its body cut first (at a word,
+    with "…"), then its buttons and its picture go, then its title is cut."""
+    out = {**payload, **{k: v for k, v in (extra or {}).items() if k in PHONE_KEEP and v not in (None, [])},
+           "server": sub.get("server") or ""}
+    enc = lambda p: json.dumps(p, ensure_ascii=False, separators=(",", ":")).encode()
+    if len(enc(out)) <= PHONE_MAX:
+        return enc(out)
+
+    def cut(field):
+        text = str(out.get(field) or "")
+        lo, hi = 0, len(text)           # the longest cut of it that fits
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if len(enc({**out, field: text[:mid].rstrip() + "…"})) <= PHONE_MAX:
+                lo = mid
+            else:
+                hi = mid - 1
+        short = text[:lo]
+        if " " in short[-40:] and lo < len(text):
+            short = short[:short.rstrip().rfind(" ")]
+        out[field] = short.rstrip() + "…" if lo < len(text) else text
+    cut("body")
+    for field in ("actions", "icon", "sound"):
+        if len(enc(out)) > PHONE_MAX:
+            out.pop(field, None)
+    if len(enc(out)) > PHONE_MAX:
+        cut("title")
+    if len(enc(out)) > PHONE_MAX:       # (only an address or a tag that long: the essentials alone)
+        out = {k: out[k] for k in ("title", "tag", "url", "server") if k in out}
+        out["title"] = str(out.get("title") or "")[:200]
+    return enc(out)
 
 
 # ---- the desktop app's notices (track B; docs/plan-omarchy-and-machines.md,
@@ -14270,8 +14403,15 @@ _version_memo = {}
 
 
 def amarchy_version():
-    """The git commit amarchy runs from (short), or "" when it isn't a checkout."""
+    """The git commit amarchy runs from (short): its checkout's, or the one a
+    package was built from (its .version, see "a packaged amarchy"); "" when
+    it's neither."""
     root = Path(SELF).parent.parent
+    if not (root / ".git").exists():
+        try:
+            return (root / ".version").read_text().strip()[:40]
+        except OSError:
+            return ""
     try:
         head = (root / ".git").stat().st_mtime_ns if (root / ".git").is_dir() else os.stat(SELF).st_mtime_ns
     except OSError:
@@ -19672,7 +19812,11 @@ def app_handler(st, users, address):
 
         def push(self, data):
             if self.path == "/api/push/test":
-                n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+                # The desktop apps ring your chime with it, as with a chat's
+                # (a phone's rings with its own sound).
+                chime = sound_name()
+                n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"},
+                             {"sound": chime} if chime != "off" else None)
                 return self.send(200, {"sent": n})
             endpoint = data.get("endpoint")
             if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
@@ -19695,6 +19839,12 @@ def app_handler(st, users, address):
                 return self.error(400, "not a push subscription")
             sub = {"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]},
                    "added": int(time.time()), "device": str(self.headers.get("User-Agent", ""))[:200]}
+            phone = phone_app(data.get("app"))      # a phone app's (see "the phone apps"): where its buttons go
+            if phone:
+                host = self.headers.get("Host", "")
+                if self.via != "tailscale" or not re.fullmatch(r"[A-Za-z0-9.-]+(:\d{1,5})?", host):
+                    return self.error(400, "a phone app registers through its machine's address on the tailnet")
+                sub.update(app=phone, server=f"https://{host}")
             if not any(s["endpoint"] == endpoint for s in app_subscriptions()):
                 push_log("on", sub)
             app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint] + [sub])
@@ -24097,6 +24247,7 @@ OPTIONS = {
     "tailscale": ({"--json", "--no-open"}, set(), set()),
     "ghostty": (set(), set(), set()),
     "key": (set(), set(), set()),
+    "setup": None,
     "bar": ({"--follow"}, set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
@@ -24282,6 +24433,8 @@ def main(argv):
         return cmd_ghostty(args)
     elif cmd == "key":
         return cmd_key(args)
+    elif cmd == "setup":
+        return cmd_setup(args)
     elif cmd == "open" and len(args) <= 1:
         return cmd_open(args)
     elif cmd == "bar" and not [a for a in args if a != "--follow"]:

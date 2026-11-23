@@ -34,8 +34,11 @@ go), the machine and its GPU driver, and everything GTK, WebKit and
 GStreamer write to stderr, a panic too. Readable without a terminal open.
 
 - **A start never does nothing.** A second start hands its arguments to the
-  running one and ends at once; the running one takes them up on its
-  window's thread, and makes its window again if it's gone.
+  running one and ends at once (asking GStreamer nothing, logging only that
+  it started); the running one takes them up on its window's thread, and
+  makes its window again if it's gone. One it starts in its place
+  (`--restart`, the watchdog) writes its stderr where this one's went, never
+  into this one's pipe, which ends with it.
 - **Its page's process crashes**: the page loads again, and the log says
   why, by what that process wrote last. GStreamer's words before it: a sound
   or a video ended it (below), so its page loads no media from then on and
@@ -91,9 +94,9 @@ python3 test/sound-test.py                          # GStreamer without its plug
                                                     # once; installed: it starts again; a sound's crash
                                                     # isn't blamed on the GPU
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
-python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
-                                                    # built anyway without the sounds' and mic's, mise's
-                                                    # Rust, why
+python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404,
+                                                    # a system update half done): built anyway without
+                                                    # the sounds' and mic's, mise's Rust, why
 python3 test/compare.py                             # the window next to Chromium, phone and wide: the
                                                     # same layout (boxes to 3 px), side by side pictures
 ```

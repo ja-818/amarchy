@@ -1,8 +1,10 @@
 // The desktop app's own page: it asks the app (status) what's going on and
 // shows that; a machine picked, an address typed or Try again go back to it.
+// The phone apps show this same page (phone/: they set window.amarchyShell,
+// whose invoke takes the same commands).
 "use strict";
 
-const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+const invoke = (cmd, args) => (window.amarchyShell || window.__TAURI_INTERNALS__).invoke(cmd, args || {});
 const $ = (id) => document.getElementById(id);
 let shown = "";
 
