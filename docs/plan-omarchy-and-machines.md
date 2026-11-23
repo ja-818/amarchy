@@ -324,9 +324,15 @@ and tell the other tracks.
   machine's name, else `next=/%23/s/<machine>:<id>`; on a server's address,
   `/#/s/<id>` when it's that server's chat, else `/#/s/<machine>:<id>`.
 - **The page knows it's in the desktop app**: `window.amarchyDesktop`
-  (`{"version", "platform"}`), set before the app's scripts run. There the
+  (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
-  natively, window closed or not.
+  natively, window closed or not. `omarchy`: the window is on an Omarchy
+  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  marked `on-omarchy` before the page is drawn, and theme.css, when the look
+  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
+  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
+  the window, which Hyprland makes see-through as the terminals
+  (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,
   `amarchy notify`, Settings' test) is also kept for the desktop apps, and
@@ -521,7 +527,11 @@ reopen, Super+Shift+A as the key, Where cloning a project first).
 In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
 and the phone apps (G) last. Started 2026-11-22: D in the `amarchy-machines`
 chat, E in `amarchy-move-chat`, H in `amarchy-desktop-app` once its fixes are
-in. I and F wait on Julian's OK (publishing, spending).
+in. E and H shipped on 2026-11-22. Overnight (Julian's go: "everything shipped"):
+F in `amarchy-cloud-machines`, G in `amarchy-phone-apps`, I prepared in
+`amarchy-omarchy-home`. What needs his accounts or money (a provider token, the
+AUR and omarchy-pkgs, signing and the stores, the relay's host) is prepared to
+the last step and left for him.
 
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
@@ -530,7 +540,12 @@ synced, last change wins per item; works with any machine off.
 **E. Move a chat** (after A): "Move to <machine>" in a chat's menu. Commit
 (work in progress) and push the branch, make the worktree there from it, copy
 Claude's conversation file (same `$HOME` and `~/Work` layout), resume; its card
-keeps its place. Only after Claude's current step ends.
+keeps its place. Only after Claude's current step ends. **Shipped 2026-11-22**
+(`amarchy move`, the contract's "Moving a chat"; `test/move.py`,
+`test/move-view.js`), and moved for real between `amarchy` and `ja` both ways,
+its Claude remembering each time. `ja`'s home is `/home/julian`, not
+`/home/ja`: each machine puts the worktree and the conversation under its own
+home, so the layout only has to match from `~` down.
 
 **F. A cloud machine in one click** (after A; Julian's OK to spend): Settings →
 Machines → "Add a cloud machine": provider (Hetzner, DigitalOcean, Hostinger),

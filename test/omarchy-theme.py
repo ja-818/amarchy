@@ -13,7 +13,8 @@
 - picked (`amarchy theme omarchy-live`), Omarchy's font comes with it;
 - sent to the machine it's paired with (PUT /api/peer/look, a real second
   amarchy server): there in the app's Look and its theme.css, with its
-  wallpaper served, and again when the desktop's theme changes; refused from a
+  wallpaper served (and not drawn again in a window on the Omarchy desktop,
+  html.on-omarchy), and again when the desktop's theme changes; refused from a
   page, with a wrong key, for another theme's name, with files it doesn't
   name, too big.
 
@@ -303,6 +304,17 @@ def peer_test(base, desk):
         url = next((part.split('"')[1] for part in css.split("--wallpaper: url(")[1:2]), "")
         code, h, pic = box.ask("GET", url, raw=True)
         check("its wallpaper served", code == 200 and (pic[:4] == b"RIFF" or pic[:3] == b"\xff\xd8\xff"), (url, code))
+        # The desktop app's window on an Omarchy desktop (html.on-omarchy): the
+        # desktop's own wallpaper is behind it, so none drawn; only for this look's own.
+        blank = "html.on-omarchy { --wallpaper: none; --wallpaper-wide: none; }"
+        check("in a window on the Omarchy desktop, its wallpaper not drawn again", blank in css, css[-300:])
+        for change, why in (({"wallpaper": "none"}, "no wallpaper"), ({"theme": "tokyo-night", "wallpaper": "theme"},
+                                                                       "another theme's wallpaper")):
+            box.ask("POST", "/api/look", change)
+            code, _, other = box.ask("GET", "/theme.css", raw=True)
+            check(f"{why}: nothing taken away there", code == 200 and blank not in other.decode(), other.decode()[-300:])
+        code, _, look = box.ask("POST", "/api/look", {"theme": "omarchy-live", "wallpaper": "theme"})
+        check("Omarchy (live) worn again", code == 200 and look.get("theme") == "omarchy-live", (code, look.get("theme")))
 
         desk.theme("gruvbox")
         r = desk.amarchy("theme", "--omarchy")

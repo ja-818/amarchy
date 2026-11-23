@@ -10,6 +10,7 @@ mod journal;
 mod links;
 mod notify;
 mod platform;
+mod sound;
 mod tailnet;
 mod target;
 mod tray;
@@ -248,6 +249,10 @@ fn main() {
             find(&handle);
             notify::follow(&handle);
             watchdog(&handle);
+            // What its page can't play here (sound.rs): said once, and
+            // watched for until it can.
+            sound::tell(&handle);
+            sound::watch(&handle);
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -307,11 +312,7 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
         // one it wore, else Omarchy's default.
         .background_color(saved_background())
         .visible(false)
-        .initialization_script(format!(
-            "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?} }});",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS
-        ))
+        .initialization_script(init_script(platform::omarchy()))
         .on_navigation(move |u| {
             if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
                 return true;
@@ -346,6 +347,26 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
         win.show()?;
     }
     Ok(win)
+}
+
+/// What every page in the window knows before its own scripts run: that it's
+/// the desktop app (window.amarchyDesktop), and whether the window is on an
+/// Omarchy desktop (platform::omarchy). There <html> is marked on-omarchy
+/// from the start, before the page is first drawn, so a wallpaper it
+/// wouldn't draw (app.css) never flashes.
+fn init_script(omarchy: bool) -> String {
+    let mut js = format!(
+        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy} }});",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
+    if omarchy {
+        js.push_str(
+            "(() => { const on = () => { const r = document.documentElement; if (r) r.classList.add('on-omarchy'); return !!r; }; \
+               if (!on()) new MutationObserver((_, o) => { if (on()) o.disconnect(); }).observe(document, { childList: true }); })();",
+        );
+    }
+    js
 }
 
 /// A file name in dir that isn't taken: name, name (2), ...
@@ -548,7 +569,7 @@ fn again(app: &AppHandle, argv: &[String]) {
 
 /// Starts again on the build installed now (the one that asked, argv0):
 /// hidden if it was, on the chat it was on.
-fn restart(app: &AppHandle, exe: Option<&str>) {
+pub fn restart(app: &AppHandle, exe: Option<&str>) {
     let exe = exe
         .filter(|e| std::path::Path::new(e).is_absolute() && std::path::Path::new(e).is_file())
         .map(std::path::PathBuf::from)
@@ -1015,5 +1036,13 @@ mod tests {
         let r = args(&["x".into(), "--after".into(), "12".into(), "--route".into(), "#/s/a".into()]).unwrap();
         assert_eq!((r.after, r.route.as_deref()), (Some(12), Some("#/s/a")));
         assert_eq!(args(&["x".into(), "--route".into(), "javascript:x".into()]).unwrap().route, None);
+    }
+
+    #[test]
+    fn page_told() {
+        let off = init_script(false);
+        assert!(off.contains("omarchy: false") && !off.contains("on-omarchy"));
+        let on = init_script(true);
+        assert!(on.contains("omarchy: true") && on.contains("classList.add('on-omarchy')"));
     }
 }

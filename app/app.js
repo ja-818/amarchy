@@ -406,6 +406,10 @@ function seenNow(id) {
 // plays the chime again instead of your music. Web Audio isn't media to the
 // system. A sound it can't decode (Safari and an .oga) plays in an element
 // let go once it ends, so it doesn't stay there either.
+//
+// The desktop app on a computer whose web view can't play sounds (Linux:
+// GStreamer without its plugins, where a media element would end the page)
+// plays them itself: window.amarchyDesktopMedia (desktop/src/sound.rs).
 
 const sounds = { ctx: null, buffers: new Map() };
 
@@ -424,6 +428,8 @@ function soundContext() {
 // src: the sound's address; rate: faster and higher (1 as it is); volume: 0 to 1.
 // Returns a stop().
 function playSound(src, { rate = 1, volume = 1 } = {}) {
+  const lacks = window.amarchyDesktopMedia;
+  if (lacks && !lacks.sounds) return lacks.play(src, { rate, volume });
   const ctx = soundContext();
   let stopped = false, node = null, el = null;
   const stop = () => {
@@ -2420,6 +2426,20 @@ function engineSettings() {
   return problem ? [h("p", { class: "note" }, `Amarchy's check of the chat with this Claude Code failed: ${problem}.`)] : [];
 }
 
+// The desktop app on a computer that lacks GStreamer's plugins (sound.rs):
+// what that means here, and the command that installs them.
+function mediaLacking() {
+  const l = window.amarchyDesktopMedia;
+  if (!l) return [];
+  // Turned off by a crash, nothing found missing: no command to give.
+  if (!l.packages) return [h("p", { class: "note", "data-lacks": "" }, "The app plays its sounds itself here: playing one ended its page.")];
+  const [it, there] = l.packages.includes(" and ") ? ["them", "they're"] : ["it", "it's"];
+  const means = !l.sounds && l.native ? `The app plays its sounds itself meanwhile${l.dictation ? "" : `; dictation waits on ${it}`}.`
+    : !l.sounds ? `No sounds${l.dictation ? "" : " or dictation"} until ${there} installed.` : `Dictation waits on ${it}.`;
+  return [h("p", { class: "note", "data-lacks": l.packages }, `This computer lacks ${l.packages}. ${means}`),
+    h("button", { class: "control wide", onclick: () => copyText(l.fix).then(() => toast(`Copied: ${l.fix}`)) }, "Copy the command")];
+}
+
 async function openSettings() {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
@@ -2487,6 +2507,7 @@ async function openSettings() {
       h("p", {}, desktopApp ? "Rings with this desktop app's notifications, its window closed too."
                  : app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
+      ...mediaLacking(),
       h("div", { class: "section" }, "Agents"),
       ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),
         h("span", {}, `${x.assistant_name || "Assistant"}: name, picture, chime…`))),
@@ -2686,6 +2707,10 @@ async function openLook() {
       h("div", { class: "section" }, "Wallpaper"),
       wallGrid(walls),
       fetching,
+      // The desktop app on an Omarchy desktop, wearing its look live: the
+      // desktop's own wallpaper is behind the window (theme.css, app.css).
+      desktopApp && desktopApp.omarchy && worn.key === "omarchy-live" && wall() === "theme"
+        ? h("p", {}, "In this window, your desktop's own wallpaper, behind it, as behind your terminals.") : null,
       h("p", {}, (worn.backgrounds || []).length
         ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
           (info.own ? "the picture you chose." : "choose a picture.")

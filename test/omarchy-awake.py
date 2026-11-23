@@ -180,18 +180,30 @@ def real_test(base):
     s = Server(home, env)
 
     def listed():
+        """The idle locks logind lists that this test's server holds (its
+        systemd-inhibit's parent): another amarchy on this machine may hold
+        one of its own."""
         out = subprocess.run(["systemd-inhibit", "--list", "--no-pager"], capture_output=True, text=True).stdout
-        return [l for l in out.splitlines() if l.split()[:1] == ["amarchy"] and str(s.p.pid) not in l
-                and "A chat in amarchy is working" in l]
-    before = len(listed())
+        mine = []
+        for line in out.splitlines():
+            cols = line.split()
+            if cols[:1] != ["amarchy"] or len(cols) < 4 or not cols[3].isdigit():
+                continue
+            try:
+                ppid = Path(f"/proc/{cols[3]}/stat").read_text().rsplit(")", 1)[1].split()[1]
+            except (OSError, IndexError):
+                continue
+            if ppid == str(s.p.pid):
+                mine.append(line)
+        return mine
     s.chats("working")
     settle()
     now = listed()
-    check("logind lists amarchy's idle lock while a chat works", len(now) == before + 1 and " idle " in f" {now[-1]} ",
-          now)
+    check("logind lists amarchy's idle lock while a chat works", len(now) == 1 and " idle " in f" {now[0]} "
+          and "A chat in amarchy is working" in now[0], now)
     s.chats("idle")
     settle()
-    check("and not after", len(listed()) == before, listed())
+    check("and not after", listed() == [], listed())
     s.p.kill()
 
 

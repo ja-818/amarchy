@@ -312,7 +312,7 @@ const LAYOUTS = {
       await press("Move to beta");
       const there = await until(() => p.evaluate((key) => { const c = (app.session && app.session.chat) || desk.chat; return c && c.id === key && c.row && c.row.machine === "beta" ? location.hash : null; }, key), 60000);
       check(where, !!there && decodeURIComponent(there) === `#/s/${key}`, `the chat open is beta's now (${there && decodeURIComponent(there)})`);
-      const head = await p.evaluate(() => { const h = document.querySelector(".chat-head .ui-machine, .desk-head .ui-machine"); return h ? h.textContent : ""; });
+      const head = await p.evaluate(() => { const h = document.querySelector(".chat-head .ui-machine, .desk-head .ui-machine"); return h ? h.dataset.machine : ""; });
       check(where, head === "beta", `its head says beta (${head})`);
       const draft = await p.evaluate(() => { const c = (app.session && app.session.chat) || desk.chat; return c.input.value; });
       check(where, draft === "half a thought", `what was typed in its box went with it (${draft})`);
@@ -324,7 +324,7 @@ const LAYOUTS = {
       const mapped = before.map((id) => (id === sid ? key : id));
       check(where, !!after && JSON.stringify(after.filter((id) => mapped.includes(id))) === JSON.stringify(mapped.filter((id) => after.includes(id))),
             `its card keeps its place, beta's now (${JSON.stringify(before)} → ${JSON.stringify(after)})`);
-      const mark = await p.evaluate((sel) => { const c = document.querySelector(sel); return c ? (c.querySelector(".ui-machine") || {}).textContent : null; }, card(key));
+      const mark = await p.evaluate((sel) => { const c = document.querySelector(sel); return c ? ((c.querySelector(".ui-machine") || {}).dataset || {}).machine : null; }, card(key));
       check(where, mark === "beta", `its card says beta (${mark})`);
       await sleep(400);
       await p.screenshot({ path: path.join(SHOTS, `${where}-moved-board.png`) });

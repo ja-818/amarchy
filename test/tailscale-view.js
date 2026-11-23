@@ -82,6 +82,33 @@ elif args[:1] == ["up"]:
     save()
 `;
 
+// amarchy's own node (track H), as the CLI test fakes it: status, login, and
+// its cli (the fake tailscale above, beside it); running once the fake
+// systemctl has made its socket.
+const NODE = `#!/usr/bin/env python3
+import json, os, subprocess, sys
+home = os.environ["HOME"]
+sock = os.path.join(os.environ["XDG_STATE_HOME"], "amarchy/tailnet/tailscaled.sock")
+f = os.path.join(home, "ts.json")
+sc = json.load(open(f))
+args = sys.argv[1:]
+up = os.path.exists(sock)
+if args[:2] == ["status", "--json"]:
+    print(json.dumps({"running": up, "state": sc["state"] if up else "off", "words": "the node"}))
+elif args[:1] == ["login"]:
+    if not up: print("amarchy's own node isn't running"); sys.exit(1)
+    sc["auth_url"] = "https://login.tailscale.com/a/own-node-view-0000"; json.dump(sc, open(f, "w"))
+    print(sc["auth_url"])
+elif args[:1] == ["cli"]:
+    rest = args[3:] if args[1:2] == ["--state"] else args[1:]
+    sys.exit(subprocess.run([os.path.join(os.path.dirname(sys.argv[0]), "tailscale-for-node"), *rest]).returncode)
+`;
+const SYSTEMCTL = `#!/bin/sh
+case "$*" in *"enable --now amarchy-tailnet.service"*)
+  mkdir -p "$XDG_STATE_HOME/amarchy/tailnet" && : > "$XDG_STATE_HOME/amarchy/tailnet/tailscaled.sock" ;;
+esac
+`;
+
 const failures = [];
 function check(where, ok, what) {
   console.log(`  ${ok ? "ok  " : "FAIL"} ${where}: ${what}`);
@@ -96,10 +123,10 @@ function freePort() {
   });
 }
 
-function startServer(port, home, fakes) {
+function startServer(port, home, fakes, extra = {}) {
   return new Promise((ok, no) => {
     const py = spawn("python3", ["-c", SHIM, BIN, String(port), home], { stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PATH: `${fakes}:${process.env.PATH}`, AMARCHY_HOST_NAME: "desk",
+      env: { ...process.env, ...extra, PATH: `${fakes}:${process.env.PATH}`, AMARCHY_HOST_NAME: "desk",
              AMARCHY_WORK: path.join(home, "Work") } });
     let err = "";
     py.stderr.on("data", (d) => { err += d; });
@@ -243,6 +270,41 @@ async function run(browser, port, layout, home, local) {
   await ctx.close();
 }
 
+// A computer without the system's Tailscale (TAILSCALE=own sets it aside):
+// amarchy's own node, built but off: Start it, then the sign-in link.
+async function runOwn(browser, port, layout, home) {
+  const where = `${layout} (own node)`;
+  fs.rmSync(path.join(home, "state", "amarchy", "tailnet"), { recursive: true, force: true });
+  fs.writeFileSync(path.join(home, "ts.json"), JSON.stringify({ ...READY, state: "NeedsLogin" }));
+  const ctx = await browser.newContext({ ...LAYOUTS[layout], baseURL: `http://127.0.0.1:${port}` });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.waitForFunction(() => typeof tailscaleSheet === "function" && document.readyState === "complete");
+  await page.evaluate(() => tailscaleSheet());
+  const start = page.locator(".sheet-back .control", { hasText: "Start it" });
+  await start.waitFor({ timeout: 10000 }).catch(() => {});
+  const t = await page.locator(".sheet-back").last().innerText();
+  check(where, /amarchy's own node: not running/.test(t) && t.includes("Start amarchy's own Tailscale node"),
+    `off: amarchy's own node, Start it (${t.replace(/\n/g, " | ").slice(0, 140)})`);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-own-start.png`) });
+  await start.click();
+  const get = page.locator(".sheet-back .control", { hasText: "Get the sign-in link" });
+  await get.waitFor({ timeout: 15000 }).catch(() => {});
+  check(where, await get.isVisible().catch(() => false), "started: then its sign-in");
+  await get.click();
+  const link = page.locator(".sheet-back a.control", { hasText: "Open the sign-in page" });
+  await link.waitFor({ timeout: 15000 }).catch(() => {});
+  check(where, (await link.getAttribute("href").catch(() => "")) === "https://login.tailscale.com/a/own-node-view-0000",
+    "its sign-in link, from amarchy-tailnet login");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(SHOTS, `${layout}-own-login.png`) });
+  check(where, !errors.length, `no page errors (${errors.join("; ")})`);
+  await ctx.close();
+}
+
 (async () => {
   const pw = loadPlaywright();
   fs.mkdirSync(SHOTS, { recursive: true });
@@ -253,15 +315,29 @@ async function run(browser, port, layout, home, local) {
   fs.writeFileSync(path.join(fakes, "tailscale"), FAKE, { mode: 0o755 });
   const port = await freePort();
   const server = await startServer(port, home, fakes);
+  // The other computer: amarchy's own node, the system's Tailscale set aside.
+  const home2 = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "tailscale-own-"));
+  fs.mkdirSync(path.join(home2, "Work"));
+  fs.mkdirSync(path.join(home2, ".local", "bin"), { recursive: true });
+  fs.writeFileSync(path.join(home2, ".local", "bin", "amarchy-tailnet"), NODE, { mode: 0o755 });
+  fs.writeFileSync(path.join(home2, ".local", "bin", "tailscale-for-node"), FAKE, { mode: 0o755 });
+  const fakes2 = path.join(home2, "bin");
+  fs.mkdirSync(fakes2);
+  fs.writeFileSync(path.join(fakes2, "systemctl"), SYSTEMCTL, { mode: 0o755 });
+  const port2 = await freePort();
+  const server2 = await startServer(port2, home2, fakes2, { AMARCHY_HOST_TAILSCALE: "own" });
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
   try {
     for (const layout of Object.keys(LAYOUTS)) {
       for (const local of [false, true]) await run(browser, port, layout, home, local).catch((e) => check(layout, false, `crashed: ${e.stack}`));
+      await runOwn(browser, port2, layout, home2).catch((e) => check(layout, false, `crashed: ${e.stack}`));
     }
   } finally {
     await browser.close();
     server.kill();
+    server2.kill();
     fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home2, { recursive: true, force: true });
   }
   console.log(`\nscreenshots: ${SHOTS}`);
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : "\nAll passed.");

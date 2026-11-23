@@ -191,6 +191,14 @@ class Dictate {
 
   // ---- written down on the host
   async host(r) {
+    // The desktop app on a computer without GStreamer's plugins: no microphone to start.
+    const lacks = window.amarchyDesktopMedia;
+    if (lacks && !lacks.dictation) {
+      this.done(r);
+      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: this computer lacks ${lacks.packages}` });
+      toast(`Dictation here needs ${lacks.packages}`, { label: "Copy the command", act: () => copyText(lacks.fix).then(() => toast(`Copied: ${lacks.fix}`)) });
+      return;
+    }
     this.say("Starting the microphone…");
     const queue = [];
     let ws = null;
