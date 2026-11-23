@@ -113,6 +113,7 @@ internal object Push {
      * What doesn't get through is tried again the next time the app opens.
      */
     fun refresh(context: Context, token: String) {
+        if (!built) return
         val keys = PushKeys.load(context) ?: return
         val kept = Kept(context)
         for (sub in kept.subscriptions.filter { it.token != token }) {

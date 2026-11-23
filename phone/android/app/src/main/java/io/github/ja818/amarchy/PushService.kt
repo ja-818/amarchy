@@ -18,14 +18,18 @@ class PushService : FirebaseMessagingService() {
     }
 
     private fun read(p: String): Notice? {
-        val keys = PushKeys.load(this) ?: return null
         return try {
+            val keys = PushKeys.load(this) ?: return null
             Notice.parse(WebPush.decrypt(B64.decode(p), keys))
         } catch (e: GeneralSecurityException) {
             Log.w(TAG, "a notification that doesn't decrypt with this phone's keys", e)
             null
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "a notification that isn't a record: ${e.message}")
+            null
+        } catch (e: RuntimeException) {
+            // Whatever else went wrong, it still shows (as "Open it to see").
+            Log.e(TAG, "a notification that couldn't be read", e)
             null
         }
     }
