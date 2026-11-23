@@ -69,8 +69,10 @@ pub struct Shell {
     status: Mutex<Status>,
     /// A chat asked for before the target was known.
     pending: Mutex<Option<Link>>,
-    /// Said once when the page is up (a machine just paired).
+    /// Said once when the page is up (a machine just paired), and whether
+    /// it's being said now.
     said: Mutex<Option<String>>,
+    saying: AtomicBool,
     /// Where the window was before --restart (its route), back there.
     route: Mutex<Option<String>>,
     quitting: AtomicBool,
@@ -167,6 +169,7 @@ fn main() {
         pending: Mutex::new(start.link.clone()),
         route: Mutex::new(start.route.clone()),
         said: Mutex::new(None),
+        saying: AtomicBool::new(false),
         quitting: AtomicBool::new(false),
         finding: AtomicBool::new(false),
     };
@@ -521,6 +524,9 @@ fn settle(app: &AppHandle, found: Found) {
                 return;
             }
             go(app, &target, link.as_ref());
+            if shell.said.lock().unwrap().is_some() {
+                say(app);
+            }
         }
         Found::Choose { machines } => {
             *shell.status.lock().unwrap() = Status::Choose { machines };
@@ -665,18 +671,52 @@ fn page_loaded(app: &AppHandle, url: &Url) {
         return;
     }
     keep_background(app);
-    if let Some(said) = app.state::<Shell>().said.lock().unwrap().take() {
-        if let Some(w) = main_window(app) {
-            // Once the app is up (its board read), in its own toast; what
-            // was said kept on the page (window.amarchyDesktopSaid).
-            let text = serde_json::to_string(&said).unwrap();
-            let _ = w.eval(format!(
-                "(function said(n) {{ if (typeof toast === 'function' && typeof app !== 'undefined' && app.view) \
-                   return setTimeout(() => {{ toast({text}); window.amarchyDesktopSaid = {text}; }}, 300); \
-                   if (n < 600) setTimeout(() => said(n + 1), 100); }})(0);"
-            ));
-        }
+    if app.state::<Shell>().said.lock().unwrap().is_some() {
+        say(app);
     }
+}
+
+/// What the window says once (a machine just paired), in the app's own
+/// toast when the app is up: kept until the page shows it, so a page that
+/// loads again meanwhile (its service worker's first start) doesn't lose it.
+/// What was said stays on the page (window.amarchyDesktopSaid).
+fn say(app: &AppHandle) {
+    let shell = app.state::<Shell>();
+    if shell.saying.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for _ in 0..240 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let Some(text) = app.state::<Shell>().said.lock().unwrap().clone() else { break };
+            let Some(w) = main_window(&app) else { break };
+            let t = serde_json::to_string(&text).unwrap();
+            let shown = format!(
+                "(() => {{ if (window.amarchyDesktopSaid === {t}) return true; \
+                   if (typeof toast !== 'function' || typeof app === 'undefined' || !app.view) return false; \
+                   toast({t}); window.amarchyDesktopSaid = {t}; return true; }})()"
+            );
+            if eval_true(&w, shown) {
+                *app.state::<Shell>().said.lock().unwrap() = None;
+                break;
+            }
+        }
+        app.state::<Shell>().saying.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Whether a script's value in the window is true (false if it doesn't answer).
+fn eval_true(w: &WebviewWindow, js: String) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if w.eval_with_callback(js, move |v| {
+        let _ = tx.send(v.trim() == "true");
+    })
+    .is_err()
+    {
+        return false;
+    }
+    rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or(false)
 }
 
 // ---- what the window's own page (dist/) asks
