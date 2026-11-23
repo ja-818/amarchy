@@ -896,6 +896,7 @@ function openList() {
   es.addEventListener("list", (e) => {
     app.view = boardIn(JSON.parse(e.data));
     aheadOn(app.view);
+    if (typeof dictationViewed === "function") dictationViewed();      // every mic as dictation stands now (dictate.js)
     movedFollow();
     app.online = true;
     app.failed = "";
@@ -1378,6 +1379,9 @@ async function micOpen(retry) {
   if (!mic.ctx) {
     mic.ctx = new AudioContext();
     mic.ready = mic.ctx.audioWorklet ? mic.ctx.audioWorklet.addModule("voice.js") : Promise.resolve();
+    // (A microphone refused at once closes the audio while voice.js still loads:
+    // that load's failure is nobody's then. Waited for below, it still fails there.)
+    mic.ready.catch(() => {});
   }
   const ctx = mic.ctx;
   ctx.resume().catch(() => {});

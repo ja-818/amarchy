@@ -97,6 +97,9 @@ def main():
     alpha, beta = tm.Machine("alpha"), tm.Machine("beta")
     for m in (alpha, beta):
         m.env["AMARCHY_DICTATE_SYSTEM"] = "off"     # no package's engine: only what's in its own state
+    # beta: a processor amarchy has no engine for, so no tap here fetches 770 MB
+    # (the first tap's fetch is test/mic-why-view.js's).
+    beta.env["AMARCHY_DICTATE_ARCH"] = "riscv64"
     (alpha.home / "state/amarchy/dictation").mkdir(parents=True)
     (alpha.home / "state/amarchy/dictation" / MODEL.name).symlink_to(MODEL)
     (alpha.home / "state/amarchy/dictation/transcribe.cpp").symlink_to(ENGINE)
