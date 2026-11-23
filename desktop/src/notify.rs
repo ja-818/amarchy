@@ -84,13 +84,20 @@ pub fn follow(app: &AppHandle) {
     });
 }
 
-fn agent(read: Option<Duration>) -> ureq::Agent {
+fn agent(read: Option<Duration>, t: &Target) -> ureq::Agent {
+    // A server on the tailnet, through amarchy's own Tailscale node when
+    // it's this computer's (the contract's "Tailscale inside the apps").
+    let proxy = match t {
+        Target::Remote { url, .. } => crate::tailnet::proxy_for(url).and_then(|p| ureq::Proxy::new(&p).ok()),
+        Target::Local { .. } => None,
+    };
     ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(10)))
         // A stream comes again every few minutes (picking up where it was):
         // a connection gone dead without a word ends that way too.
         .timeout_recv_body(read)
         .http_status_as_error(false)
+        .proxy(proxy)
         .build()
         .into()
 }
@@ -115,7 +122,7 @@ fn stream(app: &AppHandle, t: &Target) -> Result<(), String> {
     if last > 0 {
         url.query_pairs_mut().append_pair("after", &last.to_string());
     }
-    let req = authed(agent(Some(Duration::from_secs(300))).get(url.as_str()), app, t)
+    let req = authed(agent(Some(Duration::from_secs(300)), t).get(url.as_str()), app, t)
         .header("Accept", "text/event-stream");
     let res = req.call().map_err(|e| e.to_string())?;
     if res.status() != 200 {
@@ -239,7 +246,7 @@ pub fn act_on(app: &AppHandle, t: &Target, a: &Action) -> Result<(), String> {
     let origin = t.origin();
     let url = origin.join(a.path.trim_start_matches('/')).map_err(|e| e.to_string())?;
     let own = origin.origin().ascii_serialization();
-    let res = authed(agent(Some(Duration::from_secs(30))).post(url.as_str()), app, t)
+    let res = authed(agent(Some(Duration::from_secs(30)), t).post(url.as_str()), app, t)
         .header("Origin", &own)
         .header("Content-Type", "application/json")
         .send(serde_json::to_vec(&a.body).unwrap_or_default())
@@ -310,7 +317,7 @@ fn picture(app: &AppHandle, t: &Target, path: &str) -> Option<std::path::PathBuf
         return Some(file);
     }
     let url: Url = t.origin().join(path.trim_start_matches('/')).ok()?;
-    let res = authed(agent(Some(Duration::from_secs(20))).get(url.as_str()), app, t).call().ok()?;
+    let res = authed(agent(Some(Duration::from_secs(20)), t).get(url.as_str()), app, t).call().ok()?;
     if !res.status().is_success() {
         return None;
     }

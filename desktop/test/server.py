@@ -14,7 +14,8 @@
 # machine's own app server (who's asking checked for real: the desktop
 # app's local key and cookie; APP_PORT= in the host settings); else as a
 # server through Tailscale, its login and Origin given to every request.
-# --no-chats: an amarchy with no chats.
+# --no-chats: an amarchy with no chats. --address=<name>: the name it's
+# asked for at (a tailnet name, reached through a proxy), else 127.0.0.1.
 #
 # Dictation is set up on it, with a made-up speech model: what it hears is
 # written down as "heard <n> seconds" (the audio's length), so a test sees
@@ -43,6 +44,8 @@ pos = [a for a in sys.argv[1:] if not a.startswith("--")]
 port = int(pos[0])
 home = pos[1] if len(pos) > 1 else tempfile.mkdtemp(prefix="amarchy-desktop-test-")
 LOCAL, CHATS = "--local" in flags, "--no-chats" not in flags
+# --address=<name>: the name it's asked for at (a tailnet name, reached through a proxy).
+ADDRESS = next((f.split("=", 1)[1] for f in flags if f.startswith("--address=")), "127.0.0.1")
 os.makedirs(home, exist_ok=True)
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/.local/state", XDG_CONFIG_HOME=home + "/.config",
                   AMARCHY_WORK=home + "/Work", TMUX_TMPDIR=home + "/tmux")
@@ -132,7 +135,7 @@ am.dictate_status = lambda: {"ready": True, "lib": True, "model": True, "engine"
 
 st = am.AppState()
 st.transcriber = Model()
-Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")
+Handler = am.app_handler(st, ["tester@test"], ADDRESS)
 
 
 class Local(Handler):

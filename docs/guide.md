@@ -616,7 +616,8 @@ system's Tailscale, `install.sh` builds amarchy's own Tailscale node
 (`amarchy-tailnet`, on Tailscale's tsnet; Go builds it, offered with pacman or
 mise) and runs it as your user service `amarchy-tailnet.service`: a node of
 this computer's on your tailnet, nothing installed system-wide. Sign it in
-with `amarchy-tailnet login` (Tailscale's own sign-in page, in your browser).
+with `amarchy-tailnet login` (Tailscale's own sign-in page, in your browser),
+or the desktop app's **Sign in to Tailscale**.
 Then everything amarchy does with Tailscale works through it, unchanged: your
 phone and your other machines reach this computer's amarchy (`amarchy app on`
 serves it there, with your tailnet's HTTPS certificates), its chats'
@@ -661,6 +662,11 @@ window closed.
   (`amarchy machines add`) and opened, of several it asks which, once. When it
   finds nothing, or the one it opens doesn't answer, its window says why, takes
   an address, and has Try again.
+- **No Tailscale installed?** With amarchy's own Tailscale node (see
+  [Machines](#machines)), its window, its notices and their buttons reach your
+  server through that node, nothing else installed. Until the node is signed
+  in, its window says so, with **Sign in to Tailscale** (Tailscale's own page,
+  in your browser), and goes on by itself once you have.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
   in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
   A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
