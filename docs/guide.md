@@ -746,7 +746,8 @@ window closed.
   if its page crashed it loads again and the log says why (what the page
   wrote last; twice with no sign why, it draws without the GPU from then on;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
-  again by itself.
+  again by itself. What goes wrong in its page (an error, with where) is
+  in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 

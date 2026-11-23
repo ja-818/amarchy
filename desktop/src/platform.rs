@@ -265,9 +265,61 @@ mod linux {
                 });
             }
             media_script(&view);
+            page_errors(&view);
         });
         load_failures(win);
         process_ends(win);
+    }
+
+    /// What goes wrong in its page, in its log: an error nothing caught (a
+    /// click whose handler threw), a promise nothing caught, console.error.
+    /// Before the page's own scripts, each page it loads; at most 60 lines a
+    /// minute, so a page throwing in a loop can't fill it.
+    const PAGE_ERRORS: &str = r#"(() => {
+  if (window.__amarchyLog) return;
+  window.__amarchyLog = true;
+  const post = (kind, what) => {
+    try { window.webkit.messageHandlers.amarchyLog.postMessage(`${kind}: ${String(what).slice(0, 4000)}`); } catch (e) { /* not the app's */ }
+  };
+  const words = (x) => (x && x.stack) ? `${x.name || "Error"}: ${x.message}\n${x.stack}` : (x && typeof x === "object") ? (() => { try { return JSON.stringify(x); } catch (e) { return String(x); } })() : String(x);
+  addEventListener("error", (e) => {
+    if (e.target && e.target !== window && !(e instanceof ErrorEvent)) return;   // a picture or a script that didn't load: not the page's code
+    post("error", e.error ? words(e.error) : `${e.message} (${e.filename}:${e.lineno}:${e.colno})`);
+  }, true);
+  addEventListener("unhandledrejection", (e) => post("a promise nothing caught", words(e.reason)));
+  const said = console.error.bind(console);
+  console.error = (...a) => {
+    // Tauri's own complaint about a message to the app it couldn't read
+    // (wry hears every page message, this one's and amarchySound's too, as
+    // its IPC): not the page's error, and relaying it would make another.
+    if (a.length === 1 && typeof a[0] === "string" && a[0].startsWith("JSON error: ")) return said(...a);
+    const from = (new Error().stack || "").split("\n").slice(1, 4).join("\n");
+    post("console.error", a.map(words).join(" ") + (from ? `\n${from}` : ""));
+    said(...a);
+  };
+})();"#;
+
+    /// Its page's errors (PAGE_ERRORS) heard and written down, as "page: …".
+    fn page_errors(view: &webkit2gtk::WebView) {
+        use webkit2gtk::{UserContentInjectedFrames, UserContentManagerExt, UserScript, UserScriptInjectionTime, WebViewExt};
+        let Some(ucm) = view.user_content_manager() else { return };
+        ucm.register_script_message_handler("amarchyLog");
+        let budget = std::cell::Cell::new((std::time::Instant::now(), 0u32));
+        ucm.connect_script_message_received(Some("amarchyLog"), move |_, r| {
+            let (since, n) = budget.get();
+            let (since, n) = if since.elapsed() > Duration::from_secs(60) { (std::time::Instant::now(), 0) } else { (since, n) };
+            budget.set((since, n + 1));
+            if n == 60 {
+                log::warn!("page: more errors this minute, not written down");
+            }
+            if n >= 60 {
+                return;
+            }
+            if let Some(v) = r.js_value() {
+                log::warn!("page: {}", v.to_string().replace('\n', "\n    "));
+            }
+        });
+        ucm.add_script(&UserScript::new(PAGE_ERRORS, UserContentInjectedFrames::TopFrame, UserScriptInjectionTime::Start, &[], &[]));
     }
 
     thread_local! {

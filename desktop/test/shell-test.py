@@ -201,6 +201,55 @@ def listening(server, w, timeout=40):
     raise TimeoutError("the desktop app never listened for notices")
 
 
+def wait_for(test, timeout=30, every=0.3):
+    """test()'s first true value within timeout, else None."""
+    end = time.time() + timeout
+    while time.time() < end:
+        v = test()
+        if v:
+            return v
+        time.sleep(every)
+    return None
+
+
+CHAT_OPEN = ("!!app.session && !!document.querySelector('.chat-head')"
+             " && [...document.querySelectorAll('.chat-head')].some((e) => e.offsetParent !== null)")
+
+
+def opens_chats(w, server, how):
+    """On the board, a chat opens: by a click on its card, and by the keys
+    (j to its card, Enter); what's written in it is sent (Julian's M5: no
+    chat opened, by either). how: when (after a restart...)."""
+    def board():
+        w.js("location.hash = '#/'; 1")
+        return w.wait("!app.session && !!document.querySelector('.tcard[data-id] .today-go')", timeout=20)
+    board()
+    w.click_el(".tcard[data-id] .today-go")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a click on a chat opens it")
+    board()
+    w.js("document.activeElement && document.activeElement.blur(); 1")
+    for _ in range(8):
+        w.key("j")
+        time.sleep(0.25)
+        if w.js("!!document.activeElement && document.activeElement.matches('.today-go') && !!document.activeElement.closest('.tcard[data-id]')"):
+            break
+    w.key("Return")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: j to a chat and Enter open it too")
+    sid = w.js("app.session.id")
+    # Its address there already, the board shown (the view didn't follow
+    # it): a click on it opens it all the same.
+    board()
+    w.js(f"history.replaceState(history.state, '', '#/s/' + encodeURIComponent({json.dumps(sid)})); 1")
+    w.click_el(f".tcard[data-id={json.dumps(sid)}] .today-go")
+    check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a chat whose address is there already opens too")
+    words = f"sent from the window, {how}"
+    w.js(f"const t = app.session.chat.input; t.focus(); t.value = {json.dumps(words)}; t.dispatchEvent(new Event('input')); 1")
+    w.click_el(".cbtn.send")
+    got = wait_for(lambda: any(l.startswith(f"acted /api/session/{sid}/send ") and words in l for l in server.lines), timeout=15)
+    check(bool(got), f"{how}: and what's written in it is sent")
+    board()
+
+
 def on_app(w, timeout=30):
     return w.wait("!!document.querySelector('#look') && typeof app !== 'undefined' && !!app.view", timeout=timeout)
 
@@ -477,6 +526,7 @@ def main():
             ended = not Path(f"/proc/{old}").exists() or Path(f"/proc/{old}/cmdline").read_bytes() == b""     # gone, or a zombie
             check(code == 0 and ended, "--restart: the running one ends")
             check(bool(back) and w.do("visible") is True, "and starts again, on the chat it was on")
+            opens_chats(w, remote, "after a restart (an update)")
             w.do("close")
             time.sleep(0.5)
             w.again("--restart")
@@ -522,6 +572,22 @@ def main():
             check(not rendering.exists() and "drawing with the GPU again" in log and "drawing the safe way" not in log,
                   "the safe way an earlier build kept after any crash: forgotten (the GPU again)")
             check("sound: GStreamer" in log, "its log says what its page can play (GStreamer)")
+            # What goes wrong in its page: a click whose handler throws, a
+            # promise nothing caught, console.error; a picture that doesn't load isn't one.
+            w.js("const b = document.createElement('button'); b.id = 'oops'; b.textContent = 'oops';"
+                 " b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:99999';"
+                 " b.onclick = () => { missionsSheetNot(); }; document.body.append(b);"
+                 " Promise.reject(new Error('nobody caught me')); console.error('said', {a: 1});"
+                 " const i = new Image(); i.src = '/nothing-here.png'; document.body.append(i); 1")
+            w.click_el("#oops")
+            said = wait_for(lambda: "missionsSheetNot" in logf.read_text() and "nobody caught me" in logf.read_text(), timeout=10)
+            log = logf.read_text()
+            check(bool(said) and "page: error: ReferenceError: Can't find variable: missionsSheetNot" in log,
+                  "a click whose handler throws: in its log, with where")
+            check("page: a promise nothing caught: Error: nobody caught me" in log and 'page: console.error: said {"a":1}' in log,
+                  "a promise nothing caught and console.error too")
+            check("nothing-here.png" not in log, "a picture that doesn't load isn't the page's error")
+            w.js("document.getElementById('oops').remove(); 1")
             w.do("destroy")
             time.sleep(0.5)
             check(w.do("visible") is None, "(its window destroyed)")
@@ -590,6 +656,11 @@ def main():
                 w.js("window.__routes = []; addEventListener('hashchange', (e) => __routes.push(new URL(e.newURL).hash)); 1")
                 w.again("amarchy://chat/elsewhere/web-fix")
                 check(bool(w.wait("__routes.includes('#/s/elsewhere:web-fix')")), "a link to another machine's chat: its <machine>:<id> route")
+                # Its chats open, through the local key's cookie, as on Julian's M5; and after an update's restart.
+                opens_chats(w, local, "this machine's board")
+                w.again("--restart")
+                w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+                opens_chats(w, local, "this machine's board, after a restart")
         finally:
             local.stop()
 
