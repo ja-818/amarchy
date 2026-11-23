@@ -470,6 +470,15 @@ committed goes as a WIP commit pushed to origin, so say so first). After a move
 you're told so with the next message: you're on that machine now, its files and
 config are its own, and what git ignores but dependencies came with you.
 
+**Cloud machines.** `amarchy machines cloud` makes a machine in the user's own
+cloud account (Hetzner, DigitalOcean, Hostinger: `providers`, `regions`, `sizes`
+with their prices), set up and paired by itself. It costs the user money: never
+`add` on your own, and only with `--yes` once they said so (say the size and its
+monthly price first). A provider's token or the one-off Tailscale key comes
+through `amarchy machines cloud token <provider|tailscale>` (from your chat it
+asks them with a card: `amarchy secret ask <NAME> --cloud`), never the chat.
+`remove <name> --move-chats --yes` deletes one (its chats moved here first).
+
 To give a **new** session a task (only when the user asks for a session):
 
 1. `amarchy new <project> [name] --prompt "<the whole brief>"`, one call per

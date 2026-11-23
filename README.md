@@ -54,6 +54,10 @@ One board says which one needs you and what for. You answer with a tap.
   card saying where it runs. Start a new chat on any of them, and move one to another when you
   choose (its branch, its conversation and its place on the board go with it); a machine that's
   off keeps its chats on the board, dimmed, until it's back.
+- **A machine that never sleeps, in one tap.** No box at home? **Add a cloud machine** makes
+  one in your own Hetzner, DigitalOcean or Hostinger account (their prices on each size; the
+  provider bills you, never amarchy), sets it up with Claude Code and amarchy, puts it on your
+  tailnet and on your board. Then Sign in to Claude there, from the app.
 - **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
   It texts you like a coworker and puts what needs you on **Tasks**.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home

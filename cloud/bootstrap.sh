@@ -138,8 +138,11 @@ if command -v visudo >/dev/null && ! visudo -cf /etc/sudoers.d/90-amarchy >/dev/
   rm -f /etc/sudoers.d/90-amarchy
 fi
 loginctl enable-linger "$AMARCHY_USER"
-for _ in $(seq 60); do [[ -S /run/user/$USER_ID/bus ]] && break; sleep 1; done
-[[ -S /run/user/$USER_ID/bus ]] || { WHAT="Starting your user's services (systemd --user)"; false; }
+# Its user manager up (systemctl --user talks to it on its own socket: a
+# minimal image has no user D-Bus).
+user_manager() { [[ -S /run/user/$USER_ID/systemd/private || -S /run/user/$USER_ID/bus ]]; }
+for _ in $(seq 120); do user_manager && break; sleep 1; done
+user_manager || { WHAT="Starting your user's services (systemd --user)"; false; }
 
 # ---- 2. Tailscale, and on your tailnet
 
@@ -209,6 +212,13 @@ setup_firewall() {
   ufw --force enable >/dev/null
   # Tailscale SSH (tailscale up --ssh) instead of the public sshd.
   systemctl disable --now ssh.socket ssh.service >/dev/null 2>&1 || true
+  # Nor name lookups answered to the network (systemd-resolved's LLMNR and mDNS).
+  if [[ -d /etc/systemd/resolved.conf.d || -x /usr/lib/systemd/systemd-resolved ]]; then
+    mkdir -p /etc/systemd/resolved.conf.d
+    printf '# amarchy (cloud/bootstrap.sh): nothing answered on the public network.\n[Resolve]\nLLMNR=no\nMulticastDNS=no\n' \
+      >/etc/systemd/resolved.conf.d/amarchy.conf
+    systemctl try-restart systemd-resolved >/dev/null 2>&1 || true
+  fi
 }
 setup_firewall
 

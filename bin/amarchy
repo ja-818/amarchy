@@ -18149,7 +18149,8 @@ def cloud_steps_words(rec):
 
 def cloud_line(rec):
     price = cloud_money(rec.get("monthly"), rec.get("currency"))
-    size = f"{rec.get('size_label') or rec.get('size')}, {rec.get('cores') or '?'} vCPU, {rec.get('memory_gb') or '?'} GB"
+    mem = rec.get("memory_gb")
+    size = f"{rec.get('size_label') or rec.get('size')}, {rec.get('cores') or '?'} vCPU, {f'{mem:g}' if isinstance(mem, (int, float)) else '?'} GB"
     p = CLOUD_PROVIDERS.get(rec.get("provider"))
     return (f"{rec['name']}\t{p.label if p else rec.get('provider')} · {size} · {rec.get('region_label') or rec.get('region')}"
             f"\t{price}/month\t{cloud_steps_words(rec)}" + (f": {rec['error']}" if rec.get("error") else

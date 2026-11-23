@@ -38,6 +38,9 @@ the change.
 | `uiChatHead(s, {back, rename, complete, more})` | Over an open chat: Back, its project and name (a tap renames it), where it stands, its menu, its preview, Complete. Your assistant's or an agent's: its picture and name with `uiPresence` under it (typing…), as a messaging app's head; no state box, no Complete. | an open chat (both layouts) |
 | `uiScore({streak, today, goal, risk, cool, flash, title, act})` | Your score in a button (square, as every control): the streak's flame (dim and pulsing while it's at risk, cooled while chats are stalled), today's merges with a ring to your goal; `flash`, a moment's pill by it (a fast reply, a merge). A tap opens the rest. | the board's summary line |
 | `uiProgress({label, value, max, note})` | Progress to something: its name, a bar, a note. | Your missions' rank |
+| `uiSteps([{label, state, note, at}])` | Steps toward something, in order: each done (✓ and when), the one under way (it spins, its words under it), one that failed (✗, why), the ones to come (dim). | A cloud machine coming up (cloud.js) |
+| `uiPick(items, {on, pick, label})` | One of a few, a row each: its words (a badge by them: Recommended), a line under them, what's at its end (a price); the one picked lit and checked. items `{key, label, detail, aside, badge, lead, dim, disabled}`. | Add a cloud machine: the provider, where, the size |
+| `uiMoney(amount, currency)` | A price as people read it: €5.99, $48 (as bin/amarchy's `cloud_money`). | A cloud machine's price, wherever it shows |
 | `uiStepper({label, value, min, max, show, set})` | A number to pick with − and +. | Your missions' daily goal |
 | `uiBadges([{name, about, on, when}])` | Badges: the earned lit, the rest dim with how to earn them. | Your missions |
 | `uiTiles([{n, label, on}])` | A few big numbers in one row, each its word under it (`on`: lit, a record). | Your missions |
@@ -88,6 +91,8 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--score-flame`, `--score-cool`, `--score-ring`, `--score-flash`, `--score-bg`, `--score-border`, `--score-radius` | Your score's flame (and cooled), its goal ring, a fast reply's flash, its button |
 | `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |
+| `--steps-done`, `--steps-now`, `--steps-failed`, `--steps-next`, `--steps-rule` | Steps (uiSteps): a done one's mark, the one under way, one that failed, the ones to come, the rule between |
+| `--pick-bg`, `--pick-border`, `--pick-radius`, `--pick-on-bg`, `--pick-on-border`, `--pick-badge` | One of a few (uiPick): a row, the one picked, its badge |
 | `--chart-1` … `--chart-8`, `--chart-single`, `--chart-grid`, `--chart-axis` | A chart block's series, in that order (validated together for color-blind readers; a light theme gets their light steps), one series' color, its gridlines and its zero line |
 | `--dropdown-bg`, `--dropdown-border`, `--dropdown-border-width`, `--dropdown-radius`, `--dropdown-shadow`, `--dropdown-row-hover`, `--dropdown-row-on` | A dropdown (uiDropdown): its ground, its rule (a popup's, as the menu card's), its corners, its shadow, a row under the pointer and one the keys are on |
 | `--chat-them-bg`, `--chat-them-text`, `--chat-them-border`, `--chat-you-bg`, `--chat-you-text`, `--chat-you-border`, `--chat-bubble-radius`, `--chat-stamp`, `--chat-read`, `--chat-day-bg` | Your assistant's and your agents' chats, a messaging app's (chat.css `.chat.bubbles`): its bubbles and yours, their corners (square as the app's: `--radius-bubble`), a message's time, your ticks once it has it, the day between them (and the quiet lines in the middle) |
