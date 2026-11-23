@@ -358,6 +358,9 @@ function deviceError(code) {
 function dictationSettings(draw) {
   const d = (app.view && app.view.dictation) || {};
   const kids = [h("div", { class: "section" }, "Dictation")];
+  // "On the host": this machine's model (each machine its own).
+  if (typeof machinesShown === "function" && machinesShown().length > 1)
+    kids.push(h("p", { class: "hint" }, `On the host: ${machineOf("").label}'s speech model, when it has one.`));
   const now = dictationWay();
   const ways = [["auto", "Automatic"]];
   if (d.ready) ways.push(["host", "On the host"]);
