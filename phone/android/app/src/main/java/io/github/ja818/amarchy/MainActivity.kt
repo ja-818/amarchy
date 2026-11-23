@@ -343,7 +343,8 @@ class MainActivity : ComponentActivity() {
                     return false
                 }
                 state?.needsLogin == true -> {
-                    status = ShellStatus(ShellStatus.Kind.SignIn, why = state.words.ifEmpty { null })
+                    // (The node's own words name its login page: the button opens that.)
+                    status = ShellStatus(ShellStatus.Kind.SignIn, why = SIGN_IN_WHY)
                     return false
                 }
             }
@@ -844,6 +845,7 @@ class MainActivity : ComponentActivity() {
         const val ASSET_ORIGIN = "https://appassets.androidplatform.net"
         const val OWN_PAGE = "$ASSET_ORIGIN/shell/index.html"
         const val OWN_NODE = "amarchy's own Tailscale node"
+        const val SIGN_IN_WHY = "This phone reaches your amarchy through Tailscale, with amarchy's own node (no Tailscale app needed). Sign in with the Tailscale account your other machines use."
 
         // A theme's color: #rgb, #rrggbb, #aarrggbb, or rgb(r, g, b).
         fun parseColor(text: String): Int? {
