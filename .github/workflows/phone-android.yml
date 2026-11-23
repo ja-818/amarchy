@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read         # the newest tailnet.aar, from the Tailscale node workflow's artifacts
 
 concurrency:
   group: phone-android-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
@@ -48,6 +49,24 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # amarchy's own Tailscale node (tailnet/mobile), as the "Tailscale node"
+      # workflow last built it on main; none yet: the app is built without it
+      # (it then reaches the tailnet through the Tailscale app only).
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-android \
+                    && { echo "$id"; break; }; done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-android -D app/libs
+            echo "With amarchy's own Tailscale node, from run $run"
+          else
+            echo "No tailnet.aar built yet: the app is built without amarchy's own node"
+          fi
 
       - name: The Android platform it builds against
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.1.0" > /dev/null
@@ -111,6 +130,24 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # amarchy's own Tailscale node (tailnet/mobile), as the "Tailscale node"
+      # workflow last built it on main; none yet: the app is built without it
+      # (it then reaches the tailnet through the Tailscale app only).
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-android \
+                    && { echo "$id"; break; }; done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-android -D app/libs
+            echo "With amarchy's own Tailscale node, from run $run"
+          else
+            echo "No tailnet.aar built yet: the app is built without amarchy's own node"
+          fi
 
       - name: The Android platform it builds against
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.1.0" > /dev/null
