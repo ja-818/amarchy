@@ -718,7 +718,7 @@ window closed.
   there too; a click opens the window on that chat, at its card. Its chime rings
   with it (the window's page rings none of its own, so nothing rings twice).
   The app's server counts it as a device notified (`amarchy notify`, Settings →
-  Send a test). A secret is only ever asked for in the app.
+  Send a test, which rings your chime there). A secret is only ever asked for in the app.
 - **The tray**: closing the window keeps it running in the tray (Open, Reload,
   Quit; its tooltip says how many need you), and it starts there at login
   (`~/.config/autostart/amarchy.desktop`; delete it and it isn't put back), so

@@ -110,6 +110,14 @@ impl log::Log for Logger {
 /// Where stderr went before it was taken in (a terminal, the journal).
 static STDERR: Mutex<Option<File>> = Mutex::new(None);
 
+/// For a process it starts in its place (--restart, the watchdog's): the
+/// stderr this one was given, so its words go where these went, never into
+/// this one's pipe, which ends with it.
+pub fn stderr_for_child() -> Option<std::process::Stdio> {
+    let e = STDERR.lock().unwrap_or_else(|e| e.into_inner());
+    e.as_ref().and_then(|f| f.try_clone().ok()).map(std::process::Stdio::from)
+}
+
 /// The log, from now on; its first line says which build, and where it runs.
 pub fn start() {
     *JOURNAL.out.lock().unwrap() = open();
@@ -149,7 +157,14 @@ fn take_stderr() {
         if libc::pipe(fds.as_mut_ptr()) != 0 {
             return;
         }
+        // The pipe's ends and where stderr went stay this process's own
+        // (close-on-exec): what it starts gets fd 2 alone. A new build it
+        // starts (--restart) holding the read end would write into a pipe
+        // nobody reads once this one ends, and hang when it's full.
         let saved = libc::dup(2);
+        for fd in [fds[0], fds[1], saved] {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
         if saved < 0 || libc::dup2(fds[1], 2) < 0 {
             return;
         }
