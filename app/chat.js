@@ -1833,9 +1833,9 @@ class Chat {
   // card answered); should the server not take it, told that too
   // (opts.onUnsent: its card asks again). Not Esc's stop. told: the caller
   // tells them itself (send).
-  post(route, body, { told = false } = {}) {
+  post(route, body, { told = false, after = null } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body)
+    const done = route === "send" ? sendTo(this.id, body, after)
       : api(chatPath(this.id, `/${route}`), body).then((r) => (route === "answer" ? waitsSaid(r) : r));
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
@@ -3703,11 +3703,13 @@ class Chat {
     // answer comes after. Should it not take it: why, and your words back in
     // the box (its draft, if the chat's closed by then).
     const out = this.outgo(message, text, tray);
-    this.sentOff(tray, true);
+    // One after the other, in the order you sent them; its card at work at
+    // once, before whoever holds the chat moves on: the board it's back on
+    // is drawn once, as it will be (not as it was, then again).
+    const done = this.sendQueue = this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true, after: this.sendQueue });
     if (this.opts.onSent) this.opts.onSent("send");
-    // One after the other, in the order you sent them.
-    const prev = this.sendQueue || Promise.resolve();
-    const done = this.sendQueue = prev.catch(() => {}).then(() => this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true }));
+    // The box emptied after: a chat gone from sight (back on the board) isn't measured for it.
+    this.sentOff(tray, true);
     try {
       const r = await done;
       out.sent = true;

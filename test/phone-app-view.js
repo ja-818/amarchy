@@ -96,6 +96,8 @@ async function inApp(browser, port, home, layout) {
     return !!b;
   }), "Turn on: tapped");
   check(layout, await until(p, () => !document.querySelector(".tcard.k-notice")), "on: the card goes");
+  check(layout, await until(p, () => /told twice/.test((document.querySelector(".toast") || {}).innerText || "")),
+        "and it says to remove the home-screen web app, else each comes twice");
   const sub = await calls(p, "push.subscribe");
   check(layout, sub.length === 1 && sub[0].args.key === (await p.evaluate(() => app.key)), "the app made it, for this machine's key");
   const kept = subs().find((s) => s.endpoint === "https://relay.example/v1/push/handle1") || {};

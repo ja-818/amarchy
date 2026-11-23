@@ -328,8 +328,9 @@ function boardEmpty(v = app.view) {
   return !!v && !v.sessions.length && !(v.projects || []).length;
 }
 
-// The board drawn: Today's queue, or with no project yet the welcome.
-function boardFill(force) {
+// The board drawn: Today's queue, or with no project yet the welcome. top:
+// where it's to be scrolled (else where it is).
+function boardFill(force, top = null) {
   const v = app.view;
   if (boardEmpty(v)) {
     if (board.box.dataset.key !== "welcome") board.box.replaceChildren(welcome((p) => newChatIn(p)));
@@ -337,7 +338,7 @@ function boardFill(force) {
     tourAuto();      // the first time on this device: the tour, over it (tour.js)
     return;
   }
-  todayFill(board.box, force);
+  todayFill(board.box, force, top);
 }
 
 // The view changed (app.js refresh).
@@ -389,10 +390,13 @@ function boardOpen(id) {
 // The board again (desk.js show(null), the phone back from a chat): drawn,
 // where it was scrolled.
 function boardShown() {
-  if (board.query) boardSearchDraw(); else boardFill();      // as it was, unless something changed meanwhile
-  modeButtons();
-  if (typeof board.from === "number") board.scroll.scrollTop = board.from;
+  const from = typeof board.from === "number" ? board.from : null;
   board.from = null;
+  // As it was, unless something changed meanwhile; drawn where it was (not
+  // laid out first to ask where it is, as it was before it showed).
+  if (board.query) boardSearchDraw(); else boardFill(false, from);
+  modeButtons();
+  if (from !== null) board.scroll.scrollTop = from;
   boardMark();
 }
 

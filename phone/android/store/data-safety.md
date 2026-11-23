@@ -55,5 +55,5 @@ functionality). It's covered by the same answer.
 
 ## Privacy policy
 
-Play requires a privacy policy URL. Point it at a page that says the above
-(the repository's, e.g. `https://github.com/ja-818/amarchy/blob/main/phone/android/store/data-safety.md`).
+Play requires a privacy policy URL: both apps' is
+`https://github.com/ja-818/amarchy/blob/main/phone/PRIVACY.md`.

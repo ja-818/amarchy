@@ -345,7 +345,9 @@ what a home-screen web app can't do:
 app** opens it on that machine; or type its address
 (`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
 app when its VPN is on; a build that has amarchy's own Tailscale node signs in
-inside the app instead. Then **Turn on notifications**, as in the web app.
+inside the app instead. Then **Turn on notifications**, as in the web app. Had
+Amarchy on the home screen as a web app? Remove it (hold its icon, **Remove
+App**): it would notify you too, and each notification would come twice.
 
 **Private**: each notification is encrypted on your machine for that phone
 alone (the same encryption as Web Push). It goes through amarchy's push relay

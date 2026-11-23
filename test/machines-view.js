@@ -10,7 +10,10 @@
 //   - Settings → Machines: each one and how it stands;
 //   - a new chat's Where: beta picked, the chat started there;
 //   - beta off: its cards dimmed, "beta is off", no buttons; its chat says
-//     so in place of the box; beta back: as it was.
+//     so in place of the box; beta back: as it was;
+//   - alpha's board and beta's, each drawn by its own server (the web app
+//     on one, the desktop app on the other): the same cards in the same
+//     order, an agent on each.
 //
 // Phone and wide, with screenshots.
 //
@@ -313,6 +316,37 @@ const LAYOUTS = {
       check(where, !!(await until(() => p.evaluate((sel) => { const c = document.querySelector(sel); return c && !c.classList.contains("machine-off"); }, card("beta:proj-one")))), "its card as it was");
       check(where, errors.length === 0, `no errors on the page (${errors.join("; ").slice(0, 300)})`);
       await ctx.close();
+    }
+
+    // Every machine's board in the same order, whichever machine draws it (the
+    // web app on one, the desktop app on the other): an agent on each, which
+    // its own machine's list puts first.
+    alpha.amarchy("new", "proj", "zed");
+    beta.amarchy("new", "proj", "abe");
+    const both = await until(async () => {
+      const [a, b] = [await alpha.state(), await beta.state()];
+      const up = (v, id, m) => v.sessions.some((s) => s.id === id && (s.machine || v.machine) === m && !s.setup);
+      return up(a, "proj-zed", "alpha") && up(a, "proj-abe", "beta") && up(b, "proj-zed", "alpha") && up(b, "proj-abe", "beta");
+    }, 40000);
+    alpha.amarchy("agents", "proj-zed", "--name", "Zed");
+    beta.amarchy("agents", "proj-abe", "--name", "Abe");
+    check("order", !!both, "an agent on each machine, on both boards");
+    for (const layout of Object.keys(LAYOUTS)) {
+      if (ONLY && ONLY !== layout) continue;
+      const orders = {};
+      for (const m of [alpha, beta]) {
+        const ctx = await browser.newContext({ ...LAYOUTS[layout] });
+        const p = await ctx.newPage();
+        await p.addInitScript(() => { try { localStorage.setItem("amarchy-push", "no"); localStorage.setItem("tour", "done"); } catch (e) { /* none */ } });
+        await p.goto(`${m.url}/local?key=${m.key}`);
+        await until(() => p.evaluate(() => document.querySelectorAll(".tcard[data-id]").length >= 5 && [...document.querySelectorAll(".tcard[data-id]")].some((c) => /Zed/.test(c.innerText))
+          && [...document.querySelectorAll(".tcard[data-id]")].some((c) => /Abe/.test(c.innerText))), 20000);
+        orders[m.name] = await p.evaluate((me) => [...document.querySelectorAll(".tcard[data-id]")].map((c) => (c.dataset.id.includes(":") ? c.dataset.id : `${me}:${c.dataset.id}`)), m.name);
+        await p.screenshot({ path: path.join(SHOTS, `${layout}-order-${m.name}.png`) });
+        await ctx.close();
+      }
+      check(layout, orders.alpha.length >= 5 && JSON.stringify(orders.alpha) === JSON.stringify(orders.beta),
+            `alpha's board and beta's: the same cards in the same order (${orders.alpha.join(", ")} | ${orders.beta.join(", ")})`);
     }
   } catch (e) {
     console.error(e);

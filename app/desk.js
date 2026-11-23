@@ -689,6 +689,7 @@ function show(id) {
   }
   const changed = id !== desk.current;
   if (changed && id && !desk.current) board.from = board.scroll.scrollTop;      // where the board was
+  if (changed && desk.chat) letGoOf(desk.chat.el);
   desk.current = id;
   desk.el.classList.toggle("chat-open", !!id);
   if (changed) {
