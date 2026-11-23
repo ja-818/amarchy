@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- amarchy's default look (Omarchy's Tokyo Night), as the own page wears it. -->
+<resources>
+    <color name="bg">#1A1B26</color>
+    <color name="border">#414868</color>
+    <color name="text">#C0CAF5</color>
+    <color name="muted">#7982A9</color>
+    <color name="accent">#7AA2F7</color>
+</resources>

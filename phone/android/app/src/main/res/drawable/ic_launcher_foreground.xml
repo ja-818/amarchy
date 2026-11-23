@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon (desktop/dist/icon.svg): a window in its accent border, an A
+     and a cursor, scaled into the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.1224"
+        android:scaleY="0.1224"
+        android:translateX="22.66"
+        android:translateY="22.66">
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M60,60 H452 V452 H60 Z"
+            android:strokeWidth="14"
+            android:strokeColor="#7AA2F7" />
+        <path
+            android:fillColor="#C0CAF5"
+            android:fillType="evenOdd"
+            android:pathData="M196,140 H256 L340,372 H300 L282,322 H170 L152,372 H112 Z M182,288 H270 L226,166 Z" />
+        <path
+            android:fillColor="#7AA2F7"
+            android:pathData="M354,350 H418 V372 H354 Z" />
+    </group>
+</vector>
