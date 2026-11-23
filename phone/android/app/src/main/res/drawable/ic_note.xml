@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The notification's icon: the app icon's A (desktop/dist/icon.svg), alone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="-82"
+        android:translateY="-112">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M196,140 H256 L340,372 H300 L282,322 H170 L152,372 H112 Z M182,288 H270 L226,166 Z" />
+    </group>
+</vector>

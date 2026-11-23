@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+# The Firebase project's values (see phone/README.md, "Builds"): never in git.
+firebase.properties
+google-services.json
+# amarchy's own Tailscale node, built from tailnet/mobile (gomobile bind).
+app/libs/tailnet.aar
+*.keystore
+*.jks
+fastlane/report.xml
+fastlane/README.md
