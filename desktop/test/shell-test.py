@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from shell import ROOT, Shell, need  # noqa: E402
+from shell import BIN, ROOT, Shell, need  # noqa: E402
 
 # Its homes (each with a web view's data) in one folder, gone at the end:
 # under ~/.cache unless TMPDIR says (a server's /tmp can be small).
@@ -484,6 +484,21 @@ def main():
             check(w.do("visible", timeout=40) is False, "a hidden one starts again hidden (in the tray)")
             w.again()
             time.sleep(0.8)
+
+            # An update from a service (amarchy's own): no display. It hands
+            # over before GTK starts (whose init would abort it).
+            old = w.do("pid")
+            bare = {k: v for k, v in w.env.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+            r = subprocess.run([str(BIN), "--restart"], env=bare, capture_output=True, text=True, timeout=15)
+            back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+            check(r.returncode == 0 and "abort" not in (r.stdout + r.stderr).lower(),
+                  f"--restart with no display: handed over, no abort (exit {r.returncode})")
+            check(bool(back) and w.do("pid") not in (None, old) and w.do("visible") is True, "and it starts again all the same")
+            alone = tempfile.mkdtemp(prefix="desktop-home-")
+            r = subprocess.run([str(BIN), "--restart"], env={"HOME": alone, "PATH": "/usr/bin"}, capture_output=True,
+                               text=True, timeout=15)
+            shutil.rmtree(alone, ignore_errors=True)
+            check(r.returncode == 0 and not r.stderr.strip(), f"none running, no display, no bus: nothing to do (exit {r.returncode})")
 
             # A link out: your browser, not this window.
             w.js("location.href = 'https://example.com/elsewhere'; 1")

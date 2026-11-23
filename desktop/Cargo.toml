@@ -36,6 +36,7 @@ tauri-plugin-deep-link = "2"
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 webkit2gtk = { version = "2", features = ["v2_40"] }
 gtk = "0.18"
 

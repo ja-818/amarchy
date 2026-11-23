@@ -183,8 +183,15 @@ pacman_get() {
     why="pacman couldn't download them: this computer's list of packages is older than its mirror, which has newer versions now (a 404). Bringing it up to date is a system update (pacman -Syu), yours to decide; this install never does one. Nothing was installed."
   elif grep -qi 'target not found' "$log"; then
     why="pacman doesn't know $(sed -n 's/.*target not found: //p' "$log" | head -3 | paste -sd ' ' -) on this computer."
-  elif grep -qiE 'could not satisfy|conflicting|breaks dependency' "$log"; then
-    why="pacman wouldn't install them: $(grep -iE 'could not satisfy|conflicting|breaks dependency' "$log" | head -1 | sed 's/^error: //')."
+  elif grep -qiE 'breaks dependency|could not satisfy dependencies' "$log"; then
+    # Some packages newer than the ones that need them: a system update
+    # half done. Finished, these install; it's yours to run (on Apple
+    # Silicon, its own kernel and boot packages held back).
+    local held
+    held=$(pacman -Qq 2>/dev/null | grep -E '^(linux|m1n1|uboot)-(aurora|asahi)' | paste -sd, - || true)
+    why="pacman won't install them: this computer is halfway through a system update ($(grep -iE 'breaks dependency' "$log" | head -1 | sed 's/^:: //'); some of its packages are newer than the ones that need them). Finish it first, sudo pacman -Syu${held:+ --ignore $held}, then run install.sh again. This install never updates your system."
+  elif grep -qiE 'could not satisfy|conflicting' "$log"; then
+    why="pacman wouldn't install them: $(grep -iE 'could not satisfy|conflicting' "$log" | head -1 | sed 's/^error: //')."
   else
     why="pacman didn't install them$(grep -i '^error' "$log" | tail -1 | sed 's/^error: */: /')."
   fi
@@ -222,7 +229,8 @@ if [[ -n $need ]]; then
 fi
 
 # The sounds' and microphone's, apart: if pacman can't get them, the app is
-# built anyway, and says its sounds and dictation wait on them.
+# built anyway, and says what it lacks without them (no microphone, no video;
+# its chimes it plays itself).
 media=$(media_missing)
 if [[ -n $media && -t 0 && -t 1 ]]; then
   say "For its sounds and dictation the desktop app needs: $media"
@@ -307,9 +315,12 @@ if ((fresh)); then
   say "The desktop app is installed: Amarchy in your launcher, or amarchy-desktop."
 fi
 if [[ -n $media ]]; then
-  say "The desktop app's sounds and dictation wait on: $media"
-  echo "The app works without them: it plays its chimes itself meanwhile. Once pacman can install them (sudo pacman -S --needed $media), it sees them and starts again: no rebuild."
-  told "installed (Amarchy in your launcher); its sounds and dictation wait on $media (sudo pacman -S --needed $media)"
+  # Without them its web view has no audio at all: the app plays its chimes
+  # itself and its page makes no media (one would end it), so no microphone
+  # and no video until they're here.
+  say "The desktop app has no microphone (dictation) and no video until these are installed: $media"
+  echo "Its chimes play anyway (the app plays them itself) and its page is safe. Once they're in (sudo pacman -S --needed $media), it sees them and starts again: no rebuild."
+  told "installed (Amarchy in your launcher); no microphone and no video in it until $media are installed (its chimes play): ${why:-sudo pacman -S --needed $media}"
 else
   told "installed (Amarchy in your launcher, or amarchy-desktop)"
 fi
