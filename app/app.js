@@ -2616,7 +2616,8 @@ async function openSettings({ at = "" } = {}) {
     kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
     else if (store.get("layout")) kids.push(...layoutSettings());
-    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids));
+    // (Not what a part left out: replaceChildren would write a null as "null".)
+    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids.filter((k) => k !== null && k !== undefined && k !== false)));
   };
   const back = sheet(sheetHead("Settings", phoneApp && app.desk ? "Amarchy on your tablet" : app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
   back.classList.add("settings");

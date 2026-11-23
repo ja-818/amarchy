@@ -17,6 +17,13 @@
   --card-press-bg: var(--control-pressed);   /* under a finger, the moment it lands */
   --card-pad-x: 14px;
   --card-gap: 8px;            /* between cards */
+  /* Your assistant's or an agent's picture (ui.js avatar), by where it is:
+     big enough that what's in it reads at a glance. */
+  --avatar-list: 64px;        /* its line in Chats, as a messaging app lists a conversation */
+  --avatar-card: 40px;        /* on any other card of its: a task, a search hit */
+  --avatar-head: 40px;        /* over its chat */
+  --avatar-inline: 32px;      /* in a button (Settings → Agents) */
+  --avatar-big: 128px;        /* over its empty chat, in its sheet */
   /* A chat that answered and you haven't opened since (uiCard unseen). */
   --unseen: var(--accent);
   --unseen-wash: 24%;         /* how much of it the card's ground has */
@@ -162,17 +169,18 @@ html { touch-action: manipulation; }
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px var(--card-pad-x); box-sizing: border-box;
   text-align: left; color: var(--text); cursor: pointer; background: none; border-radius: 0; outline: none;
 }
-/* Your assistant's or an agent's picture (ui.js avatar): round; an agent
-   without one of yours, its initial on its project's color (--ph). */
-.avatar { display: block; width: 100%; height: 100%; border-radius: 50%; -webkit-user-drag: none; }
-.avatar.small { width: 22px; height: 22px; flex: none; }
-.avatar.big { width: 72px; height: 72px; flex: none; }
+/* Your assistant's or an agent's picture (ui.js avatar): round, its size
+   from where it is (--avatar-*); an agent without one of yours, its initial
+   on its project's color (--ph). */
+.avatar { display: block; flex: none; width: var(--avatar-size, var(--avatar-card)); height: var(--avatar-size, var(--avatar-card)); border-radius: 50%; object-fit: cover; -webkit-user-drag: none; }
+.avatar.small { --avatar-size: var(--avatar-inline); }
+.tcard-head .avatar { --avatar-size: var(--avatar-card); }
+.tcard-head .avatar.list { --avatar-size: var(--avatar-list); }
+.avatar.head { --avatar-size: var(--avatar-head); }
+.avatar.big { --avatar-size: var(--avatar-big); }
 .avatar.letter { overflow: visible; }
 .avatar.letter circle { fill: color-mix(in srgb, var(--ph, var(--accent)) 24%, var(--card-bg, var(--surface))); }
 .avatar.letter text { fill: var(--ph, var(--accent)); font-family: inherit; font-size: 54px; font-weight: 700; }
-.tcard-head .avatar { width: 26px; height: 26px; flex: none; }
-.tcard-head .avatar.row { width: 46px; height: 46px; }
-.avatar.head { width: 34px; height: 34px; flex: none; }
 /* A conversation, as a messaging app lists it (uiCard sub, count: today.js
    todayAgent): its picture, its name over its last message (or typing…), its
    time over how many you haven't read. */
@@ -377,6 +385,14 @@ html { touch-action: manipulation; }
 .tcard.k-task { cursor: pointer; }
 .tcard.k-task > .tcard-head { align-items: flex-start; }
 .tcard.k-task > .tcard-head > .avatar, .tcard.k-task > .tcard-head > .tcard-chip, .tcard.k-task > .tcard-head > .tpill { margin-top: 1px; }
+/* Wide, its agent's picture taller than a line (--avatar-card): the first
+   line of its name, its title and its time on the picture's middle. */
+@media (min-width: 560px) {
+  .tcard.k-task > .tcard-head:has(> .avatar) > .avatar { margin-top: 0; }
+  .tcard.k-task > .tcard-head:has(> .avatar) > :is(.tcard-chip, .tcard-title) { margin-top: max(1px, calc((var(--avatar-card) - 1lh) / 2)); }
+  .tcard.k-task > .tcard-head:has(> .avatar) > :is(.tpill, .tcard-side-one) {
+    margin-top: max(1px, calc((var(--avatar-card) - 1lh - 4px - 2 * var(--pill-border-width)) / 2)); }
+}
 .tcard.k-task .tcard-title .task { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .tcard.k-task .tcard-actions { align-items: center; }
 .tcard.k-task > .tcard-text { white-space: pre-line; }      /* (its note's lines as the agent wrote them) */
@@ -606,7 +622,6 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 }
 @media (hover: hover) { .head-title:hover { background: var(--control-hover); } }
 .head-title .task { flex: 0 1 auto; min-width: 0; font-size: var(--title); overflow: hidden; text-overflow: ellipsis; }
-.head-title .avatar.small { width: 22px; height: 22px; flex: none; }
 /* Your assistant's or an agent's: its picture, its name, what it's up to under it (uiPresence). */
 .head-title.who { gap: 10px; }
 .head-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }

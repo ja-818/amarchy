@@ -80,6 +80,9 @@ body.desk .toast { top: 10px; right: 10px; left: auto; max-width: 420px; }
   padding-top: 6px; padding-bottom: 6px;      /* its sides: the page's column (ui.css) */
 }
 .desk-head:empty { display: none; }
+/* Your assistant's or an agent's: its picture as tall as the bar lets it
+   (--avatar-head), the bar as tall as any other chat's. */
+.desk-head:has(.head-title.who) { padding-top: 3px; padding-bottom: 3px; }
 /* Narrow: the tabs as icons only. */
 /* Narrow, Complete is its tick alone: the chat's name has the room. */
 .desk-head { container-type: inline-size; }
