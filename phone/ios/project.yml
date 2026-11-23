@@ -105,10 +105,6 @@ targets:
         PRODUCT_NAME: AmarchyShare
         INFOPLIST_FILE: Share/Info.plist
         CODE_SIGN_ENTITLEMENTS: Share/Share.entitlements
-        # It opens the app through the responder chain's UIApplication
-        # (open(_:options:completionHandler:)), which the extension-only
-        # API check would refuse to compile.
-        APPLICATION_EXTENSION_API_ONLY: NO
 
   AmarchyTests:
     type: bundle.unit-test

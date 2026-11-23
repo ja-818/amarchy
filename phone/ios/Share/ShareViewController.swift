@@ -71,15 +71,20 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    /// The containing app, through the responder chain's UIApplication (the
-    /// way that still works on iOS 18; an extension has no UIApplication.shared).
+    /// The containing app, through the responder chain's UIApplication: the
+    /// way that still works on iOS 18. An extension may not call its
+    /// open(_:options:completionHandler:) (extension-only API, enforced by
+    /// the build), so it's called through the Objective-C runtime.
     @MainActor
     private func openApp(_ url: URL) async -> Bool {
+        let selector = NSSelectorFromString("openURL:options:completionHandler:")
         var responder: UIResponder? = self
         while let r = responder {
-            if let app = r as? UIApplication {
+            if r is UIApplication, r.responds(to: selector), let imp = r.method(for: selector) {
+                typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, (@convention(block) (Bool) -> Void)?) -> Void
+                let open = unsafeBitCast(imp, to: Open.self)
                 return await withCheckedContinuation { done in
-                    app.open(url, options: [:]) { done.resume(returning: $0) }
+                    open(r, selector, url as NSURL, NSDictionary(), { opened in done.resume(returning: opened) })
                 }
             }
             responder = r.next

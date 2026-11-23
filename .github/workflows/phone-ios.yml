@@ -155,6 +155,68 @@ jobs:
             ${{ runner.temp }}/server.log
           if-no-files-found: ignore
 
+  # amarchy's own Tailscale node is built in only when tailnet/mobile's
+  # gomobile framework is there (tailnet.yml). Until it is, its wrapper is
+  # compiled here against a stub with the same API, so it can't rot.
+  own-node:
+    name: Own node's wrapper (a stub framework)
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: phone/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_${XCODE_MAJOR}*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: XcodeGen
+        run: brew install xcodegen
+
+      - name: A stub Tailnet.xcframework (tailnet/mobile's API, doing nothing)
+        run: |
+          stub="$RUNNER_TEMP/stub"
+          fw="$stub/Tailnet.framework"
+          mkdir -p "$fw/Headers" "$fw/Modules"
+          cat > "$fw/Headers/Tailnet.h" <<'EOF'
+          #import <Foundation/Foundation.h>
+          FOUNDATION_EXPORT BOOL MobileStart(NSString* _Nullable dir, NSString* _Nullable hostname, NSError* _Nullable* _Nullable error);
+          FOUNDATION_EXPORT void MobileStop(void);
+          FOUNDATION_EXPORT NSString* _Nonnull MobileState(void);
+          FOUNDATION_EXPORT NSString* _Nonnull MobileLoginURL(NSError* _Nullable* _Nullable error);
+          FOUNDATION_EXPORT NSString* _Nonnull MobileProxyURL(void);
+          EOF
+          printf 'framework module Tailnet {\n  umbrella header "Tailnet.h"\n  export *\n}\n' > "$fw/Modules/module.modulemap"
+          cat > "$stub/stub.m" <<'EOF'
+          #import "Tailnet.h"
+          BOOL MobileStart(NSString *dir, NSString *hostname, NSError **error) { return YES; }
+          void MobileStop(void) {}
+          NSString *MobileState(void) { return @"{\"state\":\"NeedsLogin\",\"words\":\"\",\"peers\":[]}"; }
+          NSString *MobileLoginURL(NSError **error) { return @"https://login.tailscale.com/a/stub"; }
+          NSString *MobileProxyURL(void) { return @"http://amarchy:stub@127.0.0.1:1080"; }
+          EOF
+          xcrun --sdk iphonesimulator clang -c "$stub/stub.m" -o "$stub/stub.o" -I "$fw/Headers" -fobjc-arc \
+            -arch arm64 -arch x86_64 -mios-simulator-version-min=17.0
+          xcrun libtool -static -o "$fw/Tailnet" "$stub/stub.o"
+          plutil -create xml1 "$fw/Info.plist"
+          plutil -insert CFBundleExecutable -string Tailnet "$fw/Info.plist"
+          plutil -insert CFBundleIdentifier -string io.github.ja818.amarchy.tailnet-stub "$fw/Info.plist"
+          plutil -insert CFBundlePackageType -string FMWK "$fw/Info.plist"
+          plutil -insert MinimumOSVersion -string 17.0 "$fw/Info.plist"
+          mkdir -p Frameworks
+          xcodebuild -create-xcframework -framework "$fw" -output Frameworks/Tailnet.xcframework
+
+      - name: The project with it (tailnet.yml), built for the simulator
+        run: |
+          ./generate.sh
+          grep -q Tailnet.xcframework Amarchy.xcodeproj/project.pbxproj
+          xcodebuild build -project Amarchy.xcodeproj -scheme Amarchy -configuration Debug \
+            -destination "generic/platform=iOS Simulator" -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet
+
   release:
     name: TestFlight (by hand only)
     if: github.event_name == 'workflow_dispatch' && inputs.release
