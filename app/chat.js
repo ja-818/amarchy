@@ -207,6 +207,7 @@ const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at o
 const chatsSeen = new Map();
 const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
+const STREAM_STEP_MS = 33;  // between two steps of Claude's words as it writes them (Chat.streamStep): 30 a second
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
 function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
@@ -1287,7 +1288,7 @@ class Chat {
     this.attachBtn = uiComposerButton("attach", "Add a photo or a file", icon("plus"), () => this.toggleMenu("add"), { "aria-haspopup": "menu" });
     this.micBtn = uiComposerButton("mic", "Dictate (hold, or tap and tap again)", glyph("mic"), null, { hidden: true });
     this.sendBtn = uiComposerButton("send", "Send", glyph("send"), () => this.send());
-    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop());
+    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop(), { title: "Stop Claude (Esc)" });
     // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
@@ -1349,8 +1350,8 @@ class Chat {
   open() {
     this.loadInfo();
     // Opened (its stream coming back later, reopen, isn't: you may have
-    // moved by then, and where you are stays, conversationDraw).
-    if (!this.landed) { this.landed = true; this.landing = true; this.navOpened = false; }
+    // moved by then, and where you are stays, conversation).
+    if (!this.landed) { this.landed = true; this.landing = true; }
     // Opened before: drawn at once as it was when you left it, the stream's
     // own then adding only what came since (conversation), and landing on
     // the latest of it.
@@ -1359,6 +1360,7 @@ class Chat {
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
     chatsOpen.set(this.id, this);
+    this.outboxSeen();          // what waits for its machine, as it waits
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
     const es = early ? early.es : new EventSource(streamURL(chatPath(this.id, "/stream")));
@@ -1415,7 +1417,7 @@ class Chat {
     const items = this.items.slice(), start = this.start;
     this.items = [];
     this.itemKeys = new Set();
-    this.conversationDraw({ reset: true, items, start });
+    this.conversation({ reset: true, items, start });
   }
 
   close() {
@@ -1467,11 +1469,13 @@ class Chat {
     card.classList.add("called");
   }
 
-  // ---- the keys, as on the board: j / k (↓ ↑) from message to message,
-  // l (→) into one, along its buttons and links, h (←) back and out of it,
-  // Enter on a button presses it, g / G the first and the latest, d / u half
-  // a page, i the box you type in and Esc out of it again. Esc on a message:
-  // opts.back.
+  // ---- the keys. A chat opens with them in the box, to write (takeKeys).
+  // Esc there stops Claude while it works; else it, or ↑ with nothing above
+  // it, goes up onto the latest message. On the messages, as on the board:
+  // j / k (↓ ↑) from message to message (↓ on the latest: down into the
+  // box), l (→) into one, along its buttons and links, h (←) back and out of
+  // it, Enter on a button presses it, g / G the first and the latest, d / u
+  // half a page, i the box. Esc on a message: back (opts.back), never a stop.
   // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
   // dictate works from anywhere).
 
@@ -1541,6 +1545,23 @@ class Chat {
     return true;
   }
 
+  // From the messages to the box, at the bottom; false when a card's up
+  // (its keys are its own).
+  toBox() {
+    if (!this.dock.contains(this.input)) return false;
+    this.input.focus({ preventScroll: true });
+    this.toBottom(true);
+    return true;
+  }
+
+  // The keys to the chat as it opens: what it asks you (its card), else the
+  // box, to write. (The messages are a key away: ↑ or Esc.)
+  takeKeys() {
+    const card = this.dock.querySelector(".card");
+    if (card) (menuStart(card) || card).focus({ preventScroll: true });
+    else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
+  }
+
   // Whether the keys are in this chat's messages (not the box, the side, a sheet).
   navHere() {
     const a = document.activeElement;
@@ -1554,11 +1575,21 @@ class Chat {
     const a = document.activeElement;
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
-    // In the box: Esc leaves it for the messages (once more: back), unless
-    // it's for something in it (a menu, the dictation, the / list).
+    // In the box, unless the key is for something in it (a menu, the
+    // dictation, the / list): Esc stops Claude while it works, as in Claude
+    // Code (what was waiting to go comes back into the box); else it leaves
+    // the box for the messages (once more: back). ↑ with nothing above it
+    // in the box goes up onto the messages too, and Page Up / Page Down
+    // scroll them without leaving the box.
     if (a === this.input) {
-      if (k !== "Escape" || this.menu || this.talk.on()) return false;
-      return this.navLatest() ? done() : false;
+      if (this.menu || this.talk.on() || e.isComposing) return false;
+      if (k === "Escape" && this.working()) { this.stop(); return done(); }
+      if (k === "Escape" || (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0)) return this.navLatest() ? done() : false;
+      if (k === "PageUp" || k === "PageDown") {
+        this.scroller.scrollBy({ top: (k === "PageDown" ? 1 : -1) * this.scroller.clientHeight * 0.85 });
+        return done();
+      }
+      return false;
     }
     // The box's card, the side panel, the terminal: theirs. A button of the
     // bar clicked (one Safari didn't focus, too): the messages' still.
@@ -1577,12 +1608,7 @@ class Chat {
     let on = inside.indexOf(a);
     if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(item, inside));
     const go = (i, up) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))], false, up); return done(); };
-    if (k === "i") {
-      if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
-      this.input.focus({ preventScroll: true });
-      this.toBottom(true);
-      return done();
-    }
+    if (k === "i") return this.toBox() ? done() : false;
     if (!items.length) return false;
     // A message taller than the page reads as pages going down: j goes
     // through it first, then on. k goes straight to the one before (going
@@ -1590,6 +1616,9 @@ class Chat {
     const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
     const r = item && (a === item || !focused) ? item.getBoundingClientRect() : null;
     if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
+    // ↓ on the latest, its end in sight: down into the box, as ↑ came up
+    // out of it (not j: held or tapped on, the rest would be typed in it).
+    if (k === "ArrowDown" && at === items.length - 1 && this.toBox()) return done();
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
     if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
@@ -1629,7 +1658,8 @@ class Chat {
   // tells them itself (send).
   post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body) : api(chatPath(this.id, `/${route}`), body);
+    const done = route === "send" ? sendTo(this.id, body)
+      : api(chatPath(this.id, `/${route}`), body).then((r) => (route === "answer" ? waitsSaid(r) : r));
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());
@@ -1758,24 +1788,6 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
-    this.conversationDraw(d);
-    // Opened with the keys: on the latest message, once there is one (and
-    // the latest again, should newer ones come before you move).
-    if (this.navWanted && Date.now() - this.navWanted < 8000 && (document.activeElement === document.body || document.activeElement === this.input)
-        && this.navLatest()) { this.navWanted = 0; this.navOpened = true; }
-    else if (this.landing && this.navOpened && this.navHere()) this.navLatest();
-  }
-
-  // The keys on the latest message, now or once the conversation's in (a
-  // chat opened with the keys: Enter on its card). False when they can't be.
-  navStart() {
-    if (this.dock.querySelector(".card")) return false;      // what it asks you: that, first
-    if (this.navLatest()) { this.navOpened = true; return true; }
-    this.navWanted = Date.now();
-    return true;
-  }
-
-  conversationDraw(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
     // view doesn't jump, nor the answers you started go.
@@ -2772,7 +2784,7 @@ class Chat {
       if (!this.workingEl || !this.workingEl.matches(".typing")) {
         clearInterval(this.workingTimer);
         this.workingEl = h("div", { class: "msg claude typing", role: "status", "aria-label": `${this.who()} is typing` },
-          h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")));
+          beat("dots", { "aria-hidden": "true" }, h("i"), h("i"), h("i")));
       }
     } else if (now) {
       if (!this.workingEl || this.workingEl.matches(".typing")) {
@@ -2858,14 +2870,18 @@ class Chat {
     }
   }
 
+  // A step every STREAM_STEP_MS, not every frame: a 120 Hz screen drew the
+  // words 120 times a second, a core's work without a GPU, and the keys you
+  // press waited behind it. Read, it's as smooth.
   streamStep() {
     if (this.streamFrame) return;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let last = performance.now();
-    const frame = (t) => {
+    const step = () => {
       this.streamFrame = null;
       const s = this.stream;
       if (!s) return;
+      const t = performance.now();
       const behind = s.text.length - s.shown;
       if (behind > 0) {
         // Catches up in about a quarter of a second, never slower than a fast reader.
@@ -2874,9 +2890,9 @@ class Chat {
         last = t;
         this.drawStream();      // (at the bottom, it stays there as it grows: build's ResizeObserver)
       }
-      if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
+      if (s.shown < s.text.length) this.streamFrame = setTimeout(step, STREAM_STEP_MS);
     };
-    this.streamFrame = requestAnimationFrame(frame);
+    this.streamFrame = setTimeout(step, 0);
   }
 
   drawStream() {
@@ -2957,7 +2973,7 @@ class Chat {
 
   endStream() {
     clearTimeout(this.streamTimer);
-    if (this.streamFrame) cancelAnimationFrame(this.streamFrame);
+    clearTimeout(this.streamFrame);
     this.streamFrame = this.streamTimer = null;
     this.stream = null;
     this.streamEl = null;
@@ -2995,7 +3011,8 @@ class Chat {
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
     const stopped = !!(this.row && this.row.interrupted);
-    // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
+    // Its machine doesn't answer: what's here is as it last was; what you send
+    // waits for it (kept on this machine) and goes once it's back.
     const off = machineOff(this.row || this.id);
     // Moving to another machine: what it says instead of the box (moving now),
     // or over it (waiting until it's free, one that didn't move): uiMoveNote.
@@ -3009,8 +3026,8 @@ class Chat {
     this.cardKey = key;
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
-      h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
-    else if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
+      h("span", {}, `${off}: what you send goes once ${machineOf(this.row || this.id).label} is back.`)));
+    if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
     else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -3037,7 +3054,9 @@ class Chat {
     // The keys, if they were here, stay: on the card (its first choice), and
     // back in the box you type in once it's answered.
     if (!kids.includes(this.box)) this.closeMenu();
-    const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
+    // (In the dock, whatever put them there: the box a click opened the chat
+    // with is still the box after its first redraw.)
+    const had = this.dock.contains(document.activeElement) || (lastInput.keys && document.activeElement === document.body);
     const stick = this.atBottom();
     this.dock.replaceChildren(...kids);
     if (had) {
@@ -3142,7 +3161,7 @@ class Chat {
     const rows = tasks.map((t) => {
       const el = h("span", { class: "bg-took" });
       tooks.push([el, t.started]);
-      return h("li", { class: "bg-task" }, h("span", { class: "bg-dot" }), icon(t.task_type === "local_bash" ? "run" : "helper"),
+      return h("li", { class: "bg-task" }, beat("bg-dot"), icon(t.task_type === "local_bash" ? "run" : "helper"),
         h("span", { class: "bg-name" }, cut(t.description || t.summary || t.command || t.subagent_type || "A task", 120)), el);
     });
     const tick = () => {
@@ -3152,7 +3171,7 @@ class Chat {
     this.bgEl.replaceChildren(
       h("button", { class: "bg-head", type: "button", "aria-expanded": String(open),
                     onclick: () => { this.bgOpen = !open; this.renderBackground(); } },
-        h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
+        beat("bg-pulse", {}, ...tasks.slice(0, 5).map(() => h("i"))),
         h("span", { class: "bg-what" }, `${what} in the background`), took,
         icon("chevron", "bg-chev")),
       ...(open ? [h("ul", { class: "bg-list" }, ...rows)] : []));      // (replaceChildren would write a null as "null")
@@ -3610,7 +3629,7 @@ class Chat {
   }
 
   sendButtons() {
-    this.micBtn.hidden = !this.talk.available();
+    this.talk.draw();
     const empty = !this.input.value.trim() && !this.tray.length;
     const busy = this.tray.some((a) => a.state === "reading" || a.state === "uploading");
     const stop = this.working() && empty;
@@ -3685,6 +3704,8 @@ class Chat {
       const r = await done;
       out.sent = true;
       out.el.classList.remove("sending");
+      // Its machine out of reach: kept on this one, sent once it's back. Says so, with Cancel.
+      if (r && r.waits) return this.outWaits(out, r.waits, text, tray);
       this.settleOutbox();      // (the conversation may have it already)
       if (r && r.waking) toast("Waking Claude with it…");
       if (r && r.queued) this.outDone(out);       // in the broker's queue now: the queue shows it
@@ -3752,6 +3773,54 @@ class Chat {
       if (!it) continue;
       this.claimed.add(it);
       this.outDone(out);
+    }
+  }
+
+  // A message waiting for its machine (out of reach: kept on this one, sent
+  // once it's back, app.view.outbox): "Sends when <label> is back", and
+  // Cancel (its words back in the box). Once sent, as any message.
+  outWaits(out, waits, text = null, tray = []) {
+    out.waits = waits.id;
+    out.el.classList.add("waiting");
+    const cancel = h("button", { class: "text-btn", type: "button", onclick: async () => {
+      cancel.disabled = true;
+      try {
+        await api("/api/outbox/cancel", { id: waits.id });
+        this.outDone(out);
+        if (text !== null) this.takeBack(text, tray);
+      } catch (e) {
+        cancel.disabled = false;
+        toast(e.message);
+      }
+    } }, "Cancel");
+    out.el.append(h("div", { class: "msg-waits" }, glyph("clock", "clock"), h("span", {}, `Sends when ${waits.label || machineOf(this.id).label} is back`), cancel));
+  }
+
+  // What waits for this chat's machine (app.view.outbox: after a reload, or
+  // sent from another device): each as a waiting message; one sent since,
+  // a message on its way until the conversation has it.
+  outboxSeen() {
+    const waiting = ((app.view && app.view.outbox) || []).filter((w) => normKey(w.chat) === this.id && w.kind === "send");
+    const ids = new Set(waiting.map((w) => w.id));
+    for (const out of [...this.outbox]) {
+      if (!out.waits || ids.has(out.waits)) continue;
+      out.waits = null;         // sent: the conversation says it soon
+      out.el.classList.remove("waiting");
+      const note = out.el.querySelector(".msg-waits");
+      if (note) note.remove();
+      out.mark = this.items.length;
+      setTimeout(() => this.outDone(out), 30000);
+      this.settleOutbox();
+    }
+    for (const w of waiting) {
+      if (this.outbox.some((o) => o.waits === w.id)) continue;
+      const out = { text: w.text, key: outKey(w.text), shots: [], tray: [], mark: this.items.length, known: new Set(this.itemKeys),
+                    queued: false, sent: true, el: null };
+      const said = this.userView(w.text);
+      out.el = h("div", { class: "msg user" }, h("div", { class: "bubble" }, ...(said.parts || [said.note || said.summary || w.text])));
+      this.outbox.push(out);
+      this.outboxEl.append(out.el);
+      this.outWaits(out, { id: w.id, label: machineOf(this.id).label }, null);
     }
   }
 

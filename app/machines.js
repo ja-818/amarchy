@@ -19,6 +19,7 @@
 function machineState(m) {
   if (m.me) return { words: "This machine", tone: "accent" };
   if (m.update) return { words: "Update needed", tone: "warn" };
+  if (m.on && m.reconnecting) return { words: "Reconnecting…", tone: "quiet" };
   if (m.on) return { words: "On", tone: "done" };
   if (!m.seen) return { words: "Not answering yet", tone: "quiet" };
   return { words: m.since ? `Off · ${autoPast(m.since)}` : "Off", tone: "quiet" };

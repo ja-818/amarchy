@@ -467,7 +467,10 @@ class TermPane {
     const mouse = this.term.modes.mouseTrackingMode !== "none";
     const unit = mouse ? cell * TMUX_WHEEL : cell;
     this.scrolled = (this.scrolled || 0) + px;
-    const n = Math.trunc(this.scrolled / unit);
+    // Whole turns, but a hair short of one is one: a finger's positions are
+    // fractions of a pixel (a phone's, at 3x), and a swipe of three turns'
+    // worth came out 239.99997 px of 240, one turn short.
+    const n = Math.trunc(this.scrolled / unit + Math.sign(this.scrolled) * 1e-3);
     if (!n) return;
     this.scrolled -= n * unit;
     if (!mouse) return this.term.scrollLines(n);
@@ -700,7 +703,7 @@ function show(id) {
       board.composing = false;
       boardComposeShow();
       deskLayout();
-      toChat(true);
+      toChat();
       seenNow(id);      // opened: seen
     }
   } else {
@@ -1412,17 +1415,15 @@ function dropImages() {
   });
 }
 
-// The keyboard to the chat: its card if it asks something, else the box.
-function toChat(opened) {
+// The keyboard to the chat: its card if it asks something, else the box
+// (however it was opened: the messages are ↑ or Esc away).
+function toChat() {
   const c = desk.chat;
   if (!c) return;
   // Out of the side panel first (its terminal kept the keyboard: it stays put
   // as the chat changes), so the chat can take them once it's in.
   if (desk.side.el.contains(document.activeElement)) document.activeElement.blur();
-  const card = c.dock.querySelector(".card");
-  if (card) (menuStart(card) || card).focus({ preventScroll: true });
-  // Opened with the keys: on its latest message (i to write); else the box.
-  else if (!(opened && lastInput.keys && c.navStart())) c.input.focus({ preventScroll: true });
+  c.takeKeys();
   desk.focus = "chat";
   desk.focusPane = null;
   deskPanes();
@@ -1538,7 +1539,8 @@ function talkKey(e) {
   if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
   const t = fresh ? fresh.dictate : c.talk;
   if (t.locked) { t.stop(); return; }
-  if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
+  if (t.run) return;
+  if (t.tellWhyNot()) return;      // it can't work here: why, and what to do
   if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
   desk.talkCode = e.code;
@@ -1891,10 +1893,12 @@ function showKeys() {
       ["x", "Complete the chat's mission, with Undo"], ["r", "Open what it made: Review, or its Preview"],
       ["s", "Seen: off Needs you without opening it"],
       ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["Tab / Shift+Tab  in a new chat", "The next / previous project"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
-    ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
+    ...part("In a chat", [["Enter / Shift+Enter  in the box", "Send / a new line"],
+      ["Esc  in the box", "Stop Claude while it works; else up onto the messages"], ["↑  in the box, nothing above", "Up onto the messages"],
+      ["Page Up / Down  in the box", "Scroll the messages, still writing"],
+      ["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
-      ["i", "Write: the box"], ["Esc", "Out of the box or the message; again: back to the board"], ["Tab", "Brief / Chat"],
-      ["Enter / Shift+Enter  in the box", "Send / a new line"],
+      ["i  or  ↓ on the latest", "Back into the box"], ["Esc  on a message", "Back to the board (never a stop)"],
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
       ...(app.view && app.view.ghostty ? [["Ctrl+Alt+O", "This chat's terminal in Ghostty"]] : []),

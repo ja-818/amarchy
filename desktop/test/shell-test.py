@@ -111,6 +111,12 @@ class Server:
                                      method="POST", headers={"Content-Type": "application/json"})
         return json.loads(urllib.request.urlopen(req, timeout=10).read())["sent"]
 
+    def live(self, live):
+        """What a chat's Claude is doing now, as its live state says ({"sid", "state", "partial"...})."""
+        req = urllib.request.Request(self.url + "__test/live", data=json.dumps(live).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).read()
+
     def stop(self):
         self.proc.terminate()
         self.proc.wait()
@@ -628,6 +634,142 @@ def main():
             time.sleep(1)
             check(w.do("url").startswith(remote.url), "a page elsewhere isn't opened in the window (it's the browser's)")
 
+        # ---- how it draws. No GPU to draw with (this test's X server has
+        # none: Mesa's llvmpipe): its page painted on the CPU, composited, and
+        # told so (what moves steps half as often). An agent's chat at work
+        # (three dots) stays light, and Backspace held in its box lands as
+        # it's pressed, none after you let go.
+        print("how it draws")
+        said = subprocess.run([str(BIN), "--graphics"], capture_output=True, text=True, timeout=30).stdout
+        renderer = next((line[len("renderer: "):] for line in said.splitlines() if line.startswith("renderer: ")), "")
+        soft = any(x in renderer.lower() for x in ("llvmpipe", "softpipe", "swrast"))
+        check(bool(renderer) and "draws: " in said, f"--graphics says what draws its GL, and how it draws ({' / '.join(said.split(chr(10)))[:200]})")
+        agent = Server()
+        try:
+            Path(agent.home, ".local/state/amarchy/agents").write_text(json.dumps([{"id": "desk-long", "name": "Calcifer", "sound": "fairy"}]))
+            agent.live({"sid": "desk-long", "state": "working", "partial": "", "thinking": False, "pending": [], "queue": [],
+                        "activity": {"tool": "Bash", "input": {"command": "top"}}, "working_since": time.time() - 60})
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            with Shell(agent.url, home=home, env=env_for(fake_cli(home))) as w:
+                on_app(w)
+                d = w.do("drawing")
+                log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+                told = w.js("[window.amarchyDesktop.gpu, spin.every]")
+                kept = json.loads(Path(home, ".local/state/amarchy/desktop/graphics.json").read_text())
+                check(kept.get("renderer") == renderer and "|" in kept.get("sig", ""),
+                      f"what draws its GL, kept for this computer's graphics: a start that hands over doesn't ask again ({kept.get('renderer')})")
+                if soft:
+                    check(d.get("cpu_painting") is True and d.get("policy") != "never" and "its page painted on the CPU" in log,
+                          f"no GPU ({renderer}): its page painted on the CPU, composited, and its log says why ({d})")
+                    check(told == [False, 2], f"the page is told it has no GPU: its spinners step every other tick ({told})")
+                else:
+                    check(d.get("cpu_painting") is False and told == [True, 1], f"a GPU ({renderer}): its page painted through it ({d}, {told})")
+                w.js("location.hash = '#/s/desk-long'; 1")
+                check(bool(w.wait("!!document.querySelector('.chat.bubbles .msg.claude.typing .dots')", timeout=40)), "an agent's chat at work: three dots")
+                time.sleep(4)
+                web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
+                hz = os.sysconf("SC_CLK_TCK")
+                use = lambda: sum(sum(map(int, Path(f"/proc/{p}/stat").read_text().rsplit(")", 1)[1].split()[11:13])) for p in [w.proc.pid, *web])
+                a, t0 = use(), time.time()
+                time.sleep(8)
+                cpu = round(100 * (use() - a) / hz / (time.time() - t0))
+                anims = w.js("document.getAnimations().filter(a => a.playState === 'running').map(a => a.animationName)")
+                check(cpu < 40 and not anims, f"at work, it takes {cpu}% of a core (under 40), nothing animating every frame ({anims})")
+                w.js("(() => { const t = document.querySelector('.chat textarea'); window.__keys = []; t.addEventListener('input', () => __keys.push(Date.now()));"
+                     " t.value = 'x'.repeat(100); t.focus(); t.setSelectionRange(100, 100); return 1; })()")
+                w.focus()
+                t0 = time.time()
+                w.xdo("key", "--delay", 30, *(["BackSpace"] * 40))
+                t1 = time.time()
+                time.sleep(3)
+                keys, left = w.js("window.__keys"), w.js("document.querySelector('.chat textarea').value.length")
+                late = round(keys[-1] - t1 * 1000) if keys else None
+                check(len(keys) == 40 and left == 60 and late is not None and late < 2000,
+                      f"40 Backspaces held (30 ms apart): all in, the last {late} ms after it was pressed, none after ({len(keys)} in, {left} left)")
+                w.shot(SHOTS / "agent-typing.png")
+                if soft:
+                    # Its page's process crashing twice with no sign why: no GPU to blame, it draws on as it does.
+                    for _ in range(2):
+                        for p in [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]:
+                            os.kill(p, 9)
+                        time.sleep(1)
+                        w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+                    log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+                    check(not Path(home, ".local/state/amarchy/desktop/rendering.json").exists() and "no GPU here to blame" in log
+                          and w.do("drawing").get("policy") != "never", "no GPU: two crashes with no sign why aren't the GPU's, it draws on composited")
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            with Shell(agent.url, home=home, env={**env_for(fake_cli(home)), "AMARCHY_DESKTOP_GPU": "1"}) as w:
+                on_app(w)
+                check(w.do("drawing").get("cpu_painting") is False and w.js("window.amarchyDesktop.gpu") is True,
+                      "AMARCHY_DESKTOP_GPU=1: painted through GL anyway, the page told it has a GPU")
+        finally:
+            agent.stop()
+
+        # ---- its stderr. Started in another's place by a build before
+        # 2026-11-22 22:48, it was handed that one's own pipe, which nobody
+        # reads once it ends: the journal instead, never a word held up. And
+        # wherever its stderr goes, a full pipe never holds it up.
+        print("its stderr")
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        logf = Path(home, ".local/state/amarchy/desktop/desktop.log")
+        with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
+            on_app(w)
+            old = w.proc.pid
+            w.proc.kill()
+            w.proc.wait()
+            read, write = os.pipe()      # the old build's pipe: kept open here, never read
+            env = {k: v for k, v in w.env.items() if k != "AMARCHY_DESKTOP_STDERR"}
+            new = subprocess.Popen([str(BIN), "--after", str(old), "--url", remote.url], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=write, env=env, text=True, bufsize=1)
+            os.close(write)
+            try:
+                got = []
+                threading.Thread(target=lambda: [got.append(line) for line in new.stdout], daemon=True).start()
+                def do(what, rid, timeout=20):
+                    new.stdin.write(json.dumps({"id": rid, "do": what}) + "\n")
+                    new.stdin.flush()
+                    end = time.time() + timeout
+                    while time.time() < end:
+                        hit = next((line for line in got if line.startswith(f"@@{rid} ")), None)
+                        if hit:
+                            return json.loads(hit.split(" ", 1)[1])
+                        time.sleep(0.2)
+                    return None
+                for _ in range(100):
+                    if logf.exists() and f"pid {new.pid}" in logf.read_text():
+                        break
+                    time.sleep(0.2)
+                time.sleep(3)
+                log = logf.read_text()
+                journal = Path("/run/systemd/journal/stdout").exists()
+                check(("its stderr was the pipe of the build before it" in log) and (("writes to the journal itself" in log) == journal),
+                      f"handed the old build's pipe: {'the journal instead' if journal else 'its log alone'}, and its log says so")
+                check(do("stderr", "s1") is True and do("pid", "s2") == new.pid, "200 KB on its stderr, into a pipe nobody reads: it goes on")
+                check("a test's line 1999 on stderr" in logf.read_text(), "and its log has every line")
+            finally:
+                new.kill()
+                new.wait()
+                os.close(read)
+            # Where stderr went full (a pipe nobody reads, as given): its words never held up.
+            read, write = os.pipe()
+            fresh = subprocess.Popen([str(BIN), "--url", remote.url], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=write,
+                                     env=env, text=True, bufsize=1)
+            os.close(write)
+            try:
+                got2 = []
+                threading.Thread(target=lambda: [got2.append(line) for line in fresh.stdout], daemon=True).start()
+                time.sleep(4)
+                fresh.stdin.write(json.dumps({"id": "f1", "do": "stderr"}) + "\n")
+                fresh.stdin.flush()
+                end = time.time() + 20
+                while time.time() < end and not any(line.startswith("@@f1 ") for line in got2):
+                    time.sleep(0.2)
+                check(any(line.startswith("@@f1 true") for line in got2), "started with a stderr nobody reads: 200 KB on it, and it goes on")
+            finally:
+                fresh.kill()
+                fresh.wait()
+                os.close(read)
+
         # ---- it heals itself: its log; a window gone, a crashed page, a
         # stuck window thread: a start always brings it back.
         print("it heals itself")
@@ -637,7 +779,8 @@ def main():
         # The safe way as the build before kept it, after any crash (a sound's, on Julian's M5): forgotten.
         rendering.parent.mkdir(parents=True, exist_ok=True)
         rendering.write_text(json.dumps({"safe": True, "why": "its page's process crashed"}))
-        with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
+        # (As on a computer with a GPU: with none, a crash isn't the GPU's, "how it draws".)
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "AMARCHY_DESKTOP_GPU": "1"}) as w:
             on_app(w)
             log = logf.read_text() if logf.exists() else ""
             check("amarchy-desktop" in log and " started (pid " in log and "graphics:" in log,

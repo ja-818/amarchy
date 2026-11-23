@@ -223,14 +223,22 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         without one
 
 Dictation (the app's mic button: what you say, written into the box you type in, by a speech-to-text model
-on this machine that knows Spanish, English and 23 more languages and tells them apart by itself):
-  amarchy dictation [--status]          whether it's set up, and how to set it up if not
-  amarchy dictation setup               fetch the model (Parakeet TDT 0.6B v3, 670 MB) into the state; needs
-                                        whisper.cpp 1.9 or newer, with its libparakeet (Arch: whisper-cpp)
-  amarchy dictation remove              delete the model again
+on this machine that knows Spanish, English and 23 more languages and tells them apart by itself; on a
+machine without it, by another machine of yours that has it, paired with amarchy machines):
+  amarchy dictation [--status]          whether it's set up, where it's written down, and how to set it up if not
+  amarchy dictation setup               fetch what dictation needs here: the speech engine (transcribe.cpp,
+                                        about 20 MB, where no package brought it) and the model (Parakeet TDT
+                                        0.6B v3, 740 MB), into the state; --in-background: and return at once;
+                                        --engine: only the engine (what an install fetches; the model too
+                                        where whisper.cpp's was set up before). Nothing to install or build,
+                                        on x86_64 and aarch64 Linux
+  amarchy dictation remove              delete the model and the engine fetched here again
   amarchy dictation log [--json]        the last dictations, from any phone or browser: how each went (which
-                                        way it was written down, how long it took) and what came of it
-  amarchy dictation transcribe <file>   write down a recording (anything ffmpeg reads), as a dictation would be
+                                        way it was written down, for which machine, how long it took) and
+                                        what came of it
+  amarchy dictation transcribe [--on <machine>] <file>
+                                        write down a recording (anything ffmpeg reads), as a dictation would
+                                        be: here, or on the machine that writes this one's down (or the one named)
 
 Secrets (a key or password a project needs, given in the app, never in the chat; kept in
 ~/.config/amarchy/secrets, 0600, outside every repo; the session's commands, its terminal and its run
@@ -447,7 +455,7 @@ import time
 import urllib.parse
 import uuid
 import zlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 HOME = Path.home()
 WORK = Path(os.environ.get("AMARCHY_WORK", HOME / "Work")).expanduser()
@@ -9630,10 +9638,24 @@ def cuts_kick(force=False):
     return True
 
 
+def own_home():
+    """Whether amarchy runs in the account's own home, not one made up for a
+    test (HOME elsewhere: the tests' app servers and CLIs)."""
+    import pwd
+    try:
+        return os.path.realpath(os.path.expanduser("~")) == os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except (KeyError, OSError):
+        return True
+
+
 def apart(unit, argv):
     """Run a command in the background, in a unit of its own where there's
     systemd (so restarting the app, which started it, doesn't stop it).
-    Whether it started."""
+    Whether it started. Never from a test's home: it would run on the
+    account's systemd, outliving the test (a whole fetch of Omarchy's
+    wallpapers, cut with ImageMagick, for each test's app server)."""
+    if not own_home():
+        return False
     if shutil.which("systemd-run"):
         env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
         if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}-{int(time.time())}",
@@ -11567,28 +11589,62 @@ def claude_prompt(s):
 # only a session's terminal Claude has (see "dictation from the phone"). The
 # phone's or the browser's microphone, 16 kHz 16-bit mono as for that
 # (voice.js), is written down here, by NVIDIA's Parakeet TDT 0.6B v3 through
-# whisper.cpp's libparakeet (Arch: the whisper-cpp package). It knows 25
-# European languages, Spanish and English among them, and tells them apart
-# by itself; on the CPU it writes ~10 seconds of speech in one. Free, and
-# the audio never leaves this machine.
+# transcribe.cpp (github.com/handy-computer/transcribe.cpp, MIT: the engine
+# Hex and Handy write speech down with). It knows 25 European languages,
+# Spanish and English among them, and tells them apart by itself; on the
+# CPU it writes ~10 seconds of speech in one. Free, and the audio never
+# leaves your machines.
 #
-# The model (670 MB) is fetched once (amarchy dictation setup, or Settings in
-# the app) into the state. A worker (amarchy dictation worker) keeps it loaded
-# while dictations come, and exits DICTATE_KEEP after the last one. What's
-# said is cut at its pauses as it comes, and each piece written down while
-# the next is said: the words come up as you talk, and letting go leaves only
-# the last piece to do.
+# The engine comes with amarchy, on every processor it runs on (x86_64 and
+# aarch64: DICTATE_ENGINE, a release of transcribe.cpp pinned by its hash):
+# a package carries it (DICTATE_PACKAGED, packaging/arch), and a checkout
+# fetches it when it's installed (install.sh), into the state. Never a
+# distro's package, never a build here. Only its CPU code is kept (the
+# Vulkan one is 42 MB of its 64, for a GPU a server hasn't). The model
+# (740 MB) is fetched once, the first time it's wanted (amarchy dictation
+# setup, Settings in the app), into the state. A worker (amarchy dictation
+# worker) keeps it loaded while dictations come, and exits DICTATE_KEEP
+# after the last one. What's said is cut at its pauses as it comes, and
+# each piece written down while the next is said: the words come up as you
+# talk, and letting go leaves only the last piece to do.
+#
+# A machine without the model (not set up yet, or a laptop that shouldn't
+# hold it) sends a dictation to another machine of yours that has it (see
+# "machines"): its /api/dictate is that machine's, passed on (dictate_helper),
+# and the app's mic works there as here. Never further than one: the machine
+# that's asked writes it down itself or says no.
 
 DICTATE = STATE / "dictation"
 DICTATE_MODEL = {
     "name": "Parakeet TDT 0.6B v3",
-    "file": "parakeet-tdt-0.6b-v3-q8_0.bin",
-    "url": "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
-    "size": 668757119,
-    "sha256": "4d64e9e96c2792186d072fde0034df0ad670cf680a2f53069052ead827fd600e",
+    "file": "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    "url": "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/"
+           "d8d8c32cb2017c57e5307767343e97870f8a7f53/parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    "size": 739508576,
+    "sha256": "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7",
 }
-DICTATE_LIB = "libparakeet.so.1"            # whisper.cpp 1.9 or newer
-DICTATE_SETUP = DICTATE / "setup.json"      # a download under way: how far, or why it stopped
+DICTATE_ENGINE = {          # what writes it down: this release of transcribe.cpp, for each processor
+    "name": "transcribe.cpp", "version": "0.4.2",
+    "builds": {
+        "x86_64": {"url": "https://github.com/handy-computer/transcribe.cpp/releases/download/v0.4.2/"
+                          "transcribe-native-0.4.2-linux-x86_64-cpu-vulkan.tar.gz",
+                   "size": 22562331, "sha256": "4fe87db8919ea34e461db7987713b580f54e6f3ed610457c5d8fb8eac1a15046"},
+        "aarch64": {"url": "https://github.com/handy-computer/transcribe.cpp/releases/download/v0.4.2/"
+                           "transcribe-native-0.4.2-linux-aarch64-cpu-vulkan.tar.gz",
+                    "size": 18137774, "sha256": "5e9cc7b244949fc686d1272e796e965411e80cc768533f1704c3c53e4c7d695e"},
+    },
+}
+DICTATE_ENGINE_LIB = "libtranscribe.so"
+DICTATE_ENGINE_SKIP = {"libggml-vulkan.so"}         # not kept: the GPU's (42 MB), never used (CPU only)
+DICTATE_PACKAGED = Path("/usr/lib/amarchy/transcribe.cpp")  # the package's (packaging/arch)
+DICTATE_ENGINE_DIR = DICTATE / "transcribe.cpp"     # else fetched here (install.sh, setup)
+# What amarchy wrote dictations down with before transcribe.cpp (whisper.cpp's
+# libparakeet, its model, the whisper.cpp setup built where no package had
+# it): deleted once the new model is in.
+DICTATE_BEFORE = ("parakeet-tdt-0.6b-v3-q8_0.bin", "parakeet-tdt-0.6b-v3-q8_0.bin.part", "whisper.cpp", "build",
+                  "whisper.cpp.new", "build.log")
+DICTATE_SETUP = DICTATE / "setup.json"      # a setup under way: how far, or why it stopped
+DICTATE_UNIT = "amarchy-dictation-setup"    # a setup run in the background (systemctl --user status ...)
 DICTATE_LOG = DICTATE / "log.jsonl"         # the last dictations: how they went (amarchy dictation log)
 DICTATE_LOG_KEEP = 500                      # lines of it kept
 DICTATE_KEEP = 600          # seconds the model stays loaded after the last dictation
@@ -11609,35 +11665,91 @@ MIC_MAX = 300             # seconds a dictation on the host lasts at most
 MIC_QUIET = 3             # seconds without a word from the phone before it counts as let go
 
 
+def mb_of(size):
+    """A size in MB as people round it."""
+    return -(-size // 10_000_000) * 10
+
+
 def dictate_mb():
     """The model's size, in MB as people round it."""
-    return -(-DICTATE_MODEL["size"] // 10_000_000) * 10
+    return mb_of(DICTATE_MODEL["size"])
 
 
 def dictate_model_path():
     return DICTATE / DICTATE_MODEL["file"]
 
 
+def dictate_arch():
+    """This machine's processor, as packages name it (x86_64, aarch64).
+    (AMARCHY_DICTATE_ARCH: another, for the tests.)"""
+    import platform
+    return os.environ.get("AMARCHY_DICTATE_ARCH") or platform.machine() or "this processor"
+
+
+def dictate_build():
+    """The engine's build for this machine ({url, size, sha256}), or None
+    where amarchy has none (another processor, or not Linux)."""
+    return DICTATE_ENGINE["builds"].get(dictate_arch()) if sys.platform.startswith("linux") else None
+
+
+def dictate_engine_version(d):
+    """The transcribe.cpp release in folder d (its contract.json), or None."""
+    try:
+        v = json.loads((Path(d) / "contract.json").read_text()).get("version")
+        return v if isinstance(v, str) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 _dictate_lib = {"at": 0, "found": None}
 
 
 def dictate_lib():
-    """The library that writes speech down (libparakeet), or None. Looked
-    for again a minute later (installed meanwhile)."""
-    if time.time() - _dictate_lib["at"] > 60:
-        import ctypes.util
-        found = None
-        for d in ("/usr/lib", "/usr/local/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu"):
-            if Path(d, DICTATE_LIB).exists():
-                found = str(Path(d, DICTATE_LIB))
-                break
-        _dictate_lib.update(at=time.time(), found=found or ctypes.util.find_library("parakeet"))
+    """The engine (transcribe.cpp's libtranscribe), or None: the one
+    AMARCHY_DICTATE_ENGINE names (a folder: one built by hand, where amarchy
+    has no build), else the package's, else the one fetched into the state.
+    Only the release amarchy pins (the worker is written for its API).
+    Looked for again a minute later, or a few seconds while there's none (a
+    setup fetching it), and at once when it's gone (amarchy dictation remove).
+    (AMARCHY_DICTATE_SYSTEM=off: as without the package, for the tests.)"""
+    found = _dictate_lib["found"]
+    if time.time() - _dictate_lib["at"] > (60 if found else 3) or (found and not os.path.isfile(found)):
+        own = os.environ.get("AMARCHY_DICTATE_ENGINE")
+        dirs = [Path(own).expanduser()] if own else \
+            [*([DICTATE_PACKAGED] if os.environ.get("AMARCHY_DICTATE_SYSTEM") != "off" else []), DICTATE_ENGINE_DIR]
+        found = next((str(d / DICTATE_ENGINE_LIB) for d in dirs if (d / DICTATE_ENGINE_LIB).is_file()
+                      and (own or dictate_engine_version(d) == DICTATE_ENGINE["version"])), None)
+        _dictate_lib.update(at=time.time(), found=found)
     return _dictate_lib["found"]
 
 
+def dictate_ready():
+    """Whether this machine writes dictations down itself: its engine and
+    its model are here (what its hello says, and what another machine
+    sends its dictations here for)."""
+    return bool(dictate_lib()) and dictate_model_path().is_file()
+
+
+def dictate_fetching():
+    """What setup fetches here now: [(what, size)], the engine where it
+    isn't here (and amarchy has it for this processor), then the model."""
+    build = None if dictate_lib() else dictate_build()
+    return ([(f"{DICTATE_ENGINE['name']} {DICTATE_ENGINE['version']}", build["size"])] if build else []) + \
+        ([] if dictate_model_path().is_file() else [(DICTATE_MODEL["name"], DICTATE_MODEL["size"])])
+
+
+def dictate_before():
+    """Whether dictation was set up here before transcribe.cpp (whisper.cpp's model)."""
+    return (DICTATE / DICTATE_BEFORE[0]).is_file()
+
+
 def dictate_status():
-    """Whether the host can write dictations down, and if not why: the
-    library, the model, or the model's download under way."""
+    """Whether this machine can write dictations down, and if not why: the
+    engine, the model, or the setup under way (fetching them); how to set it
+    up (dictate_how, fix: its command), and whether setup can do it all by
+    itself (auto: amarchy has the engine for this processor). size: what
+    setup fetches (the model's once it's all here). buildable is always
+    false: nothing is built here any more (the app reads it)."""
     lib, model = bool(dictate_lib()), dictate_model_path().is_file()
     setup = None
     try:
@@ -11646,10 +11758,17 @@ def dictate_status():
             setup = None
         elif setup.get("pid") and not setup.get("error") and not pid_alive(setup["pid"]):
             setup = {**setup, "error": "the download stopped"}
+        elif not setup.get("pid") and not setup.get("error") and time.time() - (setup.get("at") or 0) > 60:
+            setup = {**setup, "error": "the setup didn't start"}       # (asked for, never began: dictate_kick)
     except (OSError, ValueError):
         pass
-    return {"ready": lib and model, "lib": lib, "model": model, "engine": DICTATE_MODEL["name"],
-            "size": DICTATE_MODEL["size"], "setup": None if model else setup}
+    ready = lib and model
+    how, fix = dictate_how(both=True) if not ready else (None, None)
+    under_way = setup and not setup.get("error") and isinstance(setup.get("size"), int)
+    size = setup["size"] if under_way else sum(n for _, n in dictate_fetching()) or DICTATE_MODEL["size"]
+    return {"ready": ready, "lib": lib, "model": model, "engine": DICTATE_MODEL["name"], "size": size,
+            "setup": None if ready else setup, "how": how, "fix": fix, "auto": lib or bool(dictate_build()),
+            "buildable": False, "arch": dictate_arch()}
 
 
 def pid_alive(pid):
@@ -11660,89 +11779,188 @@ def pid_alive(pid):
         return False
 
 
-def dictate_how():
-    """What to do so the host can write dictations down, in a line."""
-    if not dictate_lib():
-        return ("install whisper.cpp 1.9 or newer, with its libparakeet (Arch: sudo pacman -S whisper-cpp), "
-                "then amarchy dictation setup")
-    return f"amarchy dictation setup (fetches {DICTATE_MODEL['name']}, {dictate_mb()} MB)"
+def dictate_how(both=False):
+    """What to do so this machine can write dictations down, in a line:
+    setup, which fetches what's missing; or, on a processor amarchy has no
+    engine for, an engine built by hand. both: (the line, the command to
+    run, or None where there's none)."""
+    if not dictate_lib() and not dictate_build():
+        line = (f"amarchy has no speech engine for {dictate_arch()}: build transcribe.cpp {DICTATE_ENGINE['version']} "
+                f"(github.com/handy-computer/transcribe.cpp), set AMARCHY_DICTATE_ENGINE to the folder with its "
+                f"{DICTATE_ENGINE_LIB}, then amarchy dictation setup; or pair a machine of yours that has it")
+        return (line, None) if both else line
+    fetch = dictate_fetching()
+    what = " and ".join(w for w, _ in fetch) or DICTATE_MODEL["name"]
+    line = f"amarchy dictation setup (fetches {what}, {mb_of(sum(n for _, n in fetch) or DICTATE_MODEL['size'])} MB)"
+    return (line, "amarchy dictation setup") if both else line
 
 
-def dictate_setup(quiet=False):
-    """Fetch the model (again from where it stopped, if it did), check it,
-    and put it in place. How far it got goes to DICTATE_SETUP for the app."""
+def dictate_download(url, part, size, sha256, progress, quiet=False):
+    """url into part (again from where it stopped, if it did), checked by
+    its size and hash. progress(have) as it comes. Raises OSError."""
     import urllib.request
+    have = part.stat().st_size if part.exists() else 0
+    if have > size:
+        part.unlink()
+        have = 0
+    progress(have)
+    if have < size:
+        req = urllib.request.Request(url, headers={"User-Agent": "amarchy", **({"Range": f"bytes={have}-"} if have else {})})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if have and r.status != 206:      # it can't go on from there: from the start
+                have = 0
+            with open(part, "ab" if have else "wb") as f:
+                last = 0
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    have += len(chunk)
+                    if time.time() - last > 0.5:
+                        last = time.time()
+                        progress(have)
+    progress(have)
+    digest = hashlib.sha256()
+    with open(part, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    if have != size or digest.hexdigest() != sha256:
+        part.unlink(missing_ok=True)
+        raise OSError("what came isn't what it should be (a broken download?): try again")
+
+
+def dictate_unpack(archive):
+    """The engine's release (archive, checked already) into
+    DICTATE_ENGINE_DIR: its libraries and licenses, without the GPU's, and
+    only once it loads here (this processor runs it, the libraries find
+    each other). Raises OSError."""
+    import tarfile
+    new = DICTATE / "transcribe.cpp.new"
+    shutil.rmtree(new, ignore_errors=True)
+    try:
+        with tarfile.open(archive, "r:gz") as t:
+            for m in t.getmembers():
+                rel = PurePosixPath(m.name.partition("/")[2])       # inside its one folder
+                if not rel.parts or rel.is_absolute() or ".." in rel.parts or rel.name in DICTATE_ENGINE_SKIP:
+                    continue
+                out = new.joinpath(*rel.parts)
+                if m.isdir():
+                    out.mkdir(parents=True, exist_ok=True)
+                elif m.isfile():
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with t.extractfile(m) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    out.chmod(0o755 if m.mode & 0o111 else 0o644)
+        if dictate_engine_version(new) != DICTATE_ENGINE["version"] or not (new / DICTATE_ENGINE_LIB).is_file():
+            raise OSError(f"what came isn't {DICTATE_ENGINE['name']} {DICTATE_ENGINE['version']}")
+        # (A crash in it leaves no core behind: on Omarchy one would show as "Process crashed".)
+        import resource
+        r = subprocess.run([sys.executable, "-I", "-c",
+                            "import ctypes, sys; sys.exit(ctypes.CDLL(sys.argv[1]).transcribe_init_backends_default())",
+                            str(new / DICTATE_ENGINE_LIB)], capture_output=True, text=True, timeout=60, env=clean_env(),
+                           preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CORE, (1, 1)))
+        if r.returncode != 0:
+            said = (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[-1]
+            raise OSError(f"{DICTATE_ENGINE['name']} doesn't run on this machine ({said[:200]})")
+        shutil.rmtree(DICTATE_ENGINE_DIR, ignore_errors=True)
+        new.rename(DICTATE_ENGINE_DIR)
+        _dictate_lib["at"] = 0      # found at once
+    except (tarfile.TarError, EOFError, subprocess.TimeoutExpired) as e:
+        raise OSError(f"{DICTATE_ENGINE['name']} didn't unpack: {e}")
+    finally:
+        shutil.rmtree(new, ignore_errors=True)
+
+
+def dictate_setup(quiet=False, engine=False):
+    """Fetch what dictation needs here and isn't here: the engine (where no
+    package has it), then the model (engine: only the engine, and the model
+    where an older one was set up: what an install fetches). Each again from
+    where it stopped, if it did, and checked. How far it got goes to
+    DICTATE_SETUP for the app (done of size, both together). None once
+    it's done, else why not."""
     DICTATE.mkdir(parents=True, exist_ok=True)
-    final, part = dictate_model_path(), DICTATE / (DICTATE_MODEL["file"] + ".part")
-    size = DICTATE_MODEL["size"]
-
-    def note(**kw):
-        write_file(DICTATE_SETUP, json.dumps({"pid": os.getpid(), "size": size, **kw}) + "\n")
-
-    if final.is_file():
-        DICTATE_SETUP.unlink(missing_ok=True)
-        return None
-    # One download at a time (the app's button and a terminal, say).
+    # One setup at a time (the app's button and a terminal, say).
     lock = open(DICTATE / "setup.lock", "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        return "a download is already under way (amarchy dictation shows how far)"
+        lock.close()
+        return "a setup is already under way (amarchy dictation shows how far)"
+    build = None if dictate_lib() else dictate_build()
+    model = not dictate_model_path().is_file() and (not engine or dictate_before())
+    size = (build["size"] if build else 0) + (DICTATE_MODEL["size"] if model else 0)
+    done = [0, 0]       # what came before this download, and of this one
+
+    def note(**kw):
+        write_file(DICTATE_SETUP, json.dumps({"pid": os.getpid(), "size": size, "done": done[0] + done[1], **kw}) + "\n")
+
+    def progress(have):
+        done[1] = have
+        note()
+        if not quiet and sys.stderr.isatty() and size:
+            print(f"\r  {(done[0] + have) // 1_000_000} of {size // 1_000_000} MB ({(done[0] + have) * 100 // size}%)",
+                  end="", file=sys.stderr, flush=True)
+
     try:
-        have = part.stat().st_size if part.exists() else 0
-        if have > size:
-            part.unlink()
-            have = 0
-        note(done=have)
-        if have < size:
-            req = urllib.request.Request(DICTATE_MODEL["url"], headers={"User-Agent": "amarchy",
-                                                                        **({"Range": f"bytes={have}-"} if have else {})})
-            with urllib.request.urlopen(req, timeout=60) as r:
-                if have and r.status != 206:      # it can't go on from there: from the start
-                    have = 0
-                with open(part, "ab" if have else "wb") as f:
-                    shown, last = -1, 0
-                    while True:
-                        chunk = r.read(1 << 20)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        have += len(chunk)
-                        if time.time() - last > 0.5:
-                            last = time.time()
-                            note(done=have)
-                            pct = have * 100 // size
-                            if not quiet and pct != shown and sys.stderr.isatty():
-                                shown = pct
-                                print(f"\r  {have // 1_000_000} of {size // 1_000_000} MB ({pct}%)", end="",
-                                      file=sys.stderr, flush=True)
-            if not quiet and sys.stderr.isatty():
-                print(file=sys.stderr)
-        note(done=have, checking=True)
-        digest = hashlib.sha256()
-        with open(part, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                digest.update(chunk)
-        if have != size or digest.hexdigest() != DICTATE_MODEL["sha256"]:
-            part.unlink(missing_ok=True)
-            raise OSError("what came isn't the model (a broken download?): try again")
-        part.rename(final)
+        if not dictate_lib() and not build:
+            raise OSError(dictate_how())
+        if build:
+            archive = DICTATE / f"transcribe.cpp-{DICTATE_ENGINE['version']}.tar.gz.part"
+            dictate_download(build["url"], archive, build["size"], build["sha256"], progress, quiet)
+            note(checking=True)
+            try:
+                dictate_unpack(archive)
+            finally:
+                archive.unlink(missing_ok=True)
+            done[:] = [build["size"], 0]
+        if model:
+            part = DICTATE / (DICTATE_MODEL["file"] + ".part")
+            dictate_download(DICTATE_MODEL["url"], part, DICTATE_MODEL["size"], DICTATE_MODEL["sha256"], progress, quiet)
+            part.rename(dictate_model_path())
+        if dictate_model_path().is_file():
+            for old in DICTATE_BEFORE:          # what wrote it down before: not needed now
+                p = DICTATE / old
+                shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
         DICTATE_SETUP.unlink(missing_ok=True)
         (DICTATE / "setup.lock").unlink(missing_ok=True)
         return None
     except (OSError, ValueError) as e:
         why = str(getattr(e, "reason", None) or e)
-        note(done=part.stat().st_size if part.exists() else 0, error=why)
+        note(error=why)
         return why
     finally:
+        if not quiet and sys.stderr.isatty() and size:
+            print(file=sys.stderr)
         lock.close()
+
+
+def dictate_kick(engine=False):
+    """amarchy dictation setup in the background, in a unit of its own where
+    there's systemd (restarting the app, or an update's install, doesn't
+    stop it; it would go on from where it stopped anyway). Whether it started."""
+    argv = [sys.executable, SELF, "dictation", "setup", "--quiet", *(["--engine"] if engine else [])]
+    # How far it is, from now on (the app, and an install's line, say Fetching at once).
+    size = sum(n for w, n in dictate_fetching() if not engine or w != DICTATE_MODEL["name"] or dictate_before())
+    if size:
+        DICTATE.mkdir(parents=True, exist_ok=True)
+        write_file(DICTATE_SETUP, json.dumps({"pid": None, "at": int(time.time()), "size": size, "done": 0}) + "\n")
+    if apart(DICTATE_UNIT, argv):
+        return True
+    try:
+        detach(argv)        # (a test's home: never on the account's systemd)
+    except OSError:
+        return False
+    return True
 
 
 def dictate_worker():
     """amarchy dictation worker: load the model and write down what comes on
     stdin, one piece at a time: its length (4 bytes, little-endian), then
     that much audio (16 kHz 16-bit mono). Each answer is a line of JSON on
-    stdout ({"text"} or {"error"}), the first one once the model is loaded."""
+    stdout ({"text"} or {"error"}), the first one once the model is loaded.
+    Through transcribe.cpp's C API (transcribe.h, of the release pinned),
+    on the CPU."""
     import array
     import ctypes as C
     out = sys.stdout
@@ -11756,43 +11974,77 @@ def dictate_worker():
         say(error=f"not set up: {dictate_how()}")
         return 1
 
-    class ContextParams(C.Structure):
-        _fields_ = [("use_gpu", C.c_bool), ("gpu_device", C.c_int)]
+    class BackendParams(C.Structure):       # transcribe_backend_init_params
+        _fields_ = [("struct_size", C.c_uint64), ("artifact_dir", C.c_char_p), ("allowed_backends", C.c_uint32)]
 
-    class FullParams(C.Structure):      # parakeet_full_params (parakeet.h)
-        _fields_ = [("strategy", C.c_int), ("n_threads", C.c_int), ("offset_ms", C.c_int), ("duration_ms", C.c_int),
-                    ("no_context", C.c_bool), ("audio_ctx", C.c_int)] + \
-                   [(n, C.c_void_p) for n in ("segment_cb", "segment_data", "token_cb", "token_data", "progress_cb",
-                                              "progress_data", "encoder_cb", "encoder_data", "abort_cb", "abort_data")]
+    class SessionParams(C.Structure):       # transcribe_session_params
+        _fields_ = [("struct_size", C.c_uint64), ("n_threads", C.c_int), ("kv_type", C.c_int), ("n_ctx", C.c_int32)]
 
     started = time.time()
     try:
-        # ggml finds its CPU code (the variant for this processor) only when asked to.
-        ggml = C.CDLL(str(Path(lib_path).with_name("libggml.so")) if Path(lib_path).with_name("libggml.so").exists()
-                      else "libggml.so", mode=C.RTLD_GLOBAL)
-        ggml.ggml_backend_load_all()
         lib = C.CDLL(lib_path)
     except OSError as e:
-        say(error=f"couldn't load whisper.cpp's libparakeet: {e}")
+        say(error=f"couldn't load {DICTATE_ENGINE['name']}: {e}")
         return 1
     log = C.CFUNCTYPE(None, C.c_int, C.c_char_p, C.c_void_p)(lambda *a: None)     # its chatter, unsaid
-    lib.parakeet_log_set(log, None)
-    lib.parakeet_context_default_params.restype = ContextParams
-    lib.parakeet_init_from_file_with_params.restype = C.c_void_p
-    lib.parakeet_init_from_file_with_params.argtypes = [C.c_char_p, ContextParams]
-    lib.parakeet_full_default_params.restype = FullParams
-    lib.parakeet_full_default_params.argtypes = [C.c_int]
-    lib.parakeet_full.argtypes = [C.c_void_p, FullParams, C.POINTER(C.c_float), C.c_int]
-    lib.parakeet_full_n_segments.argtypes = [C.c_void_p]
-    lib.parakeet_full_get_segment_text.argtypes = [C.c_void_p, C.c_int]
-    lib.parakeet_full_get_segment_text.restype = C.c_char_p
-    params = lib.parakeet_context_default_params()
-    params.use_gpu = False
-    ctx = lib.parakeet_init_from_file_with_params(str(model).encode(), params)
-    if not ctx:
-        say(error="the model didn't load (a broken download? amarchy dictation remove, then setup)")
+    lib.transcribe_log_set.argtypes = [C.c_void_p, C.c_void_p]
+    lib.transcribe_log_set(C.cast(log, C.c_void_p), None)
+    lib.transcribe_status_string.restype = C.c_char_p
+    lib.transcribe_status_string.argtypes = [C.c_int]
+    lib.transcribe_backend_init_params_init.argtypes = [C.POINTER(BackendParams)]
+    lib.transcribe_init_backends_ex.argtypes = [C.POINTER(BackendParams)]
+    lib.transcribe_model_load_file.argtypes = [C.c_char_p, C.c_void_p, C.POINTER(C.c_void_p)]
+    lib.transcribe_session_params_init.argtypes = [C.POINTER(SessionParams)]
+    lib.transcribe_session_init.argtypes = [C.c_void_p, C.POINTER(SessionParams), C.POINTER(C.c_void_p)]
+    lib.transcribe_session_free.argtypes = [C.c_void_p]
+    lib.transcribe_run.argtypes = [C.c_void_p, C.POINTER(C.c_float), C.c_int, C.c_void_p]
+    lib.transcribe_full_text.argtypes = [C.c_void_p]
+    lib.transcribe_full_text.restype = C.c_char_p
+
+    def why(status):
+        return (lib.transcribe_status_string(status) or b"").decode("utf-8", "replace") or f"status {status}"
+
+    # The CPU's code only (the variant for this processor, beside the library): no GPU driver ever runs.
+    bp = BackendParams()
+    lib.transcribe_backend_init_params_init(C.byref(bp))
+    bp.allowed_backends = 0x1       # TRANSCRIBE_BACKEND_MASK_CPU
+    status = lib.transcribe_init_backends_ex(C.byref(bp))
+    if status != 0:
+        say(error=f"{DICTATE_ENGINE['name']} found no way to run here ({why(status)})")
         return 1
-    threads = max(2, min(8, (os.cpu_count() or 4) // 2))
+    mdl, sess = C.c_void_p(), C.c_void_p()
+    status = lib.transcribe_model_load_file(str(model).encode(), None, C.byref(mdl))
+    if status != 0:
+        say(error=f"the model didn't load ({why(status)}: a broken download? amarchy dictation remove, then setup)")
+        return 1
+    def threads():
+        """As many threads as the processor has free now, 2 to 8: on a busy
+        machine (other chats' builds and tests) more only wait on each other
+        (JFK's 11 s at a load of 25 on 16 cores: 2.9 s with 2, 10 s with 8)."""
+        cpus = os.cpu_count() or 4
+        try:
+            busy = os.getloadavg()[0]
+        except OSError:
+            busy = 0
+        return max(2, min(8, cpus // 2, int(cpus - busy)))
+
+    def session(n):
+        """A session with n threads (it costs nothing next to the model), or why not."""
+        nonlocal sess
+        if sess:
+            lib.transcribe_session_free(sess)
+            sess = C.c_void_p()
+        sp = SessionParams()
+        lib.transcribe_session_params_init(C.byref(sp))
+        sp.n_threads = n
+        status = lib.transcribe_session_init(mdl, C.byref(sp), C.byref(sess))
+        return None if status == 0 else why(status)
+
+    used = threads()
+    problem = session(used)
+    if problem:
+        say(error=f"the model didn't start ({problem})")
+        return 1
     say(ready=True, ms=int((time.time() - started) * 1000))
     stdin = sys.stdin.buffer
     while True:
@@ -11808,14 +12060,18 @@ def dictate_worker():
         # At least a second (with silence after): a word alone is too short for it.
         pcm.extend([0] * max(0, DICTATE_RATE - len(pcm)))
         samples = (C.c_float * len(pcm)).from_buffer(array.array("f", (x / 32768 for x in pcm)))
-        full = lib.parakeet_full_default_params(0)
-        full.n_threads = threads
         t = time.time()
-        if lib.parakeet_full(ctx, full, samples, len(pcm)) != 0:
-            say(error="it couldn't write that down")
+        if threads() != used:
+            used = threads()
+            problem = session(used)
+            if problem:
+                say(error=f"it couldn't write that down ({problem})")
+                continue
+        status = lib.transcribe_run(sess, samples, len(pcm), None)
+        if status != 0:
+            say(error=f"it couldn't write that down ({why(status)})")
             continue
-        text = "".join((lib.parakeet_full_get_segment_text(ctx, i) or b"").decode("utf-8", "replace")
-                       for i in range(lib.parakeet_full_n_segments(ctx)))
+        text = (lib.transcribe_full_text(sess) or b"").decode("utf-8", "replace")
         say(text=" ".join(text.split()), ms=int((time.time() - t) * 1000))
 
 
@@ -12059,39 +12315,201 @@ def dictate_log(entry):
         pass
 
 
+# Which kind of machine is asked first to write another's dictations down:
+# one that's always on.
+DICTATE_HELPER_FIRST = ("server", "cloud", "desktop", "laptop")
+
+
+def dictate_helper(st=None, name=None):
+    """Another machine of yours that writes this one's dictations down when
+    this one can't (no model here): a paired one that's on, has its own
+    model, and speaks this protocol; a server first (it's always on), then
+    as paired. name: that machine or none. Its machines.json row with its
+    label and engine, or None. The app's server knows how each stands
+    (st.peers); without it (the CLI), each is asked."""
+    ms = [m for m in machines_read() if name in (None, m["name"])]
+    if not ms:
+        return None
+    hellos = {}
+    if st is not None:          # (never a request of its own: the app's server follows each machine)
+        for n, p_ in (st.peers.snapshot() if getattr(st, "peers", None) else {}).items():
+            if p_.get("on") and not p_.get("update"):
+                hellos[n] = p_.get("hello") or {}
+    else:
+        def ask(m):
+            try:
+                code, h = peer_json(m, "GET", "/api/peer/hello", timeout=4)
+            except PeerError:
+                return
+            if code == 200 and isinstance(h, dict) and h.get("protocol") == PROTOCOL:
+                hellos[m["name"]] = h
+        ts = [threading.Thread(target=ask, args=(m,), daemon=True) for m in ms]
+        for t_ in ts:
+            t_.start()
+        for t_ in ts:
+            t_.join(6)
+    ready = [(m, h) for m in ms if isinstance((h := hellos.get(m["name"]) or {}).get("dictation"), dict)
+             and h["dictation"].get("ready")]
+    if not ready:
+        return None
+    ready.sort(key=lambda mh: DICTATE_HELPER_FIRST.index(mh[1].get("kind")) if mh[1].get("kind") in DICTATE_HELPER_FIRST
+               else len(DICTATE_HELPER_FIRST))
+    m, h = ready[0]
+    return {**m, "label": str(h.get("label") or m["label"])[:LABEL_MAX],
+            "engine": str(h["dictation"].get("engine") or DICTATE_MODEL["name"])[:80]}
+
+
+def dictate_via(helper):
+    """What the app is told of the machine that writes dictations down for this one."""
+    return {"name": helper["name"], "label": helper["label"], "engine": helper["engine"]} if helper else None
+
+
+def dictate_view(st, status):
+    """Dictation as the app's board has it: this machine's (dictate_status),
+    and, when it can't, the machine that writes them down for it (via)."""
+    helper = None if status.get("ready") else dictate_helper(st)
+    return {**status, "via": dictate_via(helper)}
+
+
+def ws_frame(data, op=2):
+    """A WebSocket frame from a client (masked, as a client's must be)."""
+    mask, n = os.urandom(4), len(data)
+    size = (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + n.to_bytes(2, "big") if n < 1 << 16
+            else bytes([0x80 | 127]) + n.to_bytes(8, "big"))
+    key = (mask * (n // 4 + 1))[:n]
+    return bytes([0x80 | op]) + size + mask + (int.from_bytes(data, "big") ^ int.from_bytes(key, "big")).to_bytes(n, "big")
+
+
+def dictate_remote(m, pcm, heard=None, timeout=300):
+    """A recording (16 kHz 16-bit mono) written down on machine m, through
+    its /api/dictate as the app's mic sends it: the text. Raises OSError
+    with why not."""
+    key = base64.b64encode(os.urandom(16)).decode()
+    try:
+        sock, code, head, early = peer_ws_open(m, "/api/dictate", key)
+    except PeerError as e:
+        raise OSError(str(e)) from None
+    except OSError as e:
+        raise OSError(f"{m['label']} is off: {peer_why(e)}") from None
+    if code != 101:
+        said = peer_ws_refusal(sock, head, early)
+        raise OSError(said.get("error") or f"{m['label']} said no ({code})")
+    buf, end = early, time.time() + timeout
+    try:
+        sock.settimeout(30)
+        for i in range(0, len(pcm), 6400):      # 0.2 s at a time
+            sock.sendall(ws_frame(pcm[i:i + 6400]))
+        sock.sendall(ws_frame(b"end", op=1))
+        while time.time() < end:
+            while len(buf) >= 2:
+                n, at = buf[1] & 0x7F, 2
+                if n == 126:
+                    n, at = (int.from_bytes(buf[2:4], "big"), 4) if len(buf) >= 4 else (None, 0)
+                elif n == 127:
+                    n, at = (int.from_bytes(buf[2:10], "big"), 10) if len(buf) >= 10 else (None, 0)
+                if n is None or len(buf) < at + n:
+                    break
+                op, data, buf = buf[0] & 0x0F, buf[at:at + n], buf[at + n:]
+                if op == 8:
+                    raise OSError(f"{m['label']} hung up before it said what it heard")
+                if op != 1:
+                    continue
+                try:
+                    d = json.loads(data)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                if d.get("error"):
+                    raise OSError(str(d["error"]))
+                if isinstance(d.get("text"), str):
+                    return d["text"]
+                if heard and isinstance(d.get("interim"), str):
+                    heard(d["interim"])
+            sock.settimeout(max(1.0, end - time.time()))     # (writing it all down may take a while there)
+            chunk = sock.recv(65536)
+            if not chunk:
+                raise OSError(f"{m['label']} hung up before it said what it heard")
+            buf += chunk
+        raise OSError(f"{m['label']} took too long")
+    except socket.timeout:
+        raise OSError(f"{m['label']} took too long") from None
+    finally:
+        sock.close()
+
+
 def device_name(ua, standalone=False):
     """The device and browser a User-Agent is, in a few words."""
     ua = ua or ""
     dev = ("iPhone" if "iPhone" in ua else "iPad" if "iPad" in ua else "Android" if "Android" in ua
            else "Mac" if "Macintosh" in ua else "Windows" if "Windows" in ua else "Linux" if "Linux" in ua else "?")
-    app = ("Chrome" if re.search(r"Chrome/|CriOS/", ua) and "Edg" not in ua else "Edge" if "Edg" in ua
+    app = ("desktop app" if " Amarchy/" in ua       # (amarchy's own: desktop/src/platform.rs)
+           else "Chrome" if re.search(r"Chrome/|CriOS/", ua) and "Edg" not in ua else "Edge" if "Edg" in ua
            else "Firefox" if re.search(r"Firefox/|FxiOS/", ua) else "Safari" if "Safari/" in ua or "AppleWebKit" in ua
            else "?")
     return f"{dev} {'home-screen app' if standalone else app}"
 
 
 def cmd_dictation(args):
-    """amarchy dictation [--status] | setup | remove | log [--json] | transcribe <file> | worker"""
+    """amarchy dictation [--status] | setup [--in-background] | remove | log [--json] | transcribe [--on <m>] <file> | worker"""
     what = args[0] if args and not args[0].startswith("--") else ""
     if what == "worker":
         return dictate_worker()
     if what == "setup":
-        if not dictate_lib():
-            return fail(f"whisper.cpp isn't installed: {dictate_how()}")
-        if dictate_model_path().is_file():
-            print(f"Dictation is set up: {DICTATE_MODEL['name']}, in {dictate_model_path()}.")
+        opts = set(args[1:])
+        if opts - {"--engine", "--in-background", "--quiet"}:
+            print(usage("dictation"), file=sys.stderr)
+            return 1
+        engine, later, quiet = "--engine" in opts, "--in-background" in opts, "--quiet" in opts
+        st_ = dictate_status()
+        if not st_["auto"]:
+            if engine:          # (an install: nothing to fetch for this processor)
+                return 0
+            return fail(f"dictation can't be set up here by itself: {st_['how']}")
+        fetch = [(w, n) for w, n in dictate_fetching()
+                 if not engine or w != DICTATE_MODEL["name"] or dictate_before()]
+        if not fetch:
+            if not quiet:
+                print(f"Dictation is set up: {DICTATE_MODEL['name']}, in {dictate_model_path()}." if st_["ready"] else
+                      f"{DICTATE_ENGINE['name']} {DICTATE_ENGINE['version']} is here; the speech model comes "
+                      f"the first time you dictate (or amarchy dictation setup).")
             return 0
-        print(f"Fetching {DICTATE_MODEL['name']} ({dictate_mb()} MB) into {DICTATE}…",
-              file=sys.stderr)
-        why = dictate_setup()
+        what_ = " and ".join(w for w, _ in fetch)
+        mb = mb_of(sum(n for _, n in fetch))
+        if later:
+            if st_["setup"] and not st_["setup"].get("error"):
+                return 0        # one under way already
+            if not dictate_kick(engine=engine):
+                return fail("couldn't start it in the background")
+            if not quiet:
+                print(f"Fetching {what_} ({mb} MB) in the background (amarchy dictation shows how far).")
+            return 0
+        if not quiet:
+            print(f"Fetching {what_} ({mb} MB) into {DICTATE}…", file=sys.stderr)
+        why = dictate_setup(quiet=quiet, engine=engine)
         if why:
             return fail(f"dictation isn't set up: {why}")
-        print("Dictation is set up: hold the mic in the app and speak (English, Spanish and 23 more).")
+        if not quiet:
+            print("Dictation is set up: hold the mic in the app and speak (English, Spanish and 23 more)."
+                  if dictate_ready() else f"{DICTATE_ENGINE['name']} {DICTATE_ENGINE['version']} is here; the speech "
+                  f"model comes the first time you dictate (or amarchy dictation setup).")
         return 0
     if what == "remove":
-        for f in (dictate_model_path(), DICTATE / (DICTATE_MODEL["file"] + ".part"), DICTATE_SETUP):
-            f.unlink(missing_ok=True)
-        print("Removed the dictation model (amarchy dictation setup fetches it again).")
+        if DICTATE_SETUP.exists():
+            try:
+                pid = json.loads(DICTATE_SETUP.read_text()).get("pid")
+                if pid and pid_alive(pid) and pid != os.getpid():
+                    os.kill(int(pid), signal.SIGTERM)       # a setup under way: it stops first
+            except (OSError, ValueError, AttributeError):
+                pass
+        for name in (DICTATE_MODEL["file"], DICTATE_MODEL["file"] + ".part", DICTATE_SETUP.name, "setup.lock",
+                     f"transcribe.cpp-{DICTATE_ENGINE['version']}.tar.gz.part", "transcribe.cpp.new",
+                     DICTATE_ENGINE_DIR.name, *DICTATE_BEFORE):
+            f = DICTATE / name
+            shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink(missing_ok=True)
+        _dictate_lib["at"] = 0
+        kept = f" ({DICTATE_ENGINE['name']} stays: it came with the package)" if dictate_lib() else ""
+        print(f"Removed the dictation model and its engine{kept}: amarchy dictation setup fetches them again.")
         return 0
     if what == "log":
         try:
@@ -12112,23 +12530,52 @@ def cmd_dictation(args):
         for e in entries:
             took = f"{e['wait_ms'] / 1000:.1f}s after letting go" if isinstance(e.get("wait_ms"), (int, float)) else ""
             said = f"{e['said_s']:.0f}s said" if isinstance(e.get("said_s"), (int, float)) else ""
-            head = " · ".join(x for x in (e.get("at", "")[:16].replace("T", " "), e.get("engine", ""), e.get("device", ""),
-                                          e.get("lang", ""), said, took) if x)
+            whose = f"for {e['for']}" if e.get("for") else f"sent to {e['sent_to']}" if e.get("sent_to") else ""
+            head = " · ".join(x for x in (e.get("at", "")[:16].replace("T", " "), e.get("engine", ""), whose,
+                                          e.get("device", ""), e.get("lang", ""), said, took) if x)
             print(f"{head}\n  {e['error'] if e.get('error') else e.get('text', '')}")
+        helper = None if dictate_status()["ready"] else dictate_helper()
+        if helper:
+            print(f"(What {helper['label']} writes down for this machine is in its own log: amarchy dictation log, there.)")
         return 0
     if what == "transcribe":
-        if len(args) != 2:
+        rest, on = list(args[1:]), None
+        if "--on" in rest:
+            i = rest.index("--on")
+            on = rest[i + 1] if i + 1 < len(rest) else ""
+            del rest[i:i + 2]
+        if len(rest) != 1 or on == "":
             print(usage("dictation"), file=sys.stderr)
             return 1
-        if not dictate_status()["ready"]:
-            return fail(f"dictation isn't set up: {dictate_how()}")
-        r = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", args[1], "-f", "s16le", "-ac", "1",
+        helper = None
+        if on and on != machine_name():
+            helper = dictate_helper(name=on)
+            if not helper:
+                known = machine_find(on)
+                return fail(f"{known['label'] if known else on} can't write it down: "
+                            f"{'it is off, or has no speech model' if known else 'no such machine is paired'}")
+        elif not on and not dictate_status()["ready"]:
+            helper = dictate_helper()
+            if not helper:
+                return fail(f"dictation isn't set up: {dictate_how()}")
+        elif not dictate_status()["ready"]:
+            return fail(f"dictation isn't set up here: {dictate_how()}")
+        r = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", rest[0], "-f", "s16le", "-ac", "1",
                             "-ar", str(DICTATE_RATE), "-"], capture_output=True)
         if r.returncode != 0:
             return fail(r.stderr.decode(errors="replace").strip() or "ffmpeg couldn't read it")
+        started = time.time()
+        if helper:
+            try:
+                text = dictate_remote(helper, r.stdout)
+            except OSError as e:
+                return fail(f"{helper['label']} didn't write it down: {e}")
+            print(text)
+            print(f"({len(r.stdout) / 2 / DICTATE_RATE:.1f} s of audio, written down on {helper['label']} "
+                  f"in {time.time() - started:.1f} s)", file=sys.stderr)
+            return 0
         tr = Transcriber()
         d = Dictation(tr, None)        # no words as they come: only what's kept
-        started = time.time()
         for i in range(0, len(r.stdout), DICTATE_FRAME):
             d.add(r.stdout[i:i + DICTATE_FRAME])
         try:
@@ -12144,15 +12591,30 @@ def cmd_dictation(args):
     if what:
         print(usage("dictation"), file=sys.stderr)
         return 1
-    s = dictate_status()
-    if s["ready"]:
-        print(f"Dictation is set up: {s['engine']}, on this machine (the app's mic button).")
-    elif s["setup"] and not s["setup"].get("error"):
-        print(f"Fetching {s['engine']}: {s['setup'].get('done', 0) // 1_000_000} of {s['size'] // 1_000_000} MB.")
-    else:
-        why = f" ({s['setup']['error']})" if s["setup"] else ""
-        print(f"Dictation isn't set up{why}: {dictate_how()}")
-        print("Until it is, the app's mic uses the browser's own speech recognition where it has it.")
+    st_ = dictate_status()
+    if st_["ready"]:
+        print(f"Dictation is set up: {st_['engine']}, on this machine (the app's mic button), through "
+              f"{DICTATE_ENGINE['name']} {DICTATE_ENGINE['version']}.")
+        return 0
+    setup = st_["setup"]
+    if setup and not setup.get("error"):
+        if setup.get("checking"):
+            print(f"Setting dictation up: checking {DICTATE_ENGINE['name']} (then {st_['engine']}).")
+        else:
+            print(f"Fetching dictation's engine and model: {setup.get('done', 0) // 1_000_000} of "
+                  f"{st_['size'] // 1_000_000} MB.")
+        return 0
+    helper = dictate_helper()
+    why = f" ({setup['error']})" if setup else ""
+    if helper:
+        print(f"Dictation works through {helper['label']}: this machine has no speech model{why}, so the app's mic "
+              f"sends what you say to {helper['label']}, which writes it down ({helper['engine']}).")
+        print(f"To write it down on this machine itself: {st_['how']}.")
+        return 0
+    print(f"Dictation isn't set up{why}: {st_['how']}.")
+    print("Until it is, the app's mic works only in a browser with speech recognition of its own (Chrome, Safari), "
+          "not in the desktop app; or pair a machine of yours that has the model (amarchy machines add), "
+          "and it writes it down for this one.")
     return 0
 
 
@@ -14285,6 +14747,9 @@ PEER_TIMEOUT = 8                        # seconds to reach a machine
 # Seconds a machine's stream may stay silent (it says "still here" every
 # KEEPALIVE): longer, and it's taken as gone (a laptop shut, a network down).
 PEER_SILENT = float(os.environ.get("AMARCHY_PEER_SILENT") or 45)
+# Seconds a machine stays out of reach before it's "off": a restart (a ship:
+# a few seconds) or a network blip is a reconnect, never off.
+PEER_OFF_AFTER = float(os.environ.get("AMARCHY_PEER_OFF_AFTER") or 30)
 MACHINE_NAME_RE = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 LABEL_MAX = 40
 
@@ -14428,7 +14893,10 @@ def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
             "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True,
-            "moves": True, "kind": machine_kind(), "icon": machine_icon()}
+            "moves": True, "kind": machine_kind(), "icon": machine_icon(),
+            # Its own model, never another's (see "dictation on the host"): a machine
+            # without one sends dictations here.
+            "dictation": {"ready": dictate_ready(), "engine": DICTATE_MODEL["name"]}}
 
 
 def machine_url_ok(url):
@@ -14553,6 +15021,58 @@ def peer_connect(url, timeout=PEER_TIMEOUT):
             sock.close()
             raise
     return sock
+
+
+def peer_ws_open(m, rest, key, ua=None):
+    """A WebSocket to machine m's rest, opened as this machine (key: the
+    Sec-WebSocket-Key): the socket, the answer's status, its head, and what
+    came after the head. Raises PeerError (or OSError) when it doesn't
+    answer as amarchy does."""
+    u = urllib.parse.urlsplit(m["url"])
+    sock = peer_connect(m["url"])
+    try:
+        hs = {"Host": u.hostname + (f":{u.port}" if u.port else ""), "Upgrade": "websocket", "Connection": "Upgrade",
+              "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13",
+              **peer_headers(m, {"User-Agent": ua or f"amarchy/{PROTOCOL}"})}
+        sock.sendall((f"GET {rest} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in hs.items()) + "\r\n").encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = sock.recv(16384)
+            if not chunk:
+                raise PeerError("it hung up")
+            head += chunk
+            if len(head) > 65536:
+                raise PeerError("it didn't answer as amarchy does")
+    except (OSError, PeerError):
+        sock.close()
+        raise
+    head, _, early = head.partition(b"\r\n\r\n")
+    try:
+        code = int(head.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        code = 502
+    return sock, code, head, early
+
+
+def peer_ws_refusal(sock, head, early):
+    """What a machine said when it wouldn't open a WebSocket (its JSON, {}
+    if none), the socket closed after it."""
+    length = re.search(rb"(?im)^content-length:\s*(\d+)", head)
+    body = early
+    try:
+        while length and len(body) < int(length.group(1)):
+            more = sock.recv(65536)
+            if not more:
+                break
+            body += more
+    except OSError:
+        pass
+    sock.close()
+    try:
+        said = json.loads(body or b"{}")
+    except ValueError:
+        said = {}
+    return said if isinstance(said, dict) else {}
 
 
 def peer_headers(m, extra=None):
@@ -14920,7 +15440,11 @@ class Peers:
             except (OSError, ValueError):
                 continue
             if isinstance(kept, dict) and isinstance(kept.get("sessions"), list):
-                self.seen[f.stem] = {**kept, "on": False, "error": "not reached yet", "update": None}
+                # As last seen: on then, reconnecting (this server just started: off
+                # only if it stays out of reach); off then, off until it answers.
+                was_on = kept.get("on") is not False
+                self.seen[f.stem] = {**kept, "on": False, "error": None if was_on else "not reached yet", "update": None,
+                                     "reconnecting": time.time() if was_on else None}
 
     def start(self):
         threading.Thread(target=self.run, daemon=True).start()
@@ -14974,15 +15498,18 @@ class Peers:
         self.saved_at[name] = time.time()
         try:
             write_file(PEERS_SEEN / f"{name}.json", json.dumps(
-                {k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}))
+                {**{k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}, "on": bool(now.get("on"))}))
         except OSError:
             pass
 
     def follow(self, name, wake):
-        """One machine's chats as they change, for as long as it's paired:
-        back to it when it stops answering (a second, then longer, at most
-        30 s apart; at once when poked); off once it can't be reached again."""
-        wait = 1
+        """One machine's chats as they change, for as long as it's paired.
+        Its stream cut (a restart there, a network blip): back to it at once,
+        then every half second, a second, two... while it's out of reach its
+        chats stay as they were ("reconnecting"), and only once it has been out
+        of reach PEER_OFF_AFTER seconds is it off; then every 30 s at most (at
+        once when poked)."""
+        wait, lost = 0.5, None          # lost: when it was last heard, while it isn't
         try:
             while True:
                 m = machine_find(name)
@@ -14991,18 +15518,27 @@ class Peers:
                 wake.clear()
                 try:
                     self.stream(m, wake)
-                    wait = 1
-                    continue            # it ended (a restart there): again at once, off only if that fails
+                    wait, lost = 0.5, None
+                    continue            # it ended (a restart there): again at once
                 except PeerError as e:
                     why = str(e)
                 except Exception as e:  # a stream cut mid-event, its data not JSON
                     why = str(e) or type(e).__name__
                 if machine_find(name) and machine_moved(m):
                     continue            # its address changed (another tailnet): there, at once
-                if machine_find(name):
-                    self.update(name, on=False, error=why)
+                if not machine_find(name):
+                    return
+                known = self.seen.get(name) or {}
+                heard = known.get("heard") or 0
+                if lost and heard > lost:
+                    wait, lost = 0.5, None      # heard from since it was last lost: a new time out of reach
+                lost = lost or known.get("reconnecting") or max(heard, time.time() - PEER_SILENT if heard else time.time())
+                if time.time() - lost >= PEER_OFF_AFTER or not (known.get("on") or known.get("reconnecting")):
+                    self.update(name, on=False, error=why, reconnecting=None)
+                else:
+                    self.update(name, reconnecting=lost, error=why)
                 wake.wait(wait)
-                wait = min(wait * 2, 30)
+                wait = min(wait * 2, 5 if time.time() - lost < PEER_OFF_AFTER else 30)
         finally:
             with self.lock:
                 if self.followed.get(name) is wake:
@@ -15039,6 +15575,9 @@ class Peers:
                     raise PeerError(peer_why(e)) from None
                 if not chunk:
                     raise PeerError("it stopped answering")
+                with self.lock:
+                    if name in self.seen:
+                        self.seen[name]["heard"] = time.time()
                 buf += unzip.decompress(chunk) if unzip else chunk
                 while b"\n\n" in buf:
                     block, buf = buf.split(b"\n\n", 1)
@@ -15051,7 +15590,7 @@ class Peers:
                     if event == "state" and data:
                         got = json.loads("\n".join(data))
                         hello_now = got.get("machine") if isinstance(got.get("machine"), dict) else h
-                        self.update(name, on=True, error=None, update=None, hello=hello_now, at=time.time(),
+                        self.update(name, on=True, error=None, update=None, reconnecting=None, hello=hello_now, at=time.time(),
                                     sessions=[s for s in got.get("sessions") or [] if isinstance(s, dict) and s.get("id")],
                                     projects=got.get("projects") or [], tasks=got.get("tasks") or [],
                                     moved=[r for r in got.get("moved") or [] if isinstance(r, dict)
@@ -15106,9 +15645,10 @@ def board_view(st):
         if not m:
             continue
         h = p.get("hello") or {}
-        off = not p.get("on")
+        off = not p.get("on") and not p.get("reconnecting")
         machines.append({"name": name, "label": str(h.get("label") or m["label"])[:LABEL_MAX], "me": False,
                          "icon": h.get("icon") if h.get("icon") in MACHINE_ICONS else "desktop",
+                         "reconnecting": p.get("reconnecting") if not off else None,
                          "on": not off, "since": p.get("since"), "error": p.get("error"), "update": p.get("update"),
                          "version": h.get("version") or "", "seen": bool(p.get("sessions") or p.get("at")),
                          "projects": [{"name": x.get("name"), "github": x.get("github")} for x in p.get("projects") or []
@@ -15136,7 +15676,11 @@ def board_view(st):
             sessions.append({**row, "id": to_id, "machine": where, "moved_from": r["from"]})
             board_keys.add(to)
     # What needs you: not a chat on a machine that's off (nothing to answer it with until it's back).
+    waiting = [{"id": i["id"], "machine": i["machine"], "chat": f"{i['machine']}:{i['chat']}", "kind": i["kind"], "text": i["text"],
+                "pictures": i.get("pictures") or 0, "at": i["at"]} for i in outbox_list()]
     board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True, "machines_as": machines_as(),
+             "outbox": waiting,
+             "dictation": dictate_view(st, view.get("dictation") or dictate_status()),
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
@@ -15175,6 +15719,105 @@ def list_all():
     for m in ms:
         rows += found.get(m["name"], [])
     return rows
+
+
+# ---- what waits for a machine out of reach (the outbox)
+#
+# A message, or an answer to what a chat asks, for a chat on a machine that
+# doesn't answer (restarting, a network blip, off): kept here (on disk, so
+# a restart of this one keeps it too) and sent once it answers, in the order
+# they were made. The board lists them (outbox), the app shows each as
+# waiting, with Cancel.
+
+OUTBOX = APP / "outbox"         # <id>.json: {id, machine, rest, ctype, body (base64), chat, text, kind, at, tries}
+OUTBOX_ROUTE = re.compile(r"/api/session/[\w.-]{1,120}/(send|answer)")
+OUTBOX_TRIES = 6                # times a machine that answers refuses one for a moment (409: waking...) before it's let go
+
+
+def outbox_add(machine, rest, ctype, body):
+    """Keep a request for a machine out of reach: the item kept."""
+    path = rest.partition("?")[0]
+    kind = OUTBOX_ROUTE.fullmatch(path).group(1)
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        data = {}
+    text = (data.get("text") if kind == "send" else data.get("choice") or data.get("answer")) if isinstance(data, dict) else None
+    item = {"id": f"{time.time_ns()}-{os.urandom(3).hex()}", "machine": machine, "rest": rest, "ctype": ctype,
+            "body": base64.b64encode(body or b"").decode(), "chat": path.split("/")[3], "kind": kind,
+            "text": str(text or "")[:500], "pictures": len((data.get("images") or []) if isinstance(data, dict) else []),
+            "at": time.time(), "tries": 0}
+    write_file(OUTBOX / f"{item['id']}.json", json.dumps(item))
+    return item
+
+
+def outbox_list(machine=None):
+    out = []
+    for f in sorted(OUTBOX.glob("*.json")) if OUTBOX.is_dir() else []:
+        try:
+            item = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(item, dict) and (machine is None or item.get("machine") == machine):
+            out.append(item)
+    return sorted(out, key=lambda i: i.get("id", ""))
+
+
+def outbox_drop(item_id):
+    """Take one back (Cancel), or done with it: whether it was there."""
+    if not re.fullmatch(r"\d+-[0-9a-f]{6}", item_id or ""):
+        return False
+    f = OUTBOX / f"{item_id}.json"
+    there = f.exists()
+    f.unlink(missing_ok=True)
+    return there
+
+
+_outbox_flushing = threading.Lock()
+
+
+def outbox_flush(name):
+    """Send what waits for machine name, in order, while it answers. Whether
+    anything was sent (or let go)."""
+    m = machine_find(name)
+    items = outbox_list(name)
+    if not m or not items:
+        return False
+    done = False
+    with _outbox_flushing:
+        for item in outbox_list(name):
+            try:
+                status, said = peer_json(m, "POST", item["rest"], base64.b64decode(item["body"]) or b"{}", timeout=330) \
+                    if item.get("ctype", "").startswith("application/json") else (None, {})
+            except PeerError:
+                return done             # still out of reach: the rest wait too, in their order
+            if status is None:
+                outbox_drop(item["id"])
+                continue
+            if status in (409, 502, 503) and item.get("tries", 0) + 1 < OUTBOX_TRIES:
+                item["tries"] = item.get("tries", 0) + 1     # waking, busy: again in a moment
+                write_file(OUTBOX / f"{item['id']}.json", json.dumps(item))
+                return done
+            if status >= 300:
+                print(f"amarchy app: what waited for {name} wasn't taken ({status}: {said.get('error')}): {item['rest']}",
+                      file=sys.stderr, flush=True)
+            outbox_drop(item["id"])
+            done = True
+    return done
+
+
+def outbox_tend(st):
+    """Every couple of seconds: what waits for a machine that answers now, sent."""
+    while True:
+        try:
+            names = {i.get("machine") for i in outbox_list()}
+            peers = st.peers.snapshot() if st.peers else {}
+            for name in names:
+                if (peers.get(name) or {}).get("on") and outbox_flush(name):
+                    st.bump()
+        except Exception as e:
+            print(f"amarchy app: outbox: {e}", file=sys.stderr, flush=True)
+        time.sleep(2)
 
 
 def peers_search(st, q, timeout=4):
@@ -17962,6 +18605,12 @@ def app_handler(st, users, address):
                     return self.error(400, "its length")
                 if size > UPLOAD_MAX:
                     return self.error(413, "That file is too big (50 MB at most)")
+            # A message or an answer can wait for its machine: read whole first, to keep.
+            waits = method == "POST" and OUTBOX_ROUTE.fullmatch(rest.partition("?")[0])
+            if waits and body is None:
+                if size > CLIP_MAX:
+                    return self.error(413, "too big")
+                body = self.rfile.read(size) if size else b""
             conn = peer_open(peer["url"], PEER_TIMEOUT)
             try:
                 conn.putrequest(method, rest, skip_accept_encoding=True)
@@ -17990,6 +18639,13 @@ def app_handler(st, users, address):
                 r = conn.getresponse()
             except (OSError, ValueError, http.client.HTTPException) as e:
                 conn.close()
+                if waits:
+                    # Out of reach (a restart there, a network blip, off): kept here, sent once it's back.
+                    item = outbox_add(peer["name"], rest, self.headers.get("Content-Type") or "application/json", body)
+                    st.bump()                   # (on the board: it waits)
+                    if st.peers:
+                        st.peers.poke(peer["name"])
+                    return self.send(202, {"ok": True, "waits": {"id": item["id"], "machine": peer["name"], "label": label}})
                 return self.off_answer(peer["name"], label, peer_why(e))
             try:
                 ctype = r.getheader("Content-Type") or "application/octet-stream"
@@ -18014,49 +18670,15 @@ def app_handler(st, users, address):
             there as this machine, then its frames both ways as they come."""
             if not self.ws_check():
                 return
-            u = urllib.parse.urlsplit(peer["url"])
-            sock = None
             try:
-                sock = peer_connect(peer["url"])
-                hs = {"Host": u.hostname + (f":{u.port}" if u.port else ""), "Upgrade": "websocket", "Connection": "Upgrade",
-                      "Sec-WebSocket-Key": self.headers["Sec-WebSocket-Key"], "Sec-WebSocket-Version": "13",
-                      **peer_headers(peer, {"User-Agent": self.headers.get("User-Agent") or f"amarchy/{PROTOCOL}"})}
-                sock.sendall((f"GET {rest} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in hs.items()) + "\r\n").encode())
-                head = b""
-                while b"\r\n\r\n" not in head:
-                    chunk = sock.recv(16384)
-                    if not chunk:
-                        raise PeerError("it hung up")
-                    head += chunk
-                    if len(head) > 65536:
-                        raise PeerError("it didn't answer as amarchy does")
+                sock, code, head, early = peer_ws_open(peer, rest, self.headers["Sec-WebSocket-Key"],
+                                                       self.headers.get("User-Agent"))
             except (OSError, PeerError) as e:
-                if sock:
-                    sock.close()
                 return self.off_answer(peer["name"], label, peer_why(e) if isinstance(e, OSError) else str(e))
-            head, _, early = head.partition(b"\r\n\r\n")
-            try:
-                code = int(head.split(b" ", 2)[1])
-            except (IndexError, ValueError):
-                code = 502
             if code != 101:
                 # Its refusal as it said it (a chat gone: 404; not set up: 409).
-                length = re.search(rb"(?im)^content-length:\s*(\d+)", head)
-                body = early
-                try:
-                    while length and len(body) < int(length.group(1)):
-                        more = sock.recv(65536)
-                        if not more:
-                            break
-                        body += more
-                except OSError:
-                    pass
-                sock.close()
-                try:
-                    said = json.loads(body or b"{}")
-                except ValueError:
-                    said = {}
-                return self.send(code, said if isinstance(said, dict) and said else {"error": f"{label} said no ({code})"})
+                said = peer_ws_refusal(sock, head, early)
+                return self.send(code, said or {"error": f"{label} said no ({code})"})
             self.ws_handshake()
             # A terminal there pings every TTY_PING s: silent much longer, it's gone.
             sock.settimeout(TTY_PING * 3 if "/tty/" in rest else 900)
@@ -18348,12 +18970,17 @@ def app_handler(st, users, address):
             on and "end" when it's let go. Back come {"state": "listening"},
             {"interim"} (all of it written down so far) as you talk,
             {"state": "transcribing"} and then {"text"}, or {"error"}. Without
-            the WebSocket: whether it's set up (dictate_status)."""
+            the WebSocket: whether it's set up (dictate_view). Without a
+            model here, it's another machine's that has one, passed on
+            (dictate_helper); asked by another machine, never further."""
             status = dictate_status()
+            helper = None if status["ready"] or self.via == "peer" else dictate_helper(st)
             if self.headers.get("Upgrade", "").lower() != "websocket":
-                return self.send(200, {**status, "how": None if status["ready"] else dictate_how()})
+                return self.send(200, {**status, "via": dictate_via(helper)})
             if not status["ready"]:
-                return self.error(409, f"Dictation isn't set up on the host: {dictate_how()}")
+                if helper:
+                    return self.tunnel(helper, self.path, helper["label"])
+                return self.error(409, f"Dictation isn't set up on {machine_label()}: {status['how']}")
             if not self.ws_check():
                 return
             device = device_name(self.headers.get("User-Agent"), args.get("standalone", [""])[0] == "1")
@@ -18406,7 +19033,8 @@ def app_handler(st, users, address):
                 pass
             finally:
                 d.drop()
-                dictate_log({"engine": "host", "device": device, "said_s": round(said / 32000, 1),
+                dictate_log({"engine": "host", **({"for": self.peer} if self.via == "peer" else {}), "device": device,
+                             "said_s": round(said / 32000, 1),
                              "wait_ms": int((time.time() - let_go) * 1000) if let_go else None,
                              "pieces": d.pieces, "text": text, **({"error": outcome} if outcome else {})})
 
@@ -18444,16 +19072,16 @@ def app_handler(st, users, address):
                                    "projects_known": project_names()})
 
         def dictate_fetch(self):
-            """Settings' "Set up dictation": the model's download, in the
-            background (amarchy dictation setup); the list says how far."""
+            """Settings' "Set up dictation" (and the mic's first tap): what
+            dictation needs here fetched in the background (amarchy dictation
+            setup: the engine where no package has it, then the model); the
+            list says how far."""
             status = dictate_status()
-            if not status["lib"]:
-                return self.error(409, f"whisper.cpp isn't installed on the host: {dictate_how()}")
-            if not status["model"] and not (status["setup"] and not status["setup"].get("error")):
-                try:
-                    detach([sys.executable, SELF, "dictation", "setup"])
-                except OSError as e:
-                    return self.error(500, str(e))
+            if not status["auto"]:
+                return self.error(409, f"Dictation can't be set up on {machine_label()} by itself: {status['how']}")
+            under_way = status["setup"] and not status["setup"].get("error")
+            if not status["ready"] and not under_way and not dictate_kick():
+                return self.error(500, "couldn't start dictation's setup")
             return self.send(200, {})
 
         def ws_recv(self):
@@ -19057,6 +19685,12 @@ def app_handler(st, users, address):
                 return self.peer_move_in() if self.path == "/api/peer/move" else self.peer_move_abort(self.body())
             if self.path == "/api/machines":        # Settings → Machines: add, remove, rename
                 return self.machines_post(self.body())
+            if self.path == "/api/outbox/cancel":   # a message waiting for its machine, taken back: {id}
+                data = self.body()
+                if not outbox_drop(data.get("id") if isinstance(data.get("id"), str) else ""):
+                    return self.error(404, "It's gone already: sent, or taken back")
+                st.bump()
+                return self.send(200, {})
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
                 or bool(re.fullmatch(r"/api/session/[^/]+/(send|agent/picture)", self.path))      # images, on the chat engine; an agent's picture
             upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
@@ -20026,6 +20660,7 @@ def app_serve():
     st.peers.start()
     st.sync = Sync(st)                  # your stuff the same on every machine (see "your stuff on every machine")
     st.sync.start()
+    threading.Thread(target=outbox_tend, args=(st,), daemon=True).start()     # what waits for a machine, sent once it's back
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
@@ -24280,7 +24915,7 @@ OPTIONS = {
     "update": ({"--auto"}, set(), set()),
     "protocol-check": ({"--broker"}, set(), set()),
     "migrate": (set(), set(), set()),
-    "dictation": ({"--status", "--json"}, set(), set()),
+    "dictation": ({"--status", "--json", "--engine", "--in-background", "--quiet", "--on"}, {"--on"}, set()),
     "automations": ({"--json"}, set(), set()),
     "today": ({"--json", "--loops"}, set(), set()),
     "task": ({"--agent", "--title", "--note", "--link", "--button", "--until", "--key", "--notify", "--json"},

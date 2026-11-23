@@ -355,7 +355,7 @@ function todayPermit(s, choice) {
   todayRedraw();
   todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
     seenNow(s.id);
-    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice })
+    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice }).then(waitsSaid)
       .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }
@@ -477,7 +477,7 @@ function todayAgent(s) {
   const sub = now ? h("span", { class: `tcard-presence t-${now.tone}` }, now.text)
     : said ? h("span", { class: "tcard-last" }, said) : h("span", { class: "tcard-last none" }, "No messages yet");
   const time = s.said_at ? h("span", { class: `tcard-time${n ? " on" : ""}` }, uiChatTime(s.said_at)) : null;
-  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "row"), title: s.assistant_name || s.task || "Assistant",
+  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "list"), title: s.assistant_name || s.task || "Assistant",
     sub, pill: time, count: n, id: s.id, open: () => todayOpen(s), unseen: false,
     label: [s.assistant_name || "Assistant", now ? now.text : said ? `said: ${said}` : "", n ? `${n} unread` : ""].filter(Boolean).join(", "),
     body: ask ? ask.body : [], actions: ask ? ask.actions : [uiPreview(s)] });

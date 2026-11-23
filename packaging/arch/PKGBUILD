@@ -3,9 +3,11 @@
 #
 #   amarchy-git          amarchy itself: the CLI, the app's server and its
 #                        pages, its themes, the skill for Claude Code, Omarchy's
-#                        pieces (the Ⓐ in the bar, the key, the live theme) and
-#                        its own Tailscale node. No desktop dependencies: a
-#                        server takes it as it is.
+#                        pieces (the Ⓐ in the bar, the key, the live theme), its
+#                        own Tailscale node and dictation's speech engine
+#                        (transcribe.cpp, a release pinned by its hash: its CPU
+#                        code, about 20 MB). No desktop dependencies: a server
+#                        takes it as it is.
 #   amarchy-desktop-git  the desktop app (Tauri 2, WebKitGTK): the board and the
 #                        chats in a window, native notifications, amarchy://.
 #
@@ -27,8 +29,15 @@ license=('MIT')
 makedepends=('git' 'go' 'cargo' 'webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator'
              'python' 'tmux' 'jq' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire' 'xdg-utils')
 options=('!lto' '!debug')
+# Dictation's speech engine: this release of transcribe.cpp (MIT), the one
+# bin/amarchy pins (DICTATE_ENGINE), for each processor.
+_tcpp=0.4.2
 source=("git+https://github.com/ja-818/amarchy.git")
+source_x86_64=("transcribe-native-${_tcpp}-linux-x86_64.tar.gz::https://github.com/handy-computer/transcribe.cpp/releases/download/v${_tcpp}/transcribe-native-${_tcpp}-linux-x86_64-cpu-vulkan.tar.gz")
+source_aarch64=("transcribe-native-${_tcpp}-linux-aarch64.tar.gz::https://github.com/handy-computer/transcribe.cpp/releases/download/v${_tcpp}/transcribe-native-${_tcpp}-linux-aarch64-cpu-vulkan.tar.gz")
 sha256sums=('SKIP')
+sha256sums_x86_64=('4fe87db8919ea34e461db7987713b580f54e6f3ed610457c5d8fb8eac1a15046')
+sha256sums_aarch64=('5e9cc7b244949fc686d1272e796e965411e80cc768533f1704c3c53e4c7d695e')
 
 pkgver() {
   cd "$_repo"
@@ -64,6 +73,10 @@ check() {
   cd "$_repo"
   export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/debug/$pkgbase --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/usr/src/debug/cargo"
   python -m py_compile bin/amarchy
+  # The engine it carries is the one bin/amarchy is written for.
+  grep -q "\"name\": \"transcribe.cpp\", \"version\": \"${_tcpp}\"" bin/amarchy \
+    || { echo "bin/amarchy pins another transcribe.cpp than ${_tcpp} (DICTATE_ENGINE)" >&2; return 1; }
+  [[ -f $srcdir/transcribe-native-linux-$CARCH-cpu-vulkan/libtranscribe.so ]]
   rm -rf bin/__pycache__
   local script
   for script in install.sh omarchy/install.sh tailnet/install.sh desktop/install.sh; do bash -n "$script"; done
@@ -76,7 +89,8 @@ check() {
 package_amarchy-git() {
   pkgdesc="Stop babysitting your agents. Manage them: Claude Code chats in parallel, on one board, from your phone and your desktop"
   # git, tmux and jq are run, not linked: namcap can't see them.
-  depends=('python' 'git' 'tmux>=3.5' 'jq' 'glibc' 'bash')
+  # libgcc and libstdc++: dictation's engine (transcribe.cpp) links them.
+  depends=('python' 'git' 'tmux>=3.5' 'jq' 'glibc' 'bash' 'libgcc' 'libstdc++')
   optdepends=('claude-code: Claude Code, which every chat runs (or its own installer)'
               'tailscale: your phone and your other machines reach this one (else amarchy-tailnet, included)'
               'amarchy-desktop-git: the desktop app'
@@ -84,7 +98,6 @@ package_amarchy-git() {
               'imagemagick: wallpapers cut for a phone and a computer'
               'ffmpeg: wallpapers cut without ImageMagick, and dictation from any recording'
               'python-fonttools: the fonts cut smaller for the app'
-              'whisper-cpp: dictation written down on this machine'
               'quickshell: the Ⓐ in the bar on Omarchy (Omarchy has it)')
   provides=('amarchy')
   conflicts=('amarchy')
@@ -115,6 +128,17 @@ package_amarchy-git() {
   install -Dm644 README.md "$pkgdir/usr/share/doc/amarchy/README.md"
   install -Dm644 docs/guide.md "$pkgdir/usr/share/doc/amarchy/guide.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Dictation's engine, where bin/amarchy looks for it (DICTATE_PACKAGED): its
+  # CPU code, for each kind of this processor; not the GPU's (42 MB, never used).
+  local engine="$srcdir/transcribe-native-linux-$CARCH-cpu-vulkan" lib
+  install -d "$pkgdir/usr/lib/amarchy/transcribe.cpp"
+  install -m644 "$engine/contract.json" "$pkgdir/usr/lib/amarchy/transcribe.cpp/"
+  for lib in "$engine"/*.so; do
+    [[ ${lib##*/} == libggml-vulkan.so ]] || install -m755 "$lib" "$pkgdir/usr/lib/amarchy/transcribe.cpp/"
+  done
+  install -d "$pkgdir/usr/share/licenses/$pkgname/transcribe.cpp"
+  cp -r --no-preserve=ownership "$engine/licenses/." "$pkgdir/usr/share/licenses/$pkgname/transcribe.cpp/"
 }
 
 package_amarchy-desktop-git() {
