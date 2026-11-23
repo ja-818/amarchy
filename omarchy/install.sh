@@ -6,8 +6,9 @@
 #   - the Ⓐ in the bar: the shell plugin amarchy.chats (omarchy/plugin),
 #     linked into ~/.config/omarchy/plugins and put on the bar the first
 #     time (where you move it, or whether you take it off, is yours after)
-#   - Super+Alt+A: omarchy/hypr/amarchy.lua, loaded from
-#     ~/.config/hypr/hyprland.lua by a line ending in "-- amarchy"
+#   - the key, Super+Alt+A unless `amarchy key` says another (or off):
+#     omarchy/hypr/amarchy.lua, loaded from ~/.config/hypr/hyprland.lua by a
+#     line ending in "-- amarchy"
 #   - Amarchy in the Omarchy menu (Super+Space), a block of its own in
 #     ~/.config/omarchy/extensions/omarchy-menu.jsonc
 #   - the theme live: "Omarchy (live)" made again (amarchy theme --omarchy)
@@ -20,6 +21,8 @@
 #   omarchy/install.sh             put them in place, on an Omarchy desktop
 #                                  (elsewhere, take away any left)
 #   omarchy/install.sh --uninstall take them all away
+#   omarchy/install.sh --menu      only the Omarchy menu's entry, its key
+#                                  hint again (amarchy key runs it)
 #
 # Each file it changes is backed up first (<file>.amarchy-bak.<time>, the
 # last three kept), and only when what it writes is new. The running shell
@@ -28,12 +31,13 @@
 
 set -euo pipefail
 
-uninstall=0
+uninstall=0 menu_only=0
 for arg in "$@"; do
   case $arg in
     --uninstall) uninstall=1 ;;
+    --menu) menu_only=1 ;;
     -h | --help) sed -n '3,/^$/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: omarchy/install.sh [--uninstall]" >&2; exit 2 ;;
+    *) echo "usage: omarchy/install.sh [--uninstall | --menu]" >&2; exit 2 ;;
   esac
 done
 
@@ -157,7 +161,7 @@ hypr_line() {
   sed -i -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' "$tmp"
   [[ -n ${1:-} ]] && printf '\n%s\n' "$1" >>"$tmp"
   if replace_if_changed "$hypr_conf" "$tmp"; then
-    if [[ -n ${1:-} ]]; then did+=("Super+Alt+A"); else did+=("Super+Alt+A (the key)"); fi
+    if [[ -n ${1:-} ]]; then did+=("the key"); else did+=("the key"); fi
     if command -v hyprctl >/dev/null && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
       hyprctl reload >/dev/null 2>&1 || true
     fi
@@ -326,14 +330,35 @@ install_home() {
     fi
   fi
   hypr_line "$load_line"
+  menu_entry
+  look_install
+}
+
+# The key that brings amarchy to the front, in words (amarchy key: the
+# setting in ~/.config/amarchy/key, else Super+Alt+A), or nothing when off.
+key_words() {
+  python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/key" <<'PY'
+import re, sys
+try:
+    said = open(sys.argv[1]).read().strip()
+except OSError:
+    said = ""
+if said != "off":
+    chord = said if said and re.fullmatch(r"\w+[\w +:]*", said) else "SUPER + ALT + A"
+    print("+".join(p.capitalize() if p.isupper() and len(p) > 1 else p for p in chord.split(" + ")))
+PY
+}
+
+# Amarchy in the Omarchy menu, its key as the hint under it.
+menu_entry() {
   local action entry
   action=$(printf "'%s' open" "${bin_dir//\'/\'\\\'\'}/amarchy")
   entry=$(python3 -c 'import json, sys; print(json.dumps({"icon": "Ⓐ", "label": "Amarchy",
-    "description": "Stop babysitting your agents. Manage them.", "action": sys.argv[1]}, ensure_ascii=False))' "$action")
+    "description": "Your chats" + (" · " + sys.argv[2] if sys.argv[2] else "") + ". Stop babysitting your agents.",
+    "action": sys.argv[1]}, ensure_ascii=False))' "$action" "$(key_words)")
   menu_block "  // >>> amarchy (amarchy's install.sh puts this here; its --uninstall takes it away)
   \"amarchy\": $entry,
   // <<< amarchy"
-  look_install
 }
 
 remove_home() {
@@ -357,6 +382,11 @@ remove_home() {
   look_remove
 }
 
+if ((menu_only)); then
+  if omarchy_here; then menu_entry; fi
+  exit 0
+fi
+
 if ((uninstall)); then
   omarchy_here || true
   remove_home
@@ -367,7 +397,9 @@ fi
 if omarchy_here; then
   install_home
   ((${#did[@]})) && say "On Omarchy: $(IFS=,; echo "${did[*]}" | sed 's/,/, /g')."
-  echo "  Super+Alt+A  amarchy at the front (the desktop app); Ⓐ in the bar: lights up when a chat needs you"
+  key=$(key_words)
+  echo "  ${key:-No key}${key:+  amarchy at the front (the desktop app); another: amarchy key <keys>}${key:-: amarchy key <keys> sets one}"
+  echo "  Ⓐ in the bar: lights up when a chat needs you, and says how many"
 else
   remove_home
   ((${#did[@]})) && say "Took away what an amarchy from before left on Omarchy: $(IFS=,; echo "${did[*]}" | sed 's/,/, /g')."

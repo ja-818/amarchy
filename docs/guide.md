@@ -752,11 +752,12 @@ a backup of each file it changes).
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
 - **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. (Super + A and Super + Shift + A are
-  Omarchy's.) For another key, set it before amarchy's line in
-  `~/.config/hypr/hyprland.lua`: `amarchy = { open_key = "SUPER + CTRL + ALT + A" }`
-  (`false`: no key).
-- **Amarchy in the Omarchy menu** (Super + Space) does the same.
+  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
+  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
+  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
+  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
+  under it.
 
 All three run `amarchy open`, which takes a chat too (`amarchy open
 amarchy://chat/<machine>/<id>`). Without the desktop app it opens your chats in
@@ -1696,6 +1697,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:
