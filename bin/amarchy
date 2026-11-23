@@ -8212,6 +8212,9 @@ PUSH_GONE = 200                 # ended subscriptions remembered, so a device th
 def push_device(sub):
     """A device in a log line: what it is (its browser's name for itself, cut
     short) and whose push service it's on."""
+    if isinstance(sub.get("app"), dict):      # a phone app (see "the phone apps")
+        host = urllib.parse.urlsplit(str(sub.get("endpoint") or "")).netloc
+        return f"{'iPhone' if sub['app'].get('platform') == 'ios' else 'Android'} app ({host})"
     ua = str(sub.get("device") or "")
     system = next((name for mark, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"),
                                            ("Macintosh", "Mac"), ("Windows", "Windows"), ("Linux", "Linux"))
@@ -8240,10 +8243,11 @@ def push_gone():
     return [e for e in gone if isinstance(e, str)] if isinstance(gone, list) else []
 
 
-def push_send(sub, payload):
+def push_send(sub, payload, topic=None):
     """Send one notification: True if the push service took it, False if
     that phone is gone for good (its subscription ended), None on any other
-    failure (it may work next time)."""
+    failure (it may work next time). topic: RFC 8030's Topic (a newer one
+    with the same replaces it on the way)."""
     import urllib.error
     import urllib.request
     endpoint = sub["endpoint"]
@@ -8252,11 +8256,14 @@ def push_send(sub, payload):
     head = b64u(b'{"typ":"JWT","alg":"ES256"}') + "." + b64u(json.dumps(claims).encode())
     key = app_key()
     jwt = head + "." + b64u(es256(key, head.encode()))
-    body = push_encrypt(sub["keys"], json.dumps(payload).encode())
-    req = urllib.request.Request(endpoint, data=body, method="POST", headers={
-        "TTL": "86400", "Urgency": "high", "Content-Encoding": "aes128gcm",
-        "Content-Type": "application/octet-stream",
-        "Authorization": f"vapid t={jwt}, k={app_public()}"})
+    data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+    body = push_encrypt(sub["keys"], data)
+    headers = {"TTL": "86400", "Urgency": "high", "Content-Encoding": "aes128gcm",
+               "Content-Type": "application/octet-stream",
+               "Authorization": f"vapid t={jwt}, k={app_public()}"}
+    if topic:
+        headers["Topic"] = topic
+    req = urllib.request.Request(endpoint, data=body, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20):
             return True
@@ -8279,10 +8286,14 @@ def push_all(payload, desktop=None):
     except OSError as e:
         print(f"amarchy app: couldn't keep a notice for the desktop apps: {e}", file=sys.stderr)
     payload = json.loads(mask_secrets(json.dumps(payload)))
+    extra = json.loads(mask_secrets(json.dumps(desktop))) if desktop else None
     sent, gone = 0, set()
     for sub in app_subscriptions():
         try:
-            ok = push_send(sub, payload)
+            if isinstance(sub.get("app"), dict):     # a phone app's: more, through the relay (see "the phone apps")
+                ok = push_send(sub, phone_payload(payload, extra, sub), topic=push_topic(payload.get("tag")))
+            else:
+                ok = push_send(sub, payload)
         except (OSError, KeyError, ValueError) as e:
             print(f"amarchy app: couldn't send a notification: {e}", file=sys.stderr)
             ok = None
@@ -8300,6 +8311,73 @@ def push_all(payload, desktop=None):
             finally:
                 os.umask(old)
     return sent + desktops_listening()
+
+
+# ---- the phone apps (track G; docs/plan-omarchy-and-machines.md, "The phone
+# apps and the push relay"; phone/). A phone app is a subscription as a
+# browser's, whose push service is amarchy's relay (relay/): it forwards the
+# encrypted notification to Apple's or Google's push, and only the phone can
+# read it. The app's page sends it with "app" (what the phone app is), kept
+# with the address it was sent to ("server"). Its notifications carry what
+# the desktop app's notices do (the chat, its chime, its buttons) and where
+# the buttons go, cut to what Apple's and Google's push take, with a Topic
+# so a newer one for a chat replaces the older on the way.
+
+PHONE_MAX = 2700            # bytes of a phone app's notification as JSON (the relay takes 2,900, encrypted)
+PHONE_PLATFORMS = ("ios", "android")
+PHONE_KEEP = ("session", "sound", "actions")    # what of a desktop notice a phone app's notification carries too
+
+
+def phone_app(data):
+    """What /api/push's "app" says of a phone app, checked:
+    {platform, version, device}, or None (not a phone app's, or not one)."""
+    if not isinstance(data, dict) or data.get("platform") not in PHONE_PLATFORMS:
+        return None
+    clean = lambda v, n: re.sub(r"[\x00-\x1f\x7f]", "", v)[:n] if isinstance(v, str) else ""
+    return {"platform": data["platform"], "version": clean(data.get("version"), 40), "device": clean(data.get("device"), 80)}
+
+
+def push_topic(tag):
+    """RFC 8030's Topic for a notification's tag (its chat): the first 16
+    bytes of its SHA-256, base64url (22 of the 32 characters a Topic may
+    have). Nothing of the chat's name in it: the relay sees topics."""
+    return b64u(hashlib.sha256(tag.encode()).digest()[:16]) if isinstance(tag, str) and tag else None
+
+
+def phone_payload(payload, extra, sub):
+    """A phone app's notification, as JSON bytes of PHONE_MAX at most: the
+    browser's, plus the desktop notice's chat, chime and buttons (extra) and
+    the address its buttons go to. Too long: its body cut first (at a word,
+    with "…"), then its buttons and its picture go, then its title is cut."""
+    out = {**payload, **{k: v for k, v in (extra or {}).items() if k in PHONE_KEEP and v not in (None, [])},
+           "server": sub.get("server") or ""}
+    enc = lambda p: json.dumps(p, ensure_ascii=False, separators=(",", ":")).encode()
+    if len(enc(out)) <= PHONE_MAX:
+        return enc(out)
+
+    def cut(field):
+        text = str(out.get(field) or "")
+        lo, hi = 0, len(text)           # the longest cut of it that fits
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if len(enc({**out, field: text[:mid].rstrip() + "…"})) <= PHONE_MAX:
+                lo = mid
+            else:
+                hi = mid - 1
+        short = text[:lo]
+        if " " in short[-40:] and lo < len(text):
+            short = short[:short.rstrip().rfind(" ")]
+        out[field] = short.rstrip() + "…" if lo < len(text) else text
+    cut("body")
+    for field in ("actions", "icon", "sound"):
+        if len(enc(out)) > PHONE_MAX:
+            out.pop(field, None)
+    if len(enc(out)) > PHONE_MAX:
+        cut("title")
+    if len(enc(out)) > PHONE_MAX:       # (only an address or a tag that long: the essentials alone)
+        out = {k: out[k] for k in ("title", "tag", "url", "server") if k in out}
+        out["title"] = str(out.get("title") or "")[:200]
+    return enc(out)
 
 
 # ---- the desktop app's notices (track B; docs/plan-omarchy-and-machines.md,
@@ -18961,6 +19039,12 @@ def app_handler(st, users, address):
                 return self.error(400, "not a push subscription")
             sub = {"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]},
                    "added": int(time.time()), "device": str(self.headers.get("User-Agent", ""))[:200]}
+            phone = phone_app(data.get("app"))      # a phone app's (see "the phone apps"): where its buttons go
+            if phone:
+                host = self.headers.get("Host", "")
+                if self.via != "tailscale" or not re.fullmatch(r"[A-Za-z0-9.-]+(:\d{1,5})?", host):
+                    return self.error(400, "a phone app registers through its machine's address on the tailnet")
+                sub.update(app=phone, server=f"https://{host}")
             if not any(s["endpoint"] == endpoint for s in app_subscriptions()):
                 push_log("on", sub)
             app_save_subscriptions(lambda subs: [s for s in subs if s["endpoint"] != endpoint] + [sub])
