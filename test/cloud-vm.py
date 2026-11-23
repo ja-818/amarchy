@@ -121,14 +121,14 @@ install_tailscale() {
   ip link show tailscale0 >/dev/null 2>&1 || ip link add tailscale0 type dummy 2>/dev/null || true
 }
 join_tailnet() {
-  [ -n "${TS_AUTH_KEY:-}" ] && echo "joined (test) with ${TS_AUTH_KEY%%-0*}…"
+  [ -n "${TS_AUTH_KEY:-}" ] && echo "joined (test), with the key it was given"
 }
 '''
 VERIFY = r'''#!/bin/bash
 # The tests' check from inside (test/cloud-vm.py), after bootstrap.sh: facts, as JSON, to the test.
 u=ja
 uid=$(id -u $u)
-as() { runuser -u $u -- env HOME=/home/$u XDG_RUNTIME_DIR=/run/user/$uid PATH=/home/$u/.local/bin:/usr/bin:/bin bash -c "$1"; }
+as() { runuser -u $u -- env HOME=/home/$u XDG_RUNTIME_DIR=/run/user/$uid PATH=/home/$u/.local/bin:/usr/local/bin:/usr/bin:/bin bash -c "$1"; }
 j() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'; }
 {
 echo '{'
@@ -152,6 +152,8 @@ echo '"cloud_self":' "$(cat /home/$u/.config/amarchy/cloud-self.json 2>/dev/null
 echo '"timers":' "$(as 'systemctl --user list-timers --no-legend amarchy-*' 2>&1 | j)",
 echo '"upgrades":' "$(cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null | j)",
 echo '"hostname":' "$(hostname | j)",
+echo '"serve":' "$(as 'cat /tmp/fake-tailscale-serve.json; tailscale serve status --json' 2>&1 | j)",
+echo '"fake_log":' "$(tail -n 20 /var/log/fake-tailscale.log 2>&1 | j)",
 echo '"log_tail":' "$(tail -n 30 /var/log/amarchy-cloud.log | j)"
 echo '}'
 } >/var/lib/amarchy-cloud/verify.json 2>/dev/null
@@ -258,7 +260,8 @@ try:
               and (hello.get("cloud") or {}).get("by") == "maker" and hello.get("user") == "tester@example.com",
               f"its amarchy answers as {NAME}, a cloud machine made by maker, yours ({v.get('hello', '')[:300]})")
         check(hello.get("claude") == "out", "its Claude isn't signed in yet (the app's Sign in to Claude)")
-        check("on" in v.get("app", "") and "cloudvm.tail0000.ts.net" in v.get("app", ""), f"its app on, on the tailnet ({v.get('app', '').strip()})")
+        check("on" in v.get("app", "") and "cloudvm.tail0000.ts.net" in v.get("app", ""),
+              f"its app on, on the tailnet ({v.get('app', '').strip()}; serve: {v.get('serve', '').strip()[:300]}; {v.get('fake_log', '')[-300:]})")
         check("amarchy-update.timer" in v.get("timers", "") and "amarchy-sleep.timer" in v.get("timers", ""),
               "amarchy keeps itself up to date there (its timers)")
         check('Unattended-Upgrade "1"' in v.get("upgrades", ""), "security upgrades by themselves")
