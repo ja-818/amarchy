@@ -1,0 +1,8 @@
+{
+  // amarchy's row in Omarchy's Install › AI menu (default/omarchy/omarchy-menu.jsonc),
+  // beside Herdr, Hermes and T3 Code. Disabled once it's installed.
+  "install.ai.amarchy": {"icon":"Ⓐ","label":"Amarchy","disabled":"omarchy-pkg-present amarchy-git","action":"omarchy-launch-floating-terminal-with-presentation omarchy-install-ai-amarchy"},
+
+  // Its removal, in Remove › AI, the way omarchy-remove-ai-* pair with them.
+  "remove.ai.amarchy": {"icon":"Ⓐ","label":"Amarchy","when":"omarchy-pkg-present amarchy-git","action":"omarchy-launch-floating-terminal-with-presentation omarchy-remove-ai-amarchy"}
+}

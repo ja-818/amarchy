@@ -145,7 +145,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--surface);
+  background: var(--wallpaper-ground, var(--surface));
   color: var(--text);
   font: var(--body)/1.5 var(--font-ui);
   -webkit-text-size-adjust: 100%;
@@ -201,7 +201,7 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-color: var(--surface);
+  background-color: var(--wallpaper-ground, var(--surface));
   background-image: var(--wallpaper, none);
   background-size: cover;
   background-position: center;
@@ -212,11 +212,12 @@ body::before {
   body::before { background-image: var(--wallpaper-wide, var(--wallpaper, none)); }
 }
 /* The desktop app's window on an Omarchy desktop (html.on-omarchy, from the
-   window itself) is one of the desktop's: Hyprland makes it see-through, as
-   it does the terminals (omarchy/hypr/amarchy.lua). Wearing the desktop's
-   look live, the desktop's own wallpaper is right behind it, so it draws
-   none of its own (theme.css takes --wallpaper away there): its background
-   is solid, as a terminal's is. */
+   window itself) is one of the desktop's: see-through, faded as the
+   terminals are (omarchy/hypr/amarchy.lua). Wearing the desktop's look live,
+   the desktop's own wallpaper is right behind it, so it paints neither a
+   wallpaper nor the ground under one (theme.css takes --wallpaper away there
+   and makes --wallpaper-ground transparent): the desktop shows through the
+   app's panes and cards as a browser shows the app's wallpaper. */
 
 /* The visible part of the screen (above the keyboard, when it's up), the
    app's glass over all of it: under the status bar and the home bar too. */

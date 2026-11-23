@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The chimes are rung by name (android.resource://…/raw/chime_<name>, a
+     notification channel's sound), never through R: the release's resource
+     shrinker keeps them all. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/chime_*" />

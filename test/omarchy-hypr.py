@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """omarchy/hypr/amarchy.lua on Omarchy's own Lua helpers (default/hypr/
 helpers.lua), with Hyprland's `hl` a fake that keeps the window rules it's
-given: Super+Alt+A bound, and the desktop app's window (class amarchy)
+given: Super+D bound, and the desktop app's window (class amarchy)
 see-through as the terminals are in each of Omarchy's window modes:
 Transparent (Omarchy's standard transparency, the terminals' rule), Opaque
 and Glassy (no rule of its own: theirs apply), and none when Omarchy has no
@@ -76,7 +76,7 @@ def main():
 
         terminals = "rule class=amarchy opacity=0.985 0.96 tag=+transparent-window"
         out = run()
-        check("Super+Alt+A bound", "bind SUPER + ALT + A" in out, out)
+        check("Super+D bound", "bind SUPER + D" in out, out)
         check("Transparent (Omarchy's default): the terminals' rule, for the window of class amarchy",
               [x for x in out if x.startswith("rule")] == [terminals], out)
         (toggles / "window-opaque.lua").write_text("-- Omarchy's opaque toggle\n")
@@ -93,7 +93,7 @@ def main():
               [x for x in out if x.startswith("rule")] == [terminals], out)
         (toggles / "window-glassy.lua").unlink()
         out = run("old")
-        check("an Omarchy without transparent_window: the key only", out == ["bind SUPER + ALT + A"], out)
+        check("an Omarchy without transparent_window: the key only", out == ["bind SUPER + D"], out)
     finally:
         shutil.rmtree(base, ignore_errors=True)
     if failed:

@@ -324,6 +324,39 @@ It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see
 [Configure](#configure) for `APP_USERS=`).
 
+### The phone apps
+
+amarchy's app for iPhone and Android is the same app inside a thin native shell
+([phone/](../phone/README.md)): the same board, chats and Settings. It adds only
+what a home-screen web app can't do:
+
+- **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
+  on the notification itself, without opening the app. On a locked phone it asks
+  for Face ID (or your code) first. If it can't reach your amarchy, a
+  notification says so and opens the chat. It rings the chime picked in
+  **Settings → Sound** (your assistant's, its own); a sound of your own
+  rings the phone's default.
+- **The share sheet.** A screenshot, a photo, a link or some text: tap
+  **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
+  No Shortcut to set up.
+- **A widget.** "2 need you" and their names, on the home screen and (iPhone)
+  the lock screen.
+
+**First open**: on the phone's browser, **Settings → The phone app → Open in the
+app** opens it on that machine; or type its address
+(`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
+app when its VPN is on; a build that has amarchy's own Tailscale node signs in
+inside the app instead. Then **Turn on notifications**, as in the web app. Had
+Amarchy on the home screen as a web app? Remove it (hold its icon, **Remove
+App**): it would notify you too, and each notification would come twice.
+
+**Private**: each notification is encrypted on your machine for that phone
+alone (the same encryption as Web Push). It goes through amarchy's push relay
+([relay/](../relay/README.md)), a tiny open-source service that hands it to
+Apple's or Google's push. The relay keeps nothing and can't read it: it sees
+the phone's push token and which machine may send to it, never what a
+notification says. Anyone can run their own.
+
 ## In a browser on your computer
 
 The same app on a computer's wide screen is **the board**: your chats and your tasks
@@ -349,12 +382,12 @@ host's chats without anything else installed.
   that you haven't opened yet. A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes
   it, with Undo.
-- **Tasks**: your agents' tasks first (each with its agent's picture and name, how
-  long it has left, its links and its buttons: see [Your agents'
-  tasks](#your-agents-tasks)), then your own (your loops file: due now, waiting on
-  others, this week, further out, someday), each with **Follow up** (your assistant
-  drafts the message to whoever you wait on), **Ask Jaken…** (tell your assistant
-  what to do about it) and **Done**.
+- **Tasks**: your boards ([Tasks: boards](#tasks-boards)): a box to write a task
+  for an agent, then each board with what waits on you there (its buttons, Comment,
+  Edit), and your commitments (your loops file: due now, waiting on others, this
+  week, further out, someday) as a board of their own, each with **Follow up** (your
+  assistant drafts the message to whoever you wait on), **Ask Jaken…** (tell your
+  assistant what to do about it) and **Done**.
 - **Missions count once they're merged.** amarchy looks at every open chat each
   minute: its branch merged into its project's main (a merge commit naming the
   branch, or a fast-forward: amarchy's own "ship it"), or a GitHub pull request
@@ -420,17 +453,21 @@ host's chats without anything else installed.
   and you stay on the board, on with the rest (as after sending any chat
   something): it works under **At work**, and shows under **Needs you** once it's
   done. `Esc` in its empty box puts it away.
-- **A chat opened** with a click takes the whole window, its box ready: answer,
-  approve, write. Opened with the keys (`Enter` on its card), the keys are on its
-  latest message, as on the board's cards: `j` / `k` (or `↓` / `↑`) from message
-  to message, `l` (or `→`) into one, along its buttons and links, `h` (or `←`)
-  back and out, `Enter` on a button presses it, `g` / `G` the first and the
-  latest, `d` / `u` half a page, and `i` the box to write in (`Ctrl+Alt+Enter`
-  dictates from anywhere). On a message the letters are these keys, not words. As on the board,
-  one message is lit (the latest, until you move): a click elsewhere, the bar,
-  another window leave it lit, and the keys go on from it. `Esc` in the box
-  goes out of it onto the latest message; on a message, **← Back** or `Esc`
-  (always, but in a terminal: what you were writing stays) is the board again, where you were, the keys on the card you opened; so is sending
+- **A chat opened**, with a click or the keys (`Enter` on its card), takes the
+  whole window, the keys in its box: write (or, when it asks you something, on
+  its card: answer, approve). In the box, `Esc` goes up onto the latest message
+  (never a stop: that's the **Stop** button), as `↑` does with nothing above it
+  in the box. `Page Up` / `Page Down` scroll the conversation
+  while you write. On the messages, as on the board's cards: `j` / `k` (or `↓` /
+  `↑`) from message to message, `l` (or `→`) into one, along its buttons and
+  links, `h` (or `←`) back and out, `Enter` on a button presses it, `g` / `G` the
+  first and the latest, `d` / `u` half a page, and `i` (or `↓` on the latest) the
+  box again (`Ctrl+Alt+Enter` dictates from anywhere). On a message the letters
+  are these keys, not words. As on the board, one message is lit (the latest,
+  until you move): a click elsewhere, the bar, another window leave it lit, and
+  the keys go on from it. On a message, **← Back** or `Esc` (never a stop: a
+  chat at work you only looked at goes on) is the board again, where you were,
+  the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. The browser's Back is the
   board too, a reload stays on the chat, and a link to a chat opens it.
   `Ctrl+Alt+J` / `K` open the next or previous chat in the board's order,
@@ -530,7 +567,8 @@ Control+Option. `Ctrl+Alt+M` opens the amarchy menu, which lists them too.
 | `Ctrl+Alt+Space` / `Ctrl+Alt+Enter` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. |
 
 On the board, plain keys move and act (`j` / `k`, `Enter`, `x`…: see the board
-above, or `?`). Every menu takes the keys: a chat's menu (its •••), closing
+above, or `?`); on a board's card in Tasks, `1`–`4` press its buttons, `c` comments on
+it and `e` edits it, and `Esc` on an open board is Tasks again. Every menu takes the keys: a chat's menu (its •••), closing
 one, settings, the order of your projects, the project for a
 new chat, Claude's questions, and the phone's list itself. `↑`/`↓` go from line to
 line (buttons side by side, as High · Normal · Low, are one line: `←`/`→` go along
@@ -620,6 +658,17 @@ amarchy machines remove omarchy   # both forget the other
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+- **Your stuff is the same on every machine**: the look (your own wallpaper
+  and themes too, Omarchy (live) among them), the order of your projects, what
+  a new chat starts on (model, effort), what tells you, your chimes, Show
+  terminals, how machines show, and your missions: every machine's merges,
+  streaks and badges count once, the same score everywhere, and a reset is
+  everyone's. Change it on any machine, in the app or from the command line,
+  and the others have it in a moment; one that was off catches up when it's
+  back (through any other). Two changes made apart: the later one wins. What
+  stays a machine's own: when its idle chats sleep, its dictation, its
+  secrets, the phones it notifies, its automations. A browser keeps its own
+  layout, notifications and drafts.
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
@@ -763,11 +812,14 @@ window closed.
   WebKitGTK; a few minutes the first time). On Arch it offers to install what
   the build needs with pacman (sudo asks for your password); the GStreamer
   plugins its sounds and microphone need are asked for apart and never stop
-  the build: when pacman can't get them, the app is built anyway and says its
-  sounds and dictation wait on them. When pacman can't get Rust, it offers
-  mise's instead (just for you).
+  the build: when pacman can't get them, the app is built anyway and says it
+  has no microphone (dictation) and no video until they're in (it plays its
+  chimes itself meanwhile). When pacman can't get Rust, it offers mise's
+  instead (just for you).
   It never runs a system update (`pacman -Syu`): when your package list is too
-  old for your mirror, it says so and leaves that to you. Its install ends by
+  old for your mirror, or a system update was left half done ("breaks
+  dependency"), it says so, with the command to finish it (on Apple Silicon,
+  its own kernel and boot packages held back), and leaves that to you. Its install ends by
   saying how it went ("The desktop app: …"). It's **Amarchy** in your launcher,
   or `amarchy-desktop`. `install.sh --desktop` builds it anywhere (over SSH,
   say); `--no-desktop` leaves it out.
@@ -786,8 +838,8 @@ window closed.
   in, its window says so, with **Sign in to Tailscale** (Tailscale's own page,
   in your browser), and goes on by itself once you have.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
-  in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
-  A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+  in the window already open (there's only ever one). The bar's Ⓐ, Super + D
+  and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
 - **Notifications**: the same ones your phone gets (what **Tell me** in
   Settings says), as your desktop's own, window open or closed. A chat that asks
   for a permission has **Allow** and **Deny** on its notification, a question its
@@ -795,7 +847,7 @@ window closed.
   there too; a click opens the window on that chat, at its card. Its chime rings
   with it (the window's page rings none of its own, so nothing rings twice).
   The app's server counts it as a device notified (`amarchy notify`, Settings →
-  Send a test). A secret is only ever asked for in the app.
+  Send a test, which rings your chime there). A secret is only ever asked for in the app.
 - **The tray**: closing the window keeps it running in the tray (Open, Reload,
   Quit; its tooltip says how many need you), and it starts there at login
   (`~/.config/autostart/amarchy.desktop`; delete it and it isn't put back), so
@@ -806,7 +858,12 @@ window closed.
   too). `amarchy app off` turns it off, and it stays off.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
-  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). On a
+  computer with no GPU to draw with (a new GPU whose Linux driver isn't
+  there yet, a virtual machine), it paints its page on the CPU, the way a CPU
+  does it best, so a chat at work doesn't take a core and the keys you hold
+  don't stick (`amarchy-desktop --graphics` says which; `AMARCHY_DESKTOP_GPU=1`
+  draws through GL anyway).
 - **Sounds**: its window plays them through GStreamer. On a computer without
   GStreamer's plugins (`gst-plugins-good`, `gst-plugins-base`,
   `gst-plugin-pipewire`), where a sound would crash its page, the app plays
@@ -818,9 +875,11 @@ window closed.
   `~/.local/state/amarchy/desktop/desktop.log` (the tray's **Its log**). A
   start always brings its window up: if its window is gone it's made again,
   if its page crashed it loads again and the log says why (what the page
-  wrote last; twice with no sign why, it draws without the GPU from then on;
-  `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
-  again by itself.
+  wrote last; twice with no sign why on a computer with a GPU, it draws
+  without the GPU from then on; `AMARCHY_DESKTOP_GPU=1` tries the GPU again),
+  and if it's stuck it starts
+  again by itself. What goes wrong in its page (an error, with where) is
+  in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
@@ -838,11 +897,13 @@ a backup of each file it changes).
   `amarchy.chats`, put at the end of the bar's left side the first time; move
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
-- **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
-  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
-  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
-  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Super + D** brings amarchy to the front: the desktop app's window if it has
+  one, else the app started. Omarchy leaves it free, and one hand reaches it.
+  It's a setting: `amarchy key Super+Ctrl+M` picks another (one Omarchy uses
+  gives way to amarchy while it's picked), `amarchy key off` none, `amarchy key
+  default` Super + D again; it changes at once. `amarchy key` (and the install)
+  says when this machine's Hyprland has something else on it, your own bindings
+  say. A machine that never picked a key follows the default when it changes.
 - **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
   under it.
 
@@ -872,11 +933,11 @@ It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
 **The window, one of the desktop's**: the desktop app's window is
-see-through as your terminals are, in each of Omarchy's window modes
-(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
-wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
-solid, as a terminal's, and your desktop's own wallpaper is behind it
-(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
+your desktop's own shows through its panes and cards, as a browser shows the
+app's wallpaper, lined up with the rest of the screen (Settings › Look says
+so). Hyprland fades it as your terminals, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy). For a solid window, Omarchy's Opaque mode, or its
 transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy
@@ -1154,20 +1215,44 @@ on each phone or browser picks another:
 - **On the host** (`amarchy dictation setup`, or **Set up dictation on the host** in
   Settings). A speech-to-text model on the host, NVIDIA's
   [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) through
-  whisper.cpp's `libparakeet`, writes it down. It knows 25 European languages, Spanish
-  and English among them, and tells them apart by itself: dictate in either, or start
-  in one and go on in the other after a pause. It costs nothing, and the audio never
-  leaves the host. It needs whisper.cpp 1.9 or newer installed there (Arch:
-  `sudo pacman -S whisper-cpp`) and the model (670 MB, fetched into
-  `~/.local/state/amarchy/dictation`). The model is loaded (about 1 GB of memory) when
-  a dictation starts, while you speak, and let go of ten minutes after the last one.
-  While you talk, each piece between your pauses is written down for you to see; what's
-  kept is written again from longer stretches with their context, and once you let go
-  the text is there in about half a second.
+  [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (the engine
+  Hex and Handy write speech down with), writes it down. It knows 25 European
+  languages, Spanish and English among them, and tells them apart by itself: dictate
+  in either, or start in one and go on in the other after a pause. It costs nothing,
+  and the audio never leaves your machines. Nothing to install or build, on x86_64 and
+  aarch64 Linux alike (an Apple Silicon Mac on Omarchy too): the engine comes with
+  amarchy (a release of transcribe.cpp pinned by its hash, its CPU code, about 20 MB;
+  the package carries it, a checkout's `install.sh` fetches it), and the model (740
+  MB) is fetched the first time it's wanted, into `~/.local/state/amarchy/dictation`.
+  The model is loaded (about 1 GB of memory) when a dictation starts, while you
+  speak, and let go of ten minutes after the last one. It writes with as many of the
+  processor's threads as are free at that moment: on a busy server (other chats'
+  builds and tests) more would only wait on each other. While you talk, each piece between your pauses is written down
+  for you to see; what's kept is written again from longer stretches with their
+  context, and once you let go the text is there in about half a second.
+- **On another machine of yours**: a host without the model (not set up yet, or a
+  laptop you'd rather not give 1 GB to) sends what you say to a paired machine that has
+  it ([Machines](#machines)), a server first, over your own tailnet; the words come back
+  as they would from the host itself. Nothing to set up: pair them, and the mic works.
+  Settings → Dictation says which machine writes it down, and that machine's
+  `amarchy dictation log` says for which one.
 - **This browser's**: the browser's own speech recognition (Web Speech: Apple's in
   Safari, Google's in Chrome), in one language you pick in Settings, and sending what
-  you say to Apple or Google. It's the fallback where there's no model on the host.
-  Not in the home-screen app on an iPhone, where WebKit's often hears nothing.
+  you say to Apple or Google. It's the fallback where no machine of yours has the
+  model. Not in the home-screen app on an iPhone, where WebKit's often hears nothing,
+  nor in the desktop app on Linux (its WebKitGTK has none).
+
+The mic is always there, and the model comes with your first tap on it: a host
+without it fetches it then, by itself (*Getting dictation ready on your host: 770 MB,
+once*). A ring around the mic fills as it comes (a tap meanwhile says how far, and
+Settings → Dictation too), and *Dictation is ready* says when you can speak. Where the
+tap can dictate some other way meanwhile (another machine of yours, this browser's
+own recognition), it does, and the host's model comes behind it; a phone or browser
+set to **This browser's** in Settings never fetches it. Where the mic can't work (a
+processor amarchy has no engine for, or the desktop app on a computer without
+GStreamer's microphone, `gst-plugin-pipewire`), it's dimmed, and a tap says why in a
+line, with what to do: **Set it up** (Settings → Dictation), or **Copy the command**
+that installs what's missing.
 
 The keyboard's own dictation (its mic key) works in every box too. On a computer,
 `Ctrl+Alt+Space` (or `Ctrl+Alt+Enter`) dictates into the chat's box: hold it, or tap it
@@ -1178,18 +1263,20 @@ silence once held is opened afresh on the spot. `amarchy dictation log` lists ea
 dictation, and each one whose microphone didn't start, with why.
 
 How the host did on recordings with known text, on this project's 16-vCPU server
-(October 2026): 2.5% of the words wrong in Latin American Spanish (Google's FLEURS, 15
-clips), 8.5% in English read by native Spanish speakers (the Speech Accent Archive, 13
-speakers), writing about 10 seconds of speech per second. Whisper small did 3.4% and
+(October 2026, through whisper.cpp then; transcribe.cpp writes the same words, three
+to four times faster on a busy server: JFK's 11 seconds in 3.6 against 14.1): 2.5% of
+the words wrong in Latin American Spanish (Google's FLEURS, 15 clips), 8.5% in English
+read by native Spanish speakers (the Speech Accent Archive, 13 speakers), writing
+about 10 seconds of speech per second. Whisper small did 3.4% and
 9.3%, three times slower; Whisper large-v3-turbo 1.7% and 6.9%, but slower than real
 time on that CPU (a 10-second dictation would take 15 to write down).
 
 ```sh
-amarchy dictation [--status]          # whether it's set up, and how to set it up if not
-amarchy dictation setup               # fetch the model (670 MB)
-amarchy dictation log [--json]        # the last dictations, from any phone or browser: which way, how long, what came of it
-amarchy dictation transcribe <file>   # write down a recording, as a dictation would be
-amarchy dictation remove              # delete the model
+amarchy dictation [--status]          # whether it's set up, where it's written down, and how to set it up if not
+amarchy dictation setup               # fetch the engine (about 20 MB, where no package brought it) and the model (740 MB)
+amarchy dictation log [--json]        # the last dictations, from any phone or browser: which way, for which machine, what came of it
+amarchy dictation transcribe [--on <machine>] <file>   # write down a recording, as a dictation would be (here, or where it goes)
+amarchy dictation remove              # delete the model and the engine fetched here
 ```
 
 ## Secrets
@@ -1244,8 +1331,8 @@ first, then the one you last wrote to), and one count over it:
 - **Your move**: what a chat asks you, with its buttons (tap one and the answer goes
   to the chat; **Other…** opens it to say more), a permission's **Allow** and
   **Deny**, a secret to give (**Answer** opens the chat at its card), a chat that's
-  blocked, your agents' tasks (first in Tasks: [Your agents'
-  tasks](#your-agents-tasks)), the people to chase today (**Chase**: your assistant
+  blocked, the cards your agents' boards wait on you for ([Tasks:
+  boards](#tasks-boards)), the people to chase today (**Chase**: your assistant
   drafts the message), and your commitments due by tomorrow, late ones in red. The number on the tab
   counts them; the app's icon counts the chats asking you, plus the messages from
   your assistant and your agents you haven't read.
@@ -1425,7 +1512,7 @@ amarchy agents <id> off                      # a chat like the others again (its
 
 An agent has everything your assistant has but your loops file (Today's loops and
 their **Done**, **Follow up**, **Ask** and **New chat**, and Monday's recap stay your
-assistant's); it has [tasks of its own](#your-agents-tasks) instead:
+assistant's); it has [boards and tasks of its own](#tasks-boards) instead:
 
 - **Its place**, on top of every list, right under your assistant, in the order you
   made them, whatever its priority or what it does (asking you, it stays there, with
@@ -1510,12 +1597,99 @@ sections, the steps, the buttons).
 - **Unread**: its row counts the messages it wrote since you last looked (none while
   it's on your screen), and so does the app's icon, with what needs you.
 
-## Your agents' tasks
+## Tasks: boards
 
-An agent that finds things for you to do (a post worth replying to, a lead to call,
-a form to sign) shouldn't start a chat for each one: they'd crowd your chats, and
-each would be a mission to complete. It puts each on **Tasks** instead, as a card of
-its own with buttons that answer it:
+**Tasks** is boards: one for each project or agent, of what depends on you. Your
+assistant and every agent of yours keep them (an agent's posts to review, a lead to
+call, a form to sign), and you answer from the board, on the phone as on a computer:
+press a card's buttons, **comment** on it (the agent answers by revising the card),
+**edit** it in place, move it, or write a task for an agent to help you get done.
+
+- **Tasks** lists each board with what waits on you there (the cards in a column of
+  yours, the first three), its lead's picture and name, and **Open**. On top, a box
+  to **write a task**: it goes on your assistant's board (or the one you pick under
+  it) and that agent is told, to help you get it done. Your commitments (your loops
+  file) are a board of their own. The Tasks tab counts every card of yours.
+- **A board, open** (`#/b/<board>`): its columns side by side on a computer, one at a
+  time on the phone (their tabs, or a swipe sideways), every card. **Back** or `Esc`
+  is Tasks again.
+- **A card**: its title, its block as a reply draws it (a post as X shows it, with
+  **Copy text** and **Copy image**; an email, a list, any block), its note, its
+  links, its thread (what you said, what the agent answered, what was done), then its
+  buttons, **Comment** (the bubble), **Edit** (the pencil) and its menu (**Move
+  to**, **Take it down**). Keys: `1`–`4` its buttons, `c` comment, `e` edit.
+- **Comment**: what you write goes to the card's agent as your own message, naming
+  the card (`About “<card>” (board posts, card fs-12): …`), and stays on the card's
+  thread. Its answer comes there too, and the card lights up, **Answered** or
+  **Revised**.
+- **A button**: its column's (the same on every card in it) or the card's own. It
+  sends its message to the agent (`amarchy send`: an agent asleep wakes for it),
+  moves the card, asks you for a word first (**Discard** asks why, and the reason
+  goes with it), or does only that (quiet). Pressed, the card ticks and goes, with
+  **Undo** for a few seconds.
+- **Edit**: its title and its text in place; for a post, X's count as you type (past
+  280, a warning: Premium takes it). Saved, nothing is sent: the agent finds it on the
+  card and in the log.
+- **Approving is yours alone.** A column can need your approval (**Ready to post**): a
+  card gets there only by your hand (a button, or **Move to**), never an agent's. Its
+  approval says who (your Tailscale login), when, and the sha256 of exactly what it
+  has, signed with a key only amarchy reads (in the secrets' folder); changed since
+  you looked (the agent revised it a moment ago), your Approve is refused. Any change to it
+  (your edit, the agent's revision) drops it, and the card goes back where it was. A
+  board can have a check (its agent's lint): it runs on your edit and your approval
+  first, and can refuse either, in its words. An agent's tools can't reach the app's
+  board actions or the boards' files.
+
+An agent keeps its boards with `amarchy board`:
+
+```sh
+# a board: its columns, in order; each column's buttons after it
+amarchy board set posts --title "Post board" \
+  --column "For review" --yours \
+    --button "Approve" --to "Ready to post" --quiet \
+    --button "Discard" --asks "Why discard it?" --to "Discarded" \
+  --column "Ready to post" --approval \
+    --button "Back to review" --to "For review" --quiet \
+    --button "Posted by hand=Posted {key} by hand: {words}" --asks "Its link?" --to "Posted" \
+  --column "Posted" --done \
+  --column "Discarded" --done --button "Restore" --to "For review" \
+  --check 'bin/fireship lint -'
+
+# a card (prints its id); --key again changes it in place
+amarchy board card posts --key fs-12 --title "Agents: stop babysitting" \
+  --xpost - --handle ja818_ --media ~/x/fs-12.png --note "Slot: Tue 9:00" < post.txt
+amarchy board comment posts fs-12 "Led with the hook, cut it to two lines"
+amarchy board move posts fs-12 Posted          # never into a column that needs approval
+amarchy board show posts [--card fs-12] --json # cards, threads, approvals {by, at, sha256}
+amarchy board approved posts fs-12 --text post.txt   # exit 0 only if you approved exactly that
+amarchy board log posts --json                 # every edit (before, after), press, reason, comment
+amarchy board rm posts fs-12 | amarchy board drop posts
+amarchy board list
+```
+
+- **Whose**: any of your team keeps boards (`$AMARCHY_SESSION`, or `--agent <id>`); a
+  plain chat is refused. The one that makes a board is its lead: it hears what you do
+  on a card of its own, as each agent does on its own cards.
+- **Columns**: `--yours` (its cards wait on you: Tasks counts them), `--done`
+  (finished: kept a month), `--approval` (above). Without columns a new board has
+  **To do**, **Doing** and **Done**. A column's `--button <label>[=<message>]`
+  (`{title}`, `{key}`, `{board}`, `{column}`, `{words}` in it; none:
+  `<label>: “<title>” (board <b>, card <key>)`), `--to <column>`, `--asks <words>`,
+  `--quiet` (nothing sent).
+- **Cards**: a block the app draws (`--xpost <text|->`, or `--block <kind> --body
+  <text|->` with `--attr <name>=<value>`), checked as a reply's are; a note, links
+  (up to 3), buttons of its own (up to 4; one without `--to` moves it to the done
+  column), `--until`, `--notify`. An agent's update over your edit is refused until
+  it says `--over-edit` (it sees your text); `--base <sha256>` refuses one over any
+  change since.
+- **A script that acts on your approval** (posting it) checks `amarchy board approved`
+  first. The hash is the card's block as JSON (`kind`, `attrs`, `body`), keys in
+  order, no spaces, UTF-8.
+
+### Your agents' tasks
+
+A one-off (a post worth replying to now) is a task: a card on the agent's own board
+(its id's: **For you**, **Done**), with buttons that answer it:
 
 ```sh
 amarchy task add --title "Reply: @levelsio's AI-reply spam list" \
@@ -1530,34 +1704,20 @@ amarchy task list [--agent <id>] [--json]     # what's open: id, agent, until, t
 amarchy task done <id>... | --agent <id>      # take it down (or all of an agent's): nothing is sent
 ```
 
-- **Whose**: the agent's own, run from its chat (`$AMARCHY_SESSION`), or `--agent
-  <id>`. Only your assistant and your agents have tasks: a plain chat is refused
-  (it asks you on its own card).
-- **The card**, first in Tasks' **Now** (the one going soonest first): the agent's
-  picture and name, the title (its keyword in bold, as a chat's), how long it has
-  left (red the last ten minutes; one with no time says how old it is), the note
-  (`**bold**`, `` `code` `` and links drawn), then its links and its buttons. The
-  Tasks tab counts it. On the phone the title has a line of its own.
-- **`--link [<label>=]<url>`** (up to 3; a bare URL is **Open**): a button that opens
-  the page in a new tab. The task stays.
-- **`--button <label>[=<message>]`** (up to 4; none gives **Done**): pressed, the card
-  ticks with its words and goes, with **Undo** for a few seconds; then the message
-  goes to the agent as if you'd typed it (`amarchy send`: an agent asleep wakes for
-  it) and the task is done. Without a message it sends `<label>: <title>`. Leaving
-  the app (a link, another app) sends it at once. Keys: `1`–`4` press its buttons,
-  `r` opens its first link, the card's head opens the agent's chat.
+- **`--link [<label>=]<url>`** (up to 3; a bare URL is **Open**): the page in a new
+  tab. The task stays.
+- **`--button <label>[=<message>]`** (up to 4; none gives **Done**): pressed, its
+  message goes to the agent and the task is done. Without a message it sends
+  `<label>: <title>`.
 - **`--until`**: a date and time (`2026-11-19T10:12-05:00`; the host's zone without
   one), a time today (`10:12`), or how long from now (`45m`, `2h`, `1h30m`, `1d`).
-  Past it, the task goes by itself (the agent isn't told: `amarchy task list` shows
-  what's left). A button pressed just before still goes.
-- **`--key`**: the same agent's task with that key is changed in place (same id,
-  same card) rather than added twice: a hunt that finds the same post again doesn't
-  double it.
+  Past it, the task goes by itself (red its last ten minutes; one with no time says
+  how old it is). A button pressed just before still goes.
+- **`--key`**: the same agent's task with that key is changed in place.
 - **`--notify`**: a notification on your phones too, under the agent's name and
-  picture; a tap opens Tasks. Without it, a task is quiet.
-- An agent has 30 open at most. One that's no longer an agent keeps its tasks out of
-  sight; a closed one's go. The search finds them too (the agent, the title, the
-  note).
+  picture; a tap opens its board.
+- An agent has 30 open at most. One that's no longer an agent keeps its board out of
+  sight; a closed one's tasks go. The search finds cards too.
 
 ## From scripts and agents
 
@@ -1569,8 +1729,9 @@ amarchy send <id> "<text>"                                     # to a chat's Cla
 amarchy notify "<title>" "<body>" [--session <id>] [--urgent]  # to your phones
 ```
 
-(An agent that needs you to do something puts it on Tasks instead, with buttons
-that answer it: `amarchy task add`, see [Your agents' tasks](#your-agents-tasks).)
+(An agent that needs you to do something puts it on Tasks instead, a card on its
+board with buttons that answer it: `amarchy board card` or `amarchy task add`, see
+[Tasks: boards](#tasks-boards).)
 
 **`amarchy send`** types the text into the chat's Claude the way the phone does
 (pasted, then Enter), `-` reading it from stdin. It waits until Claude is free: not in
@@ -1645,6 +1806,14 @@ in `~/.config/amarchy/host` stops it; `amarchy update` does it now. `amarchy pro
 runs the chat engine's test against the Claude Code installed, about three minutes and a
 few cheap turns on your login, and records the result; a failure shows in Settings. The
 update starts it when Claude Code has changed.
+
+**As Arch packages** (`packaging/arch`: `amarchy-git`, and the desktop app's
+`amarchy-desktop-git`), amarchy lives in `/usr/share/amarchy` and `amarchy setup`
+is `install.sh`, run as you: it sets up your part (the timers, the skill, Omarchy's
+pieces). A package updates with your packages, never from git; after an update
+your part is set up again by itself within five minutes (`amarchy update`), and
+the app reloads. `amarchy setup --uninstall` takes your part away before you
+remove the package. How they're built and published: `packaging/README.md`.
 
 `install.sh --uninstall` takes all of that out again (the chats' previews stop, and come
 off your tailnet); your worktrees, your chats,
@@ -1800,7 +1969,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
-amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+D)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:
@@ -1827,19 +1996,27 @@ amarchy agents <id> off               not an agent any more
 amarchy alerts [all|needs-you|assistant]   what the other sessions tell you about (prints it without one)
 
 Dictation:
-amarchy dictation [--status]          whether it's set up, and how to set it up if not
-amarchy dictation setup               fetch the speech model (Parakeet TDT 0.6B v3, 670 MB)
-amarchy dictation remove              delete the model again
+amarchy dictation [--status]          whether it's set up, where it's written down, and how to set it up if not
+amarchy dictation setup               fetch the speech engine (transcribe.cpp, about 20 MB, where no package brought it) and the model (Parakeet TDT 0.6B v3, 740 MB)
+amarchy dictation remove              delete the model and the engine fetched here again
 amarchy dictation log [--json]        the last dictations and how each went
-amarchy dictation transcribe <file>   write down a recording, as a dictation would be
+amarchy dictation transcribe [--on <machine>] <file>   write down a recording, as a dictation would be
 
 Today:
 amarchy today [--json]                what needs you, what's due, who you wait on, each chat's goal and state
 amarchy today --loops [<file>|off]    your loops file, or none (prints it without one)
 
-Your agents' tasks:
+Tasks: boards (amarchy board --help has every option):
+amarchy board [list] [--json]         the boards: id, lead, name, each column's count
+amarchy board set <board> [--title <text>] [--check <command>] [--column <name> [--yours|--approval|--done]
+                  [--button <label>[=<message>] [--to <column>] [--asks <words>] [--quiet]]...]...
+amarchy board card <board> [--key <key>] [--title <text>] [--column <name>] [--xpost <text|->]
+                  [--block <kind> --body <text|->] [--note <text|->] [--link ...] [--button ...]   a card; prints its id
+amarchy board move <board> <card> <column> | comment <board> <card> <text|->
+amarchy board show <board> [--card <card>] [--json] | approved <board> <card> [--text <file|->] | log [<board>]
+amarchy board rm <board> <card>... | drop <board>
 amarchy task add --title <text> [--note <text>] [--link [<label>=]<url>]... [--button <label>[=<message>]]...
-                 [--until <when>] [--key <key>] [--notify] [--agent <id>]   a card on Tasks; prints its id
+                 [--until <when>] [--key <key>] [--notify] [--agent <id>]   a task on the agent's board; prints its id
 amarchy task list [--agent <id>] [--json]   what's open
 amarchy task done <id>... | --agent <id>    take tasks down (nothing is sent)
 

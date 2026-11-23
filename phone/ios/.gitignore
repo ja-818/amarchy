@@ -1,0 +1,15 @@
+# Made by ./generate.sh (XcodeGen), and what building makes.
+Amarchy.xcodeproj/
+build/
+DerivedData/
+*.xcresult
+# amarchy's own node, built by gomobile (tailnet.yml).
+Frameworks/
+# fastlane's own.
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+*.ipa
+*.dSYM.zip
+*.mobileprovision

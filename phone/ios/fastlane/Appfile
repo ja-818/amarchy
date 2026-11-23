@@ -1,0 +1,3 @@
+# The app on App Store Connect (store/README.md says how it's made there).
+app_identifier("io.github.ja818.amarchy")
+team_id(ENV["APPLE_TEAM_ID"])

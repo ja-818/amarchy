@@ -467,7 +467,10 @@ class TermPane {
     const mouse = this.term.modes.mouseTrackingMode !== "none";
     const unit = mouse ? cell * TMUX_WHEEL : cell;
     this.scrolled = (this.scrolled || 0) + px;
-    const n = Math.trunc(this.scrolled / unit);
+    // Whole turns, but a hair short of one is one: a finger's positions are
+    // fractions of a pixel (a phone's, at 3x), and a swipe of three turns'
+    // worth came out 239.99997 px of 240, one turn short.
+    const n = Math.trunc(this.scrolled / unit + Math.sign(this.scrolled) * 1e-3);
     if (!n) return;
     this.scrolled -= n * unit;
     if (!mouse) return this.term.scrollLines(n);
@@ -662,6 +665,7 @@ function row(id) { return app.view && app.view.sessions.find((s) => s.id === id)
 function deskRoute() {
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
+  if (m) boardsUI.route = here();      // (a chat opened from a board: back from it, the board)
   if (m) {
     const id = routeKey(m[1]);       // <this machine>:<id> is <id>; a moved chat, where it is (app.js)
     if (row(id)) { board.waitFor = null; show(id); }
@@ -672,6 +676,7 @@ function deskRoute() {
   show(null);
   if (here() === "#/new") boardCompose();
   if (here() === "#/tasks") boardTasks();
+  else boardsRouted(here());
 }
 
 // The chat over the board (id), or the board (null).
@@ -684,10 +689,13 @@ function show(id) {
   }
   const changed = id !== desk.current;
   if (changed && id && !desk.current) board.from = board.scroll.scrollTop;      // where the board was
+  if (changed && desk.chat) letGoOf(desk.chat.el);
   desk.current = id;
   desk.el.classList.toggle("chat-open", !!id);
   if (changed) {
-    if (desk.chat) desk.chat.close();
+    // One that can't close (an error in it) is let go of all the same: the
+    // next one opens (app.js route).
+    if (desk.chat) try { desk.chat.close(); } catch (e) { console.error("Couldn't close the chat:", e); }
     desk.chat = id ? deskChat(id) : null;
     desk.chatSlot.replaceChildren(...(desk.chat ? [desk.chat.el] : []));
     if (desk.chat) desk.chat.open();
@@ -698,7 +706,7 @@ function show(id) {
       board.composing = false;
       boardComposeShow();
       deskLayout();
-      toChat(true);
+      toChat();
       seenNow(id);      // opened: seen
     }
   } else {
@@ -1410,17 +1418,15 @@ function dropImages() {
   });
 }
 
-// The keyboard to the chat: its card if it asks something, else the box.
-function toChat(opened) {
+// The keyboard to the chat: its card if it asks something, else the box
+// (however it was opened: the messages are ↑ or Esc away).
+function toChat() {
   const c = desk.chat;
   if (!c) return;
   // Out of the side panel first (its terminal kept the keyboard: it stays put
   // as the chat changes), so the chat can take them once it's in.
   if (desk.side.el.contains(document.activeElement)) document.activeElement.blur();
-  const card = c.dock.querySelector(".card");
-  if (card) (menuStart(card) || card).focus({ preventScroll: true });
-  // Opened with the keys: on its latest message (i to write); else the box.
-  else if (!(opened && lastInput.keys && c.navStart())) c.input.focus({ preventScroll: true });
+  c.takeKeys();
   desk.focus = "chat";
   desk.focusPane = null;
   deskPanes();
@@ -1536,7 +1542,8 @@ function talkKey(e) {
   if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
   const t = fresh ? fresh.dictate : c.talk;
   if (t.locked) { t.stop(); return; }
-  if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
+  if (t.run) return;
+  if (t.tellWhyNot()) return;      // it can't work here: why, and what to do
   if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
   desk.talkCode = e.code;
@@ -1855,6 +1862,8 @@ function sessionItems(s) {
                                               : { label: "Put to sleep", act: () => sleepSession(s) }]),
     { label: s.assistant === "main" ? "Your assistant…" : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent…` : "Make it an agent…",
       detail: isAgent(s) ? "name, picture, chime" : "or your assistant", act: () => agentSheet(s) },
+    // Its boards (Tasks): each a tap away.
+    ...boardsLedBy(s).map((b) => ({ label: b.title, icon: "organize", detail: b.yours ? `its board · ${b.yours} for you` : "its board", act: () => boardsGo(b.key) })),
     // Your assistant and your agents are on top whatever their priority.
     ...(isAgent(s) ? [] : LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
                                                 key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
@@ -1887,12 +1896,15 @@ function showKeys() {
       ["Enter", "Open the chat; on a button, press it (a folded group: unfold it)"], ["Esc", "Out of the card"],
       ["1 – 4", "Pick that answer on the card"],
       ["x", "Complete the chat's mission, with Undo"], ["r", "Open what it made: Review, or its Preview"],
-      ["s", "Seen: off Needs you without opening it"],
+      ["s", "Seen: off Needs you without opening it"], ["c / e", "A board's card: comment on it / edit it"],
+      ["Esc  on a board", "Back to Tasks"],
       ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["Tab / Shift+Tab  in a new chat", "The next / previous project"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
-    ...part("In a chat", [["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
+    ...part("In a chat", [["Enter / Shift+Enter  in the box", "Send / a new line"],
+      ["Esc  in the box", "Up onto the messages (never a stop)"], ["↑  in the box, nothing above", "Up onto the messages"],
+      ["Page Up / Down  in the box", "Scroll the messages, still writing"],
+      ["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
-      ["i", "Write: the box"], ["Esc", "Out of the box or the message; again: back to the board"], ["Tab", "Brief / Chat"],
-      ["Enter / Shift+Enter  in the box", "Send / a new line"],
+      ["i  or  ↓ on the latest", "Back into the box"], ["Esc  on a message", "Back to the board (never a stop)"],
       ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
       ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
       ...(app.view && app.view.ghostty ? [["Ctrl+Alt+O", "This chat's terminal in Ghostty"]] : []),

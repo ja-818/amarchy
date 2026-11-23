@@ -56,6 +56,7 @@ for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY", "TMUX"):
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(ROOT / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+sys.path.insert(0, str(ROOT / "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 am.app_key()
 am.migrate()
 

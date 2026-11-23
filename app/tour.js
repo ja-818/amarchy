@@ -510,7 +510,7 @@ function tourSlides() {
         feat(TOUR_COLUMNS, 4, "Inbox zero, but for robots.",
              "**At work** on top. **Now** is what you're on: pin what matters. **For later** is the guilt pile."),
         feat(TOUR_TASKS, 4, "A to-do list that does itself.",
-             "**Tasks** has what you promised people, often straight from your meeting recordings (\"I'll send it by Tuesday\"). One tap, and a chat does it with you."),
+             "**Tasks** is boards: what your agents need from you (a post to approve) and what you promised people, often straight from your meeting recordings. Comment on a card, and its agent revises it."),
         feat(TOUR_LOCK, 4, "Secrets stay secret.",
              "Keys and passwords never go in the chat: Claude asks for them in a card, and they stay on your machine."),
       ],

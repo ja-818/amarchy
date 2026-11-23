@@ -42,6 +42,9 @@ amarchy-desktop: amarchy's app, in a window of its own
   amarchy-desktop --hidden                 start in the tray (at login)
   amarchy-desktop --restart                the running one starts again, on the
                                            build installed now (install.sh)
+  amarchy-desktop --graphics               what draws its window here: the GPU,
+                                           or the CPU (then its page is painted
+                                           with Skia's CPU raster)
 
 What it opens, when not told: this computer's amarchy if it has chats (or
 machines merged in), else the first machine paired with it that's on, else
@@ -155,6 +158,10 @@ fn main() {
         println!("amarchy-desktop {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    if argv.iter().any(|a| a == "--graphics") {
+        platform::print_graphics();
+        return;
+    }
     let start = match args(&argv) {
         Ok(a) => a,
         Err(e) => {
@@ -173,7 +180,17 @@ fn main() {
     if let Some(pid) = start.after {
         wait_gone(pid);
     }
-    journal::start();
+    // A second start hands its arguments to the running one and ends, before
+    // anything of GTK starts (a start without a display: an update's
+    // --restart from a service, which GTK's init would abort). With none
+    // running, --restart has nothing to do.
+    if start.after.is_none() && hand_over(&argv) {
+        return;
+    }
+    if start.restart {
+        return;
+    }
+    journal::start(start.after.is_some());
     platform::prepare();
 
     let shell = Shell {
@@ -231,6 +248,9 @@ fn main() {
             if restart_only {
                 std::process::exit(0);
             }
+            // The one that runs (a start handed over ended before this):
+            // what it draws with and what its page can play, in the log.
+            platform::started();
             let win = window(&handle, hidden)?;
             platform::webview(&win);
             tray::make(&handle)?;
@@ -283,6 +303,31 @@ fn main() {
     });
 }
 
+/// The app's identifier (tauri.conf.json): its single instance's D-Bus name.
+const IDENTIFIER: &str = "io.github.ja818.amarchy";
+
+/// Hands argv to the running one, as tauri-plugin-single-instance does (its
+/// D-Bus name and method), when one is running: whether it took them.
+#[cfg(target_os = "linux")]
+fn hand_over(argv: &[String]) -> bool {
+    let name = format!("{IDENTIFIER}.SingleInstance");
+    let path = format!("/{}", name.replace('.', "/").replace('-', "_"));
+    let Ok(conn) = zbus::blocking::Connection::session() else { return false };
+    let Ok(dbus) = zbus::blocking::fdo::DBusProxy::new(&conn) else { return false };
+    let Ok(bus_name) = zbus::names::BusName::try_from(name.as_str()) else { return false };
+    if !dbus.name_has_owner(bus_name).unwrap_or(false) {
+        return false;
+    }
+    let cwd = std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned();
+    conn.call_method(Some(name.as_str()), path.as_str(), Some("org.SingleInstance.DBus"), "ExecuteCallback", &(argv.to_vec(), cwd))
+        .is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn hand_over(_argv: &[String]) -> bool {
+    false
+}
+
 /// Until the process pid has ended (up to 10 s).
 fn wait_gone(pid: u32) {
     #[cfg(target_os = "linux")]
@@ -304,15 +349,20 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
     let origin = app.state::<Shell>().origin.clone();
     let opener = app.clone();
     let out = app.clone();
+    let omarchy = platform::omarchy();
     let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Amarchy")
         .inner_size(1280.0, 860.0)
-        .min_inner_size(360.0, 480.0)
-        // The app's look while a page loads (not WebKit's white): the last
-        // one it wore, else Omarchy's default.
-        .background_color(saved_background())
+        .min_inner_size(360.0, 480.0);
+    // On an Omarchy desktop the window is see-through: what its page leaves
+    // unpainted shows the desktop behind it (wearing the desktop's look live,
+    // its wallpaper, as a browser shows the app's). Elsewhere, the app's look
+    // while a page loads (not WebKit's white): the last one it wore, else
+    // Omarchy's default.
+    let win = if omarchy { win.transparent(true) } else { win.background_color(saved_background()) };
+    let win = win
         .visible(false)
-        .initialization_script(init_script(platform::omarchy()))
+        .initialization_script(init_script(omarchy, platform::gpu()))
         .on_navigation(move |u| {
             if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
                 return true;
@@ -350,13 +400,14 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
 }
 
 /// What every page in the window knows before its own scripts run: that it's
-/// the desktop app (window.amarchyDesktop), and whether the window is on an
-/// Omarchy desktop (platform::omarchy). There <html> is marked on-omarchy
-/// from the start, before the page is first drawn, so a wallpaper it
-/// wouldn't draw (app.css) never flashes.
-fn init_script(omarchy: bool) -> String {
+/// the desktop app (window.amarchyDesktop), whether the window is on an
+/// Omarchy desktop (platform::omarchy), and whether it has a GPU to draw with
+/// (platform::gpu: without one, what moves on the page steps half as often).
+/// On Omarchy <html> is marked on-omarchy from the start, before the page is
+/// first drawn, so a wallpaper it wouldn't draw (app.css) never flashes.
+fn init_script(omarchy: bool, gpu: bool) -> String {
     let mut js = format!(
-        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy} }});",
+        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy}, gpu: {gpu} }});",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS
     );
@@ -485,6 +536,9 @@ fn watchdog(app: &AppHandle) {
             if let Some(u) = shell.given.clone() {
                 cmd.arg("--url").arg(u.as_str());
             }
+            if let Some(e) = journal::stderr_for_child() {
+                cmd.stderr(e).env("AMARCHY_DESKTOP_STDERR", "given");
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -588,6 +642,9 @@ pub fn restart(app: &AppHandle, exe: Option<&str>) {
     }
     if let Some(u) = app.state::<Shell>().given.clone() {
         cmd.arg("--url").arg(u.as_str());
+    }
+    if let Some(e) = journal::stderr_for_child() {
+        cmd.stderr(e).env("AMARCHY_DESKTOP_STDERR", "given");
     }
     #[cfg(unix)]
     {
@@ -819,7 +876,7 @@ fn parse_color(s: &str) -> Option<Color> {
 }
 
 /// The look the app wears now (its bars' color), worn by the window between
-/// pages and kept for the next start.
+/// pages (unless it's see-through, on Omarchy) and kept for the next start.
 fn keep_background(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -831,7 +888,10 @@ fn keep_background(app: &AppHandle) {
             move |v| {
                 let Some(raw) = serde_json::from_str::<String>(&v).ok() else { return };
                 let Some(c) = parse_color(&raw) else { return };
-                let _ = w2.set_background_color(Some(c));
+                // (A see-through window stays so: its page paints what it covers.)
+                if !platform::omarchy() {
+                    let _ = w2.set_background_color(Some(c));
+                }
                 let hex = format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
                 let f = look_file();
                 if std::fs::read_to_string(&f).map(|s| s.contains(&hex)).unwrap_or(false) {
@@ -969,7 +1029,8 @@ fn sign_in(app: AppHandle) -> Result<(), String> {
 // the window (its value comes back on stdout as "@@<id> <json>"), or
 // {"id", "do"}: what the shell itself does or is ("close", "url",
 // "visible", "size", "destroy": its window gone, "hang": its window's
-// thread stuck for a minute, "pid").
+// thread stuck for a minute, "pid", "drawing": with compositing or not,
+// "stderr": 200 KB written to it).
 #[cfg(feature = "test-hooks")]
 fn test_hooks(app: AppHandle) {
     std::thread::spawn(move || {
@@ -982,6 +1043,13 @@ fn test_hooks(app: AppHandle) {
             if let Some(what) = cmd["do"].as_str() {
                 let v = match (what, &win) {
                     ("pid", _) => serde_json::json!(std::process::id()),
+                    // 200 KB on its stderr, as GTK and WebKit write theirs: true once written (never, if it blocks).
+                    ("stderr", _) => {
+                        for i in 0..2000 {
+                            eprintln!("a test's line {i} on stderr {}", "x".repeat(80));
+                        }
+                        serde_json::json!(true)
+                    }
                     ("hang", _) => {
                         let _ = app.run_on_main_thread(|| std::thread::sleep(Duration::from_secs(60)));
                         serde_json::json!(true)
@@ -991,6 +1059,8 @@ fn test_hooks(app: AppHandle) {
                     ("destroy", Some(w)) => serde_json::json!(w.destroy().is_ok()),
                     ("url", Some(w)) => serde_json::json!(w.url().map(|u| u.to_string()).unwrap_or_default()),
                     ("visible", Some(w)) => serde_json::json!(w.is_visible().unwrap_or(false)),
+                    // How its page draws: {"policy": WebKit's ("never": no compositing), "cpu_painting"}.
+                    ("drawing", Some(w)) => platform::drawing(w),
                     ("size", Some(w)) => {
                         let s = w.inner_size().unwrap_or_default();
                         serde_json::json!([s.width, s.height])
@@ -1018,6 +1088,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn identifier_is_the_configs() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], IDENTIFIER);
+    }
+
+    #[test]
     fn colors() {
         assert_eq!(parse_color("#1a1b26"), Some(Color(0x1a, 0x1b, 0x26, 0xff)));
         assert_eq!(parse_color("rgb(26, 27, 38)"), Some(Color(26, 27, 38, 0xff)));
@@ -1040,9 +1116,9 @@ mod tests {
 
     #[test]
     fn page_told() {
-        let off = init_script(false);
-        assert!(off.contains("omarchy: false") && !off.contains("on-omarchy"));
-        let on = init_script(true);
-        assert!(on.contains("omarchy: true") && on.contains("classList.add('on-omarchy')"));
+        let off = init_script(false, true);
+        assert!(off.contains("omarchy: false") && !off.contains("on-omarchy") && off.contains("gpu: true"));
+        let on = init_script(true, false);
+        assert!(on.contains("omarchy: true") && on.contains("classList.add('on-omarchy')") && on.contains("gpu: false"));
     }
 }

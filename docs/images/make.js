@@ -17,6 +17,16 @@
 //
 //   node docs/images/make.js
 //
+// And the phone apps' store screenshots, the same demo in the app at each
+// store's sizes (the apps show this very app: phone/README.md):
+//
+//   node docs/images/make.js store
+//
+//   phone/ios/store/screenshots/        iPhone 6.9" (1320×2868; the app is iPhone only)
+//   phone/android/fastlane/metadata/android/en-US/images/
+//                                       phoneScreenshots/ (1170×2340, Play's 2:1 at most),
+//                                       featureGraphic.png (1024×500), icon.png (512×512)
+//
 // Needs what test/today-view.js needs (Chromium, playwright-core:
 // PLAYWRIGHT_CORE=<its folder>). It starts its own app server from this
 // checkout's bin/amarchy, with a home of its own, in Tokyo Night (the
@@ -31,6 +41,7 @@ const path = require("path");
 const { loadPlaywright, freePort, startServer, findChrome, until, sleep, T, NOW } = require("../../test/today-view.js");
 
 const OUT = path.resolve(__dirname);
+const ROOT = path.resolve(__dirname, "../..");
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "amarchy-shots-"));
 const THEME = "tokyo-night";
 
@@ -105,6 +116,9 @@ const CONVERSATION = [
 const LAYOUTS = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
   wide: { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 },
+  // The stores': an iPhone 16 Pro Max, Play's tallest phone shot (2:1).
+  iphone: { viewport: { width: 440, height: 956 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
+  play: { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
 };
 
 async function page(browser, layout, port) {
@@ -163,8 +177,8 @@ async function boardShot(browser, layout, port) {
   return file;
 }
 
-async function chatShot(browser, port) {
-  const p = await page(browser, "phone", port);
+async function chatShot(browser, port, layout = "phone") {
+  const p = await page(browser, layout, port);
   await p.goto("/");
   await until(p, () => typeof app !== "undefined" && app.view && document.querySelector(".tcard .today-go"), null, 10000);
   await p.evaluate((id) => {
@@ -178,7 +192,7 @@ async function chatShot(browser, port) {
   // From the top of the conversation: what you asked, then Claude's reply.
   await p.evaluate(() => { const c = app.session && app.session.chat; if (c) c.scroller.scrollTop = 0; });
   await sleep(300);
-  const file = path.join(SHOTS, "phone-chat.png");
+  const file = path.join(SHOTS, `${layout}-chat.png`);
   await p.screenshot({ path: file });
   if (p.errors.length) throw new Error(`phone chat: page errors: ${p.errors.join("; ")}`);
   await p.context().close();
@@ -223,7 +237,7 @@ const CSS = `
   .gh-notch { height: 46px; background: var(--surface); }
 `;
 
-async function compose(browser, port, { file, width, height, scale, shots, kind, max = 0 }) {
+async function compose(browser, port, { file, width, height, scale, shots, kind, max = 0, type = "jpeg" }) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, baseURL: `http://127.0.0.1:${port}` });
   const p = await ctx.newPage();
   const errors = [];
@@ -262,7 +276,7 @@ async function compose(browser, port, { file, width, height, scale, shots, kind,
   }, { shots, kind, css: CSS });
   await p.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
   await sleep(300);
-  await p.screenshot({ path: file, type: "jpeg", quality: 92 });
+  await p.screenshot(type === "png" ? { path: file, type } : { path: file, type, quality: 92 });
   if (errors.length) throw new Error(`${kind}: page errors: ${errors.join("; ")}`);
   if (max && fs.statSync(file).size > max) throw new Error(`${kind}: ${fs.statSync(file).size} bytes, more than ${max}`);
   await ctx.close();
@@ -284,6 +298,23 @@ async function compose(browser, port, { file, width, height, scale, shots, kind,
     const wide = await boardShot(browser, "wide", port);
     const chat = await chatShot(browser, port);
     const shots = { board: png(board), wide: png(wide), chat: png(chat) };
+    if (process.argv[2] === "store") {
+      const ios = path.join(ROOT, "phone/ios/store/screenshots");
+      const play = path.join(ROOT, "phone/android/fastlane/metadata/android/en-US/images");
+      for (const d of [ios, path.join(play, "phoneScreenshots")]) fs.mkdirSync(d, { recursive: true });
+      const copy = (from, to) => { fs.copyFileSync(from, to); return to; };
+      const out = [
+        copy(await boardShot(browser, "iphone", port), path.join(ios, "iphone-1-board.png")),
+        copy(await chatShot(browser, port, "iphone"), path.join(ios, "iphone-2-chat.png")),
+        copy(await boardShot(browser, "play", port), path.join(play, "phoneScreenshots", "1-board.png")),
+        copy(await chatShot(browser, port, "play"), path.join(play, "phoneScreenshots", "2-chat.png")),
+        // The link card's picture, at Play's feature graphic size (its 2:1, a little cut at the foot).
+        await compose(browser, port, { file: path.join(play, "featureGraphic.png"), width: 1280, height: 625, scale: 0.8, shots, kind: "social", type: "png" }),
+        copy(path.join(ROOT, "app/icon-512.png"), path.join(play, "icon.png")),
+      ];
+      for (const f of out) console.log(`${path.relative(process.cwd(), f)}  ${(fs.statSync(f).size / 1024).toFixed(0)} KB`);
+      return;
+    }
     const out = [
       await compose(browser, port, { file: path.join(OUT, "social-preview.jpg"), width: 1280, height: 640, scale: 2, shots, kind: "social", max: 1000 * 1000 }),
       await compose(browser, port, { file: path.join(OUT, "hero.jpg"), width: 1440, height: 720, scale: 2, shots, kind: "hero" }),

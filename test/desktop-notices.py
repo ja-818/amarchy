@@ -5,7 +5,7 @@
 # device notified; a notice's buttons are what Today's card offers (Allow and
 # Deny, a plan's Approve, a question's options, a done reply's choices; none
 # for a secret or a question it can't answer in one tap), another machine's
-# through its pass-through; its chime is the chat's.
+# through its pass-through; its chime is the chat's (Send a test's: yours).
 #
 #   python3 test/desktop-notices.py         exits 0 when every check passed
 
@@ -28,6 +28,7 @@ for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY"):
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 
 failed = []
 
@@ -148,6 +149,27 @@ for _ in range(40):
     time.sleep(0.1)
 check(len(got) == 2 and got[1]["title"] == "Done", "and the next, as it's sent")
 check(lines and lines[0].startswith("retry:"), "an event stream that comes back a second after the server restarts")
+
+
+# Settings → Send a test: the desktop app rings your chime with it (none when off).
+def send_test():
+    had = len(got)
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/push/test", data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json", "Origin": f"https://127.0.0.1:{port}"})       # as the app sends it, over Tailscale
+    sent = json.loads(urllib.request.urlopen(req, timeout=10).read())["sent"]
+    for _ in range(40):
+        if len(got) > had:
+            break
+        time.sleep(0.1)
+    return sent, (got[had] if len(got) > had else None)
+
+
+sent, t = send_test()
+check(sent == 1 and t and t["title"] == "Amarchy" and t.get("sound") == am.sound_name(),
+      f"Send a test: the desktop app gets it with your chime ({t and t.get('sound')})")
+am.set_sound("off")
+sent, t = send_test()
+check(t and "sound" not in t, "chimes off: the test rings none")
 
 server.shutdown()
 import shutil  # noqa: E402

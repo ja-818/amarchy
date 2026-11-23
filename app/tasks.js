@@ -232,6 +232,8 @@ function boardKeys(e) {
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
   if (on >= 0 && k === "Escape") return into(stops[at]);
+  // Esc on a board open in Tasks: back to Tasks' list.
+  if (k === "Escape" && boardsUI.open && !board.query) { e.preventDefault(); return boardsClose(); }
   // Tab: Chats | Tasks, the other one (Shift+Tab too).
   if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
   // Enter on the card lit, the focus off it: it opens (on a button, a tab,
@@ -264,12 +266,15 @@ function boardKeys(e) {
     if (s && !isAgent(s)) { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
   } else if (k === "r") press("a.tbtn") || press(".tbtn.ui-previews");     // what it made: its Review, else its Preview (of several: pick one)
   else if (k === "s") press(".tbtn.seen");
+  else if (k === "c") press(".bcard-comment");      // a board's card: Comment
+  else if (k === "e") press(".bcard-edit-btn");     // and Edit
 }
 
-// Esc over an open chat: back to the board, always (what you were writing
-// stays, as a chat's draft does). But for what Esc does first: stop a
-// dictation, close a menu or a sheet, or Select text over a terminal; and in
-// a terminal, Esc is the terminal's.
+// Esc over an open chat: back to the board (what you were writing stays, as
+// a chat's draft does). But for what Esc does first: stop a dictation, close
+// a menu or a sheet, or Select text over a terminal; in the chat's box, go
+// out onto its messages (chat.js navKey); and in a terminal, Esc is the
+// terminal's. Never a stop of Claude.
 function boardEsc(e) {
   if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
@@ -292,6 +297,8 @@ function modeButtons() {
 
 // Chats or Tasks on the board, kept for the next time.
 function boardTab(tab) {
+  // Tasks again, a board open there: back to Tasks' list.
+  if (tab === "tasks" && board.tab === "tasks" && typeof boardsUI !== "undefined" && boardsUI.open) return boardsClose();
   board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   store.set("board-tab", board.tab);
   if (desk.current) boardBack(true);
@@ -310,6 +317,7 @@ function boardTab(tab) {
 // #/tasks (a task's notification, tapped): the board on Tasks, its address
 // the board's again (so the next one is a change of address too).
 function boardTasks() {
+  if (boardsUI.open) boardsClose();
   boardTab("tasks");
   if (standalone) routed.hash = "#/today";
   else history.replaceState(null, "", `${location.pathname}${location.search}#/today`);
@@ -320,8 +328,9 @@ function boardEmpty(v = app.view) {
   return !!v && !v.sessions.length && !(v.projects || []).length;
 }
 
-// The board drawn: Today's queue, or with no project yet the welcome.
-function boardFill(force) {
+// The board drawn: Today's queue, or with no project yet the welcome. top:
+// where it's to be scrolled (else where it is).
+function boardFill(force, top = null) {
   const v = app.view;
   if (boardEmpty(v)) {
     if (board.box.dataset.key !== "welcome") board.box.replaceChildren(welcome((p) => newChatIn(p)));
@@ -329,7 +338,7 @@ function boardFill(force) {
     tourAuto();      // the first time on this device: the tour, over it (tour.js)
     return;
   }
-  todayFill(board.box, force);
+  todayFill(board.box, force, top);
 }
 
 // The view changed (app.js refresh).
@@ -381,10 +390,13 @@ function boardOpen(id) {
 // The board again (desk.js show(null), the phone back from a chat): drawn,
 // where it was scrolled.
 function boardShown() {
-  if (board.query) boardSearchDraw(); else boardFill();      // as it was, unless something changed meanwhile
-  modeButtons();
-  if (typeof board.from === "number") board.scroll.scrollTop = board.from;
+  const from = typeof board.from === "number" ? board.from : null;
   board.from = null;
+  // As it was, unless something changed meanwhile; drawn where it was (not
+  // laid out first to ask where it is, as it was before it showed).
+  if (board.query) boardSearchDraw(); else boardFill(false, from);
+  modeButtons();
+  if (from !== null) board.scroll.scrollTop = from;
   boardMark();
 }
 
@@ -558,10 +570,10 @@ function boardSearchDraw() {
     .map((id) => row(id)).filter(Boolean);
   // Your tasks that have them too (who and what; an agent's: it, what, its note), first on the Tasks tab.
   const loops = ((v.today && v.today.loops) || []).filter((l) => { const t = `${l.who} ${l.what}`.toLowerCase(); return words.every((w) => t.includes(w)); });
-  const theirs = todayTasks(v).filter((t) => { const x = `${t.agent_name} ${t.title} ${t.note}`.toLowerCase(); return words.every((w) => x.includes(w)); });
+  const theirs = boardsFound(v, words);
   // Drawn again only when what it shows changed: the list comes every
   // second while chats work, and the same cards stay as they are.
-  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops, theirs.map(todayTaskKey),
+  const key = `search|${JSON.stringify([board.tab, board.query, answered, board.found, todayUI.version, rows.map((s) => [todayRowKey(s), todayTimes(s)]), loops, theirs.map(({ b, c }) => [b.key, c, boardsKey()]),
     ((v.today || {}).assistant || {}).name, (v.today || {}).sent, (found || []).map((r) => (r.at ? autoPast(r.at) : ""))])}`;
   if (board.box.dataset.key === key) return;
   const cards = rows.map((s) => {
@@ -575,7 +587,7 @@ function boardSearchDraw() {
              ...lines.map((l) => h("p", { class: "tcard-text found" }, h("span", { class: `found-who ${l.who}` }, l.who === "you" ? "You" : "Claude"),
                h("span", { html: lit(l.text, words) })))] }));
   });
-  const taskCards = [...theirs.map((t) => todayTask(t)), ...loops.map((l) => todayLoop(l, v))];
+  const taskCards = [...theirs.map(({ b, c }) => boardsCard(b, c, { list: true })), ...loops.map((l) => todayLoop(l, v))];
   const chatsSec = cards.length ? uiSection("found-chats", "Chats", { count: cards.length }, cards) : null;
   const tasksSec = taskCards.length ? uiSection("found-tasks", "Tasks", { count: taskCards.length }, taskCards) : null;
   const n = rows.length + taskCards.length;

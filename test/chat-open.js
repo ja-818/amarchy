@@ -267,6 +267,18 @@ async function run(browser, layout, engine, port) {
   check(as, onReply(a, "The menu"), `not moved, its stream coming back with a new reply: on that one (${say(a)})`);
   await home(p);
 
+  // An open chat that can't be closed (an error in it, as on Julian's M5,
+  // where then no chat opened): back home, and the next opens all the same.
+  await open(p);
+  await p.evaluate(() => { __chat().close = () => { throw new Error("a chat that can't close"); }; });
+  await home(p);
+  check(as, await p.evaluate(() => !!document.querySelector(".tcard .today-go") && !(app.desk ? desk.chat : app.session)),
+        "a chat that can't close: home all the same, the chat let go");
+  await open(p);
+  check(as, await p.evaluate((id) => { const c = __chat(); return !!c && c.id === id && c.scroller.isConnected; }, ID),
+        "and the next chat opens");
+  await home(p);
+
   check(as, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 }

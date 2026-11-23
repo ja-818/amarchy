@@ -1,8 +1,9 @@
 # Plan: amarchy everywhere, chats on every machine
 
-Status: **approved** by Julian on 2026-11-22 (decisions below). Wave 1 is done
-and running on his Omarchy; wave 2 is being built in parallel chats, each track
-shipping on its own.
+Status: **built** (2026-11-23). Approved by Julian on 2026-11-22; every track
+is on main. What's left needs Julian's accounts, money or a decision: see
+[What's left](#whats-left-julians-own-steps). The coordinating chat is closed:
+each remaining chat reports on its own card.
 
 Goal: amarchy is one app on every device (Omarchy, Mac, Windows, iPhone,
 Android, any browser), and every computer you have can run chats: your
@@ -265,7 +266,7 @@ and tell the other tracks.
 ### Omarchy: the bar, the key, the theme live
 
 - **`amarchy open [<id> | <machine>/<id> | amarchy://chat/<machine>/<id>]`**
-  is what the Ⓐ in the bar, Super+Alt+A and the Omarchy menu run: the window of
+  is what the Ⓐ in the bar, the key (Super+D; amarchy key) and the Omarchy menu run: the window of
   class `amarchy` to the front (Hyprland), else `amarchy-desktop [link]`
   started; without the desktop app, the board in a browser window at the
   chat, by the routes below. It finds the board in the desktop app's order.
@@ -327,11 +328,13 @@ and tell the other tracks.
   (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
   natively, window closed or not. `omarchy`: the window is on an Omarchy
-  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  desktop (Hyprland's session, Omarchy's current theme); the window is then
+  see-through (what the page leaves unpainted shows the desktop), `<html>` is
   marked `on-omarchy` before the page is drawn, and theme.css, when the look
-  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
-  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
-  the window, which Hyprland makes see-through as the terminals
+  is Omarchy (live) with its own wallpaper, takes the wallpaper and the ground
+  under it away there (`html.on-omarchy { --wallpaper: none; ...;
+  --wallpaper-ground: transparent; }`): the desktop's own wallpaper shows
+  through the app's panes, and Hyprland fades the window as the terminals
   (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,
@@ -388,6 +391,113 @@ and tell the other tracks.
   `amarchy-tailnet status` says where it stands in words.
 - **Phones (G)**: the same Go package (`tailnet/`), bound with gomobile, a
   node of the phone's own and its proxy for the app's web view (no serving).
+
+### The phone apps and the push relay (track G)
+
+**Swift and Kotlin, not Tauri mobile** (decided 2026-11-22). Everything a
+phone shell adds lives in the system's own extension points, each a native
+target of its own whatever wraps the web view: the Notification Service
+Extension that decrypts a notification, WidgetKit's widgets, the Share
+Extension; on Android, Firebase's messaging service, an app widget, a share
+intent. Tauri would wrap only the web view, and add a Rust toolchain for
+three architectures and its own generated Xcode and Gradle projects to fight
+for every one of those targets, while sharing nothing with `desktop/` (its
+Rust is the tray, one instance, the local key and the notices' stream, none
+of which a phone has). So each shell is a small native app: a web view on
+the machine's app (`app/`, never a second UI), the desktop's own page
+(`desktop/dist`, the same files) while it isn't showing amarchy, and the
+extensions. `phone/ios` (Swift, an XcodeGen project, iOS 17 and newer) and
+`phone/android` (Kotlin, Android 8 and newer); app id
+`io.github.ja818.amarchy` on both.
+
+- **The page knows it's in the phone app**: `window.amarchyPhone`
+  (`{"version", "platform": "ios"|"android", "relay"}`), set before the app's
+  scripts run, with `call(command, args)` → a promise of the shell's answer:
+  - `push.state` → `"on"|"off"|"denied"|"unsupported"`;
+  - `push.subscribe {"key"}` (the machine's VAPID key, `/api/state`'s `key`)
+    → a subscription as a browser's, `{"endpoint", "keys": {"p256dh",
+    "auth"}}`, plus `"app": {"platform", "version", "device"}`; it asks the
+    system for notifications first, while it's still your tap;
+  - `push.unsubscribe` → `{"endpoint"}` it dropped (or null);
+  - `notes.clear {"tags": [...]}` → that chat's notifications off the lock
+    screen (the page opened it);
+  - `status {"needs", "chats": [{"key", "name", "why"}]}` → the widget's
+    count and names, each time the board changes.
+  The shell tells the page with `amarchy-open` events (`{"go", "ask"}`, as
+  the service worker's message: a notification tapped, a chat's link), and
+  loads `/?ask=<key>#/s/<key>` when the page isn't up yet. There the page
+  registers no service worker for notifications (none can reach a web view)
+  and never says "add it to your Home Screen".
+- **A phone on a machine** is a subscription as a browser's: the page sends
+  `POST /api/push` with what `push.subscribe` gave. Its `endpoint` is the
+  relay's (`<relay>/v1/push/<handle>`), so the machine sends to it as to any
+  push service (RFC 8030, RFC 8291's aes128gcm, VAPID), and 404 or 410 ends
+  it the same way. `"app"` marks it a phone app's, kept with it, with
+  `"server"`: the address it was registered at (`https://<Host>`).
+- **What a phone app's notification carries**: a browser's (`title`,
+  `body`, `tag`, `url`, `ask`, `icon`, `waiting`, `urgent`) plus `server`,
+  `session`, `sound` and `actions` (the desktop notice's: up to three
+  `{"label", "path", "body"}`, each a POST of `body` to `server + path` as
+  the app's page would make it, with `Origin: <server>`). At most 2,700
+  bytes of JSON: the body is cut first, then the actions go. Sent with
+  `Topic` (the tag's SHA-256, its first 16 bytes in base64url: a newer
+  notification for a chat replaces the older), `Urgency: high`, `TTL`.
+- **The relay** (`relay/`, `amarchy-relay`: Go, its standard library only,
+  open source, anyone can run one) is a Web Push service in front of APNs
+  and FCM, and keeps nothing:
+  - `POST /v1/register` `{"platform": "apns"|"apns-sandbox"|"fcm",
+    "token", "app" (the app id), "server_key" (the machine's VAPID key,
+    65 bytes base64url)}` → `{"endpoint"}`. The handle in it is all of that
+    sealed with the relay's secret (AES-256-GCM): no database, and only the
+    machine with that key can send to it, as with Web Push.
+  - `POST /v1/push/<handle>`: `Content-Encoding: aes128gcm` (anything else
+    is refused: it never takes what it could read), at most 2,900 bytes;
+    `Authorization: vapid t=<JWT>, k=<key>`, the handle's key, its `aud` the
+    relay's address and `exp` within 24 hours; `TTL`, `Urgency`, `Topic`.
+    To APNs: `{"aps": {"alert": {"title": "Amarchy", "body": "Something
+    needs you"}, "mutable-content": 1, "sound": "default"}, "p": <the body,
+    base64url>}`, `apns-collapse-id` the topic; to FCM: a data message
+    `{"p"}`, `collapse_key` the topic, high priority. Answers 201; 404 a
+    handle it didn't make; 410 the token is gone (APNs or FCM say so); 400,
+    401, 403, 413, 415 what's wrong with the request; 429 with
+    `Retry-After` over its limits (per device 30 at once then 15 a minute,
+    per address 20 registrations an hour, all set by its environment); 502
+    when APNs or FCM failed.
+  - `GET /v1/health` → `{"ok", "apns", "fcm"}` (which it can send to).
+  - Never logs a token or a payload (a device is the first bytes of its
+    handle's hash). Its secret (`RELAY_SECRET`, older ones in
+    `RELAY_SECRETS` still opened), the APNs key (`APNS_KEY`, `APNS_KEY_ID`,
+    `APNS_TEAM_ID`, `APNS_TOPICS`), FCM's project (`FCM_PROJECT`, its
+    credentials from `FCM_CREDENTIALS` or Google Cloud's own) come from its
+    environment. Deploys: Google Cloud Run's free tier (one instance, so its
+    limits hold), any container host, or a systemd unit.
+- **On the phone**: its push key pair (P-256) and auth secret are made on
+  the phone and never leave it (iOS: the Keychain, shared with its
+  Notification Service Extension; Android: wrapped by the Keystore). The
+  extension (iOS) or the messaging service (Android) decrypts `p` and shows
+  the notification: its buttons (iOS: a category made for them, each asking
+  for Face ID on a locked phone), the badge (`waiting`), the widget's count.
+  Nothing it can decrypt: "Amarchy: open it to see", never content.
+- **A button pressed**: the shell (started in the background for it) POSTs
+  `body` to `server + path` with `Origin: <server>` and `Content-Type:
+  application/json`, as the page does. It fails: a notification says so, and
+  tapped opens the chat.
+- **Reaching the machine**: the Tailscale app, when its VPN is on; else
+  amarchy's own node in the app (`tailnet/mobile`, gomobile: the node and
+  its proxy), its proxy set on the web view (iOS 17's
+  `WKWebsiteDataStore.proxyConfigurations`, Android's `ProxyController`) and
+  on the shell's own requests. The machine's address: `amarchy://open?server=<url>`
+  (Settings in the web app has it), typed on its own page, or found on the
+  tailnet with its own node (each peer's `/api/peer/hello`). Chat links:
+  `amarchy://chat/<machine>/<id>`, as on the desktop.
+- **The share sheet**: what you share (text, a link, pictures) goes to that
+  machine's `POST /api/share?key=<share key>` (`GET /api/share/key`, kept by
+  the shell), as the iPhone's Shortcut does, and the app opens on "Send it
+  to a chat".
+- **The widget** (home and lock screen on iOS, an app widget on Android):
+  "2 need you", from each notification's `waiting` and the page's `status`.
+  No Live Activity: the system shows one from its push as it comes, so the
+  relay and Apple would read it.
 
 ### Your stuff on every machine (track D)
 
@@ -569,6 +679,7 @@ or bills anyone: the provider bills you, and Remove deletes it there.
 | Agents (Jaken...) and their tasks | The machine they run on (the server, by default) |
 | Automations | The machine they run on; listed together |
 | Web Push to a phone | The machine the phone subscribed on, for every machine's chats |
+| A phone app's notifications | The machine it registered on, for every machine's chats, through the relay (encrypted to the phone) |
 | Desktop notifications | The desktop app, for every machine's chats |
 | Claude's usage limits | Shared (same account): shown once |
 | A cloud machine's record, its provider token, the Tailscale key until used | The machine that made it (`cloud.json`, `secrets/cloud.env`) |
@@ -648,7 +759,11 @@ reopen, Super+Shift+A as the key, Where cloning a project first).
 In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
 and the phone apps (G) last. Started 2026-11-22: D in the `amarchy-machines`
 chat, E in `amarchy-move-chat`, H in `amarchy-desktop-app` once its fixes are
-in. I and F wait on Julian's OK (publishing, spending).
+in. E and H shipped on 2026-11-22. Overnight (Julian's go: "everything shipped"):
+F in `amarchy-cloud-machines`, G in `amarchy-phone-apps`, I prepared in
+`amarchy-omarchy-home`. What needs his accounts or money (a provider token, the
+AUR and omarchy-pkgs, signing and the stores, the relay's host) is prepared to
+the last step and left for him.
 
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
@@ -676,10 +791,20 @@ own cloud image in QEMU (`test/cloud-vm.py`, Tailscale stood in for). No real VM
 made yet: that waits on Julian's provider token and his tap on Create.
 
 **G. Phone apps and the push relay** (last; Julian has an Apple Developer
-account; the iOS build needs a Mac with Xcode): thin iOS and Android shells around `app/` (Tauri 2 mobile,
-or Swift and Kotlin), widgets, live status, share sheet, notification buttons;
-the relay (open source, free, self-hostable) between the machines and Apple's
-and Google's push.
+account; the iOS build needs a Mac with Xcode): thin iOS and Android shells
+around `app/` in **Swift and Kotlin** (why not Tauri mobile: the contract's
+"The phone apps and the push relay"), widgets, live status, share sheet,
+notification buttons; the relay (open source, free, self-hostable) between
+the machines and Apple's and Google's push. iOS builds and tests in GitHub
+Actions (macOS runners); Android here and in CI. Signing, TestFlight, the
+stores and the relay's deploy are prepared to the last step for Julian.
+**Built 2026-11-23**: the relay (`relay/`), the server's and the page's side,
+the Android app (`phone/android`) and the iPhone app (`phone/ios`), both with
+amarchy's own Tailscale node (`tailnet/mobile`, track H's builds), CI green
+for each; the whole chain tested from the server through the real relay to a
+phone decrypting (`test/push-phone.py`). What needs Julian's accounts is
+`phone/RELEASE.md`. Not yet: a demo machine App Review can reach (before a
+public App Store release), and a run on real phones.
 
 **H. Tailscale inside the apps** (after B): the desktop and phone apps join the
 tailnet themselves (tsnet / libtailscale), so the user installs nothing else.
@@ -698,3 +823,25 @@ in Omarchy's Install menu, and a pitch to Omarchy as its agent manager.
   changes in sections of its own and catches up with main before shipping.
 - **Apple's review** for the phone app; **Tailscale's free plan** is
   non-commercial.
+
+## What's left: Julian's own steps
+
+Everything below is prepared to the last step; each needs his account, money
+or a decision.
+
+- **Cloud machines (F)**: its chat, `amarchy-cloud-machines`, waits on a
+  command he allows. Then a provider token and Create (that costs money).
+- **The AUR and Omarchy (I)**: [packaging/README.md](../packaging/README.md).
+  Add the server's AUR key to his AUR account, `git push origin master` in
+  `~/Work/aur/amarchy-git`, open the draft omarchy-pkgs PR, and run
+  `packaging/omarchy/post-pitch.sh`. After the AUR push, the README's install
+  line becomes `yay -S amarchy-git amarchy-desktop-git`.
+- **The phone apps (G)**: [phone/RELEASE.md](../phone/RELEASE.md), about an
+  hour. Decide the app id first (`io.github.ja818.amarchy` is permanent after
+  the first upload).
+- **Tailscale inside the apps (H)**: a real sign-in against Tailscale's servers
+  needs a computer without Tailscale, or his OK for a throwaway node.
+- **On `ja`**: hold Backspace in New chat and check it stops on release (the
+  typing-lag fix); glance at the one-time "This computer lacks gst-plugins…"
+  notice.
+

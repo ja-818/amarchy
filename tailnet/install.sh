@@ -73,7 +73,23 @@ if system_tailscale; then
   exit 0
 fi
 
-if ((background)); then
+# Installed by your packages (amarchy-git: /usr/bin/amarchy-tailnet): the node
+# comes with them, nothing to build; only its service here, started again when
+# the package brought a new one. A node built here before goes (the package's
+# is the one).
+packaged=0
+if [[ -x /usr/bin/amarchy-tailnet ]] && command -v pacman >/dev/null && pacman -Qqo /usr/bin/amarchy-tailnet >/dev/null 2>&1; then
+  rm -f "$app"
+  app=/usr/bin/amarchy-tailnet
+  packaged=1
+  fresh=0
+  if [[ $(stat -c %Y "$app") != "$(cat "$mine/packaged" 2>/dev/null || true)" ]]; then
+    fresh=1
+    stat -c %Y "$app" >"$mine/packaged"
+  fi
+fi
+
+if ((background && !packaged)); then
   told "being built in the background when it changed (its log: $mine/build.log)"
   if command -v systemd-run >/dev/null &&
     systemd-run --user --quiet --collect --unit=amarchy-tailnet-build -p Nice=10 \
@@ -94,7 +110,7 @@ find_go() {
   [[ -n $go ]]
 }
 
-if ! find_go; then
+if ((!packaged)) && ! find_go; then
   if [[ ! -t 0 || ! -t 1 ]]; then
     told "not built: it needs Go (run amarchy's install.sh in a terminal, which installs it)"
     exit 1
@@ -119,9 +135,9 @@ sources() {
   (cd "$here" && find . -type f \( -name '*.go' -o -name go.mod -o -name go.sum \) ! -name '*_test.go' -print |
     LC_ALL=C sort | xargs -d '\n' sha1sum | sha1sum | cut -c1-40)
 }
-want=$(sources)
-fresh=0
-if [[ $want != "$(cat "$mine/built" 2>/dev/null || true)" || ! -x $app ]]; then
+((packaged)) || want=$(sources)
+((packaged)) || fresh=0
+if ((!packaged)) && [[ $want != "$(cat "$mine/built" 2>/dev/null || true)" || ! -x $app ]]; then
   say "Building amarchy's own Tailscale node (a minute or two the first time)…"
   commit=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo dev)
   mkdir -p "$bin_dir" "$build"

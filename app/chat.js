@@ -207,6 +207,7 @@ const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at o
 const chatsSeen = new Map();
 const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
+const STREAM_STEP_MS = 33;  // between two steps of Claude's words as it writes them (Chat.streamStep): 30 a second
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
 function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
@@ -1142,6 +1143,183 @@ function placeSig(el) {
   return `${el.tagName}|${words.slice(0, 80)}`;
 }
 
+// A block's parts, wherever it's drawn (a reply's: Chat.artifactParts; a
+// board's card: boards.js): its icon, title, the line under it, its quick
+// action, what it shows open and the actions there; look: its class, when
+// it's not its kind's (a message's channels share one). chat: the chat it's
+// in (a session block's id is one on its machine); mediaUrl(src): where its
+// pictures come from.
+function blockParts(a, { chat = "", mediaUrl = (src) => src } = {}) {
+  const str = (x) => (typeof x === "string" ? x.trim() : "");
+  const at = a.attrs || {}, body = str(a.body), title = str(at.title);
+  const copy = (text, label = "Copy") => {
+    const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
+      e.stopPropagation();
+      copyText(text).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = label; }, 1500); });
+    } }, label);
+    return b;
+  };
+  // A picture itself on the clipboard (pictures[i]: xpostView's), to paste
+  // into X; name: what it does, num: its number alone, when it shows only
+  // that (one of several). Where the browser won't (or it's a GIF, which
+  // would be a still): full screen, to hold (or right-click) and save or
+  // copy it there. One that can't be shown has nothing to copy: its button
+  // goes (its group too, once it holds none).
+  const copyPicture = (pictures, i, name, num = "") => {
+    const label = num || name;
+    let busy = false;
+    const b = h("button", { class: `art-btn${num ? " num" : ""}`, type: "button", "data-name": name, title: name, "aria-label": name, onclick: (e) => {
+      e.stopPropagation();
+      if (busy) return;
+      busy = true;
+      b.textContent = num ? "…" : "Copying…";
+      xpostCopyImage(pictures[i].url).then(() => {
+        b.textContent = num ? "✓" : "Copied";
+        b.setAttribute("aria-label", `${name}: copied`);
+        setTimeout(() => { b.textContent = label; b.setAttribute("aria-label", name); busy = false; }, 1500);
+      }, (err) => {
+        b.textContent = label;
+        busy = false;
+        if (!b.isConnected) return;
+        const hold = matchMedia("(pointer: coarse)").matches ? "hold it" : "right-click it";
+        toast(err && err.gif ? `A GIF would copy as a still: ${hold} to save it` : `Can't copy the picture here: ${hold} to save or copy it`);
+        uiPhoto(pictures.map((p) => ({ src: p.url, label: "" })), i);
+      });
+    } }, label);
+    pictures[i].img.addEventListener("error", () => {
+      const group = b.closest(".xpost-copy-images");
+      b.remove();
+      if (group && !group.querySelector(".art-btn")) group.remove();
+    });
+    return b;
+  };
+  const open = (href, label, primary) => {
+    const safe = artifactHref(href);
+    return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
+      onclick: (e) => e.stopPropagation() }, label) : null;
+  };
+  const digits = (p) => str(p).replace(/[^\d]/g, "");
+  const pre = (text) => h("div", { class: "art-pre" }, text);
+  const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
+  switch (a.kind) {
+    case "whatsapp": case "email": case "slack": case "sms": {
+      const ch = a.kind, to = str(at.to);
+      const wa = ch === "whatsapp" ? `https://wa.me/${digits(at.phone)}?text=${encodeURIComponent(body)}` : null;
+      const mailTo = str(at.email) || (/@/.test(to) ? to : "");
+      const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(at.subject))}&body=${encodeURIComponent(body)}` : null;
+      const sms = ch === "sms" && digits(at.phone) ? `sms:+${digits(at.phone)}?&body=${encodeURIComponent(body)}` : null;
+      return { look: "message", icon: "message", title: title || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
+        quick: body ? copy(body) : null,
+        body: [at.subject ? field("Subject", str(at.subject)) : null, pre(body)],
+        actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
+          body ? copy(body, "Copy the message") : null] };
+    }
+    case "link": {
+      const href = artifactHref(a.url);
+      let host = "";
+      try { host = new URL(a.url).host; } catch { /* not a URL */ }
+      // A link is its row: Copy and Open at hand, its address a tap away.
+      return { folded: true, icon: "web", title: str(at.label) || title || host || "Link", sub: host,
+        quick: href ? [copy(href), open(href, "Open", true)] : null, body: [pre(str(a.url))], actions: [] };
+    }
+    case "command":
+      return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),
+        quick: copy(body), body: [h("div", { class: "art-code" }, body)], actions: [] };
+    case "event": {
+      const start = artifactDate(at.when), end = artifactDate(at.end) || (start ? new Date(start.getTime() + 3600000) : null);
+      const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(at.when);
+      const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+      const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title || "Event")}` +
+        `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(at.where))}&details=${encodeURIComponent(body)}` : null;
+      const map = str(at.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(at.where))}` : null;
+      return { icon: "clock", title: title || "Event", sub: [when, str(at.where)].filter(Boolean).join(" · "), quick: null,
+        body: [when ? field("When", when, end && at.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
+          str(at.where) ? field("Where", str(at.where)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
+    }
+    case "todos": {
+      const items = (a.items || []).filter((x) => str(x.text));
+      const left = items.filter((x) => !x.done).length;
+      return { icon: "list", title: title || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
+        body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
+          h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
+          str(x.due) ? h("span", { class: "meta" }, str(x.due)) : null)))],
+        actions: [] };
+    }
+    case "fields": {
+      const fields = a.fields || [];
+      return { icon: "fields", title: title || "Details", sub: `${fields.length} detail${fields.length === 1 ? "" : "s"}`,
+        quick: fields.length ? copy(fields.map((f) => `${f.label}: ${f.value}`).join("\n")) : null,
+        body: [h("dl", { class: "art-dl" }, ...fields.flatMap((f) => [h("dt", {}, f.label), h("dd", { html: inline(f.value) })]))],
+        actions: [] };
+    }
+    case "chart": {
+      const pts = a.points || [];
+      const tsv = [["", ...a.series], ...pts.map((p) => [p.label, ...p.values])].map((r) => r.join("\t")).join("\n");
+      return { icon: "chart", title: title || "Chart", sub: [/^[$€£¥%]$/.test(str(at.unit)) ? "" : str(at.unit), `${pts.length} ${(at.type || "bar") === "line" ? "points" : "values"}`,
+          a.series.length > 1 ? `${a.series.length} series` : ""].filter(Boolean).join(" · "),
+        quick: pts.length ? copy(tsv) : null, body: [chartView(a)], actions: [] };
+    }
+    case "contact": {
+      const ph = digits(at.phone);
+      return { icon: "helper", title: str(at.name) || title || "Contact", sub: str(at.role), quick: null,
+        body: [ph ? field("Phone", `+${ph}`) : null, str(at.email) ? field("Email", str(at.email)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(at.email) && open(`mailto:${str(at.email)}`, "Email"),
+          ph ? copy(`+${ph}`, "Copy the number") : null] };
+    }
+    case "place": {
+      const where = str(at.where);
+      const map = where || str(at.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(at.name), where].filter(Boolean).join(", "))}` : null;
+      const ph = digits(at.phone);
+      return { icon: "web", title: str(at.name) || title || "Place", sub: [str(at.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
+        body: [where ? field("Address", where) : null, str(at.hours) ? field("Hours", str(at.hours)) : null, ph ? field("Phone", `+${ph}`) : null,
+          body ? h("div", { class: "art-note", html: inline(body) }) : null],
+        actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(at.url) && open(str(at.url), "Website")] };
+    }
+    case "session": {
+      const id = str(at.id);
+      // Its id on this chat's machine (a reply names the chats beside it).
+      const key = id ? keyNamed(chat, id) : "";
+      return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${encodeURIComponent(key)}`, "Open") : null,
+        body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
+    }
+    case "file": {
+      // A picture: shown (from the server: a file in your home or /tmp), a tap away from full screen.
+      const where = str(at.path), pic = /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(where);
+      let shot = null;
+      if (pic) {
+        shot = uiShot({ src: mediaUrl(where), alt: baseName(where), cls: "art-shot" });
+        shot.querySelector("img").addEventListener("error", () => shot.remove());
+      }
+      return { icon: pic ? "image" : "file", title: title || baseName(where) || "File", sub: where, quick: copy(where, "Copy path"),
+        body: [shot, body ? pre(body) : null], actions: [] };
+    }
+    case "xpost": {
+      // The post as X will show it (xpost.js); under it, how X counts it and its draft's id,
+      // and what posting it by hand takes: Copy text (its exact text), Copy image (each picture).
+      const v = xpostView(a, mediaUrl);
+      const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
+      const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
+      const text = String(a.body || ""), pics = v.pictures;
+      return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
+        sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
+        body: [v.card, h("div", { class: "xpost-foot" },
+          h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
+          str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
+          h("span", { class: "xpost-copies" }, text.trim() ? copy(text, "Copy text") : null,
+            // (Several: "Copy image" and a number for each, its place in the grid, a video's counted.)
+            pics.length > 1 ? h("span", { class: "xpost-copy-images", role: "group", "aria-label": "Copy image" },
+              h("span", { class: "xpost-copy-label", "aria-hidden": "true" }, "Copy image"),
+              ...pics.map((p, i) => copyPicture(pics, i, `Copy image ${p.at + 1}`, String(p.at + 1))))
+              : pics.length ? copyPicture(pics, 0, "Copy image") : null))],
+        actions: [] };
+    }
+    default:
+      return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
+        body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };
+  }
+}
+
 class Chat {
   // opts: id; onSession(row), onScreen(screen), onGone(): for whoever
   // shows the chat (its header, its other views).
@@ -1349,8 +1527,8 @@ class Chat {
   open() {
     this.loadInfo();
     // Opened (its stream coming back later, reopen, isn't: you may have
-    // moved by then, and where you are stays, conversationDraw).
-    if (!this.landed) { this.landed = true; this.landing = true; this.navOpened = false; }
+    // moved by then, and where you are stays, conversation).
+    if (!this.landed) { this.landed = true; this.landing = true; }
     // Opened before: drawn at once as it was when you left it, the stream's
     // own then adding only what came since (conversation), and landing on
     // the latest of it.
@@ -1359,6 +1537,7 @@ class Chat {
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
     chatsOpen.set(this.id, this);
+    this.outboxSeen();          // what waits for its machine, as it waits
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
     const es = early ? early.es : new EventSource(streamURL(chatPath(this.id, "/stream")));
@@ -1415,7 +1594,7 @@ class Chat {
     const items = this.items.slice(), start = this.start;
     this.items = [];
     this.itemKeys = new Set();
-    this.conversationDraw({ reset: true, items, start });
+    this.conversation({ reset: true, items, start });
   }
 
   close() {
@@ -1467,11 +1646,13 @@ class Chat {
     card.classList.add("called");
   }
 
-  // ---- the keys, as on the board: j / k (↓ ↑) from message to message,
-  // l (→) into one, along its buttons and links, h (←) back and out of it,
-  // Enter on a button presses it, g / G the first and the latest, d / u half
-  // a page, i the box you type in and Esc out of it again. Esc on a message:
-  // opts.back.
+  // ---- the keys. A chat opens with them in the box, to write (takeKeys).
+  // Esc there, or ↑ with nothing above it, goes up onto the latest message
+  // (Esc never stops Claude: its Stop does). On the messages, as on the board:
+  // j / k (↓ ↑) from message to message (↓ on the latest: down into the
+  // box), l (→) into one, along its buttons and links, h (←) back and out of
+  // it, Enter on a button presses it, g / G the first and the latest, d / u
+  // half a page, i the box. Esc on a message: back (opts.back), never a stop.
   // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
   // dictate works from anywhere).
 
@@ -1541,6 +1722,23 @@ class Chat {
     return true;
   }
 
+  // From the messages to the box, at the bottom; false when a card's up
+  // (its keys are its own).
+  toBox() {
+    if (!this.dock.contains(this.input)) return false;
+    this.input.focus({ preventScroll: true });
+    this.toBottom(true);
+    return true;
+  }
+
+  // The keys to the chat as it opens: what it asks you (its card), else the
+  // box, to write. (The messages are a key away: ↑ or Esc.)
+  takeKeys() {
+    const card = this.dock.querySelector(".card");
+    if (card) (menuStart(card) || card).focus({ preventScroll: true });
+    else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
+  }
+
   // Whether the keys are in this chat's messages (not the box, the side, a sheet).
   navHere() {
     const a = document.activeElement;
@@ -1554,11 +1752,20 @@ class Chat {
     const a = document.activeElement;
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
-    // In the box: Esc leaves it for the messages (once more: back), unless
-    // it's for something in it (a menu, the dictation, the / list).
+    // In the box, unless the key is for something in it (a menu, the
+    // dictation, the / list): Esc leaves the box for the messages (once
+    // more: back), and never stops Claude (Esc is for moving: a stop by
+    // mistake loses a turn). ↑ with nothing above it in the box goes up onto
+    // the messages too, and Page Up / Page Down scroll them without leaving
+    // the box.
     if (a === this.input) {
-      if (k !== "Escape" || this.menu || this.talk.on()) return false;
-      return this.navLatest() ? done() : false;
+      if (this.menu || this.talk.on() || e.isComposing) return false;
+      if (k === "Escape" || (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0)) return this.navLatest() ? done() : false;
+      if (k === "PageUp" || k === "PageDown") {
+        this.scroller.scrollBy({ top: (k === "PageDown" ? 1 : -1) * this.scroller.clientHeight * 0.85 });
+        return done();
+      }
+      return false;
     }
     // The box's card, the side panel, the terminal: theirs. A button of the
     // bar clicked (one Safari didn't focus, too): the messages' still.
@@ -1577,12 +1784,7 @@ class Chat {
     let on = inside.indexOf(a);
     if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(item, inside));
     const go = (i, up) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))], false, up); return done(); };
-    if (k === "i") {
-      if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
-      this.input.focus({ preventScroll: true });
-      this.toBottom(true);
-      return done();
-    }
+    if (k === "i") return this.toBox() ? done() : false;
     if (!items.length) return false;
     // A message taller than the page reads as pages going down: j goes
     // through it first, then on. k goes straight to the one before (going
@@ -1590,6 +1792,9 @@ class Chat {
     const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
     const r = item && (a === item || !focused) ? item.getBoundingClientRect() : null;
     if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
+    // ↓ on the latest, its end in sight: down into the box, as ↑ came up
+    // out of it (not j: held or tapped on, the rest would be typed in it).
+    if (k === "ArrowDown" && at === items.length - 1 && this.toBox()) return done();
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
     if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
@@ -1611,6 +1816,8 @@ class Chat {
 
   // The notifications about this session: seen, now it's open.
   clearNotes() {
+    // The phone app's: its own (phone/, notes.clear).
+    if (window.amarchyPhone) window.amarchyPhone.call("notes.clear", { tags: [this.id, `assistant-${this.id}`] }).catch(() => {});
     if (!("serviceWorker" in navigator) || !navigator.serviceWorker.getRegistration) return;
     navigator.serviceWorker.getRegistration().then((reg) => {
       if (!reg || !reg.getNotifications) return;
@@ -1625,9 +1832,10 @@ class Chat {
   // card answered); should the server not take it, told that too
   // (opts.onUnsent: its card asks again). Not Esc's stop. told: the caller
   // tells them itself (send).
-  post(route, body, { told = false } = {}) {
+  post(route, body, { told = false, after = null } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body) : api(chatPath(this.id, `/${route}`), body);
+    const done = route === "send" ? sendTo(this.id, body, after)
+      : api(chatPath(this.id, `/${route}`), body).then((r) => (route === "answer" ? waitsSaid(r) : r));
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());
@@ -1756,24 +1964,6 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
-    this.conversationDraw(d);
-    // Opened with the keys: on the latest message, once there is one (and
-    // the latest again, should newer ones come before you move).
-    if (this.navWanted && Date.now() - this.navWanted < 8000 && (document.activeElement === document.body || document.activeElement === this.input)
-        && this.navLatest()) { this.navWanted = 0; this.navOpened = true; }
-    else if (this.landing && this.navOpened && this.navHere()) this.navLatest();
-  }
-
-  // The keys on the latest message, now or once the conversation's in (a
-  // chat opened with the keys: Enter on its card). False when they can't be.
-  navStart() {
-    if (this.dock.querySelector(".card")) return false;      // what it asks you: that, first
-    if (this.navLatest()) { this.navOpened = true; return true; }
-    this.navWanted = Date.now();
-    return true;
-  }
-
-  conversationDraw(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
     // view doesn't jump, nor the answers you started go.
@@ -2070,176 +2260,7 @@ class Chat {
   // A block's parts (a reply's block: replyParts): its icon, title, the line
   // under it, its quick action, what it shows open and the actions there;
   // look: its class, when it's not its kind's (a message's channels share one).
-  artifactParts(a) {
-    const str = (x) => (typeof x === "string" ? x.trim() : "");
-    const at = a.attrs || {}, body = str(a.body), title = str(at.title);
-    const copy = (text, label = "Copy") => {
-      const b = h("button", { class: "art-btn", type: "button", onclick: (e) => {
-        e.stopPropagation();
-        copyText(text).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = label; }, 1500); });
-      } }, label);
-      return b;
-    };
-    // A picture itself on the clipboard (pictures[i]: xpostView's), to paste
-    // into X; name: what it does, num: its number alone, when it shows only
-    // that (one of several). Where the browser won't (or it's a GIF, which
-    // would be a still): full screen, to hold (or right-click) and save or
-    // copy it there. One that can't be shown has nothing to copy: its button
-    // goes (its group too, once it holds none).
-    const copyPicture = (pictures, i, name, num = "") => {
-      const label = num || name;
-      let busy = false;
-      const b = h("button", { class: `art-btn${num ? " num" : ""}`, type: "button", "data-name": name, title: name, "aria-label": name, onclick: (e) => {
-        e.stopPropagation();
-        if (busy) return;
-        busy = true;
-        b.textContent = num ? "…" : "Copying…";
-        xpostCopyImage(pictures[i].url).then(() => {
-          b.textContent = num ? "✓" : "Copied";
-          b.setAttribute("aria-label", `${name}: copied`);
-          setTimeout(() => { b.textContent = label; b.setAttribute("aria-label", name); busy = false; }, 1500);
-        }, (err) => {
-          b.textContent = label;
-          busy = false;
-          if (!b.isConnected) return;
-          const hold = matchMedia("(pointer: coarse)").matches ? "hold it" : "right-click it";
-          toast(err && err.gif ? `A GIF would copy as a still: ${hold} to save it` : `Can't copy the picture here: ${hold} to save or copy it`);
-          uiPhoto(pictures.map((p) => ({ src: p.url, label: "" })), i);
-        });
-      } }, label);
-      pictures[i].img.addEventListener("error", () => {
-        const group = b.closest(".xpost-copy-images");
-        b.remove();
-        if (group && !group.querySelector(".art-btn")) group.remove();
-      });
-      return b;
-    };
-    const open = (href, label, primary) => {
-      const safe = artifactHref(href);
-      return safe ? h("a", { class: `art-btn${primary ? " primary" : ""}`, href: safe, ...(safe.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }),
-        onclick: (e) => e.stopPropagation() }, label) : null;
-    };
-    const digits = (p) => str(p).replace(/[^\d]/g, "");
-    const pre = (text) => h("div", { class: "art-pre" }, text);
-    const field = (k, ...v) => h("div", { class: "art-field" }, h("span", { class: "k" }, k), h("span", {}, ...v));
-    switch (a.kind) {
-      case "whatsapp": case "email": case "slack": case "sms": {
-        const ch = a.kind, to = str(at.to);
-        const wa = ch === "whatsapp" ? `https://wa.me/${digits(at.phone)}?text=${encodeURIComponent(body)}` : null;
-        const mailTo = str(at.email) || (/@/.test(to) ? to : "");
-        const mail = ch === "email" ? `mailto:${encodeURIComponent(mailTo)}?subject=${encodeURIComponent(str(at.subject))}&body=${encodeURIComponent(body)}` : null;
-        const sms = ch === "sms" && digits(at.phone) ? `sms:+${digits(at.phone)}?&body=${encodeURIComponent(body)}` : null;
-        return { look: "message", icon: "message", title: title || `${CHANNEL_WORDS[ch]} draft`, sub: [CHANNEL_WORDS[ch], to ? `to ${to}` : ""].filter(Boolean).join(" · "),
-          quick: body ? copy(body) : null,
-          body: [at.subject ? field("Subject", str(at.subject)) : null, pre(body)],
-          actions: [wa && open(wa, "Open in WhatsApp", true), mail && open(mail, "Open in mail", true), sms && open(sms, "Open in Messages", true),
-            body ? copy(body, "Copy the message") : null] };
-      }
-      case "link": {
-        const href = artifactHref(a.url);
-        let host = "";
-        try { host = new URL(a.url).host; } catch { /* not a URL */ }
-        // A link is its row: Copy and Open at hand, its address a tap away.
-        return { folded: true, icon: "web", title: str(at.label) || title || host || "Link", sub: host,
-          quick: href ? [copy(href), open(href, "Open", true)] : null, body: [pre(str(a.url))], actions: [] };
-      }
-      case "command":
-        return { icon: "run", title: title || "Command to run", sub: str(at.cwd) ? `in ${str(at.cwd)}` : cut(body, 60),
-          quick: copy(body), body: [h("div", { class: "art-code" }, body)], actions: [] };
-      case "event": {
-        const start = artifactDate(at.when), end = artifactDate(at.end) || (start ? new Date(start.getTime() + 3600000) : null);
-        const when = start ? start.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : str(at.when);
-        const gstamp = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-        const gcal = start ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title || "Event")}` +
-          `&dates=${gstamp(start)}/${gstamp(end)}&location=${encodeURIComponent(str(at.where))}&details=${encodeURIComponent(body)}` : null;
-        const map = str(at.where) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(str(at.where))}` : null;
-        return { icon: "clock", title: title || "Event", sub: [when, str(at.where)].filter(Boolean).join(" · "), quick: null,
-          body: [when ? field("When", when, end && at.end ? ` → ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") : null,
-            str(at.where) ? field("Where", str(at.where)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [gcal && open(gcal, "Add to Google Calendar", true), map && open(map, "Map")] };
-      }
-      case "todos": {
-        const items = (a.items || []).filter((x) => str(x.text));
-        const left = items.filter((x) => !x.done).length;
-        return { icon: "list", title: title || "To-dos", sub: `${left} to do${items.length > left ? ` · ${items.length - left} done` : ""}`, quick: null,
-          body: [h("ul", { class: "art-todos" }, ...items.map((x) => h("li", { class: x.done ? "done" : "" },
-            h("span", { class: "box", html: x.done ? TICK : "" }), h("span", { class: "t", html: inline(str(x.text)) }),
-            str(x.due) ? h("span", { class: "meta" }, str(x.due)) : null)))],
-          actions: [] };
-      }
-      case "fields": {
-        const fields = a.fields || [];
-        return { icon: "fields", title: title || "Details", sub: `${fields.length} detail${fields.length === 1 ? "" : "s"}`,
-          quick: fields.length ? copy(fields.map((f) => `${f.label}: ${f.value}`).join("\n")) : null,
-          body: [h("dl", { class: "art-dl" }, ...fields.flatMap((f) => [h("dt", {}, f.label), h("dd", { html: inline(f.value) })]))],
-          actions: [] };
-      }
-      case "chart": {
-        const pts = a.points || [];
-        const tsv = [["", ...a.series], ...pts.map((p) => [p.label, ...p.values])].map((r) => r.join("\t")).join("\n");
-        return { icon: "chart", title: title || "Chart", sub: [/^[$€£¥%]$/.test(str(at.unit)) ? "" : str(at.unit), `${pts.length} ${(at.type || "bar") === "line" ? "points" : "values"}`,
-            a.series.length > 1 ? `${a.series.length} series` : ""].filter(Boolean).join(" · "),
-          quick: pts.length ? copy(tsv) : null, body: [chartView(a)], actions: [] };
-      }
-      case "contact": {
-        const ph = digits(at.phone);
-        return { icon: "helper", title: str(at.name) || title || "Contact", sub: str(at.role), quick: null,
-          body: [ph ? field("Phone", `+${ph}`) : null, str(at.email) ? field("Email", str(at.email)) : null, body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [ph && open(`tel:+${ph}`, "Call", true), ph && open(`https://wa.me/${ph}`, "WhatsApp"), str(at.email) && open(`mailto:${str(at.email)}`, "Email"),
-            ph ? copy(`+${ph}`, "Copy the number") : null] };
-      }
-      case "place": {
-        const where = str(at.where);
-        const map = where || str(at.name) ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([str(at.name), where].filter(Boolean).join(", "))}` : null;
-        const ph = digits(at.phone);
-        return { icon: "web", title: str(at.name) || title || "Place", sub: [str(at.hours), where].filter(Boolean).join(" · "), quick: map ? open(map, "Map") : null,
-          body: [where ? field("Address", where) : null, str(at.hours) ? field("Hours", str(at.hours)) : null, ph ? field("Phone", `+${ph}`) : null,
-            body ? h("div", { class: "art-note", html: inline(body) }) : null],
-          actions: [map && open(map, "Map", true), ph && open(`tel:+${ph}`, "Call"), str(at.url) && open(str(at.url), "Website")] };
-      }
-      case "session": {
-        const id = str(at.id);
-        // Its id on this chat's machine (a reply names the chats beside it).
-        const key = id ? keyNamed(this.id, id) : "";
-        return { icon: "message", title: title || id || "A chat", sub: id && title ? id : "Another chat", quick: id ? open(`#/s/${encodeURIComponent(key)}`, "Open") : null,
-          body: [body ? h("div", { class: "msg claude", html: md(body) }) : null], actions: [] };
-      }
-      case "file": {
-        // A picture: shown (from the server: a file in your home or /tmp), a tap away from full screen.
-        const where = str(at.path), pic = /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(where);
-        let shot = null;
-        if (pic) {
-          shot = uiShot({ src: this.mediaUrl(where), alt: baseName(where), cls: "art-shot" });
-          shot.querySelector("img").addEventListener("error", () => shot.remove());
-        }
-        return { icon: pic ? "image" : "file", title: title || baseName(where) || "File", sub: where, quick: copy(where, "Copy path"),
-          body: [shot, body ? pre(body) : null], actions: [] };
-      }
-      case "xpost": {
-        // The post as X will show it (xpost.js); under it, how X counts it and its draft's id,
-        // and what posting it by hand takes: Copy text (its exact text), Copy image (each picture).
-        const v = xpostView(a, (src) => this.mediaUrl(src));
-        const handle = str(at.handle).replace(/^@/, ""), reply = xpostRef(at.reply_to), quote = xpostRef(at.quote);
-        const who = (ref) => (ref.user ? `@${ref.user}` : "a post");
-        const text = String(a.body || ""), pics = v.pictures;
-        return { icon: "xlogo", title: title || (reply ? "Reply on X" : quote ? "Quote on X" : "Post on X"),
-          sub: [handle ? `@${handle}` : "", reply ? `to ${who(reply)}` : quote ? `quoting ${who(quote)}` : ""].filter(Boolean).join(" · "), quick: null,
-          body: [v.card, h("div", { class: "xpost-foot" },
-            h("span", { class: `xpost-count${v.over ? " over" : ""}`, title: v.over ? `${v.over} over what X takes` : "As X counts it" }, `${v.count}/${XPOST_LIMIT}`),
-            str(at.id) ? h("span", { class: "xpost-id" }, str(at.id)) : null,
-            h("span", { class: "xpost-copies" }, text.trim() ? copy(text, "Copy text") : null,
-              // (Several: "Copy image" and a number for each, its place in the grid, a video's counted.)
-              pics.length > 1 ? h("span", { class: "xpost-copy-images", role: "group", "aria-label": "Copy image" },
-                h("span", { class: "xpost-copy-label", "aria-hidden": "true" }, "Copy image"),
-                ...pics.map((p, i) => copyPicture(pics, i, `Copy image ${p.at + 1}`, String(p.at + 1))))
-                : pics.length ? copyPicture(pics, 0, "Copy image") : null))],
-          actions: [] };
-      }
-      default:
-        return { fallback: true, icon: "file", title: title || a.kind, sub: cut(firstLine(body), 70), quick: body ? copy(body) : null,
-          body: [h("div", { class: "msg claude", html: md(body) })], actions: [] };
-    }
-  }
+  artifactParts(a) { return blockParts(a, { chat: this.id, mediaUrl: (src) => this.mediaUrl(src) }); }
 
   // What waits on you: each question and its options. One question: a tap
   // sends. Several: a tap marks it answered, and they go together once all
@@ -2770,7 +2791,7 @@ class Chat {
       if (!this.workingEl || !this.workingEl.matches(".typing")) {
         clearInterval(this.workingTimer);
         this.workingEl = h("div", { class: "msg claude typing", role: "status", "aria-label": `${this.who()} is typing` },
-          h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")));
+          beat("dots", { "aria-hidden": "true" }, h("i"), h("i"), h("i")));
       }
     } else if (now) {
       if (!this.workingEl || this.workingEl.matches(".typing")) {
@@ -2856,14 +2877,18 @@ class Chat {
     }
   }
 
+  // A step every STREAM_STEP_MS, not every frame: a 120 Hz screen drew the
+  // words 120 times a second, a core's work without a GPU, and the keys you
+  // press waited behind it. Read, it's as smooth.
   streamStep() {
     if (this.streamFrame) return;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let last = performance.now();
-    const frame = (t) => {
+    const step = () => {
       this.streamFrame = null;
       const s = this.stream;
       if (!s) return;
+      const t = performance.now();
       const behind = s.text.length - s.shown;
       if (behind > 0) {
         // Catches up in about a quarter of a second, never slower than a fast reader.
@@ -2872,9 +2897,9 @@ class Chat {
         last = t;
         this.drawStream();      // (at the bottom, it stays there as it grows: build's ResizeObserver)
       }
-      if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
+      if (s.shown < s.text.length) this.streamFrame = setTimeout(step, STREAM_STEP_MS);
     };
-    this.streamFrame = requestAnimationFrame(frame);
+    this.streamFrame = setTimeout(step, 0);
   }
 
   drawStream() {
@@ -2955,7 +2980,7 @@ class Chat {
 
   endStream() {
     clearTimeout(this.streamTimer);
-    if (this.streamFrame) cancelAnimationFrame(this.streamFrame);
+    clearTimeout(this.streamFrame);
     this.streamFrame = this.streamTimer = null;
     this.stream = null;
     this.streamEl = null;
@@ -2993,7 +3018,8 @@ class Chat {
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
     const stopped = !!(this.row && this.row.interrupted);
-    // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
+    // Its machine doesn't answer: what's here is as it last was; what you send
+    // waits for it (kept on this machine) and goes once it's back.
     const off = machineOff(this.row || this.id);
     // Moving to another machine: what it says instead of the box (moving now),
     // or over it (waiting until it's free, one that didn't move): uiMoveNote.
@@ -3007,8 +3033,8 @@ class Chat {
     this.cardKey = key;
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
-      h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
-    else if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
+      h("span", {}, `${off}: what you send goes once ${machineOf(this.row || this.id).label} is back.`)));
+    if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
     else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -3035,7 +3061,9 @@ class Chat {
     // The keys, if they were here, stay: on the card (its first choice), and
     // back in the box you type in once it's answered.
     if (!kids.includes(this.box)) this.closeMenu();
-    const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
+    // (In the dock, whatever put them there: the box a click opened the chat
+    // with is still the box after its first redraw.)
+    const had = this.dock.contains(document.activeElement) || (lastInput.keys && document.activeElement === document.body);
     const stick = this.atBottom();
     this.dock.replaceChildren(...kids);
     if (had) {
@@ -3140,7 +3168,7 @@ class Chat {
     const rows = tasks.map((t) => {
       const el = h("span", { class: "bg-took" });
       tooks.push([el, t.started]);
-      return h("li", { class: "bg-task" }, h("span", { class: "bg-dot" }), icon(t.task_type === "local_bash" ? "run" : "helper"),
+      return h("li", { class: "bg-task" }, beat("bg-dot"), icon(t.task_type === "local_bash" ? "run" : "helper"),
         h("span", { class: "bg-name" }, cut(t.description || t.summary || t.command || t.subagent_type || "A task", 120)), el);
     });
     const tick = () => {
@@ -3150,7 +3178,7 @@ class Chat {
     this.bgEl.replaceChildren(
       h("button", { class: "bg-head", type: "button", "aria-expanded": String(open),
                     onclick: () => { this.bgOpen = !open; this.renderBackground(); } },
-        h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
+        beat("bg-pulse", {}, ...tasks.slice(0, 5).map(() => h("i"))),
         h("span", { class: "bg-what" }, `${what} in the background`), took,
         icon("chevron", "bg-chev")),
       ...(open ? [h("ul", { class: "bg-list" }, ...rows)] : []));      // (replaceChildren would write a null as "null")
@@ -3608,7 +3636,7 @@ class Chat {
   }
 
   sendButtons() {
-    this.micBtn.hidden = !this.talk.available();
+    this.talk.draw();
     const empty = !this.input.value.trim() && !this.tray.length;
     const busy = this.tray.some((a) => a.state === "reading" || a.state === "uploading");
     const stop = this.working() && empty;
@@ -3674,15 +3702,19 @@ class Chat {
     // answer comes after. Should it not take it: why, and your words back in
     // the box (its draft, if the chat's closed by then).
     const out = this.outgo(message, text, tray);
-    this.sentOff(tray, true);
+    // One after the other, in the order you sent them; its card at work at
+    // once, before whoever holds the chat moves on: the board it's back on
+    // is drawn once, as it will be (not as it was, then again).
+    const done = this.sendQueue = this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true, after: this.sendQueue });
     if (this.opts.onSent) this.opts.onSent("send");
-    // One after the other, in the order you sent them.
-    const prev = this.sendQueue || Promise.resolve();
-    const done = this.sendQueue = prev.catch(() => {}).then(() => this.post("send", { text: message, ...(images.length ? { images } : {}) }, { told: true }));
+    // The box emptied after: a chat gone from sight (back on the board) isn't measured for it.
+    this.sentOff(tray, true);
     try {
       const r = await done;
       out.sent = true;
       out.el.classList.remove("sending");
+      // Its machine out of reach: kept on this one, sent once it's back. Says so, with Cancel.
+      if (r && r.waits) return this.outWaits(out, r.waits, text, tray);
       this.settleOutbox();      // (the conversation may have it already)
       if (r && r.waking) toast("Waking Claude with it…");
       if (r && r.queued) this.outDone(out);       // in the broker's queue now: the queue shows it
@@ -3750,6 +3782,54 @@ class Chat {
       if (!it) continue;
       this.claimed.add(it);
       this.outDone(out);
+    }
+  }
+
+  // A message waiting for its machine (out of reach: kept on this one, sent
+  // once it's back, app.view.outbox): "Sends when <label> is back", and
+  // Cancel (its words back in the box). Once sent, as any message.
+  outWaits(out, waits, text = null, tray = []) {
+    out.waits = waits.id;
+    out.el.classList.add("waiting");
+    const cancel = h("button", { class: "text-btn", type: "button", onclick: async () => {
+      cancel.disabled = true;
+      try {
+        await api("/api/outbox/cancel", { id: waits.id });
+        this.outDone(out);
+        if (text !== null) this.takeBack(text, tray);
+      } catch (e) {
+        cancel.disabled = false;
+        toast(e.message);
+      }
+    } }, "Cancel");
+    out.el.append(h("div", { class: "msg-waits" }, glyph("clock", "clock"), h("span", {}, `Sends when ${waits.label || machineOf(this.id).label} is back`), cancel));
+  }
+
+  // What waits for this chat's machine (app.view.outbox: after a reload, or
+  // sent from another device): each as a waiting message; one sent since,
+  // a message on its way until the conversation has it.
+  outboxSeen() {
+    const waiting = ((app.view && app.view.outbox) || []).filter((w) => normKey(w.chat) === this.id && w.kind === "send");
+    const ids = new Set(waiting.map((w) => w.id));
+    for (const out of [...this.outbox]) {
+      if (!out.waits || ids.has(out.waits)) continue;
+      out.waits = null;         // sent: the conversation says it soon
+      out.el.classList.remove("waiting");
+      const note = out.el.querySelector(".msg-waits");
+      if (note) note.remove();
+      out.mark = this.items.length;
+      setTimeout(() => this.outDone(out), 30000);
+      this.settleOutbox();
+    }
+    for (const w of waiting) {
+      if (this.outbox.some((o) => o.waits === w.id)) continue;
+      const out = { text: w.text, key: outKey(w.text), shots: [], tray: [], mark: this.items.length, known: new Set(this.itemKeys),
+                    queued: false, sent: true, el: null };
+      const said = this.userView(w.text);
+      out.el = h("div", { class: "msg user" }, h("div", { class: "bubble" }, ...(said.parts || [said.note || said.summary || w.text])));
+      this.outbox.push(out);
+      this.outboxEl.append(out.el);
+      this.outWaits(out, { id: w.id, label: machineOf(this.id).label }, null);
     }
   }
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- targetSdk 36 is what Google Play asks for (from August 2026). Android
+         17 (API 37) is newer: targeting it waits for compileSdk 37 and its
+         behavior changes tried on a phone. -->
+    <issue id="OldTargetApi" severity="ignore" />
+    <!-- The same wait: androidx.core 1.19 only builds against API 37. Newer
+         versions than these still show. -->
+    <issue id="GradleDependency">
+        <ignore regexp="compileSdk`? than 36 is available: 37" />
+        <ignore regexp="androidx.core:core-ktx than 1.18.0 is available: 1.19" />
+    </issue>
+</lint>

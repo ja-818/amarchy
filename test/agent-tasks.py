@@ -43,7 +43,25 @@ def run(*args, me=None):
     return rc, out.getvalue(), err.getvalue()
 
 def stored():
-    return json.loads(am.TASKS.read_text()) if am.TASKS.exists() else []
+    """The tasks open: each agent's own board's cards not done, as a task was
+    (its agent, its buttons each with its message)."""
+    out = []
+    for b in am.boards_all():
+        if not b.get("task"):
+            continue
+        for c in b["cards"]:
+            if c.get("column") != am.board_done_column(b):
+                out.append({**c, "agent": b["lead"], "buttons": [{"label": x["label"], "send": am.button_words(b, c, x, "")}
+                                                                  for x in am.card_buttons(b, c) if x["own"]]})
+    return out
+
+def set_until(tid, when):
+    def change(boards):
+        for b in boards.values():
+            for c in b["cards"]:
+                if c["id"] == tid:
+                    c["until"] = when
+    am.boards_change(change)
 
 am.SESSIONS.mkdir(parents=True, exist_ok=True)
 def mk(sid, repo):
@@ -162,14 +180,10 @@ timed = [x for x in view if x["until"]]
 check(timed == sorted(timed, key=lambda x: x["until"]) and view.index(timed[-1]) < min(view.index(x) for x in view if not x["until"]),
       "those with a time first, soonest first; then the rest")
 rc, out, _ = run("today")
-check(rc == 0 and "From your agents:" in out and "Fireship: Reply: @levelsio's AI-reply spam list (until" in out, "amarchy today says them")
+check(rc == 0 and "On your boards:" in out and "Fireship: 2 for you" in out and "Reply: @levelsio's AI-reply spam list (until" in out, f"amarchy today says them ({out})")
 
 # Past its time: out of sight, still pressable a while, then gone.
-d = stored()
-for x in d:
-    if x["id"] == tid:
-        x["until"] = time.time() - 60
-am.write_file(am.TASKS, json.dumps(d))
+set_until(tid, time.time() - 60)
 check(tid not in [x["id"] for x in am.today_view()["tasks"]], "past its time: off the app's view")
 rc, out, _ = run("task", "list")
 check(tid not in out, "and off the list")
@@ -179,11 +193,7 @@ check(am.task_press(tid, 0) is None and sent == [("send", "fireship-fireship", f
 check(tid not in [x["id"] for x in stored()], "and it's done")
 rc, out, _ = run("task", "add", "--title", "Old one", "--until", "1m", me="fireship-fireship")
 old = out.strip()
-d = stored()
-for x in d:
-    if x["id"] == old:
-        x["until"] = time.time() - am.TASK_GRACE - 5
-am.write_file(am.TASKS, json.dumps(d))
+set_until(old, time.time() - am.TASK_GRACE - 5)
 run("task", "add", "--title", "Something new", me="fireship-fireship")
 check(old not in [x["id"] for x in stored()], "long past its time: gone at the next change")
 
@@ -244,13 +254,13 @@ am.app_subscriptions = lambda: [{"endpoint": "x"}]
 am.push_all = lambda p: pushed.append(p) or 1
 rc, out, err = run("task", "add", "--title", "Reply: loud", "--note", "worth it", "--notify", me="fireship-fireship")
 p = pushed[0] if pushed else {}
-check(rc == 0 and not err and p.get("title") == "Fireship: Reply: loud" and p.get("body") == "worth it" and p.get("url") == "/#/tasks"
-      and p.get("tag") == f"amarchy-task-{out.strip()}" and p.get("icon"), f"--notify: under its name, a tap opens Tasks ({p})")
+check(rc == 0 and not err and p.get("title") == "Fireship: Reply: loud" and p.get("body") == "worth it" and p.get("url") == "/#/b/fireship-fireship"
+      and p.get("tag") == f"amarchy-card-{out.strip()}" and p.get("icon"), f"--notify: under its name, a tap opens its board ({p})")
 run("task", "add", "--title", "Reply: no", me="fireship-fireship")
 check(len(pushed) == 1, "without --notify: no notification")
 
 # Written in one go: the file is always whole JSON.
-check(isinstance(json.loads(am.TASKS.read_text()), list), "the file: whole")
+check(all(isinstance(json.loads(f.read_text()), dict) for f in am.BOARDS.glob("*.json")), "the files: whole")
 
 shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")

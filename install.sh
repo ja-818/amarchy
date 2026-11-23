@@ -12,15 +12,17 @@
 #     exits until you type in them again; amarchy sleep --after), and one that
 #     keeps amarchy up to date (amarchy update)
 #   - restarts the app (amarchy app on serves it) on what's installed now
-#   - says whether dictation in the app is set up (amarchy dictation setup:
-#     a speech model, not fetched by itself: 670 MB)
+#   - dictation in the app (its mic): fetches its speech engine, transcribe.cpp
+#     (about 20 MB, where no package brought it), in the background; the
+#     speech model (740 MB) comes the first time you dictate (amarchy
+#     dictation setup). Says whether it's set up
 #   - fetches Omarchy's wallpapers for the themes from Omarchy's repository,
 #     in the background (amarchy theme --refresh-wallpapers: 60 MB, kept in
 #     ~/.local/state/amarchy/wallpapers), and cuts the fonts and your own
 #     wallpapers smaller for the app (amarchy theme --cut: kept in
 #     ~/.local/state/amarchy/cuts)
 #   - on an Omarchy desktop (Omarchy 4), omarchy/install.sh: the Ⓐ in the
-#     bar, Super+Alt+A and Amarchy in the Omarchy menu; elsewhere, it takes
+#     bar, Super+D and Amarchy in the Omarchy menu; elsewhere, it takes
 #     away what an amarchy from before left there. Brings the state of an
 #     amarchy from before up to date (amarchy migrate)
 #   - on a computer with a desktop (Omarchy, or any Wayland or X session):
@@ -59,6 +61,15 @@ for arg in "$@"; do
 done
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# ---- a packaged amarchy (packaging/arch): /usr/share/amarchy, no .git. It
+# updates with your packages, so the timer below only checks Claude Code;
+# `amarchy setup` runs this.
+packaged=""
+if [[ ! -e $repo/.git ]]; then
+  packaged=$(pacman -Qqo "$repo/bin/amarchy" 2>/dev/null | head -1 || true)
+  packaged=${packaged:-a package}
+fi
+# ---- end of a packaged amarchy
 bin_dir="$HOME/.local/bin"
 skill_link="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/amarchy"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -215,8 +226,9 @@ if ((uninstall)); then
   # ---- Omarchy home (track C): its pieces of Omarchy, all of them.
   "$repo/omarchy/install.sh" --uninstall || say "Couldn't take away all of amarchy's pieces of Omarchy (omarchy/install.sh --uninstall)"
   # ---- end of Omarchy home
-  # The dictation model is only a download (670 MB): fetched again by
-  # amarchy dictation setup.
+  # Dictation's engine and model are only downloads (amarchy dictation
+  # setup fetches them again): a setup under way stops once they're gone.
+  systemctl --user stop 'amarchy-dictation-setup-*.service' >/dev/null 2>&1 || true
   rm -rf "$state/dictation"
   # Omarchy's wallpapers too, only downloads (amarchy theme
   # --refresh-wallpapers): a fetch under way stops once they're gone.
@@ -351,12 +363,17 @@ Type=oneshot
 Environment=PATH=$bin_dir:$PATH
 ExecStart=$bin_dir/amarchy update --auto
 UNIT
+if [[ -n $packaged ]]; then
+  update_about="Every 5 minutes, checks whether Claude Code changed (then tests amarchy's chat with it again). amarchy itself is installed by $packaged: it updates with your packages (pacman -Syu, or your AUR helper)."
+else
+  update_about="Every 5 minutes, brings amarchy up to the latest on GitHub (its main), when the checkout it runs from is on main with nothing uncommitted, and installs it; the app reloads by itself. Paused, amarchy stays as it is until you run amarchy update."
+fi
 cat >"$units/amarchy-update.timer" <<UNIT
 # Installed by amarchy ($repo/install.sh); removed by its --uninstall.
 [Unit]
 Description=Update amarchy to the latest on GitHub, every 5 minutes
 X-Amarchy-Name=Updates
-X-Amarchy-About=Every 5 minutes, brings amarchy up to the latest on GitHub (its main), when the checkout it runs from is on main with nothing uncommitted, and installs it; the app reloads by itself. Paused, amarchy stays as it is until you run amarchy update.
+X-Amarchy-About=$update_about
 
 [Timer]
 OnBootSec=2min
@@ -433,7 +450,17 @@ if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
 fi
 # ---- end of the desktop app (track B)
 
+# What this set up, so a package's update is set up again by itself (amarchy
+# update --auto, see "a packaged amarchy").
+mkdir -p "$state"
+if [[ -n $packaged ]]; then
+  cat "$repo/.version" 2>/dev/null >"$state/setup-version" || true
+else
+  git -C "$repo" rev-parse --short=12 HEAD 2>/dev/null >"$state/setup-version" || true
+fi
+
 say "amarchy installed."
+[[ -n $packaged ]] && echo "  Installed by $packaged: it updates with your packages, and sets itself up again after (amarchy update)."
 # ---- amarchy's own Tailscale node (track H): how it went, when it's this computer's.
 if [[ -n $tailnet_said && $tailnet_said != "not needed"* ]]; then
   echo "  amarchy's own Tailscale node: $tailnet_said"
@@ -454,7 +481,10 @@ fi
 echo "  Sessions serve on this machine's Tailscale address if it has one, else only on localhost;"
 echo "  set NAME= and BIND= in ~/.config/amarchy/host to change it."
 echo "  Idle sessions open nowhere sleep after $("$bin_dir/amarchy" sleep --after) min (amarchy sleep --after <min>|off); send one something to wake it"
-# Dictation into the app's boxes, written down here (amarchy dictation): set
-# up, or how.
+# Dictation into the app's boxes, written down here (amarchy dictation). Its
+# engine (transcribe.cpp) comes with amarchy: a package brings it, a checkout
+# fetches it here, in the background (and the model too where whisper.cpp's
+# was set up before: the new one replaces it). Then: set up, or how.
+"$bin_dir/amarchy" dictation setup --engine --in-background --quiet >/dev/null 2>&1 || true
 echo "  $("$bin_dir/amarchy" dictation 2>&1 | head -1 || true)"
 echo "  $("$bin_dir/amarchy" theme --list 2>/dev/null | tail -1 || true)"

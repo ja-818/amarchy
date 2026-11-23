@@ -1,16 +1,16 @@
 // Your agents' tasks on Tasks, in a browser, against a real app server and
-// the real CLI (amarchy task add | done): each a card first in Now, the one
-// going soonest first, with its agent's picture (an agent's initial, your
-// assistant's own) and name, its title, its note, how long it has left (red
-// the last ten minutes), its links and its buttons; counted on the Tasks tab.
+// the real CLI (amarchy task add | done): each a card on its agent's own
+// board in Tasks (your assistant's first), under its agent's picture (an
+// agent's initial, your assistant's own) and name, the one going soonest
+// first: its title, its note, how long it has left (red the last ten
+// minutes), its links and its buttons; counted on the Tasks tab.
 // A link opens its page in a new tab and the task stays. A button: the card
 // ticks with its words, goes, Undo brings it back and nothing is sent;
 // after Undo's moment its message reaches the agent (the server's amarchy
 // send) and the task is done for good. Leaving the app sends it at once.
 // The keys press its buttons (1, 2…). One its agent took down meanwhile:
 // nothing sent, said so, not back. Past its time it's gone. Its head opens
-// the agent's chat; the search finds it; #/tasks (its notification) opens
-// Tasks. On the phone and wide, dark and light, the same cards; with
+// its board, the card in sight; the search finds it; #/tasks opens Tasks. On the phone and wide, dark and light, the same cards; with
 // screenshots.
 //
 //   node test/agent-tasks-view.js          both layouts
@@ -42,6 +42,7 @@ os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 am.app_key(); am.migrate()
 for sid, repo in [("jaken-jaken", "jaken"), ("fireship-fireship", "fireship"), ("proj-a", "proj")]:
     os.makedirs(home + "/Work/" + repo, exist_ok=True)
@@ -160,13 +161,13 @@ function freshTasks() {
 }
 
 // What a task's cards show, for the phone and wide to be compared.
-const SHAPE = () => [...document.querySelectorAll(".today:not([hidden]) .today-yours .tcard.k-task")].map((c) => ({
-  chip: (c.querySelector(".tcard-chip") || {}).textContent, title: (c.querySelector(".tcard-title") || {}).textContent,
-  pic: c.querySelector(".tcard-head .avatar") ? c.querySelector(".tcard-head .avatar").tagName.toLowerCase() : "",
+const SHAPE = () => [...document.querySelectorAll(".board-today > .tsec[data-board] .tcard.k-bcard")].map((c) => ({
+  chip: (c.closest(".tsec").querySelector(".bsec-name > span") || {}).textContent, title: (c.querySelector(".tcard-title") || {}).textContent,
+  pic: c.closest(".tsec").querySelector(".bsec-name .avatar") ? c.closest(".tsec").querySelector(".bsec-name .avatar").tagName.toLowerCase() : "",
   tone: ([...(c.querySelector(".tpill") || { classList: [] }).classList].find((x) => x.startsWith("t-")) || ""),
   note: (c.querySelector(".tcard-text") || {}).textContent,
   links: [...c.querySelectorAll("a.tbtn")].map((a) => [a.textContent.trim(), a.getAttribute("href")]),
-  buttons: [...c.querySelectorAll(".tbtn.task-btn")].map((b) => b.textContent.trim()),
+  buttons: [...c.querySelectorAll(".tbtn.bcard-btn")].map((b) => b.textContent.trim()),
 }));
 
 const lum = (rgb) => {
@@ -197,12 +198,12 @@ async function run(browser, base, layout) {
   page.on("pageerror", (e) => errors.push(e.message));
   // What the presses got back, and the toasts said (for a failure's message).
   const presses = [];
-  page.on("response", async (r) => { if (r.url().includes("/api/tasks/press")) presses.push(`${r.status()} ${await r.text().catch(() => "")}`); });
-  page.on("requestfailed", (r) => { if (r.url().includes("/api/tasks/press")) presses.push(`failed ${r.failure() && r.failure().errorText}`); });
+  page.on("response", async (r) => { if (r.url().includes("/api/boards/press")) presses.push(`${r.status()} ${await r.text().catch(() => "")}`); });
+  page.on("requestfailed", (r) => { if (r.url().includes("/api/boards/press")) presses.push(`failed ${r.failure() && r.failure().errorText}`); });
   await page.route("**/api/session/*/stream", (r) => r.fulfill({ status: 200, contentType: "text/event-stream", body: "retry: 600000\n\n" }));
   const tasksTab = () => page.evaluate(() => boardTab("tasks"));
-  const cards = () => page.evaluate(() => [...document.querySelectorAll(".today:not([hidden]) .today-yours .tcard.k-task")].map((c) => c.dataset.task));
-  const card = (id) => `.today:not([hidden]) .tcard.k-task[data-task="${id}"]`;
+  const cards = () => page.evaluate(() => [...document.querySelectorAll(".board-today > .tsec[data-board] .tcard.k-bcard")].map((c) => c.dataset.card));
+  const card = (id) => `.today:not([hidden]) .tcard.k-bcard[data-card="${id}"]`;
   const tap = (id, label) => page.evaluate(({ sel, label }) => {
     const b = [...document.querySelectorAll(`${sel} .tbtn`)].find((x) => x.textContent.trim() === label);
     if (b) b.click();
@@ -217,26 +218,27 @@ async function run(browser, base, layout) {
     check(where, [ids.a, ids.b, ids.c].every((x) => /^[0-9a-f]{6}$/.test(x)), `the CLI added three, each its id (${JSON.stringify(ids)})`);
     check(where, (await look(page, base, theme)) === 200, `the app wears ${theme}`);
     await tasksTab();
-    check(where, await until(page, () => document.querySelectorAll(".today:not([hidden]) .today-yours .tcard.k-task").length === 3), "three task cards in Tasks' Now");
+    check(where, await until(page, () => document.querySelectorAll(".board-today > .tsec[data-board] .tcard.k-bcard").length === 3), "three task cards in Tasks");
     const order = await cards();
-    check(where, JSON.stringify(order) === JSON.stringify([ids.b, ids.a, ids.c]), `the one going soonest first, the one with no time last (${order})`);
+    check(where, JSON.stringify(order) === JSON.stringify([ids.c, ids.b, ids.a]), `your assistant's board first; on Fireship's, the one going soonest first (${order})`);
     check(where, /Tasks\s*3/.test(await page.evaluate(() => document.querySelector(".board-switch").textContent)), "the Tasks tab counts them");
-    check(where, /^Now\s*3/.test(await page.evaluate(() => document.querySelector(".today-yours .tsec-head").textContent.trim())), "Now's head too");
+    check(where, await page.evaluate(() => /Fireship\s*2/.test(document.querySelector('.tsec[data-board="fireship-fireship"] .tsec-head').textContent)
+      && /Jaken\s*1/.test(document.querySelector('.tsec[data-board="jaken-jaken"] .tsec-head').textContent)), "each board's head too");
     const shape = await page.evaluate(SHAPE);
-    const [b, a, c] = shape;
+    const [c, b, a] = shape;
     check(where, a.chip === "Fireship" && a.pic === "svg" && /^Reply: @levelsio's AI-reply spam list$/.test(a.title), `its agent's initial and name, its title (${JSON.stringify(a)})`);
     check(where, a.note === "45 min old, 46 replies; worth it until 10:12" && await page.evaluate((s) => !!document.querySelector(`${s} .tcard-text strong`), card(ids.a)), "its note, its **bold** drawn");
     check(where, JSON.stringify(a.links) === JSON.stringify([["Open post", POST]]) && JSON.stringify(a.buttons) === JSON.stringify(["Replied", "Skipped"]), "its link, then its buttons");
-    const pills = await page.evaluate((ids) => ids.map((id) => document.querySelector(`.tcard.k-task[data-task="${id}"] .tpill`).textContent), [ids.b, ids.a, ids.c]);
+    const pills = await page.evaluate((ids) => ids.map((id) => document.querySelector(`.tcard.k-bcard[data-card="${id}"] .tpill`).textContent), [ids.b, ids.a, ids.c]);
     check(where, /^[78] min left$/.test(pills[0]) && b.tone === "t-late", `8 minutes left: said, in red (${pills[0]} ${b.tone})`);
     check(where, /^4[45] min left$/.test(pills[1]) && a.tone === "t-quiet", `45 left: said, quiet (${pills[1]})`);
     check(where, c.chip === "Jaken" && c.pic === "img" && /just now|min ago/.test(pills[2]), `your assistant's: its picture and name; no time, how old (${pills[2]})`);
     check(where, await page.evaluate((s) => document.querySelector(`${s} a.tbtn`).classList.contains("primary"), card(ids.a)), "its link the one thing to do first");
     const fit = await page.evaluate(() => {
       const over = document.documentElement.scrollWidth > innerWidth;
-      const out = [...document.querySelectorAll(".tcard.k-task")].some((c) => { const r = c.getBoundingClientRect();
+      const out = [...document.querySelectorAll(".tcard.k-bcard")].some((c) => { const r = c.getBoundingClientRect();
         return [...c.querySelectorAll(".tbtn, .tpill, .tcard-chip")].some((x) => { const q = x.getBoundingClientRect(); return q.right > r.right + 0.5 || q.left < r.left - 0.5; }); });
-      const tall = [...document.querySelectorAll(".tcard.k-task .tbtn")].some((x) => x.getBoundingClientRect().height > 60);
+      const tall = [...document.querySelectorAll(".tcard.k-bcard .tbtn")].some((x) => x.getBoundingClientRect().height > 60);
       return { over, out, tall };
     });
     check(where, !fit.over && !fit.out && !fit.tall, `everything in the card and the screen, no button a word a line (${JSON.stringify(fit)})`);
@@ -287,7 +289,7 @@ async function run(browser, base, layout) {
     await page.evaluate((s) => boardFocus(document.querySelector(`${s} > .today-go`)), card(ids.b));
     await page.keyboard.press("2");
     check(where, await until(page, () => /Skipped: sent to Fireship/.test((document.querySelector(".undo-toast") || {}).textContent || "")), "2: its second button, Skipped");
-    check(where, await page.evaluate((c) => { const a = document.activeElement; return a.matches(".tcard > .today-go") && a.parentElement.dataset.task === c; }, ids.c),
+    check(where, await page.evaluate((c) => { const a = document.activeElement; return a.matches(".tcard > .today-go") && a.parentElement.dataset.card === c; }, ids.c),
           "the keys on the card in its place, not on one of its buttons (Enter again would press it)");
     await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
     check(where, await sentBy(2, 2000), "the app left: sent at once, not after Undo's moment");
@@ -305,26 +307,27 @@ async function run(browser, base, layout) {
     check(where, !(await cards()).includes(d) && sentNow().length === 2, "not back, nothing sent");
 
     // Past its time: gone; the last minute in red.
-    await page.evaluate((id) => { const t = app.view.today.tasks.find((x) => x.id === id); t.until = Date.now() / 1000 + 30; todayRedraw(); }, ids.c);
+    const timeTo = (id, until) => page.evaluate(({ id, until }) => { for (const b of app.view.today.boards) for (const t of b.cards) if (t.id === id) t.until = Date.now() / 1000 + until; todayRedraw(); }, { id, until });
+    await timeTo(ids.c, 30);
     check(where, await until(page, (s) => { const p = document.querySelector(`${s} .tpill`); return !!p && p.textContent === "Under a minute" && p.classList.contains("t-late"); }, card(ids.c)),
           "under a minute left: said, in red");
-    await page.evaluate((id) => { const t = app.view.today.tasks.find((x) => x.id === id); t.until = Date.now() / 1000 - 1; todayRedraw(); }, ids.c);
+    await timeTo(ids.c, -1);
     check(where, await until(page, (s) => !document.querySelector(s), card(ids.c)), "past its time: gone");
-    check(where, await until(page, () => !document.querySelector(".today-yours") && /Nothing needs you/.test(document.querySelector(".board-today").textContent)), "nothing left: Nothing needs you");
+    check(where, await until(page, () => !document.querySelector(".board-today .tcard.k-bcard") && /No task is due now/.test(document.querySelector(".board-today").textContent)), "nothing left: No task is due now");
     await page.reload();
     await until(page, () => window.app && app.view && boardOn());
     await tasksTab();
     await until(page, (s) => !!document.querySelector(s), card(ids.c));
 
-    // Its head opens its agent's chat.
+    // Its head opens its board, the card in sight.
     await page.evaluate((s) => document.querySelector(`${s} > .today-go`).click(), card(ids.c));
-    check(where, await until(page, () => (app.desk ? desk.current : app.session && app.session.id) === "jaken-jaken"), "its head: its agent's chat");
-    await page.evaluate(() => { if (app.desk) boardBack(true); else go("#/"); });
-    await until(page, () => !(app.desk ? desk.current : app.session));
+    check(where, await until(page, (id) => boardsUI.open === "jaken-jaken" && !!document.querySelector(`.ui-kanban .tcard[data-card="${id}"]`), ids.c), "its head: its board, the card there");
+    await page.evaluate(() => boardsClose());
+    await until(page, () => !boardsUI.open && !document.querySelector(".ui-kanban"));
 
     // The search finds it.
     await page.evaluate(() => { board.search.value = "lease"; boardSearch("lease"); });
-    check(where, await until(page, (s) => !!document.querySelector(`.today-found-tasks .tcard.k-task[data-task="${s}"]`), ids.c), "the search finds it, in Tasks");
+    check(where, await until(page, (s) => !!document.querySelector(`.today-found-tasks .tcard.k-bcard[data-card="${s}"]`), ids.c), "the search finds it, in Tasks");
     await tap(ids.c, "Signed");
     check(where, await until(page, (s) => !document.querySelector(s) && !!document.querySelector(".undo-toast"), card(ids.c)), "pressed there: off what it found");
     await page.evaluate(() => { const u = document.querySelector(".undo-toast .text-btn"); if (u) u.click(); });
@@ -335,7 +338,7 @@ async function run(browser, base, layout) {
     // #/tasks (a task's notification, tapped): Tasks, from wherever.
     await page.evaluate(() => boardTab("chats"));
     await page.evaluate(() => go("#/tasks"));
-    check(where, await until(page, () => board.tab === "tasks" && here() === "#/today" && !!document.querySelector(".today-yours .tcard.k-task")), "#/tasks: the board on Tasks");
+    check(where, await until(page, () => board.tab === "tasks" && here() === "#/today" && !!document.querySelector(".board-today > .tsec[data-board] .tcard.k-bcard")), "#/tasks: the board on Tasks");
     await page.evaluate(() => todayOpen(row("fireship-fireship")));
     await until(page, () => (app.desk ? desk.current : app.session && app.session.id) === "fireship-fireship");
     await page.evaluate(() => boardTab("chats"));

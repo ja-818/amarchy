@@ -1,0 +1,179 @@
+# amarchy's Android app (phone/android/): built, unit tested (with the push
+# vectors every side decrypts) and linted on every change to it, to the
+# vectors, or to what it ships from the rest of the repo: the own page
+# (desktop/dist) and the chimes (sounds/, named by bin/amarchy's CHIMES: a
+# change to that list alone is caught by the next run, not each server change).
+# Its debug APK and lint report are kept as this run's artifacts, for
+# trying, not published.
+#
+# A release (a signed AAB to Play's internal testing track) only ever runs
+# by hand: Actions → Android app → Run workflow, "release" ticked. What it
+# needs set up first is in phone/android/store/README.md.
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", ".github/workflows/phone-android.yml"]
+  pull_request:
+    paths: ["phone/android/**", "phone/testdata/**", "desktop/dist/**", "sounds/**", ".github/workflows/phone-android.yml"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Release: sign it and upload it to Play's internal track"
+        type: boolean
+        default: false
+      version_name:
+        description: "Its version name"
+        type: string
+        default: "1.0"
+
+permissions:
+  contents: read
+  actions: read         # the newest tailnet.aar, from the Tailscale node workflow's artifacts
+
+concurrency:
+  group: phone-android-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test, lint
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: phone/android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # amarchy's own Tailscale node (tailnet/mobile), as the "Tailscale node"
+      # workflow last built it on main; none yet: the app is built without it
+      # (it then reaches the tailnet through the Tailscale app only).
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-android \
+                    && { echo "$id"; break; }; done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-android -D app/libs
+            echo "With amarchy's own Tailscale node, from run $run"
+          else
+            echo "No tailnet.aar built yet: the app is built without amarchy's own node"
+          fi
+
+      - name: The Android platform it builds against
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.1.0" > /dev/null
+
+      - name: Build, unit tests, lint
+        run: ./gradlew assembleDebug testDebugUnitTest lint
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amarchy-android-debug
+          path: phone/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: amarchy-android-reports
+          path: |
+            phone/android/app/build/reports/
+            phone/android/app/build/test-results/
+          if-no-files-found: ignore
+
+  release:
+    name: Release to Play (internal track)
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    needs: build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: phone/android
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_SENDER_ID: ${{ secrets.FIREBASE_SENDER_ID }}
+      AMARCHY_RELAY: ${{ secrets.AMARCHY_RELAY }}
+      PLAY_JSON_KEY: ${{ secrets.PLAY_JSON_KEY }}
+      AMARCHY_VERSION_NAME: ${{ inputs.version_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every secret it needs is set
+        run: |
+          missing=""
+          for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD \
+                   FIREBASE_API_KEY FIREBASE_APP_ID FIREBASE_PROJECT_ID FIREBASE_SENDER_ID AMARCHY_RELAY PLAY_JSON_KEY; do
+            [ -n "${!s}" ] || missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Not set as repository secrets:$missing (phone/android/store/README.md, step 5)"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # amarchy's own Tailscale node (tailnet/mobile), as the "Tailscale node"
+      # workflow last built it on main; none yet: the app is built without it
+      # (it then reaches the tailnet through the Tailscale app only).
+      - name: amarchy's own Tailscale node (the newest built on main, if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow tailnet.yml --branch main --status success --limit 10 \
+                  --json databaseId --jq '.[].databaseId' | while read -r id; do
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx tailnet-android \
+                    && { echo "$id"; break; }; done)
+          if [ -n "$run" ]; then
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n tailnet-android -D app/libs
+            echo "With amarchy's own Tailscale node, from run $run"
+          else
+            echo "No tailnet.aar built yet: the app is built without amarchy's own node"
+          fi
+
+      - name: The Android platform it builds against
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.1.0" > /dev/null
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: fastlane
+        run: gem install fastlane --no-document
+
+      - name: Its version, and the Play key
+        run: |
+          # Each upload's version code is newer than the last one's.
+          echo "AMARCHY_VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+          printf '%s' "$PLAY_JSON_KEY" > "$RUNNER_TEMP/play.json"
+          echo "PLAY_JSON_KEY_FILE=$RUNNER_TEMP/play.json" >> "$GITHUB_ENV"
+
+      - name: Build, sign and upload to the internal track
+        run: fastlane android internal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amarchy-android-release
+          path: phone/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error

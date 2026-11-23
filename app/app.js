@@ -48,6 +48,9 @@ const ICONS = {
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
   paste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>',
+  // A board's card (boards.js): Comment (to its agent) and Edit (in place).
+  comment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-11.8 7L4 20l1.1-4A8 8 0 1 1 20 12z"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',
   select: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h9M4 17h12"/><path d="M18 10v10M16 10h4M16 20h4"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
@@ -118,15 +121,40 @@ function stateIcon(s) {
 // Every spinner (class spin) turns together. They're found as the page has
 // them (a live list, not a search of the page every tick), and each turns in
 // a box of its own size, so a tick lays out nothing around it.
-const spin = { frame: 0, all: document.getElementsByClassName("spin") };
+// Whatever else moves for as long as it's on screen (class beat: three dots
+// while it types, the dot beating in New, what runs in the background, a
+// streak at risk) moves with them, a step every other tick (its data-b, one
+// of BEAT_FRAMES, drawn in CSS): the page draws at most eleven frames a
+// second for all of them at once. A CSS animation that never ends draws
+// every frame the screen shows, 120 a second on a 120 Hz screen: without a
+// GPU (a computer whose driver isn't there yet) that's a core, and every key
+// you press waits in line behind its frames.
+// In the desktop app on a computer with no GPU to draw with (amarchyDesktop.gpu
+// false: each frame tens of milliseconds of a core there), the spinners step
+// every other tick too, with the beat: half the frames.
+const BEAT_FRAMES = 6;
+const spin = { frame: 0, beat: 0, ticks: 0, all: document.getElementsByClassName("spin"), beats: document.getElementsByClassName("beat"),
+               every: window.amarchyDesktop && window.amarchyDesktop.gpu === false ? 2 : 1 };
 setInterval(() => {
-  if (document.visibilityState !== "visible" || !spin.all.length) return;
-  spin.frame = (spin.frame + 1) % SPINNER_FRAMES;
-  for (const el of spin.all) el.setAttribute("data-f", spin.frame);
+  if (document.visibilityState !== "visible" || (!spin.all.length && !spin.beats.length)) return;
+  spin.ticks++;
+  if (spin.ticks % spin.every === 0) {
+    spin.frame = (spin.frame + 1) % SPINNER_FRAMES;
+    for (const el of spin.all) el.setAttribute("data-f", spin.frame);
+  }
+  if (spin.ticks % 2) return;
+  spin.beat = (spin.ticks / 2) % BEAT_FRAMES;
+  for (const el of spin.beats) el.setAttribute("data-b", spin.beat);
 }, 90);
 
 function spinner() {
   return h("span", { class: "spinner spin", "aria-hidden": "true", "data-f": spin.frame });
+}
+
+// Something that moves with the beat (above), made at the step it's on now:
+// a redraw that makes it again finds it the same (uiPatch keeps the old one).
+function beat(cls, attrs = {}, ...kids) {
+  return h("span", { ...attrs, class: `${cls} beat`, "data-b": spin.beat }, ...kids);
 }
 
 // What a session is about, the keyword before ": " in bold.
@@ -356,8 +384,18 @@ function aheadOf(id, patch, settled, done, { quiet = false } = {}) {
   });
 }
 
+// The keys out of what's about to go (a chat closed), now, while the page is
+// as it was: a box with the keys taken out of the page has the browser lay
+// the whole page out on the spot, and the frame lays it out again.
+function letGoOf(el) {
+  const a = document.activeElement;
+  if (el && a && a !== document.body && el.contains(a)) a.blur();
+}
+
+// Only what changed: the rows it changed say how their cards look (todayRowKey),
+// so a board drawn with them already (back on it as you sent) isn't drawn again.
 function aheadDrawn() {
-  if (typeof todayRedraw === "function") todayRedraw();
+  if (typeof todayRedraw === "function") todayRedraw(false);
   refresh();
 }
 
@@ -380,8 +418,18 @@ function aheadOn(v) {
 // waking with it), until the server's list says how it stands: working, or
 // what you said in its conversation (a turn that was over before a list
 // came). A command (/model) starts no turn: it stays where it is.
-function sendTo(id, body) {
-  const done = api(chatPath(id, "/send"), body);
+// Its machine out of reach: kept on this one, sent once it's back (bin/amarchy's outbox): said so.
+function waitsSaid(r) {
+  if (r && r.waits) toast(`Sends when ${r.waits.label || "its machine"} is back`);
+  return r;
+}
+
+// after: what was sent before it, still on its way (a chat's messages go in
+// the order you sent them): asked for once that's answered; its card at work
+// now all the same.
+function sendTo(id, body, after = null) {
+  const ask = () => api(chatPath(id, "/send"), body).then(waitsSaid);
+  const done = after ? after.catch(() => {}).then(ask) : ask();
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   if (!s || s.setup || String((body && body.text) || "").trimStart().startsWith("/")) return done;
   const you = (r) => (r.today || {}).you_at || 0;
@@ -865,6 +913,7 @@ function openList() {
   es.addEventListener("list", (e) => {
     app.view = boardIn(JSON.parse(e.data));
     aheadOn(app.view);
+    if (typeof dictationViewed === "function") dictationViewed();      // every mic as dictation stands now (dictate.js)
     movedFollow();
     app.online = true;
     app.failed = "";
@@ -900,9 +949,10 @@ function refresh() {
   if (app.desk) { deskList(); boardRefresh(); }
   else if (!app.session) renderHome();
   else uiWhenStill(`head-${app.session.id}`, () => { if (app.session) app.session.renderHeader(); });      // its preview, as the list has it
-  // Its machine went off, or came back (machines): its chat says so.
+  // Its machine went off, or came back (machines): its chat says so, and
+  // what waited for it there (sent now, or still waiting).
   const open = (app.session && app.session.chat) || (app.desk && typeof desk !== "undefined" && desk.chat);
-  if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) open.renderDock(); });
+  if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) { open.renderDock(); open.outboxSeen(); } });
   cloudLive();      // a cloud machine's sheet, as it comes up (cloud.js)
   keptListScroll();
 }
@@ -1080,6 +1130,9 @@ function sessionActions(s) {
   return [
     h("button", { class: "control wide", onclick: () => renameSheet(s) }, "Rename…"),
     h("button", { class: "control wide", onclick: () => agentSheet(s) }, agentMenuLabel(s)),
+    // Its boards (Tasks): each a tap away.
+    ...boardsLedBy(s).map((b) => h("button", { class: "control wide", onclick: () => boardsGo(b.key) },
+      `${b.title}${b.yours ? ` · ${b.yours} for you` : ""}`)),
     sleepButton(s),
     ...moveButtons(s),      // Move to <machine>… (manage.js)
   ].filter(Boolean);
@@ -1200,7 +1253,9 @@ class SessionView {
 
   open() {
     this.chat.open();
-    if (lastInput.keys) this.chat.navStart();      // opened with the keys: on its latest message
+    // On a computer, the keys in its box (or its card), to write; on a
+    // phone's touch, none: its keyboard would come up over the chat.
+    if (lastInput.keys || matchMedia("(hover: hover) and (pointer: fine)").matches) this.chat.takeKeys();
   }
 
   close() {
@@ -1345,6 +1400,9 @@ async function micOpen(retry) {
   if (!mic.ctx) {
     mic.ctx = new AudioContext();
     mic.ready = mic.ctx.audioWorklet ? mic.ctx.audioWorklet.addModule("voice.js") : Promise.resolve();
+    // (A microphone refused at once closes the audio while voice.js still loads:
+    // that load's failure is nobody's then. Waited for below, it still fails there.)
+    mic.ready.catch(() => {});
   }
   const ctx = mic.ctx;
   ctx.resume().catch(() => {});
@@ -1944,7 +2002,8 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     imgBtn.hidden = none;
     under.hidden = none;
     row.hidden = none;
-    micBtn.hidden = none || !dictate.available();
+    micBtn.hidden = none;
+    dictate.draw();
     micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
     box.classList.toggle("listening", saying !== null);
     field.placeholder = none ? (app.view ? "Add a project first" : "Connecting…")
@@ -2231,9 +2290,23 @@ function shareSheet(s) {
 
 // Settings → Share to Amarchy: how to put it in the phone's share sheet.
 function shareSettings() {
+  if (phoneApp) {
+    return [h("div", { class: "section" }, "Share to Amarchy"),
+      h("p", {}, "A screenshot, a photo, a link or some text, from the share sheet to a chat: Amarchy is in your phone's share sheet.")];
+  }
   return [h("div", { class: "section" }, "Share to Amarchy"),
     h("p", {}, "A screenshot or photo, from the share sheet to a chat: sent as it is, or with more to say."),
     h("button", { class: "control wide", onclick: () => shareSetup() }, "Put Amarchy in the share sheet…")];
+}
+
+// On a phone's browser (not in the app): the phone app, opened on this
+// machine (amarchy://open, phone/README.md).
+function phoneAppSettings() {
+  if (phoneApp || desktopApp || app.desk || !(iOS || /Android/.test(navigator.userAgent))) return [];
+  const link = `amarchy://open?server=${encodeURIComponent(location.origin)}`;
+  return [h("div", { class: "section" }, "The phone app"),
+    h("p", {}, "Notifications you answer from the lock screen (Allow, Deny, Ship it), the share sheet, a widget. Installed? Open this machine in it."),
+    h("button", { class: "control wide", onclick: () => follow(link) }, "Open in the app")];
 }
 
 async function shareSetup() {
@@ -2269,7 +2342,11 @@ async function shareSetup() {
 
 // ---- notifications
 
-const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+// In amarchy's phone app (phone/, which sets it before this runs): always the
+// home-screen app, its notifications the app's own, through amarchy's push
+// relay (the contract's "The phone apps and the push relay").
+const phoneApp = window.amarchyPhone || null;
+const standalone = !!phoneApp || window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 // In amarchy's desktop app (desktop/, which sets it before this runs): its
 // notifications are the app's own, not this page's (the contract's "The
 // desktop app").
@@ -2287,6 +2364,7 @@ function sameKey(a, b) {
 }
 
 async function pushState() {
+  if (phoneApp) return phoneApp.call("push.state");
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return "unsupported";
   // Not there when its service worker couldn't start (then it never is).
   const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(() => ok(null), 4000))]);
@@ -2295,6 +2373,10 @@ async function pushState() {
   if (sub) return "on";
   return Notification.permission === "denied" ? "denied" : "off";
 }
+
+// Said when they're turned on. In the phone app: the home-screen web app,
+// if this phone has it on too, would tell you each one twice.
+const PUSH_ON_SAID = () => phoneApp ? "Notifications on. Had Amarchy on the home screen as a web app? Remove it, or you'll be told twice." : "Notifications on.";
 
 // What this device was last known to want (PUSH_WANT): "on" (notifications
 // were on here), "no" (turned off or dismissed here), nothing (never decided).
@@ -2306,6 +2388,15 @@ const push = { state: null, at: 0, busy: false };
 // A subscription the server takes: this device's, or a new one when its push
 // service ended the one it had (the server says gone).
 async function pushSubscribe(reg, fresh = false) {
+  // The phone app's: made by the app (its keys, the relay's address), sent
+  // here as a browser's is.
+  if (phoneApp) {
+    if (fresh) await phoneApp.call("push.unsubscribe").catch(() => null);
+    const r = await api("/api/push", await phoneApp.call("push.subscribe", { key: app.key }));
+    if (r.gone && !fresh) return pushSubscribe(reg, true);
+    if (r.gone) throw new Error("Notifications couldn't be turned on: try again in a moment.");
+    return;
+  }
   const key = keyBytes(app.key);
   let sub = await reg.pushManager.getSubscription();
   if (sub && (fresh || !sameKey(sub.options.applicationServerKey, key))) {
@@ -2319,6 +2410,11 @@ async function pushSubscribe(reg, fresh = false) {
 }
 
 async function pushOn() {
+  if (phoneApp) {           // (the app asks the phone first, itself)
+    await pushSubscribe(null);
+    store.set(PUSH_WANT, "on");
+    return pushShow("on");
+  }
   const asked = Notification.requestPermission();      // first, while it's still your tap
   if ((await asked) !== "granted") throw new Error("Notifications weren't allowed (Settings → Notifications → Amarchy).");
   await pushSubscribe(await navigator.serviceWorker.ready);
@@ -2327,6 +2423,12 @@ async function pushOn() {
 }
 
 async function pushOff() {
+  if (phoneApp) {
+    const dropped = await phoneApp.call("push.unsubscribe").catch(() => null);
+    if (dropped && dropped.endpoint) await api("/api/push/remove", { endpoint: dropped.endpoint }).catch(() => {});
+    store.set(PUSH_WANT, "no");
+    return pushShow("off");
+  }
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (sub) {
@@ -2349,7 +2451,7 @@ async function pushRefresh(force = false) {
     let state = await pushState();
     if (state === "on") {
       try {
-        await pushSubscribe(await navigator.serviceWorker.ready);
+        await pushSubscribe(phoneApp ? null : await navigator.serviceWorker.ready);
         store.set(PUSH_WANT, "on");
       } catch (e) {
         state = await pushState().catch(() => state);      // (the server out of reach: still on, told next time)
@@ -2377,14 +2479,15 @@ function pushNotice() {
   const card = uiCard({ kind: "notice", hue: "none", title: "Notifications are off",
     pill: uiPill(blocked ? "Blocked" : "Off", "warn"), open: () => openSettings(), label: "Notifications are off on this device: Settings",
     body: [h("p", { class: "tcard-text muted" }, blocked
-      ? (app.desk ? "This device blocks them for Amarchy: allow them in this browser's settings, or in System Settings → Notifications."
+      ? (phoneApp ? "This device blocks them for Amarchy: allow them in its Settings → Notifications."
+        : app.desk ? "This device blocks them for Amarchy: allow them in this browser's settings, or in System Settings → Notifications."
                   : "This device blocks them for Amarchy: allow them in the phone's Settings → Notifications.")
       : "This device isn't told when a chat needs you or is done.")],
     actions: [uiButton(blocked ? "Dismiss" : "Not now", later, false, "quiet"),
       blocked ? null : uiButton("Turn on", async (e) => {
         const b = e.currentTarget;
         b.disabled = true;
-        try { await pushOn(); toast("Notifications on."); }
+        try { await pushOn(); toast(PUSH_ON_SAID()); }
         catch (err) { toast(err.message); b.disabled = false; pushRefresh(true); }
       }, true)] });
   card.todayData = `push|${push.state}|${want}`;
@@ -2400,7 +2503,9 @@ function sleepSettings(draw) {
   const after = app.view ? app.view.sleep_after : 1;
   const choices = [[1, "1m"], [5, "5m"], [15, "15m"], [60, "1h"], ["off", "Never"]];
   if (after !== undefined && !choices.some(([v]) => v === after)) choices.splice(-1, 0, [after, `${after}m`]);
-  return [h("div", { class: "section" }, "Sleep"),
+  // Each machine's own (its memory): said so, with two or more (the rest of what's yours is the same on all).
+  const own = machinesShown().length > 1 ? h("p", { class: "hint" }, `For the chats on ${machineOf("").label}: each machine sleeps its own.`) : null;
+  return [h("div", { class: "section" }, "Sleep"), own,
     h("div", { class: "seg" }, ...choices.map(([value, label]) =>
       h("button", { class: `control${after === value ? " on" : ""}`, onclick: async () => {
         try { await api("/api/sleep", { after: value }); app.view.sleep_after = value; draw(); }
@@ -2439,7 +2544,8 @@ function mediaLacking() {
     h("button", { class: "control wide", onclick: () => copyText(l.fix).then(() => toast(`Copied: ${l.fix}`)) }, "Copy the command")];
 }
 
-async function openSettings() {
+// at: a section to show first (its data-section: "dictation").
+async function openSettings({ at = "" } = {}) {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
   const body = h("div", {});
@@ -2457,21 +2563,25 @@ async function openSettings() {
         } }, "Send a test"));
     } else if (!standalone && !app.desk) {
       kids.push(h("p", {}, "To get notifications, add Amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
+    } else if (state === "unsupported" && phoneApp) {
+      kids.push(h("p", {}, "This build of the app has no way to send notifications (no push relay is set in it)."));
     } else if (state === "unsupported") {
       kids.push(h("p", {}, app.desk ? "This browser can't get notifications (in Safari, add Amarchy to the Dock first: File → Add to Dock)."
                                     : "This browser can't get notifications (on iPhone they need iOS 16.4 or newer)."));
     } else if (state === "denied") {
-      kids.push(h("p", {}, app.desk ? "Notifications are turned off for Amarchy in this browser's settings (and System Settings → Notifications)."
+      kids.push(h("p", {}, phoneApp ? "Notifications are turned off for Amarchy in this device's Settings → Notifications."
+                           : app.desk ? "Notifications are turned off for Amarchy in this browser's settings (and System Settings → Notifications)."
                                     : "Notifications are turned off for Amarchy in the phone's Settings → Notifications."));
     } else if (state === "off") {
       kids.push(h("p", {}, "Get a notification when a chat needs you or is done."),
         h("button", { class: "control wide accent", onclick: async (e) => {
           e.currentTarget.disabled = true;
-          try { await pushOn(); toast("Notifications on."); } catch (err) { toast(err.message); }
+          try { await pushOn(); toast(PUSH_ON_SAID()); } catch (err) { toast(err.message); }
           draw();
         } }, "Turn on notifications"));
     } else {
-      kids.push(h("p", {}, "On: you're told when a chat needs you or is done, unless you're looking at it."),
+      kids.push(h("p", {}, phoneApp ? "On: you're told when a chat needs you or is done, unless you're looking at it. Answer from the notification itself: Allow, Deny, an answer, Ship it."
+                                     : "On: you're told when a chat needs you or is done, unless you're looking at it."),
         h("button", { class: "control wide", onclick: async () => {
           try { const r = await api("/api/push/test"); toast(r.sent ? "Sent. It should arrive in a moment." : "It couldn't be sent."); }
           catch (err) { toast(err.message); }
@@ -2518,7 +2628,7 @@ async function openSettings() {
       h("button", { class: "control wide", onclick: () => newProjectSheet((p) => { newChatIn(p); }) }, "New project…"),
       h("button", { class: "control wide", onclick: () => orderProjects() }, "Order projects…"));
     kids.push(...machinesSettings());      // machines.js
-    kids.push(...shareSettings());
+    kids.push(...shareSettings(), ...phoneAppSettings());
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
     kids.push(...engineSettings());
@@ -2537,13 +2647,18 @@ async function openSettings() {
     kids.push(...linkSettings());
     if (app.desk) kids.push(...deskSettings());
     else if (store.get("layout")) kids.push(...layoutSettings());
-    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids));
+    // (Not what a part left out: replaceChildren would write a null as "null".)
+    keepFocus(body.parentNode || body, () => body.replaceChildren(...kids.filter((k) => k !== null && k !== undefined && k !== false)));
   };
-  const back = sheet(sheetHead("Settings", app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
+  const back = sheet(sheetHead("Settings", phoneApp && app.desk ? "Amarchy on your tablet" : app.desk ? "Amarchy in this browser" : "Amarchy on your phone"), body);
   back.classList.add("settings");
   back.redraw = () => draw();
   draw("checking");
   if (body.parentNode === document.activeElement) menuFocus(body.parentNode);      // opened with the keys: now there's a first line
+  // The section asked for, just under the sheet's head (it stays on top as the sheet scrolls).
+  const section = at && body.querySelector(`[data-section="${at}"]`);
+  const scroller = section && section.closest(".sheet"), head = scroller && scroller.querySelector(".head");
+  if (scroller) scroller.scrollTop += section.getBoundingClientRect().top - (head ? head.getBoundingClientRect().bottom : scroller.getBoundingClientRect().top) - 8;
   draw();
 }
 
@@ -2709,7 +2824,7 @@ async function openLook() {
       // The desktop app on an Omarchy desktop, wearing its look live: the
       // desktop's own wallpaper is behind the window (theme.css, app.css).
       desktopApp && desktopApp.omarchy && worn.key === "omarchy-live" && wall() === "theme"
-        ? h("p", {}, "In this window, your desktop's own wallpaper, behind it, as behind your terminals.") : null,
+        ? h("p", {}, "In this window, your desktop's own wallpaper, seen through it.") : null,
       h("p", {}, (worn.backgrounds || []).length
         ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
           (info.own ? "the picture you chose." : "choose a picture.")
@@ -2807,6 +2922,9 @@ const routed = { hash: location.hash };
 
 function go(hash) {
   if (!standalone) {
+    // The address there already (the view didn't follow it): no hashchange
+    // would come, so it's gone to all the same.
+    if (location.hash === hash) return route();
     location.hash = hash;
     return;
   }
@@ -2836,13 +2954,53 @@ function routeKey(raw) {
   return id;
 }
 
+// A chat that can't be closed or opened (an error in it) mustn't leave every
+// chat unopenable (Julian's M5, 2026-11-23: no chat opened, by a click or
+// by Enter, until the app started again): it's said (the desktop app keeps
+// it in its log), the open one let go, and it's tried once more; failing
+// still, the page loads again (once a minute at most).
 function route() {
+  try {
+    routeNow();
+  } catch (e) {
+    console.error(`Couldn't go to ${here()}:`, e);
+    routeLetGo();
+    try {
+      routeNow();
+    } catch (again) {
+      console.error(`Couldn't go to ${here()}, again:`, again);
+      routeReload();
+    }
+  }
+}
+
+// The chat open, let go of (closed if it can be).
+function routeLetGo() {
+  const open = [app.session, typeof desk !== "undefined" ? desk.chat : null].filter(Boolean);
+  app.session = null;
+  if (typeof desk !== "undefined") { desk.chat = null; desk.current = null; }
+  for (const c of open) try { c.close(); } catch (e) { /* let go of all the same */ }
+}
+
+function routeReload() {
+  const key = "amarchy-route-reload";
+  try {
+    if (Date.now() - Number(sessionStorage.getItem(key) || 0) < 60000) return;
+    sessionStorage.setItem(key, String(Date.now()));
+  } catch (e) { /* no storage: loaded again all the same */ }
+  keepForReload();
+  location.reload();
+}
+
+function routeNow() {
   if (app.desk) return deskRoute();
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
+  if (m) boardsUI.route = here();      // (a chat opened from a board: back from it, the board)
   const id = m ? routeKey(m[1]) : null;      // <this machine>:<id> is <id>; a moved chat, where it is
   if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
+    letGoOf(app.session.el);
     app.session.close();
     app.session = null;
   }
@@ -2851,6 +3009,7 @@ function route() {
   } else {
     renderHome();
     if (here() === "#/tasks") boardTasks();
+    else boardsRouted(here());
   }
 }
 
@@ -2924,16 +3083,24 @@ async function start() {
   keyedOn(app.desk || matchMedia("(pointer: fine)").matches);
   wearPhoneSize();
   fitViewport();
+  // A notification tapped (the service worker's message; the phone app's
+  // amarchy-open, a chat's link too), or something shared from the phone app.
+  const opened = (d) => {
+    if (d && d.go) {
+      away.told = Date.now();
+      go(new URL(d.go, location.href).hash || "#/");
+    }
+    // A notification about a card: the session's chat shows it (chat.js).
+    if (d && d.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: normKey(d.ask) } }));
+    if (d && d.share) {       // (its sheet comes with the next list, every second or so)
+      openList();
+      shareCheck();
+    }
+  };
+  window.addEventListener("amarchy-open", (e) => opened(e.detail));
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
-    navigator.serviceWorker.addEventListener("message", (e) => {
-      if (e.data && e.data.go) {
-        away.told = Date.now();
-        go(new URL(e.data.go, location.href).hash || "#/");
-      }
-      // A notification about a card: the session's chat shows it (chat.js).
-      if (e.data && e.data.ask) window.dispatchEvent(new CustomEvent("amarchy-ask", { detail: { id: normKey(e.data.ask) } }));
-    });
+    navigator.serviceWorker.addEventListener("message", (e) => opened(e.data));
   }
   try {
     const res = await fetch("/api/state");

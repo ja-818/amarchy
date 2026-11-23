@@ -59,12 +59,15 @@ One board says which one needs you and what for. You answer with a tap.
   provider bills you, never amarchy), sets it up with Claude Code and amarchy, puts it on your
   tailnet and on your board. Then Sign in to Claude there, from the app.
 - **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
-  It texts you like a coworker and puts what needs you on **Tasks**.
+  It texts you like a coworker and keeps what needs you on **Tasks**, as boards: comment on a
+  card and it revises it, write it a task and it helps you get it done. Approving is yours alone.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home
   screen, the same app on a computer, and a desktop app of its own (Linux first, Omarchy at
-  home). All of them work over your private Tailscale network, not the internet.
+  home). All of them work over your private Tailscale network, not the internet. The iPhone
+  and Android apps add answers right on the notification, the share sheet and a widget,
+  end-to-end encrypted through a tiny open-source push relay that can't read them.
 - **At home on Omarchy.** The **Ⓐ** in the bar lights up when a chat needs you and says how
-  many; click it and you're on that chat. **Super + Alt + A** brings amarchy to the front, and
+  many; click it and you're on that chat. **Super + D** brings amarchy to the front, and
   it's in the Omarchy menu. Pick **Omarchy (live)** and the app wears your desktop's theme,
   wallpaper and font, on every device, changing when the desktop's does.
 
@@ -91,6 +94,40 @@ leaves your projects and chats alone. On a computer with a desktop it also build
 **desktop app** ([The desktop app](docs/guide.md#the-desktop-app)), and on Omarchy it puts the
 Ⓐ in the bar, the key and the menu entry ([On Omarchy](docs/guide.md#on-omarchy)).
 
+## Coming from Omarchy
+
+amarchy was made on [Omarchy](https://omarchy.org), and fits Omarchy 4 the way its own pieces
+do. Omarchy's agent tools put one agent in front of you; amarchy runs a dozen of your Claude
+Code agents while you're elsewhere, and calls you only where you're needed. Its install finds
+Omarchy by itself and adds, without editing any of Omarchy's files:
+
+- **the Ⓐ in the bar**: lights up when a chat needs you, says how many; a click opens it.
+- **Super + D** brings amarchy to the front (`amarchy key` picks another), and
+  **Amarchy** is in the Omarchy menu.
+- **Omarchy (live)**: pick it in Settings → Look, and amarchy wears your desktop's theme,
+  wallpaper and font on every device, changing when you switch Omarchy's.
+- **Ctrl + Alt + O**: a chat's terminal in a Ghostty window.
+- While a chat works, the laptop doesn't doze off (the screen still locks, the lid still
+  sleeps it); Tailscale through Omarchy's own (`omarchy-install-service-tailscale`), or
+  amarchy's node without it.
+
+Every chat is Claude Code with your own plan: Omarchy's `omarchy-default-agent claude`
+installs it. Then amarchy, either way:
+
+```sh
+git clone https://github.com/ja-818/amarchy ~/.local/share/amarchy && ~/.local/share/amarchy/install.sh
+```
+
+or as Arch packages, `amarchy-git` and `amarchy-desktop-git` (built from
+[packaging/arch](packaging/arch/PKGBUILD)):
+
+```sh
+git clone https://github.com/ja-818/amarchy && cd amarchy/packaging/arch && makepkg -si && amarchy setup
+```
+
+`amarchy setup --uninstall` (or `install.sh --uninstall`) takes every piece away again.
+More in the guide: [On Omarchy](docs/guide.md#on-omarchy).
+
 ## The app
 
 - **The list**: your chats, each with its name, what it's doing ("Needs your answer",
@@ -114,6 +151,7 @@ On a computer's browser:
 | `Ctrl+Alt+N` | New chat |
 | `Ctrl+Alt+J` / `K` | Next / previous chat |
 | `j` / `k`, `Enter`, `Esc` | On the board: card to card, open it, back (`?`: every key) |
+| `Esc` or `↑` in a chat's box | Up onto the messages to read (`Esc` there: back; never a stop) |
 | `Ctrl+Alt+S` | Search chats |
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |
@@ -124,7 +162,7 @@ On a computer's browser:
 | `Ctrl+Alt+O` | The chat's terminal in a Ghostty window (on a desktop with Ghostty) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
-Every action is also a command: `amarchy help`. On Omarchy, **Super + Alt + A** brings amarchy to
+Every action is also a command: `amarchy help`. On Omarchy, **Super + D** brings amarchy to
 the front from anywhere (`amarchy key` picks another).
 
 ## More
@@ -133,7 +171,7 @@ The **[full guide](docs/guide.md)** covers all of it: [how it works](docs/guide.
 [the chat](docs/guide.md#the-chat), [your phone](docs/guide.md#your-phone),
 [the browser](docs/guide.md#in-a-browser-on-your-computer), [the desktop app](docs/guide.md#the-desktop-app),
 [dictation](docs/guide.md#dictation), [secrets](docs/guide.md#secrets),
-[sleep](docs/guide.md#sleep), [Omarchy](docs/guide.md#on-omarchy), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
+[sleep](docs/guide.md#sleep), [Omarchy](docs/guide.md#on-omarchy), [packages](packaging/README.md), [themes](docs/guide.md#theme), [sounds](docs/guide.md#sound),
 [configuration](docs/guide.md#configure) and [the CLI](docs/guide.md#cli).
 
 [MIT](LICENSE)

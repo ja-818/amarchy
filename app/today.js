@@ -22,9 +22,8 @@
 // each reply ends with (its today: goal, state, asks; bin/amarchy
 // chat_reply). Your commitments are your loops file's (amarchy today
 // --loops), which Today only reads: Done, Chase, Ask and New chat go to your
-// assistant, which keeps it (loop_tell). Your agents' own tasks (amarchy task
-// add) are first in Tasks' Now: a card each, its buttons the agent's
-// (todayTask).
+// assistant, which keeps it (loop_tell). Tasks is your boards (boards.js):
+// your agents' cards of what depends on you, your commitments among them.
 
 const TODAY_STALE = 2 * 86400;      // s idle before a chat is stalled: Close or Ask status (bin/amarchy STALE_DAYS)
 const TODAY_NUDGE = "Where does this stand? Finish what's left for this chat's goal, or tell me what you need from me to close it.";
@@ -42,7 +41,6 @@ const todayUI = {
   needsOnly: false,     // Chats shows only what needs you (the filter beside your streak)
   seen: new Set(),      // chats you marked seen here (until the view says so)
   expand: new Set(),    // loops whose whole text you opened
-  tasksGone: new Map(), // your agents' tasks whose button you pressed: id -> when (off Tasks, its Undo up or its press on its way)
   version: 0,           // bumped by what's done here: drawn again (todayFill)
 };
 
@@ -147,9 +145,15 @@ function todaySort(v, ss) {
   const prio = { high: 0, normal: 1, low: 2 };
   const you = (s) => (s.today || {}).you_at || s.created || 0;
   const rank = (s) => (s.assistant === "main" ? 0 : s.assistant === "agent" ? 1 : 2);
-  const at = new Map(ss.map((s, i) => [s.id, i]));
-  return ss.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? at.get(a.id) - at.get(b.id) : 0)
-    || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || you(b) - you(a) || (a.id < b.id ? -1 : 1));
+  // Every machine's board in the same order, whichever machine draws it: its
+  // assistants and agents machine by machine (by name, not this one first),
+  // each as its own machine orders them; a tie by machine and id.
+  const machine = (s) => s.machine || (v && v.machine) || "";
+  const key = (s) => `${machine(s)}:${s.id}`;
+  const at = new Map(ss.map((s, i) => [s, i]));
+  return ss.slice().sort((a, b) => rank(a) - rank(b)
+    || (rank(a) < 2 ? machine(a).localeCompare(machine(b)) || at.get(a) - at.get(b) : 0)
+    || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || you(b) - you(a) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
 }
 
 // At work: Claude working, or what it started running (status "running":
@@ -160,8 +164,7 @@ function todayBusy(s) { return s.status === "working" || s.status === "running";
 // orders them: but for one whose button you pressed, or whose time ran out
 // (the server's next list says so too, in a second).
 function todayTasks(v) {
-  const now = Date.now() / 1000;
-  return ((v && v.today && v.today.tasks) || []).filter((t) => !todayUI.tasksGone.has(t.id) && (!t.until || t.until > now));
+  return typeof boardsCount === "function" ? boardsCount(v) : 0;
 }
 
 // The chats and loops, sorted into Today's parts.
@@ -216,7 +219,7 @@ function todayCount(v, only = null) {
   if (!v) return 0;
   const p = todayParts(v);
   // (Not a chat on a machine that's off: nothing answers it until it's back. Its card still shows, dimmed.)
-  const chats = [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)).length, tasks = p.tasks.length + p.dueNow.length + p.chaseNow.length;
+  const chats = [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)).length, tasks = p.tasks + p.dueNow.length + p.chaseNow.length;
   return only === "chats" ? chats : only === "tasks" ? tasks : chats + tasks;
 }
 
@@ -355,7 +358,7 @@ function todayPermit(s, choice) {
   todayRedraw();
   todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
     seenNow(s.id);
-    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice })
+    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice }).then(waitsSaid)
       .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }
@@ -477,7 +480,7 @@ function todayAgent(s) {
   const sub = now ? h("span", { class: `tcard-presence t-${now.tone}` }, now.text)
     : said ? h("span", { class: "tcard-last" }, said) : h("span", { class: "tcard-last none" }, "No messages yet");
   const time = s.said_at ? h("span", { class: `tcard-time${n ? " on" : ""}` }, uiChatTime(s.said_at)) : null;
-  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "row"), title: s.assistant_name || s.task || "Assistant",
+  return uiCard({ kind: "assistant", hue: todayHue(s.repo), lead: avatar(s, "list"), title: s.assistant_name || s.task || "Assistant",
     sub, pill: time, count: n, id: s.id, open: () => todayOpen(s), unseen: false,
     label: [s.assistant_name || "Assistant", now ? now.text : said ? `said: ${said}` : "", n ? `${n} unread` : ""].filter(Boolean).join(", "),
     body: ask ? ask.body : [], actions: ask ? ask.actions : [uiPreview(s)] });
@@ -567,31 +570,6 @@ function todayLoop(l, v) {
       uiButton("Done", () => act("done"), !chase && late, "loop-done")] });
 }
 
-// One of your agents' tasks (amarchy task add): its agent (its picture, its
-// name), what, its note, then its links (a new tab: the task stays) and its
-// buttons, each the agent's own message for it (todayTaskPress). Its head
-// opens the agent's chat. How long it has left, when it has a time: past
-// it, it's gone (todayTasks).
-function todayTask(t) {
-  const s = rowOf(t.agent) || { id: t.agent, repo: "", assistant: "agent", assistant_name: t.agent_name };
-  const name = t.agent_name || s.assistant_name || "Your agent";
-  const when = todayTaskWhen(t);
-  const links = (t.links || []).map((l, i) => h("a", { class: `tbtn task-link${i === 0 ? " primary" : ""}`, href: l.url, target: "_blank", rel: "noopener",
-    title: l.url, onclick: (e) => { e.stopPropagation(); if (typeof openLink === "function") { e.preventDefault(); openLink(l.url); } } }, glyph("preview"), l.label));
-  const buttons = (t.buttons || []).map((b, i) => {
-    const btn = uiButton(b.label, () => todayTaskPress(t, i), !links.length && i === 0, "today-opt task-btn");
-    btn.title = `Sends ${name}: ${b.send}`;
-    return btn;
-  });
-  const card = uiCard({ kind: "task", hue: todayHue(s.repo), lead: avatar(s, "small"), chip: name, title: t.title, label: `${name}: ${t.title}`, on: rowOf(t.agent),
-    pill: when ? uiPill(when.text, when.tone) : null, id: null, unseen: false,
-    open: () => { const chat = rowOf(t.agent); if (chat) todayOpen(chat); },
-    body: [t.note ? h("p", { class: "tcard-text", html: inline(t.note) }) : null],
-    actions: [...links, ...buttons] });
-  card.dataset.task = t.id;
-  return card;
-}
-
 // How long a task has left, in its pill: "Until 3:40 PM", "12 min left"
 // (red the last ten), "Under a minute"; one with no time, how old it is.
 function todayTaskWhen(t) {
@@ -601,36 +579,6 @@ function todayTaskWhen(t) {
   if (left < 3600) { const m = Math.floor(left / 60); return { text: `${m} min left`, tone: m < 10 ? "late" : "quiet" }; }
   const at = autoNext(t.until);
   return { text: `Until ${at.replace(/^at /, "")}`, tone: "quiet" };
-}
-
-// A task's button: its card says so a moment (a tick, the button's words),
-// then it's off Tasks, with Undo; after that its message goes to the agent
-// (waking it) and the task is done. Refused (the agent took it down, its
-// time ran out): back on Tasks, and why.
-async function todayTaskPress(t, i) {
-  const b = (t.buttons || [])[i];
-  if (!b || todayUI.tasksGone.has(t.id)) return;
-  const name = t.agent_name || "your agent";
-  todayUI.tasksGone.set(t.id, Date.now());
-  const card = [...document.querySelectorAll(`.tcard[data-task="${CSS.escape(t.id)}"]`)].find((c) => c.offsetParent);
-  if (card) {
-    card.classList.add("completing");
-    card.append(h("div", { class: "tcard-complete", "aria-hidden": "true" }, h("span", { class: "tick" }, glyph("check")), h("b", {}, b.label)));
-    await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 150 : 450));
-  }
-  // The keys were in it (Enter, a click on a computer): on the card that takes
-  // its place, the card itself; not the button at the same place in it, which
-  // another Enter would press.
-  const keyed = !!card && card.contains(document.activeElement);
-  if (keyed) document.activeElement.blur();
-  todayRedraw();
-  if (keyed && boardOn()) { const go = boardMark(); if (go) boardFocus(go); }
-  const back = () => { todayUI.tasksGone.delete(t.id); todayRedraw(); };
-  todayUndo(`${b.label}: sent to ${name}`, () => {
-    api(machinePath(t.agent, "/api/tasks/press"), { id: t.tid || t.id, button: i }, { keepalive: true })
-      .then(() => setTimeout(() => todayUI.tasksGone.delete(t.id), 15000))      // (gone from the server's list by then)
-      .catch((e) => { back(); toast(e.message); });
-  }, back, TODAY_UNDO, { hide: true });
 }
 
 // A chat: its project, its name, where it stands; its goal (and in Tasks
@@ -1007,13 +955,10 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // Each card with what it shows of its chat or task (todayData): drawn
   // again, the same one is kept (todayPatch).
   const tk = (draw, ...more) => (s) => { const n = board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more); n.todayData = todayRowKey(s); return n; };
-  const loop = (l) => { const n = todayLoop(l, v); n.todayData = JSON.stringify([l, (v.today.sent || {})[l.key] || null, (v.today.assistant || {}).name]); return n; };
-  const task = (t) => { const n = todayTask(t); n.todayData = todayTaskKey(t); return n; };
-  const hasLoops = !!(v.today && v.today.source);
   const nodes = [];
   const needing = (s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s);
   // On Chats, Needs you beside your streak; on Tasks, what's for now.
-  if (top) nodes.push(h("div", { class: "today-summary" }, only === "chats"
+  if (top && !(only === "tasks" && boardsUI.open)) nodes.push(h("div", { class: "today-summary" }, only === "chats"
     ? uiFilter({ label: "Needs you", count: todayCount(v, "chats"), on: todayUI.needsOnly, title: "Only what needs you (o)", act: () => todayNeedsOnly(!todayUI.needsOnly) })
     : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
   // Notifications don't reach this device (app.js pushNotice): said above your chats.
@@ -1050,18 +995,8 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
       extra: !on && waiting ? uiPill(`${waiting} need${waiting === 1 ? "s" : ""} you`, "ask") : null }, put.map(cardOf)));
     return nodes.filter(Boolean);
   }
-  // Your tasks: what's for now (your agents' first: theirs have a time), then the rest.
-  const needs = p.tasks.length + p.dueNow.length + p.chaseNow.length;
-  nodes.push(uiSection("yours", "Now", { count: needs }, p.tasks.map(task), p.chaseNow.map(loop), p.dueNow.map(loop)));
-  if (!needs) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
-  nodes.push(uiSection("chase", "Waiting on others", { count: p.waiting.length, fold: true }, p.waiting.map(loop)));
-  nodes.push(uiSection("week", "Later this week", { count: p.week.length, fold: true }, p.week.map(loop)));
-  nodes.push(uiSection("later", "Further out", { count: p.later.length, fold: false }, p.later.map(loop)));
-  nodes.push(uiSection("someday", "Someday", { count: p.someday.length, fold: false }, p.someday.map(loop)));
-  if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
-  if (!hasLoops) nodes.push(h("p", { class: "today-note" }, "Your tasks show here from your loops file: set it in ",
-    h("button", { class: "text-btn", type: "button", onclick: () => openSettings() }, "Settings → Today"), "."));
-  else if (!v.today.assistant) nodes.push(h("p", { class: "today-note" }, "Make one of your chats your assistant to mark tasks done from here."));
+  // Tasks: your boards (boards.js), and what waits on you on each.
+  nodes.push(...boardsNodes(v));
   return nodes.filter(Boolean);
 }
 
@@ -1086,9 +1021,9 @@ function todayNeedsOnly(on) {
 function todayKey(v) {
   if (!v) return `off|${app.failed}`;
   const m = missionsNow();
-  // A task's pill says its minutes left: drawn again each minute while there's one (the timer by todayTaskKey).
-  const minute = ((v.today || {}).tasks || []).length ? Math.floor(Date.now() / 60000) : 0;
-  return JSON.stringify([todayUI.version, new Date().toDateString(), minute, v.today, v.needs, todayUI.needsOnly,
+  // A card's pill says its minutes left: drawn again each minute while there's one.
+  const minute = boardsTimed(v) ? Math.floor(Date.now() / 60000) : 0;
+  return JSON.stringify([todayUI.version, new Date().toDateString(), minute, v.today, v.needs, todayUI.needsOnly, boardsKey(),
     [m.n, m.streak, m.goal, m.total], (v.sessions || []).map((s) => s.id).join(), (v.sessions || []).map((s) => [todayRowKey(s), todayTimes(s)])]);
 }
 
@@ -1106,17 +1041,11 @@ function todayRowKey(s) {
     s.moving || null, s.move_error || null]);
 }
 
-// What a task's card shows: the task, its time as said, its agent's name and picture.
-function todayTaskKey(t) {
-  const s = rowOf(t.agent) || {};
-  return JSON.stringify([t, todayTaskWhen(t), s.picture, s.assistant_name, s.assistant, s.repo]);
-}
-
 // While a task has a time, Tasks says how long it has left: looked at again
 // every 20 seconds (drawn again only when what it says changed, todayFill),
 // and its count with it.
 setInterval(() => {
-  if (document.visibilityState !== "visible" || !app.view || !((app.view.today || {}).tasks || []).length) return;
+  if (document.visibilityState !== "visible" || !app.view || !boardsTimed(app.view)) return;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
   if (typeof modeButtons === "function") modeButtons();
 }, 20000);
@@ -1134,8 +1063,9 @@ function boardTabNow() { return typeof board !== "undefined" && board.tab === "t
 // The board (tasks.js) is the home, on the phone as on a computer.
 function boardOn() { return typeof board !== "undefined" && !!board.el; }
 
-// Today into its box, if what it shows changed, keeping where it's scrolled to.
-function todayFill(box, force) {
+// Today into its box, if what it shows changed, keeping where it's scrolled
+// to (top: where that is, known already: the page isn't laid out to ask).
+function todayFill(box, force, top = null) {
   const onBoard = box.classList.contains("board-today");
   // Under a computer's open chat the board isn't in sight: drawn once it's
   // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
@@ -1152,7 +1082,7 @@ function todayFill(box, force) {
   const tab = (box.dataset.key || "").startsWith(`${only}|`);      // it shows this tab now (not another, a search, the welcome)
   box.dataset.key = key;
   const scroller = box.closest(".scroll, .board-scroll");
-  const top = scroller ? scroller.scrollTop : 0;
+  if (top === null) top = scroller ? scroller.scrollTop : 0;
   // A tab as it was last drawn, when nothing changed since (Chats, Tasks,
   // Chats again): its cards as they were, not drawn again.
   box.drawn = box.drawn || new Map();
@@ -1203,9 +1133,11 @@ function todayShape(el) {
   return el.outerHTML.replace(/ data-f="\d+"/g, "").replace(/ ui-in(?=")/g, "");      // (the button the keys are on in it: not a change)
 }
 
-// Drawn again where it shows: something was done here.
-function todayRedraw() {
-  todayUI.version++;
+// Drawn again where it shows: something was done here. changed: what was
+// done isn't in the rows (todayKey), so drawn again whatever they say; a
+// row's own change (aheadDrawn) draws only once its cards differ.
+function todayRedraw(changed = true) {
+  if (changed) todayUI.version++;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
   if (typeof modeButtons === "function") modeButtons();      // the tabs' counts
   if (typeof markWaiting === "function") markWaiting();      // the tab's title, the icon's badge (manage.js)

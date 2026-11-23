@@ -1,0 +1,97 @@
+# The iPhone app to TestFlight: `fastlane beta`, from the workflow's
+# `release` job (by hand only), or from a Mac with the same environment.
+#
+# Signing, one way only: an Apple Distribution certificate you made once
+# (its .p12, base64, and its password) imported into a keychain of the run's
+# own; App Store provisioning profiles for the app and its three extensions
+# made or fetched with the App Store Connect API key (sigh), the key also
+# uploading the build. No Apple ID password, no match repository.
+#
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8    the API key (App Manager role): its id, its issuer, the .p8 file's text
+#   APPLE_TEAM_ID                            the team (10 characters)
+#   IOS_DIST_CERT_P12, IOS_DIST_CERT_PASSWORD the Apple Distribution certificate, base64 of its .p12, and its password
+#   AMARCHY_RELAY                            the push relay built in (https://...)
+
+require "base64"
+require "securerandom"
+require "tmpdir"
+
+default_platform(:ios)
+
+# Each target the archive signs, and its bundle id (project.yml).
+TARGETS = {
+  "Amarchy" => "io.github.ja818.amarchy",
+  "AmarchyNotifications" => "io.github.ja818.amarchy.notifications",
+  "AmarchyWidget" => "io.github.ja818.amarchy.widget",
+  "AmarchyShare" => "io.github.ja818.amarchy.share",
+}.freeze
+
+KEYCHAIN = "amarchy-release.keychain"
+
+platform :ios do
+  desc "Signs a Release build and uploads it to TestFlight"
+  lane :beta do
+    %w[ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID IOS_DIST_CERT_P12 IOS_DIST_CERT_PASSWORD AMARCHY_RELAY].each do |name|
+      UI.user_error!("#{name} isn't set: phone/ios/store/README.md says where it comes from") if ENV[name].to_s.strip.empty?
+    end
+    relay = ENV["AMARCHY_RELAY"].strip.chomp("/")
+    UI.user_error!("AMARCHY_RELAY must be an https:// address") unless relay.start_with?("https://")
+    team = ENV["APPLE_TEAM_ID"].strip
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_content: ENV["ASC_KEY_P8"],
+      duration: 1200,
+      in_house: false
+    )
+
+    # The certificate, in a keychain of this run's own (gone at the end).
+    password = SecureRandom.hex(24)
+    create_keychain(name: KEYCHAIN, password: password, default_keychain: false, unlock: true,
+                    timeout: 3600, lock_when_sleeps: false, add_to_search_list: true)
+    p12 = File.join(Dir.tmpdir, "amarchy-distribution.p12")
+    File.binwrite(p12, Base64.decode64(ENV["IOS_DIST_CERT_P12"]))
+    import_certificate(certificate_path: p12, certificate_password: ENV["IOS_DIST_CERT_PASSWORD"],
+                       keychain_name: KEYCHAIN, keychain_password: password)
+    File.delete(p12)
+
+    # An App Store profile for each target (made the first time), and the
+    # project signed with them by hand.
+    profiles = {}
+    TARGETS.each do |target, bundle_id|
+      get_provisioning_profile(api_key: api_key, app_identifier: bundle_id, team_id: team,
+                               output_path: Dir.tmpdir, filename: "#{target}.mobileprovision")
+      profiles[bundle_id] = lane_context[SharedValues::SIGH_NAME]
+      update_code_signing_settings(path: "Amarchy.xcodeproj", targets: [target], use_automatic_signing: false,
+                                   team_id: team, code_sign_identity: "Apple Distribution",
+                                   profile_name: lane_context[SharedValues::SIGH_NAME], bundle_identifier: bundle_id)
+    end
+
+    # The next build number after TestFlight's last.
+    build = latest_testflight_build_number(api_key: api_key, app_identifier: TARGETS["Amarchy"], initial_build_number: 0) + 1
+
+    build_app(
+      project: "Amarchy.xcodeproj",
+      scheme: "Amarchy",
+      configuration: "Release",
+      clean: true,
+      output_directory: "build",
+      output_name: "Amarchy.ipa",
+      export_method: "app-store",
+      export_options: { signingStyle: "manual", teamID: team, provisioningProfiles: profiles },
+      xcargs: "DEVELOPMENT_TEAM=#{team} CURRENT_PROJECT_VERSION=#{build} AMARCHY_RELAY='#{relay}' " \
+              "OTHER_CODE_SIGN_FLAGS='--keychain #{KEYCHAIN}'"
+    )
+
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+
+  after_all do
+    delete_keychain(name: KEYCHAIN) if File.exist?(File.expand_path("~/Library/Keychains/#{KEYCHAIN}-db"))
+  end
+
+  error do
+    delete_keychain(name: KEYCHAIN) if File.exist?(File.expand_path("~/Library/Keychains/#{KEYCHAIN}-db"))
+  end
+end

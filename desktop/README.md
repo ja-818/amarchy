@@ -14,7 +14,7 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: see-through as the terminals, its look live drawn without a wallpaper of its own) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, what draws its GL (no GPU: its page painted on the CPU, the page told, `--graphics`), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it) |
 | `src/sound.rs` | What its page can play: GStreamer asked at start; without its plugins, no media in the page (one would end it), its sounds played by the app (`pw-play`), said once, and a start again once they're installed |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
@@ -30,19 +30,31 @@ opened, what it opens").
 `~/.local/state/amarchy/desktop/desktop.log` (the last 2 MB, then
 `desktop.log.1`; the tray's **Its log** opens it): what it does and why
 (which board it opens, a start handed over, a notice's button that didn't
-go), the machine and its GPU driver, and everything GTK, WebKit and
-GStreamer write to stderr, a panic too. Readable without a terminal open.
+go), the machine and its GPU driver, everything GTK, WebKit and GStreamer
+write to stderr, a panic too, and what goes wrong in its page (`page: …`:
+an error nothing caught, with where; a promise nothing caught;
+`console.error`; at most 60 a minute). Readable without a terminal open.
 
 - **A start never does nothing.** A second start hands its arguments to the
-  running one and ends at once; the running one takes them up on its
-  window's thread, and makes its window again if it's gone.
+  running one and ends at once (asking GStreamer nothing, logging only that
+  it started); the running one takes them up on its window's thread, and
+  makes its window again if it's gone. One it starts in its place
+  (`--restart`, the watchdog) writes its stderr where this one's went, never
+  into this one's pipe, which ends with it (`AMARCHY_DESKTOP_STDERR=given`
+  says so). Started in another's place by a build before 2026-11-22 22:48,
+  which handed over its own pipe, it writes to the journal itself (a stream
+  of its own, as `amarchy-desktop`). Wherever its stderr goes, a line goes on
+  only when it's taken at once: a pipe nobody reads, full, never holds it up
+  (its log has every line).
 - **Its page's process crashes**: the page loads again, and the log says
   why, by what that process wrote last. GStreamer's words before it: a sound
   or a video ended it (below), so its page loads no media from then on and
   the GPU isn't blamed. No sign why: twice in ten minutes, it draws the safe
   way from then on (WebKit's DMA-BUF renderer and compositing off, its
   hardware acceleration never), kept in `rendering.json` beside the log;
-  `AMARCHY_DESKTOP_GPU=1` tries the GPU again. Three crashes in two minutes:
+  `AMARCHY_DESKTOP_GPU=1` tries the GPU again. With no GPU here (its GL the
+  CPU's) there's no driver to blame, and that way is slower still: it draws
+  on as it does. Three crashes in two minutes:
   its own page says so, with the log's path.
 - **GStreamer without its plugins** (`gst-plugins-good`: WebKit's audio
   sink; `gst-plugins-base`: the `.oga` chimes; `gst-plugin-pipewire`: the
@@ -57,6 +69,16 @@ GStreamer write to stderr, a panic too. Readable without a terminal open.
   and when dictation can't start; once they're installed it sees GStreamer's
   plugins change and starts again by itself. `AMARCHY_DESKTOP_SOUND=1` lets
   the page play them even so.
+- **No GPU to draw with** (a GPU whose Linux driver isn't there yet, as
+  Apple's M5 today; a virtual machine): Mesa runs WebKit's GL on the CPU
+  (llvmpipe), every frame a GPU's work emulated. It asks EGL what draws its
+  GL before the window, in a process of its own (`amarchy-desktop
+  --graphics` says it too), and there its page's tiles are painted with
+  Skia's CPU raster (`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1`), compositing kept
+  (without it WebKit 2.54 paints on the page's own thread, and held keys came
+  out seconds late). `AMARCHY_DESKTOP_GPU=1` paints through GL anyway. The
+  page itself draws as few frames as it can, anywhere: what moves for as long
+  as it's on screen moves with the spinners' tick (app.js, the beat).
 - **Its window's thread stuck** (a start handed over not taken up in 8 s, or
   no answer for 45 s): it starts again as a new process, on the chat it was
   asked for, and the stuck one ends.
@@ -84,16 +106,19 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart), its self-healing, amarchy's own
                                                     # Tailscale node (its sign-in, through its proxy),
-                                                    # on an Omarchy desktop (no wallpaper of its own)
+                                                    # on an Omarchy desktop (see-through: the desktop through
+                                                    # it, under picom when it's installed), how it draws
+                                                    # (no GPU: painted on the CPU, light at work, held keys
+                                                    # in as pressed), its stderr (a pipe nobody reads)
 python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5; its core
                                                     # elements only; none at all): no media in the page,
                                                     # nothing ends it, its sounds played by the app, said
                                                     # once; installed: it starts again; a sound's crash
                                                     # isn't blamed on the GPU
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
-python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
-                                                    # built anyway without the sounds' and mic's, mise's
-                                                    # Rust, why
+python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404,
+                                                    # a system update half done): built anyway without
+                                                    # the sounds' and mic's, mise's Rust, why
 python3 test/compare.py                             # the window next to Chromium, phone and wide: the
                                                     # same layout (boxes to 3 px), side by side pictures
 ```
