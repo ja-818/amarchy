@@ -111,13 +111,14 @@ async function run(browser, port, layout) {
   await back(p);
   await until(p, () => !/asks you/.test((document.querySelector(".board-today .tcard[data-id=fireship-fireship] .tcard-sub") || {}).innerText || ""));
 
-  // Its keys on the board: x and p do nothing to it.
+  // Its keys on the board: Ctrl+Alt+W (Complete) does nothing to it, nor x and p (plain keys only move).
   await p.evaluate(() => { const c = document.querySelector(".board-today .tcard[data-id=fireship-fireship] .tcard-head"); c.focus(); });
   const before = p.posts.length;
+  await p.keyboard.press("Control+Alt+KeyW");
   await p.keyboard.press("x");
   await p.keyboard.press("p");
   await sleep(400);
-  check(where, !(await p.$(".mission")) && !p.posts.slice(before).some((x) => /close|priority/.test(x.url)), "x and p on it: no Complete, no priority");
+  check(where, !(await p.$(".mission")) && !p.posts.slice(before).some((x) => /close|priority/.test(x.url)), "Ctrl+Alt+W, x and p on it: no Complete, no priority");
   await p.evaluate(() => todayComplete(row("fireship-fireship")));
   await sleep(300);
   check(where, !(await p.$(".mission")) && !p.posts.some((x) => /fireship-fireship\/close/.test(x.url)), "Complete asked anyway: it stays");

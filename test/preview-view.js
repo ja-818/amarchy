@@ -167,12 +167,12 @@ async function run(browser, port, layout) {
     await p.evaluate(() => { window.__opened.length = 0; });
     await p.keyboard.press("Enter");
     check(layout, await until(p, (u) => window.__opened.includes(u), URL_APP) && await p.evaluate(() => !document.querySelector(".ui-dropdown")), "↵ picks it");
-    // r on its card (what it made): with no Review, its Previews.
+    // Ctrl+Alt+P on its card: its Previews.
     await p.evaluate(() => { const s = rowOf("proj-done"); s.today = { ...s.today, links: [] }; todayRedraw(); });
     await until(p, () => !document.querySelector(".tcard[data-id=proj-done] a.tbtn"));
     await p.evaluate(() => boardFocus(document.querySelector(".tcard[data-id=proj-done] .today-go")));
-    await p.keyboard.press("r");
-    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "r on its card: its dropdown");
+    await p.keyboard.press("Control+Alt+KeyP");
+    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "Ctrl+Alt+P on its card: its dropdown");
     await p.keyboard.press("Escape");
     await stands("stopped", "proj-done", "storybook");
   }
@@ -283,8 +283,8 @@ async function run(browser, port, layout) {
 
   if (layout === "wide") {
     await p.evaluate(() => { window.__opened.length = 0; });
-    await p.keyboard.press("Control+Alt+KeyR");
-    check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "Ctrl+Alt+R opens it");
+    await p.keyboard.press("Control+Alt+KeyP");
+    check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "Ctrl+Alt+P opens it");
     await p.evaluate(() => deskMenu());
     await until(p, () => !!document.querySelector(".picker"));
     const items = await p.evaluate(() => document.querySelector(".picker").innerText);
@@ -326,8 +326,8 @@ async function run(browser, port, layout) {
   check(layout, await until(p, () => !document.querySelector(".ui-dropdown")) && await p.evaluate(() => !!document.querySelector(".head-btns .ui-previews") && (desk.current === "proj-done" || (app.session && app.session.id === "proj-done"))),
         "Esc closes it, and the chat stays open");
   if (layout === "wide") {
-    await p.keyboard.press("Control+Alt+KeyR");
-    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "Ctrl+Alt+R: its dropdown, from the keys");
+    await p.keyboard.press("Control+Alt+KeyP");
+    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "Ctrl+Alt+P: its dropdown, from the keys");
     await p.keyboard.press("Escape");
     await p.evaluate(() => sessionMenu(rowOf("proj-done")));
     await until(p, () => !!document.querySelector(".picker"));

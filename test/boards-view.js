@@ -360,10 +360,15 @@ async function run(browser, base, layout) {
   }
   shapes[`${where} board`] = await p.evaluate(SHAPE);
 
-  // Back: Tasks' list again (Esc on a computer, its Back).
-  if (layout === "wide") { await p.evaluate(() => document.activeElement && document.activeElement.blur()); await p.keyboard.press("Escape"); }
-  else await p.click(".ui-page-back");
-  check(where, await until(p, () => !document.querySelector(".ui-kanban") && !!document.querySelector(".board-today .bwrite-wrap")), `${layout === "wide" ? "Esc" : "Back"}: Tasks' list again`);
+  // Back: Tasks' list again (Ctrl+Alt+← on a computer, its Back). Esc isn't back: it only stops a chat.
+  if (layout === "wide") {
+    await p.evaluate(() => document.activeElement && document.activeElement.blur());
+    await p.keyboard.press("Escape");
+    await sleep(200);
+    check(where, !!(await p.$(".ui-kanban")), "Esc on it: nothing (it stops a chat, and only that)");
+    await p.keyboard.press("Control+Alt+ArrowLeft");
+  } else await p.click(".ui-page-back");
+  check(where, await until(p, () => !document.querySelector(".ui-kanban") && !!document.querySelector(".board-today .bwrite-wrap")), `${layout === "wide" ? "Ctrl+Alt+←" : "Back"}: Tasks' list again`);
 
   // Write a task: on Jaken's board, Jaken told.
   await p.fill(".bwrite-wrap textarea", "Renew the car insurance\nIt ends Dec 1");

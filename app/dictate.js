@@ -553,7 +553,7 @@ function dictationSettings(draw) {
       if (d.fix) kids.push(h("button", { class: "control wide", onclick: () => copyText(d.fix).then(() => toast(`Copied: ${d.fix}`)) }, "Copy the command"));
     }
   }
-  kids.push(h("p", {}, app.desk ? "Ctrl+Alt+Space dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key) works in every box too."
+  kids.push(h("p", {}, matchMedia("(hover: hover) and (pointer: fine)").matches ? "Ctrl+Alt+D dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key, or Omarchy's Alt+Space) works in every box too."
                                 : "The keyboard's own dictation (its mic key) works in every box too."));
   return kids;
 }

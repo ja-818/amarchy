@@ -140,23 +140,25 @@ More in the guide: [On Omarchy](docs/guide.md#on-omarchy).
 
 ## The keys that matter
 
-On a computer's browser:
+On a computer, three rules: **Ctrl+Alt + a key does things**, from anywhere, even
+while you type (as Super does on Omarchy); **Esc stops Claude**, as in Claude Code,
+and nothing else; every other key only moves, or types.
 
 | Key | |
 | --- | --- |
-| `Ctrl+Alt+N` | New chat |
-| `Ctrl+Alt+J` / `K` | Next / previous chat |
-| `j` / `k`, `Enter`, `Esc` | On the board: card to card, open it, back (`?`: every key) |
-| `Esc` or `↑` in a chat's box | Up onto the messages to read (`Esc` there: back; never a stop) |
-| `Ctrl+Alt+S` | Search chats |
-| `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
-| `Ctrl+Alt+←` / `→` | The chat / the terminal |
-| `Ctrl+Alt+R` | Open the chat's preview (of several: pick one) |
-| `Ctrl+Alt+Up` / `Down` | Moves the chat a step: For later, Now, Pinned |
-| `Ctrl+Alt+A` | Go to a chat, by its name |
-| `Ctrl+Alt+X` | Complete the chat's mission (close it, with Undo) |
-| `Ctrl+Alt+O` | The chat's terminal in a Ghostty window (on a desktop with Ghostty) |
-| `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
+| `Ctrl+Alt+←` / `→` | Back to the board / into the chat lit |
+| `Ctrl+Alt+↑` / `↓` | The chat before / after |
+| `Ctrl+Alt+↵` | New chat |
+| `Ctrl+Alt+Space` | **The amarchy menu: everything else, and any chat by its name** |
+| `Ctrl+Alt+W` | Complete the chat's mission (close it, with Undo) |
+| `Ctrl+Alt+T` | The chat's terminal (again: back to the chat) |
+| `Ctrl+Alt+P` | Open the chat's preview (of several: pick one) |
+| `Ctrl+Alt+D` | Dictate into the chat (hold it, or tap it and tap again) |
+| `Ctrl+Alt+K` | Every key |
+| `Esc` | Stop Claude (on its question: no) |
+| `j` / `k`, `Enter` | Card to card, message to message; open it, press it |
+
+A chat opens in its box: `↑` goes up onto its messages, `↓` on the latest back down.
 
 Every action is also a command: `amarchy help`. On Omarchy, **Super + D** brings amarchy to
 the front from anywhere (`amarchy key` picks another).

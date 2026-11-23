@@ -377,7 +377,7 @@ takes it away; docs/guide.md, "On Omarchy"):
   amarchy tailscale switch [<account>]  the accounts signed in here (* the one in use), or switch to one
   amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a real Ghostty window on its desktop: tmux
                                         attached to its terminal (or Claude's pane); again, that window to the
-                                        front. Ctrl+Alt+O in the app, or a chat's menu → Advanced
+                                        front. In the app: a chat's menu → Advanced
   amarchy awake [on|off] [--json]       while a chat on this machine works, amarchy's app holds off its idle
                                         sleep (systemd-inhibit, "idle" only: the screen still locks, the lid
                                         still sleeps it) and lets go when none does: whether it holds it now,
@@ -21714,9 +21714,8 @@ def app_handler(st, users, address):
             return self.send(200, {})
 
         def desk_action(self, s, what, data):
-            """What the wide layout's keys do to a session: name it
-            (Ctrl+Alt+E), run its command or another one in its terminal
-            (Ctrl+Alt+R, Ctrl+Alt+C), save one."""
+            """What the wide layout's menus do to a session: name it, run its
+            command or another one in its terminal, save one."""
             if what == "rename":
                 title = data.get("title")
                 if data.get("reset") is True:
@@ -21842,7 +21841,7 @@ def app_handler(st, users, address):
             return self.send(200, {}) if r.returncode == 0 else self.error(500, gist(r.stderr or r.stdout))
 
         def add(self, data):
-            """A new project (Ctrl+Alt+P): a repo (owner/repo or a git URL),
+            """A new project (the menu's New project…): a repo (owner/repo or a git URL),
             or an empty one ({new, github})."""
             repo, new = data.get("repo"), data.get("new")
             if isinstance(new, str) and re.fullmatch(r"[\w.-]{1,100}", new) and not new.startswith("-"):
@@ -24381,11 +24380,11 @@ def cmd_tailscale(args):
 
 # ---- a chat in Ghostty
 #
-# One key (Ctrl+Alt+O in the app, or a chat's menu → Advanced → Open in
-# Ghostty; `amarchy ghostty <id>` here) opens a chat of this machine's in a
-# real Ghostty window on this machine's desktop: tmux attached to its session
-# (its terminal, or with claude, Claude's pane), as the app's terminals are. One
-# window per chat: again, the one it has comes to the front (Hyprland).
+# A chat's menu → Advanced → Open in Ghostty (`amarchy ghostty <id>` here)
+# opens a chat of this machine's in a real Ghostty window on this machine's
+# desktop: tmux attached to its session (its terminal, or with claude,
+# Claude's pane), as the app's terminals are. One window per chat: again,
+# the one it has comes to the front (Hyprland).
 
 GHOSTTY_HERE = {"at": 0, "here": False}
 

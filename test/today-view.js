@@ -314,29 +314,33 @@ async function sortChecks(p, where) {
   check(where, await p.evaluate(() => { const d = document.querySelector(".today-forlater-needs"); return !!d && d.open && !!d.querySelector(".tcard[data-id=proj-later]"); }), "For later's in sight too");
   check(where, await p.evaluate(() => !document.querySelector(".today-working")), "and no At work: it doesn't need you");
   await p.screenshot({ path: path.join(SHOTS, `${where}-needs-you.png`) });
+  // Plain keys only move: o isn't the filter any more (its button, or the menu, is).
   await p.keyboard.press("o");
-  check(where, await until(p, () => !todayUI.needsOnly && !!document.querySelector(".today-working")), "o: everything again");
+  await sleep(150);
+  check(where, await p.evaluate(() => todayUI.needsOnly), "o: nothing (plain keys only move)");
+  await p.click(".ui-filter");
+  check(where, await until(p, () => !todayUI.needsOnly && !!document.querySelector(".today-working")), "its button again: everything");
 
-  // Moved by you: p pins, f for later, again back in Now.
-  const key = async (id, k) => { await p.evaluate((id) => boardFocus(document.querySelector(`.tcard[data-id=${id}] .today-go`)), id); await p.keyboard.press(k); };
+  // Moved by you (the chat's menu: Pinned, Now, For later): pinned, for later, back in Now.
+  const prio = (id, level) => p.evaluate(({ id, level }) => priorityNow(row(id), level), { id, level });
   await p.route("**/priority", (r) => r.fulfill({ json: {} }));
-  await key("proj-done2", "p");
-  check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2] .prio.high")), "p: pinned, its flag on");
+  await prio("proj-done2", "high");
+  check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2] .prio.high")), "pinned: its flag on");
   await change("proj-done2", { priority: "high" });
   check(where, await until(p, () => document.querySelector(".today-now .tcard[data-id]").dataset.id === "proj-done2"), "pinned: first in Now");
-  await key("proj-done2", "p");
-  check(where, await until(p, () => !document.querySelector(".tcard[data-id=proj-done2] .prio.high")), "p again: back in Now");
+  await prio("proj-done2", "normal");
+  check(where, await until(p, () => !document.querySelector(".tcard[data-id=proj-done2] .prio.high")), "Now: back in Now");
   await change("proj-done2", { priority: "normal" });
-  await key("proj-done2", "f");
-  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "f: For later");
+  await prio("proj-done2", "low");
+  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "For later");
   await change("proj-done2", { priority: "low" });
   await p.evaluate(() => { document.querySelector(".today-forlater").open = true; });
   await p.screenshot({ path: path.join(SHOTS, `${where}-for-later.png`), fullPage: true });
-  await key("proj-done2", "f");
-  check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2]")), "f again: back in Now");
+  await prio("proj-done2", "normal");
+  check(where, await until(p, () => !!document.querySelector(".today-now .tcard[data-id=proj-done2]")), "Now again: back in Now");
   await change("proj-done2", { priority: "normal", unseen: true });
-  await key("proj-done2", "f");
-  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "f on a new one: seen, so in For later");
+  await prio("proj-done2", "low");
+  check(where, await until(p, () => !!document.querySelector(".today-forlater .tcard[data-id=proj-done2]")), "For later on a new one: seen, so in For later");
   await change("proj-done2", { priority: "normal", unseen: false });
   await p.unroute("**/priority");
   await p.evaluate(() => { document.querySelector(".today-forlater").open = false; uiState.open.delete("forlater"); });
@@ -400,14 +404,14 @@ async function steady(p, where) {
     return { onCard, onHead, id, now: card && card.dataset.id };
   });
   check(where, f.onCard && f.onHead, `the keys stay on their card, and on a group's head, over a redraw (${JSON.stringify(f)})`);
-  // l into a card, l along its buttons, h back, h out; l again, Esc out.
+  // l into a card, l along its buttons, h back, h out; l again, h out (Esc isn't a move).
   const inCard = await p.evaluate(() => { const c = [...document.querySelectorAll(".board-today .tcard")].find((x) => cardInside(x).length >= 2); c.querySelector(".today-go").focus(); return c.dataset.id || "#task"; });
   const at = () => p.evaluate(() => { const a = document.activeElement, c = a.closest(".tcard"); return [a.matches(".today-go") ? "head" : cardInside(c).indexOf(a), (c && c.dataset.id) || "#task"]; });
   const seen = [];
-  for (const k of ["l", "l", "h", "h", "l", "Escape"]) { await p.keyboard.press(k); seen.push(await at()); }
+  for (const k of ["l", "l", "h", "h", "l", "h"]) { await p.keyboard.press(k); seen.push(await at()); }
   const tab = await p.evaluate(() => board.tab);
   check(where, JSON.stringify(seen.map((x) => x[0])) === JSON.stringify([0, 1, 0, "head", 0, "head"]) && seen.every((x) => x[1] === inCard) && tab === "chats",
-        `l into a card and along it, h back and out, Esc out; the tab stays (${JSON.stringify([inCard, seen, tab])})`);
+        `l into a card and along it, h back and out; the tab stays (${JSON.stringify([inCard, seen, tab])})`);
   // The browser's focus lost (the window left for a screenshot and came
   // back, a click on nothing, a button Safari doesn't focus): the card stays
   // lit, and j goes on from it to the next, k back to it.
@@ -451,7 +455,8 @@ async function steady(p, where) {
   await p.evaluate(() => document.activeElement.blur());
   await p.keyboard.press("l");
   const lit2 = await p.evaluate(() => { const l = document.querySelector(".board-today .ui-in"); return l ? cardInside(l.closest(".tcard")).indexOf(l) : -1; });
-  await p.keyboard.press("Escape");
+  await p.keyboard.press("h");
+  await p.keyboard.press("h");
   check(where, lit1 && lit1[0] === 0 && lit1[1] && lit2 === 1, `into a card: its button lit, l goes on from it with the focus lost (${JSON.stringify([lit1, lit2])})`);
   check(where, off && Object.values(moved).every(([a, b]) => a === 1 && b === 2), `focus off the board any way: lit stays, j moves on (${JSON.stringify(moved)})`);
   check(where, r.waited && r.stillWaits && r.ran === 1, `the list's news waits for the finger to lift and its tap (${JSON.stringify(r)})`);
@@ -887,7 +892,13 @@ async function wide(browser, port) {
   // One bar for both: the board's and an open chat's are .ui-bar, their slots one height.
   check(where, await p.evaluate(() => !!document.querySelector(".board-head-in.ui-bar") && !!document.querySelector(".desk-head.ui-bar")), "the board's bar and a chat's are one bar");
   await p.keyboard.press("m");
-  check(where, await until(p, () => !!document.querySelector(".picker") && !/Group & sort/.test(document.querySelector(".picker").innerText)), "m: the Amarchy menu");
+  await sleep(150);
+  check(where, await p.evaluate(() => !document.querySelector(".picker")), "m: nothing (plain keys only move)");
+  await p.keyboard.press("Control+Alt+Space");
+  check(where, await until(p, () => !!document.querySelector(".picker") && !/Group & sort/.test(document.querySelector(".picker").innerText)), "Ctrl+Alt+Space: the Amarchy menu");
+  check(where, await p.evaluate(() => !/Refund: old order/.test(document.querySelector(".picker").innerText)), "its chats aren't in it before you type");
+  await p.keyboard.type("refund");
+  check(where, await until(p, () => /Refund: old order/.test(document.querySelector(".picker").innerText)), "typed: the chat by its name");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".picker"));
   await p.keyboard.press("Escape");
@@ -944,7 +955,7 @@ async function wide(browser, port) {
   if (shapes.phoneHead) check("both", wideHead === shapes.phoneHead, `an open chat's head is the same on both${wideHead === shapes.phoneHead ? "" : `\n    phone ${shapes.phoneHead}\n    wide  ${wideHead}`}`);
   await p.evaluate(() => boardBack());
 
-  // Opened: the whole window, its box ready; Back and Esc: the board, where you were.
+  // Opened: the whole window, its box ready; Back and Ctrl+Alt+←: the board, where you were. Esc only stops Claude.
   await p.evaluate(() => document.querySelector(".ticket[data-id=proj-fresh] .today-go").click());
   check(where, await until(p, () => desk.current === "proj-fresh" && getComputedStyle(document.querySelector(".tasks-board")).display === "none"
                                    && !!document.querySelector(".stage .chat")), "a ticket opens over the whole window");
@@ -958,16 +969,30 @@ async function wide(browser, port) {
   check(where, await p.evaluate(() => document.activeElement && document.activeElement.closest(".ticket[data-id=proj-fresh]")), "on the ticket it opened");
   await p.keyboard.press("Enter");
   check(where, await until(p, () => desk.current === "proj-fresh"), "Enter opens it again");
+  check(where, await p.evaluate(() => document.activeElement === desk.chat.input), "opened with Enter: the keys in its box, to write");
+  const stops = () => p.posts.filter((x) => /proj-fresh\/(interrupt|keys)/.test(x.url)).length;
   await p.evaluate(() => document.activeElement.blur());
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => !desk.current), "Esc: back");
-  await p.keyboard.press("Enter");
-  await until(p, () => desk.current === "proj-fresh");
-  check(where, await p.evaluate(() => document.activeElement === desk.chat.input), "opened with Enter: the keys in its box, to write");
+  await sleep(250);
+  check(where, await p.evaluate(() => desk.current === "proj-fresh") && !stops(), "Esc, Claude done: nothing (not back, nothing to stop)");
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  check(where, await until(p, () => !desk.current), "Ctrl+Alt+←: back");
+  check(where, await p.evaluate(() => document.activeElement && document.activeElement.closest(".ticket[data-id=proj-fresh]")), "on the ticket it opened");
+  await p.keyboard.press("Control+Alt+ArrowRight");
+  check(where, await until(p, () => desk.current === "proj-fresh"), "Ctrl+Alt+→: into it again");
   await p.evaluate(() => { desk.chat.row = { ...desk.chat.row, status: "working" }; desk.chat.input.focus(); });
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => !desk.current), "Esc in the box, Claude at work: back too (not a stop)");
-  check(where, !p.posts.some((x) => /proj-fresh\/(interrupt|keys)/.test(x.url)), "and Claude wasn't stopped");
+  await sleep(300);
+  check(where, stops() === 1 && await p.evaluate(() => desk.current === "proj-fresh"), `Esc in the box, Claude at work: a stop, as in Claude Code; the chat stays open (${stops()})`);
+  await p.evaluate(() => document.activeElement.blur());
+  await p.keyboard.press("Escape");
+  await sleep(300);
+  check(where, stops() === 2, `Esc with the keys nowhere in it: a stop too (${stops()})`);
+  await p.evaluate(() => { desk.chat.input.value = "a draft"; desk.chat.typed(); desk.chat.input.focus(); });
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  check(where, await until(p, () => !desk.current), "Ctrl+Alt+← from the box, typing: back, Claude not stopped") ;
+  check(where, stops() === 2, `and nothing else stopped (${stops()})`);
+  await p.evaluate(() => store.set("draft:proj-fresh", ""));
 
   // Sent from an open chat: back to the board, it's off your move, the next lit with the keys.
   await p.evaluate(() => todayOpen(row("proj-quiet")));
@@ -998,27 +1023,27 @@ async function wide(browser, port) {
 
   await sortChecks(p, where);
 
-  // Ctrl+Alt+J / K: from chat to chat in the board's order.
+  // Ctrl+Alt+↓ / ↑: from chat to chat in the board's order.
   await p.evaluate(() => { board.scroll.focus(); });
-  await p.keyboard.press("Control+Alt+KeyJ");
+  await p.keyboard.press("Control+Alt+ArrowDown");
   const j1 = await p.evaluate(() => keyedId());
-  await p.keyboard.press("Control+Alt+KeyJ");
+  await p.keyboard.press("Control+Alt+ArrowDown");
   const j2 = await p.evaluate(() => keyedId());
-  check(where, !!j1 && !!j2 && j1 !== j2, `Ctrl+Alt+J moves from card to card (${j1} → ${j2})`);
+  check(where, !!j1 && !!j2 && j1 !== j2, `Ctrl+Alt+↓ moves from card to card (${j1} → ${j2})`);
   await p.keyboard.press("Enter");
   await until(p, (id) => desk.current === id, j2);
-  await p.keyboard.press("Control+Alt+KeyK");
-  check(where, await until(p, (id) => desk.current === id, j1), "with one open, Ctrl+Alt+K opens the one before");
+  await p.keyboard.press("Control+Alt+ArrowUp");
+  check(where, await until(p, (id) => desk.current === id, j1), "with one open, Ctrl+Alt+↑ opens the one before");
   await p.evaluate(() => boardBack());
   check(where, await p.evaluate(() => board.search.placeholder === "Search"), "the search box says only Search");
 
-  // Ctrl+Alt+X on the board: the open chat closes (with Undo), from its box too.
+  // Ctrl+Alt+W: the open chat closes (with Undo), from its box too.
   await p.evaluate(() => todayOpen(row("proj-quiet")));
   await until(p, () => desk.current === "proj-quiet");
   await p.evaluate(() => desk.chat.input.focus());
-  await p.keyboard.press("Control+Alt+KeyX");
+  await p.keyboard.press("Control+Alt+KeyW");
   check(where, await until(p, () => !desk.current && !!document.querySelector(".undo-toast") && /Closed, not merged: Eval/.test(document.querySelector(".undo-toast").innerText)),
-        "Ctrl+Alt+X: the open chat completes (not merged: said so), with Undo");
+        "Ctrl+Alt+W: the open chat completes (not merged: said so), with Undo");
   await p.evaluate(() => { const m = document.querySelector(".mission"); if (m) m.remove(); });
   await sleep(5600);
   check(where, p.posts.some((x) => /proj-quiet\/close/.test(x.url)), "closed once Undo's gone");
@@ -1055,7 +1080,7 @@ async function wide(browser, port) {
   await p.keyboard.press("Escape");
   check(where, await until(p, () => !board.query && !!board.box.querySelector(".ui-filter")), "Esc: Today again");
 
-  // Keys: j / k move, n a new chat, Esc away.
+  // Keys: j / k move; Ctrl+Alt+K the keys, Ctrl+Alt+↵ a new chat, Ctrl+Alt+← away.
   await p.evaluate(() => { document.activeElement.blur(); board.scroll.focus(); });
   await p.keyboard.press("j");
   const first = await p.evaluate(() => document.activeElement.closest(".ticket") && document.activeElement.closest(".ticket").dataset.id);
@@ -1083,16 +1108,19 @@ async function wide(browser, port) {
   check(where, await until(p, () => board.tab === "tasks"), "Shift+Tab: Tasks");
   await p.keyboard.press("Tab");
   check(where, await until(p, () => board.tab === "chats"), "Tab again: round to Chats");
-  await p.keyboard.press("?");
-  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "")), "?: the keys");
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+Space/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
-  await p.keyboard.press("n");
-  check(where, await until(p, () => !!document.querySelector(".picker-row.on") && /which project/.test(document.querySelector(".picker").innerText)), "n: which project first, one lit");
+  for (const k of ["n", "x", "?"]) await p.keyboard.press(k);
+  await sleep(200);
+  check(where, await p.evaluate(() => !document.querySelector(".picker, .sheet-back, .mission, .undo-toast") && document.querySelector(".board-new").hidden), "n, x, ?: nothing (plain keys only move)");
+  await p.keyboard.press("Control+Alt+Enter");
+  check(where, await until(p, () => !!document.querySelector(".picker-row.on") && /which project/.test(document.querySelector(".picker").innerText)), "Ctrl+Alt+↵: which project first, one lit");
   await p.keyboard.press("Enter");
-  check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "n: a new chat, its box at the top");
-  await p.keyboard.press("Escape");
-  check(where, await until(p, () => document.querySelector(".board-new").hidden), "Esc: away again");
+  check(where, await until(p, () => !document.querySelector(".board-new").hidden && document.activeElement === document.querySelector(".board-new textarea")), "a new chat, its box at the top");
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  check(where, await until(p, () => document.querySelector(".board-new").hidden), "Ctrl+Alt+←: away again");
 
   await p.setViewportSize({ width: 1280, height: 520 });
   const sc = await p.evaluate(() => { const el = document.querySelector(".board-scroll"); el.scrollTop = 200; return el.scrollTop; });
@@ -1102,7 +1130,7 @@ async function wide(browser, port) {
   // A screenshot pasted into the new chat: it goes with what you wrote.
   const made = [];
   await p.route("**/api/new", (r) => { made.push(r.request().postDataJSON()); r.fulfill({ json: { id: "proj-work" } }); });
-  await p.keyboard.press("n");
+  await p.keyboard.press("Control+Alt+Enter");
   await until(p, () => !!document.querySelector(".picker-row.on"));
   await p.keyboard.press("Enter");
   await until(p, () => document.activeElement === document.querySelector(".board-new textarea"));
@@ -1124,16 +1152,14 @@ async function wide(browser, port) {
   check(where, made.length === 1 && made[0].prompt === "Fix what this shows [Image #1]" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
         `the picture goes with it (${JSON.stringify(made.map((x) => ({ ...x, images: (x.images || []).length })))})`);
   check(where, await p.evaluate(() => !document.querySelector(".board-new .tray .att")), "and the box is empty again");
-  // Ctrl+Alt+H: the board; Ctrl+Alt+A: any chat, by its name.
-  await p.keyboard.press("Control+Alt+KeyH");
-  check(where, await until(p, () => !desk.current), "Ctrl+Alt+H: the board");
-  await p.keyboard.press("Control+Alt+KeyA");
-  check(where, await until(p, () => !!document.querySelector(".picker")), "Ctrl+Alt+A: go to a chat");
+  // Ctrl+Alt+Space: any chat, by its name; Ctrl+Alt+←: the board.
+  await p.keyboard.press("Control+Alt+Space");
+  check(where, await until(p, () => !!document.querySelector(".picker")), "Ctrl+Alt+Space: the menu");
   await p.keyboard.type("login");
   await p.keyboard.press("Enter");
-  check(where, await until(p, () => desk.current === "proj-fresh"), "picked by its name, it opens");
-  await p.keyboard.press("Escape");
-  check(where, await until(p, () => !desk.current), "Esc: the board");
+  check(where, await until(p, () => desk.current === "proj-fresh"), "a chat picked by its name: it opens");
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  check(where, await until(p, () => !desk.current), "Ctrl+Alt+←: the board");
   await completeOpen(p, where);
   // Left on the Tavern, before it went: Chats, and what it kept gone.
   await p.evaluate(() => { localStorage.setItem("board-tab", "tavern"); localStorage.setItem("tavern-seats", "{}"); localStorage.setItem("office-seats", "{}"); });

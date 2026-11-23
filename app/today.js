@@ -1068,7 +1068,7 @@ function boardOn() { return typeof board !== "undefined" && !!board.el; }
 function todayFill(box, force, top = null) {
   const onBoard = box.classList.contains("board-today");
   // Under a computer's open chat the board isn't in sight: drawn once it's
-  // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
+  // back (boardShown), its order the one you left (Ctrl+Alt+↑ / ↓ go by it).
   if (onBoard && !force && typeof desk !== "undefined" && desk.current) return;
   // An empty amarchy's board is the welcome (tasks.js boardFill): not an
   // empty Today in its place whenever something here asks for a redraw.

@@ -733,7 +733,7 @@ async function sleepSession(s) {
 
 // A chat of this machine's in a real Ghostty window on its desktop (amarchy
 // ghostty): when the machine has Ghostty and a desktop (the view's ghostty).
-// One key, Ctrl+Alt+O, on a computer; a chat's menu on both.
+// From a chat's menu, on both.
 function ghosttyCan(s) {
   return !!(s && !s.setup && app.view && app.view.ghostty && (!s.machine || s.machine === machineHere()));
 }
@@ -1228,7 +1228,6 @@ class SessionView {
         boardSentToast(this.id);
       },
       onUnsent: () => todayUnsent(this.id),     // it didn't go: its card asks again
-      back: () => { if (this.mode === "chat") go("#/"); },       // Esc on its messages: home, as a computer's to its board
     });
     // (The terminals open from the menu, ⋯: the chat keeps the whole screen.)
     this.el = h("div", { class: "view" }, bar, this.chat.el);
@@ -1851,7 +1850,7 @@ function swipeToClose(back, card) {
 // on, the host's for every new chat (Opus until you pick another here, for
 // this chat and the ones after, on every device). Under the list on the
 // phone; on a computer, the middle of the window (wide: desk.js's
-// newSession, Ctrl+Alt+N), where Enter starts it. Started, it isn't opened:
+// newSession, Ctrl+Alt+↵), where Enter starts it. Started, it isn't opened:
 // you stay where you were, as after sending any chat something. started(id):
 // what else to do then.
 // started(job): it's on its way (the box empties at once); starting(job,
@@ -1867,7 +1866,7 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
   const picks = uiTabs([], repo, (p) => choose(p), null, "Project: where Claude works on it", { scroll: true });
   picks.addEventListener("mousedown", (e) => e.preventDefault());
   const addProject = uiTool("plus", "New project", () => (app.desk ? newProject() : newProjectSheet(use)),
-    { title: app.desk ? "New project (Ctrl+Alt+P)" : "New project", cls: "new-project" });
+    { title: "New project", cls: "new-project" });
   const row = h("div", { class: "new-projects" }, picks, addProject);
   const why = h("span", { class: "why" }, "named in what you wrote");
   const modelLabel = h("b", { class: "name" });

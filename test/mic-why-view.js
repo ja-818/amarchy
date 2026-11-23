@@ -9,7 +9,7 @@
 //     chat's are lit; the first tap starts the setup on the host and says
 //     so (770 MB, once), the ring fills as the board says how far, a tap
 //     meanwhile says how far, and "Dictation is ready" once it's there;
-//     Ctrl+Alt+Space does the same on a computer; Settings offers it too;
+//     Ctrl+Alt+D does the same on a computer; Settings offers it too;
 //   - a processor amarchy has no engine for: dimmed; a tap says the host
 //     needs a speech model, Set it up opens Settings at Dictation, which
 //     says what would do;
@@ -288,16 +288,16 @@ async function run(browser, layout, port) {
   });
   check(where, nm && nm.shown && !nm.cant, `the new chat's mic: there, lit (${JSON.stringify(nm)})`);
 
-  // Ctrl+Alt+Space on a computer: the same first tap.
+  // Ctrl+Alt+D on a computer: the same first tap.
   if (layout === "wide") {
     await at(p, "auto");
     posted = 0;
     await p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
-    await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("Space");
+    await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("KeyD");
     await p.keyboard.up("Alt"); await p.keyboard.up("Control");
     await sleep(250);
     t = await toastText(p);
-    check(where, posted === 1 && /Getting dictation ready/.test(t), `Ctrl+Alt+Space: the same (${posted}, "${t}")`);
+    check(where, posted === 1 && /Getting dictation ready/.test(t), `Ctrl+Alt+D: the same (${posted}, "${t}")`);
   }
 
   // A processor amarchy has no engine for: dimmed, and what would do.

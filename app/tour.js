@@ -521,8 +521,8 @@ function tourSlides() {
       features: () => [
         feat(TOUR_FLAME, 3, "It's dopamine, but it ships.",
              "Every merge counts: streaks, combos, 40 badges, confetti."),
-        feat(TOUR_KEYBOARD, 3, "Vim users: welcome home.",
-             "**j** / **k** go card to card, **Enter** opens, **Esc** goes back, **n** is a new chat, **/** searches, **?** shows every key. **Ctrl+Alt+M** opens the Amarchy menu from anywhere."),
+        feat(TOUR_KEYBOARD, 3, "Omarchy hands: welcome home.",
+             "**Ctrl+Alt** and a key, from anywhere, as Super on Omarchy: **↵** a new chat, **←** back, **↑ ↓** the next chat, **Space** the menu, **K** every key. **Esc** stops Claude, as in Claude Code. **j** / **k** go card to card."),
         feat(TOUR_PHONE, 3, "Thumbs are keys too.",
              "On the phone, hold a card for its menu, and swipe a sheet down to close it."),
       ],

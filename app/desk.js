@@ -16,11 +16,11 @@ const desk = {
   focus: "chat",        // where the keyboard is: chat, side (the panel), term (a terminal in it)
   focusPane: null,      // the terminal (TermPane) with the keyboard
   sideTab: null,        // the side panel's tab you left open: term, changes, details, none (closed)
-  sideWide: false,      // the side panel over the whole width (Ctrl+Alt+F)
+  sideWide: false,      // the side panel over the whole width
   sideWidth: 0,
   sideOn: null,         // the tab and the chat the side panel's view was opened on
   revealed: false,      // a terminal asked for with Show terminals off: shown, for this session
-  stepping: null,       // the chat Ctrl+Alt+J / K, held, is on: opened when let go
+  stepping: null,       // the chat Ctrl+Alt+↑ / ↓, held, is on: opened when let go
   terminal: null,       // the side panel's views
   changes: null,
   details: null,
@@ -563,7 +563,7 @@ async function copyText(text) {
 const MIN_CHAT = 440;       // the chat no narrower than this beside the side panel
 const SIDE_MIN = 340;       // the side panel's narrowest
 const SIDE_START = 560;     // and its width until you drag its edge
-const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+→"], ["changes", "Changes", "Ctrl+Alt+G"], ["details", "Details", "Ctrl+Alt+I"]];
+const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+T"], ["changes", "Changes", ""], ["details", "Details", ""]];
 
 // Whether the terminals show (Settings → Show terminals, the host's, on
 // unless it says off). Off, they're under the session's menu (Advanced), and
@@ -603,8 +603,6 @@ function deskStart() {
     if (!e.target.closest(".term-box")) { desk.focus = "side"; desk.focusPane = null; deskPanes(); }
   });
   dropImages();
-  window.addEventListener("keydown", deskKeys, true);
-  window.addEventListener("keyup", deskKeysUp, true);
   window.addEventListener("keydown", typeToChat);
   window.addEventListener("resize", () => deskLayout());
   // A notification's card, tapped (chat.js answers it in its Chat): another
@@ -682,7 +680,7 @@ function deskRoute() {
 // The chat over the board (id), or the board (null).
 function show(id) {
   if (id && app.view && !row(id)) id = null;
-  if (desk.stepping) {      // somewhere else meanwhile: not where Ctrl+Alt+J was held
+  if (desk.stepping) {      // somewhere else meanwhile: not where Ctrl+Alt+↓ was held
     clearTimeout(desk.stepTimer);
     desk.stepping = null;
     desk.column.classList.remove("stepping");
@@ -765,13 +763,13 @@ function markSeen() {
 
 function deskHead() {
   if (!desk.head) return;
-  const s = row(desk.stepping || desk.current);      // (Ctrl+Alt+J held: the one it's on)
+  const s = row(desk.stepping || desk.current);      // (Ctrl+Alt+↓ held: the one it's on)
   if (!s) { desk.head.replaceChildren(); return; }
   // The box calls your assistant or an agent by its name, as the phone's does.
   if (desk.chat && desk.chat.id === s.id) desk.chat.setPlaceholder(composerPlaceholder(s));
   // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
   uiSwap(desk.head, uiChatHead(s, {
-    backTitle: "Back to the board (Esc)", back: () => boardBack(), rename: () => renameSession(),
+    backTitle: "Back to the board (Ctrl+Alt+←)", back: () => boardBack(), rename: () => renameSession(),
     complete: () => closeCurrent(), more: () => sessionMenu(row(desk.current) || s) }));
 }
 
@@ -804,7 +802,7 @@ function buildSide() {
                          "aria-orientation": "vertical" });
   side.el = h("aside", { class: "sidepanel", "aria-label": "Side panel" }, side.grip,
     h("div", { class: "side-head" }, side.tabs, side.wideBtn,
-      h("button", { class: "side-btn", type: "button", title: "Close the panel (Ctrl+Alt+B)", "aria-label": "Close the panel",
+      h("button", { class: "side-btn", type: "button", title: "Close the panel", "aria-label": "Close the panel",
                     onclick: () => sideToggle(null) }, glyph("close"))),
     side.body);
   // Its edge, dragged: its width (kept in this browser). While it moves,
@@ -867,13 +865,13 @@ function sideWide(on) {
 // What the panel shows: its tabs, and the open one's view (a view not shown
 // lets go of its terminal, or stops reading). The view is opened only when
 // it's another tab or another chat: a new width (the window, its edge,
-// Ctrl+Alt+F) leaves it as it is, the keyboard in its terminal.
+// full width) leaves it as it is, the keyboard in its terminal.
 function renderSide() {
   const side = desk.side, tab = desk.current ? sideTab() : null;
   side.tabs.replaceChildren(...SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) =>
     h("button", { class: `side-tab${tab === key ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(tab === key),
-                  title: `${label} (${keys})`, onclick: () => sideToggle(key, true) }, label)));
-  side.wideBtn.title = desk.sideWide ? "Back beside the chat (Ctrl+Alt+F)" : "Full width (Ctrl+Alt+F)";
+                  title: keys ? `${label} (${keys})` : label, onclick: () => sideToggle(key, true) }, label)));
+  side.wideBtn.title = desk.sideWide ? "Back beside the chat" : "Full width";
   side.wideBtn.setAttribute("aria-label", side.wideBtn.title);
   side.wideBtn.replaceChildren(deskIcon(desk.sideWide ? "narrow" : "wide"));
   const views = { term: desk.terminal, changes: desk.changes, details: desk.details };
@@ -1486,58 +1484,106 @@ function chime(v) {
   playSound(`/sound/${encodeURIComponent(sound)}`);      // app.js: never the Mac's Now Playing
 }
 
-// ---- Go to a chat (Ctrl+Alt+A): every chat, by its name, its project or
-// where it stands, a few keys away
+// ---- the keys: amarchy's, Ctrl+Alt + one key
+//
+// As Super is Omarchy's: from anywhere (typing in a box, in a terminal too),
+// on a computer's keyboard, in either layout. Ctrl+Alt because nothing else
+// has it: Omarchy only Ctrl+Alt+Del and Tab, a browser lets a page have it,
+// a Mac too (Option alone types é and ñ, and jumps words), a box and a
+// terminal type nothing with it. The arrows move: ← back, → into the chat
+// lit, ↑ ↓ the chat before or after. The rest each do one thing; what else
+// there is to do is in the menu (Space). Esc is Claude Code's: it stops
+// Claude (chat.js navKey); plain keys only move, or type.
 
-function chatPicker() {
-  const v = app.view;
-  if (!v) return;
-  const ss = v.sessions.filter((s) => !s.setup && !todayUI.closing.has(s.id));
-  picker({ title: "Go to a chat", placeholder: "Its name or project", items: ss.map((s) => ({
-    label: isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat",
-    detail: [projectName(s.repo), statusWords(s)].filter(Boolean).join(" · "),
-    icon: s.id === desk.current ? "check" : s.status === "waiting" ? "waiting" : "project",
-    act: () => boardOpen(s.id) })) });
-}
-
-// ---- the keys: amarchy's, Ctrl+Alt+… (Super is the browser's or the Mac's)
-
-const DESK_KEYS = {
-  KeyJ: (e) => step(1, e.repeat), KeyK: (e) => step(-1, e.repeat),
-  KeyS: () => deskSearch(), KeyA: () => chatPicker(),
-  ArrowLeft: () => toChat(), ArrowRight: () => toTerminal(),
-  KeyG: () => desk.current && sideToggle("changes"), KeyI: () => desk.current && sideToggle("details"),
-  KeyB: () => desk.current && toggleSide(), KeyF: () => desk.current && sideTab() && sideWide(),
-  KeyL: () => classicTerminal(),
-  KeyR: () => uiPreviewGo(row(keyedId())),
-  KeyN: () => boardNew(), KeyP: () => newProject(), KeyT: () => openLook(), KeyH: () => boardBack(),
-  ArrowUp: () => keyedId() && setPriority(row(keyedId()), "up"),
-  ArrowDown: () => keyedId() && setPriority(row(keyedId()), "down"),
-  KeyE: () => renameSession(), KeyM: () => deskMenu(), KeyX: () => closeCurrent(),
-  KeyO: () => ghosttyOpen(row(keyedId())),
+const APP_KEYS = {
+  ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
+  ArrowUp: (e) => step(-1, e.repeat), ArrowDown: (e) => step(1, e.repeat),
+  Enter: () => boardNew(), NumpadEnter: () => boardNew(),
+  Space: () => deskMenu(),
+  KeyW: () => closeCurrent(),
+  KeyT: () => keysTerminal(),
+  KeyP: () => keysPreview(),
+  KeyK: () => showKeys(),
 };
 
 function deskKeys(e) {
   if (!(e.ctrlKey && e.altKey) || e.metaKey) return;
+  if (e.getModifierState && e.getModifierState("AltGraph")) return;      // (AltGr, as Windows has it: a character)
   if (TALK_KEYS.includes(e.code)) return talkKey(e);
-  const act = DESK_KEYS[e.code];
+  const act = APP_KEYS[e.code];
   if (!act) return;
   e.preventDefault();
   e.stopPropagation();
-  if (e.repeat && !["KeyJ", "KeyK"].includes(e.code)) return;
+  if (e.repeat && !["ArrowUp", "ArrowDown"].includes(e.code)) return;
+  closeSheets();
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
   act(e);
 }
 
-// Ctrl+Alt+Space or Ctrl+Alt+Enter: dictate into the chat's box, held as its
+window.addEventListener("keydown", deskKeys, true);
+window.addEventListener("keyup", deskKeysUp, true);
+
+// The chat open, either layout: its id, and its Chat (chat.js) while it shows.
+function openId() {
+  return app.desk ? desk.current : app.session ? app.session.id : null;
+}
+
+function openChat() {
+  if (app.desk) return desk.chat;
+  return app.session && app.session.mode === "chat" ? app.session.chat : null;
+}
+
+// Ctrl+Alt+←: back. A chat: the board, where you were (the phone's
+// terminal: its chat first, as its ‹ does); a board open in Tasks: Tasks;
+// the new chat's box: put away (what you wrote stays).
+function keysBack() {
+  if (app.desk && desk.current) return boardBack();
+  if (!app.desk && app.session) {
+    if (app.session.mode !== "chat") { app.session.setMode("chat"); return app.session.chat.takeKeys(); }
+    return go("#/");
+  }
+  if (boardsUI.open) return boardsClose();
+  if (board.composing) return leaveNewChat();
+}
+
+// Ctrl+Alt+→: into the chat lit on the board (back from a chat, the one you
+// left: it's lit), as Enter on its card.
+function keysInto() {
+  if (openId()) return;
+  const id = keyedId();
+  if (id && row(id)) boardOpen(id);
+}
+
+// Ctrl+Alt+T: the chat's terminal, with the keyboard; again, back to the chat.
+function keysTerminal() {
+  if (!app.desk) {
+    if (!app.session) return;
+    const term = app.session.mode === "terminal";
+    app.session.setMode(term ? "chat" : "terminal");
+    if (term) app.session.chat.takeKeys();
+    return;
+  }
+  if (!desk.current) return;
+  if (sideTab() === "term" && desk.focus === "term") { sideToggle(null); return toChat(); }
+  toTerminal();
+}
+
+// Ctrl+Alt+P: its preview (of several: which).
+function keysPreview() {
+  const s = row(keyedId());
+  if (s) uiPreviewGo(s);
+}
+
+// Ctrl+Alt+D: dictate into the chat's box (or the new chat's), held as its
 // mic is (let go and it's written down), or tapped (it listens until tapped
-// again).
-const TALK_KEYS = ["Space", "Enter", "NumpadEnter"];
+// again). (Not Alt+Space: that's Omarchy's own dictation, which types into
+// the box too.)
+const TALK_KEYS = ["KeyD"];
 
 function talkKey(e) {
   e.preventDefault();
   e.stopPropagation();
-  const c = desk.chat;
+  const c = openChat();
   const fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;     // into the new chat's box
   if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
   const t = fresh ? fresh.dictate : c.talk;
@@ -1551,9 +1597,9 @@ function talkKey(e) {
 }
 
 function deskKeysUp(e) {
-  if (desk.stepping && ["KeyJ", "KeyK", "ControlLeft", "ControlRight", "AltLeft", "AltRight"].includes(e.code)) stepDone();
+  if (desk.stepping && ["ArrowUp", "ArrowDown", "ControlLeft", "ControlRight", "AltLeft", "AltRight"].includes(e.code)) stepDone();
   if (e.code !== desk.talkCode || desk.talkDown === undefined || desk.talkDown === null) return;
-  const c = desk.chat, fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
+  const c = openChat(), fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
   const t = fresh ? fresh.dictate : c && c.talk;
   const tapped = e.timeStamp - desk.talkDown < DICTATE_TAP;
   desk.talkDown = null;
@@ -1561,20 +1607,22 @@ function deskKeysUp(e) {
   e.preventDefault();
   if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
     t.locked = true;
-    t.say(`Listening… ${e.code === "Space" ? "Ctrl+Alt+Space" : "Ctrl+Alt+Enter"} again when you're done`);
+    t.say("Listening… Ctrl+Alt+D again when you're done");
     (fresh ? fresh.dictate.opts.button : c.micBtn).classList.add("on");
     return;
   }
   t.stop();
 }
 
-// Ctrl+Alt+J / K: the next chat, in the board's order (tasks.js). Held
-// down (the key repeating), only the head says which it's on: the chat it
-// stops on opens when you let go (or it stops a moment), not every one it
-// went by (each its stream, its terminals).
+// Ctrl+Alt+↑ / ↓: the chat before or after, in the board's order (tasks.js).
+// Held down (the key repeating) in the wide layout, only the head says which
+// it's on: the chat it stops on opens when you let go (or it stops a
+// moment), not every one it went by (each its stream, its terminals). The
+// phone layout goes one a press.
 const STEP_SETTLE = 150;      // ms with no key: there
 
 function step(n, repeat) {
+  if (!app.desk) return repeat ? null : boardStep(n);
   if (!desk.current || (!repeat && !desk.stepping)) return boardStep(n);
   const id = boardStep(n, desk.stepping || desk.current);
   if (!id) return;
@@ -1592,13 +1640,6 @@ function stepDone() {
   desk.column.classList.remove("stepping");
   if (id && id !== desk.current && row(id)) boardOpen(id);
   else deskHead();
-}
-
-// Ctrl+Alt+S: the board's search.
-function deskSearch() {
-  if (desk.current) boardBack(true);
-  board.search.focus();
-  board.search.select();
 }
 
 // The side panel closed, or back on the tab it had.
@@ -1635,7 +1676,7 @@ function classicTerminal() {
 // ---- pickers: a menu card, for everything amarchy asks
 
 // items: [{label, detail, icon, key, group (a function giving items), act,
-// keep, on (the one it starts on), always}], or text (a field to type in,
+// keep, on (the one it starts on), always, typed (only once you type)}], or text (a field to type in,
 // value its start). Typing filters;
 // ↑/↓ move, ↵ picks, → opens a group, ← and Esc go back.
 function picker(opts) {
@@ -1666,7 +1707,9 @@ function picker(opts) {
   const draw = () => {
     const q = input.value.trim().toLowerCase();
     const all = typeof level.items === "function" ? level.items(input.value) : (level.items || []);
-    items = level.text ? all : all.filter((it) => !q || `${it.label} ${it.detail || ""}`.toLowerCase().includes(q) || it.always);
+    // (typed: only once you type, and it fits: a chat in the menu.)
+    const fits = (it) => `${it.label} ${it.detail || ""}`.toLowerCase().includes(q);
+    items = level.text ? all : all.filter((it) => (it.typed ? !!q && fits(it) : !q || it.always || fits(it)));
     at = Math.min(at, Math.max(items.length - 1, 0));
     list.replaceChildren(...items.map((it, i) => h("button", {
       class: `picker-row${i === at ? " on" : ""}${it.danger ? " danger" : ""}`,
@@ -1767,7 +1810,7 @@ async function addProject(body) {
 // The chat the keys act on (rename, priority, close, the menu's This chat):
 // the one open, else the card the keyboard is on.
 function keyedId() {
-  if (desk.current) return desk.current;
+  if (openId()) return openId();
   const t = document.activeElement && document.activeElement.closest(".ticket, .tcard[data-id]");
   if (t) return t.dataset.id;
   const lit = boardSel();      // the browser's focus off the board: the card lit there (tasks.js)
@@ -1786,18 +1829,6 @@ function renameSession() {
 }
 
 const LEVELS = ["low", "normal", "high"];
-async function setPriority(s, dir) {
-  if (!s) return;
-  if (isAgent(s)) return toast(`${s.assistant_name || "It"} is on top already: ${s.assistant === "main" ? "your assistant" : "an agent"}`);
-  const at = LEVELS.indexOf(s.priority || "normal");
-  const level = LEVELS[Math.max(0, Math.min(2, at + (dir === "up" ? 1 : -1)))];
-  if (level === (s.priority || "normal")) return toast(`${PRIORITY[level]} already`);
-  try {
-    await priorityNow(s, level);
-    toast(`${s.task || s.name}: ${PRIORITY[level]}`);
-  } catch (e) { /* said */ }
-}
-
 async function closeCurrent() {
   const s = row(keyedId());
   if (!s) return;
@@ -1807,43 +1838,59 @@ async function closeCurrent() {
   todayComplete(s);
 }
 
-// The Amarchy menu (the Ⓐ, m on the board, Ctrl+Alt+M): everything you
-// can do from here, each with its key. A keyboard's card on a computer, a
-// sheet on the phone (ui.js uiMenu); what needs keys or a chat open, on a
-// computer only.
+// The Amarchy menu (the Ⓐ, Ctrl+Alt+Space): everything you can do from
+// here, the keys for what has one, and every chat by its name as you type
+// (Super+Space is Omarchy's menu). A keyboard's card on a computer, a sheet
+// on the phone (ui.js uiMenu); what needs a chat open beside the board, on
+// a computer only.
 function deskMenu() {
-  const s = app.desk ? row(keyedId()) : null;
+  const s = row(keyedId());
+  const open = openId();
   uiMenu("Amarchy", [
-    { label: "New chat", icon: "plus", key: app.desk ? "N" : "", act: () => boardNew() },
-    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
-      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: app.desk ? "Ctrl+Alt+R" : "", act: () => uiPreviewGo(s) } : null,
-    { label: "Go to a chat…", icon: "project", key: "Ctrl+Alt+A", desk: true, act: () => chatPicker() },
-    desk.current ? { label: "Back to the board", icon: "back", key: "Esc", desk: true, act: () => boardBack() } : null,
+    { label: "New chat", icon: "plus", key: "Ctrl+Alt+↵", act: () => boardNew() },
+    open ? { label: "Back to the board", icon: "back", key: "Ctrl+Alt+←", act: () => keysBack() } : null,
+    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+P", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+P", act: () => uiPreviewGo(s) } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
+    !open && boardTabNow() === "chats" && !board.query ? { label: todayUI.needsOnly ? "Show every chat" : "Only what needs you", icon: "waiting", act: () => todayNeedsOnly(!todayUI.needsOnly) } : null,
     { label: "Automations", icon: "clock", detail: autoState.failed ? `${autoState.failed} failed last time` : "what runs by itself", act: () => automationsSheet() },
-    { label: "Theme, font and wallpaper…", icon: "image", key: "Ctrl+Alt+T", act: () => openLook() },
+    { label: "Theme, font and wallpaper…", icon: "image", act: () => openLook() },
     { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(null) },
-    { label: "New project…", icon: "plus", key: "Ctrl+Alt+P", act: () => (app.desk ? newProject() : newProjectSheet()) },
+    { label: "New project…", icon: "plus", act: () => (app.desk ? newProject() : newProjectSheet()) },
     { label: "New agent…", icon: "plus", detail: "a chat that lives on", act: () => newAgentSheet() },
     { label: "Settings", icon: "gear", act: () => openSettings() },
     { label: "Tour", icon: "tour", detail: "amarchy in 100 seconds", act: () => tourShow() },
-    { label: "Keys", icon: "keys", key: "?", desk: true, act: () => showKeys() },
-  ]);
+    { label: "Keys", icon: "keys", key: "Ctrl+Alt+K", act: () => showKeys() },
+    ...menuChats(),
+  ], { search: "A chat, or what to do" });
+}
+
+// Every chat, by its name, its project and where it stands: in the menu
+// as you type its name (not before: the menu is what you do).
+function menuChats() {
+  const v = app.view;
+  if (!v) return [];
+  return v.sessions.filter((s) => !s.setup && !todayUI.closing.has(s.id)).map((s) => ({
+    typed: true,
+    label: isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat",
+    detail: [projectName(s.repo), statusWords(s)].filter(Boolean).join(" · "),
+    icon: s.id === openId() ? "check" : s.status === "waiting" ? "waiting" : "project",
+    act: () => boardOpen(s.id) }));
 }
 
 // What the window shows: the chat, the side panel's tabs, its width.
 function viewItems() {
   const tab = sideTab(), on = (x) => (x ? "on" : "");
   return [
-    { label: "The chat", key: "Ctrl+Alt+←", act: () => toChat() },
+    { label: "The chat", act: () => toChat() },
     ...(showTerminals() ? [
-      { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+→", act: () => toTerminal("term") },
-      { label: "Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
-    { label: "Changes", detail: on(tab === "changes"), key: "Ctrl+Alt+G", act: () => sideToggle("changes", true) },
-    { label: "Details", detail: on(tab === "details"), key: "Ctrl+Alt+I", act: () => sideToggle("details", true) },
-    { label: tab ? "Close the side panel" : "Open the side panel", key: "Ctrl+Alt+B", act: () => toggleSide() },
-    ...(tab ? [{ label: "Side panel full width", detail: on(desk.sideWide), key: "Ctrl+Alt+F", act: () => sideWide() }] : []),
+      { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+T", act: () => toTerminal("term") },
+      { label: "Claude's classic terminal", detail: "Claude Code's own, same conversation", act: () => classicTerminal() }] : []),
+    { label: "Changes", detail: on(tab === "changes"), act: () => sideToggle("changes", true) },
+    { label: "Details", detail: on(tab === "details"), act: () => sideToggle("details", true) },
+    { label: tab ? "Close the side panel" : "Open the side panel", act: () => toggleSide() },
+    ...(tab ? [{ label: "Side panel full width", detail: on(desk.sideWide), act: () => sideWide() }] : []),
   ];
 }
 
@@ -1851,7 +1898,7 @@ function viewItems() {
 function sessionItems(s) {
   const on = (x) => (x ? "on" : "");
   return [
-    { label: "Rename", key: "Ctrl+Alt+E", act: () => renameSession() },
+    { label: "Rename", act: () => renameSession() },
     { label: "Add a picture or a file…", detail: "it goes with your next message",
       act: () => (desk.chat && desk.current === s.id ? desk.chat.openMenu("add") : pickImageInto({ id: s.id })) },
     { label: "Add a secret…", detail: "an API key or password, never in the chat", act: () => addSecretSheet({ project: s.repo, on: s.id }) },
@@ -1866,14 +1913,13 @@ function sessionItems(s) {
     ...boardsLedBy(s).map((b) => ({ label: b.title, icon: "organize", detail: b.yours ? `its board · ${b.yours} for you` : "its board", act: () => boardsGo(b.key) })),
     // Your assistant and your agents are on top whatever their priority.
     ...(isAgent(s) ? [] : LEVELS.slice().reverse().map((p) => ({ label: PRIORITY[p], detail: on((s.priority || "normal") === p),
-                                                key: p === "high" ? "Ctrl+Alt+Up" : p === "low" ? "Ctrl+Alt+Down" : "",
                                                 act: () => priorityNow(s, p).catch(() => {}) }))),
     { label: "Advanced", icon: "gear", group: () => ({ title: "Advanced", items: [
-      { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+→", act: () => toTerminal("term") },
-      ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", key: "Ctrl+Alt+L", act: () => classicTerminal() }] : []),
-      ...(ghosttyCan(s) ? [{ label: `Open in Ghostty on ${ghosttyWhere()}`, detail: "its terminal, in a window of its own", key: "Ctrl+Alt+O", act: () => ghosttyOpen(s) }] : []),
-      { label: "Details", detail: "branch, worktree, model, mode", key: "Ctrl+Alt+I", act: () => sideToggle("details", true) }] }) },
-    isAgent(s) ? null : { label: "Complete mission", key: "Ctrl+Alt+X", danger: true, act: () => closeCurrent() },
+      { label: "Open terminal", detail: "this chat's own, in the side panel", key: "Ctrl+Alt+T", act: () => toTerminal("term") },
+      ...(classicAllowed() ? [{ label: "Open Claude's classic terminal", detail: "Claude Code's own, same conversation", act: () => classicTerminal() }] : []),
+      ...(ghosttyCan(s) ? [{ label: `Open in Ghostty on ${ghosttyWhere()}`, detail: "its terminal, in a window of its own", act: () => ghosttyOpen(s) }] : []),
+      { label: "Details", detail: "branch, worktree, model, mode", act: () => sideToggle("details", true) }] }) },
+    isAgent(s) ? null : { label: "Complete mission", key: "Ctrl+Alt+W", danger: true, act: () => closeCurrent() },
   ].filter(Boolean);
 }
 
@@ -1887,33 +1933,27 @@ function sessionMenu(s) {
   picker({ title: s.task || where(s), items: [...(desk.current === s.id ? panel : []), ...sessionItems(s)] });
 }
 
+// The keys, three rules: Ctrl+Alt + a key does things from anywhere (as
+// Super does on Omarchy), Esc stops Claude (as in Claude Code), and the
+// rest only move, or type.
 function showKeys() {
   const part = (title, keys) => [h("div", { class: "section" }, title),
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
-  sheet(sheetHead("Keys", "amarchy's, in the browser"),
+  sheet(sheetHead("Keys", "Ctrl+Alt does, Esc stops"),
+    ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
+      ["Ctrl+Alt+↑ / ↓", "The chat before / after"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+Space", "The menu: everything else, any chat by name"],
+      ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
+      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+K", "These keys"]]),
+    ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
-      ["l  or  →", "Into the card, along its buttons"], ["h  or  ←", "Back along them, out of the card"],
-      ["Enter", "Open the chat; on a button, press it (a folded group: unfold it)"], ["Esc", "Out of the card"],
-      ["1 – 4", "Pick that answer on the card"],
-      ["x", "Complete the chat's mission, with Undo"], ["r", "Open what it made: Review, or its Preview"],
-      ["s", "Seen: off Needs you without opening it"], ["c / e", "A board's card: comment on it / edit it"],
-      ["Esc  on a board", "Back to Tasks"],
-      ["p", "Pin it"], ["f", "For later"], ["Tab", "Chats / Tasks"], ["/", "Search"], ["n", "New chat"], ["Tab / Shift+Tab  in a new chat", "The next / previous project"], ["m", "The Amarchy menu"], ["o", "Only what needs you"], ["?", "These keys"]]),
-    ...part("In a chat", [["Enter / Shift+Enter  in the box", "Send / a new line"],
-      ["Esc  in the box", "Up onto the messages (never a stop)"], ["↑  in the box, nothing above", "Up onto the messages"],
-      ["Page Up / Down  in the box", "Scroll the messages, still writing"],
-      ["j / k  or  ↓ / ↑", "Next / previous message"], ["l / h  or  → / ←", "Into a message, along its buttons and links / back out"],
+      ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],
+      ["1 – 4", "Pick that answer on the card"], ["Tab", "Chats / Tasks"], ["/", "Search"],
+      ["Tab / Shift+Tab  in a new chat", "The next / previous project"]]),
+    ...part("In a chat: it opens in the box", [["Enter / Shift+Enter", "Send / a new line"],
+      ["↑  with nothing above it", "Up onto the messages"], ["Page Up / Down", "Scroll the messages, still writing"],
+      ["j / k  or  ↓ / ↑", "Next / previous message (↓ on the latest: the box)"], ["l / h  or  → / ←", "Along a message's buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
-      ["i  or  ↓ on the latest", "Back into the box"], ["Esc  on a message", "Back to the board (never a stop)"],
-      ["Ctrl+Alt+J / K", "Next / previous chat"], ["Ctrl+Alt+← / →", "The chat / the terminal"],
-      ...(classicAllowed() ? [["Ctrl+Alt+L", "Claude's classic terminal"]] : []),
-      ...(app.view && app.view.ghostty ? [["Ctrl+Alt+O", "This chat's terminal in Ghostty"]] : []),
-      ["Ctrl+Alt+G / I", "Changes / Details, beside the chat"], ["Ctrl+Alt+B", "Open or close the side panel"],
-      ["Ctrl+Alt+F", "The side panel full width"], ["Ctrl+Alt+R", "Open its preview"],
-      ["Ctrl+Alt+Space / Enter", "Dictate: hold, or tap and tap again"], ["⌘V / drop", "A picture goes with your message"]]),
-    ...part("Anywhere", [["Ctrl+Alt+N / P", "New chat / new project"], ["Ctrl+Alt+A", "Go to a chat"], ["Ctrl+Alt+S", "Search"],
-      ["Ctrl+Alt+H", "The board"], ["Ctrl+Alt+X", "Complete the chat's mission"], ["Ctrl+Alt+E", "Rename"],
-      ["Ctrl+Alt+↑ / ↓", "Pin / for later, a step"], ["Ctrl+Alt+M", "Amarchy menu"], ["Ctrl+Alt+T", "Theme, font and wallpaper"]]));
+      ["i", "Back into the box"], ["⌘V / drop", "A picture goes with your message"]]));
 }
 
 // Settings that are this browser's own (the rest is in app.js's sheet).

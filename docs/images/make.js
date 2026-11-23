@@ -287,6 +287,12 @@ async function compose(browser, port, { file, width, height, scale, shots, kind,
   const pw = loadPlaywright();
   const port = await freePort();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "amarchy-images-"));
+  // The theme's own wallpaper, as an install wears it once it has fetched it
+  // (bin/amarchy WALLS): this host's copy. A fresh home has none yet and wears
+  // the one drawn for the theme until the fetch is done.
+  const walls = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "amarchy/wallpapers", THEME);
+  if (fs.existsSync(walls)) fs.cpSync(walls, path.join(home, "state/amarchy/wallpapers", THEME), { recursive: true });
+  else console.log(`No ${THEME} wallpaper on this host yet (amarchy theme --refresh-wallpapers): the pictures wear the drawn one.`);
   const server = await startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
   try {

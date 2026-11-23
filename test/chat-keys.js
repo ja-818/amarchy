@@ -1,10 +1,17 @@
-// A chat's keys, in the real app: it opens with them in its box, to write,
-// whether a click or Enter on its card opened it (on a phone's touch, none:
-// its keyboard would come up over the chat). From the box: Esc goes up onto
-// the latest message, as ↑ does with nothing above it in the box; Page Up /
-// Page Down scroll the conversation, the keys still in the box. On the
-// messages: i, or ↓ on the latest, the box again; Esc back to the chats.
-// Esc never stops Claude, at work or not: a stop by mistake loses a turn.
+// amarchy's keys, in the real app, three rules: Ctrl+Alt + a key does
+// things from anywhere (typing too), as Super does on Omarchy; Esc stops
+// Claude, as in Claude Code, and nothing else; the rest only move, or type.
+//
+//   A chat opens with the keys in its box, to write, a click or Enter on its
+//   card (on a phone's touch, none: its keyboard would come up over the
+//   chat). ↑ with nothing above it in the box goes up onto the messages, ↓ on
+//   the latest back down, i too; Page Up / Page Down scroll them from the box.
+//   Esc: Claude at work, a stop (from the box, a message, nowhere in it; on
+//   its question too, a no); Claude done, nothing at all (not back, not out
+//   of the box). Ctrl+Alt+← back to the board, → into the chat again, ↑ ↓ the
+//   chat before or after, Space the menu (a chat by its name as you type),
+//   T its terminal and back, K the keys. Plain letters on the board do
+//   nothing but move.
 //
 // Three layouts: the phone's (touch), the phone layout on a computer (a
 // narrow window), and the wide one. With screenshots.
@@ -31,9 +38,10 @@ const LAYOUTS = {
   wide: { viewport: { width: 1280, height: 800 } },
 };
 
-const ID = "proj-keys";
+const ID = "proj-keys", TWO = "proj-other";
 const CHATS = [
   { id: ID, repo: "proj", name: "keys", task: "Fix: the login loop", status: "idle", engine: "chat", path: "/tmp/k", today: T({ goal: "Fix the login loop" }) },
+  { id: TWO, repo: "proj", name: "other", task: "Docs: the keys page", status: "idle", engine: "chat", path: "/tmp/o", today: T({ goal: "Write the keys page" }) },
 ];
 const paras = (what) => Array.from({ length: 30 }, (_, i) => `${what}, paragraph ${i + 1}: words enough to make it longer than a phone or a computer's screen.`).join("\n\n");
 const user = (n, text) => ({ kind: "user", text, turn: true, key: `u${n}:0`, rec: `u${n}`, at: "" });
@@ -46,13 +54,12 @@ async function page(browser, layout, port) {
   p.errors = [];
   p.on("pageerror", (e) => p.errors.push(e.message));
   p.stops = [];
-  p.now = { state: "idle" };
   await p.route("**/api/session/*/stream", (r) => {
-    const { state } = p.now;
-    const c = { ...CHATS[0], status: state === "working" ? "working" : "idle" };
+    const id = decodeURIComponent(new URL(r.request().url()).pathname.split("/")[3]);
+    const c = CHATS.find((x) => x.id === id) || CHATS[0];
     const ev = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
     r.fulfill({ status: 200, contentType: "text/event-stream",
-                body: `retry: 600000\n\n${ev("session", c)}${ev("live", { state, pending: [], queue: [] })}${ev("conversation", { reset: true, items: ITEMS, start: 0 })}${ev("screen", { live: true })}` });
+                body: `retry: 600000\n\n${ev("session", c)}${ev("live", { state: "idle", pending: [], queue: [] })}${ev("conversation", { reset: true, items: ITEMS, start: 0 })}${ev("screen", { live: true })}` });
   });
   await p.route("**/api/session/*/interrupt", (r) => { p.stops.push(r.request().url()); r.fulfill({ json: { ok: true } }); });
   await p.route("**/api/session/*/keys", (r) => { p.stops.push(r.request().url()); r.fulfill({ json: { ok: true } }); });
@@ -68,7 +75,7 @@ async function page(browser, layout, port) {
       const v = parse.call(this, text, ...rest);
       if (v && typeof v === "object" && Array.isArray(v.sessions) && "share" in v) {
         v.sessions = chats.map((c) => ({ ...c, today: { ...c.today } }));
-        v.projects = [{ name: "proj", sessions: 1 }];
+        v.projects = [{ name: "proj", sessions: chats.length }];
         v.today = { loops: [], source: "", error: "", sent: {}, assistant: null };
       }
       return v;
@@ -77,8 +84,9 @@ async function page(browser, layout, port) {
   return p;
 }
 
-const opened = (p) => until(p, (id) => { const c = __chat(); return c && c.id === id && c.scroller.isConnected && !!document.querySelector(".chat .msg.claude"); }, ID);
+const opened = (p, id = ID) => until(p, (id) => { const c = __chat(); return c && c.id === id && c.scroller.isConnected && !!document.querySelector(".chat .msg.claude"); }, id);
 const isHome = (p) => until(p, () => !!document.querySelector(".tcard .today-go") && !(app.desk ? desk.current : app.session));
+const openNow = (p) => p.evaluate(() => (app.desk ? desk.current : app.session ? app.session.id : null));
 
 // Opened from its card: with a click (a tap on the phone), or with the keys (Enter on it).
 async function openBy(p, how) {
@@ -106,20 +114,20 @@ async function home(p) {
 // Where the keys are: the box, a message (and whether it's the latest), else what.
 const keys = (p) => p.evaluate(() => {
   const c = __chat(), a = document.activeElement;
-  if (!c) return { where: "home" };
+  if (!c || !(app.desk ? desk.current : app.session)) return { where: "home" };
   if (a === c.input) return { where: "box", value: c.input.value };
   const items = c.navItems(), at = items.findIndex((it) => it === a || it.contains(a));
   if (at >= 0) return { where: "message", latest: at === items.length - 1, lit: !!items[at].classList.contains("nav-sel") };
   return { where: a ? `${a.tagName.toLowerCase()}.${a.className}` : "none" };
 });
 const scrollTop = (p) => p.evaluate(() => Math.round(__chat().scroller.scrollTop));
-const working = (p, on) => p.evaluate((on) => {
+const live = (p, l) => p.evaluate((l) => {
   const c = __chat();
-  c.live = { state: on ? "working" : "idle", pending: [], queue: [] };
-  c.row = { ...c.row, status: on ? "working" : "idle" };
+  c.live = { pending: [], queue: [], ...l };
+  c.row = { ...c.row, status: l.state === "working" ? "working" : l.pending && l.pending.length ? "waiting" : "idle" };
   c.renderDock();
   c.renderTail();
-}, on);
+}, l);
 
 async function run(browser, layout, port) {
   const as = layout;
@@ -141,6 +149,7 @@ async function run(browser, layout, port) {
   await openBy(p, "keys");
   k = await keys(p);
   check(as, k.where === "box", `opened with Enter on its card: the keys in the box, not on a message (${k.where})`);
+  check(as, await p.evaluate(() => __chat().stopBtn.title === "Stop Claude (Esc)"), "Stop says its key, Esc");
   await shot("opened");
 
   // Typed into straight away.
@@ -163,13 +172,18 @@ async function run(browser, layout, port) {
   check(as, k.where === "box" && k.value === "Looks", `↓ on the latest: the box again, its words kept (${JSON.stringify(k)})`);
   await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
 
-  // Esc in the box, Claude not at work: up onto the latest message; i, the box.
+  // Claude done: Esc does nothing at all, in the box or on a message.
+  p.stops.length = 0;
   await p.keyboard.press("Escape");
+  await sleep(200);
   k = await keys(p);
-  check(as, k.where === "message" && k.latest, `Esc in the box, Claude done: on the latest message (${JSON.stringify(k)})`);
+  check(as, k.where === "box" && !p.stops.length, `Claude done, Esc in the box: nothing, the keys still there (${k.where}; ${p.stops.join(", ") || "nothing sent"})`);
+  await p.keyboard.press("ArrowUp");
   await p.keyboard.press("k");
+  await p.keyboard.press("Escape");
+  await sleep(200);
   k = await keys(p);
-  check(as, k.where === "message" && !k.latest, `k: the message before (${JSON.stringify(k)})`);
+  check(as, k.where === "message" && !k.latest && !p.stops.length, `Claude done, Esc on a message: nothing, not back (${JSON.stringify(k)})`);
   await p.keyboard.press("i");
   k = await keys(p);
   check(as, k.where === "box" && k.value === "", `i: the box, nothing typed in it (${JSON.stringify(k)})`);
@@ -186,28 +200,91 @@ async function run(browser, layout, port) {
   const t2 = await scrollTop(p);
   check(as, t2 > t1 && (await keys(p)).where === "box", `Page Down: back down (${t1} → ${t2})`);
 
-  // Claude at work: Esc in the box is up onto the messages, and again back to the chats; never a stop.
-  await working(p, true);
-  await sleep(100);
+  // Claude at work: Esc stops it, wherever the keys are in the chat, and the chat stays open.
+  await live(p, { state: "working" });
   p.stops.length = 0;
+  await p.keyboard.press("Escape");
+  await sleep(300);
+  check(as, p.stops.length === 1 && /proj-keys\/interrupt/.test(p.stops[0]), `Claude at work, Esc in the box: a stop (${p.stops.join(", ") || "nothing sent"})`);
+  k = await keys(p);
+  check(as, k.where === "box" && (await openNow(p)) === ID, `and the chat stays open, the keys in its box (${k.where})`);
+  await shot("esc-stopped");
+  await p.keyboard.press("ArrowUp");
   await p.keyboard.press("Escape");
   await sleep(300);
   k = await keys(p);
-  check(as, k.where === "message" && !p.stops.length, `Claude at work, Esc in the box: on the messages, not a stop (${k.where}; ${p.stops.join(", ") || "nothing sent"})`);
-  await shot("esc-at-work");
-  await p.keyboard.press("Escape");
-  check(as, await isHome(p), "Esc on a message: back to the chats");
-  await sleep(300);
-  check(as, !p.stops.length, `and Claude wasn't stopped (${p.stops.join(", ") || "nothing sent"})`);
+  check(as, p.stops.length === 2 && k.where === "message" && (await openNow(p)) === ID, `on a message: a stop too, never back (${p.stops.length}; ${k.where})`);
 
-  // Claude done: Esc, Esc from the box is back to the chats.
-  await openBy(p, "keys");
-  await working(p, false);
-  p.stops.length = 0;
+  // Its question (a permission waiting): Esc is a stop, a no, as in Claude Code.
+  await live(p, { state: "waiting", pending: [{ request_id: "req-1", tool: "Bash", input: { command: "ls", description: "List the files" } }] });
+  await p.evaluate(() => { const c = __chat(); c.takeKeys(); });
+  check(as, await p.evaluate(() => __chat().dock.contains(document.activeElement)), "a question up: the keys on its card");
   await p.keyboard.press("Escape");
+  await sleep(300);
+  check(as, p.stops.length === 3 && (await openNow(p)) === ID, `Esc on its question: a stop, Claude takes it back (${p.stops.length})`);
+  await live(p, { state: "idle" });
+  await p.evaluate(() => __chat().takeKeys());
+
+  // Ctrl+Alt: from the box, typing, the keys do things.
+  await p.keyboard.type("half a thought");
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  check(as, await isHome(p), "Ctrl+Alt+← from the box, typing: back to the board");
+  check(as, p.stops.length === 3, `and nothing stopped (${p.stops.length})`);
+  await p.keyboard.press("Control+Alt+ArrowRight");
+  check(as, await opened(p), "Ctrl+Alt+→: into it again");
+  await sleep(500);
+  k = await keys(p);
+  check(as, k.where === "box" && k.value === "half a thought", `the keys in its box, what you wrote still there (${JSON.stringify(k)})`);
+  await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
+  await p.keyboard.press("Control+Alt+ArrowDown");
+  check(as, await opened(p, TWO), "Ctrl+Alt+↓: the next chat");
+  await p.keyboard.press("Control+Alt+ArrowUp");
+  check(as, await opened(p, ID), "Ctrl+Alt+↑: the one before");
+  await sleep(400);
+
+  // Ctrl+Alt+T: its terminal, the keyboard in it; again, back to the chat, the keys in its box.
+  await p.keyboard.press("Control+Alt+KeyT");
+  check(as, await until(p, () => (app.desk ? sideTab() === "term" : app.session.mode === "terminal")), "Ctrl+Alt+T: its terminal");
+  await sleep(400);
+  await shot("terminal");
+  if (desk) await p.evaluate(() => desk.terminal.focus());
+  await p.keyboard.press("Control+Alt+KeyT");
+  check(as, await until(p, () => (app.desk ? !sideTab() : app.session.mode === "chat") && document.activeElement === __chat().input), "again: back to the chat, the keys in its box");
+
+  // Ctrl+Alt+Space: the menu, a chat by its name as you type.
+  await p.keyboard.press("Control+Alt+Space");
+  const menu = () => p.evaluate(() => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop(); return m ? m.innerText : ""; });
+  await until(p, () => !!document.querySelector(".picker, .sheet-back"));
+  const m0 = await menu();
+  check(as, /New chat/.test(m0) && !/Docs: the keys page/.test(m0),
+        `Ctrl+Alt+Space: the menu, no chats in it before you type (${JSON.stringify(m0.slice(0, 300))})`);
+  await sleep(500);
+  await shot("menu");
+  if (desk) await p.keyboard.type("keys page");
+  else await p.fill(".sheet .ui-menu-search input", "keys page");
+  check(as, await until(p, () => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();
+    return !!m && [...m.querySelectorAll(".picker-row, .menu-item")].some((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)); }), "typed: the chat by its name");
+  await p.evaluate(() => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();
+    [...m.querySelectorAll(".picker-row, .menu-item")].find((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)).click(); });
+  check(as, await opened(p, TWO), "picked: it opens");
+
+  // Ctrl+Alt+K: the keys, the same on both.
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(as, await until(p, () => /Ctrl\+Alt\+Space/.test((document.querySelector(".sheet") || {}).innerText || "") && /Esc/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  await sleep(500);
+  await shot("keys");
   await p.keyboard.press("Escape");
-  check(as, await isHome(p), "Claude done: Esc, Esc from the box is back to the chats");
-  check(as, !p.stops.length, `nothing stopped (${p.stops.join(", ") || "nothing sent"})`);
+  await until(p, () => !document.querySelector(".sheet-back"));
+
+  // Back on the board: plain letters only move.
+  await p.keyboard.press("Control+Alt+ArrowLeft");
+  await isHome(p);
+  for (const key of ["n", "x", "m", "?", "Escape"]) await p.keyboard.press(key);
+  await sleep(300);
+  check(as, await p.evaluate(() => !document.querySelector(".picker, .sheet-back, .mission, .undo-toast") && document.querySelector(".board-new").hidden && !(app.desk ? desk.current : app.session)),
+        "on the board, n, x, m, ? and Esc: nothing");
+  await p.keyboard.press("Control+Alt+Enter");
+  check(as, await until(p, () => !!document.querySelector(".picker-row, .sheet .menu-item") || !document.querySelector(".board-new").hidden), "Ctrl+Alt+↵: a new chat");
 
   check(as, !p.errors.length, `no page errors ${p.errors.join(" | ")}`);
   await p.context().close();

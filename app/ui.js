@@ -254,7 +254,7 @@ function uiPatchPart(old, next) {
 // on: the chat whose machine a card shows when it isn't the card's own (an
 // agent's task: its agent's).
 function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = null, count = 0, body = [], actions = [], open, id, label, unseen = null, on = null }) {
-  // A chat's priority, when it isn't normal: its mark by its project (Ctrl+Alt+↑ / ↓, p or f sets it).
+  // A chat's priority, when it isn't normal: its mark by its project (the chat's menu sets it).
   // Not your assistant's or an agent's: on top whatever its priority.
   const s = id && typeof rowOf === "function" ? rowOf(id) : null;
   // On a machine that doesn't answer: as last seen, dimmed, "<label> is off";
@@ -673,10 +673,10 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
       // Its machine, then where it stands (a box as the buttons are, its tone a dot in it): as on its card.
       uiMachine(s, { head: true }),
       main ? null : h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
-      h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details… (Ctrl+Alt+M)", "aria-label": "This chat",
+      h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details…", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
       uiPreview(s, { head: true }),
-      main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+X)",
+      main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+W)",
                                                "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete"))),
   ];
 }
@@ -974,9 +974,9 @@ function uiAction(icon, label, act, { title = "", key = "", cls = "" } = {}) {
     glyph(icon), h("span", { class: "label" }, label), key ? h("kbd", { class: "ui-key" }, key) : null);
 }
 
-// The Ⓐ: the Amarchy menu (everything you can do, each with its key), as
-// Omarchy's mark opens its own. Its dot: an automation that failed.
-function uiBrand(act, title = "Amarchy menu (m, Ctrl+Alt+M)") {
+// The Ⓐ: the Amarchy menu (everything you can do, the keys for what has
+// one, any chat by its name), as Omarchy's mark opens its own. Its dot: an automation that failed.
+function uiBrand(act, title = "Amarchy menu (Ctrl+Alt+Space)") {
   return h("button", { class: "control ui-action ui-brand auto-btn", type: "button", title, "aria-label": "Amarchy menu", "aria-haspopup": "menu",
                        onclick: act, oncontextmenu: (e) => { e.preventDefault(); act(); } },
     glyph("brand", "ui-brand-mark"), h("span", { class: "auto-dot", "aria-hidden": "true" }));
@@ -984,7 +984,8 @@ function uiBrand(act, title = "Amarchy menu (m, Ctrl+Alt+M)") {
 
 // A menu: items [{label, detail, icon, key, act, group: () => ({title,
 // items}), desk: only on a computer, on: the one lit (the keys start on
-// it), always: shown whatever you look for}]. On a computer the keyboard's
+// it), always: shown whatever you look for, typed: only once you look for
+// it}]. On a computer the keyboard's
 // card (desk.js picker); on the phone a sheet, a group opening one of its
 // own. search: a box over it that narrows it (its placeholder), on both.
 function uiMenu(title, items, { search = "" } = {}) {
@@ -997,7 +998,8 @@ function uiMenu(title, items, { search = "" } = {}) {
   } }, h("span", { class: "label" }, it.icon ? glyph(it.icon, "icon") : null,
          h("span", { class: "ui-menu-text" }, it.label, it.detail ? h("small", {}, it.detail) : null)),
     it.group ? h("span", { class: "val" }, "›") : null);
-  const rows = items.map((it) => Object.assign(row(it), { item: it }));
+  // (typed: a row only once you type, and it fits: a chat in the menu.)
+  const rows = items.filter((it) => search || !it.typed).map((it) => Object.assign(row(it), { item: it, hidden: !!it.typed }));
   const menu = h("div", { class: "menu ui-menu" }, ...rows);
   if (!search) return sheet(sheetHead(title), menu);
   // What you type narrows it; Enter picks the first one left.
@@ -1005,7 +1007,8 @@ function uiMenu(title, items, { search = "" } = {}) {
   const shown = () => rows.filter((r) => !r.hidden);
   box.field.addEventListener("input", () => {
     const q = box.field.value.trim().toLowerCase();
-    for (const r of rows) r.hidden = !!q && !r.item.always && !`${r.item.label} ${r.item.detail || ""}`.toLowerCase().includes(q);
+    const fits = (it) => `${it.label} ${it.detail || ""}`.toLowerCase().includes(q);
+    for (const r of rows) r.hidden = r.item.typed ? !q || !fits(r.item) : !!q && !r.item.always && !fits(r.item);
   });
   box.field.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.isComposing) return;
@@ -1138,7 +1141,7 @@ function uiDropdownOpen(key) { return !!(uiState.dropdown && uiState.dropdown.ke
 // (lead), what it is (title), a line under it (sub), its actions (extra).
 function uiPageHead({ back, backLabel = "Back", lead = null, title, sub = "", extra = [] }) {
   return h("div", { class: "ui-page-head" },
-    uiTool("back", backLabel, back, { cls: "ui-page-back", title: `${backLabel} (Esc)` }),
+    uiTool("back", backLabel, back, { cls: "ui-page-back", title: `${backLabel} (Ctrl+Alt+←)` }),
     lead, h("div", { class: "ui-page-name" }, h("h2", { class: "ui-page-title" }, title), sub ? h("div", { class: "ui-page-sub" }, sub) : null),
     ...[extra].flat().filter(Boolean));
 }

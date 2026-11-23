@@ -45,7 +45,7 @@ function boardBuild() {
       uiBrand(() => deskMenu()),
       board.switchEl,
       boardSearchBox(),
-      uiAction("plus", "New chat", () => boardNew(), { title: "New chat (n, Ctrl+Alt+N)", key: "N", cls: "board-new-btn" })));
+      uiAction("plus", "New chat", () => boardNew(), { title: "New chat (Ctrl+Alt+↵)", cls: "board-new-btn" })));
   board.slot = h("div", { class: "board-new", hidden: true });
   board.box = h("div", { class: "today board-today" });
   board.startingEl = h("div", { class: "board-starting", hidden: true });
@@ -68,15 +68,14 @@ function boardBuild() {
     const go = b && board.box.contains(b) ? b : (e.target.closest(".tcard") || {}).querySelector?.(":scope > .today-go");
     if (go && document.activeElement !== go && go.isConnected && shown(go)) go.focus({ preventScroll: true });
   });
-  // Its keys wherever the keyboard is (nothing focused, too), while it's up;
-  // Esc over an open chat before the chat has it (there it would stop Claude).
-  window.addEventListener("keydown", (e) => { if (!desk.current) boardKeys(e); });
+  // Its keys wherever the keyboard is (nothing focused, too), while it's up
+  // (not under a chat open over it: the chat's are its own).
+  window.addEventListener("keydown", (e) => { if (!openId()) boardKeys(e); });
   // Back in the window (a screenshot, another app): the keys where they were.
   window.addEventListener("focus", () => {
     const a = document.activeElement;
     if (!desk.current && (!a || a === document.body || !a.isConnected || !shown(a))) boardRefocus();
   });
-  window.addEventListener("keydown", (e) => { if (desk.current) boardEsc(e); }, true);
   // The search it had, over an update (app.js keepForReload).
   if (typeof kept !== "undefined" && kept && kept.search) { board.search.value = kept.search; boardSearch(kept.search); }
   return board.el;
@@ -195,7 +194,9 @@ function cardInside(card) {
   return card ? [...card.querySelectorAll("button, a[href], input, textarea")].filter((b) => !b.matches(".today-go") && !b.disabled && shown(b)) : [];
 }
 
-// The board's keys (none while you type, or a sheet is up).
+// The board's keys (none while you type, or a sheet is up): they only move,
+// as everywhere. What does something is Ctrl+Alt + a key (desk.js), from
+// anywhere; Esc stops a chat, and on the board there's none to stop.
 function boardKeys(e) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
   if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
@@ -212,10 +213,9 @@ function boardKeys(e) {
   if (!focused) at = stops.indexOf(boardSel());
   const card = at >= 0 && stops[at].matches(".today-go") ? stops[at].closest(".tcard") : null;
   const to = (i) => { e.preventDefault(); boardFocus(stops[Math.max(0, Math.min(stops.length - 1, i))]); };
-  const press = (sel) => { const b = card && [...card.querySelectorAll(sel)].find(shown); if (b) { e.preventDefault(); b.click(); } return !!b; };
   const k = e.key;
   // A card is a row: l (→) goes into it, along its buttons; h (←) back,
-  // out of it from its first; Esc out at once. Enter presses the one you're on.
+  // out of it from its first. Enter presses the one you're on.
   const inside = cardInside(card);
   // On a button in it, or the focus off it: the one lit in it (uiInner).
   let on = inside.indexOf(document.activeElement);
@@ -231,61 +231,19 @@ function boardKeys(e) {
   }
   if (k === "l" || k === "ArrowRight") return inside.length ? into(inside[Math.min(on + 1, inside.length - 1)]) : e.preventDefault();
   if (k === "h" || k === "ArrowLeft") return on >= 0 ? into(on === 0 ? stops[at] : inside[on - 1]) : e.preventDefault();
-  if (on >= 0 && k === "Escape") return into(stops[at]);
-  // Esc on a board open in Tasks: back to Tasks' list.
-  if (k === "Escape" && boardsUI.open && !board.query) { e.preventDefault(); return boardsClose(); }
   // Tab: Chats | Tasks, the other one (Shift+Tab too).
   if (k === "Tab") { e.preventDefault(); return boardTab(BOARD_TABS[(BOARD_TABS.indexOf(board.tab) + (e.shiftKey ? BOARD_TABS.length - 1 : 1)) % BOARD_TABS.length]); }
-  // Enter on the card lit, the focus off it: it opens (on a button, a tab,
-  // the browser presses that).
-
   if (k === "j" || k === "ArrowDown") to(at < 0 ? 0 : at + 1);
   else if (k === "k" || k === "ArrowUp") to(at < 0 ? 0 : at - 1);
   else if (k === "g" || k === "Home") to(0);
   else if (k === "G" || k === "End") to(stops.length - 1);
   else if (k === "/") { e.preventDefault(); board.search.focus(); board.search.select(); }
-  else if (k === "n") { e.preventDefault(); boardNew(); }
-  else if (k === "?") { e.preventDefault(); showKeys(); }
-  else if (k === "m") { e.preventDefault(); deskMenu(); }
-  else if (k === "o") {
-    if (boardTabNow() !== "chats" || board.query) return;
-    e.preventDefault();
-    todayNeedsOnly(!todayUI.needsOnly);
-  }
   else if (!card) return;
+  // An answer's number picks it on its card, as on Claude's own menu.
   else if (/^[1-9]$/.test(k)) {
     const o = card.querySelectorAll(".today-opt")[Number(k) - 1];
     if (o) { e.preventDefault(); o.click(); }
-  } else if (k === "x") {
-    const s = card.dataset.id && row(card.dataset.id);
-    if (s && !isAgent(s)) { e.preventDefault(); todayComplete(s); }
-    else if (!s) press(".tbtn.loop-done");      // a task: Done
-  } else if (k === "p" || k === "f") {
-    // Pinned or For later; again, back in Now.
-    const s = card.dataset.id && row(card.dataset.id), level = k === "p" ? "high" : "low";
-    if (s && !isAgent(s)) { e.preventDefault(); priorityNow(s, s.priority === level ? "normal" : level).catch(() => {}); }
-  } else if (k === "r") press("a.tbtn") || press(".tbtn.ui-previews");     // what it made: its Review, else its Preview (of several: pick one)
-  else if (k === "s") press(".tbtn.seen");
-  else if (k === "c") press(".bcard-comment");      // a board's card: Comment
-  else if (k === "e") press(".bcard-edit-btn");     // and Edit
-}
-
-// Esc over an open chat: back to the board (what you were writing stays, as
-// a chat's draft does). But for what Esc does first: stop a dictation, close
-// a menu or a sheet, or Select text over a terminal; in the chat's box, go
-// out onto its messages (chat.js navKey); and in a terminal, Esc is the
-// terminal's. Never a stop of Claude.
-function boardEsc(e) {
-  if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (document.querySelector(".sheet-back, .picker-back, .ui-dropdown, .mission")) return;
-  if (e.target.closest && e.target.closest(".term-box, .term-text")) return;
-  if (desk.terminal && desk.terminal.talk.on()) return;     // its message line's dictation
-  const c = desk.chat;
-  if (c && (c.talk.on() || c.menu)) return;
-  if (c && c.navKey(e)) return;      // out of the box, or of a message, first (chat.js)
-  e.preventDefault();
-  e.stopPropagation();
-  boardBack();
+  }
 }
 
 // The board's tabs, Chats and Tasks, each with what's your move.
@@ -600,20 +558,21 @@ function boardSearchDraw() {
   boardMark();      // (not Today's: Today draws itself again when the search is emptied)
 }
 
-// Ctrl+Alt+J / K: from chat to chat in the board's order, the open one
+// Ctrl+Alt+↑ / ↓: from chat to chat in the board's order, the open one
 // opening the next, else the keys going to the next card. With from (the
 // key held, desk.js step): only which chat comes after that one.
 function boardStep(n, from) {
   // (Under an open chat the board isn't in sight: then not in a folded group.
   // Nor drawn again: a chat closed meanwhile is still there, and skipped.)
-  const inSight = (t) => (desk.current ? !t.closest("details:not([open])") : shown(t));
+  const open = openId();
+  const inSight = (t) => (open ? !t.closest("details:not([open])") : shown(t));
   const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(inSight).map((t) => t.dataset.id))]
     .filter((id) => row(id));
   if (!ids.length) return null;
   const at = ids.indexOf(from || keyedId());
   const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];
   if (from) return id;
-  if (desk.current) boardOpen(id);
+  if (open) boardOpen(id);
   else boardFocus(board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`));
   return id;
 }

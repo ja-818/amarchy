@@ -125,7 +125,7 @@ async function run(browser, port, layout) {
   const features = { "touch grass": /touch grass/, worktree: /worktree/, "chats nap": /sleeps to free memory/, briefings: /Briefings/,
     dictation: /\bmic\b/, notifications: /notification/, "Ship it": /Ship it/, Preview: /Preview/, terminal: /terminal in your pocket/i,
     "Now · At work · For later": /At work[\s\S]*Now[\s\S]*For later/, Tasks: /Tasks[\s\S]*meeting recordings/, secrets: /Keys and passwords/,
-    dopamine: /dopamine[\s\S]*40 badges/, vim: /Vim/ };
+    dopamine: /dopamine[\s\S]*40 badges/, keys: /Ctrl\+Alt[\s\S]*Esc[\s\S]*stops Claude/ };
   const missing = Object.entries(features).filter(([, re]) => !re.test(all)).map(([k]) => k);
   check(where, !missing.length, `every feature${missing.length ? `: missing ${missing.join(", ")}` : ""}`);
   check(where, /themes/i.test(all) && /Tokyo Night/.test(all), "the themes");

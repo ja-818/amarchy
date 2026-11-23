@@ -1,9 +1,8 @@
 // A chat in Ghostty, from the app, phone and wide: a chat's menu has "Open in
 // Ghostty on <machine>" when the machine has Ghostty and a desktop (the
 // board's ghostty), and it asks the host to open it (POST
-// /api/session/<id>/ghostty); on a computer Ctrl+Alt+O does too, and the keys
-// list says so. Not there for a chat of another machine's, nor on a machine
-// without it. Screenshots of each layout go to SHOTS.
+// /api/session/<id>/ghostty). Not there for a chat of another machine's,
+// nor on a machine without it. Screenshots of each layout go to SHOTS.
 //
 //   node test/ghostty-view.js
 //
@@ -154,14 +153,6 @@ async function run(browser, port, layout) {
   const items = await menuItems(p, layout);
   const item = items.find((t) => /Open in Ghostty on desk/.test(t));
   check(layout, !!item, `the chat's menu has Open in Ghostty on desk (${items.map((t) => t.split("\n")[0]).join(", ")})`);
-  if (layout === "wide") {
-    const key = await p.evaluate(() => {
-      const adv = sessionItems(app.view.sessions[0]).find((x) => x.label === "Advanced");
-      const it = adv && adv.group().items.find((x) => /Ghostty/.test(x.label));
-      return it && it.key;
-    });
-    check(layout, key === "Ctrl+Alt+O", `with its key, Ctrl+Alt+O (${key})`);
-  }
   await shot(p, "menu");
   await (layout === "wide" ? p.locator(".picker-row", { hasText: "Open in Ghostty" }) : p.locator(".sheet .menu-item", { hasText: "Open in Ghostty" })).first().click();
   await p.waitForTimeout(500);
@@ -169,16 +160,6 @@ async function run(browser, port, layout) {
     `it asks the host to open its terminal (${JSON.stringify(p.posts)})`);
   const said = await p.locator(".toast").last().innerText().catch(() => "");
   check(layout, /in Ghostty on desk/.test(said), `and says where (${said})`);
-  if (layout === "wide") {
-    await p.keyboard.press("Escape").catch(() => {});
-    await p.locator("body").click({ position: { x: 5, y: 400 } }).catch(() => {});
-    await p.keyboard.press("Control+Alt+KeyO");
-    await p.waitForTimeout(500);
-    check(layout, p.posts.length === 2, `Ctrl+Alt+O opens it too (${p.posts.length} asked)`);
-    await p.evaluate(() => showKeys());
-    const keys = await p.locator(".keys-row").allInnerTexts();
-    check(layout, keys.some((k) => /Ctrl\+Alt\+O/.test(k) && /Ghostty/.test(k)), "the keys list has it");
-  }
   check(layout, !p.errors.length, `no page errors (${p.errors.join("; ")})`);
   await p.context().close();
 
@@ -187,12 +168,6 @@ async function run(browser, port, layout) {
   await openChat(p, "proj-pop");
   const none = await menuItems(p, layout);
   check(layout, !none.some((t) => /Ghostty/.test(t)), "a machine without Ghostty: not offered");
-  if (layout === "wide") {
-    await p.keyboard.press("Escape").catch(() => {});
-    await p.keyboard.press("Control+Alt+KeyO");
-    await p.waitForTimeout(400);
-    check(layout, !p.posts.length, "and Ctrl+Alt+O asks nothing");
-  }
   await p.context().close();
 
   // Another machine's chat: not offered (its window would open over there).

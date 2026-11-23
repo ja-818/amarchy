@@ -1465,7 +1465,7 @@ class Chat {
     this.attachBtn = uiComposerButton("attach", "Add a photo or a file", icon("plus"), () => this.toggleMenu("add"), { "aria-haspopup": "menu" });
     this.micBtn = uiComposerButton("mic", "Dictate (hold, or tap and tap again)", glyph("mic"), null, { hidden: true });
     this.sendBtn = uiComposerButton("send", "Send", glyph("send"), () => this.send());
-    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop());
+    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop(), { title: "Stop Claude (Esc)" });
     // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
@@ -1647,14 +1647,14 @@ class Chat {
   }
 
   // ---- the keys. A chat opens with them in the box, to write (takeKeys).
-  // Esc there, or ↑ with nothing above it, goes up onto the latest message
-  // (Esc never stops Claude: its Stop does). On the messages, as on the board:
-  // j / k (↓ ↑) from message to message (↓ on the latest: down into the
-  // box), l (→) into one, along its buttons and links, h (←) back and out of
-  // it, Enter on a button presses it, g / G the first and the latest, d / u
-  // half a page, i the box. Esc on a message: back (opts.back), never a stop.
-  // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
-  // dictate works from anywhere).
+  // ↑ with nothing above it goes up onto the latest message. On the
+  // messages, as on the board: j / k (↓ ↑) from message to message (↓ on the
+  // latest: down into the box), l (→) into one, along its buttons and links,
+  // h (←) back and out of it, Enter on a button presses it, g / G the first
+  // and the latest, d / u half a page, i the box. Messages are commands then,
+  // not words: i to write. Esc anywhere in it stops Claude, and does nothing
+  // else; back to the board, and all that does something, is Ctrl+Alt + a
+  // key (desk.js), from anywhere.
 
   navItems() {
     if (!this.conv.isConnected) return [];
@@ -1732,11 +1732,19 @@ class Chat {
   }
 
   // The keys to the chat as it opens: what it asks you (its card), else the
-  // box, to write. (The messages are a key away: ↑ or Esc.)
+  // box, to write. (The messages are a key away: ↑.)
   takeKeys() {
     const card = this.dock.querySelector(".card");
     if (card) (menuStart(card) || card).focus({ preventScroll: true });
     else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
+  }
+
+  // Whether Esc has something to stop: Claude at work, or asking you (a
+  // stop is a no then, as in Claude Code).
+  stoppable() {
+    if (this.working()) return true;
+    if (this.engine === "chat") return !!(this.live && Array.isArray(this.live.pending) && this.live.pending.length);
+    return !!(this.row && this.row.status === "waiting" && this.dock.querySelector(".card"));
   }
 
   // Whether the keys are in this chat's messages (not the box, the side, a sheet).
@@ -1752,15 +1760,25 @@ class Chat {
     const a = document.activeElement;
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
+    // Esc is Claude Code's, and only that: it stops Claude, wherever the keys
+    // are in the chat (the box, a message, its card: a stop is a no there, as
+    // in Claude Code, and Claude takes its question back). Never back, never
+    // out of the box: an Esc pressed to move would stop a chat at work. But
+    // for what's open on it and takes Esc first (a menu, the / list, a
+    // dictation), and a terminal's own.
+    if (k === "Escape") {
+      if (this.menu || this.talk.on() || e.isComposing) return false;
+      if (a && a.closest && a.closest(".term-box, .term-text")) return false;
+      if (!this.stoppable()) return false;
+      this.stop();
+      return done();
+    }
     // In the box, unless the key is for something in it (a menu, the
-    // dictation, the / list): Esc leaves the box for the messages (once
-    // more: back), and never stops Claude (Esc is for moving: a stop by
-    // mistake loses a turn). ↑ with nothing above it in the box goes up onto
-    // the messages too, and Page Up / Page Down scroll them without leaving
-    // the box.
+    // dictation, the / list): ↑ with nothing above it goes up onto the
+    // messages, and Page Up / Page Down scroll them without leaving the box.
     if (a === this.input) {
       if (this.menu || this.talk.on() || e.isComposing) return false;
-      if (k === "Escape" || (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0)) return this.navLatest() ? done() : false;
+      if (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0) return this.navLatest() ? done() : false;
       if (k === "PageUp" || k === "PageDown") {
         this.scroller.scrollBy({ top: (k === "PageDown" ? 1 : -1) * this.scroller.clientHeight * 0.85 });
         return done();
@@ -1806,8 +1824,6 @@ class Chat {
       return done();
     }
     if (k === "h" || k === "ArrowLeft") { if (on >= 0) this.navTo(on === 0 ? item : inside[on - 1]); return done(); }
-    if (k === "Escape" && on >= 0) { this.navTo(item); return done(); }
-    if (k === "Escape" && this.opts.back) { this.opts.back(); return done(); }      // the phone's; a computer's board has its own Esc
     // Enter, the focus off the message: the button lit in it, pressed.
     if (k === "Enter" && !focused && on >= 0 && !(a && a.closest && a.closest("button, a[href], summary"))) { this.navTo(inside[on]); inside[on].click(); return done(); }
     if (k === "Enter" && (a === item || (!focused && !(a && a.closest && a.closest("button, a[href], summary")))) && !item.matches("button, a[href]")) return done();
@@ -3888,6 +3904,8 @@ class Chat {
   // Stop: the chat engine's interrupt, or Esc in Claude's terminal. As Esc
   // does in Claude Code, what was waiting to go comes back into the box.
   async stop() {
+    if (this.stopping) return;      // (Esc pressed again on its way: one stop)
+    this.stopping = true;
     try {
       if (this.engine === "chat") {
         const queue = (this.live && Array.isArray(this.live.queue) && this.live.queue) || [];
@@ -3899,6 +3917,8 @@ class Chat {
       } else await this.post("keys", { keys: ["Escape"] });
     } catch (e) {
       toast(e.message);
+    } finally {
+      this.stopping = false;
     }
   }
 

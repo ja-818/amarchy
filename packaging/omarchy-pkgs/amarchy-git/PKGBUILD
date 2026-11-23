@@ -79,7 +79,7 @@ package_amarchy-git() {
   optdepends=('claude-code: Claude Code, which every chat runs (or its own installer)'
               'tailscale: your phone and your other machines reach this one (else amarchy-tailnet, included)'
               'amarchy-desktop-git: the desktop app'
-              'ghostty: a chat in a Ghostty window (Ctrl+Alt+O)'
+              'ghostty: a chat in a Ghostty window (its menu, Advanced)'
               'imagemagick: wallpapers cut for a phone and a computer'
               'ffmpeg: wallpapers cut without ImageMagick, and dictation from any recording'
               'python-fonttools: the fonts cut smaller for the app'
