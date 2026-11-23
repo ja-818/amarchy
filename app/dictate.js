@@ -446,28 +446,24 @@ function dictationSettings(draw) {
   }
   if (!d.ready && app.view && app.view.dictation) {
     const setup = d.setup;
-    const itself = via ? `: then it writes it down itself, without ${via.label}` : "";
     if (setup && !setup.error) {
-      const pct = Number.isInteger(setup.pct) ? `: ${setup.pct}%` : "…";
-      kids.push(h("p", {}, setup.build ? `${setup.build.charAt(0).toUpperCase()}${setup.build.slice(1)} on ${here}${pct} Then the speech model (${mb}).`
-        : setup.checking ? "Checking the speech model…"
+      kids.push(h("p", {}, setup.checking ? "Checking the speech model…"
         : `Fetching the speech model: ${Math.round((setup.done || 0) / 1e6)} of ${mb}.`));
       clearTimeout(dictationSettings.timer);
       dictationSettings.timer = setTimeout(() => { if (document.querySelector(".sheet-back.settings")) draw(); }, 1000);
-    } else if (d.lib || d.buildable) {
+    } else if (d.lib || d.auto) {
       const stopped = setup && setup.error ? ` The last try stopped: ${setup.error}.` : "";
-      kids.push(h("p", {}, d.lib ? `${Here} can write down what you say${via ? " itself" : `, in ${langs}`}, once it has the speech model (${mb}).${stopped}`
-          : `No package has whisper.cpp for ${d.arch || "this processor"}, so ${here} builds it (a few minutes), then fetches the speech model (${mb})${itself}.${stopped}`),
+      kids.push(h("p", {}, `${Here} can write down what you say${via ? " itself" : `, in ${langs}`}, once it has the speech model (${mb}).${stopped}`),
         h("button", { class: `control wide${via ? "" : " accent"}`, onclick: async (e) => {
           e.currentTarget.disabled = true;
           try {
             await api("/api/dictate/setup", {});
-            if (app.view && app.view.dictation) app.view.dictation.setup = d.lib ? { done: 0 } : { build: "fetching whisper.cpp" };
+            if (app.view && app.view.dictation) app.view.dictation.setup = { done: 0, size: d.size };
           } catch (err) { toast(err.message); }
           draw();
         } }, `Set up dictation on ${here}`));
     } else {
-      kids.push(h("p", {}, `To write down what you say on ${here}${via ? " itself" : ""}: ${d.how || "install whisper.cpp there, then amarchy dictation setup"}.`));
+      kids.push(h("p", {}, `To write down what you say on ${here}${via ? " itself" : ""}: ${d.how || "amarchy dictation setup, there"}.`));
       if (d.fix) kids.push(h("button", { class: "control wide", onclick: () => copyText(d.fix).then(() => toast(`Copied: ${d.fix}`)) }, "Copy the command"));
     }
   }

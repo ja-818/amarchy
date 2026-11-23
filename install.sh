@@ -12,8 +12,10 @@
 #     exits until you type in them again; amarchy sleep --after), and one that
 #     keeps amarchy up to date (amarchy update)
 #   - restarts the app (amarchy app on serves it) on what's installed now
-#   - says whether dictation in the app is set up (amarchy dictation setup:
-#     a speech model, not fetched by itself: 670 MB)
+#   - dictation in the app (its mic): fetches its speech engine, transcribe.cpp
+#     (about 20 MB, where no package brought it), in the background; the
+#     speech model (740 MB) comes the first time you dictate (amarchy
+#     dictation setup). Says whether it's set up
 #   - fetches Omarchy's wallpapers for the themes from Omarchy's repository,
 #     in the background (amarchy theme --refresh-wallpapers: 60 MB, kept in
 #     ~/.local/state/amarchy/wallpapers), and cuts the fonts and your own
@@ -216,9 +218,9 @@ if ((uninstall)); then
   # ---- Omarchy home (track C): its pieces of Omarchy, all of them.
   "$repo/omarchy/install.sh" --uninstall || say "Couldn't take away all of amarchy's pieces of Omarchy (omarchy/install.sh --uninstall)"
   # ---- end of Omarchy home
-  # The dictation model is only a download (670 MB), and the whisper.cpp
-  # built there where no package has it: both made again by amarchy
-  # dictation setup.
+  # Dictation's engine and model are only downloads (amarchy dictation
+  # setup fetches them again): a setup under way stops once they're gone.
+  systemctl --user stop 'amarchy-dictation-setup-*.service' >/dev/null 2>&1 || true
   rm -rf "$state/dictation"
   # Omarchy's wallpapers too, only downloads (amarchy theme
   # --refresh-wallpapers): a fetch under way stops once they're gone.
@@ -463,7 +465,10 @@ fi
 echo "  Sessions serve on this machine's Tailscale address if it has one, else only on localhost;"
 echo "  set NAME= and BIND= in ~/.config/amarchy/host to change it."
 echo "  Idle sessions open nowhere sleep after $("$bin_dir/amarchy" sleep --after) min (amarchy sleep --after <min>|off); send one something to wake it"
-# Dictation into the app's boxes, written down here (amarchy dictation): set
-# up, or how.
+# Dictation into the app's boxes, written down here (amarchy dictation). Its
+# engine (transcribe.cpp) comes with amarchy: a package brings it, a checkout
+# fetches it here, in the background (and the model too where whisper.cpp's
+# was set up before: the new one replaces it). Then: set up, or how.
+"$bin_dir/amarchy" dictation setup --engine --in-background --quiet >/dev/null 2>&1 || true
 echo "  $("$bin_dir/amarchy" dictation 2>&1 | head -1 || true)"
 echo "  $("$bin_dir/amarchy" theme --list 2>/dev/null | tail -1 || true)"

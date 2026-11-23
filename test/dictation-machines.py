@@ -1,12 +1,12 @@
-# Dictation on a machine without the speech model (an ARM laptop: no
-# whisper-cpp package for it), written down by another machine of yours
+# Dictation on a machine without the speech model (not set up yet, or a
+# laptop that shouldn't hold it), written down by another machine of yours
 # that has it (see "dictation on the host" in bin/amarchy), with two real
 # amarchy app servers on this machine (test/two_machines.py):
 #
-#   - alpha has the model (this host's libparakeet and model), beta has
-#     neither, and no package for it (a pacman that has no whisper-cpp);
-#   - beta says so honestly: no pacman line that fails, but setup building
-#     whisper.cpp (what that needs first), and that alpha writes it down;
+#   - alpha has the model (this host's engine, transcribe.cpp, and model),
+#     beta has neither (no package's engine either);
+#   - beta says so honestly: setup fetches them, by itself, and alpha
+#     writes it down meanwhile;
 #   - alpha's hello says it writes dictations down; beta's board and its
 #     /api/dictate say alpha does it for beta (via);
 #   - the app's WebSocket on beta: what's said, written down on alpha, the
@@ -15,10 +15,15 @@
 #   - never further than one: alpha asking beta (its pass-through) gets
 #     beta's own no, not alpha's model again;
 #   - alpha off: beta's board has no via any more, the mic says why;
-#   - Settings' button on beta: whisper.cpp built there (how far on its
-#     board), then beta writes its own down; remove takes the build too.
+#   - a processor amarchy has no engine for: beta says so, and Settings'
+#     button can't set it up by itself;
+#   - Settings' button on beta: the engine fetched there (the real release,
+#     checked, unpacked without the GPU's code; how far on its board), then
+#     beta writes its own down; what wrote it down before (whisper.cpp's
+#     model and build) gone; remove takes the engine too; setup --engine
+#     (what an install runs) fetches only the engine.
 #
-# Needs this host's dictation set up (amarchy dictation: libparakeet and the
+# Needs this host's dictation set up (amarchy dictation: the engine and the
 # model) and ffmpeg; the recording is whisper.cpp's JFK sample, fetched once
 # (checked by its hash) into ~/.cache/amarchy-test.
 #
@@ -30,13 +35,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from two_machines import *      # Machine, until, check, failed, the WebSockets' helpers
 
-MODEL = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amarchy/dictation/parakeet-tdt-0.6b-v3-q8_0.bin"
-LIB = next((p for p in (Path("/usr/lib/libparakeet.so.1"), Path("/usr/local/lib/libparakeet.so.1")) if p.exists()), None)
+HOST = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amarchy/dictation"
+MODEL = HOST / "parakeet-tdt-0.6b-v3-Q8_0.gguf"
+ENGINE = next((d for d in (HOST / "transcribe.cpp", Path("/usr/lib/amarchy/transcribe.cpp")) if (d / "libtranscribe.so").is_file()), None)
 SPEECH = Path.home() / ".cache/amarchy-test/jfk.wav"
 SPEECH_URL = "https://raw.githubusercontent.com/ggml-org/whisper.cpp/d1be6fde11ac6e0407606b4e42fe72d34add8037/samples/jfk.wav"
 SPEECH_SHA = "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e"
 
-if not MODEL.is_file() or not LIB or not shutil.which("ffmpeg"):
+if not MODEL.is_file() or not ENGINE or not shutil.which("ffmpeg"):
     print("skipped: this host's dictation isn't set up (amarchy dictation), or no ffmpeg")
     sys.exit(0)
 if not SPEECH.is_file() or hashlib.sha256(SPEECH.read_bytes()).hexdigest() != SPEECH_SHA:
@@ -48,14 +54,12 @@ if not SPEECH.is_file() or hashlib.sha256(SPEECH.read_bytes()).hexdigest() != SP
 pcm = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(SPEECH), "-f", "s16le", "-ac", "1", "-ar", "16000", "-"],
                      capture_output=True, check=True).stdout
 
-# No whisper-cpp in this machine's packages (as on Arch Linux ARM): for both, but alpha has the system's library.
-(FAKE / "pacman").write_text("#!/bin/sh\necho \"error: package 'whisper-cpp' was not found\" >&2\nexit 1\n")
-(FAKE / "pacman").chmod(0o755)
-
 alpha, beta = Machine("alpha"), Machine("beta")
-beta.env["AMARCHY_DICTATE_SYSTEM"] = "off"          # as on a machine without the library
+for m in (alpha, beta):
+    m.env["AMARCHY_DICTATE_SYSTEM"] = "off"         # no package's engine: only what's in its own state
 (alpha.home / "state/amarchy/dictation").mkdir(parents=True)
 (alpha.home / "state/amarchy/dictation" / MODEL.name).symlink_to(MODEL)
+(alpha.home / "state/amarchy/dictation/transcribe.cpp").symlink_to(ENGINE)
 
 
 def talk(m, path="/api/dictate", audio=pcm, limit=90):
@@ -100,11 +104,12 @@ try:
     print("beta alone: honest about what works there")
     r = beta.amarchy("dictation")
     out = r.stdout
-    check("pacman -S whisper-cpp" not in out and "amarchy dictation setup" in out and "builds" in out,
-          f"no pacman line that fails, setup builds it ({out.splitlines()[0][:160] if out else r.stderr[-160:]})")
+    check("amarchy dictation setup (fetches transcribe.cpp 0.4.2 and Parakeet TDT 0.6B v3" in out and "whisper" not in out,
+          f"setup fetches what it needs ({out.splitlines()[0][:160] if out else r.stderr[-160:]})")
     d = beta.state().get("dictation") or {}
-    check(d.get("ready") is False and d.get("via") is None and d.get("lib") is False and isinstance(d.get("how"), str)
-          and "builds" in d["how"], f"its board: not ready, nobody to send it to, how ({d.get('how')})")
+    check(d.get("ready") is False and d.get("via") is None and d.get("lib") is False and d.get("auto") is True
+          and d.get("buildable") is False and "fetches" in (d.get("how") or "") and d.get("fix") == "amarchy dictation setup",
+          f"its board: not ready, nobody to send it to, setup by itself ({d.get('how')})")
     code, said = talk(beta)
     check(code.startswith("HTTP/1.1 409") or code.startswith("HTTP/1.0 409"), f"its mic's WebSocket: refused, saying why ({code})")
 
@@ -160,44 +165,70 @@ try:
     check(d and d.get("via") is None and d.get("ready") is False, "beta's board: nobody writes it down now")
     code, said = talk(beta, audio=pcm[:32000])
     check("409" in code, f"its mic: refused, saying why ({code})")
-    code, _, said = beta.ask("POST", "/api/dictate/setup", {})
-    check(code == 409 and "cmake" in said.get("error", ""), f"Settings' button without what builds it: says what to install ({said.get('error', '')[:100]})")
 
-    # Settings' button where it can build: whisper.cpp built on beta (a minute or
-    # so), progress on its board, then beta writes its own down. Only with a cmake
-    # (pip's will do: python -m venv ~/.cache/cmake-venv && ~/.cache/cmake-venv/bin/pip install cmake).
-    cmake = shutil.which("cmake") or next((str(c) for c in [Path.home() / ".cache/cmake-venv/bin/cmake"] if c.exists()), None)
-    if not cmake or os.environ.get("QUICK"):
-        print("beta builds its own: skipped (no cmake, or QUICK)")
+    print("a processor amarchy has no engine for")
+    beta.stop()
+    beta.env["AMARCHY_DICTATE_ARCH"] = "riscv64"
+    check(beta.start(), "beta again, as a riscv64")
+    d = beta.state().get("dictation") or {}
+    check(d.get("auto") is False and d.get("fix") is None and "no speech engine for riscv64" in (d.get("how") or "")
+          and "AMARCHY_DICTATE_ENGINE" in d["how"], f"its board: it can't by itself, and what would ({(d.get('how') or '')[:90]})")
+    code, _, said = beta.ask("POST", "/api/dictate/setup", {})
+    check(code == 409 and "no speech engine for riscv64" in said.get("error", ""), f"Settings' button: says so ({said.get('error', '')[:90]})")
+    r = beta.amarchy("dictation", "setup", env_extra={"AMARCHY_DICTATE_ARCH": "riscv64"})
+    check(r.returncode != 0 and "no speech engine for riscv64" in r.stderr, f"amarchy dictation setup: says so ({r.stderr.strip()[:90]})")
+    r = beta.amarchy("dictation", "setup", "--engine", env_extra={"AMARCHY_DICTATE_ARCH": "riscv64"})
+    check(r.returncode == 0 and not (beta.home / "state/amarchy/dictation/transcribe.cpp").exists(),
+          "an install's setup --engine there: nothing to fetch, no error")
+
+    # Settings' button: the engine fetched on beta (the real release, about
+    # 20 MB), how far on its board, then beta writes its own down. The model
+    # is this host's (no 740 MB download for a test); what wrote it down
+    # before is there, to go.
+    if os.environ.get("QUICK"):
+        print("beta sets up its own: skipped (QUICK)")
     else:
-        print("beta builds its own (Settings' button)")
+        print("beta sets up its own (Settings' button)")
         beta.stop()
-        beta.env["PATH"] = f"{FAKE}:{Path(cmake).parent}:/usr/local/bin:/usr/bin:/bin"
-        (beta.home / "state/amarchy/dictation").mkdir(parents=True, exist_ok=True)
-        (beta.home / "state/amarchy/dictation" / MODEL.name).symlink_to(MODEL)     # (no 670 MB download for a test)
-        check(beta.start(), "beta again, with a cmake")
+        del beta.env["AMARCHY_DICTATE_ARCH"]
+        here = beta.home / "state/amarchy/dictation"
+        here.mkdir(parents=True, exist_ok=True)
+        (here / MODEL.name).symlink_to(MODEL)
+        (here / "parakeet-tdt-0.6b-v3-q8_0.bin").write_bytes(b"whisper.cpp's model")
+        (here / "whisper.cpp/lib").mkdir(parents=True)
+        check(beta.start(), "beta again")
         d = beta.state().get("dictation") or {}
-        check(d.get("buildable") is True and "builds whisper.cpp" in (d.get("how") or ""), f"its board: it can build it ({d.get('how')})")
+        check(d.get("auto") is True and d.get("lib") is False and d.get("model") is True and d.get("size") == 22562331,
+              f"its board: only the engine to fetch ({d.get('size')} bytes: {d.get('how')})")
         code, _, _ = beta.ask("POST", "/api/dictate/setup", {})
         check(code == 200, f"Set up dictation: under way ({code})")
-        seen = until(lambda: ((beta.state().get("dictation") or {}).get("setup") or {}).get("pct") is not None
-                     and beta.state()["dictation"]["setup"], limit=120, step=0.5)
-        check(bool(seen) and "building whisper.cpp" in seen.get("build", ""), f"how far, on its board ({seen})")
-        d = until(lambda: (x := beta.state().get("dictation") or {}).get("ready") and x, limit=600, step=2) or {}
-        check(d.get("ready") is True and d.get("via") is None and not d.get("setup"), "built: beta writes its own down")
-        built = beta.home / "state/amarchy/dictation/whisper.cpp"
-        check((built / "lib/libparakeet.so.1").exists() and json.loads((built / "amarchy.json").read_text()).get("commit", "").startswith("d1be6fde"),
-              "whisper.cpp 1.9.5 in its state, at its commit")
-        check(not (beta.home / "state/amarchy/dictation/build").exists(), "its source and build gone, only the libraries kept")
+        seen = until(lambda: (x := (beta.state().get("dictation") or {}).get("setup") or {}).get("done") and x, limit=60, step=0.2)
+        check(bool(seen) and seen.get("size") == 22562331 and 0 < seen["done"] <= seen["size"], f"how far, on its board ({seen})")
+        d = until(lambda: (x := beta.state().get("dictation") or {}).get("ready") and x, limit=180, step=1) or {}
+        check(d.get("ready") is True and d.get("via") is None and not d.get("setup"), "set up: beta writes its own down")
+        eng = here / "transcribe.cpp"
+        check(json.loads((eng / "contract.json").read_text()).get("version") == "0.4.2" and (eng / "libtranscribe.so").is_file()
+              and not (eng / "libggml-vulkan.so").exists() and (eng / "licenses/LICENSE").is_file(),
+              "transcribe.cpp 0.4.2 in its state: its CPU code and licenses, not the GPU's")
+        check(not (here / "parakeet-tdt-0.6b-v3-q8_0.bin").exists() and not (here / "whisper.cpp").exists()
+              and not list(here.glob("*.part")) and not (here / "setup.json").exists(),
+              "what wrote it down before gone, nothing half-fetched left")
         code, said = talk(beta)
         text = next((m["text"] for m in said if "text" in m), "")
         check("country" in text, f"its mic: written down on beta itself ({text[:60]!r})")
-        log = [json.loads(x) for x in (beta.home / "state/amarchy/dictation/log.jsonl").read_text().splitlines()]
+        log = until(lambda: [json.loads(x) for x in (here / "log.jsonl").read_text().splitlines()], limit=5) or []
         check(log and log[-1].get("engine") == "host" and not log[-1].get("for"), "in beta's own log")
+        code, _, h = beta.ask("GET", "/api/peer/hello", cookie=False)
+        check((h.get("dictation") or {}).get("ready") is True, "beta's hello: it writes dictations down now")
         r = beta.amarchy("dictation")
-        check("built here" in r.stdout, f"amarchy dictation says it's the one built here ({r.stdout.strip()[:120]})")
+        check("through transcribe.cpp 0.4.2" in r.stdout, f"amarchy dictation says through what ({r.stdout.strip()[:120]})")
         r = beta.amarchy("dictation", "remove")
-        check(r.returncode == 0 and not built.exists() and "whisper.cpp built here" in r.stdout, f"remove: the model and the build ({r.stdout.strip()[:100]})")
+        check(r.returncode == 0 and not eng.exists() and not (here / MODEL.name).exists() and MODEL.is_file(),
+              f"remove: the model and the engine (this host's model untouched: {r.stdout.strip()[:90]})")
+        r = beta.amarchy("dictation", "setup", "--engine", timeout=180)
+        check(r.returncode == 0 and (eng / "libtranscribe.so").is_file() and not (here / MODEL.name).exists()
+              and "the speech model comes the first time" in r.stdout,
+              f"setup --engine (an install's): the engine only ({r.stdout.strip()[:100] or r.stderr.strip()[-100:]})")
 finally:
     for m in (alpha, beta):
         m.stop()
