@@ -118,15 +118,40 @@ function stateIcon(s) {
 // Every spinner (class spin) turns together. They're found as the page has
 // them (a live list, not a search of the page every tick), and each turns in
 // a box of its own size, so a tick lays out nothing around it.
-const spin = { frame: 0, all: document.getElementsByClassName("spin") };
+// Whatever else moves for as long as it's on screen (class beat: three dots
+// while it types, the dot beating in New, what runs in the background, a
+// streak at risk) moves with them, a step every other tick (its data-b, one
+// of BEAT_FRAMES, drawn in CSS): the page draws at most eleven frames a
+// second for all of them at once. A CSS animation that never ends draws
+// every frame the screen shows, 120 a second on a 120 Hz screen: without a
+// GPU (a computer whose driver isn't there yet) that's a core, and every key
+// you press waits in line behind its frames.
+// In the desktop app on a computer with no GPU to draw with (amarchyDesktop.gpu
+// false: each frame tens of milliseconds of a core there), the spinners step
+// every other tick too, with the beat: half the frames.
+const BEAT_FRAMES = 6;
+const spin = { frame: 0, beat: 0, ticks: 0, all: document.getElementsByClassName("spin"), beats: document.getElementsByClassName("beat"),
+               every: window.amarchyDesktop && window.amarchyDesktop.gpu === false ? 2 : 1 };
 setInterval(() => {
-  if (document.visibilityState !== "visible" || !spin.all.length) return;
-  spin.frame = (spin.frame + 1) % SPINNER_FRAMES;
-  for (const el of spin.all) el.setAttribute("data-f", spin.frame);
+  if (document.visibilityState !== "visible" || (!spin.all.length && !spin.beats.length)) return;
+  spin.ticks++;
+  if (spin.ticks % spin.every === 0) {
+    spin.frame = (spin.frame + 1) % SPINNER_FRAMES;
+    for (const el of spin.all) el.setAttribute("data-f", spin.frame);
+  }
+  if (spin.ticks % 2) return;
+  spin.beat = (spin.ticks / 2) % BEAT_FRAMES;
+  for (const el of spin.beats) el.setAttribute("data-b", spin.beat);
 }, 90);
 
 function spinner() {
   return h("span", { class: "spinner spin", "aria-hidden": "true", "data-f": spin.frame });
+}
+
+// Something that moves with the beat (above), made at the step it's on now:
+// a redraw that makes it again finds it the same (uiPatch keeps the old one).
+function beat(cls, attrs = {}, ...kids) {
+  return h("span", { ...attrs, class: `${cls} beat`, "data-b": spin.beat }, ...kids);
 }
 
 // What a session is about, the keyword before ": " in bold.

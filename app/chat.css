@@ -549,11 +549,18 @@
 .bg-chev { transition: transform .15s; }
 .bg-head[aria-expanded="true"] .bg-chev { transform: rotate(90deg); }
 .bg-pulse { display: inline-flex; gap: 3px; flex: none; }
-.bg-pulse i, .bg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: bg-pulse 1.4s ease-in-out infinite; }
-.bg-pulse i:nth-child(2) { animation-delay: .2s; } .bg-pulse i:nth-child(3) { animation-delay: .4s; }
-.bg-pulse i:nth-child(4) { animation-delay: .6s; } .bg-pulse i:nth-child(5) { animation-delay: .8s; }
-@keyframes bg-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .bg-pulse i, .bg-dot { animation: none; } }
+.bg-pulse i, .bg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+/* A light going along its dots (one a task), a task's dot fading and coming
+   back: a step on each beat (app.js, with the spinners), not every frame. */
+@media (prefers-reduced-motion: no-preference) {
+  .bg-pulse i, .bg-dot { opacity: .35; }
+  :is(.bg-pulse[data-b="0"] i:nth-child(1), .bg-pulse[data-b="1"] i:nth-child(2), .bg-pulse[data-b="2"] i:nth-child(3),
+      .bg-pulse[data-b="3"] i:nth-child(4), .bg-pulse[data-b="4"] i:nth-child(5)) { opacity: 1; }
+  :is(.bg-pulse[data-b="1"] i:nth-child(1), .bg-pulse[data-b="2"] i:nth-child(2), .bg-pulse[data-b="3"] i:nth-child(3),
+      .bg-pulse[data-b="4"] i:nth-child(4), .bg-pulse[data-b="5"] i:nth-child(5)) { opacity: .65; }
+  .bg-dot:is([data-b="1"], [data-b="5"]) { opacity: .6; }
+  .bg-dot:is([data-b="2"], [data-b="3"], [data-b="4"]) { opacity: 1; }
+}
 .bg-list { list-style: none; margin: 0; padding: 0 12px 8px; display: flex; flex-direction: column; gap: 2px; }
 .bg-task { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: var(--caption); border-top: 1px solid var(--border); }
 .bg-task .ic { color: var(--text-muted); flex: none; }
@@ -636,12 +643,13 @@
 .chat.bubbles .chat-tail > .msg.claude.typing { padding: 12px 14px; margin-top: 6px; }
 .chat.bubbles .typing .dots { display: inline-flex; gap: 4px; align-items: center; height: 10px; }
 .chat.bubbles .typing .dots i { width: 6px; height: 6px; background: var(--text-muted); opacity: .4; }     /* square, as the spinner's dots */
+/* A dot up at a time, the one before on its way down: a step on each beat
+   (app.js, with the spinners), not a CSS animation's every frame. */
 @media (prefers-reduced-motion: no-preference) {
-  .chat.bubbles .typing .dots i { animation: chat-typing 1.2s ease-in-out infinite; }
-  .chat.bubbles .typing .dots i:nth-child(2) { animation-delay: .15s; }
-  .chat.bubbles .typing .dots i:nth-child(3) { animation-delay: .3s; }
+  .chat.bubbles .typing .dots i { opacity: .35; }
+  .chat.bubbles .typing :is(.dots[data-b="0"] i:nth-child(1), .dots[data-b="1"] i:nth-child(2), .dots[data-b="2"] i:nth-child(3)) { opacity: 1; transform: translateY(-3px); }
+  .chat.bubbles .typing :is(.dots[data-b="1"] i:nth-child(1), .dots[data-b="2"] i:nth-child(2), .dots[data-b="3"] i:nth-child(3)) { opacity: .65; transform: translateY(-1px); }
 }
-@keyframes chat-typing { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
 /* What a script, a timer or another chat sent: a quiet line in the middle, all of it a tap away. */
 .chat.bubbles .msg.note, .chat.bubbles .msg.command { margin: 6px 0; }
 .chat.bubbles .msg.note.auto { align-self: center; max-width: min(92%, 560px); text-align: left; white-space: normal; }

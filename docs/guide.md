@@ -729,7 +729,12 @@ window closed.
   too). `amarchy app off` turns it off, and it stays off.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
-  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+  DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). On a
+  computer with no GPU to draw with (a new GPU whose Linux driver isn't
+  there yet, a virtual machine), it paints its page on the CPU, the way a CPU
+  does it best, so a chat at work doesn't take a core and the keys you hold
+  don't stick (`amarchy-desktop --graphics` says which; `AMARCHY_DESKTOP_GPU=1`
+  draws through GL anyway).
 - **Sounds**: its window plays them through GStreamer. On a computer without
   GStreamer's plugins (`gst-plugins-good`, `gst-plugins-base`,
   `gst-plugin-pipewire`), where a sound would crash its page, the app plays

@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from shell import ROOT, Shell, need  # noqa: E402
+from shell import BIN, ROOT, Shell, need  # noqa: E402
 
 # Its homes (each with a web view's data) in one folder, gone at the end:
 # under ~/.cache unless TMPDIR says (a server's /tmp can be small).
@@ -91,6 +91,12 @@ class Server:
         req = urllib.request.Request(self.url + "__test/notice", data=json.dumps({"payload": payload, "desktop": desktop}).encode(),
                                      method="POST", headers={"Content-Type": "application/json"})
         return json.loads(urllib.request.urlopen(req, timeout=10).read())["sent"]
+
+    def live(self, live):
+        """What a chat's Claude is doing now, as its live state says ({"sid", "state", "partial"...})."""
+        req = urllib.request.Request(self.url + "__test/live", data=json.dumps(live).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).read()
 
     def stop(self):
         self.proc.terminate()
@@ -463,6 +469,64 @@ def main():
             w.js("location.href = 'https://example.com/elsewhere'; 1")
             time.sleep(1)
             check(w.do("url").startswith(remote.url), "a page elsewhere isn't opened in the window (it's the browser's)")
+
+        # ---- how it draws. No GPU to draw with (this test's X server has
+        # none: Mesa's llvmpipe): its page painted on the CPU, composited, and
+        # told so (what moves steps half as often). An agent's chat at work
+        # (three dots) stays light, and Backspace held in its box lands as
+        # it's pressed, none after you let go.
+        print("how it draws")
+        said = subprocess.run([str(BIN), "--graphics"], capture_output=True, text=True, timeout=30).stdout
+        renderer = next((line[len("renderer: "):] for line in said.splitlines() if line.startswith("renderer: ")), "")
+        soft = any(x in renderer.lower() for x in ("llvmpipe", "softpipe", "swrast"))
+        check(bool(renderer) and "draws: " in said, f"--graphics says what draws its GL, and how it draws ({' / '.join(said.split(chr(10)))[:200]})")
+        agent = Server()
+        try:
+            Path(agent.home, ".local/state/amarchy/agents").write_text(json.dumps([{"id": "desk-long", "name": "Calcifer", "sound": "fairy"}]))
+            agent.live({"sid": "desk-long", "state": "working", "partial": "", "thinking": False, "pending": [], "queue": [],
+                        "activity": {"tool": "Bash", "input": {"command": "top"}}, "working_since": time.time() - 60})
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            with Shell(agent.url, home=home, env=env_for(fake_cli(home))) as w:
+                on_app(w)
+                d = w.do("drawing")
+                log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+                told = w.js("[window.amarchyDesktop.gpu, spin.every]")
+                if soft:
+                    check(d.get("cpu_painting") is True and d.get("policy") != "never" and "its page painted on the CPU" in log,
+                          f"no GPU ({renderer}): its page painted on the CPU, composited, and its log says why ({d})")
+                    check(told == [False, 2], f"the page is told it has no GPU: its spinners step every other tick ({told})")
+                else:
+                    check(d.get("cpu_painting") is False and told == [True, 1], f"a GPU ({renderer}): its page painted through it ({d}, {told})")
+                w.js("location.hash = '#/s/desk-long'; 1")
+                check(bool(w.wait("!!document.querySelector('.chat.bubbles .msg.claude.typing .dots')", timeout=40)), "an agent's chat at work: three dots")
+                time.sleep(4)
+                web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
+                hz = os.sysconf("SC_CLK_TCK")
+                use = lambda: sum(sum(map(int, Path(f"/proc/{p}/stat").read_text().rsplit(")", 1)[1].split()[11:13])) for p in [w.proc.pid, *web])
+                a, t0 = use(), time.time()
+                time.sleep(8)
+                cpu = round(100 * (use() - a) / hz / (time.time() - t0))
+                anims = w.js("document.getAnimations().filter(a => a.playState === 'running').map(a => a.animationName)")
+                check(cpu < 40 and not anims, f"at work, it takes {cpu}% of a core (under 40), nothing animating every frame ({anims})")
+                w.js("(() => { const t = document.querySelector('.chat textarea'); window.__keys = []; t.addEventListener('input', () => __keys.push(Date.now()));"
+                     " t.value = 'x'.repeat(100); t.focus(); t.setSelectionRange(100, 100); return 1; })()")
+                w.focus()
+                t0 = time.time()
+                w.xdo("key", "--delay", 30, *(["BackSpace"] * 40))
+                t1 = time.time()
+                time.sleep(3)
+                keys, left = w.js("window.__keys"), w.js("document.querySelector('.chat textarea').value.length")
+                late = round(keys[-1] - t1 * 1000) if keys else None
+                check(len(keys) == 40 and left == 60 and late is not None and late < 1500,
+                      f"40 Backspaces held (30 ms apart): all in, the last {late} ms after it was pressed, none after ({len(keys)} in, {left} left)")
+                w.shot(SHOTS / "agent-typing.png")
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            with Shell(agent.url, home=home, env={**env_for(fake_cli(home)), "AMARCHY_DESKTOP_GPU": "1"}) as w:
+                on_app(w)
+                check(w.do("drawing").get("cpu_painting") is False and w.js("window.amarchyDesktop.gpu") is True,
+                      "AMARCHY_DESKTOP_GPU=1: painted through GL anyway, the page told it has a GPU")
+        finally:
+            agent.stop()
 
         # ---- it heals itself: its log; a window gone, a crashed page, a
         # stuck window thread: a start always brings it back.

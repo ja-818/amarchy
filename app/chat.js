@@ -207,6 +207,7 @@ const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at o
 const chatsSeen = new Map();
 const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
+const STREAM_STEP_MS = 33;  // between two steps of Claude's words as it writes them (Chat.streamStep): 30 a second
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
 function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
@@ -2770,7 +2771,7 @@ class Chat {
       if (!this.workingEl || !this.workingEl.matches(".typing")) {
         clearInterval(this.workingTimer);
         this.workingEl = h("div", { class: "msg claude typing", role: "status", "aria-label": `${this.who()} is typing` },
-          h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")));
+          beat("dots", { "aria-hidden": "true" }, h("i"), h("i"), h("i")));
       }
     } else if (now) {
       if (!this.workingEl || this.workingEl.matches(".typing")) {
@@ -2856,14 +2857,18 @@ class Chat {
     }
   }
 
+  // A step every STREAM_STEP_MS, not every frame: a 120 Hz screen drew the
+  // words 120 times a second, a core's work without a GPU, and the keys you
+  // press waited behind it. Read, it's as smooth.
   streamStep() {
     if (this.streamFrame) return;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let last = performance.now();
-    const frame = (t) => {
+    const step = () => {
       this.streamFrame = null;
       const s = this.stream;
       if (!s) return;
+      const t = performance.now();
       const behind = s.text.length - s.shown;
       if (behind > 0) {
         // Catches up in about a quarter of a second, never slower than a fast reader.
@@ -2872,9 +2877,9 @@ class Chat {
         last = t;
         this.drawStream();      // (at the bottom, it stays there as it grows: build's ResizeObserver)
       }
-      if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
+      if (s.shown < s.text.length) this.streamFrame = setTimeout(step, STREAM_STEP_MS);
     };
-    this.streamFrame = requestAnimationFrame(frame);
+    this.streamFrame = setTimeout(step, 0);
   }
 
   drawStream() {
@@ -2955,7 +2960,7 @@ class Chat {
 
   endStream() {
     clearTimeout(this.streamTimer);
-    if (this.streamFrame) cancelAnimationFrame(this.streamFrame);
+    clearTimeout(this.streamFrame);
     this.streamFrame = this.streamTimer = null;
     this.stream = null;
     this.streamEl = null;
@@ -3140,7 +3145,7 @@ class Chat {
     const rows = tasks.map((t) => {
       const el = h("span", { class: "bg-took" });
       tooks.push([el, t.started]);
-      return h("li", { class: "bg-task" }, h("span", { class: "bg-dot" }), icon(t.task_type === "local_bash" ? "run" : "helper"),
+      return h("li", { class: "bg-task" }, beat("bg-dot"), icon(t.task_type === "local_bash" ? "run" : "helper"),
         h("span", { class: "bg-name" }, cut(t.description || t.summary || t.command || t.subagent_type || "A task", 120)), el);
     });
     const tick = () => {
@@ -3150,7 +3155,7 @@ class Chat {
     this.bgEl.replaceChildren(
       h("button", { class: "bg-head", type: "button", "aria-expanded": String(open),
                     onclick: () => { this.bgOpen = !open; this.renderBackground(); } },
-        h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
+        beat("bg-pulse", {}, ...tasks.slice(0, 5).map(() => h("i"))),
         h("span", { class: "bg-what" }, `${what} in the background`), took,
         icon("chevron", "bg-chev")),
       ...(open ? [h("ul", { class: "bg-list" }, ...rows)] : []));      // (replaceChildren would write a null as "null")
