@@ -296,7 +296,8 @@ function boardsOpenNodes(v, key) {
   }
   const lead = b.loops ? (v.sessions || []).find((s) => s.assistant === "main") : boardsLeadRow(b);
   const yours = b.loops ? b.yours : boardsYours(b);
-  const sub = [b.loops ? `Kept by ${b.lead_name}` : `${b.lead_name}'s`, yours ? `${yours} for you` : "nothing waits on you"].join(" · ");
+  const whose = b.loops ? `Kept by ${b.lead_name}` : b.title === b.lead_name ? "" : `${b.lead_name}'s`;
+  const sub = [whose, yours ? `${yours} for you` : "nothing waits on you"].filter(Boolean).join(" · ");
   const head = uiPageHead({ back, backLabel: "Tasks", lead: lead ? avatar(lead, "small") : null, title: b.title, sub });
   if (b.loops) {
     const loop = (l) => { const n = todayLoop(l, v); n.todayData = JSON.stringify([l, (v.today.sent || {})[l.key] || null]); return n; };
