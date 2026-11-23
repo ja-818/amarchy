@@ -257,6 +257,14 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
     actions = [];
     count = 0;
   }
+  // Moving to another machine: that, and nothing to do to it until it's there;
+  // waiting to be free, or one that didn't move: a line saying so (uiMoveNote).
+  if (s && !off && uiMoving(s)) {
+    pill = uiMovePill(s);
+    actions = [];
+  }
+  const move = s && !off && !uiMoving(s) ? uiMoveNote(s) : null;
+  if (move) body = [move, ...body];
   if (unseen === null) unseen = !!s && typeof todayUnseen === "function" && todayUnseen(s);
   const prio = s && !isAgent(s) && s.priority && s.priority !== "normal" ? glyph(s.priority, `prio ${s.priority}`) : null;
   if (prio) prio.title = `${PRIORITY[s.priority]} priority`;
@@ -288,6 +296,41 @@ function uiMachine(s, { head = false } = {}) {
 
 // "<label> is off" (or what to update) for a chat on a machine that doesn't answer, else "".
 function uiMachineOff(s) { return s && typeof machineOff === "function" ? machineOff(s) : ""; }
+
+// A chat moving to another machine (docs/plan-omarchy-and-machines.md,
+// "Moving a chat"), or one that didn't: the same on its card, over its chat
+// and in its box's place. Moving now: its pill, and nothing to do to it until
+// it's there. Waiting until it's free: a line saying so, with Cancel. One that
+// didn't move: why (it's as it was), with OK.
+function uiMoving(s) { return s && s.moving && s.moving.when !== "free" ? s.moving : null; }
+function uiMovePill(s) {
+  const mv = uiMoving(s);
+  return mv ? uiPill(`Moving to ${mv.label}…`, "working", { long: true, title: mv.step || "" }) : null;
+}
+function uiMoveNote(s, { dock = false } = {}) {
+  const mv = s && s.moving, err = s && s.move_error;
+  if (!mv && !err) return null;
+  const cls = (kind) => `ui-move ${kind}${dock ? " dock" : ""}`;
+  const tell = (body, said) => (e) => {
+    e.stopPropagation();
+    const b = e.currentTarget;
+    b.disabled = true;
+    api(chatPath(s, "/move"), body).then(() => { if (said) toast(said); }).catch((x) => { b.disabled = false; toast(x.message); });
+  };
+  if (mv && mv.when === "free") {
+    const why = mv.step && mv.step.startsWith("Waiting: ") ? mv.step.slice(9) : "";
+    return h("div", { class: cls("waiting"), role: "status" }, glyph("machine", "move-mark"),
+      h("span", { class: "ui-move-text" }, `Moves to ${mv.label} once it's free`, why ? h("span", { class: "ui-move-why" }, ` · ${why}`) : null),
+      h("button", { class: "text-btn", type: "button", onclick: tell({ cancel: true }, `It stays on ${machineOf(s).label}`) }, "Cancel"));
+  }
+  if (mv) {
+    return h("div", { class: cls("moving"), role: "status" }, glyph("machine", "move-mark"),
+      h("span", { class: "ui-move-text" }, `Moving to ${mv.label}…`, mv.step ? h("span", { class: "ui-move-why" }, ` ${mv.step}`) : null));
+  }
+  return h("div", { class: cls("failed"), role: "status" }, glyph("machine", "move-mark"),
+    h("span", { class: "ui-move-text" }, `Didn't move to ${err.label}: `, h("span", { class: "ui-move-why" }, String(err.error || "").replace(/[^.…!?]$/, "$&."))),
+    h("button", { class: "text-btn", type: "button", onclick: tell({ dismiss: true }) }, "OK"));
+}
 
 // How many of a chat's messages you haven't read, as a messaging app counts
 // them: a round count, filled (99+ past 99); nothing for none.

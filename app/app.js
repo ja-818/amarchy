@@ -260,6 +260,40 @@ function boardIn(v) {
   return v;
 }
 
+// A chat moved to another machine (docs/plan-omarchy-and-machines.md, "Moving
+// a chat"): its old key leads to the one it's under now. The board's moved
+// says each machine's, <machine>:<id> to <machine>:<id>, followed to the last.
+// One still on the board is where it is.
+function movedKey(key) {
+  const k = normKey(key);
+  if (!k || !app.view || (app.view.sessions || []).some((s) => s.id === k)) return k;
+  const p = keyParts(k);
+  const to = (app.view.moved || {})[`${p.machine || machineHere()}:${p.id}`];
+  return to ? normKey(to) : k;
+}
+
+// The list came: what a moved chat had here follows it (the drafts in its
+// box and its terminal's message line, the terminal it showed), and one
+// that's open goes on where it is now (it was moving as you looked).
+function movedFollow() {
+  const moved = (app.view && app.view.moved) || {};
+  for (const [from, to] of Object.entries(moved)) {
+    const a = normKey(from), b = normKey(to);
+    if (a === b) continue;
+    for (const [x, y] of [[`draft:${a}`, `draft:${b}`], [`term-draft:${a}:claude`, `term-draft:${b}:claude`],
+                          [`term-draft:${a}:term`, `term-draft:${b}:term`], [`term-shown:${a}`, `term-shown:${b}`]]) {
+      const v = store.get(x);
+      if (!v) continue;
+      if (!store.get(y)) store.set(y, v);
+      store.set(x, "");
+    }
+  }
+  const open = app.desk ? (typeof desk !== "undefined" && desk.current) : app.session && app.session.id;
+  if (!open || rowOf(open)) return;
+  const to = movedKey(open);
+  if (to !== open && rowOf(to)) goInstead(`#/s/${encodeURIComponent(to)}`);
+}
+
 // The machines on the board, this one first ([] before the server says).
 function machinesAll() { return (app.view && app.view.machines) || []; }
 // The ones that have answered (a machine paired but never reached isn't on the board yet).
@@ -824,6 +858,7 @@ function openList() {
   es.addEventListener("list", (e) => {
     app.view = boardIn(JSON.parse(e.data));
     aheadOn(app.view);
+    movedFollow();
     app.online = true;
     app.failed = "";
     if (app.view.build && app.build && app.view.build !== app.build) updated();
@@ -1038,6 +1073,7 @@ function sessionActions(s) {
     h("button", { class: "control wide", onclick: () => renameSheet(s) }, "Rename…"),
     h("button", { class: "control wide", onclick: () => agentSheet(s) }, agentMenuLabel(s)),
     sleepButton(s),
+    ...moveButtons(s),      // Move to <machine>… (manage.js)
   ].filter(Boolean);
 }
 
@@ -2768,11 +2804,31 @@ function go(hash) {
 
 function here() { return standalone ? routed.hash : location.hash; }
 
+// Where you are, said again without a step back to it (a chat that moved: its
+// new key in place of its old one).
+function goInstead(hash) {
+  if (standalone) routed.hash = hash;
+  else history.replaceState(history.state, "", hash);
+  route();
+}
+
+// A chat's route, as it is now: <this machine>:<id> is <id>, and a chat that
+// moved to another machine is there (movedKey), the address said again.
+function routeKey(raw) {
+  const id = movedKey(decodeURIComponent(raw));
+  if (id !== normKey(decodeURIComponent(raw))) {
+    const hash = `#/s/${encodeURIComponent(id)}`;
+    if (standalone) routed.hash = hash;
+    else history.replaceState(history.state, "", hash);
+  }
+  return id;
+}
+
 function route() {
   if (app.desk) return deskRoute();
   closeSheets();
   const m = here().match(/^#\/s\/(.+)$/);
-  const id = m ? normKey(decodeURIComponent(m[1])) : null;      // <this machine>:<id> is <id>
+  const id = m ? routeKey(m[1]) : null;      // <this machine>:<id> is <id>; a moved chat, where it is
   if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
     app.session.close();

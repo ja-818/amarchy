@@ -69,6 +69,15 @@ fn last_words(lines: &[&String], n: usize) -> String {
     lines[from..].iter().map(|l| l.trim()).collect::<Vec<_>>().join(" | ")
 }
 
+/// The window's way to the tailnet: through amarchy's own node's proxy
+/// (Some), or straight (None). Never for this computer's own addresses.
+pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
+    #[cfg(target_os = "linux")]
+    linux::proxy(win, url);
+    #[cfg(not(target_os = "linux"))]
+    let _ = (win, url);
+}
+
 /// The web view's own settings, once it's made.
 pub fn webview(win: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
@@ -125,6 +134,25 @@ mod linux {
 
         // What its page can play here (GStreamer's plugins), before the window.
         crate::sound::check();
+    }
+
+    pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
+        let url = url.map(str::to_string);
+        let through = url.is_some();
+        let _ = win.with_webview(move |wv| {
+            use webkit2gtk::{NetworkProxyMode, NetworkProxySettings, WebViewExt, WebsiteDataManagerExt};
+            let Some(dm) = wv.inner().website_data_manager() else { return };
+            match &url {
+                Some(u) => {
+                    let mut s = NetworkProxySettings::new(Some(u), &["localhost", "127.0.0.1", "::1"]);
+                    dm.set_network_proxy_settings(NetworkProxyMode::Custom, Some(&mut s));
+                }
+                None => dm.set_network_proxy_settings(NetworkProxyMode::Default, None),
+            }
+        });
+        if through {
+            log::info!("its window reaches the tailnet through amarchy's own Tailscale node");
+        }
     }
 
     /// The machine and its GPU's driver, for the log: what a crash was on.

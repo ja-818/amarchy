@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -187,9 +188,143 @@ def on_app(w, timeout=30):
 
 def own_page(w, kind, timeout=20):
     """The window's own page, showing kind (its title says which)."""
-    titles = {"nothing": "Can't find", "failed": "Can't reach", "choose": "Which amarchy?", "opening": "Opening"}
+    titles = {"nothing": "Can't find", "failed": "Can't reach", "choose": "Which amarchy?", "opening": "Opening",
+              "signin": "Sign in to Tailscale"}
     return w.wait(f"location.protocol === 'tauri:' && document.getElementById('title').textContent.startsWith({json.dumps(titles[kind])})",
                   timeout=timeout)
+
+
+class FakeProxy:
+    """An HTTP proxy standing in for amarchy's own node's: it wants the
+    node's credential, takes tailnet names (srv.tail-scale.ts.net) to this
+    computer's test server, and writes down what came through it."""
+
+    def __init__(self, routes):
+        import base64
+        import socketserver
+        self.routes, self.seen = routes, []
+        self.cred = "Basic " + base64.b64encode(b"amarchy:s3cret").decode()
+        proxy = self
+
+        class Handler(socketserver.StreamRequestHandler):
+            # As the node's proxy reads them (tailnet/node/proxy.go): asked
+            # for its credential (407), the same connection goes on; a
+            # target naming nothing or the proxy itself means its Host header.
+            def handle(self):
+                buf = b""
+                while True:
+                    while b"\r\n\r\n" not in buf:
+                        chunk = self.connection.recv(65536)
+                        if not chunk:
+                            return
+                        buf += chunk
+                    top, _, buf = buf.partition(b"\r\n\r\n")
+                    lines = top.decode(errors="replace").split("\r\n")
+                    method, target, version = lines[0].split(" ", 2)
+                    hdr = {l.split(":", 1)[0].strip().lower(): l.split(":", 1)[1].strip() for l in lines[1:] if ":" in l}
+                    keep = [l for l in lines[1:] if not l.lower().startswith(("proxy-authorization:", "proxy-connection:"))]
+                    if hdr.get("proxy-authorization") != proxy.cred:
+                        proxy.seen.append(("407", target))
+                        self.connection.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"amarchy\"\r\nContent-Length: 0\r\n\r\n")
+                        continue
+                    me = f"127.0.0.1:{proxy.port}"
+                    if method == "CONNECT":
+                        host = target
+                    else:
+                        u = urllib.parse.urlsplit(target)
+                        host = u.netloc
+                        target = (u.path or "/") + (f"?{u.query}" if u.query else "")
+                    if not host or host == me:
+                        host = hdr.get("host", "")
+                        if host and ":" not in host:
+                            host += ":443" if method == "CONNECT" else ":80"
+                    to = proxy.routes.get(host)
+                    proxy.seen.append((method, host + ("" if method == "CONNECT" else target)))
+                    if not to:
+                        self.connection.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        return
+                    up = socket.create_connection(to)
+                    if method == "CONNECT":
+                        self.connection.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                        if buf:
+                            up.sendall(buf)
+                    else:
+                        up.sendall(f"{method} {target} {version}\r\n".encode() + "\r\n".join(keep).encode() + b"\r\n\r\n" + buf)
+                    pump(self.connection, up)
+                    return
+
+        def pump(a, b):
+            def one(x, y):
+                try:
+                    while True:
+                        d = x.recv(65536)
+                        if not d:
+                            break
+                        y.sendall(d)
+                except OSError:
+                    pass
+                for s in (x, y):
+                    try:
+                        s.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+            t = threading.Thread(target=one, args=(b, a), daemon=True)
+            t.start()
+            one(a, b)
+            t.join(5)
+
+        class Server(socketserver.ThreadingTCPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        self.server = Server(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        self.url = f"http://amarchy:s3cret@127.0.0.1:{self.port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def stop(self):
+        self.server.shutdown()
+
+
+def fake_node(home, proxy_url, state="Running", flip_after_login=None):
+    """amarchy's own Tailscale node, made up: its state folder (a socket,
+    proxy.json), and an amarchy-tailnet that answers status and login (and,
+    flip_after_login: on the tailnet that many seconds after a login)."""
+    d = Path(home, ".local/state/amarchy/tailnet")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "tailscaled.sock").write_text("")
+    (d / "proxy.json").write_text(json.dumps({"url": proxy_url}))
+    (d / "fake.json").write_text(json.dumps({"state": state, "login_at": None, "flip": flip_after_login}))
+    b = Path(home, ".local/bin")
+    b.mkdir(parents=True, exist_ok=True)
+    (b / "amarchy-tailnet").write_text(f"""#!/usr/bin/env python3
+import json, sys, time
+from pathlib import Path
+f = Path({str(d / "fake.json")!r})
+st = json.loads(f.read_text())
+with open(f.with_name("asked.log"), "a") as log:
+    log.write(" ".join(sys.argv[1:]) + "\\n")
+if st["login_at"] and st["flip"] is not None and time.time() - st["login_at"] > st["flip"]:
+    st["state"] = "Running"
+if sys.argv[1:2] == ["status"]:
+    words = "on your tailnet as desk" if st["state"] == "Running" else "waits for you to sign in to Tailscale"
+    print(json.dumps({{"running": True, "state": st["state"], "words": words}}))
+elif sys.argv[1:2] == ["login"]:
+    st["login_at"] = time.time()
+    f.write_text(json.dumps(st))
+    print("https://login.tailscale.com/a/amarchytest")
+""")
+    (b / "amarchy-tailnet").chmod(0o755)
+    return d
+
+
+def fake_opener(home):
+    """xdg-open, made up: what it was asked to open, written down."""
+    b = Path(home, "openbin")
+    b.mkdir(parents=True, exist_ok=True)
+    (b / "xdg-open").write_text(f"#!/bin/sh\necho \"$@\" >> {b}/opened.log\n")
+    (b / "xdg-open").chmod(0o755)
+    return b
 
 
 def main():
@@ -508,6 +643,60 @@ def main():
                 check(bool(w.note(lambda n: n["summary"] == "While away", 40)), "the server restarted: a notice sent meanwhile still comes")
         finally:
             local.stop()
+
+        # ---- amarchy's own Tailscale node (a computer without the
+        # system's): its sign-in in the window's own page, and the window,
+        # its notices and its buttons reaching a server by its tailnet name
+        # through the node's proxy.
+        print("amarchy's own Tailscale node")
+        tsnet_srv = Server("--address=srv.tail-scale.ts.net")
+        proxy = FakeProxy({f"srv.tail-scale.ts.net:{tsnet_srv.port}": ("127.0.0.1", tsnet_srv.port)})
+        try:
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            srv_url = f"http://srv.tail-scale.ts.net:{tsnet_srv.port}"
+            cli = fake_cli(home, machines=[{"name": "desk", "me": True, "state": "on"},
+                                           {"name": "srv", "label": "Server", "url": srv_url, "me": False, "state": "on"}])
+            node_dir = fake_node(home, proxy.url, state="NeedsLogin", flip_after_login=2)
+            opener = fake_opener(home)
+            env = {**env_for(cli), "AMARCHY_HOST_TAILSCALE": "own"}
+            env["PATH"] = f"{opener}:{Path(home, '.local/bin')}:{env['PATH']}"
+            with Shell(None, home=home, env=env, notifyd=True) as w:
+                own_page(w, "signin", timeout=40)
+                check("Sign in with the Tailscale account" in w.js("document.getElementById('why').textContent"),
+                      "its page asks to sign in to Tailscale (amarchy's own node)")
+                w.shot(SHOTS / "tailscale-signin.png")
+                w.click_el("#signin-go")
+                opened = Path(opener, "opened.log")
+                for _ in range(50):
+                    if opened.exists():
+                        break
+                    time.sleep(0.2)
+                check(opened.exists() and "https://login.tailscale.com/a/amarchytest" in opened.read_text(),
+                      "Sign in opens Tailscale's sign-in page in the browser")
+                on_app(w, timeout=60)
+                check(w.do("url").startswith(srv_url), f"signed in: the server, by its tailnet name ({w.do('url')})")
+                check(any(m == "GET" and "/api/state" in t for m, t in proxy.seen) or any(m == "CONNECT" for m, _ in proxy.seen),
+                      "the window went through the node's proxy, with its credential")
+                kinds = [m for m, _ in proxy.seen]
+                check("407" in kinds and kinds.index("407") < max(i for i, m in enumerate(kinds) if m != "407"),
+                      "the proxy asks for its credential, and gets it")
+                before = len(proxy.seen)
+                listening(tsnet_srv, w)
+                check(any(m == "CONNECT" or "/api/notices" in t for m, t in proxy.seen[before:] + proxy.seen[:before]
+                          if m != "407" and t.startswith("srv.tail-scale.ts.net")), "its notices too, through the node")
+                tsnet_srv.notice({"title": "Through the node", "body": "Allow it?", "tag": "desk-term"},
+                                 {"session": "desk-term", "actions": [{"label": "Allow", "path": "/api/session/desk-term/answer",
+                                                                       "body": {"request_id": "r7", "choice": "allow"}}]})
+                n = w.note(lambda n: n["summary"] == "Through the node")
+                if n:
+                    w.press(n["id"], "a0")
+                got = tsnet_srv.acted("/api/session/desk-term/answer")
+                check(got is not None and got[1]["request_id"] == "r7" and got[0] == srv_url,
+                      f"and its buttons, from the server's own origin ({got})")
+                w.shot(SHOTS / "tailscale-through.png")
+        finally:
+            proxy.stop()
+            tsnet_srv.stop()
 
         # ---- the window's size, kept.
         print("its window")

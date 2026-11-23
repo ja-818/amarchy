@@ -2995,7 +2995,10 @@ class Chat {
     const stopped = !!(this.row && this.row.interrupted);
     // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
     const off = machineOff(this.row || this.id);
-    const key = [now ? now.key || now.note : "composer", sleep, stopped, stopped && this.row.cut, this.view.composer, this.view.above.length, content, off].join("|");
+    // Moving to another machine: what it says instead of the box (moving now),
+    // or over it (waiting until it's free, one that didn't move): uiMoveNote.
+    const move = this.row && (this.row.moving || this.row.move_error) ? JSON.stringify([this.row.moving, this.row.move_error]) : "";
+    const key = [now ? now.key || now.note : "composer", sleep, stopped, stopped && this.row.cut, this.view.composer, this.view.above.length, content, off, move].join("|");
     this.renderQueue();
     this.renderBackground();
     this.drawPills();
@@ -3005,6 +3008,7 @@ class Chat {
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
       h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
+    else if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
     else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -3025,6 +3029,7 @@ class Chat {
         h("span", {}, "Asleep to save memory. Send something to wake it."),
         h("button", { class: "text-btn", type: "button", onclick: () => wakeSession(this.row) }, "Wake")));
       else if (sleep === "waking") kids.push(h("div", { class: "dock-note" }, glyph("asleep", "sleep waking"), h("span", {}, "Waking Claude…")));
+      if (move) kids.push(uiMoveNote(this.row, { dock: true }));
       kids.push(this.queueEl, this.box);
     }
     // The keys, if they were here, stay: on the card (its first choice), and

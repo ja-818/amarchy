@@ -127,6 +127,10 @@ pub enum Found {
     Choose { machines: Vec<Candidate> },
     /// None: why, in words.
     Nothing { why: String },
+    /// This computer reaches the tailnet through amarchy's own Tailscale
+    /// node, which waits for a sign-in.
+    #[serde(rename = "signin")]
+    SignIn { words: String },
 }
 
 /// A machine of yours on the tailnet that answers as amarchy, not paired yet
@@ -329,6 +333,13 @@ pub fn find(given: Option<Url>, pair: bool) -> Found {
         if (h.chats > 0 || merged) && local_answers(port) && local_key().is_ok() {
             let machine = me.map(|m| m.name.clone()).unwrap_or_else(hostname);
             return Found::Open { target: Target::Local { port, machine }, said: None };
+        }
+        // Further than this machine is the tailnet: through amarchy's own
+        // node when it's this computer's Tailscale, signed in first.
+        if let Some(node) = crate::tailnet::node() {
+            if node.needs_sign_in() {
+                return Found::SignIn { words: node.words };
+            }
         }
         if let Some(m) = h.machines.iter().find(|m| !m.me && m.state.as_deref() == Some("on")) {
             if let Some(url) = m.url.as_deref().and_then(|u| Url::parse(u).ok()) {

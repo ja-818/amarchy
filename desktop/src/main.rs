@@ -11,6 +11,7 @@ mod links;
 mod notify;
 mod platform;
 mod sound;
+mod tailnet;
 mod target;
 mod tray;
 
@@ -61,6 +62,10 @@ pub enum Status {
     Nothing { why: String },
     /// It was found, then didn't load: why.
     Failed { label: String, why: String },
+    /// This computer's Tailscale is amarchy's own node, which waits for a
+    /// sign-in (waiting: its page in the browser is open).
+    #[serde(rename = "signin")]
+    SignIn { words: String, waiting: bool },
 }
 
 pub struct Shell {
@@ -219,7 +224,7 @@ fn main() {
                 _ => PermissionResponse::Deny,
             }
         })
-        .invoke_handler(tauri::generate_handler![status, choose, use_address, retry])
+        .invoke_handler(tauri::generate_handler![status, choose, use_address, retry, sign_in])
         .setup(move |app| {
             let handle = app.handle().clone();
             // --restart with none running: nothing to start again.
@@ -656,7 +661,8 @@ fn settle(app: &AppHandle, found: Found) {
             *shell.said.lock().unwrap() = said;
             let link = shell.pending.lock().unwrap().take();
             if link.is_none() {
-                if let Some(route) = shell.route.lock().unwrap().take() {
+                let route = shell.route.lock().unwrap().take();
+                if let Some(route) = route {
                     return go_route(app, &target, &route);
                 }
             }
@@ -684,6 +690,12 @@ fn settle(app: &AppHandle, found: Found) {
             *shell.target.lock().unwrap() = None;
             to_own_page(app);
         }
+        Found::SignIn { words } => {
+            log::info!("amarchy's own Tailscale node waits for a sign-in");
+            *shell.status.lock().unwrap() = Status::SignIn { words, waiting: false };
+            *shell.target.lock().unwrap() = None;
+            to_own_page(app);
+        }
     }
 }
 
@@ -699,6 +711,9 @@ fn go_url(app: &AppHandle, t: &Target, url: Url) {
     *shell.target.lock().unwrap() = Some(t.clone());
     let Target::Local { port, .. } = t else {
         if let Some(w) = main_window(app) {
+            // On the tailnet, through amarchy's own Tailscale node when it's
+            // this computer's (else straight).
+            platform::proxy(&w, tailnet::proxy_for(&url).as_deref());
             let _ = w.navigate(url);
         }
         return;
@@ -904,6 +919,34 @@ fn use_address(app: AppHandle, address: String) -> Result<(), String> {
 #[tauri::command]
 fn retry(app: AppHandle) {
     find(&app);
+}
+
+/// Sign in to Tailscale (amarchy's own node): its page in the browser, then
+/// the window goes on once the node is on the tailnet (for up to 10 minutes).
+#[tauri::command]
+fn sign_in(app: AppHandle) -> Result<(), String> {
+    let url = tailnet::login_url()?;
+    if let Some(u) = &url {
+        log::info!("signing amarchy's own Tailscale node in (its page, in the browser)");
+        app.opener().open_url(u, None::<&str>).map_err(|e| format!("couldn't open its page: {e}"))?;
+        // (Its lock let go before it's taken again: an `if let` would hold it.)
+        let now = app.state::<Shell>().status.lock().unwrap().clone();
+        if let Status::SignIn { words, .. } = now {
+            *app.state::<Shell>().status.lock().unwrap() = Status::SignIn { words, waiting: true };
+        }
+    }
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        for _ in 0..300 {
+            if tailnet::node().map(|n| n.on()).unwrap_or(true) {
+                log::info!("amarchy's own Tailscale node is on the tailnet");
+                find(&app2);
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+    Ok(())
 }
 
 // The tests' way in: each line on stdin is {"id", "js"}, JavaScript to run in
