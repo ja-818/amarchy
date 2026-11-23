@@ -94,9 +94,10 @@ On a Mac instead: the same environment variables, then
 
 ## Before the App Store
 
-9. The version page: `listing.md`'s text; screenshots of a 6.9" iPhone
-   (1320 × 2868): the CI run's `phone-ios-screenshots` artifact has the
-   simulator's, from demo chats only.
+9. The version page: `listing.md`'s text; screenshots: `screenshots/`
+   here, a 6.9" iPhone (1320 × 2868; the app is iPhone only), drawn by
+   the app from demo chats only (`node docs/images/make.js store` makes them
+   again).
 10. App Privacy: `privacy-nutrition.md`.
 11. App Review Information: `review-notes.md` (a demo machine and a
     Tailscale login for the reviewer, which you set up first).

@@ -22,7 +22,7 @@
 //
 //   node docs/images/make.js store
 //
-//   phone/ios/store/screenshots/        iPhone 6.9" (1320×2868) and iPad 13" (2064×2752)
+//   phone/ios/store/screenshots/        iPhone 6.9" (1320×2868; the app is iPhone only)
 //   phone/android/fastlane/metadata/android/en-US/images/
 //                                       phoneScreenshots/ (1170×2340, Play's 2:1 at most),
 //                                       featureGraphic.png (1024×500), icon.png (512×512)
@@ -116,10 +116,9 @@ const CONVERSATION = [
 const LAYOUTS = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
   wide: { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 },
-  // The stores': an iPhone 16 Pro Max, Play's tallest phone shot (2:1), an iPad Pro 13".
+  // The stores': an iPhone 16 Pro Max, Play's tallest phone shot (2:1).
   iphone: { viewport: { width: 440, height: 956 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
   play: { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
-  ipad: { viewport: { width: 1032, height: 1376 }, hasTouch: true, deviceScaleFactor: 2 },
 };
 
 async function page(browser, layout, port) {
@@ -307,7 +306,6 @@ async function compose(browser, port, { file, width, height, scale, shots, kind,
       const out = [
         copy(await boardShot(browser, "iphone", port), path.join(ios, "iphone-1-board.png")),
         copy(await chatShot(browser, port, "iphone"), path.join(ios, "iphone-2-chat.png")),
-        copy(await boardShot(browser, "ipad", port), path.join(ios, "ipad-1-board.png")),
         copy(await boardShot(browser, "play", port), path.join(play, "phoneScreenshots", "1-board.png")),
         copy(await chatShot(browser, port, "play"), path.join(play, "phoneScreenshots", "2-chat.png")),
         // The link card's picture, at Play's feature graphic size (its 2:1, a little cut at the foot).

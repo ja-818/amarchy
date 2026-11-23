@@ -61,7 +61,7 @@ claude code,coding agents,ai agents,agent manager,claude,tailscale,developer,ter
 
 - Support URL: https://github.com/ja-818/amarchy/issues
 - Marketing URL: https://github.com/ja-818/amarchy
-- Privacy Policy URL: https://github.com/ja-818/amarchy/blob/main/phone/ios/store/privacy-nutrition.md#privacy-policy
+- Privacy Policy URL: https://github.com/ja-818/amarchy/blob/main/phone/PRIVACY.md (both apps' policy)
 
 ## App Information
 

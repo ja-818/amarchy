@@ -38,6 +38,9 @@ The label then reads: "Data Not Linked to You: Identifiers", and no
 
 ## Privacy policy
 
+The policy both apps link to is [phone/PRIVACY.md](../../PRIVACY.md); in
+short:
+
 Amarchy (the iPhone app) is a window onto your own amarchy machine. It has
 no account, no analytics and no ads, and it sends nothing to its developer.
 
