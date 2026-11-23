@@ -424,9 +424,13 @@ whether it was saved, never the value. Then:
 ## Dictation
 
 The user can dictate into your composer with its mic. The words are written down
-on the host (a speech model, through `amarchy dictation`), or by their browser
-where the host has none. You don't handle it. If they say it isn't working,
-`amarchy dictation` says whether the host's model is set up, and how to set it up.
+on the host (a speech model, through `amarchy dictation`), or, on a host without
+one, by another of their paired machines that has it, or by their browser where no
+machine has it. You don't handle it. If they say it isn't working, `amarchy
+dictation` says where it's written down, or how to set it up on this machine (where
+no package has whisper.cpp, `amarchy dictation setup` builds it; it names what
+that needs first). Installing packages takes their password: give them the
+command, don't run sudo yourself.
 
 ## Talking to other sessions
 
