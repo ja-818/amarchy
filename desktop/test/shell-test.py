@@ -213,8 +213,9 @@ def wait_for(test, timeout=30, every=0.3):
     return None
 
 
-CHAT_OPEN = ("!!app.session && !!document.querySelector('.chat-head')"
-             " && [...document.querySelectorAll('.chat-head')].some((e) => e.offsetParent !== null)")
+# A chat open, in sight: the phone's layout's (app.session) or the wide one's (desk.chat).
+CHAT_OPEN = ("(app.desk ? !!desk.chat && !!desk.current && desk.chat.el.isConnected && desk.chat.el.offsetParent !== null"
+             " : !!app.session && [...document.querySelectorAll('.chat-head')].some((e) => e.offsetParent !== null))")
 
 
 def opens_chats(w, server, how):
@@ -223,7 +224,7 @@ def opens_chats(w, server, how):
     chat opened, by either). how: when (after a restart...)."""
     def board():
         w.js("location.hash = '#/'; 1")
-        return w.wait("!app.session && !!document.querySelector('.tcard[data-id] .today-go')", timeout=20)
+        return w.wait("!(app.desk ? desk.current : app.session) && !!document.querySelector('.tcard[data-id] .today-go')", timeout=20)
     board()
     w.click_el(".tcard[data-id] .today-go")
     check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a click on a chat opens it")
@@ -236,7 +237,7 @@ def opens_chats(w, server, how):
             break
     w.key("Return")
     check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: j to a chat and Enter open it too")
-    sid = w.js("app.session.id")
+    sid = w.js("app.desk ? desk.current : app.session.id")
     # Its address there already, the board shown (the view didn't follow
     # it): a click on it opens it all the same.
     board()
@@ -244,7 +245,7 @@ def opens_chats(w, server, how):
     w.click_el(f".tcard[data-id={json.dumps(sid)}] .today-go")
     check(bool(w.wait(CHAT_OPEN, timeout=20)), f"{how}: a chat whose address is there already opens too")
     words = f"sent from the window, {how}"
-    w.js(f"const t = app.session.chat.input; t.focus(); t.value = {json.dumps(words)}; t.dispatchEvent(new Event('input')); 1")
+    w.js(f"const t = (app.desk ? desk.chat : app.session.chat).input; t.focus(); t.value = {json.dumps(words)}; t.dispatchEvent(new Event('input')); 1")
     w.click_el(".cbtn.send")
     got = wait_for(lambda: any(l.startswith(f"acted /api/session/{sid}/send ") and words in l for l in server.lines), timeout=15)
     check(bool(got), f"{how}: and what's written in it is sent")
