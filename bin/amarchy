@@ -11758,6 +11758,8 @@ def dictate_status():
             setup = None
         elif setup.get("pid") and not setup.get("error") and not pid_alive(setup["pid"]):
             setup = {**setup, "error": "the download stopped"}
+        elif not setup.get("pid") and not setup.get("error") and time.time() - (setup.get("at") or 0) > 60:
+            setup = {**setup, "error": "the setup didn't start"}       # (asked for, never began: dictate_kick)
     except (OSError, ValueError):
         pass
     ready = lib and model
@@ -11938,6 +11940,11 @@ def dictate_kick(engine=False):
     there's systemd (restarting the app, or an update's install, doesn't
     stop it; it would go on from where it stopped anyway). Whether it started."""
     argv = [sys.executable, SELF, "dictation", "setup", "--quiet", *(["--engine"] if engine else [])]
+    # How far it is, from now on (the app, and an install's line, say Fetching at once).
+    size = sum(n for w, n in dictate_fetching() if not engine or w != DICTATE_MODEL["name"] or dictate_before())
+    if size:
+        DICTATE.mkdir(parents=True, exist_ok=True)
+        write_file(DICTATE_SETUP, json.dumps({"pid": None, "at": int(time.time()), "size": size, "done": 0}) + "\n")
     if apart(DICTATE_UNIT, argv):
         return True
     try:

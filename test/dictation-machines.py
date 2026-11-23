@@ -202,8 +202,10 @@ try:
               f"its board: only the engine to fetch ({d.get('size')} bytes: {d.get('how')})")
         code, _, _ = beta.ask("POST", "/api/dictate/setup", {})
         check(code == 200, f"Set up dictation: under way ({code})")
-        seen = until(lambda: (x := (beta.state().get("dictation") or {}).get("setup") or {}).get("done") and x, limit=60, step=0.2)
-        check(bool(seen) and seen.get("size") == 22562331 and 0 < seen["done"] <= seen["size"], f"how far, on its board ({seen})")
+        # (Its progress is there before the button's answer: nothing to catch in flight.)
+        seen = until(lambda: (x := (beta.state().get("dictation") or {}).get("setup") or {}).get("size") and x, limit=5, step=0.1)
+        check(bool(seen) and seen.get("size") == 22562331 and 0 <= seen.get("done", -1) <= seen["size"] and not seen.get("error"),
+              f"how far, on its board ({seen})")
         d = until(lambda: (x := beta.state().get("dictation") or {}).get("ready") and x, limit=180, step=1) or {}
         check(d.get("ready") is True and d.get("via") is None and not d.get("setup"), "set up: beta writes its own down")
         eng = here / "transcribe.cpp"
