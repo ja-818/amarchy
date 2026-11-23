@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# omarchy:summary=Remove amarchy, and what it set up for you; your chats' worktrees and projects stay.
+# omarchy:requires-sudo=true
+
+# -u so an unset HOME is an error rather than a set of rm -rf paths rooted at /.
+set -euo pipefail
+
+# The user's part first, while amarchy is still here to take it away: its
+# timers and app service, the skill, the Ⓐ, the key, the menu row, the theme
+# hook. ~/Work and the chats' worktrees are left alone.
+if omarchy-cmd-present amarchy; then
+  amarchy setup --uninstall || true
+fi
+
+pkill -x amarchy-desktop || true
+
+omarchy-pkg-drop amarchy-desktop-git amarchy-git
+
+echo ""
+echo "amarchy has been removed. Your projects and the chats' worktrees are where they were."

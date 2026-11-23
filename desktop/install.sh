@@ -89,6 +89,14 @@ if [[ -x /usr/bin/amarchy-desktop ]] && command -v pacman >/dev/null && pacman -
   exit 0
 fi
 
+# A packaged amarchy carries no desktop/ sources to build from: the desktop
+# app is a package of its own there.
+if [[ ! -f $here/Cargo.toml ]]; then
+  mkdir -p "$state"
+  printf '%s\n' "not installed: it's a package of its own (amarchy-desktop-git)" >"$state/status"
+  exit 0
+fi
+
 # In the background (an update): the same, as a user unit of its own, once.
 if ((background)); then
   mkdir -p "$state"

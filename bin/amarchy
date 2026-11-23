@@ -334,6 +334,10 @@ Updating:
                                         on your login) for the Claude Code installed, and record the result: a
                                         failure shows in Settings. --broker also runs a test session. amarchy
                                         update starts it when Claude Code has changed
+  amarchy setup [--uninstall] [--force] amarchy's install.sh, as you: what's yours of amarchy (its timers, the
+                                        skill for Claude Code, on Omarchy the Ⓐ, the key, the menu, the live
+                                        theme). After installing the amarchy package (once), or to take it
+                                        away again before removing the package (--uninstall)
   amarchy update                        to the latest amarchy on GitHub (origin's main): pull the checkout it
                                         runs from (when it's on main, with nothing uncommitted) and install it.
                                         It does it by itself every 5 minutes (AUTO_UPDATE=off in
@@ -6956,13 +6960,64 @@ def last_said(s, limit=240):
 
 # ------------------------------------------------------------------ update
 
+# ---- a packaged amarchy
+#
+# amarchy runs from a git checkout (what install.sh links), or from a package
+# (packaging/arch: /usr/share/amarchy, read only, no .git, its commit in
+# .version, /usr/bin/amarchy). A package updates with your packages (pacman,
+# yay), never by itself: `amarchy update` says so, and the timer only checks
+# Claude Code. `amarchy setup` is install.sh there (your own part: the timers,
+# the skill, Omarchy's pieces), run as you.
+
+def packaged():
+    """The package amarchy is installed by ("amarchy-git"), or None when it
+    runs from a git checkout."""
+    root = Path(SELF).parent.parent
+    if (root / ".git").exists():
+        return None
+    if shutil.which("pacman"):
+        r = sh("pacman", "-Qqo", SELF)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip().splitlines()[0]
+    return "a package"
+
+
+def cmd_setup(args):
+    """`amarchy setup [install.sh's options]`: install.sh of the amarchy
+    that runs, as you (on a package, the part that's yours)."""
+    script = Path(SELF).parent.parent / "install.sh"
+    if not script.is_file():
+        return fail(f"no install.sh beside this amarchy ({script})")
+    if os.geteuid() == 0:
+        return fail("run amarchy setup as yourself, not root: it sets amarchy up for your user")
+    os.execv(str(script), [str(script), *args])
+
+
 def self_update():
     """Bring amarchy here up to origin's main (`amarchy update`, which a
     timer runs every few minutes). Only when amarchy runs from a checkout of
     main with nothing uncommitted (not a session's worktree, not work in
     progress): pull it and run its install.sh, as you would. Says what it
-    did, or why it didn't; "not updated: ..." when it couldn't."""
+    did, or why it didn't; "not updated: ..." when it couldn't. A package
+    isn't: it updates with your packages."""
     repo = Path(SELF).parent.parent
+    pkg = packaged()
+    if pkg:
+        # Your packages brought a new one: your part of it set up again (the
+        # timers, the skill, Omarchy's pieces, the node's service), as an
+        # update from git does.
+        try:
+            now, was = (repo / ".version").read_text().strip(), (STATE / "setup-version").read_text().strip()
+        except OSError:
+            now, was = None, None
+        if now and was and now != was:
+            r = subprocess.run([str(repo / "install.sh")], capture_output=True, text=True, env=clean_env(),
+                               stdin=subprocess.DEVNULL, timeout=600)
+            if r.returncode:
+                return f"not updated: {pkg} is new ({now}), but setting it up again failed: " \
+                       f"{(r.stderr or r.stdout).strip().splitlines()[-1:]}"
+            return f"set up again for {pkg} {now} (was {was})"
+        return f"installed by {pkg}: it updates with your packages (pacman -Syu, or your AUR helper)"
     env = {**clean_env(), "GIT_TERMINAL_PROMPT": "0"}
 
     def git(*args):
@@ -7090,7 +7145,7 @@ def cmd_update(args):
         except OSError:
             return 0 if auto else fail("already updating")
         said = self_update()
-    if not (auto and said == "up to date"):
+    if not (auto and (said == "up to date" or said.startswith("installed by"))):
         print(f"amarchy: {said}", file=sys.stderr if said.startswith("not updated") else sys.stdout)
     return 1 if said.startswith("not updated") else 0
 
@@ -14334,8 +14389,15 @@ _version_memo = {}
 
 
 def amarchy_version():
-    """The git commit amarchy runs from (short), or "" when it isn't a checkout."""
+    """The git commit amarchy runs from (short): its checkout's, or the one a
+    package was built from (its .version, see "a packaged amarchy"); "" when
+    it's neither."""
     root = Path(SELF).parent.parent
+    if not (root / ".git").exists():
+        try:
+            return (root / ".version").read_text().strip()[:40]
+        except OSError:
+            return ""
     try:
         head = (root / ".git").stat().st_mtime_ns if (root / ".git").is_dir() else os.stat(SELF).st_mtime_ns
     except OSError:
@@ -23452,6 +23514,7 @@ OPTIONS = {
     "tailscale": ({"--json", "--no-open"}, set(), set()),
     "ghostty": (set(), set(), set()),
     "key": (set(), set(), set()),
+    "setup": None,
     "bar": ({"--follow"}, set(), set()),
     "shell": None,
     "claude": None, "asleep": None, "woke": None, "hook": None, "seen": None,
@@ -23637,6 +23700,8 @@ def main(argv):
         return cmd_ghostty(args)
     elif cmd == "key":
         return cmd_key(args)
+    elif cmd == "setup":
+        return cmd_setup(args)
     elif cmd == "open" and len(args) <= 1:
         return cmd_open(args)
     elif cmd == "bar" and not [a for a in args if a != "--follow"]:

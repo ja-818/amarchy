@@ -1,0 +1,30 @@
+# amarchy-git: what pacman says to you (the part that's yours is amarchy setup).
+
+post_install() {
+  cat <<'MSG'
+==> amarchy: stop babysitting your agents, manage them.
+    Set it up for your user (not root): its timers, the skill for Claude
+    Code, and on Omarchy the Ⓐ in the bar, Super+Alt+A and the live theme:
+        amarchy setup
+    Then the app on your tailnet, for your phone and your browser:
+        amarchy app on          (Tailscale: amarchy tailscale)
+    On a desktop, the app in a window of its own: amarchy-desktop-git.
+    Every chat runs Claude Code: https://docs.claude.com/en/docs/claude-code
+MSG
+}
+
+post_upgrade() {
+  cat <<'MSG'
+==> amarchy: its app reloads by itself, and your part of it is set up again
+    within five minutes (amarchy update); amarchy setup does it now.
+MSG
+}
+
+pre_remove() {
+  cat <<'MSG'
+==> amarchy: what each user set up (amarchy setup: its timers, the skill,
+    Omarchy's pieces) stays until they take it away. Next time, run
+    amarchy setup --uninstall first; now, from a copy of amarchy:
+        git clone https://github.com/ja-818/amarchy /tmp/amarchy && /tmp/amarchy/install.sh --uninstall
+MSG
+}
