@@ -522,7 +522,7 @@ function tourSlides() {
         feat(TOUR_FLAME, 3, "It's dopamine, but it ships.",
              "Every merge counts: streaks, combos, 40 badges, confetti."),
         feat(TOUR_KEYBOARD, 3, "Omarchy hands: welcome home.",
-             "**Ctrl+Alt** and a key, from anywhere, as Super on Omarchy: **↵** a new chat, **← ↑ ↓ →** (or **h k j l**) back, between chats and in, **M** the menu, **/** every key. **Esc** stops Claude, as in Claude Code. **j** / **k** go card to card."),
+             "**Ctrl+Alt** and a key, from anywhere, as Super on Omarchy: **↵** a new chat, **←** / **→** (or **h** / **l**) back and in, **↑** / **↓** (or **k** / **j**) Chats or Tasks, **M** the menu, **/** every key. **Esc** stops Claude, as in Claude Code. **j** / **k** go card to card."),
         feat(TOUR_PHONE, 3, "Thumbs are keys too.",
              "On the phone, hold a card for its menu, and swipe a sheet down to close it."),
       ],

@@ -473,8 +473,9 @@ host's chats without anything else installed.
   the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. `Ctrl+Alt+→` goes back
   into it. The browser's Back is the board too, a reload stays on the chat, and
-  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `K` / `J`) open the chat before or after in
-  the board's order, and `Ctrl+Alt+M` any chat by its name. Dictating, the
+  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `K` / `J`) are the board's
+  Chats and Tasks (from a chat too), and `Ctrl+Alt+M` opens any chat by its name
+  (not the chat before or after: the board's order changes as they work). Dictating, the
   keys go to the box: `Enter` stops it, the next `Enter` sends.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
   project and name (click: rename), where it stands (its tone a dot), `⋯` its
@@ -567,7 +568,7 @@ Three rules, the same in every layout:
 | Key | |
 | --- | --- |
 | `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
-| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The chat before / after, in the board's order (held, in the wide layout: it opens where you let go). |
+| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The board's Chats / Tasks (from a chat: the board, on that tab). |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |

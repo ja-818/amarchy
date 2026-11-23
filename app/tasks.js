@@ -557,22 +557,3 @@ function boardSearchDraw() {
   board.box.dataset.key = key;
   boardMark();      // (not Today's: Today draws itself again when the search is emptied)
 }
-
-// Ctrl+Alt+↑ / ↓: from chat to chat in the board's order, the open one
-// opening the next, else the keys going to the next card. With from (the
-// key held, desk.js step): only which chat comes after that one.
-function boardStep(n, from) {
-  // (Under an open chat the board isn't in sight: then not in a folded group.
-  // Nor drawn again: a chat closed meanwhile is still there, and skipped.)
-  const open = openId();
-  const inSight = (t) => (open ? !t.closest("details:not([open])") : shown(t));
-  const ids = [...new Set([...board.box.querySelectorAll(".ticket[data-id]")].filter(inSight).map((t) => t.dataset.id))]
-    .filter((id) => row(id));
-  if (!ids.length) return null;
-  const at = ids.indexOf(from || keyedId());
-  const id = ids[at < 0 ? (n > 0 ? 0 : ids.length - 1) : (at + n + ids.length) % ids.length];
-  if (from) return id;
-  if (open) boardOpen(id);
-  else boardFocus(board.box.querySelector(`.ticket[data-id="${CSS.escape(id)}"] .today-go`));
-  return id;
-}
