@@ -1536,7 +1536,8 @@ function talkKey(e) {
   if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
   const t = fresh ? fresh.dictate : c.talk;
   if (t.locked) { t.stop(); return; }
-  if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
+  if (t.run) return;
+  if (t.tellWhyNot()) return;      // it can't work here: why, and what to do
   if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
   desk.talkCode = e.code;

@@ -1943,7 +1943,8 @@ function newChat({ wide = false, started = null, starting = null, failed = null 
     imgBtn.hidden = none;
     under.hidden = none;
     row.hidden = none;
-    micBtn.hidden = none || !dictate.available();
+    micBtn.hidden = none;
+    dictate.draw();
     micBtn.classList.toggle("on", dictate.on() && dictate.run.held);
     box.classList.toggle("listening", saying !== null);
     field.placeholder = none ? (app.view ? "Add a project first" : "Connecting…")
@@ -2480,7 +2481,8 @@ function mediaLacking() {
     h("button", { class: "control wide", onclick: () => copyText(l.fix).then(() => toast(`Copied: ${l.fix}`)) }, "Copy the command")];
 }
 
-async function openSettings() {
+// at: a section to show first (its data-section: "dictation").
+async function openSettings({ at = "" } = {}) {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
   const body = h("div", {});
@@ -2589,6 +2591,10 @@ async function openSettings() {
   back.redraw = () => draw();
   draw("checking");
   if (body.parentNode === document.activeElement) menuFocus(body.parentNode);      // opened with the keys: now there's a first line
+  // The section asked for, just under the sheet's head (it stays on top as the sheet scrolls).
+  const section = at && body.querySelector(`[data-section="${at}"]`);
+  const scroller = section && section.closest(".sheet"), head = scroller && scroller.querySelector(".head");
+  if (scroller) scroller.scrollTop += section.getBoundingClientRect().top - (head ? head.getBoundingClientRect().bottom : scroller.getBoundingClientRect().top) - 8;
   draw();
 }
 

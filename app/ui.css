@@ -535,6 +535,8 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 /* Hold to dictate: lit while it listens, the box too. */
 .cbtn.mic { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .cbtn.mic.on { color: var(--on-accent); background: var(--accent); }
+/* It can't work here (no speech model, no microphone): dimmed, and a tap says why. */
+.cbtn.mic.cant, .mic.cant { opacity: 0.4; }
 .composer.listening { border-color: var(--accent); animation: listen 1.2s ease-in-out infinite; }
 
 /* ---- a bar (.ui-bar): the board's and an open chat's are one, as

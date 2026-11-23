@@ -3610,7 +3610,7 @@ class Chat {
   }
 
   sendButtons() {
-    this.micBtn.hidden = !this.talk.available();
+    this.talk.draw();
     const empty = !this.input.value.trim() && !this.tray.length;
     const busy = this.tray.some((a) => a.state === "reading" || a.state === "uploading");
     const stop = this.working() && empty;
