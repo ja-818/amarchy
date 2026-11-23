@@ -133,6 +133,20 @@ board, in the app on any of them; docs/guide.md, "Machines"):
                                         what the app calls a machine (this one, or another that answers):
                                         kept on that machine, so every machine shows the same
   amarchy machines found [--json]       machines of yours on the tailnet that answer as amarchy, not paired yet
+  amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]
+                                        move a chat to another machine of yours, never on its own: once its
+                                        Claude's step is over, what it hadn't committed goes as one WIP commit,
+                                        its branch is pushed to origin and made its worktree there, and its
+                                        conversation (resumed there), name, priority, seen and unread, run
+                                        commands, previews and the files git ignores (not dependencies and
+                                        builds) go with it; the secrets it asked for only with --secrets. It's
+                                        taken off here once it's up there; anything wrong, it stays as it
+                                        was. Busy: --when-free moves it once it's free (from the chat's own
+                                        Claude, always so). Not your assistant or an agent. Prints <machine>:<id>
+  amarchy move [<id>] --check --to <machine> [--json]
+                                        what moving it would do, and whether it can now
+  amarchy move [<id>] --cancel | --dismiss
+                                        call off a move waiting for it to be free / forget why one didn't move
 
 Theme (the app's look, on every phone and browser; Settings, Look in the app):
   amarchy theme [--show]                print it: the theme, the font and the wallpaper
@@ -832,7 +846,7 @@ def save_session(s):
 # What session_view() adds for the UIs, never saved.
 VIEW_FIELDS = ("status", "awake", "sleeping", "waking", "task", "claude_title", "age", "background", "agent",
                "running", "serving", "unseen", "assistant", "assistant_name", "said", "said_at", "unread", "picture", "chime",
-               "today", "permission", "merged", "cut", "interrupted")
+               "today", "permission", "merged", "cut", "interrupted", "moving", "move_error")
 
 
 def own_session_id():
@@ -3875,7 +3889,7 @@ def in_tree(path, procs):
     return out
 
 
-AMARCHY_OWN = {"send", "reap", "claude-reload", "shorten", "protocol-check", "dictation"}
+AMARCHY_OWN = {"send", "reap", "claude-reload", "shorten", "protocol-check", "dictation", "move"}
 
 
 def amarchy_own(pid):
@@ -6237,6 +6251,8 @@ def session_view():
         s["secret_asks"] = secret_asks(s["id"])
         # Its work merged (merge_scan): when last, how many times, what's new since.
         s["merged"] = chat_merged(s["id"], merges)
+        # Moving to another machine (see "moving a chat"), or what stopped it.
+        s["moving"], s["move_error"] = move_shown(s["id"])
     crew = team()
     for s in ss:
         # Yours (your assistant, an agent) or of one's project: under its
@@ -12290,7 +12306,7 @@ def app_watch(st):
                     "new_model": new_model(), "new_effort": new_effort(),
                     "default_efforts": default_efforts(), "models": known_models(), "share": share_state(),
                     "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss),
-                    "missions": missions_view(), "ghostty": ghostty_here()}
+                    "missions": missions_view(), "ghostty": ghostty_here(), "moved": moved_shared()}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -14051,7 +14067,8 @@ def amarchy_version():
 def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
-            "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True}
+            "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True,
+            "moves": True}
 
 
 def machine_url_ok(url):
@@ -14543,7 +14560,7 @@ class Peers:
         self.saved_at[name] = time.time()
         try:
             write_file(PEERS_SEEN / f"{name}.json", json.dumps(
-                {k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "at")}))
+                {k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}))
         except OSError:
             pass
 
@@ -14622,7 +14639,9 @@ class Peers:
                         hello_now = got.get("machine") if isinstance(got.get("machine"), dict) else h
                         self.update(name, on=True, error=None, update=None, hello=hello_now, at=time.time(),
                                     sessions=[s for s in got.get("sessions") or [] if isinstance(s, dict) and s.get("id")],
-                                    projects=got.get("projects") or [], tasks=got.get("tasks") or [])
+                                    projects=got.get("projects") or [], tasks=got.get("tasks") or [],
+                                    moved=[r for r in got.get("moved") or [] if isinstance(r, dict)
+                                           and isinstance(r.get("from"), str) and isinstance(r.get("to"), str)])
                         if hello_now.get("label") and hello_now["label"] != m["label"]:
                             try:
                                 machine_keep({**m, "label": hello_now["label"]})
@@ -14648,7 +14667,7 @@ def peer_state(view):
     """What another machine's board takes of this one: its own chats (never
     the ones it shows from others), its projects and its agents' tasks."""
     return {"machine": hello(), "sessions": view.get("sessions") or [], "projects": view.get("projects") or [],
-            "tasks": (view.get("today") or {}).get("tasks") or []}
+            "tasks": (view.get("today") or {}).get("tasks") or [], "moved": view.get("moved") or []}
 
 
 def board_view(st):
@@ -14684,9 +14703,27 @@ def board_view(st):
         for s in p.get("sessions") or []:
             sessions.append({**s, "machine": name, **({"machine_off": True} if off else {})})
         tasks += [{**x, "machine": name} for x in p.get("tasks") or [] if isinstance(x, dict) and not off]
+    # Moved chats (see "moving a chat"): every machine's, each old key to
+    # the one it's under now; and one that moved a moment ago, as it was,
+    # under its new key, until its new machine's list has it (its card keeps
+    # its place, never gone for a second).
+    moved_rows = list(view.get("moved") or [])
+    for name, p in peers.items():
+        if name in paired:
+            moved_rows += [r for r in p.get("moved") or [] if isinstance(r, dict)]
+    board_keys = {f"{s.get('machine') or me}:{s['id']}" for s in sessions}
+    now = time.time()
+    for r in moved_rows:
+        to, row = r.get("to"), r.get("row")
+        where, _, to_id = (to or "").partition(":")
+        if isinstance(row, dict) and to and to not in board_keys and where != me and where in paired \
+                and now - (r.get("at") or 0) < MOVED_ROW and to_id:
+            sessions.append({**row, "id": to_id, "machine": where, "moved_from": r["from"]})
+            board_keys.add(to)
     # What needs you: not a chat on a machine that's off (nothing to answer it with until it's back).
     board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True,
-             "needs": needs_you([s for s in sessions if not s.get("machine_off")])}
+             "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
+             "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
         board["today"] = {**(view.get("today") or {}), "tasks": tasks}
     st.board = (version, board)
@@ -14792,6 +14829,1572 @@ def peer_moments(st, board):
         desktop = {"session": k, "sound": notice_chime(s, mine),
                    "actions": notice_actions(s, None, f"/api/m/{urllib.parse.quote(s['machine'], safe='')}")}
         threading.Thread(target=push_all, args=(payload, desktop), daemon=True).start()
+
+
+# ------------------------------------------------------------------ moving a chat (track E)
+#
+# docs/plan-omarchy-and-machines.md, "Moving a chat". A chat lives on its
+# machine, and you move it, never amarchy on its own: "Move to <label>" in its
+# menu, or `amarchy move [<id>] --to <machine>`; only once its Claude's step
+# is over (move_busy), and never your assistant or an agent. The machine it's
+# on (A):
+#   1. stops its Claude (as sleep does) and its previews;
+#   2. commits what isn't committed as one WIP commit on its branch (the index
+#      as it was kept, to put back) and pushes the branch to origin, forward
+#      only (move_commit, move_push);
+#   3. packs the rest (move_pack): its conversations, amarchy's own of it
+#      (model, title, draft, who sent it what), and what git doesn't carry
+#      (.amarchy/, the files git ignores but dependencies and builds, which are
+#      made again there), and hands it to the other machine (B):
+#      POST /api/peer/move;
+#   4. B makes the worktree from the branch, puts everything in place, starts
+#      its Claude on the conversation and answers once it's up (move_take);
+#   5. A lets its own go (move_drop): tmux, worktree, branch, amarchy's state of
+#      it; moved.json leads its old key to the new one, so its card keeps its
+#      place and old links open it where it is.
+# Anything wrong before B's answer: undone (move_undo). B's answer lost: A asks
+# B to drop what it took (/api/peer/move/abort) first, and keeps asking
+# (move_tend) until B answers. Each step is written down as it's done
+# (MOVES/<id>.json on A, MOVES_IN/<move>.json on B), so a machine that dies in
+# the middle finishes or undoes it once it's back.
+
+MOVES = STATE / "moves"             # <id>.json: a move of one of this machine's chats (waiting, under way, failed); its lock; its package
+MOVED = STATE / "moved.json"        # [{from, to, at, row}]: the chats moved away from here
+MOVED_LOCK = STATE / "moved.lock"
+MOVES_IN = STATE / "moves-in"       # <move>.json: a move this machine took (or is taking): what undoes it; <move>/ while it's unpacked
+MOVE_MAX = 1 << 30                  # bytes of a move's package, at most
+MOVE_CARRY_MAX = 512 << 20          # bytes of what git doesn't carry (the files it ignores), at most
+MOVED_KEEP = 30 * 86400             # seconds a moved chat's old key leads to its new one
+MOVED_ROW = 120                     # seconds a board shows a moved chat as it was, until its new machine's list has it
+MOVE_FREE_WAIT = 24 * 3600          # how long a move waits for its chat to be free
+MOVE_UP_WAIT = 90                   # seconds the new machine gives the chat's Claude to come up
+MOVE_SEND_TIMEOUT = 900             # seconds the old machine waits for the new one to take it
+MOVE_GIT_TIMEOUT = 180              # seconds a push or a fetch gets
+MOVE_ERROR_KEEP = 7 * 86400         # a move that failed says so on its card this long (or until dismissed)
+MOVE_TOKEN_RE = r"[0-9a-f]{32}"
+# What's made again from the project (dependencies, builds, caches): never carried.
+MOVE_REBUILT = {"node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
+                ".nox", "target", "dist", "build", "out", ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache",
+                ".cache", "coverage", ".gradle", ".terraform", "bower_components", ".expo", ".angular", ".vite",
+                ".eggs", ".hypothesis", ".DS_Store"}
+# Files that hold keys, not code: never in the WIP commit (it goes to origin), carried as they are.
+MOVE_PRIVATE = re.compile(r"(?:^|/)(?:\.env(?!\.(?:example|sample|template|dist|defaults)$)(?:\.[\w.-]+)?|[^/]+\.(?:pem|key|p12|pfx|"
+                          r"keystore|jks|kdbx)|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|\.npmrc|\.pypirc|\.netrc|\.pgpass|"
+                          r"credentials(?:\.[\w-]+)?\.json|service[-_]account[\w.-]*\.json|secrets?\.(?:json|ya?ml|toml))$")
+# Of amarchy's own for a chat (claude_dir), what goes with it.
+MOVE_CHAT_FILES = ("conversation", "chosen.json", "title", "draft", "send", "attached.json")
+
+
+class MoveError(Exception):
+    """A move refused or failed, in words (undone already, or nothing done)."""
+
+
+def move_read(sid):
+    try:
+        d = json.loads((MOVES / f"{sid}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def move_write(sid, rec):
+    write_file(MOVES / f"{sid}.json", json.dumps(rec))
+
+
+def move_forget(sid):
+    for f in (MOVES / f"{sid}.json", MOVES / f"{sid}.pkg.tar.gz"):
+        f.unlink(missing_ok=True)
+
+
+def move_lock(sid):
+    """The lock of a chat's move, held while it's under way (or waits for the
+    chat to be free): the open file, or None when another move has it."""
+    MOVES.mkdir(parents=True, exist_ok=True)
+    lock = open(MOVES / f"{sid}.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return None
+    return lock
+
+
+def move_running(sid):
+    """Whether a move of this chat is under way now (its lock is held)."""
+    lock = move_lock(sid)
+    if lock:
+        lock.close()
+        return False
+    return True
+
+
+def move_shown(sid, rec=None):
+    """A chat's move as its card shows it: (moving, move_error), each a dict or None."""
+    rec = move_read(sid) if rec is None else rec
+    if not rec or not rec.get("to"):
+        return None, None
+    if rec.get("error"):
+        return None, {"to": rec["to"], "label": rec.get("label") or rec["to"], "error": rec["error"], "at": rec.get("at")}
+    return {"to": rec["to"], "label": rec.get("label") or rec["to"], "step": rec.get("step") or "",
+            "since": rec.get("since"), "when": "free" if rec.get("when") == "free" and not rec.get("started") else "now"}, None
+
+
+def move_holds(sid):
+    """Why nothing can be done to a chat here now, as it moves (sending it a
+    message, waking it, completing it), or None. One that waits to be free
+    still takes them: it's at work here until then."""
+    moving, _ = move_shown(sid)
+    if not moving or moving["when"] == "free":
+        return None
+    return f"It's moving to {moving['label']}: it's there in a moment"
+
+
+# ---- the chats moved away from here
+
+def moved_read():
+    """moved.json, but what's older than MOVED_KEEP."""
+    try:
+        rows = json.loads(MOVED.read_text())
+    except (OSError, ValueError):
+        return []
+    now = time.time()
+    return [r for r in rows if isinstance(r, dict) and isinstance(r.get("from"), str) and isinstance(r.get("to"), str)
+            and now - (r.get("at") or 0) < MOVED_KEEP] if isinstance(rows, list) else []
+
+
+def moved_change(fn):
+    """moved.json changed by fn(rows) -> rows, under its lock."""
+    MOVED_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(MOVED_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = fn(moved_read())
+        write_file(MOVED, json.dumps(rows))
+
+
+def moved_add(entry):
+    """A chat moved away from here: its old key leads to its new one."""
+    moved_change(lambda rows: [r for r in rows if r["from"] != entry["from"]] + [entry])
+
+
+def moved_back(key):
+    """A chat comes (back) to this machine under key: its old key here leads nowhere now."""
+    moved_change(lambda rows: [r for r in rows if r["from"] != key])
+
+
+def moved_to(sid):
+    """Where this machine's chat sid is now (<machine>:<id>), when it moved away, else None."""
+    me = f"{machine_name()}:{sid}"
+    return next((r["to"] for r in reversed(moved_read()) if r["from"] == me), None)
+
+
+def moved_shared():
+    """This machine's moved chats for the other machines' boards: the row
+    only while it's fresh (it's on its new machine's list soon)."""
+    now = time.time()
+    return [{"from": r["from"], "to": r["to"], "at": r.get("at"),
+             **({"row": r["row"]} if r.get("row") and now - (r.get("at") or 0) < MOVED_ROW else {})} for r in moved_read()]
+
+
+def moved_map(rows):
+    """{old key: the key it's under now}, each followed to the last (a chat
+    moved twice), never round in a circle."""
+    step = {}
+    for r in sorted(rows, key=lambda r: r.get("at") or 0):
+        step[r["from"]] = r["to"]
+    out = {}
+    for k in step:
+        seen, at = {k}, step[k]
+        while at in step and at not in seen:
+            seen.add(at)
+            at = step[at]
+        if at != k:
+            out[k] = at
+    return out
+
+
+# ---- what a move would do, and whether it can now
+
+def move_busy(s):
+    """Why a chat can't move this moment, its Claude's step not over (it
+    moves once it is): [words], empty when it can."""
+    sid = s["id"]
+    reasons = []
+    status = (STATUS / sid).read_text().strip() if (STATUS / sid).exists() else "idle"
+    if status == "working":
+        reasons.append("it's working")
+    elif status == "waiting":
+        reasons.append("it's waiting for your answer")
+    if secret_asks(sid):
+        reasons.append("it's asking you for a secret")
+    live = agent_live(sid) if engine(s) == "chat" else {}
+    if live.get("pending"):
+        reasons.append("it's waiting for your answer")
+    queued = send_queue(sid)
+    if live.get("queue") or starting(sid) or (queued.is_dir() and any(queued.glob("[0-9]*"))):
+        reasons.append("a message is on its way in")
+    for d in background_sessions(s):
+        if d.get("status") not in (None, "", "idle"):
+            reasons.append(f"a background session is at work ({' '.join(str(d.get('name') or 'it').split())[:60]})")
+    pane = host_pane(s)
+    procs = processes()
+    if pane and pane_claude(pane, procs):
+        # What sleep says would be lost (a task running, a /loop, a command in
+        # the background), but what only says it just finished a turn: the
+        # move stops it as sleep does, its conversation all written.
+        for why in sleep_blockers(s, pane, procs, auto=False):
+            if why not in ("its conversation is still moving", "Claude isn't running in its pane"):
+                reasons.append(why)
+        f = transcript(s)
+        subagents = f.with_suffix("") / "subagents" if f else None
+        if subagents and subagents.is_dir() and any(time.time() - x.stat().st_mtime < QUIET for x in subagents.glob("*.jsonl")):
+            reasons.append("a subagent of its is still at work")
+    return list(dict.fromkeys(reasons))
+
+
+def move_git(path, *args, timeout=60, net=False, input=None):
+    """git in a worktree, for the move: its result (never waiting on a
+    password: it fails instead)."""
+    try:
+        return subprocess.run(["git", *args], cwd=path, capture_output=True, text=True, input=input,
+                              stdin=None if input is not None else subprocess.DEVNULL, timeout=timeout,
+                              env=git_net_env() if net else None)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 1, "", f"no answer in {timeout}s")
+
+
+def move_branch(path):
+    """The branch a worktree is on, or None (a detached HEAD)."""
+    r = move_git(path, "symbolic-ref", "--short", "-q", "HEAD")
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def move_refused(s):
+    """Why a chat can't move at all, whatever its Claude does (it says so,
+    and what to do about it), or None."""
+    if s.get("setup"):
+        return "it's still being set up"
+    if (CLOSING / f"{s['id']}.json").exists():
+        return "it's being completed"
+    role = team_of(s)[0]
+    if role == "main":
+        return "your assistant lives on its machine (amarchy assistant off makes it a chat like the others)"
+    if role == "agent":
+        return f"an agent lives on its machine (amarchy agents {s['id']} off makes it a chat like the others)"
+    path, repo_dir = Path(s["path"]), WORK / s["repo"]
+    if not path.is_dir():
+        return "its worktree isn't there"
+    if not has_origin(repo_dir):
+        return f"{s['repo']} has no origin to carry its branch to the other machine (git remote add origin <its address>)"
+    if not move_branch(path):
+        return "its worktree isn't on a branch (a detached HEAD): check one out first"
+    git_dir = Path(move_git(path, "rev-parse", "--absolute-git-dir").stdout.strip() or path / ".git")
+    for mark, what in (("MERGE_HEAD", "a merge"), ("rebase-merge", "a rebase"), ("rebase-apply", "a rebase"),
+                       ("CHERRY_PICK_HEAD", "a cherry-pick"), ("REVERT_HEAD", "a revert"), ("BISECT_LOG", "a bisect")):
+        if (git_dir / mark).exists():
+            return f"it's in the middle of {what}: finish it (or abort it) first"
+    if move_git(path, "ls-files", "-u").stdout.strip():
+        return "it has conflicts to resolve first"
+    return None
+
+
+def move_files(path):
+    """What of a worktree git won't carry, sorted out: carry (what git
+    ignores, a path each: .amarchy/, .env.local...), private (files git would
+    commit that hold keys: carried, never committed), left (dependencies and
+    builds, made again there), size (bytes carried)."""
+    path = Path(path)
+    carry, left, size = [], [], 0
+
+    def tally(full):
+        nonlocal size
+        if full.is_symlink():
+            return
+        if full.is_file():
+            size += full.stat().st_size
+            return
+        for root, dirs, files in os.walk(full):
+            for d in list(dirs):
+                if d in MOVE_REBUILT:
+                    dirs.remove(d)
+                    left.append(str((Path(root) / d).relative_to(path)) + "/")
+            for f in files:
+                try:
+                    st_ = os.lstat(os.path.join(root, f))
+                except OSError:
+                    continue
+                if st_.st_mode & 0o170000 == 0o100000:     # a regular file
+                    size += st_.st_size
+
+    r = move_git(path, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+    for e in (x for x in r.stdout.split("\0") if x):
+        rel = e.rstrip("/")
+        if any(p in MOVE_REBUILT for p in rel.split("/")):
+            left.append(e)
+            continue
+        full = path / rel
+        if full.is_symlink() and not move_link_ok(path, full):
+            left.append(e)
+            continue
+        tally(full)
+        carry.append(rel)
+    # What git would commit: kept out of the WIP commit when it holds a key
+    # (it goes to origin, GitHub), and carried as it is instead.
+    private = []
+    r = move_git(path, "ls-files", "-z", "--others", "--exclude-standard")
+    values = secret_values()
+    for rel in (x for x in r.stdout.split("\0") if x):
+        full = path / rel
+        if MOVE_PRIVATE.search(rel) or move_has_secret(full, values):
+            if not full.is_symlink() or move_link_ok(path, full):
+                tally(full)
+                private.append(rel)
+    return {"carry": carry, "private": private, "left": sorted(set(left)), "size": size}
+
+
+def move_link_ok(root, link):
+    """Whether a symlink can go as it is: it points inside the worktree."""
+    try:
+        target = os.readlink(link)
+    except OSError:
+        return False
+    if os.path.isabs(target):
+        return False
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.relpath(link, root)), target)).split(os.sep)[0] != ".."
+
+
+def move_has_secret(f, values=None):
+    """Whether a file (a small one) has one of your secrets' values in it."""
+    values = secret_values() if values is None else values
+    if not values:
+        return False
+    try:
+        if f.is_symlink() or not f.is_file() or f.stat().st_size > 4 << 20:
+            return False
+        text = f.read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return False
+    return any(v in text for v in values)
+
+
+def move_committed_secrets(path, private):
+    """The files a WIP commit would take that hold one of your secrets (a
+    changed file git tracks: it would go to origin): their paths."""
+    values = secret_values()
+    if not values:
+        return []
+    r = move_git(path, "diff", "--name-only", "-z", "HEAD")
+    return [rel for rel in r.stdout.split("\0") if rel and rel not in private and move_has_secret(Path(path) / rel, values)]
+
+
+def move_secrets_asked(s):
+    """The secrets this chat's Claude asked you for (amarchy secret ask, in its
+    conversations) that are kept here: [{name, scope}]."""
+    names = []
+    for f in move_conversations(s):
+        for _, use in tool_uses(conversation_records(f)):
+            if use.get("name") == "Bash":
+                for m in re.finditer(r"\bamarchy\s+secret\s+ask\s+([A-Za-z_][A-Za-z0-9_]*)", str((use.get("input") or {}).get("command") or "")):
+                    names.append(m.group(1))
+    out = []
+    for name in dict.fromkeys(names):
+        scope = secret_scope(s["repo"], name)
+        if scope:
+            out.append({"name": name, "scope": scope})
+    return out
+
+
+def move_conversations(s):
+    """The chat's own conversations here (Claude Code's files): the one it's in,
+    and the others written since it was made (after a /clear)."""
+    folder = projects_dir(s["path"])
+    current = conversation_id(s["id"])
+    since = (s.get("created") or 0) - 60
+    out = []
+    for f in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
+        try:
+            if f.stem == current or f.stat().st_mtime >= since:
+                out.append(f)
+        except OSError:
+            continue
+    return out
+
+
+def move_check(s, to=None):
+    """What moving a chat to machine `to` would do, for the app and
+    `amarchy move --check`: where (to, label, on), busy (why not this moment),
+    refused (why not at all), changes (files not committed), secrets (the
+    names it asked for), previews, left (what isn't carried), size."""
+    m = machine_find(to) if to else None
+    label = m["label"] if m else to or ""
+    out = {"id": s["id"], "to": to, "label": label, "on": False, "busy": [], "refused": None, "changes": 0,
+           "secrets": [], "previews": [preview_label(p) for p in previews(s) if p.get("run")], "left": [], "size": 0,
+           "moving": move_shown(s["id"])[0]}
+    if to and to == machine_name():
+        out["refused"] = "it's on this machine already"
+    elif to and not m:
+        out["refused"] = f"no machine {to} is paired with this one (amarchy machines lists them)"
+    out["refused"] = out["refused"] or move_refused(s)
+    if m and not out["refused"]:
+        try:
+            status, h = peer_json(m, "GET", "/api/peer/hello", timeout=5)
+            why = protocol_words(h.get("protocol"), label) if status == 200 else (h.get("error") or f"it answered {status}")
+            if not why and not h.get("moves"):
+                why = f"Update amarchy on {label}: it doesn't take chats from other machines yet"
+            out["on"] = not why
+            if why:
+                out["refused"] = why
+        except PeerError as e:
+            out["refused"] = f"{label} is off: {e}"
+    path = Path(s["path"])
+    if path.is_dir():
+        out["changes"] = len(move_git(path, "status", "--porcelain").stdout.splitlines())
+        files = move_files(path)
+        out["left"], out["size"] = files["left"], files["size"]
+        if files["size"] > MOVE_CARRY_MAX and not out["refused"]:
+            out["refused"] = (f"what git ignores in it is too big to carry ({files['size'] >> 20} MB, "
+                              f"{MOVE_CARRY_MAX >> 20} MB at most): remove what it doesn't need")
+        bad = move_committed_secrets(path, files["private"])
+        if bad and not out["refused"]:
+            out["refused"] = (f"{bad[0]} has one of your secrets in it, and moving would commit it to origin: "
+                              f"take the secret out first (amarchy secret keeps it)")
+    out["secrets"] = [x["name"] for x in move_secrets_asked(s)]
+    if not out["refused"]:
+        out["busy"] = move_busy(s)
+    return out
+
+
+# ---- on the old machine: the move, and what undoes it
+
+def move_spawn(argv):
+    """A move of its own, outside whoever asked (the app's server restarts
+    with an update; a chat's own Claude stops as it moves): a systemd unit
+    when there is one, else a process let go."""
+    keep = {k: v for k, v in os.environ.items()
+            if k in ("HOME", "PATH", "LANG", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK",
+                     "DBUS_SESSION_BUS_ADDRESS")
+            or k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))
+            or (k.startswith("AMARCHY") and k not in SESSION_ENV)}
+    full = [sys.executable, SELF, *argv]
+    if shutil.which("systemd-run"):
+        r = sh("systemd-run", "--user", "--quiet", "--collect", f"--unit=amarchy-move-{time.time_ns()}",
+               f"--description=amarchy move {' '.join(argv[:1])}", f"--working-directory={HOME}",
+               *(f"--setenv={k}={v}" for k, v in keep.items()), *full)
+        if r.returncode == 0:
+            return True
+    subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True, cwd=str(HOME), env={**clean_env(), **keep})
+    return True
+
+
+def move_out(sid, to, secrets=False, when="now", say=None):
+    """Move this machine's chat sid to machine `to` (see above), its secrets
+    too when you said so; with when="free", once its Claude's step is over.
+    None once it's there; else MoveError, saying why (undone)."""
+    say = say or (lambda text: None)
+    lock = move_lock(sid)
+    if not lock:
+        raise MoveError("it's being moved already")
+    try:
+        s = session(sid)
+        if not s:
+            raise MoveError(f"no chat {sid} here")
+        m = machine_find(to)
+        if not m:
+            raise MoveError(f"no machine {to} is paired with this one (amarchy machines lists them)")
+        if m["name"] == machine_name():
+            raise MoveError("it's on this machine already")
+        rec = {"to": m["name"], "label": m["label"], "when": when, "secrets": bool(secrets), "since": time.time(),
+               "step": "Waiting for it to be free" if when == "free" else "Getting ready", "pid": os.getpid()}
+        was = move_read(sid) or {}
+        if was.get("since") and not was.get("error") and was.get("to") == m["name"]:
+            rec["since"] = was["since"]         # (the one the app wrote, a moment ago)
+        move_write(sid, rec)
+        try:
+            if when == "free":
+                move_wait_free(s, m, rec, say)
+            return move_go(session(sid) or s, m, rec, say)
+        except MoveError as e:
+            if (move_read(sid) or {}).get("cancel"):
+                move_forget(sid)
+            else:
+                move_write(sid, {"to": m["name"], "label": m["label"], "error": str(e), "at": time.time(),
+                                 **{k: rec[k] for k in ("abort", "move") if rec.get(k)}})
+            raise
+    finally:
+        lock.close()
+
+
+def move_wait_free(s, m, rec, say):
+    """Until the chat's Claude's step is over (and the other machine answers):
+    the move waits, saying so on its card. MoveError when it's called off, or
+    can't move at all any more."""
+    sid, end, said = s["id"], time.time() + MOVE_FREE_WAIT, None
+    while True:
+        now = move_read(sid) or {}
+        if not now or now.get("cancel"):
+            raise MoveError("called off")
+        s = session(sid)
+        if not s:
+            raise MoveError("it was closed")
+        why = move_refused(s)
+        if why:
+            raise MoveError(why)
+        busy = move_busy(s)
+        if not busy:
+            try:
+                status, h = peer_json(m, "GET", "/api/peer/hello", timeout=5)
+                if status == 200 and h.get("moves") and not protocol_words(h.get("protocol"), m["label"]):
+                    return
+                busy = [f"{m['label']} doesn't take it yet"]
+            except PeerError:
+                busy = [f"{m['label']} is off"]
+        words = f"Waiting: {busy[0]}"
+        if words != said:
+            rec["step"] = words
+            move_write(sid, {**now, "step": words, "pid": os.getpid()})
+            say(words)
+            said = words
+        if time.time() > end:
+            raise MoveError(f"it wasn't free in {MOVE_FREE_WAIT // 3600} hours ({busy[0]})")
+        time.sleep(2)
+
+
+def move_project_there(m, s, say):
+    """The chat's project on machine m, cloned there first from GitHub when it
+    isn't there (as Where does). MoveError when it can't be."""
+    status, there = peer_json(m, "GET", "/api/peer/state", timeout=15)
+    if status != 200:
+        raise MoveError(there.get("error") or f"{m['label']} said no ({status})")
+    slug = project_github(s["repo"])
+    mine = {p.get("name"): p.get("github") for p in there.get("projects") or [] if isinstance(p, dict)}
+    if slug and slug in mine.values():
+        return
+    if not slug and s["repo"] in mine:
+        return          # (no GitHub address: the same name, its origin checked there)
+    if not slug:
+        raise MoveError(f"{s['repo']} isn't on {m['label']}, and has no GitHub address to clone it from there: add it there first")
+    say(f"Cloning {slug} on {m['label']} first")
+    status, added = peer_json(m, "POST", "/api/add", {"repo": slug}, timeout=930)
+    if status != 200:
+        raise MoveError(f"couldn't clone {slug} on {m['label']}: {added.get('error') or status}")
+
+
+def move_go(s, m, rec, say):
+    sid, label, path = s["id"], m["label"], Path(s["path"])
+    if (move_read(sid) or {}).get("cancel"):
+        raise MoveError("called off")
+    rec.update(started=True, move=uuid.uuid4().hex)
+
+    def step(text):
+        if os.environ.get("AMARCHY_MOVE_DIE") == text:
+            os._exit(9)         # (the tests: a mover that dies here, as one killed would)
+        rec["step"] = text
+        move_write(sid, rec)
+        say(text)
+
+    step("Getting ready")
+    why = move_refused(s)
+    if why:
+        raise MoveError(why)
+    busy = move_busy(s)
+    if busy:
+        raise MoveError("; ".join(busy))
+    try:
+        status, h = peer_json(m, "GET", "/api/peer/hello", timeout=8)
+    except PeerError as e:
+        raise MoveError(f"{label} is off: {e}") from None
+    why = protocol_words(h.get("protocol"), label) if status == 200 else (h.get("error") or f"{label} answered {status}")
+    if why:
+        raise MoveError(why)
+    if not h.get("moves"):
+        raise MoveError(f"Update amarchy on {label}: it doesn't take chats from other machines yet")
+    try:
+        move_project_there(m, s, step)
+    except PeerError as e:
+        raise MoveError(f"{label} is off: {e}") from None
+    files = move_files(path)
+    if files["size"] > MOVE_CARRY_MAX:
+        raise MoveError(f"what git ignores in it is too big to carry ({files['size'] >> 20} MB): remove what it doesn't need")
+    bad = move_committed_secrets(path, files["private"])
+    if bad:
+        raise MoveError(f"{bad[0]} has one of your secrets in it, and moving would commit it to origin: take it out first")
+    asked = move_secrets_asked(s) if rec.get("secrets") else []
+    # From here on, each step is undone when a later one fails (move_undo).
+    undo = rec.setdefault("undo", {})
+    undo["previews"] = [p["key"] for p in previews(s) if p.get("run") and preview_state(s, p) in ("up", "starting")]
+    undo["private"] = files["private"]      # (carried, not committed: all that may be left of it here)
+    move_write(sid, rec)
+    try:
+        step("Stopping its Claude")
+        lock = sleep_lock(wait=True)
+        try:
+            why = put_to_sleep(s, force=True)       # (its step is over: nothing it would lose)
+        finally:
+            if lock:
+                lock.close()
+        if why:
+            raise MoveError(f"its Claude didn't stop: {why}")
+        left = preview_close(s)
+        if left:
+            raise MoveError(PREVIEW_LEFT + "; ".join(left))
+        step("Committing its work")
+        undo.update(move_commit(s, label, files))
+        move_write(sid, rec)
+        step("Pushing its branch")
+        undo.update(move_push(path, undo["branch"]))
+        move_write(sid, rec)
+        step("Packing its conversation")
+        pkg = MOVES / f"{sid}.pkg.tar.gz"
+        move_pack(s, rec, files, [{**x, "value": session_secrets(s["repo"]).get(x["name"])} for x in asked], pkg)
+        step(f"Handing it to {label}")
+        rec["sent"] = True
+        move_write(sid, rec)
+        kind, said = move_send(m, pkg, rec["move"])
+        if kind == "lost":
+            step(f"{label} didn't answer: asking it to let go")
+            gone, kept = move_abort_ask(m, rec["move"])
+            if gone == "kept":
+                kind, said = "ok", {**kept, "notes": [f"{label} didn't answer in time, but has it, and it was used there since"]}
+            elif gone is None:
+                rec["abort"] = True     # (move_tend asks again until it answers)
+                raise MoveError(f"{label} didn't answer ({said}): it's here as it was. If it shows up on {label} "
+                                f"too, amarchy takes it off there once {label} answers again")
+            else:
+                raise MoveError(f"{label} didn't take it ({said})")
+        if kind != "ok":
+            raise MoveError(said)
+    except MoveError:
+        move_undo(s, rec, say)
+        raise
+    except Exception as e:      # a bug: never half moved
+        move_undo(s, rec, say)
+        raise MoveError(f"it failed ({type(e).__name__}: {e})") from None
+    rec["answered"] = said
+    step(f"On {label}: letting it go here")
+    notes = move_drop(s, m, said, rec)
+    move_forget(sid)
+    return {"key": said.get("key"), "id": said.get("id"), "notes": [*(said.get("notes") or []), *notes]}
+
+
+def move_commit(s, label, files):
+    """What isn't committed in the chat's worktree, as one WIP commit on its
+    branch (but the files that hold keys: files["private"], carried instead).
+    {branch, head (before it), index (the index as it was, a tree), wip (the
+    commit, or None: nothing to commit)}."""
+    path = Path(s["path"])
+    branch = move_branch(path)
+    if not branch:
+        raise MoveError("its worktree isn't on a branch")
+    head = move_git(path, "rev-parse", "HEAD").stdout.strip()
+    r = move_git(path, "write-tree")
+    if r.returncode != 0:
+        raise MoveError(f"couldn't read its index: {gist(r.stderr) or 'git write-tree failed'}")
+    out = {"branch": branch, "head": head, "index": r.stdout.strip(), "wip": None}
+    r = move_git(path, "add", "-A")
+    if r.returncode != 0:
+        move_git(path, "read-tree", out["index"])
+        raise MoveError(f"couldn't take its changes: {gist(r.stderr)}")
+    if files["private"]:
+        move_git(path, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", input="\0".join(files["private"]))
+    if move_git(path, "diff", "--cached", "--quiet").returncode == 0:
+        move_git(path, "read-tree", out["index"])
+        return out
+    task = session_task(s, "") or s["name"]
+    message = (f"WIP: moving to {label} (amarchy move)\n\nWhat \"{task}\" hadn't committed yet when it moved from "
+               f"{machine_label()} to {label}, so its work goes with it. Amend or squash it before it's merged.\n")
+    ident = []
+    if not move_git(path, "config", "user.email").stdout.strip():
+        ident = ["-c", "user.name=amarchy", "-c", f"user.email=amarchy@{machine_name()}"]
+    r = move_git(path, *ident, "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "-m", message)
+    if r.returncode != 0:
+        move_git(path, "read-tree", out["index"])
+        raise MoveError(f"couldn't commit its work: {gist(r.stderr or r.stdout)}")
+    out["wip"] = move_git(path, "rev-parse", "HEAD").stdout.strip()
+    return out
+
+
+def move_push(path, branch):
+    """The branch pushed to origin, forward only: {origin (its branch there
+    before, or None), pushed (what's there now)}."""
+    r = move_git(path, "ls-remote", "origin", f"refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
+    if r.returncode != 0:
+        raise MoveError(f"couldn't reach origin: {gist(r.stderr) or 'git ls-remote failed'}")
+    before = (r.stdout.split() or [None])[0]
+    head = move_git(path, "rev-parse", "HEAD").stdout.strip()
+    if before and before != head:
+        f = move_git(path, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", net=True,
+                     timeout=MOVE_GIT_TIMEOUT)
+        if f.returncode != 0:
+            raise MoveError(f"couldn't fetch origin's {branch}: {gist(f.stderr)}")
+        if not is_ancestor(before, head, path):
+            raise MoveError(f"origin's {branch} has commits this chat doesn't: bring them in first (git pull), then move it")
+    out = {"origin": before, "pushed": None}
+    if before != head:
+        p = move_git(path, "push", "-q", "-u", "origin", f"HEAD:refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
+        if p.returncode != 0:
+            raise MoveError(f"couldn't push its branch to origin: {gist(p.stderr) or 'git push failed'}")
+        out["pushed"] = head
+    else:
+        move_git(path, "branch", "-q", f"--set-upstream-to=origin/{branch}")
+    return out
+
+
+def move_pack(s, rec, files, secrets, out):
+    """The chat's package for the other machine (see the plan): move.json,
+    its conversations, amarchy's own of it, what git doesn't carry."""
+    import io
+    import tarfile
+    sid, path = s["id"], Path(s["path"])
+    convs = move_conversations(s)
+    undo = rec.get("undo") or {}
+    keep = {k: v for k, v in s.items() if k not in VIEW_FIELDS and k not in ("setup", "prompt", "previews", "preview",
+                                                                            "status", "moving", "move_error")}
+    stamp = lambda f: f.stat().st_mtime if f.exists() else None
+    manifest = {
+        "version": 1, "move": rec["move"], "from": {"machine": machine_name(), "id": sid, "label": machine_label()},
+        "session": keep, "repo": s["repo"], "github": project_github(s["repo"]),
+        "origin": hashlib.sha256(sh("git", "remote", "get-url", "origin", cwd=WORK / s["repo"]).stdout.strip().encode()).hexdigest(),
+        "branch": undo.get("branch") or s["branch"], "commit": undo.get("pushed") or move_git(path, "rev-parse", "HEAD").stdout.strip(),
+        "base": s.get("base"), "conversation": conversation_id(sid),
+        "seen": seen_at(sid), "unseen": stamp(UNSEEN / sid), "status_at": stamp(STATUS / sid),
+        "secrets": [x for x in secrets if x.get("value")],
+        "run": {"command": (RUN / s["repo"]).read_text().strip() if (RUN / s["repo"]).is_file() else None,
+                "saved": saved_commands(s["repo"])},
+        "previews": [{**preview_stored(p), "local": bool(preview_local(p["url"]))} for p in previews(s)],
+        "merges": merges_read().get(sid),
+        "wip": {"commit": undo["wip"], "label": rec.get("label")} if undo.get("wip") else None,
+        "left": files["left"],
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".{out.name}.{os.getpid()}")
+
+    def skip(info):
+        parts = info.name.split("/")
+        if any(p in MOVE_REBUILT for p in parts[1:]) or not (info.isfile() or info.isdir() or info.issym()):
+            return None
+        if info.issym() and (os.path.isabs(info.linkname) or ".." in Path(info.linkname).parts):
+            return None
+        return info
+
+    with tarfile.open(tmp, "w:gz", compresslevel=6) as tar:
+        data = json.dumps(manifest).encode()
+        info = tarfile.TarInfo("move.json")
+        info.size, info.mtime, info.mode = len(data), time.time(), 0o600
+        tar.addfile(info, io.BytesIO(data))
+        for f in convs:
+            tar.add(f, f"claude-projects/{f.name}")
+            folder = f.with_suffix("")
+            if folder.is_dir():
+                tar.add(folder, f"claude-projects/{folder.name}", filter=skip)
+            history = HOME / ".claude/file-history" / f.stem
+            if history.is_dir():
+                tar.add(history, f"claude-home/file-history/{f.stem}", filter=skip)
+            for todo in sorted((HOME / ".claude/todos").glob(f"{f.stem}-*.json")):
+                tar.add(todo, f"claude-home/todos/{todo.name}")
+        for name in MOVE_CHAT_FILES:
+            f = claude_dir(sid) / name
+            if f.is_file():
+                tar.add(f, f"chat/{name}")
+        for f, name in ((SENT_BY / f"{sid}.jsonl", "sent-by.jsonl"), (QUIET_TURNS / f"{sid}.jsonl", "quiet-turns.jsonl")):
+            if f.is_file():
+                tar.add(f, f"chat/{name}")
+        for rel in [*files["carry"], *files["private"]]:
+            full = path / rel
+            if full.exists() or full.is_symlink():
+                tar.add(full, f"worktree/{rel}", filter=skip)
+    size = tmp.stat().st_size
+    if size > MOVE_MAX:
+        tmp.unlink()
+        raise MoveError(f"it's too big to move ({size >> 20} MB, {MOVE_MAX >> 20} MB at most)")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, out)
+
+
+def move_send(m, pkg, token):
+    """The package to machine m: ("ok", its answer), ("refused", why: it
+    took nothing), or ("lost", why: it may have taken it, or not)."""
+    size = pkg.stat().st_size
+    headers = {"Content-Type": "application/x-amarchy-move", "Content-Length": str(size), "X-Amarchy-Move": token}
+    try:
+        with open(pkg, "rb") as body:
+            conn, r = peer_request(m, "POST", "/api/peer/move", body=body, headers=headers, timeout=MOVE_SEND_TIMEOUT)
+            try:
+                raw = r.read()
+            except (OSError, ValueError) as e:
+                return "lost", peer_why(e)
+            finally:
+                conn.close()
+    except PeerError as e:
+        return "lost", str(e)
+    try:
+        said = json.loads(zlib.decompress(raw, 31) if r.getheader("Content-Encoding") == "gzip" else raw or b"{}")
+    except (ValueError, zlib.error):
+        said = None
+    if not isinstance(said, dict):
+        return "lost", f"it answered {r.status}, not amarchy's way"
+    if r.status == 200 and said.get("key") and said.get("id"):
+        return "ok", said
+    if said.get("undone") or r.status in (400, 403, 404, 409, 413):
+        return "refused", said.get("error") or f"{m['label']} said no ({r.status})"
+    return "lost", said.get("error") or f"it answered {r.status}"
+
+
+def move_abort_ask(m, token, tries=3):
+    """Ask machine m to drop the move it may have taken: ("dropped", None)
+    (or it never took it), ("kept", {id, key}) (used there since: it stays
+    there), (None, None) (no answer)."""
+    for i in range(tries):
+        try:
+            status, said = peer_json(m, "POST", "/api/peer/move/abort", {"move": token}, timeout=150)
+            if status == 200:
+                return "dropped", None
+            if status == 409 and said.get("kept") and isinstance(said.get("key"), str):
+                return "kept", {"key": said["key"], "id": said["key"].split(":", 1)[-1]}
+        except PeerError:
+            pass
+        if i + 1 < tries:
+            time.sleep(3 * (i + 1))
+    return None, None
+
+
+def move_undo(s, rec, say=None):
+    """Put a chat back as it was before a move that failed: the WIP commit
+    undone (its changes and the index as they were), origin's branch as it
+    was, its previews started again. Its Claude stays asleep: what you send
+    wakes it, its conversation as it was."""
+    say = say or (lambda text: None)
+    sid, path, undo = s["id"], Path(s["path"]), rec.get("undo") or {}
+    notes = []
+    if path.is_dir() and undo.get("wip"):
+        if move_git(path, "rev-parse", "HEAD").stdout.strip() == undo["wip"]:
+            move_git(path, "reset", "-q", "--soft", undo["head"])
+            move_git(path, "read-tree", undo["index"])
+        else:
+            notes.append(f"its WIP commit {undo['wip'][:9]} stays: its branch moved on since")
+    if undo.get("pushed") and path.is_dir():
+        branch = undo["branch"]
+        lease = f"--force-with-lease=refs/heads/{branch}:{undo['pushed']}"
+        target = f"{undo['origin']}:refs/heads/{branch}" if undo.get("origin") else f":refs/heads/{branch}"
+        p = move_git(path, "push", "-q", lease, "origin", target, net=True, timeout=MOVE_GIT_TIMEOUT)
+        if p.returncode != 0:
+            notes.append(f"origin's {branch} has its WIP commit still ({gist(p.stderr)})")
+        elif not undo.get("origin"):
+            move_git(path, "branch", "-q", "--unset-upstream")
+    for key in undo.get("previews") or []:
+        p = preview_pick(session(sid) or s, key)
+        if p and p.get("run"):
+            preview_start(session(sid) or s, p)
+    (MOVES / f"{sid}.pkg.tar.gz").unlink(missing_ok=True)
+    for n in notes:
+        say(n)
+    return notes
+
+
+def move_drop(s, m, answer, rec):
+    """The chat is on machine m now (it answered): let it go here. Its old key
+    leads to the new one; its tmux, worktree (never with work not committed),
+    branch (origin has it) and amarchy's state of it go; Claude's files of its
+    conversations stay, as closing leaves them. Not a mission completed; its
+    merges went with it. Notes, in words, of what stayed."""
+    sid, path, repo_dir = s["id"], Path(s["path"]), WORK / s["repo"]
+    notes = []
+    row = next((app_row(x) for x in session_view() if x["id"] == sid), None)
+    if row:
+        row = {k: v for k, v in row.items() if k not in ("moving", "move_error", "secret_asks", "previews", "agent",
+                                                        "path", "awake", "background", "running", "serving")}
+        row.update(machine=m["name"], id=answer["id"], sleeping=True, status="idle")
+    moved_add({"from": f"{machine_name()}:{sid}", "to": answer["key"], "at": time.time(), **({"row": row} if row else {})})
+    (SESSIONS / f"{sid}.json").unlink(missing_ok=True)
+    (STATUS / sid).unlink(missing_ok=True)
+    (UNSEEN / sid).unlink(missing_ok=True)
+    (SEEN / sid).unlink(missing_ok=True)
+    move_merges_drop(sid)
+    stop_background(s, only_idle=False)
+    pane, term = host_pane(s), term_pane(s)
+    scopes = [x for x in (pane_scope(pane["pid"]) if pane else None, pane_scope(term) if term else None) if x]
+    host_stop(s)
+    if installed_from(path) and (repo_dir / "install.sh").exists():
+        put = sh(str(repo_dir / "install.sh"), "--force", cwd=repo_dir)
+        if put.returncode != 0:
+            notes.append(f"amarchy ran from it, and putting it back on {repo_dir} failed: its folder stays")
+    stop_leftovers(path, scopes)
+    if path.exists() and not installed_from(path):
+        # Nothing of its work may be lost: what git would still see in it is
+        # only what was carried (the files with keys, never committed), and
+        # its HEAD is what origin has. Else the folder stays, said.
+        undo = rec.get("undo") or {}
+        carried = set(undo.get("private") or [])
+        status = move_git(path, "status", "--porcelain", "-z", "--untracked-files=all").stdout
+        left = [e[3:] for e in status.split("\0") if e]
+        head = move_git(path, "rev-parse", "HEAD").stdout.strip()
+        safe = all(e in carried for e in left) and head in (undo.get("pushed"), undo.get("head") if not undo.get("wip") else None,
+                                                             answer.get("commit"))
+        removed = sh("git", "worktree", "remove", *(["--force"] if safe and left else []), str(path), cwd=repo_dir)
+        if path.exists() and removed.returncode != 0:
+            notes.append(f"its folder stays at {path} on {machine_label()}: {last_line(removed, 'git worktree remove failed')}")
+    sh("git", "worktree", "prune", cwd=repo_dir)
+    branch = (rec.get("undo") or {}).get("branch") or s["branch"]
+    tip = sh("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", cwd=repo_dir).stdout.strip()
+    there = sh("git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", cwd=repo_dir).stdout.strip()
+    pushed = (rec.get("undo") or {}).get("pushed") or there
+    if tip and tip in (there, pushed) and not path.exists():
+        sh("git", "branch", "-D", branch, cwd=repo_dir)
+    shutil.rmtree(claude_dir(sid), ignore_errors=True)
+    for x in (PREVIEWS / f"{sid}.json", PREVIEWS / f"{sid}.log", SENT_BY / f"{sid}.jsonl", QUIET_TURNS / f"{sid}.jsonl"):
+        x.unlink(missing_ok=True)
+    for x in PREVIEWS.glob(f"{sid}--*") if PREVIEWS.is_dir() else ():
+        x.unlink(missing_ok=True)
+    if not path.exists():
+        set_trust(path, False)
+    return notes
+
+
+def move_merges_drop(sid):
+    """A chat's merges go with it (the new machine counts them, once)."""
+    MERGES_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(MERGES_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        d = merges_read()
+        if sid in d:
+            d = {k: v for k, v in d.items() if k != sid}
+            write_file(MERGES, json.dumps(d))
+
+
+def move_merges_add(sid, entry):
+    MERGES_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(MERGES_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        d = dict(merges_read())
+        d[sid] = entry
+        write_file(MERGES, json.dumps(d))
+
+
+# ---- on the new machine: taking a chat (POST /api/peer/move)
+
+def move_find_project(man):
+    """The project here a moving chat's is: the one with its GitHub address,
+    else the one of the same name with the same origin. Its name, or MoveError."""
+    slug = man.get("github")
+    for p in projects(remotes=False):
+        if slug and project_github(p["name"]) == slug:
+            return p["name"]
+    name = man.get("repo")
+    if isinstance(name, str) and re.fullmatch(r"[\w.-]+", name) and (WORK / name / ".git").exists():
+        origin = sh("git", "remote", "get-url", "origin", cwd=WORK / name).stdout.strip()
+        if not slug and hashlib.sha256(origin.encode()).hexdigest() == man.get("origin"):
+            return name
+    raise MoveError(f"{slug or name} isn't on {machine_label()}")
+
+
+def move_in_read(token):
+    try:
+        d = json.loads((MOVES_IN / f"{token}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def move_in_write(rec):
+    write_file(MOVES_IN / f"{rec['move']}.json", json.dumps(rec))
+
+
+def move_take(pkg, peer):
+    """Take the chat in package pkg from machine peer (see the plan): its
+    answer ({id, key, notes}) once its Claude is up here, or MoveError (all of
+    it undone). The same move again: the answer it had."""
+    import tarfile
+    if not re.fullmatch(MACHINE_NAME_RE, peer or ""):
+        raise MoveError("from which machine?")
+    try:
+        with tarfile.open(pkg) as tar:
+            member = tar.getmember("move.json")
+            if not member.isfile() or member.size > 4 << 20:
+                raise ValueError
+            man = json.loads(tar.extractfile(member).read())
+    except (OSError, KeyError, ValueError, tarfile.TarError):
+        raise MoveError("that isn't a chat's package") from None
+    token = man.get("move")
+    if not isinstance(token, str) or not re.fullmatch(MOVE_TOKEN_RE, token):
+        raise MoveError("that isn't a chat's package")
+    before = move_in_read(token)
+    if before and before.get("state") == "done":
+        return before["answer"]
+    if before and before.get("state") == "taking" and pid_alive(before.get("pid")):
+        raise MoveError("it's being taken already")
+    rec = {"move": token, "from": f"{peer}:{(man.get('from') or {}).get('id')}", "label": (man.get("from") or {}).get("label") or peer,
+           "state": "taking", "pid": os.getpid(), "at": time.time(), "undo": []}
+    MOVES_IN.mkdir(parents=True, exist_ok=True)
+    move_in_write(rec)
+    stage = MOVES_IN / token
+    try:
+        shutil.rmtree(stage, ignore_errors=True)
+        with tarfile.open(pkg) as tar:
+            tar.extractall(stage, filter="data")
+        answer = move_install(man, stage, rec)
+    except BaseException as e:
+        move_take_undo(rec)
+        rec.update(state="undone", error=str(e))
+        move_in_write(rec)
+        if isinstance(e, MoveError):
+            raise
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise MoveError(f"it failed on {machine_label()} ({type(e).__name__}: {e})") from None
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    rec.update(state="done", answer=answer, done_at=time.time())
+    move_in_write(rec)
+    return answer
+
+
+def move_install(man, stage, rec):
+    """Everything of a moving chat in place here, each step written down in
+    rec["undo"] as it's done; then its Claude started. Its answer."""
+    label, here = rec["label"], machine_label()
+    undo = rec["undo"]
+
+    def did(*action):
+        undo.append(list(action))
+        move_in_write(rec)
+
+    given = man.get("session") or {}
+    name = slug(str(given.get("name") or ""))
+    branch = man.get("branch")
+    commit = man.get("commit")
+    if not name or not isinstance(branch, str) or not re.fullmatch(r"[\w./-]{1,200}", branch) or ".." in branch \
+            or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+        raise MoveError("that isn't a chat's package")
+    repo = move_find_project(man)
+    repo_dir = WORK / repo
+    sid = f"{repo}-{name}"
+    path = WORKTREES / repo / name
+    if session(sid) or (CLOSING / f"{sid}.json").exists():
+        raise MoveError(f"a chat called {name} is on {here} already")
+    if path.exists():
+        raise MoveError(f"{path} is on {here} already (an old worktree?): remove it there first")
+    # Its branch, from origin, at the commit it was pushed at.
+    r = move_git(repo_dir, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", net=True,
+                 timeout=MOVE_GIT_TIMEOUT)
+    if r.returncode != 0:
+        raise MoveError(f"couldn't fetch its branch from origin on {here}: {gist(r.stderr)}")
+    if move_git(repo_dir, "rev-parse", f"refs/remotes/origin/{branch}").stdout.strip() != commit:
+        raise MoveError(f"origin's {branch} isn't where {label} pushed it (someone pushed since?)")
+    tip = move_git(repo_dir, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").stdout.strip()
+    if tip and tip != commit and not is_ancestor(tip, commit, repo_dir):
+        raise MoveError(f"{here} has a branch {branch} with commits of its own: rename or delete it there first")
+    listed = move_git(repo_dir, "worktree", "list", "--porcelain").stdout
+    if f"branch refs/heads/{branch}\n" in listed + "\n":
+        raise MoveError(f"its branch {branch} is checked out somewhere else on {here}")
+    if tip:
+        move_git(repo_dir, "branch", "-q", "-f", branch, commit)
+    else:
+        move_git(repo_dir, "branch", "-q", branch, commit)
+    did("branch", branch, tip or None, str(repo_dir))
+    move_git(repo_dir, "branch", "-q", f"--set-upstream-to=origin/{branch}", branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    r = move_git(repo_dir, "worktree", "add", "-q", str(path), branch)
+    if r.returncode != 0:
+        raise MoveError(f"couldn't make its worktree on {here}: {gist(r.stderr)}")
+    did("worktree", str(path), str(repo_dir))
+    # What git doesn't carry: as it was there.
+    carried = stage / "worktree"
+    if carried.is_dir():
+        for src in sorted(carried.rglob("*")):
+            rel = src.relative_to(carried)
+            dst = path / rel
+            if src.is_dir() and not src.is_symlink():
+                dst.mkdir(parents=True, exist_ok=True)
+            elif not dst.exists() and not dst.is_symlink():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(src, dst) if src.is_symlink() else shutil.copy2(src, dst)
+    # Its conversations, where its Claude looks for them here (the worktree's
+    # folder, as Claude Code names it); what was there kept, to put back.
+    backup = MOVES_IN / f"{rec['move']}.backup"
+    folder = projects_dir(path)
+    for src in sorted((stage / "claude-projects").glob("*")) if (stage / "claude-projects").is_dir() else []:
+        move_put(src, folder / src.name, backup, did)
+    home = stage / "claude-home"
+    for sub in ("file-history", "todos"):
+        for src in sorted((home / sub).glob("*")) if (home / sub).is_dir() else []:
+            move_put(src, HOME / ".claude" / sub / src.name, backup, did)
+    # The chat: its record, amarchy's own of it.
+    s = {k: v for k, v in given.items() if k not in VIEW_FIELDS and k not in ("setup", "prompt", "preview", "previews", "moving", "move_error")}
+    s.update(id=sid, repo=repo, name=name, branch=branch, path=str(path), engine="chat")
+    if not s.get("created"):
+        s["created"] = int(time.time())
+    ps = move_previews_here(man.get("previews") or [])
+    if ps:
+        s["previews"] = ps
+    did("session", sid)
+    d = claude_dir(sid)
+    for f in MOVE_CHAT_FILES:
+        src = stage / "chat" / f
+        if src.is_file():
+            write_file(d / f, src.read_bytes())
+    if man.get("conversation") and re.fullmatch(r"[0-9a-f-]{36}", str(man["conversation"])):
+        write_file(d / "conversation", man["conversation"])
+    for src, dst in ((stage / "chat/sent-by.jsonl", SENT_BY / f"{sid}.jsonl"), (stage / "chat/quiet-turns.jsonl", QUIET_TURNS / f"{sid}.jsonl")):
+        if src.is_file():
+            write_file(dst, src.read_bytes())
+    write_file(d / "moved-note", move_note(man, rec, path))
+    notes = []
+    notes += move_run_here(repo, man.get("run") or {}, did)
+    notes += move_secrets_here(repo, man.get("secrets") or [], did)
+    if isinstance(man.get("merges"), dict):
+        move_merges_add(sid, man["merges"])
+    # Seen and unread, as they were (their files' times say it).
+    STATUS.mkdir(parents=True, exist_ok=True)
+    (STATUS / sid).write_text("idle")
+    if isinstance(man.get("status_at"), (int, float)):
+        os.utime(STATUS / sid, (man["status_at"], man["status_at"]))
+    if isinstance(man.get("seen"), (int, float)):
+        SEEN.mkdir(parents=True, exist_ok=True)
+        (SEEN / sid).touch()
+        os.utime(SEEN / sid, (man["seen"], man["seen"]))
+    if isinstance(man.get("unseen"), (int, float)):
+        mark_unseen(sid)
+        os.utime(UNSEEN / sid, (man["unseen"], man["unseen"]))
+    save_session(s)
+    moved_back(f"{machine_name()}:{sid}")
+    set_trust(path, True)
+    did("trust", str(path))
+    # Its Claude, on the conversation: up (its broker idle, Claude running) before it answers.
+    clear_asleep(sid)
+    host_start(s, wake=True)
+    why = move_wait_up(sid)
+    if why:
+        raise MoveError(f"its Claude didn't start on {here}: {why}")
+    for left in man.get("left") or []:
+        if isinstance(left, str):
+            notes.append(f"not carried (made again there): {left}")
+            break
+    return {"id": sid, "key": f"{machine_name()}:{sid}", "notes": notes}
+
+
+def move_put(src, dst, backup, did):
+    """One of Claude Code's files of the chat (a conversation, its folder), in
+    place: what was there kept in backup first, for its undo."""
+    keep = None
+    if dst.exists() or dst.is_symlink():
+        keep = backup / hashlib.sha1(str(dst).encode()).hexdigest()
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(keep, ignore_errors=True) if keep.is_dir() else keep.unlink(missing_ok=True)
+        shutil.move(str(dst), str(keep))
+    did("file", str(dst), str(keep) if keep else None)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst, symlinks=True)
+    else:
+        shutil.copy2(src, dst)
+
+
+def move_previews_here(ps):
+    """A moving chat's previews, at this machine's address: one served where
+    it was (local) at the same port here (https://<this machine>:<port> over
+    HTTPS where amarchy serves previews so, else http://<its name>:<port>);
+    one served elsewhere (a deploy) as it was. Registered, not started."""
+    out = []
+    tls, (host, _) = preview_tls(), host_network()
+    for p in ps:
+        if not isinstance(p, dict) or not isinstance(p.get("url"), str):
+            continue
+        p = {k: v for k, v in p.items() if k in ("key", "name", "url", "run", "stop", "ports", "memory", "idle")}
+        try:
+            u = urllib.parse.urlsplit(p["url"])
+            port = u.port
+        except ValueError:
+            continue
+        local = any(isinstance(x, dict) and x.get("url") == p["url"] and x.get("local") for x in ps)
+        if local and port:
+            p["url"] = urllib.parse.urlunsplit(("https", f"{tls}:{port}", u.path, u.query, u.fragment) if tls
+                                               else ("http", f"{host or 'localhost'}:{port}", u.path, u.query, u.fragment))
+        out.append(p)
+    return out
+
+
+def move_run_here(repo, run, did):
+    """The project's run commands from the other machine: the ones it hasn't
+    got here (its own win). Notes, in words."""
+    notes = []
+    command, saved = run.get("command"), run.get("saved") if isinstance(run.get("saved"), dict) else {}
+    if isinstance(command, str) and command.strip():
+        mine = (RUN / repo).read_text().strip() if (RUN / repo).is_file() else None
+        if mine is None:
+            set_run_command(repo, command)
+            did("run", repo)
+        elif mine != command.strip():
+            notes.append(f"its run command here is {machine_label()}'s own ({mine})")
+    have = saved_commands(repo)
+    for name, cmd in saved.items():
+        if isinstance(name, str) and isinstance(cmd, str) and name not in have and cmd.strip():
+            save_command(repo, name, cmd)
+            did("saved", repo, name)
+    return notes
+
+
+def move_secrets_here(repo, secrets, did):
+    """The secrets you said to copy: each kept here as it was there (this
+    project's, or every project's), but one this machine has already. Notes."""
+    notes = []
+    for x in secrets:
+        if not isinstance(x, dict) or not isinstance(x.get("name"), str) or not isinstance(x.get("value"), str):
+            continue
+        scope = None if x.get("scope") == "all" else repo
+        if x["name"] in secrets_read(secret_file(scope)):
+            notes.append(f"{x['name']}: {machine_label()} has its own, kept")
+            continue
+        why = secret_set(scope, x["name"], x["value"])
+        if why:
+            notes.append(f"{x['name']}: {why}")
+            continue
+        did("secret", scope, x["name"])
+    return notes
+
+
+def move_note(man, rec, path):
+    """What the chat's Claude is told with its next message, after the move
+    (Agent.deliver): where it is now, what came with it, what didn't."""
+    frm, here = rec["label"], machine_label()
+    wip = man.get("wip") or {}
+    lines = [f"amarchy: this chat moved from {frm} to {here} (amarchy move), at your user's word. Same conversation, "
+             f"same branch ({man.get('branch')}), its worktree at {path}."]
+    if wip.get("commit"):
+        lines.append(f"What you hadn't committed came as one commit, {wip['commit'][:9]} \"WIP: moving to {here} "
+                     f"(amarchy move)\", pushed to origin: amend or squash it before it's merged.")
+    left = [x for x in man.get("left") or [] if isinstance(x, str)]
+    lines.append("The files git ignores came too" + (f", but dependencies and builds ({', '.join(left[:5])}"
+                                                      f"{'...' if len(left) > 5 else ''}): make them again before you run the project."
+                                                      if left else "."))
+    lines.append(f"What ran in the background stopped on {frm}. This machine ({here}) is another computer: its "
+                 f"config, its services and what's installed are its own, not {frm}'s.")
+    return "<system-reminder>\n" + "\n".join(lines) + "\n</system-reminder>"
+
+
+def move_wait_up(sid, wait=MOVE_UP_WAIT):
+    """Until a chat's Claude is up on the chat engine (its broker idle, Claude
+    running, still running a moment later): None, else why not (what Claude
+    said as it stopped, when it did: not signed in, no such conversation)."""
+    end, up_since, dead_since = time.time() + wait, None, None
+    while time.time() < end:
+        live = agent_live(sid)
+        cpid = live.get("claude_pid")
+        try:        # (one that exited is a zombie until its broker waits for it: not alive)
+            alive = isinstance(cpid, int) and Path(f"/proc/{cpid}/stat").read_text().rpartition(")")[2].split()[0] != "Z"
+        except (OSError, IndexError):
+            alive = False
+        if agent_up(sid, live) and live.get("state") in ("idle", "working", "waiting") and alive:
+            up_since, dead_since = up_since or time.time(), None
+            if time.time() - up_since > 2:
+                return None
+        else:
+            up_since = None
+            gone = live.get("state") == "exited" or (isinstance(cpid, int) and not alive)
+            dead_since = (dead_since or time.time()) if gone else None
+            if dead_since and time.time() - dead_since > 1.5:
+                return move_pane_why(sid) or live.get("error") or f"Claude Code exited ({live.get('exit_code')})"
+        time.sleep(0.3)
+    return move_pane_why(sid) or agent_live(sid).get("error") or "it didn't come up in time"
+
+
+def move_pane_why(sid):
+    """The last thing a chat's Claude pane printed (why it stopped), or ""."""
+    lines = [l.strip() for l in (tty_text(sid, "claude") or "").splitlines()]
+    lines = [l for l in lines if l and not l.startswith(("·", "amarchy", "Claude Code exited"))]
+    return lines[-1][:240] if lines else ""
+
+
+def move_take_undo(rec):
+    """Undo what a move taken here did, last first (rec["undo"])."""
+    for action in reversed(rec.get("undo") or []):
+        try:
+            kind = action[0]
+            if kind == "session":
+                sid = action[1]
+                s = session(sid) or {"id": sid, "path": ""}
+                host_stop(s)
+                for f in (SESSIONS / f"{sid}.json", STATUS / sid, UNSEEN / sid, SEEN / sid, SENT_BY / f"{sid}.jsonl",
+                          QUIET_TURNS / f"{sid}.jsonl"):
+                    f.unlink(missing_ok=True)
+                shutil.rmtree(claude_dir(sid), ignore_errors=True)
+                move_merges_drop(sid)
+            elif kind == "worktree":
+                path, repo_dir = Path(action[1]), Path(action[2])
+                stop_leftovers(path)
+                sh("git", "worktree", "remove", "--force", str(path), cwd=repo_dir)
+                shutil.rmtree(path, ignore_errors=True)
+                sh("git", "worktree", "prune", cwd=repo_dir)
+            elif kind == "branch":
+                branch, was, repo_dir = action[1], action[2], action[3]
+                if was:
+                    sh("git", "branch", "-q", "-f", branch, was, cwd=repo_dir)
+                else:
+                    sh("git", "branch", "-q", "-D", branch, cwd=repo_dir)
+            elif kind == "file":
+                dst, keep = Path(action[1]), action[2]
+                shutil.rmtree(dst, ignore_errors=True) if dst.is_dir() and not dst.is_symlink() else dst.unlink(missing_ok=True)
+                if keep and Path(keep).exists():
+                    shutil.move(keep, str(dst))
+            elif kind == "run":
+                (RUN / action[1]).unlink(missing_ok=True)
+            elif kind == "saved":
+                save_command(action[1], action[2], "")
+            elif kind == "secret":
+                secret_forget(action[1], action[2])
+            elif kind == "trust":
+                set_trust(Path(action[1]), False)
+        except Exception as e:      # the rest is undone all the same
+            print(f"amarchy: undoing a move: {action[0]}: {e}", file=sys.stderr)
+    shutil.rmtree(MOVES_IN / f"{rec['move']}.backup", ignore_errors=True)
+
+
+def move_abort_in(token, peer):
+    """POST /api/peer/move/abort: the machine that sent move `token` lost the
+    answer, so this one lets it go. (code, answer)."""
+    rec = move_in_read(token)
+    if not rec or rec.get("from", "").split(":")[0] != peer:
+        return 200, {"dropped": False}
+    end = time.time() + 120
+    while rec.get("state") == "taking" and pid_alive(rec.get("pid")) and time.time() < end:
+        time.sleep(0.5)
+        rec = move_in_read(token) or rec
+    if rec.get("state") == "taking" and pid_alive(rec.get("pid")):
+        return 503, {"error": "it's still being taken: ask again in a moment"}
+    if rec.get("state") != "done":
+        if rec.get("state") == "taking":
+            move_take_undo(rec)
+            rec["state"] = "undone"
+            move_in_write(rec)
+        return 200, {"dropped": True}
+    sid = (rec.get("answer") or {}).get("id")
+    s = session(sid) if sid else None
+    if s:
+        f = transcript(s)
+        used = f and f.stat().st_mtime > (rec.get("done_at") or 0) + 5
+        if used or (STATUS / sid).read_text().strip() != "idle":
+            return 409, {"kept": True, "key": rec["answer"]["key"],
+                         "error": f"it's been used on {machine_label()} since: it stays there"}
+    move_take_undo(rec)
+    rec["state"] = "undone"
+    move_in_write(rec)
+    return 200, {"dropped": True}
+
+
+# ---- each minute, and when the app starts: moves cut short
+
+def move_tend():
+    """What a move cut short left (amarchy stopped in the middle of one, a
+    reboot): on this machine as the old one, finished or undone; a move that
+    waits for its chat to be free, waiting again; an abort the other machine
+    hasn't answered, asked again. As the new one: a take cut short, undone.
+    Old records forgotten."""
+    now = time.time()
+    for f in sorted(MOVES.glob("*.json")) if MOVES.is_dir() else []:
+        sid = f.stem
+        rec = move_read(sid)
+        if not rec or move_running(sid):
+            continue
+        s = session(sid)
+        if rec.get("error"):
+            if rec.get("abort"):
+                m = machine_find(rec.get("to") or "")
+                gone = move_abort_ask(m, rec["move"], tries=1)[0] if m and rec.get("move") else "dropped"
+                if gone == "dropped":
+                    rec.pop("abort", None)
+                    move_write(sid, rec)
+                elif gone == "kept":
+                    rec.pop("abort", None)
+                    rec["error"] = (f"{rec.get('label') or rec['to']} took it after all, and it was used there: it's on "
+                                    f"both machines now. Complete the one you don't want")
+                    move_write(sid, rec)
+            elif now - (rec.get("at") or 0) > MOVE_ERROR_KEEP or not s:
+                move_forget(sid)
+            continue
+        if not s:
+            move_forget(sid)
+            continue
+        if not rec.get("started"):
+            if now - (rec.get("since") or 0) < 90:
+                continue        # (its mover may still be starting)
+            if rec.get("when") == "free" and not rec.get("cancel"):
+                move_spawn(["move", sid, "--to", rec["to"], "--when-free", "--wait-here",
+                            "--secrets" if rec.get("secrets") else "--no-secrets"])
+            else:
+                move_forget(sid)
+            continue
+        lock = move_lock(sid)
+        if not lock:
+            continue
+        try:
+            m = machine_find(rec.get("to") or "")
+            label = rec.get("label") or rec.get("to")
+            if rec.get("answered") and m:
+                move_drop(s, m, rec["answered"], rec)
+                move_forget(sid)
+                continue
+            if rec.get("sent") and m and rec.get("move"):
+                gone, kept = move_abort_ask(m, rec["move"], tries=1)
+                if gone is None:
+                    rec["step"] = f"Waiting for {label} to answer"
+                    move_write(sid, rec)
+                    continue
+                if gone == "kept":
+                    move_drop(s, m, kept, rec)
+                    move_forget(sid)
+                    continue
+            move_undo(s, rec)
+            move_write(sid, {"to": rec["to"], "label": label, "at": now,
+                             "error": "amarchy stopped in the middle of moving it: it's here as it was"})
+        finally:
+            lock.close()
+    for f in sorted(MOVES_IN.glob("*.json")) if MOVES_IN.is_dir() else []:
+        rec = move_in_read(f.stem)
+        if not rec:
+            continue
+        if rec.get("state") == "taking" and not pid_alive(rec.get("pid")):
+            move_take_undo(rec)
+            rec["state"] = "undone"
+            move_in_write(rec)
+        elif rec.get("state") != "taking" and now - (rec.get("at") or 0) > MOVED_KEEP:
+            f.unlink(missing_ok=True)
+
+
+def move_tend_loop(st):
+    """The app's server: move_tend when it starts, then each minute."""
+    while True:
+        try:
+            move_tend()
+        except Exception as e:      # never the server's end
+            print(f"amarchy app: moves: {e}", file=sys.stderr, flush=True)
+        st.poke.set()
+        time.sleep(60)
+
+
+# ---- amarchy move
+
+def cmd_move(args):
+    """amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets];
+    --check [--json]; --cancel; --dismiss. Plumbing: --take <package> --from
+    <machine> (the app's server, for /api/peer/move); --tend."""
+    opts, rest = {}, []
+    it = iter(args)
+    for a in it:
+        if a in ("--to", "--take", "--from"):
+            opts[a] = next(it, None)
+            if not opts[a]:
+                return fail(f"{a} needs a value")
+        elif a.startswith("--to="):
+            opts["--to"] = a.split("=", 1)[1]
+        elif a.startswith("--"):
+            opts[a] = True
+        else:
+            rest.append(a)
+    if "--tend" in opts:
+        move_tend()
+        return 0
+    if "--take" in opts:
+        try:
+            print(json.dumps(move_take(Path(opts["--take"]), opts.get("--from") or "")))
+            return 0
+        except MoveError as e:
+            print(json.dumps({"error": str(e)}))
+            return 3
+    if len(rest) > 1:
+        print(usage("move"), file=sys.stderr)
+        return 1
+    sid = rest[0] if rest else own_session_id()
+    if not sid:
+        return fail("Not in a session (name one: amarchy move <id> --to <machine>)")
+    s = session(sid)
+    if not s:
+        to = moved_to(sid)
+        return fail(f"{sid} moved to {to} already" if to else f"No session {sid!r}")
+    if "--dismiss" in opts:
+        rec = move_read(sid)
+        if rec and rec.get("error") and not rec.get("abort"):
+            move_forget(sid)
+        return 0
+    if "--cancel" in opts:
+        rec = move_read(sid)
+        if not rec or rec.get("error"):
+            return fail(f"{sid} isn't waiting to move")
+        if rec.get("started"):
+            return fail(f"{sid} is moving already: it can't be called off now")
+        move_write(sid, {**rec, "cancel": True})
+        print(f"{sid} stays here")
+        return 0
+    to = opts.get("--to")
+    if not to:
+        print(usage("move"), file=sys.stderr)
+        return 1
+    if to == machine_name():
+        return fail(f"{sid} is on this machine already")
+    m = machine_find(to)
+    if "--check" in opts:
+        out = move_check(s, to)
+        if "--json" in opts:
+            print(json.dumps(out, indent=2))
+        else:
+            print(move_check_words(out))
+        return 0 if not out["refused"] else 1
+    if not m:
+        return fail(f"no machine {to} is paired with this one (amarchy machines lists them)")
+    out = move_check(s, to)
+    if out["refused"]:
+        return fail(f"{sid} can't move to {m['label']}: {out['refused']}")
+    if move_running(sid):
+        return fail(f"{sid} is moving to {(out.get('moving') or {}).get('label') or 'another machine'} already")
+    asked = out["secrets"]
+    secrets = True if "--secrets" in opts else False if "--no-secrets" in opts else None
+    if asked and secrets is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            answer = input(f"It asked you for {', '.join(asked)}: copy {'it' if len(asked) == 1 else 'them'} to {m['label']} too? [y/N] ")
+            secrets = answer.strip().lower() in ("y", "yes")
+        else:
+            return fail(f"{sid} asked you for {', '.join(asked)}: say --secrets to copy {'it' if len(asked) == 1 else 'them'} "
+                        f"to {m['label']} too, or --no-secrets")
+    own = sid == os.environ.get("AMARCHY_SESSION")
+    free = "--when-free" in opts or own
+    if out["busy"] and not free:
+        return fail(f"{sid} can't move this moment: {'; '.join(out['busy'])}. amarchy move {sid} --to {m['name']} "
+                    f"--when-free moves it once it's free")
+    if free and "--wait-here" not in opts:
+        # It waits in a process of its own (from the chat's own Claude: its
+        # turn is the one to end first, and that Claude stops as it moves).
+        move_write(sid, {"to": m["name"], "label": m["label"], "when": "free", "secrets": bool(secrets),
+                         "since": time.time(), "step": "Waiting for it to be free"})
+        move_spawn(["move", sid, "--to", m["name"], "--when-free", "--wait-here", "--secrets" if secrets else "--no-secrets"])
+        print(f"{sid} moves to {m['label']} once it's free" + (" (once this turn ends)" if own else "")
+              + f": amarchy move {sid} --cancel calls it off")
+        return 0
+    try:
+        done = move_out(sid, m["name"], secrets=bool(secrets), when="free" if free else "now",
+                        say=lambda text: print(f"  {text}…", file=sys.stderr, flush=True))
+    except MoveError as e:
+        return fail(f"{sid} didn't move to {m['label']}: {e}")
+    print(done["key"])
+    for n in done.get("notes") or []:
+        print(f"  {n}", file=sys.stderr)
+    return 0
+
+
+def move_check_words(out):
+    """amarchy move --check, in words."""
+    lines = [f"{out['id']} to {out['label'] or out['to']}:"]
+    if out["refused"]:
+        lines.append(f"  can't: {out['refused']}")
+    elif out["busy"]:
+        lines.append(f"  not this moment ({'; '.join(out['busy'])}): --when-free moves it once it's free")
+    else:
+        lines.append("  it can move now")
+    if out["changes"]:
+        lines.append(f"  {out['changes']} file{'s' if out['changes'] != 1 else ''} not committed: one WIP commit, pushed to origin")
+    if out["secrets"]:
+        lines.append(f"  it asked for {', '.join(out['secrets'])}: --secrets copies them, --no-secrets doesn't")
+    if out["previews"]:
+        lines.append(f"  its preview{'s' if len(out['previews']) > 1 else ''} ({', '.join(out['previews'])}): stopped here, ready there")
+    if out["left"]:
+        lines.append(f"  not carried, made again there: {', '.join(out['left'][:6])}{'...' if len(out['left']) > 6 else ''}")
+    return "\n".join(lines)
 
 
 def app_handler(st, users, address):
@@ -15018,8 +16621,11 @@ def app_handler(st, users, address):
             this machine's label (label: {label})."""
             if what == "send":      # amarchy send <this machine>:<id>, from another machine
                 sid, text, origin = data.get("id"), data.get("text"), data.get("from") or ""
-                if not isinstance(sid, str) or not self.session(sid):
-                    return None if isinstance(sid, str) else self.error(400, "which chat (id)")
+                # One that moved away from here: it goes on to where it is (amarchy send does).
+                if not isinstance(sid, str):
+                    return self.error(400, "which chat (id)")
+                if not (re.fullmatch(r"[\w][\w.-]{0,119}", sid) and not session(sid) and moved_to(sid)) and not self.session(sid):
+                    return None
                 if not isinstance(text, str) or not text.strip() or len(text) > 60_000:
                     return self.error(400, "nothing to send")
                 if not isinstance(origin, str) or not re.fullmatch(r"([\w.-]{1,63}:[\w.-]{1,120})?", origin):
@@ -15039,6 +16645,91 @@ def app_handler(st, users, address):
                 return self.error(400, str(e))
             st.poke.set()
             return self.send(200, {"label": label})
+
+        # ---- moving a chat (see "moving a chat")
+
+        def move_post(self, s, data):
+            """POST /api/session/<id>/move: {to, secrets, when: now|free} moves
+            it (409 {busy} when it's busy and when is now); {cancel: true} calls
+            off one waiting to be free; {dismiss: true} drops a failed one's
+            words from its card."""
+            sid = s["id"]
+            if data.get("dismiss") is True:
+                run_amarchy("move", sid, "--dismiss")
+                return self.send(200, {})
+            if data.get("cancel") is True:
+                r = run_amarchy("move", sid, "--cancel")
+                return self.send(200, {}) if r.returncode == 0 else self.error(409, gist(r.stderr) or "it can't be called off now")
+            to, when = data.get("to"), data.get("when") or "now"
+            if not isinstance(to, str) or not re.fullmatch(MACHINE_NAME_RE, to) or when not in ("now", "free") \
+                    or not isinstance(data.get("secrets", False), bool):
+                return self.error(400, "{to: <machine>, secrets: true|false, when: now|free}")
+            m = machine_find(to)
+            if not m:
+                return self.error(404, f"no machine {to} is paired with {machine_label()}")
+            out = move_check(s, to)
+            if out["refused"]:
+                return self.error(409, out["refused"])
+            if out.get("moving"):
+                return self.error(409, f"It's moving to {out['moving']['label']} already")
+            if out["busy"] and when == "now":
+                return self.send(409, {"error": f"It can't move this moment: {out['busy'][0]}", "busy": out["busy"]})
+            secrets = "--secrets" if data.get("secrets") else "--no-secrets"
+            move_write(sid, {"to": m["name"], "label": m["label"], "when": when, "secrets": bool(data.get("secrets")),
+                             "since": time.time(), "step": "Waiting for it to be free" if when == "free" else "Getting ready"})
+            move_spawn(["move", sid, "--to", m["name"], secrets, *(["--when-free", "--wait-here"] if when == "free" else [])])
+            st.poke.set()
+            return self.send(200, {"moving": move_shown(sid)[0]})
+
+        def peer_move_in(self):
+            """POST /api/peer/move: a chat from the machine asking (its package,
+            a gzipped tar, as the body), taken here (move_take): its new id and
+            key once its Claude is up, else why not (all of it undone)."""
+            try:
+                n = int(self.headers.get("Content-Length") or -1)
+            except ValueError:
+                n = -1
+            token = self.headers.get("X-Amarchy-Move", "")
+            if not re.fullmatch(MOVE_TOKEN_RE, token):
+                return self.error(400, "which move (X-Amarchy-Move)?")
+            if n < 0 or n > MOVE_MAX:
+                return self.error(413, f"a chat's package is {MOVE_MAX >> 20} MB at most, with its length")
+            MOVES_IN.mkdir(parents=True, exist_ok=True)
+            pkg = MOVES_IN / f"{token}.tar.gz"
+            try:
+                with open(pkg, "wb") as out:
+                    left = n
+                    while left > 0:
+                        chunk = self.rfile.read(min(left, 1 << 20))
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        left -= len(chunk)
+                if left:
+                    return self.error(400, "the package came cut short")
+                print(f"amarchy app: a chat moving here from {self.peer} ({n >> 10} KB)", file=sys.stderr, flush=True)
+                r = run_amarchy("move", "--take", str(pkg), "--from", self.peer, timeout=MOVE_SEND_TIMEOUT - 30)
+            finally:
+                pkg.unlink(missing_ok=True)
+            try:
+                said = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                said = {"error": gist(r.stderr) or "it failed here"}
+            st.poke.set()
+            if r.returncode == 0 and said.get("key"):
+                return self.send(200, said)
+            refused = re.search(r"already|isn't on|has a branch|checked out|isn't where|a chat's package", said.get("error") or "")
+            return self.send(409 if refused else 500, {"error": said.get("error") or "it failed here", "undone": True})
+
+        def peer_move_abort(self, data):
+            """POST /api/peer/move/abort {move}: the machine that sent it lost
+            the answer; this one lets the chat go (unless it's been used here)."""
+            token = data.get("move")
+            if not isinstance(token, str) or not re.fullmatch(MOVE_TOKEN_RE, token):
+                return self.error(400, "which move?")
+            code, said = move_abort_in(token, self.peer)
+            st.poke.set()
+            return self.send(code, said)
 
         def peer_events(self):
             """GET /api/peer/events: this machine's own chats (never the ones
@@ -15794,11 +17485,16 @@ def app_handler(st, users, address):
             if path == "/api/secrets":      # the secrets' names (never a value): Settings → Secrets
                 return self.send(200, {**secrets_list(), "suggestions": list(SECRET_SUGGESTIONS),
                                        "projects_known": project_names()})
-            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|tty/claude|tty/term|tty/claude/text|tty/term/text|commands|agent)", path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(stream|earlier|closing|move|tty/claude|tty/term|tty/claude/text|tty/term/text|commands|agent)", path)
             if m:
                 s = self.session(m.group(1))
                 if not s:
                     return
+                if m.group(2) == "move":        # what moving it there would do (see "moving a chat")
+                    to = (args.get("to") or [""])[0]
+                    if not re.fullmatch(MACHINE_NAME_RE, to):
+                        return self.error(400, "to: a machine (amarchy machines lists them)")
+                    return self.send(200, move_check(s, to))
                 if m.group(2) == "agent":
                     return self.chat(s, "agent", {})
                 if m.group(2).endswith("/text"):        # Select text: what the terminal printed, as text
@@ -16174,6 +17870,10 @@ def app_handler(st, users, address):
                 if self.via != "peer":
                     return self.error(403, "only from another machine of yours")
                 return self.peer_post(self.path.rsplit("/", 1)[1], self.body())
+            if self.path in ("/api/peer/move", "/api/peer/move/abort"):     # a chat moving here (see "moving a chat")
+                if self.via != "peer":
+                    return self.error(403, "only from another machine of yours")
+                return self.peer_move_in() if self.path == "/api/peer/move" else self.peer_move_abort(self.body())
             if self.path == "/api/machines":        # Settings → Machines: add, remove, rename
                 return self.machines_post(self.body())
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
@@ -16303,12 +18003,22 @@ def app_handler(st, users, address):
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|effort|mode|unqueue|engine|classic)", self.path)
             if m:
                 s = self.session(m.group(1))
+                held = move_holds(s["id"]) if s else None
+                if held:
+                    return self.error(409, held)
                 return self.chat(s, m.group(2), data) if s else None
-            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|agent|agent/picture|wake|sleep|preview|ghostty)", self.path)
+            m = re.fullmatch(r"/api/session/([^/]+)/(send|keys|priority|seen|close|rename|run|commands|assistant|agent|agent/picture|wake|sleep|preview|ghostty|move)", self.path)
             s = self.session(m.group(1)) if m else self.error(404, "not found")
             if not s:
                 return
             what = m.group(2)
+            if what == "move":
+                return self.move_post(s, data)
+            # Moving to another machine: nothing reaches it here until it's there.
+            held = move_holds(s["id"]) if what in ("send", "keys", "priority", "close", "rename", "run", "commands",
+                                                   "assistant", "agent", "wake", "sleep", "preview") else None
+            if held:
+                return self.error(409, held)
             if what in ("rename", "run", "commands"):
                 return self.desk_action(s, what, data)
             if what == "preview":       # {action: start|restart|stop, key}: its Preview button, its sheet
@@ -17124,6 +18834,7 @@ def app_serve():
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
+    threading.Thread(target=move_tend_loop, args=(st,), daemon=True).start()  # moves cut short (see "moving a chat")
     version = os.stat(SELF).st_mtime_ns
 
     def updated():
@@ -17397,8 +19108,18 @@ def send_deliver(sid, text, deadline, mine=False):
     wait = ""
     while True:
         s = session(sid)
+        if not s and moved_to(sid):
+            # It moved to another machine while this waited: it goes on there.
+            to = moved_to(sid)
+            r = run_amarchy("send", to, "-", "--no-wait", input=text, env={"AMARCHY_SESSION": os.environ.get("AMARCHY_SESSION", ""),
+                                                                            **({"AMARCHY_SENT_BY": "you"} if mine else {})})
+            return None if r.returncode == 0 else f"it moved to {to}, and sending it there failed: {gist(r.stderr)}"
         if not s or (CLOSING / f"{sid}.json").exists():
             return "the session was closed"
+        if move_holds(sid):
+            wait = "it's moving to another machine"
+            time.sleep(1)
+            continue
         if time.time() > deadline:
             return f"its Claude wasn't free in time ({wait})"
         if s.get("setup"):
@@ -17522,7 +19243,15 @@ def cmd_send(args):
     if where and where != machine_name():
         return send_on(where, local, text)
     sid = local
+    # Moving to another machine: it goes there once it's moved (or here, if it didn't).
+    end = time.time() + 600
+    while session(sid) and move_holds(sid) and time.time() < end:
+        time.sleep(1)
     if not session(sid):
+        to = moved_to(sid)
+        if to:
+            print(f"{sid} moved to {to}: sent there", file=sys.stderr)
+            return send_on(*to.split(":", 1), text)
         return fail(f"No session {sid!r}")
     # From the session's own Claude, waiting would wait on itself: its turn
     # is the one running.
@@ -17556,7 +19285,7 @@ def send_on(name, sid, text):
     me = os.environ.get("AMARCHY_SESSION")
     try:
         status, d = peer_json(m, "POST", "/api/peer/send", {"id": sid, "text": text,
-                                                            "from": f"{machine_name()}:{me}" if me else "",
+                                                            "from": (me if ":" in me else f"{machine_name()}:{me}") if me else "",
                                                             "you": os.environ.get("AMARCHY_SENT_BY") == "you"}, timeout=60)
     except PeerError as e:
         return fail(f"{m['label']} is off: {e}")
@@ -20058,6 +21787,18 @@ class Agent:
                 blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
                 message = {**message, "content": [*blocks, {"type": "text", "text": cut_note(cut)}]}
                 self.out(f"  · told Claude what stopped before it ended: {', '.join(task_words(t) for t in cut)}"[:400], dim=True)
+            # It moved here from another machine (move_note): said once, after your words, unseen in the chat.
+            moved = self.dir / "moved-note"
+            try:
+                note = moved.read_text()
+                moved.unlink()
+            except OSError:
+                note = ""
+            if note.strip():
+                content = message["content"]
+                blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
+                message = {**message, "content": [*blocks, {"type": "text", "text": note}]}
+                self.out("  · told Claude this chat moved here", dim=True)
             self.delivered[message["uuid"]] = {"elsewhere": elsewhere, "at": now, "what": what}
             if len(self.delivered) > 50:        # (ones Claude never started on: a stop, an exit)
                 self.delivered = dict(list(self.delivered.items())[-50:])
@@ -21135,6 +22876,8 @@ OPTIONS = {
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
     "machines": ({"--json"}, set(), set()),
+    "move": ({"--to", "--when-free", "--wait-here", "--secrets", "--no-secrets", "--check", "--json", "--cancel", "--dismiss",
+              "--take", "--from", "--tend"}, {"--to", "--take", "--from"}, set()),
     "open": (set(), set(), set()),
     "awake": ({"--json"}, set(), set()),
     "tailscale": ({"--json", "--no-open"}, set(), set()),
@@ -21310,6 +23053,8 @@ def main(argv):
         return cmd_terminals(args)
     elif cmd == "machines":
         return cmd_machines(args)
+    elif cmd == "move":
+        return cmd_move(args)
     elif cmd == "protocol-check":
         return cmd_protocol_check(args)
     elif cmd == "shell" and args:
