@@ -144,7 +144,9 @@ echo '"settings_left":' "$( [ -e /var/lib/amarchy-cloud/settings ] && echo true 
 echo '"userdata_left":' "$(ls /var/lib/cloud/instances/*/user-data.txt 2>/dev/null | wc -l)",
 echo '"secrets_in":' "$(grep -rlF --exclude=verify.sh -e '__KEY__' -e '__TOKEN__' /var/log /var/lib /home /tmp /root /etc /run /post_install 2>/dev/null | xargs -r stat -c '%a %U %n' | tr '\n' ';' | j)",
 echo '"metadata_rule":' "$(iptables -S ufw-before-output 2>&1 | grep 169.254.169.254 | j)",
-echo '"metadata_user":' "$(as 'curl -sS --max-time 5 http://169.254.169.254/ 2>&1' | j)",
+hits() { iptables -L ufw-before-output -v -n -x | awk '/169\.254\.169\.254/ {print $1}'; }
+h0=$(hits); as 'curl -sS --max-time 3 http://169.254.169.254/ >/dev/null 2>&1'; h1=$(hits); curl -sS --max-time 3 http://169.254.169.254/ >/dev/null 2>&1; h2=$(hits)
+echo '"metadata_hits":' "$(echo "$h0 $h1 $h2" | j)",
 echo '"tmux":' "$(tmux -V | j)",
 echo '"claude":' "$(as 'claude --version' 2>&1 | j)",
 echo '"git_name":' "$(as 'git config --global user.name' | j)",
@@ -251,8 +253,9 @@ try:
         check(not loose, f"the key and the report token: in no log, no file of yours, nothing but cloud-init's own root-only cache ({found})")
         check("REJECT" in v.get("metadata_rule", "") and "uid-owner 0" in v.get("metadata_rule", ""),
               f"the metadata service: root's alone ({v.get('metadata_rule', '').strip()})")
-        check("refused" in v.get("metadata_user", "").lower() or "couldn't connect" in v.get("metadata_user", "").lower(),
-              f"your user can't reach it ({v.get('metadata_user', '').strip()[:120]})")
+        hits = [int(x) for x in v.get("metadata_hits", "").split() if x.isdigit()]
+        check(len(hits) == 3 and hits[1] > hits[0] and hits[2] == hits[1],
+              f"the rule turns your user away, and lets root through (its counts: {hits})")
         tv = v.get("tmux", "").split()
         check(len(tv) == 2 and tuple(int(x) for x in tv[1].rstrip("abcdefgh").split(".")[:2]) >= (3, 5), f"tmux 3.5 or newer ({v.get('tmux', '').strip()})")
         check("Claude Code" in v.get("claude", ""), f"Claude Code installed by its installer ({v.get('claude', '').strip()})")
