@@ -963,10 +963,14 @@ async function wide(browser, port) {
   check(where, await until(p, () => !desk.current), "Esc: back");
   await p.keyboard.press("Enter");
   await until(p, () => desk.current === "proj-fresh");
+  check(where, await p.evaluate(() => document.activeElement === desk.chat.input), "opened with Enter: the keys in its box, to write");
   await p.evaluate(() => { desk.chat.row = { ...desk.chat.row, status: "working" }; desk.chat.input.focus(); });
   await p.keyboard.press("Escape");
-  check(where, await until(p, () => !desk.current), "Esc in the box, Claude at work: back too (not a stop)");
-  check(where, !p.posts.some((x) => /proj-fresh\/(interrupt|keys)/.test(x.url)), "and Claude wasn't stopped");
+  await sleep(300);
+  check(where, await p.evaluate(() => desk.current === "proj-fresh") && p.posts.some((x) => /proj-fresh\/(interrupt|keys)/.test(x.url)),
+        "Esc in the box, Claude at work: a stop, as in Claude Code, the chat still open");
+  await p.keyboard.press("Control+Alt+KeyH");
+  check(where, await until(p, () => !desk.current), "Ctrl+Alt+H: back, from the box");
 
   // Sent from an open chat: back to the board, it's off your move, the next lit with the keys.
   await p.evaluate(() => todayOpen(row("proj-quiet")));

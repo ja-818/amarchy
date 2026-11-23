@@ -1,14 +1,13 @@
 // The mic where it can't work, on the phone and on a computer: always there,
 // dimmed, and a tap says why in a line, with what to do. As on a laptop
-// whose processor no whisper.cpp package is for (an Apple Silicon Mac on
-// Omarchy) and whose desktop app has no speech recognition of its own
-// (WebKitGTK): no Web Speech here at all.
+// not set up yet (an Apple Silicon Mac on Omarchy) whose desktop app has no
+// speech recognition of its own (WebKitGTK): no Web Speech here at all.
 //
 //   - no model anywhere: the chat's mic and the new chat's are dimmed; a tap
 //     says the host needs a speech model, and Set it up opens Settings at
-//     Dictation, which says setup builds whisper.cpp there (no package for
-//     aarch64), with its button; Ctrl+Alt+Space says the same on a computer;
-//   - no tools to build it: Settings gives the command that installs them;
+//     Dictation, which offers to fetch it (the engine too: 770 MB), with its
+//     button; Ctrl+Alt+Space says the same on a computer;
+//   - a processor amarchy has no engine for: Settings says what would do;
 //   - a setup under way: the tap says so, Settings how far;
 //   - another machine has the model (via): the mic is lit, and Settings
 //     says that machine writes it down for this one;
@@ -126,12 +125,15 @@ const MACHINES = [
 ];
 
 // This machine's dictation, as the board says it, per step.
-const BASE = { ready: false, lib: false, model: false, engine: "Parakeet TDT 0.6B v3", size: 668757119, setup: null, arch: "aarch64", via: null };
+const SIZE = 22562331 + 739508576;      // the engine and the model, both to fetch
+const BASE = { ready: false, lib: false, model: false, engine: "Parakeet TDT 0.6B v3", size: SIZE, setup: null, arch: "aarch64", via: null,
+               auto: true, buildable: false, how: "amarchy dictation setup (fetches transcribe.cpp 0.4.2 and Parakeet TDT 0.6B v3, 770 MB)", fix: "amarchy dictation setup" };
 const STATES = {
-  buildable: { ...BASE, buildable: true, how: "run amarchy dictation setup, which builds whisper.cpp here (no package has it for aarch64; a few minutes), then fetches Parakeet TDT 0.6B v3, 670 MB", fix: "amarchy dictation setup" },
-  tools: { ...BASE, buildable: false, how: "install what building whisper.cpp needs (sudo pacman -S --needed base-devel cmake git), then run amarchy dictation setup, which builds it here (no package has it for aarch64)", fix: "sudo pacman -S --needed base-devel cmake git && amarchy dictation setup" },
-  building: { ...BASE, buildable: true, setup: { pid: 1, build: "building whisper.cpp 1.9.5", pct: 45 }, how: "x", fix: "amarchy dictation setup" },
-  via: { ...BASE, buildable: true, how: "run amarchy dictation setup, which builds whisper.cpp here", fix: "amarchy dictation setup", via: { name: "amarchy", label: "amarchy", engine: "Parakeet TDT 0.6B v3" } },
+  auto: { ...BASE },
+  none: { ...BASE, arch: "riscv64", auto: false, fix: null,
+          how: "amarchy has no speech engine for riscv64: build transcribe.cpp 0.4.2 (github.com/handy-computer/transcribe.cpp), set AMARCHY_DICTATE_ENGINE to the folder with its libtranscribe.so, then amarchy dictation setup; or pair a machine of yours that has it" },
+  fetching: { ...BASE, setup: { pid: 1, size: SIZE, done: 300e6 } },
+  via: { ...BASE, via: { name: "amarchy", label: "amarchy", engine: "Parakeet TDT 0.6B v3" } },
 };
 
 async function page(browser, layout, port) {
@@ -147,7 +149,7 @@ async function page(browser, layout, port) {
     delete window.webkitSpeechRecognition;
     Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, configurable: true });
     try { if (!localStorage.getItem("amarchy-push")) localStorage.setItem("amarchy-push", "no"); } catch (e) { /* no storage yet */ }
-    const step = sessionStorage.getItem("mic-step") || "buildable";
+    const step = sessionStorage.getItem("mic-step") || "auto";
     if (sessionStorage.getItem("mic-lacks")) {
       window.amarchyDesktopMedia = Object.freeze({ sounds: true, native: false, dictation: false, packages: "gst-plugin-pipewire",
                                                   fix: "sudo pacman -S --needed gst-plugin-pipewire", play: () => () => {} });
@@ -210,7 +212,7 @@ async function run(browser, layout, port) {
   await p.goto("/");
 
   // No model here, none on another machine: dimmed, and a tap says why.
-  await at(p, "buildable");
+  await at(p, "auto");
   let m = await mic(p);
   check(where, m && m.shown && m.cant && Number(m.opacity) < 0.6, `the chat's mic is there, dimmed (${JSON.stringify(m)})`);
   await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-dimmed.png`) });
@@ -229,14 +231,14 @@ async function run(browser, layout, port) {
   });
   check(where, seen, "at Dictation, its title just under the sheet's head");
   let s = await settingsText(p);
-  check(where, /No package has whisper\.cpp for aarch64, so your host builds it/.test(s) && /Set up dictation on your host/.test(s),
-        `it says setup builds whisper.cpp, with its button (${JSON.stringify(s.slice(0, 220))})`);
-  check(where, !/pacman -S whisper-cpp/.test(s), "no pacman line that fails");
-  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-build.png`) });
+  check(where, /Your host can write down what you say, in Spanish, English and 23 more languages, told apart by themselves, once it has the speech model \(770 MB\)/.test(s)
+        && /Set up dictation on your host/.test(s), `it offers to fetch it, with its button (${JSON.stringify(s.slice(0, 260))})`);
+  check(where, !/whisper|pacman|build/i.test(s), "nothing to install or build");
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-setup.png`) });
   let posted = null;
   await p.route("**/api/dictate/setup", (r) => { posted = true; r.fulfill({ json: {} }); });
   await p.evaluate(() => [...document.querySelectorAll(".sheet-back.settings button")].find((b) => /Set up dictation/.test(b.innerText)).click());
-  check(where, await until(p, () => /Fetching whisper\.cpp/i.test(document.querySelector(".sheet-back.settings").innerText)) && posted,
+  check(where, await until(p, () => /Fetching the speech model: 0 of 770 MB/.test(document.querySelector(".sheet-back.settings").innerText)) && posted,
         "its button: setup starts, and Settings says so");
   await p.unroute("**/api/dictate/setup");
   await p.keyboard.press("Escape");
@@ -263,7 +265,7 @@ async function run(browser, layout, port) {
 
   // Ctrl+Alt+Space on a computer: the same why.
   if (layout === "wide") {
-    await at(p, "buildable");
+    await at(p, "auto");
     await p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
     await p.locator(".cbtn.mic:visible").first().evaluate(() => {});
     await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("Space");
@@ -273,29 +275,27 @@ async function run(browser, layout, port) {
     check(where, /Dictation needs a speech model/.test(t), `Ctrl+Alt+Space: the same why ("${t}")`);
   }
 
-  // Nothing to build it with: the command that installs it.
-  await at(p, "tools");
+  // A processor amarchy has no engine for: what would do, no button that can't work.
+  await at(p, "none");
   await p.evaluate(() => openSettings({ at: "dictation" }));
   await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
   s = await settingsText(p);
-  check(where, /install what building whisper\.cpp needs \(sudo pacman -S --needed base-devel cmake git\)/.test(s) && /Copy the command/.test(s),
-        `no tools: what to install, to copy (${JSON.stringify(s.slice(0, 200))})`);
-  await p.evaluate(() => [...document.querySelectorAll(".sheet-back.settings button")].find((b) => b.innerText === "Copy the command").click());
-  await sleep(100);
-  check(where, (await p.evaluate(() => window.__copied))[0] === "sudo pacman -S --needed base-devel cmake git && amarchy dictation setup",
-        "Copy the command: the whole line");
-  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-tools.png`) });
+  check(where, /amarchy has no speech engine for riscv64: build transcribe\.cpp 0\.4\.2/.test(s) && /AMARCHY_DICTATE_ENGINE/.test(s),
+        `no engine for it: what would do (${JSON.stringify(s.slice(0, 200))})`);
+  check(where, await p.evaluate(() => ![...document.querySelectorAll(".sheet-back.settings button")].some((b) => /Set up dictation|Copy the command/.test(b.innerText))),
+        "no Set up button, nothing to copy");
+  await p.screenshot({ path: path.join(SHOTS, `mic-why-${where}-settings-none.png`) });
   await p.keyboard.press("Escape");
 
   // A setup under way.
-  await at(p, "building");
+  await at(p, "fetching");
   await tapMic(p, layout);
   t = await toastText(p);
   check(where, /being set up on your host/.test(t), `under way: the tap says so ("${t}")`);
   await p.evaluate(() => openSettings({ at: "dictation" }));
   await until(p, () => !!document.querySelector('.sheet-back.settings [data-section="dictation"]'));
   s = await settingsText(p);
-  check(where, /Building whisper\.cpp 1\.9\.5 on your host: 45%/.test(s), `Settings: how far (${JSON.stringify(s.slice(0, 160))})`);
+  check(where, /Fetching the speech model: 300 of 770 MB/.test(s), `Settings: how far (${JSON.stringify(s.slice(0, 160))})`);
   await p.keyboard.press("Escape");
 
   // Another machine has the model: lit, and Settings says who writes it down.

@@ -9,6 +9,11 @@
 #   - amarchy update: never git; after a new package, it sets itself up again
 #   - the app's pages and the desktop app's files where the packages put them
 #   - amarchy help, amarchy theme --list, amarchy key work from the package
+#   - dictation's engine (transcribe.cpp) where amarchy looks for it, its CPU
+#     code only, loading on a clean system; amarchy dictation wants only the
+#     model; with DICTATION_MODEL (the model's file, a GGUF) and
+#     DICTATION_PCM (16 kHz 16-bit mono of someone saying "...your
+#     country...", JFK's), the package's engine writes it down
 #
 #   packaging/arch/test-in-chroot.sh <chroot> <package files...>
 #
@@ -88,10 +93,34 @@ check "and remembered" "$(as_user 'cat ~/.local/state/amarchy/setup-version' | g
 out=$(as_user 'amarchy theme --list 2>&1 | head -3; amarchy key 2>&1')
 check "themes and the key, from the package" "$(grep -q 'Super+D brings amarchy to the front' <<<"$out" && grep -q 'catppuccin' <<<"$out" && echo ok)" "$out"
 
+# Dictation's engine: with the package, nothing to fetch but the model.
+eng=/usr/lib/amarchy/transcribe.cpp
+check "dictation's engine where amarchy looks, its CPU code only" "$(run bash -c "test -f $eng/libtranscribe.so && grep -q '\"version\"' $eng/contract.json && ls $eng/libggml-cpu-*.so >/dev/null && test ! -e $eng/libggml-vulkan.so && test -f /usr/share/licenses/amarchy-git/transcribe.cpp/LICENSE && echo ok" | tail -1)"
+out=$(as_user 'python3 -c "import ctypes, sys; sys.exit(ctypes.CDLL(\"/usr/lib/amarchy/transcribe.cpp/libtranscribe.so\").transcribe_init_backends_default())" 2>&1; echo "exit $?"')
+check "it loads here (its libraries, this processor's code)" "$(grep -q 'exit 0' <<<"$out" && echo ok)" "$out"
+out=$(as_user 'amarchy dictation 2>&1 | head -1')
+check "amarchy dictation: only the model to fetch" "$(grep -q 'amarchy dictation setup (fetches Parakeet TDT 0.6B v3, 740 MB)' <<<"$out" && echo ok)" "$out"
+if [[ -n ${DICTATION_MODEL:-} && -n ${DICTATION_PCM:-} ]]; then
+  run bash -c 'mkdir -p /home/tester/.local/state/amarchy/dictation'
+  sudo cp "$DICTATION_MODEL" "$copy/home/tester/.local/state/amarchy/dictation/parakeet-tdt-0.6b-v3-Q8_0.gguf"
+  sudo cp "$DICTATION_PCM" "$copy/home/tester/speech.pcm"
+  run chown -R tester: /home/tester/.local/state/amarchy /home/tester/speech.pcm
+  out=$(as_user 'amarchy dictation 2>&1 | head -1; python3 -c "
+import json, subprocess, sys
+pcm = open(\"/home/tester/speech.pcm\", \"rb\").read()
+w = subprocess.Popen([\"amarchy\", \"dictation\", \"worker\"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+print(w.stdout.readline().decode().strip())
+w.stdin.write(len(pcm).to_bytes(4, \"little\") + pcm); w.stdin.flush()
+print(w.stdout.readline().decode().strip())
+w.stdin.close(); w.wait()
+"')
+  check "the package's engine writes it down" "$(grep -q 'through transcribe.cpp' <<<"$out" && grep -q '"ready": true' <<<"$out" && grep -qi 'your country' <<<"$out" && echo ok)" "$out"
+fi
+
 out=$(as_user 'amarchy setup --uninstall 2>&1')
 check "amarchy setup --uninstall" "$(as_user 'test ! -e ~/.local/bin/amarchy && test ! -e ~/.claude/skills/amarchy && test ! -e ~/.config/systemd/user/amarchy-update.timer && echo gone' | grep -q gone && echo ok)" "$(tail -3 <<<"$out")"
 out=$(run pacman -R --noconfirm amarchy-git amarchy-desktop-git 2>&1)
-check "pacman removes them" "$(run test ! -e /usr/share/amarchy && echo ok)" "$(tail -3 <<<"$out")"
+check "pacman removes them (dictation's engine too)" "$(run bash -c 'test ! -e /usr/share/amarchy && test ! -e /usr/lib/amarchy && echo ok' | tail -1)" "$(tail -3 <<<"$out")"
 
 sudo rm -rf "$copy"
 echo
