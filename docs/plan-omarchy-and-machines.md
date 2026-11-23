@@ -613,6 +613,49 @@ or bills anyone: the provider bills you, and Remove deletes it there.
   (or straight, from you, on 127.0.0.1: the tests), no Origin (it isn't a
   page). What the watcher can see for itself (the provider's state, the
   node on `tailscale status`, its hello) moves it on without them.
+  - **Only over the tailnet**: the app server listens on 127.0.0.1 alone, so
+    nothing on the internet reaches it; a report comes through tailscale
+    serve (a node of yours, its login one of `APP_USERS`'s), or from your
+    own user on this machine (the kernel says whose socket it is).
+  - **Its token is that machine's, for its reports only**: 24 random bytes
+    made when it's made, kept in its `cloud.json` row, carried only in its
+    setup. It's compared (in constant time) with that one row's, by the
+    name the report gives: it can change nothing but that row's report
+    words, its `report:<step>` times, its log, and its step to `tailnet` or
+    `failed`. It's dropped (every later report refused) after the last
+    report it's for (`ready` or `failed`), and once the machine is paired,
+    failed or being removed.
+  - **It opens nothing else**: it isn't a pairing key (none is in its setup),
+    nothing but `/api/cloud/progress` reads it, and that route does nothing
+    but update the row. Pairing is only ever this machine pairing with it,
+    once its hello answers, with a key made then. (Its node is yours on your
+    tailnet, so it's let in as you, as every machine of yours is: Tailscale's
+    login is the trust, and it's paired right after.)
+- **What its setup carries, and doesn't**: the provider's API token never
+  leaves this machine (only this machine calls the provider). The setup
+  carries the Tailscale key and the report token, and the provider keeps a
+  copy of what it was given (cloud-init's user data, served on the VM by its
+  metadata service; Hostinger's post-install script), so:
+  - The key asked for is **one-off, pre-approved, a day's expiry, no tags**
+    (the sheet says so, and why, with Tailscale's Keys page). Tailscale has no
+    key for one named machine: one-off is that (it adds exactly one device,
+    once). amarchy can't read a key's settings, so it never uses one twice:
+    it's forgotten here once its machine joined, and a new one is asked for
+    the next machine.
+  - `bootstrap.sh` never logs either: neither is ever echoed or traced
+    (`set -x` never), the key reaches `tailscale up` as `--auth-key=file:`
+    (a 0600 file, removed at once; never on a command line other users can
+    see), the token reaches curl in its config on stdin, and the log's end
+    sent with a failure has any `tskey-` masked. Its settings file loses the
+    key once it joined, and goes with the token once it's ready.
+  - On the VM: cloud-init's own copies of the user data are removed once it's
+    ready, Hostinger's `/post_install` too, and the metadata service is
+    reachable by root alone (the firewall refuses everyone else), so no chat
+    there reads what's left. At the provider: Hostinger's script is deleted
+    from the account once the machine is on the tailnet. What remains (the
+    provider's own copy of the user data) holds a spent key and a dead token.
+  - `test/cloud-vm.py` checks it on the real image: neither secret in any
+    file or log on it, the metadata rule in place.
 - **Pairing**: once its `/api/peer/hello` answers, the machine that made it
   pairs as `amarchy machines add <node>` does. Then the board's row says
   **Sign in to Claude** until its Claude is signed in, and **Sign in to
