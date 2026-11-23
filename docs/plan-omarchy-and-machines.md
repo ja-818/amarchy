@@ -668,7 +668,12 @@ home, so the layout only has to match from `~` down.
 Machines → "Add a cloud machine": provider (Hetzner, DigitalOcean, Hostinger),
 size; the provider's token through `amarchy secret ask`; the machine made in
 the user's account, amarchy installed by cloud-init, joined to their tailnet,
-then "Sign in to Claude" there.
+then "Sign in to Claude" there. **Built 2026-11-23** (the contract's "A cloud
+machine"; `amarchy machines cloud`, `app/cloud.js`, `cloud/bootstrap.sh`), tested
+against fake provider APIs with each one's real shapes (`test/cloud.py`,
+`test/cloud-view.js`, phone and wide) and its setup run for real on Debian 13's
+own cloud image in QEMU (`test/cloud-vm.py`, Tailscale stood in for). No real VM
+made yet: that waits on Julian's provider token and his tap on Create.
 
 **G. Phone apps and the push relay** (last; Julian has an Apple Developer
 account; the iOS build needs a Mac with Xcode): thin iOS and Android shells around `app/` (Tauri 2 mobile,

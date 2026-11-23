@@ -42,10 +42,6 @@ exec > >(tee -a "$LOG") 2>&1
 : "${AMARCHY_NAME:?}" "${AMARCHY_USER:?}" "${AMARCHY_REPO:?}"
 AMARCHY_BRANCH=${AMARCHY_BRANCH:-main}
 SWAP_GB=${SWAP_GB:-4}
-# The tests' own (test/cloud-vm.py): what stands in for Tailscale in a VM
-# that can't join a real tailnet. Never there on a real machine.
-# shellcheck source=/dev/null
-[[ -r $DIR/overrides.sh ]] && . "$DIR/overrides.sh"
 
 STEP=start
 ON_TAILNET=0
@@ -161,6 +157,10 @@ join_tailnet() {
   [[ -n ${TS_AUTH_KEY:-} ]] || { WHAT="Joining your tailnet (no Tailscale key came with it)"; false; }
   tailscale up --auth-key="$TS_AUTH_KEY" --hostname="$AMARCHY_NAME" --ssh --timeout=180s
 }
+# The tests' own (test/cloud-vm.py): what stands in for Tailscale in a VM
+# that can't join a real tailnet. Never there on a real machine.
+# shellcheck source=/dev/null
+if [[ -r $DIR/overrides.sh ]]; then . "$DIR/overrides.sh"; fi
 retry install_tailscale
 WHAT="Joining your tailnet with the Tailscale key (used already, expired, or waiting for your approval?)"
 join_tailnet

@@ -17957,17 +17957,25 @@ def cloud_progress(name, token, step, words, log):
 
 # ---- removing one
 
-def cloud_chats(rec):
-    """Its chats, from its own list ([] for one not paired, or off): (all,
-    the ones that can move: not your assistant or an agent)."""
+def cloud_chats(rec, live=False):
+    """Its chats ([] for one not paired): (all, the ones that can move: not
+    your assistant or an agent), from its own list, or as the board last saw
+    them when it doesn't answer (live: None then, for "can't tell now")."""
     m = machine_find(rec.get("machine") or "")
     if not m:
         return [], []
     try:
         status, d = peer_json(m, "GET", "/api/peer/state", timeout=6)
+        if status != 200:
+            raise PeerError(str(status))
     except PeerError:
-        return [], []
-    ss = [s for s in d.get("sessions") or [] if isinstance(s, dict) and s.get("id")] if status == 200 else []
+        if live:
+            return None, None
+        try:
+            d = json.loads((PEERS_SEEN / f"{m['name']}.json").read_text())
+        except (OSError, ValueError):
+            d = {}
+    ss = [s for s in d.get("sessions") or [] if isinstance(s, dict) and s.get("id")]
     return ss, [s for s in ss if not s.get("assistant")]
 
 
@@ -18009,7 +18017,15 @@ def cloud_removing(rec):
     plan = rec.get("remove") or {}
     m = machine_find(rec.get("machine") or "")
     if plan.get("move_chats") and m and not plan.get("moved"):
-        every, movable = cloud_chats(rec)
+        every, movable = cloud_chats(rec, live=True)
+        if every is None:       # it doesn't answer: its chats can't move until it does
+            if time.time() - (plan.get("at") or time.time()) > 3 * 3600:
+                cloud_update(name, remove=None, error=f"{m['label']} didn't answer in 3 hours, so its chats couldn't move. "
+                                                      "Nothing was deleted", detail=None)
+                return
+            cloud_update(name, detail=f"Waiting for {m['label']} to answer, to move its chats here")
+            time.sleep(CLOUD_POLL * 3)
+            return
         if movable:
             asked = set(plan.get("asked") or [])
             me = machine_name()
