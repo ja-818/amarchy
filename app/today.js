@@ -1134,8 +1134,9 @@ function boardTabNow() { return typeof board !== "undefined" && board.tab === "t
 // The board (tasks.js) is the home, on the phone as on a computer.
 function boardOn() { return typeof board !== "undefined" && !!board.el; }
 
-// Today into its box, if what it shows changed, keeping where it's scrolled to.
-function todayFill(box, force) {
+// Today into its box, if what it shows changed, keeping where it's scrolled
+// to (top: where that is, known already: the page isn't laid out to ask).
+function todayFill(box, force, top = null) {
   const onBoard = box.classList.contains("board-today");
   // Under a computer's open chat the board isn't in sight: drawn once it's
   // back (boardShown), its order the one you left (Ctrl+Alt+J / K go by it).
@@ -1152,7 +1153,7 @@ function todayFill(box, force) {
   const tab = (box.dataset.key || "").startsWith(`${only}|`);      // it shows this tab now (not another, a search, the welcome)
   box.dataset.key = key;
   const scroller = box.closest(".scroll, .board-scroll");
-  const top = scroller ? scroller.scrollTop : 0;
+  if (top === null) top = scroller ? scroller.scrollTop : 0;
   // A tab as it was last drawn, when nothing changed since (Chats, Tasks,
   // Chats again): its cards as they were, not drawn again.
   box.drawn = box.drawn || new Map();
@@ -1203,9 +1204,11 @@ function todayShape(el) {
   return el.outerHTML.replace(/ data-f="\d+"/g, "").replace(/ ui-in(?=")/g, "");      // (the button the keys are on in it: not a change)
 }
 
-// Drawn again where it shows: something was done here.
-function todayRedraw() {
-  todayUI.version++;
+// Drawn again where it shows: something was done here. changed: what was
+// done isn't in the rows (todayKey), so drawn again whatever they say; a
+// row's own change (aheadDrawn) draws only once its cards differ.
+function todayRedraw(changed = true) {
+  if (changed) todayUI.version++;
   for (const box of document.querySelectorAll(".today")) todayFill(box);
   if (typeof modeButtons === "function") modeButtons();      // the tabs' counts
   if (typeof markWaiting === "function") markWaiting();      // the tab's title, the icon's badge (manage.js)

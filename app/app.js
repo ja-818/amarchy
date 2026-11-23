@@ -381,8 +381,18 @@ function aheadOf(id, patch, settled, done, { quiet = false } = {}) {
   });
 }
 
+// The keys out of what's about to go (a chat closed), now, while the page is
+// as it was: a box with the keys taken out of the page has the browser lay
+// the whole page out on the spot, and the frame lays it out again.
+function letGoOf(el) {
+  const a = document.activeElement;
+  if (el && a && a !== document.body && el.contains(a)) a.blur();
+}
+
+// Only what changed: the rows it changed say how their cards look (todayRowKey),
+// so a board drawn with them already (back on it as you sent) isn't drawn again.
 function aheadDrawn() {
-  if (typeof todayRedraw === "function") todayRedraw();
+  if (typeof todayRedraw === "function") todayRedraw(false);
   refresh();
 }
 
@@ -411,8 +421,12 @@ function waitsSaid(r) {
   return r;
 }
 
-function sendTo(id, body) {
-  const done = api(chatPath(id, "/send"), body).then(waitsSaid);
+// after: what was sent before it, still on its way (a chat's messages go in
+// the order you sent them): asked for once that's answered; its card at work
+// now all the same.
+function sendTo(id, body, after = null) {
+  const ask = () => api(chatPath(id, "/send"), body).then(waitsSaid);
+  const done = after ? after.catch(() => {}).then(ask) : ask();
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   if (!s || s.setup || String((body && body.text) || "").trimStart().startsWith("/")) return done;
   const you = (r) => (r.today || {}).you_at || 0;
@@ -2968,6 +2982,7 @@ function routeNow() {
   const id = m ? routeKey(m[1]) : null;      // <this machine>:<id> is <id>; a moved chat, where it is
   if (id !== app.fromToday) app.fromToday = null;      // only the chat Today opened goes back there on send
   if (app.session && app.session.id !== id) {
+    letGoOf(app.session.el);
     app.session.close();
     app.session = null;
   }
