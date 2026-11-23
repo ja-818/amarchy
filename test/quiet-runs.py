@@ -257,7 +257,8 @@ row = next(s for s in view if s["id"] == "fire-fire")
 check(row["quiet"] and row["status"] == "working", "amarchy list: at work, quiet")
 app = am.app_row(row)
 check(app["status"] == "idle" and app["doing"] is None and not app["waking"], "the app's row: as it was, idle (no typing…)")
-check(am.app_row(next(s for s in view if s["id"] == "proj-a")) is next(s for s in view if s["id"] == "proj-a"), "any other row: as it is")
+other = next(s for s in view if s["id"] == "proj-a")
+check(am.app_row(other) == {**other, "machine": am.machine_name()}, "any other row: as it is (with its machine: see machines)")
 # It asks you something: shown at once.
 live = am.agent_live("fire-fire")
 live["turn"]["asked"] = True
