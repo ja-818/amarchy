@@ -588,7 +588,9 @@ function uiChart(items) {
 // assistant, and for an agent its initial on its project's color, so two of
 // them never look alike. The 192 one is what the lists show (about 70 KB, not
 // the 512's 420 KB, and every row's picture is drawn again each time the list
-// changes); the big one only where it's shown big. cls: small, big.
+// changes); the big one only where it's shown big. cls: its size (ui.css
+// --avatar-*): small (in a button), list (its line in Chats), head (over
+// its chat), big; on any card, the card's (--avatar-card) but list.
 function avatar(s, cls) {
   const size = cls === "big" ? 512 : 192;
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");

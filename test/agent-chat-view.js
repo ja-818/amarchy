@@ -36,7 +36,7 @@ const SCOUT = { id: "scout-scout", repo: "scout", name: "scout", task: "Scout", 
 // Fireship: read, quiet since yesterday.
 const FIRESHIP = { id: "fireship-fireship", repo: "fireship", name: "fireship", task: "", status: "idle", engine: "chat", path: "/tmp/fs",
                    assistant: "agent", assistant_name: "Fireship", picture: "", chime: "elementary", today: T({}),
-                   said: "Posted. 12 likes in the first hour.", said_at: Math.floor(NOW - 86400 - 3600), unread: 0 };
+                   said: "Posted. 12 likes in the first hour.", said_at: Math.floor(Date.parse(yesterday(12, 0)) / 1000), unread: 0 };      // (noon: "Yesterday" just after midnight too)
 const JAKEN = { ...CHATS[0], said: "Your 3 pm with Felipe moved to 4.", said_at: Math.floor(NOW - 600), unread: 1 };
 const AGENTS = [JAKEN, SCOUT, FIRESHIP, ...CHATS.slice(1)];
 
