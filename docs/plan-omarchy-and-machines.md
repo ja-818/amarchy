@@ -792,6 +792,13 @@ notification buttons; the relay (open source, free, self-hostable) between
 the machines and Apple's and Google's push. iOS builds and tests in GitHub
 Actions (macOS runners); Android here and in CI. Signing, TestFlight, the
 stores and the relay's deploy are prepared to the last step for Julian.
+**Built 2026-11-23**: the relay (`relay/`), the server's and the page's side,
+the Android app (`phone/android`) and the iPhone app (`phone/ios`), both with
+amarchy's own Tailscale node (`tailnet/mobile`, track H's builds), CI green
+for each; the whole chain tested from the server through the real relay to a
+phone decrypting (`test/push-phone.py`). What needs Julian's accounts is
+`phone/RELEASE.md`. Not yet: a demo machine App Review can reach (before a
+public App Store release), and a run on real phones.
 
 **H. Tailscale inside the apps** (after B): the desktop and phone apps join the
 tailnet themselves (tsnet / libtailscale), so the user installs nothing else.
