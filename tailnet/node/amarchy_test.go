@@ -37,8 +37,13 @@ func TestAmarchyOnItsOwnNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	controlURL := startControl(t)
-	// A short home: a unix socket's path has room for 108 bytes.
-	home, err := os.MkdirTemp("", "an")
+	// A short home: a unix socket's path has room for 108 bytes (104 on
+	// macOS, whose temporary folder is a long path of its own).
+	base := os.TempDir()
+	if len(base) > 32 {
+		base = "/tmp"
+	}
+	home, err := os.MkdirTemp(base, "an")
 	if err != nil {
 		t.Fatal(err)
 	}
