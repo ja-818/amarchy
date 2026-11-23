@@ -1,0 +1,48 @@
+# amarchy-relay on Fly.io: an alternative to Cloud Run. From relay/:
+#
+#   fly apps create <name>                 (names are global: change app below to it)
+#   fly secrets set --config deploy/fly.toml \
+#     RELAY_URL=https://<name>.fly.dev RELAY_SECRET="$(go run ./cmd/amarchy-relay secret)" \
+#     APNS_KEY="$(cat AuthKey_XXXXXXXXXX.p8)" APNS_KEY_ID=XXXXXXXXXX APNS_TEAM_ID=YYYYYYYYYY \
+#     APNS_TOPICS=io.github.ja818.amarchy \
+#     FCM_PROJECT=<firebase project> FCM_CREDENTIALS="$(cat service-account.json)" FCM_APPS=io.github.ja818.amarchy
+#   fly deploy --config deploy/fly.toml --ha=false .
+#
+# One machine only: the relay's limits live in its memory. FCM needs a
+# service account's key here (FCM_CREDENTIALS): Fly has no Google metadata
+# server.
+app = "amarchy-relay"
+primary_region = "iad"
+
+# The Dockerfile in the build context (relay/, the directory deployed).
+[build]
+
+[env]
+  PORT = "8080"
+  # Fly's proxy puts its own address last in X-Forwarded-For, and the
+  # client's in Fly-Client-IP.
+  RELAY_TRUST_PROXY = "1"
+  RELAY_CLIENT_IP_HEADER = "Fly-Client-IP"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "5s"
+  interval = "30s"
+  method = "GET"
+  path = "/v1/health"
+  timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "256mb"

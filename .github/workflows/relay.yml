@@ -1,0 +1,46 @@
+# amarchy's push relay (relay/): vetted, tested with the race detector
+# (fake APNs and FCM, and the phones' push vectors), built, and its image
+# built (never pushed).
+name: Push relay
+
+on:
+  push:
+    branches: [main]
+    paths: ["relay/**", "phone/testdata/push-vectors.json", ".github/workflows/relay.yml"]
+  pull_request:
+    paths: ["relay/**", "phone/testdata/push-vectors.json", ".github/workflows/relay.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test, build, image
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: relay/go.mod
+          # Only the standard library: no go.sum, nothing to cache.
+          cache: false
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt wants these files formatted"; exit 1; }
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build -trimpath -ldflags "-s -w" -o amarchy-relay ./cmd/amarchy-relay
+      - run: RELAY_URL=https://relay.example.com RELAY_SECRET="$(./amarchy-relay secret)" ./amarchy-relay check
+      - run: docker build -t amarchy-relay:ci .
+      - name: The image starts and answers
+        run: |
+          docker run -d --name relay -p 8080:8080 \
+            -e RELAY_URL=http://127.0.0.1:8080 -e RELAY_SECRET="$(./amarchy-relay secret)" amarchy-relay:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && exit 0; sleep 1; done
+          docker logs relay; exit 1
