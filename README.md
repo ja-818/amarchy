@@ -62,7 +62,7 @@ One board says which one needs you and what for. You answer with a tap.
   and Android apps add answers right on the notification, the share sheet and a widget,
   end-to-end encrypted through a tiny open-source push relay that can't read them.
 - **At home on Omarchy.** The **Ⓐ** in the bar lights up when a chat needs you and says how
-  many; click it and you're on that chat. **Super + Alt + A** brings amarchy to the front, and
+  many; click it and you're on that chat. **Super + D** brings amarchy to the front, and
   it's in the Omarchy menu. Pick **Omarchy (live)** and the app wears your desktop's theme,
   wallpaper and font, on every device, changing when the desktop's does.
 
@@ -97,7 +97,7 @@ Code agents while you're elsewhere, and calls you only where you're needed. Its 
 Omarchy by itself and adds, without editing any of Omarchy's files:
 
 - **the Ⓐ in the bar**: lights up when a chat needs you, says how many; a click opens it.
-- **Super + Alt + A** brings amarchy to the front (`amarchy key` picks another), and
+- **Super + D** brings amarchy to the front (`amarchy key` picks another), and
   **Amarchy** is in the Omarchy menu.
 - **Omarchy (live)**: pick it in Settings → Look, and amarchy wears your desktop's theme,
   wallpaper and font on every device, changing when you switch Omarchy's.
@@ -156,7 +156,7 @@ On a computer's browser:
 | `Ctrl+Alt+O` | The chat's terminal in a Ghostty window (on a desktop with Ghostty) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
-Every action is also a command: `amarchy help`. On Omarchy, **Super + Alt + A** brings amarchy to
+Every action is also a command: `amarchy help`. On Omarchy, **Super + D** brings amarchy to
 the front from anywhere (`amarchy key` picks another).
 
 ## More

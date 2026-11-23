@@ -18,7 +18,7 @@ function render(s) {
   document.title = s.kind === "opening" ? "Amarchy" : `Amarchy · ${title}`;
   const why = s.kind === "choose" ? "Several of yours answer on your tailnet. This computer opens the one you pick from now on."
     : s.kind === "signin" ? (s.waiting ? "Waiting for you to sign in, in your browser…"
-      : "This computer reaches your amarchy through Tailscale, with amarchy's own node (nothing else to install). Sign in with the Tailscale account your other machines use.")
+      : s.why || "This computer reaches your amarchy through Tailscale, with amarchy's own node (nothing else to install). Sign in with the Tailscale account your other machines use.")
     : s.why || "";
   $("why").textContent = why;
   $("why").hidden = !why;

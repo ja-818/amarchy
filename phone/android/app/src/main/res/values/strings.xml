@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Amarchy</string>
+    <string name="widget_description">Who needs you, and for what</string>
+    <string name="widget_nothing">Nothing needs you</string>
+    <string name="old_webview">This phone\'s Android System WebView is too old for Amarchy. Update it in Google Play, then open Amarchy again.</string>
+</resources>
