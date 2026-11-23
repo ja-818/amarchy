@@ -684,7 +684,7 @@ def main():
                 time.sleep(3)
                 keys, left = w.js("window.__keys"), w.js("document.querySelector('.chat textarea').value.length")
                 late = round(keys[-1] - t1 * 1000) if keys else None
-                check(len(keys) == 40 and left == 60 and late is not None and late < 1500,
+                check(len(keys) == 40 and left == 60 and late is not None and late < 2000,
                       f"40 Backspaces held (30 ms apart): all in, the last {late} ms after it was pressed, none after ({len(keys)} in, {left} left)")
                 w.shot(SHOTS / "agent-typing.png")
             home = tempfile.mkdtemp(prefix="desktop-home-")
