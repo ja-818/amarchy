@@ -8232,9 +8232,15 @@ def push_send(sub, payload):
     return None
 
 
-def push_all(payload):
-    """Send a notification to every phone, dropping the ones that are gone.
-    The number that took it."""
+def push_all(payload, desktop=None):
+    """Send a notification to every phone, dropping the ones that are gone,
+    and keep it for the desktop apps (notice_put; desktop: what only they
+    use, its buttons and its chime). The number of devices that took it
+    (the desktop apps listening count)."""
+    try:
+        notice_put(payload, desktop)
+    except OSError as e:
+        print(f"amarchy app: couldn't keep a notice for the desktop apps: {e}", file=sys.stderr)
     payload = json.loads(mask_secrets(json.dumps(payload)))
     sent, gone = 0, set()
     for sub in app_subscriptions():
@@ -8256,7 +8262,141 @@ def push_all(payload):
                 write_file(APP / "push-gone.json", json.dumps((push_gone() + sorted(gone))[-PUSH_GONE:]))
             finally:
                 os.umask(old)
-    return sent
+    return sent + desktops_listening()
+
+
+# ---- the desktop app's notices (track B; docs/plan-omarchy-and-machines.md,
+# the contract's "Its notifications"). Every notification push_all sends the
+# phones is kept here too, the last NOTICES_KEEP of them, and GET
+# /api/notices streams each new one to the desktop apps listening, with the
+# chime it rings and its buttons (notice_actions). A file, so what the CLI
+# sends (amarchy notify, a task's --notify) reaches them as the server's does.
+
+NOTICES = APP / "notices.jsonl"
+NOTICES_KEEP = 200
+NOTICES_RESUME = 600                    # seconds back a desktop app that reconnects picks up from (?after=)
+DESKTOPS = APP / "desktops.json"        # the desktop apps listening now: {stream: when last seen}
+DESKTOP_GONE = 3 * KEEPALIVE            # seconds without a word from one: it's gone
+_desktops_lock = threading.Lock()
+
+
+def notice_put(payload, desktop=None):
+    """Keep a notification for the desktop apps (secrets masked, as for the
+    phones): its id."""
+    rec = {**payload, **(desktop or {}), "id": time.time_ns(), "at": int(time.time())}
+    line = mask_secrets(json.dumps(rec))
+    APP.mkdir(parents=True, exist_ok=True)
+    with open(APP / "notices.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            lines = NOTICES.read_text().splitlines()
+        except OSError:
+            lines = []
+        old = os.umask(0o077)
+        try:
+            write_file(NOTICES, "\n".join((lines + [line])[-NOTICES_KEEP:]) + "\n")
+        finally:
+            os.umask(old)
+    return rec["id"]
+
+
+def notices_after(after):
+    """The notices kept since the one with id after, oldest first."""
+    try:
+        lines = NOTICES.read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            n = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(n, dict) and isinstance(n.get("id"), int) and n["id"] > after:
+            out.append(n)
+    return out
+
+
+def desktop_seen(key, gone=False):
+    """A desktop app's stream (key) is still there, or has gone."""
+    with _desktops_lock:
+        try:
+            seen = json.loads(DESKTOPS.read_text())
+        except (OSError, ValueError):
+            seen = {}
+        now = time.time()
+        seen = {k: t for k, t in (seen if isinstance(seen, dict) else {}).items()
+                if isinstance(t, (int, float)) and now - t < DESKTOP_GONE}
+        if gone:
+            seen.pop(key, None)
+        else:
+            seen[key] = now
+        write_file(DESKTOPS, json.dumps(seen))
+
+
+def desktops_listening():
+    """How many desktop apps listen for notices now."""
+    try:
+        seen = json.loads(DESKTOPS.read_text())
+    except (OSError, ValueError):
+        return 0
+    now = time.time()
+    return sum(1 for t in seen.values() if isinstance(t, (int, float)) and now - t < DESKTOP_GONE) \
+        if isinstance(seen, dict) else 0
+
+
+def notified_anywhere():
+    """Whether a notification sent now reaches a device: a phone or browser
+    with notifications on, or a desktop app listening."""
+    return bool(app_subscriptions()) or desktops_listening() > 0
+
+
+def notice_actions(s, pending=None, prefix=""):
+    """A notice's buttons for a chat (its row; pending: what its Claude asks,
+    when this machine runs it), at most three, as Today's card offers them:
+    a permission's Allow and Deny, a plan's Approve, a question's options (one
+    question, one answer), a done reply's choices (one question). prefix:
+    another machine's chat, through its pass-through (/api/m/<machine>)."""
+    sid = urllib.parse.quote(s["id"], safe="")
+    answer, send = f"{prefix}/api/session/{sid}/answer", f"{prefix}/api/session/{sid}/send"
+
+    def yes_no(rid):
+        return [{"label": "Allow", "path": answer, "body": {"request_id": rid, "choice": "allow"}},
+                {"label": "Deny", "path": answer, "body": {"request_id": rid, "choice": "deny"}}]
+    if s.get("status") == "waiting":
+        if any(a.get("waiting") for a in s.get("secret_asks") or [] if isinstance(a, dict)):
+            return []       # a secret: only in the app, never on a notification
+        first = (pending or [None])[0]
+        if isinstance(first, dict) and first.get("request_id"):
+            rid, tool = first["request_id"], first.get("tool")
+            if tool == "AskUserQuestion":
+                qs = [q for q in ((first.get("input") or {}).get("questions") or []) if isinstance(q, dict) and q.get("question")]
+                opts = [o.get("label") for o in (qs[0].get("options") or []) if isinstance(o, dict) and o.get("label")] \
+                    if len(qs) == 1 and not qs[0].get("multiSelect") else []
+                return [{"label": o, "path": answer, "body": {"request_id": rid, "choice": "allow",
+                                                               "answers": {qs[0]["question"]: o}}}
+                        for o in opts] if 1 <= len(opts) <= 3 else []
+            if tool == "ExitPlanMode":
+                return [{"label": "Approve", "path": answer, "body": {"request_id": rid, "choice": "allow"}}]
+            return yes_no(rid)
+        p = s.get("permission")     # another machine's chat: what its row says
+        return yes_no(p["request_id"]) if isinstance(p, dict) and p.get("request_id") else []
+    asks = (s.get("today") or {}).get("asks") or []
+    if len(asks) == 1:
+        opts = [o for o in asks[0].get("options") or [] if isinstance(o, dict) and o.get("label") and o.get("send")]
+        if 1 <= len(opts) <= 3:
+            return [{"label": o["label"], "path": send, "body": {"text": o["send"]}} for o in opts]
+    return []
+
+
+def notice_chime(s, mine):
+    """The chime a notice about a chat rings with: your assistant's or an
+    agent's own, else the one picked; None when it's off."""
+    if mine:
+        sound = s.get("chime") or (assistant_sound_name() if s.get("assistant") == "main" else "") or ASSISTANT_CHIME
+    else:
+        sound = sound_name()
+    return None if sound == "off" else sound
 
 
 # The app's look: the theme, font and wallpaper picked in the app (Settings,
@@ -13359,7 +13499,7 @@ def task_button(v, title):
 def task_notify(who, t):
     """A new task on your phones, under its agent's name and picture; a tap
     opens Tasks. None, or why it didn't go."""
-    if not app_subscriptions():
+    if not notified_anywhere():
         return "no phone or browser has turned on notifications yet (in the app: the gear, then Turn on notifications)"
     title = t["title"] if t["title"].lower().startswith(who["name"].lower()) else f"{who['name']}: {t['title']}"
     n = push_all({"title": title[:200], "body": t["note"][:2000], "tag": f"amarchy-task-{t['id']}",
@@ -13722,7 +13862,10 @@ def app_moments(st, ss):
                        "tag": s["id"], "url": f"/#/s/{s['id']}", "waiting": waiting}
         if state == "waiting":
             payload["ask"] = s["id"]        # tapped, it opens on the card (sw.js, Chat)
-        threading.Thread(target=push_all, args=(payload,), daemon=True).start()
+        # The desktop app's: which chat, its chime, its buttons.
+        desktop = {"session": s["id"], "sound": notice_chime(s, kind == "assistant"),
+                   "actions": notice_actions(s, pending)}
+        threading.Thread(target=push_all, args=(payload, desktop), daemon=True).start()
 
 
 # ------------------------------------------------------------------ machines
@@ -14642,7 +14785,10 @@ def peer_moments(st, board):
                        "url": url, "waiting": board.get("needs") or 0}
         if state == "waiting":
             payload["ask"] = k
-        threading.Thread(target=push_all, args=(payload,), daemon=True).start()
+        # The desktop app's: which chat, its chime, its buttons (through the pass-through).
+        desktop = {"session": k, "sound": notice_chime(s, mine),
+                   "actions": notice_actions(s, None, f"/api/m/{urllib.parse.quote(s['machine'], safe='')}")}
+        threading.Thread(target=push_all, args=(payload, desktop), daemon=True).start()
 
 
 def app_handler(st, users, address):
@@ -15535,6 +15681,8 @@ def app_handler(st, users, address):
                                        "user": user})
             if path == "/api/events":
                 return self.list_stream()
+            if path == "/api/notices":      # the desktop app's notifications (see "the desktop app's notices")
+                return self.notices_stream()
             if path == "/api/github":       # your repos, for a new project
                 r = run_amarchy("projects", "--github", "--json")
                 try:
@@ -15807,6 +15955,45 @@ def app_handler(st, users, address):
 
         def event(self, name, data):
             self.out(f"event: {name}\ndata: {mask_secrets(json.dumps(data))}\n\n".encode())
+
+        def notices_stream(self):
+            """The desktop app's notices as they're kept (notice_put), from
+            now on: none from before it connected."""
+            self.stream_start()
+            key = f"{threading.get_ident()}-{time.time_ns()}"
+            last = max((n["id"] for n in notices_after(0)), default=0)
+            # Back after a moment away (a reconnect): from the one it saw last,
+            # if that's from the last few minutes; never older ones.
+            try:
+                after = int(urllib.parse.parse_qs(self.path.partition("?")[2]).get("after", ["0"])[0])
+            except ValueError:
+                after = 0
+            if after and time.time_ns() - after < NOTICES_RESUME * 1_000_000_000:
+                last = min(last, after)
+            mtime, beat, seen = None, time.time(), 0
+            try:
+                while True:
+                    if time.time() - seen > KEEPALIVE / 3:
+                        desktop_seen(key)
+                        seen = time.time()
+                    try:
+                        m = NOTICES.stat().st_mtime_ns
+                    except OSError:
+                        m = None
+                    if m != mtime:
+                        mtime = m
+                        for n in notices_after(last):
+                            self.event("notice", n)
+                            last = n["id"]
+                            beat = time.time()
+                    if time.time() - beat > KEEPALIVE:
+                        self.out(b": still here\n\n")
+                        beat = time.time()
+                    time.sleep(0.25)
+            except OSError:
+                pass
+            finally:
+                desktop_seen(key, gone=True)
 
         def list_stream(self):
             """The list, and again on every change."""
@@ -17070,10 +17257,10 @@ def cmd_app(args):
     if what == "off":
         return app_off()
     if what == "--test":
-        if not app_subscriptions():
+        if not notified_anywhere():
             return fail("no phone has turned on notifications yet (in the app: the gear, then Turn on notifications)")
         n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
-        print(f"sent to {n} of {len(app_subscriptions())}")
+        print(f"sent to {n} of {len(app_subscriptions()) + desktops_listening()}")
         return 0 if n else 1
     if what == "--status":
         return app_status()
@@ -17674,7 +17861,7 @@ def cmd_notify(args):
     if mine:
         if not title.lower().startswith(mine["name"].lower()):
             title = f"{mine['name']}: {title}"
-    if not app_subscriptions():
+    if not notified_anywhere():
         return fail("no phone or browser has turned on notifications yet "
                     "(in the app: the gear, then Turn on notifications)")
     # A tag of its own: it doesn't replace the one before it (the app's own
@@ -17686,7 +17873,7 @@ def cmd_notify(args):
     if mine:
         payload["icon"] = team_icon(mine)
     n = push_all(payload)
-    print(f"sent to {n} of {len(app_subscriptions())}")
+    print(f"sent to {n} of {len(app_subscriptions()) + desktops_listening()}")
     return 0 if n else 1
 
 

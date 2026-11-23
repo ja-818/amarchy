@@ -617,8 +617,8 @@ Windows built from the same code. It's the same app as on your phone and in a
 browser, not another one: the window shows the board and the chats your
 amarchy serves, drawn by the system's own web view (WebKitGTK on Linux). It
 adds what a page can't: its own window and launcher entry, `amarchy://` links,
-a tray, the microphone for dictation, and (next) notifications that come with
-its window closed.
+a tray, the microphone for dictation, and notifications that come with its
+window closed.
 
 - **Install**: on a computer with a desktop (Omarchy, or any Wayland or X
   session), `install.sh` builds it there (`desktop/install.sh`: Rust and
@@ -638,9 +638,22 @@ its window closed.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
   in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
   A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+- **Notifications**: the same ones your phone gets (what **Tell me** in
+  Settings says), as your desktop's own, window open or closed. A chat that asks
+  for a permission has **Allow** and **Deny** on its notification, a question its
+  answers, a plan **Approve**, and a finished reply's choices (**Ship it**) are
+  there too; a click opens the window on that chat, at its card. Its chime rings
+  with it (the window's page rings none of its own, so nothing rings twice).
+  The app's server counts it as a device notified (`amarchy notify`, Settings →
+  Send a test). A secret is only ever asked for in the app.
 - **The tray**: closing the window keeps it running in the tray (Open, Reload,
-  Quit), and it starts there at login (`~/.config/autostart/amarchy.desktop`;
-  delete it and it isn't put back), so its notifications can reach you.
+  Quit; its tooltip says how many need you), and it starts there at login
+  (`~/.config/autostart/amarchy.desktop`; delete it and it isn't put back), so
+  its notifications reach you.
+- **This computer runs chats too**: the first time `install.sh` puts the
+  desktop app on a computer, it turns that computer's app server on (`amarchy
+  app on`: for this computer alone until Tailscale is up, then on your tailnet
+  too). `amarchy app off` turns it off, and it stays off.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
   DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).

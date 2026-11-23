@@ -24,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
 ureq = "3"
+notify-rust = "4"
+log = "0.4"
 
 # A chat's link (amarchy://) comes as a second start's argument on Linux and
 # Windows (single instance hands it over), as an Apple event on macOS.

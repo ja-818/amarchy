@@ -61,9 +61,10 @@ jobs:
       - name: The real window (Xvfb)
         if: matrix.window
         run: |
-          sudo apt-get install -y --no-install-recommends xvfb xdotool imagemagick dbus tmux xclip
+          sudo apt-get install -y --no-install-recommends xvfb xdotool imagemagick dbus tmux xclip python3-gi
           cargo build --locked --features test-hooks
           SHOTS="$RUNNER_TEMP/shots" python3 test/shell-test.py
+          python3 ../test/desktop-notices.py
 
       - name: Screenshots
         if: matrix.window && always()

@@ -28,6 +28,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -137,6 +138,7 @@ Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")
 class Local(Handler):
     def parse_request(self):
         ok = super().parse_request()
+        self.sent_origin = self.headers.get("Origin") if ok else None     # as sent, before it's made the tailnet's below
         if LOCAL:
             return ok
         if ok and not self.headers.get("Tailscale-User-Login"):
@@ -146,6 +148,21 @@ class Local(Handler):
         return ok
 
     def do_POST(self):
+        # A chat's answer or message, as the desktop app's notification
+        # buttons send them: let in (or not) as the app's would be, then
+        # printed ("acted <path> <origin> <body>") instead of reaching a Claude.
+        if re.fullmatch(r"/api/session/[^/]+/(answer|send)", self.path.partition("?")[0]):
+            if not self.allowed(write=True):
+                return
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n).decode(errors="replace")
+            print(f"acted {self.path} {self.sent_origin} {body}", flush=True)
+            return self.send(200, {"ok": True})
+        if self.path == "/__test/notice":       # a notification, as the server sends one: {payload, desktop}
+            n = int(self.headers.get("Content-Length") or 0)
+            given = json.loads(self.rfile.read(n) or b"{}")
+            sent = am.push_all(given.get("payload") or {}, given.get("desktop"))
+            return self.send(200, {"sent": sent})
         if self.path in ("/__test/report", "/__test/live"):
             n = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(n).decode(errors="replace")

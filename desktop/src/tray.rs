@@ -35,3 +35,10 @@ pub fn make(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
     Ok(())
 }
+
+/// How many things need you, on the tray's tooltip (the app's count).
+pub fn waiting(app: &AppHandle, n: u64) {
+    if let Some(tray) = app.tray_by_id("amarchy") {
+        let _ = tray.set_tooltip(Some(if n == 0 { "Amarchy".to_string() } else { format!("Amarchy · {n} need you") }));
+    }
+}

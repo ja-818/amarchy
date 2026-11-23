@@ -15,7 +15,8 @@ opened, what it opens").
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
 | `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures |
-| `src/tray.rs` | The tray: Open, Reload, Quit |
+| `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
+| `src/tray.rs` | The tray: Open, Reload, Quit, and how many need you |
 | `dist/` | Its own page, while the window isn't showing amarchy: looking for it, which one, why not |
 | `install.sh` | Built and installed on the machine it runs on (amarchy's `install.sh` runs it on a computer with a desktop) |
 | `amarchy.desktop` | Its launcher entry (and `amarchy.desktop.hbs`, the same for Tauri's packages) |
@@ -40,17 +41,23 @@ cargo test                                          # links, addresses, argument
 cargo build --features test-hooks                   # the build the window tests drive
 python3 test/shell-test.py                          # the real window under Xvfb: what it opens, the
                                                     # local key, pairing, the chooser, links, the tray,
-                                                    # its size, no white flash, its page's own words
+                                                    # its size, no white flash, its page's own words, its
+                                                    # notifications (buttons, a click, closed, a chime,
+                                                    # a restart)
+python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
 ```
 
 `test/shell.py` runs the app in an X server of its own (Xvfb) with a D-Bus of
 its own, real keys and clicks (xdotool), JavaScript in its window (the
-`test-hooks` feature: never in a build for people), screenshots and its memory.
+`test-hooks` feature: never in a build for people), screenshots and its memory,
+and a notification daemon on that bus (`test/notifyd.py`, PyGObject) that
+records what it shows and presses its buttons.
 `test/server.py` is an amarchy app server with a home and tmux of its own, as a
 server through Tailscale or as this machine's own (`--local`, the real local
 key). Nothing in them reaches a real machine: amarchy's CLI there is a made-up
-one, or this checkout's on a test home with pairing refused. Needs Xvfb,
-xdotool, ImageMagick, dbus and tmux.
+one, or this checkout's on a test home with pairing refused. Its homes go under
+`~/.cache/amarchy-tests` (unless `TMPDIR` says) and away at the end. Needs Xvfb,
+xdotool, ImageMagick, dbus, tmux and PyGObject.
 
 ## Packages
 

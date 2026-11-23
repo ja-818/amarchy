@@ -1473,6 +1473,7 @@ function chime(v) {
     return alerts === "all" || (alerts === "needs-you" && s.status === "waiting");
   });
   if (!rings.length) return;
+  if (desktopApp) return;       // the desktop app rings it with its notification (desktop/src/notify.rs)
   const agent = rings.find(isAgent);
   const sound = agent ? agentChime(agent) : v.sound || "kalimba";
   if (sound === "off") return;

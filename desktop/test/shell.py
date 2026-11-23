@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -28,9 +29,11 @@ def free_display():
 
 
 class Shell:
-    def __init__(self, url, size=(1280, 800), env=None, args=(), home=None, visible=True, sized=True, screen=None):
+    def __init__(self, url, size=(1280, 800), env=None, args=(), home=None, visible=True, sized=True, screen=None,
+                 notifyd=False):
         self.url, self.size, self.extra_env, self.args = url, size, env or {}, list(args)
         self.home, self.visible, self.sized, self.screen = home, visible, sized, screen
+        self.notifyd, self.shown = notifyd, []
         self.results, self.lines, self.n = {}, [], 0
         self.cond = threading.Condition()
 
@@ -53,6 +56,14 @@ class Shell:
         env = {**os.environ, "DISPLAY": f":{self.display}", "GDK_BACKEND": "x11", "NO_AT_BRIDGE": "1",
                "DBUS_SESSION_BUS_ADDRESS": address, **self.extra_env}
         env.pop("WAYLAND_DISPLAY", None)
+        # A notification daemon on that bus (notifyd.py): what the app shows.
+        if self.notifyd:
+            self.daemon = subprocess.Popen([sys.executable, str(Path(__file__).parent / "notifyd.py")], stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                                           env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": address})
+            if "ready" not in self.daemon.stdout.readline():
+                raise RuntimeError("the test's notification daemon didn't start")
+            threading.Thread(target=self._notes, daemon=True).start()
         if self.home:
             env.update(HOME=self.home, XDG_CONFIG_HOME=f"{self.home}/.config", XDG_DATA_HOME=f"{self.home}/.local/share",
                        XDG_STATE_HOME=f"{self.home}/.local/state", XDG_CACHE_HOME=f"{self.home}/.cache")
@@ -68,6 +79,37 @@ class Shell:
         else:
             self.window = None
         return self
+
+    def _notes(self):
+        for line in self.daemon.stdout:
+            try:
+                n = json.loads(line)
+            except ValueError:
+                continue
+            with self.cond:
+                self.shown.append(n)
+                self.cond.notify_all()
+
+    def note(self, test, timeout=20):
+        """The first notification shown that test(n) says yes to."""
+        end = time.time() + timeout
+        with self.cond:
+            while True:
+                hit = next((n for n in self.shown if test(n)), None)
+                if hit:
+                    return hit
+                left = end - time.time()
+                if left <= 0:
+                    return None
+                self.cond.wait(left)
+
+    def press(self, nid, action):
+        """A notification's button pressed (or "default": it clicked), a
+        moment after it showed, as a person would (the app listens for it
+        once it's shown)."""
+        time.sleep(0.5)
+        self.daemon.stdin.write(f"invoke {nid} {action}\n")
+        self.daemon.stdin.flush()
 
     def again(self, *args, timeout=15):
         """amarchy-desktop started a second time, as a key or a link would:
@@ -104,6 +146,9 @@ class Shell:
                 self.proc.wait(5)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+        if getattr(self, "daemon", None):
+            self.daemon.kill()
+            self.daemon.wait()
         if getattr(self, "bus", None):
             for p in self.tree(self.bus.pid)[1:]:      # what it started (the portals)
                 try:

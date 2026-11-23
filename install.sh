@@ -380,6 +380,18 @@ if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
   else
     "$repo/desktop/install.sh" --background || true
   fi
+  # A computer with the desktop app is a machine (the plan's decision 2): its
+  # app server on, once (amarchy app on: for this machine alone until
+  # Tailscale is up, then on your tailnet too; it says what's missing). Turned
+  # off since (amarchy app off), it stays off.
+  app_on_once="$state/desktop/app-on"
+  if [[ ! -e $app_on_once ]]; then
+    if ! systemctl --user is-active --quiet amarchy-app.service 2>/dev/null; then
+      say "This computer runs chats too: its app server, on."
+      "$bin_dir/amarchy" app on || true
+    fi
+    mkdir -p "$state/desktop" && touch "$app_on_once"
+  fi
 fi
 # ---- end of the desktop app (track B)
 

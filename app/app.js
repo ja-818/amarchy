@@ -2361,7 +2361,11 @@ async function openSettings() {
     if (state === "checking") {
       kids.push(h("p", {}, "…"));
     } else if (desktopApp) {
-      kids.push(h("p", {}, "This desktop app's own notifications come with its next update. Your phone's keep coming."));
+      kids.push(h("p", {}, "On: this desktop app tells you when a chat needs you or is done, its window closed too (it stays in the tray). Answer from the notification, or click it to open the chat."),
+        h("button", { class: "control wide", onclick: async () => {
+          try { const r = await api("/api/push/test"); toast(r.sent ? "Sent. It should arrive in a moment." : "It couldn't be sent."); }
+          catch (err) { toast(err.message); }
+        } }, "Send a test"));
     } else if (!standalone && !app.desk) {
       kids.push(h("p", {}, "To get notifications, add Amarchy to your Home Screen: tap Share, then “Add to Home Screen”, and open it from there."));
     } else if (state === "unsupported") {
@@ -2410,7 +2414,8 @@ async function openSettings() {
     kids.push(h("div", { class: "section" }, "Sound"),
       h("button", { class: "control wide", onclick: () => soundSheet(null) },
         `Chime: ${label(app.view && app.view.sound)}${team.map((x) => ` · ${x.assistant_name || "Assistant"}'s: ${label(agentChime(x))}`).join("")}`),
-      h("p", {}, app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
+      h("p", {}, desktopApp ? "Rings with this desktop app's notifications, its window closed too."
+                 : app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
       h("div", { class: "section" }, "Agents"),
       ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),

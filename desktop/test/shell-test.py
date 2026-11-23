@@ -16,17 +16,26 @@
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shell import ROOT, Shell, need  # noqa: E402
 
-SHOTS = Path(os.environ.get("SHOTS") or tempfile.mkdtemp(prefix="desktop-shell-"))
+# Its homes (each with a web view's data) in one folder, gone at the end:
+# under ~/.cache unless TMPDIR says (a server's /tmp can be small).
+if not os.environ.get("TMPDIR"):
+    tempfile.tempdir = str(Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "amarchy-tests")
+    os.makedirs(tempfile.tempdir, exist_ok=True)
+tempfile.tempdir = tempfile.mkdtemp(prefix="desktop-shell-test-")
+SHOTS = Path(os.environ.get("SHOTS") or tempfile.mkdtemp(prefix="shots-"))
 SHOTS.mkdir(parents=True, exist_ok=True)
 failed = []
 
@@ -57,6 +66,29 @@ class Server:
         if not line.startswith("listening"):
             raise RuntimeError(f"the test server didn't start: {self.proc.stderr.read()[-800:]}")
         self.url = f"http://127.0.0.1:{self.port}/"
+        self.lines = []
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        for line in self.proc.stdout:
+            self.lines.append(line.rstrip("\n"))
+
+    def acted(self, path, timeout=15):
+        """What a button sent to path: (its Origin, its body), or None."""
+        end = time.time() + timeout
+        while time.time() < end:
+            for line in self.lines:
+                parts = line.split(" ", 3)
+                if parts[0] == "acted" and parts[1] == path:
+                    return parts[2], json.loads(parts[3])
+            time.sleep(0.1)
+        return None
+
+    def notice(self, payload, desktop=None):
+        """A notification, as this server sends one (push_all)."""
+        req = urllib.request.Request(self.url + "__test/notice", data=json.dumps({"payload": payload, "desktop": desktop}).encode(),
+                                     method="POST", headers={"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=10).read())["sent"]
 
     def stop(self):
         self.proc.terminate()
@@ -129,6 +161,16 @@ def env_for(cli):
     # Not the machine's own amarchy: PATH without ~/.local/bin.
     path = ":".join(p for p in os.environ.get("PATH", "").split(":") if ".local/bin" not in p and "amarchy" not in p)
     return {"AMARCHY_CLI": str(cli), "PATH": path, "AMARCHY_URL": ""}
+
+
+def listening(server, w, timeout=40):
+    """Once the app's stream of notices is up: a notice sent reaches it."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if server.notice({"title": "warm-up", "body": "", "tag": "warm"}) and w.note(lambda n: n["summary"] == "warm-up", 2):
+            return True
+        time.sleep(0.3)
+    raise TimeoutError("the desktop app never listened for notices")
 
 
 def on_app(w, timeout=30):
@@ -247,11 +289,13 @@ def main():
         home = tempfile.mkdtemp(prefix="desktop-home-")
         cli = fake_cli(home, found=[{"name": "srv", "label": "Server", "url": remote.url, "version": "x"}])
         with Shell(None, home=home, env=env_for(cli)) as w:
+            # Watched from the start: it shows for a few seconds once the app is up.
+            said = w.wait("[...document.querySelectorAll('.toast')].map(e => e.textContent).join(' ').includes('Paired with Server')",
+                          timeout=40, every=0.05)
+            check(bool(said), "the window says so once (Paired with Server.)")
             on_app(w)
             check(w.do("url").startswith(remote.url), "the one found is opened")
             check("machines add srv" in asked(cli), f"and paired with ({asked(cli)})")
-            said = w.wait("[...document.querySelectorAll('.toast, #toast, [role=status]')].map(e => e.textContent).join(' ').includes('Paired with Server')", timeout=10)
-            check(bool(said), "the window says so once (Paired with Server.)")
             w.shot(SHOTS / "found-one.png")
 
         # ---- several: asked which, once.
@@ -307,6 +351,75 @@ def main():
             own_page(w, "nothing")
             check("isn't installed" in w.js("document.getElementById('why').textContent"), "it says amarchy isn't installed here")
 
+        # ---- its notifications: what the server sends, shown natively with
+        # its buttons, a button done as the page would, a click on the chat;
+        # window closed too; a chime; a tag replaces; back after a restart.
+        print("its notifications")
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        allow = [{"label": "Allow", "path": "/api/session/desk-term/answer", "body": {"request_id": "r1", "choice": "allow"}},
+                 {"label": "Deny", "path": "/api/session/desk-term/answer", "body": {"request_id": "r1", "choice": "deny"}}]
+        with Shell(remote.url, home=home, env=env_for(fake_cli(home)), notifyd=True) as w:
+            on_app(w)
+            w.js("window.__rang = []; const p = playSound; playSound = (src, o) => { __rang.push(src); return p(src, o); }; 1")
+            listening(remote, w)
+            sent = remote.notice({"title": "Term: a real terminal", "body": "Claude wants to run ls\nDesk", "tag": "desk-term",
+                                  "url": "/#/s/desk-term", "ask": "desk-term", "waiting": 1},
+                                 {"session": "desk-term", "sound": "kalimba", "actions": allow})
+            check(sent >= 1, f"the server counts the desktop app as a device notified ({sent})")
+            n = w.note(lambda n: n["summary"] == "Term: a real terminal")
+            check(bool(n) and n["body"].startswith("Claude wants to run ls"), "a chat that needs you: a notification on the desktop")
+            if n:
+                check(n["actions"] == ["default", "Open", "a0", "Allow", "a1", "Deny"], f"with its buttons: Allow, Deny ({n['actions']})")
+                check(n["app"] == "Amarchy" and n["hints"].get("desktop-entry") == "amarchy", "as Amarchy (its launcher entry, its icon)")
+                check(bool(w.wait("__rang.includes('/sound/kalimba')", timeout=5)), "the chat's chime rings (the app's own sound)")
+                w.press(n["id"], "a0")
+                got = remote.acted("/api/session/desk-term/answer")
+                check(got is not None and got[1] == {"request_id": "r1", "choice": "allow"}, f"Allow: answered as the page answers it ({got})")
+                check(got is not None and got[0] == remote.url.rstrip("/"), "from the app's own origin")
+            # Window closed: still told; a click opens the window on the chat, at its card.
+            w.do("close")
+            time.sleep(0.5)
+            remote.notice({"title": "Long: a chat with 120 turns", "body": "Done: it works", "tag": "desk-long", "url": "/#/s/desk-long"},
+                          {"session": "desk-long", "sound": "kalimba", "actions": []})
+            n2 = w.note(lambda n: n["summary"] == "Long: a chat with 120 turns")
+            check(bool(n2) and w.do("visible") is False, "its window closed, the notification still comes")
+            if n2:
+                w.press(n2["id"], "default")
+                check(bool(w.wait("location.hash === '#/s/desk-long'")) and w.do("visible") is True, "clicked: the window, on that chat")
+            # The same chat again: in place of the one before.
+            remote.notice({"title": "Term again", "body": "x", "tag": "desk-term"}, {"session": "desk-term"})
+            remote.notice({"title": "Term once more", "body": "y", "tag": "desk-term"}, {"session": "desk-term"})
+            a = w.note(lambda n: n["summary"] == "Term again")
+            b = w.note(lambda n: n["summary"] == "Term once more")
+            check(bool(a and b) and b["replaces"] == a["id"], "a chat's next notification takes the place of its last")
+            w.shot(SHOTS / "notified.png")
+        # This machine's amarchy: its notices and buttons with the local cookie.
+        local = Server("--local")
+        try:
+            with Shell(None, home=local.home, env=env_for(real_cli(local.home)), notifyd=True) as w:
+                on_app(w)
+                listening(local, w)
+                local.notice({"title": "Local asks", "body": "Allow it?", "tag": "desk-term"}, {"session": "desk-term", "actions": allow})
+                n = w.note(lambda n: n["summary"] == "Local asks")
+                check(bool(n), "this machine's amarchy: its notifications come too (the local cookie)")
+                if n:
+                    w.press(n["id"], "a1")
+                    got = local.acted("/api/session/desk-term/answer")
+                    check(got is not None and got[1]["choice"] == "deny" and got[0] == local.url.rstrip("/"),
+                          f"and its buttons answer, let in by the cookie ({got})")
+                # The server restarted (a ship): what came meanwhile still comes.
+                port, lhome = local.port, local.home
+                local.stop()
+                env = {**os.environ, "HOME": lhome, "XDG_STATE_HOME": lhome + "/.local/state", "XDG_CONFIG_HOME": lhome + "/.config"}
+                subprocess.run([sys.executable, "-c", "import importlib.machinery, importlib.util, sys; "
+                                "l = importlib.machinery.SourceFileLoader('a', sys.argv[1]); m = importlib.util.module_from_spec("
+                                "importlib.util.spec_from_loader('a', l)); l.exec_module(m); m.notice_put({'title': 'While away', 'body': 'z'})",
+                                str(ROOT / "bin/amarchy")], env=env, check=True)
+                local = Server("--local", home=lhome, port=port)
+                check(bool(w.note(lambda n: n["summary"] == "While away", 40)), "the server restarted: a notice sent meanwhile still comes")
+        finally:
+            local.stop()
+
         # ---- the window's size, kept.
         print("its window")
         home = tempfile.mkdtemp(prefix="desktop-home-")
@@ -324,6 +437,14 @@ def main():
         remote.stop()
 
     print(f"screenshots: {SHOTS}")
+    if not os.environ.get("KEEP"):
+        for d in Path(tempfile.tempdir).iterdir():
+            if d != SHOTS:
+                shutil.rmtree(d, ignore_errors=True)
+        try:
+            os.rmdir(tempfile.tempdir)      # unless the screenshots are in it
+        except OSError:
+            pass
     if failed:
         print(f"{len(failed)} failed")
         sys.exit(1)

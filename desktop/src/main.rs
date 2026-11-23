@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod links;
+mod notify;
 mod platform;
 mod target;
 mod tray;
@@ -186,6 +187,7 @@ fn main() {
     let builder = builder.plugin(tauri_plugin_deep_link::init());
     let app = builder
         .manage(shell)
+        .manage(notify::Notifier::default())
         .on_permission_request(|webview, kind| {
             // Only amarchy's own pages, and only what the app uses: the
             // microphone (dictation) and reading what you copied (Paste).
@@ -224,6 +226,7 @@ fn main() {
             #[cfg(feature = "test-hooks")]
             test_hooks(win.clone());
             find(&handle);
+            notify::follow(&handle);
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -425,6 +428,38 @@ fn restart(app: &AppHandle, exe: Option<&str>) {
     }
 }
 
+/// A notification clicked: the window, on its route (a chat), at the card it
+/// asks about (the app's amarchy-ask, as a phone's notification does).
+pub fn open_route(app: &AppHandle, hash: Option<&str>, ask: Option<&str>) {
+    show(app);
+    let Some(t) = app.state::<Shell>().target.lock().unwrap().clone() else { return };
+    let Some(w) = main_window(app) else { return };
+    let on_app = w.url().ok().map(|u| u.origin()) == Some(t.origin().origin());
+    if on_app {
+        let mut js = String::new();
+        if let Some(h) = hash {
+            js += &format!("location.hash = {};", serde_json::to_string(h).unwrap());
+        }
+        if let Some(a) = ask {
+            js += &format!(
+                "setTimeout(() => window.dispatchEvent(new CustomEvent('amarchy-ask', {{ detail: {{ id: {} }} }})), 300);",
+                serde_json::to_string(a).unwrap()
+            );
+        }
+        let _ = w.eval(js);
+        return;
+    }
+    // Not on the app (its own page): the app, started there (?ask=, app.js's start).
+    let mut u = t.open_url(None);
+    if let Some(a) = ask {
+        u.query_pairs_mut().append_pair("ask", a);
+    }
+    if let Some(h) = hash {
+        u.set_fragment(Some(h.trim_start_matches('#')));
+    }
+    go_url(app, &t, u);
+}
+
 /// Opens a chat: in the app if it's up (its route, no reload), else once it is.
 pub fn open_link(app: &AppHandle, link: Link) {
     show(app);
@@ -518,8 +553,14 @@ fn go_url(app: &AppHandle, t: &Target, url: Url) {
     let (app, port, t) = (app.clone(), *port, t.clone());
     std::thread::spawn(move || {
         let Some(w) = main_window(&app) else { return };
-        match target::local_cookie(port).and_then(|c| w.set_cookie(c).map_err(|e| format!("its cookie: {e}"))) {
-            Ok(()) => {
+        let cookie = target::local_cookie(port).and_then(|c| {
+            let pair = format!("{}={}", c.name(), c.value());
+            w.set_cookie(c).map_err(|e| format!("its cookie: {e}")).map(|_| pair)
+        });
+        match cookie {
+            Ok(pair) => {
+                // The notices' stream and buttons use it too (notify.rs).
+                *app.state::<notify::Notifier>().cookie.lock().unwrap() = Some(pair);
                 let _ = w.navigate(url);
             }
             Err(why) => {
