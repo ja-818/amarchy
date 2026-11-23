@@ -14283,6 +14283,9 @@ PEER_TIMEOUT = 8                        # seconds to reach a machine
 # Seconds a machine's stream may stay silent (it says "still here" every
 # KEEPALIVE): longer, and it's taken as gone (a laptop shut, a network down).
 PEER_SILENT = float(os.environ.get("AMARCHY_PEER_SILENT") or 45)
+# Seconds a machine stays out of reach before it's "off": a restart (a ship:
+# a few seconds) or a network blip is a reconnect, never off.
+PEER_OFF_AFTER = float(os.environ.get("AMARCHY_PEER_OFF_AFTER") or 30)
 MACHINE_NAME_RE = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 LABEL_MAX = 40
 
@@ -14918,7 +14921,11 @@ class Peers:
             except (OSError, ValueError):
                 continue
             if isinstance(kept, dict) and isinstance(kept.get("sessions"), list):
-                self.seen[f.stem] = {**kept, "on": False, "error": "not reached yet", "update": None}
+                # As last seen: on then, reconnecting (this server just started: off
+                # only if it stays out of reach); off then, off until it answers.
+                was_on = kept.get("on") is not False
+                self.seen[f.stem] = {**kept, "on": False, "error": None if was_on else "not reached yet", "update": None,
+                                     "reconnecting": time.time() if was_on else None}
 
     def start(self):
         threading.Thread(target=self.run, daemon=True).start()
@@ -14972,15 +14979,18 @@ class Peers:
         self.saved_at[name] = time.time()
         try:
             write_file(PEERS_SEEN / f"{name}.json", json.dumps(
-                {k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}))
+                {**{k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}, "on": bool(now.get("on"))}))
         except OSError:
             pass
 
     def follow(self, name, wake):
-        """One machine's chats as they change, for as long as it's paired:
-        back to it when it stops answering (a second, then longer, at most
-        30 s apart; at once when poked); off once it can't be reached again."""
-        wait = 1
+        """One machine's chats as they change, for as long as it's paired.
+        Its stream cut (a restart there, a network blip): back to it at once,
+        then every half second, a second, two... while it's out of reach its
+        chats stay as they were ("reconnecting"), and only once it has been out
+        of reach PEER_OFF_AFTER seconds is it off; then every 30 s at most (at
+        once when poked)."""
+        wait, lost = 0.5, None          # lost: when it was last heard, while it isn't
         try:
             while True:
                 m = machine_find(name)
@@ -14989,18 +14999,27 @@ class Peers:
                 wake.clear()
                 try:
                     self.stream(m, wake)
-                    wait = 1
-                    continue            # it ended (a restart there): again at once, off only if that fails
+                    wait, lost = 0.5, None
+                    continue            # it ended (a restart there): again at once
                 except PeerError as e:
                     why = str(e)
                 except Exception as e:  # a stream cut mid-event, its data not JSON
                     why = str(e) or type(e).__name__
                 if machine_find(name) and machine_moved(m):
                     continue            # its address changed (another tailnet): there, at once
-                if machine_find(name):
-                    self.update(name, on=False, error=why)
+                if not machine_find(name):
+                    return
+                known = self.seen.get(name) or {}
+                heard = known.get("heard") or 0
+                if lost and heard > lost:
+                    wait, lost = 0.5, None      # heard from since it was last lost: a new time out of reach
+                lost = lost or known.get("reconnecting") or max(heard, time.time() - PEER_SILENT if heard else time.time())
+                if time.time() - lost >= PEER_OFF_AFTER or not (known.get("on") or known.get("reconnecting")):
+                    self.update(name, on=False, error=why, reconnecting=None)
+                else:
+                    self.update(name, reconnecting=lost, error=why)
                 wake.wait(wait)
-                wait = min(wait * 2, 30)
+                wait = min(wait * 2, 5 if time.time() - lost < PEER_OFF_AFTER else 30)
         finally:
             with self.lock:
                 if self.followed.get(name) is wake:
@@ -15037,6 +15056,9 @@ class Peers:
                     raise PeerError(peer_why(e)) from None
                 if not chunk:
                     raise PeerError("it stopped answering")
+                with self.lock:
+                    if name in self.seen:
+                        self.seen[name]["heard"] = time.time()
                 buf += unzip.decompress(chunk) if unzip else chunk
                 while b"\n\n" in buf:
                     block, buf = buf.split(b"\n\n", 1)
@@ -15049,7 +15071,7 @@ class Peers:
                     if event == "state" and data:
                         got = json.loads("\n".join(data))
                         hello_now = got.get("machine") if isinstance(got.get("machine"), dict) else h
-                        self.update(name, on=True, error=None, update=None, hello=hello_now, at=time.time(),
+                        self.update(name, on=True, error=None, update=None, reconnecting=None, hello=hello_now, at=time.time(),
                                     sessions=[s for s in got.get("sessions") or [] if isinstance(s, dict) and s.get("id")],
                                     projects=got.get("projects") or [], tasks=got.get("tasks") or [],
                                     moved=[r for r in got.get("moved") or [] if isinstance(r, dict)
@@ -15104,9 +15126,10 @@ def board_view(st):
         if not m:
             continue
         h = p.get("hello") or {}
-        off = not p.get("on")
+        off = not p.get("on") and not p.get("reconnecting")
         machines.append({"name": name, "label": str(h.get("label") or m["label"])[:LABEL_MAX], "me": False,
                          "icon": h.get("icon") if h.get("icon") in MACHINE_ICONS else "desktop",
+                         "reconnecting": p.get("reconnecting") if not off else None,
                          "on": not off, "since": p.get("since"), "error": p.get("error"), "update": p.get("update"),
                          "version": h.get("version") or "", "seen": bool(p.get("sessions") or p.get("at")),
                          "projects": [{"name": x.get("name"), "github": x.get("github")} for x in p.get("projects") or []
@@ -15134,7 +15157,10 @@ def board_view(st):
             sessions.append({**row, "id": to_id, "machine": where, "moved_from": r["from"]})
             board_keys.add(to)
     # What needs you: not a chat on a machine that's off (nothing to answer it with until it's back).
+    waiting = [{"id": i["id"], "machine": i["machine"], "chat": f"{i['machine']}:{i['chat']}", "kind": i["kind"], "text": i["text"],
+                "pictures": i.get("pictures") or 0, "at": i["at"]} for i in outbox_list()]
     board = {**view, "sessions": sessions, "machine": me, "machines": machines, "merges": True, "machines_as": machines_as(),
+             "outbox": waiting,
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
@@ -15173,6 +15199,105 @@ def list_all():
     for m in ms:
         rows += found.get(m["name"], [])
     return rows
+
+
+# ---- what waits for a machine out of reach (the outbox)
+#
+# A message, or an answer to what a chat asks, for a chat on a machine that
+# doesn't answer (restarting, a network blip, off): kept here (on disk, so
+# a restart of this one keeps it too) and sent once it answers, in the order
+# they were made. The board lists them (outbox), the app shows each as
+# waiting, with Cancel.
+
+OUTBOX = APP / "outbox"         # <id>.json: {id, machine, rest, ctype, body (base64), chat, text, kind, at, tries}
+OUTBOX_ROUTE = re.compile(r"/api/session/[\w.-]{1,120}/(send|answer)")
+OUTBOX_TRIES = 6                # times a machine that answers refuses one for a moment (409: waking...) before it's let go
+
+
+def outbox_add(machine, rest, ctype, body):
+    """Keep a request for a machine out of reach: the item kept."""
+    path = rest.partition("?")[0]
+    kind = OUTBOX_ROUTE.fullmatch(path).group(1)
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        data = {}
+    text = (data.get("text") if kind == "send" else data.get("choice") or data.get("answer")) if isinstance(data, dict) else None
+    item = {"id": f"{time.time_ns()}-{os.urandom(3).hex()}", "machine": machine, "rest": rest, "ctype": ctype,
+            "body": base64.b64encode(body or b"").decode(), "chat": path.split("/")[3], "kind": kind,
+            "text": str(text or "")[:500], "pictures": len((data.get("images") or []) if isinstance(data, dict) else []),
+            "at": time.time(), "tries": 0}
+    write_file(OUTBOX / f"{item['id']}.json", json.dumps(item))
+    return item
+
+
+def outbox_list(machine=None):
+    out = []
+    for f in sorted(OUTBOX.glob("*.json")) if OUTBOX.is_dir() else []:
+        try:
+            item = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(item, dict) and (machine is None or item.get("machine") == machine):
+            out.append(item)
+    return sorted(out, key=lambda i: i.get("id", ""))
+
+
+def outbox_drop(item_id):
+    """Take one back (Cancel), or done with it: whether it was there."""
+    if not re.fullmatch(r"\d+-[0-9a-f]{6}", item_id or ""):
+        return False
+    f = OUTBOX / f"{item_id}.json"
+    there = f.exists()
+    f.unlink(missing_ok=True)
+    return there
+
+
+_outbox_flushing = threading.Lock()
+
+
+def outbox_flush(name):
+    """Send what waits for machine name, in order, while it answers. Whether
+    anything was sent (or let go)."""
+    m = machine_find(name)
+    items = outbox_list(name)
+    if not m or not items:
+        return False
+    done = False
+    with _outbox_flushing:
+        for item in outbox_list(name):
+            try:
+                status, said = peer_json(m, "POST", item["rest"], base64.b64decode(item["body"]) or b"{}", timeout=330) \
+                    if item.get("ctype", "").startswith("application/json") else (None, {})
+            except PeerError:
+                return done             # still out of reach: the rest wait too, in their order
+            if status is None:
+                outbox_drop(item["id"])
+                continue
+            if status in (409, 502, 503) and item.get("tries", 0) + 1 < OUTBOX_TRIES:
+                item["tries"] = item.get("tries", 0) + 1     # waking, busy: again in a moment
+                write_file(OUTBOX / f"{item['id']}.json", json.dumps(item))
+                return done
+            if status >= 300:
+                print(f"amarchy app: what waited for {name} wasn't taken ({status}: {said.get('error')}): {item['rest']}",
+                      file=sys.stderr, flush=True)
+            outbox_drop(item["id"])
+            done = True
+    return done
+
+
+def outbox_tend(st):
+    """Every couple of seconds: what waits for a machine that answers now, sent."""
+    while True:
+        try:
+            names = {i.get("machine") for i in outbox_list()}
+            peers = st.peers.snapshot() if st.peers else {}
+            for name in names:
+                if (peers.get(name) or {}).get("on") and outbox_flush(name):
+                    st.bump()
+        except Exception as e:
+            print(f"amarchy app: outbox: {e}", file=sys.stderr, flush=True)
+        time.sleep(2)
 
 
 def peers_search(st, q, timeout=4):
@@ -17960,6 +18085,12 @@ def app_handler(st, users, address):
                     return self.error(400, "its length")
                 if size > UPLOAD_MAX:
                     return self.error(413, "That file is too big (50 MB at most)")
+            # A message or an answer can wait for its machine: read whole first, to keep.
+            waits = method == "POST" and OUTBOX_ROUTE.fullmatch(rest.partition("?")[0])
+            if waits and body is None:
+                if size > CLIP_MAX:
+                    return self.error(413, "too big")
+                body = self.rfile.read(size) if size else b""
             conn = peer_open(peer["url"], PEER_TIMEOUT)
             try:
                 conn.putrequest(method, rest, skip_accept_encoding=True)
@@ -17988,6 +18119,13 @@ def app_handler(st, users, address):
                 r = conn.getresponse()
             except (OSError, ValueError, http.client.HTTPException) as e:
                 conn.close()
+                if waits:
+                    # Out of reach (a restart there, a network blip, off): kept here, sent once it's back.
+                    item = outbox_add(peer["name"], rest, self.headers.get("Content-Type") or "application/json", body)
+                    st.bump()                   # (on the board: it waits)
+                    if st.peers:
+                        st.peers.poke(peer["name"])
+                    return self.send(202, {"ok": True, "waits": {"id": item["id"], "machine": peer["name"], "label": label}})
                 return self.off_answer(peer["name"], label, peer_why(e))
             try:
                 ctype = r.getheader("Content-Type") or "application/octet-stream"
@@ -19055,6 +19193,12 @@ def app_handler(st, users, address):
                 return self.peer_move_in() if self.path == "/api/peer/move" else self.peer_move_abort(self.body())
             if self.path == "/api/machines":        # Settings → Machines: add, remove, rename
                 return self.machines_post(self.body())
+            if self.path == "/api/outbox/cancel":   # a message waiting for its machine, taken back: {id}
+                data = self.body()
+                if not outbox_drop(data.get("id") if isinstance(data.get("id"), str) else ""):
+                    return self.error(404, "It's gone already: sent, or taken back")
+                st.bump()
+                return self.send(200, {})
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
                 or bool(re.fullmatch(r"/api/session/[^/]+/(send|agent/picture)", self.path))      # images, on the chat engine; an agent's picture
             upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
@@ -20024,6 +20168,7 @@ def app_serve():
     st.peers.start()
     st.sync = Sync(st)                  # your stuff the same on every machine (see "your stuff on every machine")
     st.sync.start()
+    threading.Thread(target=outbox_tend, args=(st,), daemon=True).start()     # what waits for a machine, sent once it's back
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score

@@ -255,10 +255,9 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   // to read, not to act on (its buttons would go nowhere) until it's back.
   const off = s ? uiMachineOff(s) : "";
   if (off) {
-    // "Off" by its machine's icon (dimmed), the whole of it in its label.
-    pill = uiPill(/^Update/.test(off) ? "Update needed" : "Off", "quiet", { title: `${off}: what it shows is from when it last answered` });
-    actions = [];
-    count = 0;
+    // "Off" by its machine's icon (dimmed), the whole of it in its label. Its
+    // buttons stay: what you answer waits for it, and goes once it's back.
+    pill = uiPill(/^Update/.test(off) ? "Update needed" : "Off", "quiet", { title: `${off}: what it shows is from when it last answered; what you send goes once it's back` });
   }
   // Moving to another machine: that, and nothing to do to it until it's there;
   // waiting to be free, or one that didn't move: a line saying so (uiMoveNote).

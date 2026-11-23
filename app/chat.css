@@ -263,8 +263,13 @@
                         color: var(--text-muted); font-size: var(--caption); text-align: center; }
 .chat-dock .dock-note.interrupted { color: var(--text); }
 .chat-dock .dock-note .cut-mark { color: var(--warn, var(--warning)); }
-/* Its machine doesn't answer: in place of the box, saying so. */
-.chat-dock .dock-note.machine-off { padding: 14px 12px; }
+/* Its machine doesn't answer: over the box, saying what you send waits. */
+.chat-dock .dock-note.machine-off { padding: 4px 12px 6px; }
+/* A message waiting for its machine: under its bubble, and Cancel. */
+.msg.user.waiting .bubble { opacity: .7; }
+.msg-waits { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 4px;
+             color: var(--text-muted); font-size: var(--caption); }
+.msg-waits .clock { width: 1em; height: 1em; display: inline-grid; }
 .chat-dock .dock-note .machine { flex: none; width: 1.2em; height: 1.2em; display: inline-grid; }
 .chat-dock .dock-note .machine svg { width: 100%; height: 100%; display: block; }
 .text-btn { min-height: 36px; padding: 6px 8px; color: var(--link); font-weight: 700; white-space: nowrap; border-radius: var(--radius-control); }

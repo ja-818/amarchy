@@ -258,7 +258,7 @@ html { touch-action: manipulation; }
 .ui-machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-machine.off { color: var(--machine-off-color); }
 .ui-machine.head { max-width: 30%; }
-.tcard.machine-off > :not(.tcard-head), .tcard.machine-off > .tcard-head > :not(.tpill) { opacity: var(--machine-off-opacity); }
+.tcard.machine-off > :not(.tcard-head):not(.tcard-actions), .tcard.machine-off > .tcard-head > :not(.tpill):not(.tcard-side-one):not(.tcard-side) { opacity: var(--machine-off-opacity); }
 .ui-move { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--move-color); font-size: var(--caption); line-height: 1.35; }
 .ui-move .move-mark { flex: none; width: 1.15em; height: 1.15em; display: inline-grid; }
 .ui-move .move-mark svg { width: 100%; height: 100%; display: block; }

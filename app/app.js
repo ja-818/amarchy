@@ -380,8 +380,14 @@ function aheadOn(v) {
 // waking with it), until the server's list says how it stands: working, or
 // what you said in its conversation (a turn that was over before a list
 // came). A command (/model) starts no turn: it stays where it is.
+// Its machine out of reach: kept on this one, sent once it's back (bin/amarchy's outbox): said so.
+function waitsSaid(r) {
+  if (r && r.waits) toast(`Sends when ${r.waits.label || "its machine"} is back`);
+  return r;
+}
+
 function sendTo(id, body) {
-  const done = api(chatPath(id, "/send"), body);
+  const done = api(chatPath(id, "/send"), body).then(waitsSaid);
   const s = app.view && app.view.sessions.find((x) => x.id === id);
   if (!s || s.setup || String((body && body.text) || "").trimStart().startsWith("/")) return done;
   const you = (r) => (r.today || {}).you_at || 0;
@@ -900,9 +906,10 @@ function refresh() {
   if (app.desk) { deskList(); boardRefresh(); }
   else if (!app.session) renderHome();
   else uiWhenStill(`head-${app.session.id}`, () => { if (app.session) app.session.renderHeader(); });      // its preview, as the list has it
-  // Its machine went off, or came back (machines): its chat says so.
+  // Its machine went off, or came back (machines): its chat says so, and
+  // what waited for it there (sent now, or still waiting).
   const open = (app.session && app.session.chat) || (app.desk && typeof desk !== "undefined" && desk.chat);
-  if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) open.renderDock(); });
+  if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) { open.renderDock(); open.outboxSeen(); } });
   keptListScroll();
 }
 

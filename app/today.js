@@ -355,7 +355,7 @@ function todayPermit(s, choice) {
   todayRedraw();
   todayUndo(`${choice === "allow" ? "Allowed" : "Denied"}: ${s.task || "the chat"}`, () => {
     seenNow(s.id);
-    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice })
+    api(chatPath(s.id, "/answer"), { request_id: p.request_id, choice }).then(waitsSaid)
       .catch((e) => { todayUI.sent.delete(s.id); todayRedraw(); toast(e.message); });
   }, () => { todayUI.sent.delete(s.id); todayRedraw(); });
 }

@@ -1359,6 +1359,7 @@ class Chat {
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
     chatsOpen.set(this.id, this);
+    this.outboxSeen();          // what waits for its machine, as it waits
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
     const es = early ? early.es : new EventSource(streamURL(chatPath(this.id, "/stream")));
@@ -1629,7 +1630,8 @@ class Chat {
   // tells them itself (send).
   post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body) : api(chatPath(this.id, `/${route}`), body);
+    const done = route === "send" ? sendTo(this.id, body)
+      : api(chatPath(this.id, `/${route}`), body).then((r) => (route === "answer" ? waitsSaid(r) : r));
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());
@@ -2995,7 +2997,8 @@ class Chat {
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
     const stopped = !!(this.row && this.row.interrupted);
-    // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
+    // Its machine doesn't answer: what's here is as it last was; what you send
+    // waits for it (kept on this machine) and goes once it's back.
     const off = machineOff(this.row || this.id);
     // Moving to another machine: what it says instead of the box (moving now),
     // or over it (waiting until it's free, one that didn't move): uiMoveNote.
@@ -3009,8 +3012,8 @@ class Chat {
     this.cardKey = key;
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
-      h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
-    else if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
+      h("span", {}, `${off}: what you send goes once ${machineOf(this.row || this.id).label} is back.`)));
+    if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
     else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -3685,6 +3688,8 @@ class Chat {
       const r = await done;
       out.sent = true;
       out.el.classList.remove("sending");
+      // Its machine out of reach: kept on this one, sent once it's back. Says so, with Cancel.
+      if (r && r.waits) return this.outWaits(out, r.waits, text, tray);
       this.settleOutbox();      // (the conversation may have it already)
       if (r && r.waking) toast("Waking Claude with it…");
       if (r && r.queued) this.outDone(out);       // in the broker's queue now: the queue shows it
@@ -3752,6 +3757,54 @@ class Chat {
       if (!it) continue;
       this.claimed.add(it);
       this.outDone(out);
+    }
+  }
+
+  // A message waiting for its machine (out of reach: kept on this one, sent
+  // once it's back, app.view.outbox): "Sends when <label> is back", and
+  // Cancel (its words back in the box). Once sent, as any message.
+  outWaits(out, waits, text = null, tray = []) {
+    out.waits = waits.id;
+    out.el.classList.add("waiting");
+    const cancel = h("button", { class: "text-btn", type: "button", onclick: async () => {
+      cancel.disabled = true;
+      try {
+        await api("/api/outbox/cancel", { id: waits.id });
+        this.outDone(out);
+        if (text !== null) this.takeBack(text, tray);
+      } catch (e) {
+        cancel.disabled = false;
+        toast(e.message);
+      }
+    } }, "Cancel");
+    out.el.append(h("div", { class: "msg-waits" }, glyph("clock", "clock"), h("span", {}, `Sends when ${waits.label || machineOf(this.id).label} is back`), cancel));
+  }
+
+  // What waits for this chat's machine (app.view.outbox: after a reload, or
+  // sent from another device): each as a waiting message; one sent since,
+  // a message on its way until the conversation has it.
+  outboxSeen() {
+    const waiting = ((app.view && app.view.outbox) || []).filter((w) => normKey(w.chat) === this.id && w.kind === "send");
+    const ids = new Set(waiting.map((w) => w.id));
+    for (const out of [...this.outbox]) {
+      if (!out.waits || ids.has(out.waits)) continue;
+      out.waits = null;         // sent: the conversation says it soon
+      out.el.classList.remove("waiting");
+      const note = out.el.querySelector(".msg-waits");
+      if (note) note.remove();
+      out.mark = this.items.length;
+      setTimeout(() => this.outDone(out), 30000);
+      this.settleOutbox();
+    }
+    for (const w of waiting) {
+      if (this.outbox.some((o) => o.waits === w.id)) continue;
+      const out = { text: w.text, key: outKey(w.text), shots: [], tray: [], mark: this.items.length, known: new Set(this.itemKeys),
+                    queued: false, sent: true, el: null };
+      const said = this.userView(w.text);
+      out.el = h("div", { class: "msg user" }, h("div", { class: "bubble" }, ...(said.parts || [said.note || said.summary || w.text])));
+      this.outbox.push(out);
+      this.outboxEl.append(out.el);
+      this.outWaits(out, { id: w.id, label: machineOf(this.id).label }, null);
     }
   }
 
