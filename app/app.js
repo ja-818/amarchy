@@ -2314,6 +2314,10 @@ async function pushState() {
   return Notification.permission === "denied" ? "denied" : "off";
 }
 
+// Said when they're turned on. In the phone app: the home-screen web app,
+// if this phone has it on too, would tell you each one twice.
+const PUSH_ON_SAID = () => phoneApp ? "Notifications on. Had Amarchy on the home screen as a web app? Remove it, or you'll be told twice." : "Notifications on.";
+
 // What this device was last known to want (PUSH_WANT): "on" (notifications
 // were on here), "no" (turned off or dismissed here), nothing (never decided).
 // Off without a "no": the home says so, with one tap to turn them on (pushNotice).
@@ -2423,7 +2427,7 @@ function pushNotice() {
       blocked ? null : uiButton("Turn on", async (e) => {
         const b = e.currentTarget;
         b.disabled = true;
-        try { await pushOn(); toast("Notifications on."); }
+        try { await pushOn(); toast(PUSH_ON_SAID()); }
         catch (err) { toast(err.message); b.disabled = false; pushRefresh(true); }
       }, true)] });
   card.todayData = `push|${push.state}|${want}`;
@@ -2511,7 +2515,7 @@ async function openSettings() {
       kids.push(h("p", {}, "Get a notification when a chat needs you or is done."),
         h("button", { class: "control wide accent", onclick: async (e) => {
           e.currentTarget.disabled = true;
-          try { await pushOn(); toast("Notifications on."); } catch (err) { toast(err.message); }
+          try { await pushOn(); toast(PUSH_ON_SAID()); } catch (err) { toast(err.message); }
           draw();
         } }, "Turn on notifications"));
     } else {
