@@ -389,6 +389,113 @@ and tell the other tracks.
 - **Phones (G)**: the same Go package (`tailnet/`), bound with gomobile, a
   node of the phone's own and its proxy for the app's web view (no serving).
 
+### The phone apps and the push relay (track G)
+
+**Swift and Kotlin, not Tauri mobile** (decided 2026-11-22). Everything a
+phone shell adds lives in the system's own extension points, each a native
+target of its own whatever wraps the web view: the Notification Service
+Extension that decrypts a notification, WidgetKit's widgets, the Share
+Extension; on Android, Firebase's messaging service, an app widget, a share
+intent. Tauri would wrap only the web view, and add a Rust toolchain for
+three architectures and its own generated Xcode and Gradle projects to fight
+for every one of those targets, while sharing nothing with `desktop/` (its
+Rust is the tray, one instance, the local key and the notices' stream, none
+of which a phone has). So each shell is a small native app: a web view on
+the machine's app (`app/`, never a second UI), the desktop's own page
+(`desktop/dist`, the same files) while it isn't showing amarchy, and the
+extensions. `phone/ios` (Swift, an XcodeGen project, iOS 17 and newer) and
+`phone/android` (Kotlin, Android 8 and newer); app id
+`io.github.ja818.amarchy` on both.
+
+- **The page knows it's in the phone app**: `window.amarchyPhone`
+  (`{"version", "platform": "ios"|"android", "relay"}`), set before the app's
+  scripts run, with `call(command, args)` → a promise of the shell's answer:
+  - `push.state` → `"on"|"off"|"denied"|"unsupported"`;
+  - `push.subscribe {"key"}` (the machine's VAPID key, `/api/state`'s `key`)
+    → a subscription as a browser's, `{"endpoint", "keys": {"p256dh",
+    "auth"}}`, plus `"app": {"platform", "version", "device"}`; it asks the
+    system for notifications first, while it's still your tap;
+  - `push.unsubscribe` → `{"endpoint"}` it dropped (or null);
+  - `notes.clear {"tags": [...]}` → that chat's notifications off the lock
+    screen (the page opened it);
+  - `status {"needs", "chats": [{"key", "name", "why"}]}` → the widget's
+    count and names, each time the board changes.
+  The shell tells the page with `amarchy-open` events (`{"go", "ask"}`, as
+  the service worker's message: a notification tapped, a chat's link), and
+  loads `/?ask=<key>#/s/<key>` when the page isn't up yet. There the page
+  registers no service worker for notifications (none can reach a web view)
+  and never says "add it to your Home Screen".
+- **A phone on a machine** is a subscription as a browser's: the page sends
+  `POST /api/push` with what `push.subscribe` gave. Its `endpoint` is the
+  relay's (`<relay>/v1/push/<handle>`), so the machine sends to it as to any
+  push service (RFC 8030, RFC 8291's aes128gcm, VAPID), and 404 or 410 ends
+  it the same way. `"app"` marks it a phone app's, kept with it, with
+  `"server"`: the address it was registered at (`https://<Host>`).
+- **What a phone app's notification carries**: a browser's (`title`,
+  `body`, `tag`, `url`, `ask`, `icon`, `waiting`, `urgent`) plus `server`,
+  `session`, `sound` and `actions` (the desktop notice's: up to three
+  `{"label", "path", "body"}`, each a POST of `body` to `server + path` as
+  the app's page would make it, with `Origin: <server>`). At most 2,700
+  bytes of JSON: the body is cut first, then the actions go. Sent with
+  `Topic` (the tag's SHA-256, its first 16 bytes in base64url: a newer
+  notification for a chat replaces the older), `Urgency: high`, `TTL`.
+- **The relay** (`relay/`, `amarchy-relay`: Go, its standard library only,
+  open source, anyone can run one) is a Web Push service in front of APNs
+  and FCM, and keeps nothing:
+  - `POST /v1/register` `{"platform": "apns"|"apns-sandbox"|"fcm",
+    "token", "app" (the app id), "server_key" (the machine's VAPID key,
+    65 bytes base64url)}` → `{"endpoint"}`. The handle in it is all of that
+    sealed with the relay's secret (AES-256-GCM): no database, and only the
+    machine with that key can send to it, as with Web Push.
+  - `POST /v1/push/<handle>`: `Content-Encoding: aes128gcm` (anything else
+    is refused: it never takes what it could read), at most 2,900 bytes;
+    `Authorization: vapid t=<JWT>, k=<key>`, the handle's key, its `aud` the
+    relay's address and `exp` within 24 hours; `TTL`, `Urgency`, `Topic`.
+    To APNs: `{"aps": {"alert": {"title": "Amarchy", "body": "Something
+    needs you"}, "mutable-content": 1, "sound": "default"}, "p": <the body,
+    base64url>}`, `apns-collapse-id` the topic; to FCM: a data message
+    `{"p"}`, `collapse_key` the topic, high priority. Answers 201; 404 a
+    handle it didn't make; 410 the token is gone (APNs or FCM say so); 400,
+    401, 403, 413, 415 what's wrong with the request; 429 with
+    `Retry-After` over its limits (per device 30 at once then 15 a minute,
+    per address 20 registrations an hour, all set by its environment); 502
+    when APNs or FCM failed.
+  - `GET /v1/health` → `{"ok", "apns", "fcm"}` (which it can send to).
+  - Never logs a token or a payload (a device is the first bytes of its
+    handle's hash). Its secret (`RELAY_SECRET`, older ones in
+    `RELAY_SECRETS` still opened), the APNs key (`APNS_KEY`, `APNS_KEY_ID`,
+    `APNS_TEAM_ID`, `APNS_TOPICS`), FCM's project (`FCM_PROJECT`, its
+    credentials from `FCM_CREDENTIALS` or Google Cloud's own) come from its
+    environment. Deploys: Google Cloud Run's free tier (one instance, so its
+    limits hold), any container host, or a systemd unit.
+- **On the phone**: its push key pair (P-256) and auth secret are made on
+  the phone and never leave it (iOS: the Keychain, shared with its
+  Notification Service Extension; Android: wrapped by the Keystore). The
+  extension (iOS) or the messaging service (Android) decrypts `p` and shows
+  the notification: its buttons (iOS: a category made for them, each asking
+  for Face ID on a locked phone), the badge (`waiting`), the widget's count.
+  Nothing it can decrypt: "Amarchy: open it to see", never content.
+- **A button pressed**: the shell (started in the background for it) POSTs
+  `body` to `server + path` with `Origin: <server>` and `Content-Type:
+  application/json`, as the page does. It fails: a notification says so, and
+  tapped opens the chat.
+- **Reaching the machine**: the Tailscale app, when its VPN is on; else
+  amarchy's own node in the app (`tailnet/mobile`, gomobile: the node and
+  its proxy), its proxy set on the web view (iOS 17's
+  `WKWebsiteDataStore.proxyConfigurations`, Android's `ProxyController`) and
+  on the shell's own requests. The machine's address: `amarchy://open?server=<url>`
+  (Settings in the web app has it), typed on its own page, or found on the
+  tailnet with its own node (each peer's `/api/peer/hello`). Chat links:
+  `amarchy://chat/<machine>/<id>`, as on the desktop.
+- **The share sheet**: what you share (text, a link, pictures) goes to that
+  machine's `POST /api/share?key=<share key>` (`GET /api/share/key`, kept by
+  the shell), as the iPhone's Shortcut does, and the app opens on "Send it
+  to a chat".
+- **The widget** (home and lock screen on iOS, an app widget on Android):
+  "2 need you", from each notification's `waiting` and the page's `status`.
+  No Live Activity: the system shows one from its push as it comes, so the
+  relay and Apple would read it.
+
 ### Your stuff on every machine (track D)
 
 What's yours, not a chat's, is the same on every machine: each keeps a copy,
@@ -449,6 +556,7 @@ up when it's back. No main machine; any one can be off.
 | Agents (Jaken...) and their tasks | The machine they run on (the server, by default) |
 | Automations | The machine they run on; listed together |
 | Web Push to a phone | The machine the phone subscribed on, for every machine's chats |
+| A phone app's notifications | The machine it registered on, for every machine's chats, through the relay (encrypted to the phone) |
 | Desktop notifications | The desktop app, for every machine's chats |
 | Claude's usage limits | Shared (same account): shown once |
 
@@ -554,10 +662,13 @@ the user's account, amarchy installed by cloud-init, joined to their tailnet,
 then "Sign in to Claude" there.
 
 **G. Phone apps and the push relay** (last; Julian has an Apple Developer
-account; the iOS build needs a Mac with Xcode): thin iOS and Android shells around `app/` (Tauri 2 mobile,
-or Swift and Kotlin), widgets, live status, share sheet, notification buttons;
-the relay (open source, free, self-hostable) between the machines and Apple's
-and Google's push.
+account; the iOS build needs a Mac with Xcode): thin iOS and Android shells
+around `app/` in **Swift and Kotlin** (why not Tauri mobile: the contract's
+"The phone apps and the push relay"), widgets, live status, share sheet,
+notification buttons; the relay (open source, free, self-hostable) between
+the machines and Apple's and Google's push. iOS builds and tests in GitHub
+Actions (macOS runners); Android here and in CI. Signing, TestFlight, the
+stores and the relay's deploy are prepared to the last step for Julian.
 
 **H. Tailscale inside the apps** (after B): the desktop and phone apps join the
 tailnet themselves (tsnet / libtailscale), so the user installs nothing else.
