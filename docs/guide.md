@@ -621,9 +621,13 @@ amarchy machines remove omarchy   # both forget the other
 
 **Tailscale, set up for you.** Your machines and devices meet on Tailscale, each
 on your own account. `amarchy tailscale` takes a machine through it, a step at
-a time: installed (on Omarchy with Omarchy's own installer, which also puts its
-Tailscale panel in the bar; on Arch with pacman), its service running, amarchy
-allowed to drive it, signed in (it gets the sign-in link and opens it), on, and
+a time. With no Tailscale on it yet, it offers **amarchy's own node** first
+(`amarchy-tailnet`: Tailscale without installing it, built here and run as a
+service of yours, started for you; see "Tailscale inside the apps" in the plan),
+and installing the system's Tailscale as the other way (on Omarchy with Omarchy's
+own installer, which also puts its Tailscale panel in the bar; on Arch with
+pacman). Then: its service running, amarchy allowed to drive it, signed in (it
+gets the sign-in link and opens it), on, and
 your tailnet's MagicDNS and HTTPS certificates on (it opens the admin page where
 each is turned on). What needs root it asks before doing, in a terminal; run by
 Claude or a script, it says what to run instead. **Settings → Tailscale** in the

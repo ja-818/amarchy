@@ -308,8 +308,10 @@ takes it away; docs/guide.md, "On Omarchy"):
                                         machines), else AMARCHY_URL's. --follow prints it again on every
                                         change, from the board's events, and says when it doesn't answer
   amarchy tailscale [--json] [--no-open]
-                                        Tailscale here, step by step: installed (Omarchy's installer on
-                                        Omarchy), its service running, you allowed to drive it, signed in
+                                        Tailscale here, step by step: with none, amarchy's own node first
+                                        (amarchy-tailnet: nothing to install; started for you), or the
+                                        system's installed (Omarchy's installer on Omarchy); its service
+                                        running, you allowed to drive it, signed in
                                         (the sign-in link, opened), on, and your tailnet's MagicDNS and HTTPS
                                         certificates (the admin page where they're turned on); what needs
                                         root it asks first, in a terminal, else says what to run. Exits 0
@@ -17995,6 +17997,9 @@ def app_handler(st, users, address):
             if what == "login":
                 url, why = tailscale_login()
                 return self.send(200, self.tailscale_view(tailscale_state())) if url else self.error(409, why)
+            if what == "own":       # amarchy's own node started (a user service)
+                why = tailscale_own_start()
+                return self.error(409, why) if why else self.send(200, self.tailscale_view(tailscale_state()))
             if what == "up":
                 why = tailscale_up()
                 return self.error(409, why) if why else self.send(200, self.tailscale_view(tailscale_state()))
@@ -18004,7 +18009,7 @@ def app_handler(st, users, address):
                                            "device off")
                 why = tailscale_switch(str(data.get("account") or ""))
                 return self.error(409, why) if why else self.send(200, self.tailscale_view(tailscale_state()))
-            return self.error(400, "do: login, up or switch")
+            return self.error(400, "do: login, own, up or switch")
 
         def tailscale_view(self, st):
             """tailscale_state for Settings: with it in words, this machine's
@@ -20850,9 +20855,11 @@ TS_LINUX = "https://tailscale.com/download/linux"
 
 
 def tailscale_cli(*args, timeout=8):
-    """tailscale <args>: (exit code, what it printed), 127 when it isn't here."""
+    """tailscale <args> on this computer (the system's, or amarchy's own
+    node's: tailscale_argv): (exit code, what it printed), 127 when there's
+    none."""
     try:
-        r = subprocess.run(["tailscale", *args], capture_output=True, text=True, timeout=timeout,
+        r = subprocess.run(tailscale_argv(list(args)), capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
     except FileNotFoundError:
@@ -20868,16 +20875,28 @@ def tailscale_state():
     (this machine's address), "magicdns", "https", "auth_url" (the sign-in
     link, while one is under way), "accounts" [{id, account, tailnet,
     selected}], "elsewhere" (your machines on another tailnet: [{name,
-    suffix}]), "omarchy", "ready", "steps"}: steps, what's left in order,
-    each {"do", "words", and a "url" to open or a "command" to run}."""
+    suffix}]), "omarchy", "node" ("system", or "own": amarchy's own node, track
+    H), "ready", "steps"}: steps, what's left in order, each {"do", "words",
+    and a "url" to open or a "command" to run ("root": it needs sudo); one
+    marked "alt" is another way to the step before it."""
     import pwd
     me = pwd.getpwuid(os.getuid()).pw_name
     omarchy = bool(shutil.which("omarchy-install-service-tailscale"))
-    out = {"installed": bool(shutil.which("tailscale")), "running": False, "state": None, "operator": None,
+    # Which Tailscale: the system's when its daemon answers (or it's there
+    # and amarchy has no node of its own); else amarchy's own node, when
+    # it's built here; else none yet.
+    own_only = (host_setting("TAILSCALE") or "").lower() == "own"      # (track H's: the system's set aside)
+    system = not own_only and (system_tailscale() or (bool(shutil.which("tailscale")) and not tailnet_bin()))
+    node = "system" if system else "own" if tailnet_bin() else None
+    out = {"installed": node is not None, "running": False, "state": None, "operator": None,
            "account": None, "tailnet": None, "name": None, "magicdns": None, "https": None, "auth_url": None,
-           "accounts": [], "elsewhere": [], "omarchy": omarchy, "ready": False, "steps": []}
+           "accounts": [], "elsewhere": [], "omarchy": omarchy, "node": node, "ready": False, "steps": []}
     steps = out["steps"]
-    if not out["installed"]:
+    if node is None:
+        # amarchy's own node first (nothing else to install: amarchy builds
+        # it), the system's Tailscale the other way.
+        steps.append({"do": "own-install", "words": "Use amarchy's own Tailscale node: nothing else to install",
+                      "command": str(Path(SELF).parent.parent / "tailnet/install.sh"), "root": False})
         if omarchy:
             cmd = "omarchy-install-service-tailscale"
         elif shutil.which("pacman"):
@@ -20885,7 +20904,12 @@ def tailscale_state():
                    f"&& sudo tailscale set --operator={me}")
         else:
             cmd = None
-        steps.append({"do": "install", "words": "Install Tailscale", "command": cmd, "url": None if cmd else TS_LINUX})
+        steps.append({"do": "install", "words": "Or install the system's Tailscale", "command": cmd,
+                      "url": None if cmd else TS_LINUX, "root": True, "alt": True})
+        return out
+    if node == "own" and not (TAILNET_SOCKET.exists() and (tailnet_status_words() or {}).get("running")):
+        steps.append({"do": "own-start", "words": "Start amarchy's own Tailscale node",
+                      "command": f"systemctl --user enable --now {TAILNET_UNIT}", "root": False})
         return out
     code, said = tailscale_cli("status", "--json", "--peers=false")
     try:
@@ -20893,7 +20917,8 @@ def tailscale_state():
     except ValueError:
         status = None
     if not isinstance(status, dict) or not status.get("BackendState"):
-        steps.append({"do": "start", "words": "Start Tailscale's service", "command": "sudo systemctl enable --now tailscaled"})
+        steps.append({"do": "start", "words": "Start Tailscale's service", "command": "sudo systemctl enable --now tailscaled",
+                      "root": True})
         return out
     out["running"] = True
     code, said = tailscale_cli("debug", "prefs")
@@ -20901,7 +20926,7 @@ def tailscale_state():
         prefs = json.loads(said) if code == 0 else {}
     except ValueError:
         prefs = {}
-    out["operator"] = os.geteuid() == 0 or prefs.get("OperatorUser") == me
+    out["operator"] = os.geteuid() == 0 or prefs.get("OperatorUser") == me or node == "own"     # (its node is yours)
     state = status.get("BackendState")
     tailnet = status.get("CurrentTailnet") or {}
     selfnode = status.get("Self") or {}
@@ -20923,7 +20948,7 @@ def tailscale_state():
     # allowed to, but only when one of those is to be done.
     if not out["operator"] and (state in ("NeedsLogin", "Stopped") or len(out["accounts"]) > 1):
         steps.append({"do": "operator", "words": "Let amarchy drive Tailscale as you",
-                      "command": f"sudo tailscale set --operator={me}"})
+                      "command": f"sudo tailscale set --operator={me}", "root": True})
     if state == "NeedsLogin":
         steps.append({"do": "login", "words": "Sign in to Tailscale", "url": out["auth_url"]})
     elif state == "NeedsMachineAuth":
@@ -20959,7 +20984,15 @@ def tailscale_login(wait=10):
         return None, "Tailscale is signed in already" if st["running"] else "Tailscale isn't running"
     if not st["operator"]:
         return None, "Tailscale doesn't let amarchy drive it yet: sudo tailscale set --operator=" + os.environ.get("USER", "you")
-    p = subprocess.Popen(["tailscale", "up", "--timeout=15m"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    if st["node"] == "own":     # amarchy's own node: its own sign-in (amarchy-tailnet login)
+        try:
+            r = subprocess.run([tailnet_bin(), "login", "--no-open"], capture_output=True, text=True, timeout=wait + 20,
+                               stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return None, f"amarchy's own node gave no sign-in link ({e})"
+        url = next((w for w in r.stdout.split() if re.match(r"https://login\.tailscale\.com/", w)), None)
+        return (url, None) if url else (None, (r.stdout + r.stderr).strip()[:300] or "amarchy's own node gave no sign-in link")
+    p = subprocess.Popen(tailscale_argv(["up", "--timeout=15m"]), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
     end = time.time() + wait
     while time.time() < end:        # the link shows in its status within a moment
@@ -20970,6 +21003,20 @@ def tailscale_login(wait=10):
         if p.poll() not in (None, 0):
             break
     return None, "Tailscale gave no sign-in link (try tailscale up in a terminal)"
+
+
+def tailscale_own_start():
+    """amarchy's own node started, now and from each login (a user service:
+    no root). None, or why not."""
+    r = sh("systemctl", "--user", "enable", "--now", TAILNET_UNIT)
+    if r.returncode != 0:
+        return (r.stderr or r.stdout).strip()[:300] or f"systemctl couldn't start {TAILNET_UNIT}"
+    for _ in range(40):         # its socket, once it's up
+        if TAILNET_SOCKET.exists():
+            _tailnet_own["at"] = 0
+            return None
+        time.sleep(0.25)
+    return f"{TAILNET_UNIT} started, but its node isn't answering yet (amarchy-tailnet status)"
 
 
 def tailscale_up():
@@ -20994,7 +21041,9 @@ def tailscale_switch(which):
 def tailscale_words(st):
     """Where Tailscale stands, in a line."""
     if not st["installed"]:
-        return "Tailscale isn't installed"
+        return "No Tailscale here yet"
+    if st.get("node") == "own":
+        return "amarchy's own node: " + (tailscale_words({**st, "node": "system"}) if st["running"] else "not running")
     if not st["running"]:
         return "Tailscale's service isn't running"
     state = st["state"]
@@ -21049,7 +21098,26 @@ def cmd_tailscale(args):
         if not step or step["do"] in ("magicdns", "https", "switch"):
             break
         print(f"{tailscale_words(st)}. Next: {step['words']}.")
-        if step.get("command"):
+        if step["do"] == "own-start":       # a user service of amarchy's: no root, nothing to ask
+            why = tailscale_own_start()
+            if why:
+                return fail(why)
+        elif step["do"] == "own-install":
+            # amarchy's own node, or else the system's Tailscale (the step after it).
+            other = next((s for s in st["steps"] if s.get("alt")), None)
+            if ask(f"Set up amarchy's own Tailscale node now? It's built here (with Go, asked first): `{step['command']}`"):
+                if subprocess.run([step["command"]]).returncode != 0:
+                    return fail("amarchy's own node: that didn't work")
+            elif other and other.get("command") and ask(f"Then install the system's Tailscale: `{other['command']}`"
+                                                        " (it asks for your password)?"):
+                if subprocess.run(["sh", "-c", other["command"]]).returncode != 0:
+                    return fail("installing Tailscale didn't work")
+            else:
+                print(f"  amarchy's own node (nothing else to install): {step['command']}")
+                if other:
+                    print(f"  Or the system's Tailscale: {other.get('command') or other.get('url')}")
+                return 1
+        elif step.get("command"):
             if not ask(f"Run `{step['command']}` now (it may ask for your password)?"):
                 print(f"  Run it in a terminal: {step['command']}")
                 return 1
@@ -21069,6 +21137,10 @@ def cmd_tailscale(args):
             print("  Waiting until you've signed in…")
             if p is not None:
                 p.wait()
+            else:               # amarchy's own node: until its state says so (ten minutes at most)
+                end = time.time() + 600
+                while time.time() < end and tailscale_state()["state"] == "NeedsLogin":
+                    time.sleep(2)
         elif step["do"] == "approve":
             print("  Approve it at:")
             show(step["url"])
