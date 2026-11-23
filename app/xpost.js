@@ -357,6 +357,14 @@ function xpostMedia(items, media, pictures = []) {
   };
   items.forEach((src, at) => {
     const url = media(src);
+    if (XPOST_VIDEO.test(src) && window.amarchyDesktopMedia && !window.amarchyDesktopMedia.sounds) {
+      // The desktop app on a computer without GStreamer's audio output: its
+      // page loads no media (one would end it: desktop/src/sound.rs), so a
+      // video is a link, your browser plays it.
+      box.append(h("div", { class: "xpost-tile video" },
+        h("a", { class: "xpost-missing", href: url, target: "_blank", rel: "noopener" }, "Open the video")));
+      return;
+    }
     if (XPOST_VIDEO.test(src)) {
       // A video: its first frame (#t: Safari draws none before it plays), X's
       // play button and its length; a tap plays it there, with its controls.

@@ -1,8 +1,9 @@
 # desktop/install.sh when pacman can't get what it asks for, as on an Omarchy
 # whose package list is older than its mirror (a 404): the GStreamer plugins
 # of its sounds and microphone never stand in the way of building the app
-# (built anyway, and it says its sounds and dictation wait on them, with the
-# command); Rust that pacman
+# (built anyway, and it says it has no microphone and no video without them,
+# its chimes played anyway, with the command; a system update half done,
+# "breaks dependency", said as that); Rust that pacman
 # can't get comes from mise instead (asked first); a package the build needs
 # that pacman can't get: not built, why in plain words, no system update
 # suggested (no -Sy, no -Syu); each says how it went in the line amarchy's
@@ -45,12 +46,20 @@ st = json.loads(f.read_text())
 a = sys.argv[1:]
 with open(Path(__file__).with_name("asked.log"), "a") as log:
     log.write("pacman " + " ".join(a) + "\n")
+if a == ["-Qq"]:
+    print("\n".join(st["installed"] + st.get("held", [])))
+    sys.exit(0)
 if a[:1] == ["-Qq"]:
     sys.exit(0 if a[1] in st["installed"] else 1)
 if a[:1] == ["-Qqo"]:
     sys.exit(1)
 if a[:1] == ["-S"]:
     pkgs = [p for p in a[1:] if not p.startswith("-")]
+    if st.get("broken") and any(p in st["broken"] for p in pkgs):
+        print("error: failed to prepare transaction (could not satisfy dependencies)", file=sys.stderr)
+        print(":: installing gstreamer (1.28.9-3) breaks dependency 'gstreamer=1.28.9-1' required by gst-plugins-bad-libs",
+              file=sys.stderr)
+        sys.exit(1)
     gone = [p for p in pkgs if p in st["gone"]]
     if gone:
         for p in gone:
@@ -169,12 +178,27 @@ def main():
     check("gst-plugin-pipewire" in state["installed"] and "gst-plugins-base" in state["installed"],
           "after the 404, each on its own: the ones pacman can get come (PipeWire's)")
     check("older than its mirror" in out and "a 404" in out, "pacman's 404 said in words")
-    check("The desktop app's sounds and dictation wait on: gst-plugins-good" in out
-          and "sudo pacman -S --needed gst-plugins-good" in out and "plays its chimes itself" in out,
-          "its sounds and dictation wait on the one missing, with the command")
+    check("no microphone (dictation) and no video until these are installed: gst-plugins-good" in out
+          and "sudo pacman -S --needed gst-plugins-good" in out and "Its chimes play anyway" in out,
+          "no microphone and no video without the one missing, said, with the command (its chimes play)")
     check("-Sy" not in out.replace("-Syu), yours to decide", ""), "no partial update suggested (-Sy)")
-    check(status(home).startswith("installed") and "its sounds and dictation wait on gst-plugins-good" in status(home),
-          f"the summary line says so ({status(home)})")
+    check(status(home).startswith("installed") and "no microphone and no video in it until gst-plugins-good" in status(home)
+          and "older than its mirror" in status(home), f"the summary line says so, and why ({status(home)[:140]})")
+
+    # ---- a system update half done (Julian's M5): "breaks dependency".
+    print("a system update half done")
+    home, fake, path = sandbox({"installed": [], "gone": [], "broken": ["gst-plugins-good", "gst-plugins-base", "gst-plugin-pipewire"],
+                                "held": ["linux-aurora", "m1n1-aurora", "uboot-aurora"]})
+    homes.append(home)
+    out, code = run(home, path)
+    check(code == 0 and (home / ".local/bin/amarchy-desktop").is_file(), f"built and installed all the same (exit {code})")
+    check("halfway through a system update" in out and "breaks dependency 'gstreamer=1.28.9-1'" in out,
+          "said: a system update half done, with pacman's line")
+    check("sudo pacman -Syu --ignore linux-aurora,m1n1-aurora,uboot-aurora" in out,
+          "finish it first, the Apple Silicon kernel and boot packages held back")
+    check("pacman -Sy " not in out and "never updates your system" in out, "never run, never a partial update")
+    check("no microphone and no video in it until" in status(home) and "halfway through a system update" in status(home),
+          "the summary line says why too")
 
     # ---- Rust: pacman can't get it, mise can (asked first).
     print("Rust: a 404, then mise")
@@ -210,7 +234,7 @@ def main():
     snippet = (ROOT / "install.sh").read_text()
     piece = snippet[snippet.index("# ---- the desktop app (track B): how it went"):snippet.index("# ---- end of the desktop app (track B)\n", snippet.index("# ---- the desktop app (track B): how it went"))]
     for said, bold in (("not built: it needs rust to build. pacman couldn't download them", True),
-                       ("installed (Amarchy in your launcher); its sounds and dictation wait on gst-plugins-good", False)):
+                       ("installed (Amarchy in your launcher); no microphone and no video in it until gst-plugins-good are installed (its chimes play)", False)):
         r = subprocess.run(["bash", "-c", "set -euo pipefail; say() { printf 'BOLD:%s\\n' \"$*\"; }; desktop_said=\"$1\"\n" + piece
                             + "\necho done", "x", said], capture_output=True, text=True)
         line = r.stdout.splitlines()[0] if r.stdout else ""

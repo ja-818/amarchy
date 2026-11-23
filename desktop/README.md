@@ -94,9 +94,9 @@ python3 test/sound-test.py                          # GStreamer without its plug
                                                     # once; installed: it starts again; a sound's crash
                                                     # isn't blamed on the GPU
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
-python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
-                                                    # built anyway without the sounds' and mic's, mise's
-                                                    # Rust, why
+python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404,
+                                                    # a system update half done): built anyway without
+                                                    # the sounds' and mic's, mise's Rust, why
 python3 test/compare.py                             # the window next to Chromium, phone and wide: the
                                                     # same layout (boxes to 3 px), side by side pictures
 ```

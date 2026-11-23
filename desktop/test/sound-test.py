@@ -189,6 +189,10 @@ def main():
             r = w.js("const v = document.createElement('video'); v.muted = true; v.src = '/sound/herald#t=0.1'; document.body.append(v);"
                      " try { await v.play(); return 'played'; } catch (e) { return e.name; } finally { v.remove(); }")
             check(r == "NotSupportedError", f"nor a <video> ({r})")
+            r = w.js("(() => { const b = xpostMedia(['clip.mp4'], () => '/sound/herald'); document.body.append(b);"
+                     " const a = b.querySelector('a.xpost-missing'); const out = [a && a.textContent, a && a.target,"
+                     " !!b.querySelector('video')]; b.remove(); return out; })()")
+            check(r == ["Open the video", "_blank", False], f"a post's video: a link to it (your browser plays it), no <video> ({r})")
             r = w.js(WEB_AUDIO)
             check(isinstance(r, list) and len(r) == 2, f"Web Audio (a context, a tone, a .wav decoded) fails in words ({r})")
             w.js("window.__stop = playSound('/sound/kalimba'); 1")
