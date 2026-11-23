@@ -18,6 +18,7 @@ opened, what it opens").
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
 | `src/journal.rs` | Its log (below) |
+| `src/tailnet.rs` | amarchy's own Tailscale node, when it's this computer's: its sign-in (the own page's **Sign in to Tailscale**) and its proxy, for the window (WebKit's proxy settings, never for 127.0.0.1) and the notices |
 | `dist/` | Its own page, while the window isn't showing amarchy: looking for it, which one, why not |
 | `install.sh` | Built and installed on the machine it runs on (amarchy's `install.sh` runs it on a computer with a desktop) |
 | `amarchy.desktop` | Its launcher entry (and `amarchy.desktop.hbs`, the same for Tauri's packages) |
@@ -64,7 +65,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # local key, pairing, the chooser, links, the tray,
                                                     # its size, no white flash, its page's own words, its
                                                     # notifications (buttons, a click, closed, a chime,
-                                                    # a restart)
+                                                    # a restart), its self-healing, amarchy's own
+                                                    # Tailscale node (its sign-in, through its proxy)
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
 python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
                                                     # built anyway without the mic's, mise's Rust, why

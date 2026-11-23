@@ -213,6 +213,45 @@ func TestNode(t *testing.T) {
 	if !strings.Contains(string(rest), "hello from the phone") {
 		t.Errorf("through its CONNECT tunnel: %q", rest)
 	}
+	// As WebKit does it: asked for the credential (407), its next request
+	// on the same connection names the proxy itself, the real host only in
+	// its Host header; then origin-form requests with a Host header.
+	c, _ = net.Dial("tcp", pu.Host)
+	br = bufio.NewReader(c)
+	fmt.Fprintf(c, "CONNECT phone.tail-scale.ts.net:9090 HTTP/1.1\r\nHost: phone.tail-scale.ts.net:9090\r\n\r\n")
+	if s, _ := br.ReadString('\n'); !strings.Contains(s, "407") {
+		t.Fatalf("no credential: %q", s)
+	}
+	for {
+		l, _ := br.ReadString('\n')
+		if l == "\r\n" || l == "" {
+			break
+		}
+	}
+	io.ReadFull(br, make([]byte, len("this proxy is amarchy's")))
+	fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\nHost: phone.tail-scale.ts.net:9090\r\nProxy-Authorization: %s\r\n\r\n", pu.Host, auth)
+	if s, _ := br.ReadString('\n'); !strings.Contains(s, "200") {
+		t.Fatalf("WebKit's retry (CONNECT to the proxy itself, the host in Host): %q", s)
+	}
+	for {
+		l, _ := br.ReadString('\n')
+		if l == "\r\n" || l == "" {
+			break
+		}
+	}
+	fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: phone\r\nConnection: close\r\n\r\n")
+	rest, _ = io.ReadAll(br)
+	c.Close()
+	if !strings.Contains(string(rest), "hello from the phone") {
+		t.Errorf("through WebKit's retried tunnel: %q", rest)
+	}
+	c, _ = net.Dial("tcp", pu.Host)
+	fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: phone.tail-scale.ts.net:9090\r\nProxy-Authorization: %s\r\nConnection: close\r\n\r\n", auth)
+	rest, _ = io.ReadAll(c)
+	c.Close()
+	if !strings.Contains(string(rest), "hello from the phone") {
+		t.Errorf("an origin-form request, its host in Host: %q", rest)
+	}
 	for _, tc := range []struct {
 		host, auth string
 		code       string

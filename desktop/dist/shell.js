@@ -11,10 +11,13 @@ function render(s) {
   if (key === shown) return;
   shown = key;
   const title = { opening: "Opening Amarchy…", choose: "Which amarchy?", nothing: "Can't find your amarchy",
-                  failed: `Can't reach ${s.label || "amarchy"}` }[s.kind] || "Amarchy";
+                  failed: `Can't reach ${s.label || "amarchy"}`, signin: "Sign in to Tailscale" }[s.kind] || "Amarchy";
   $("title").textContent = title;
   document.title = s.kind === "opening" ? "Amarchy" : `Amarchy · ${title}`;
-  const why = s.kind === "choose" ? "Several of yours answer on your tailnet. This computer opens the one you pick from now on." : s.why || "";
+  const why = s.kind === "choose" ? "Several of yours answer on your tailnet. This computer opens the one you pick from now on."
+    : s.kind === "signin" ? (s.waiting ? "Waiting for you to sign in, in your browser…"
+      : "This computer reaches your amarchy through Tailscale, with amarchy's own node (nothing else to install). Sign in with the Tailscale account your other machines use.")
+    : s.why || "";
   $("why").textContent = why;
   $("why").hidden = !why;
   const list = $("machines");
@@ -31,6 +34,8 @@ function render(s) {
     return b;
   }));
   list.hidden = s.kind !== "choose";
+  $("signin").hidden = s.kind !== "signin";
+  $("signin-go").textContent = s.waiting ? "Open the sign-in page again" : "Sign in to Tailscale";
   $("address").hidden = !["nothing", "failed"].includes(s.kind);
   $("actions").hidden = !["nothing", "failed"].includes(s.kind);
   $("error").hidden = true;
@@ -54,6 +59,10 @@ $("address").addEventListener("submit", (e) => {
   if (address) act(() => invoke("use_address", { address }));
 });
 $("retry").addEventListener("click", () => act(() => invoke("retry")));
+$("signin-go").addEventListener("click", async () => {
+  $("error").hidden = true;
+  try { await invoke("sign_in"); } catch (e) { $("error").textContent = String(e); $("error").hidden = false; }
+});
 
 async function poll() {
   try { render(await invoke("status")); } catch (e) { /* the app is busy: next time */ }
