@@ -97,14 +97,38 @@ struct Notice: Equatable {
         }
     }
 
-    /// The notification's sound: the chime the machine picked, when the app
-    /// has it (its WAV ones; any other, iOS's own), none when it's off.
-    var notificationSound: UNNotificationSound? {
-        switch sound {
-        case "off": return nil
-        case let name? where AmarchyLink.okPart(name, most: 40): return UNNotificationSound(named: UNNotificationSoundName("\(name).wav"))
-        default: return .default
-        }
+    /// amarchy's own chimes (bin/amarchy's CHIMES), each in the app's bundle
+    /// as App/Sounds/<name>.caf (phone/ios/sounds.sh): iOS rings a
+    /// notification's sound from the app's bundle only, the extension's own
+    /// doesn't count.
+    static let chimes = ["kalimba", "vibraphone", "tine", "fairy", "ocean", "elementary", "herald"]
+
+    /// The sound file for a chime the machine named, when it's one of
+    /// amarchy's; nil for any other (a chime of your own the app hasn't).
+    static func chimeFile(_ name: String?) -> String? {
+        guard let name = name?.lowercased(), chimes.contains(name) else { return nil }
+        return "\(name).caf"
+    }
+
+    /// The notification's sound: the chime picked in amarchy's Settings (or
+    /// your assistant's own), as the desktop app rings it; iOS's own when
+    /// it's none of amarchy's, or none was named.
+    var notificationSound: UNNotificationSound {
+        Self.chimeFile(sound).map { UNNotificationSound(named: UNNotificationSoundName($0)) } ?? .default
+    }
+
+    /// As the extension shows it: one per chat (`tag`), the badge, its
+    /// chime, time-sensitive when it's urgent, and what the app needs of it.
+    var content: UNMutableNotificationContent {
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body ?? ""
+        if let tag { c.threadIdentifier = tag }
+        if let waiting { c.badge = NSNumber(value: waiting) }
+        c.sound = notificationSound
+        c.interruptionLevel = urgent ? .timeSensitive : .active
+        c.userInfo = userInfo
+        return c
     }
 }
 

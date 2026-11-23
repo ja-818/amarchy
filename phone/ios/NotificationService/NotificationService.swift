@@ -58,15 +58,7 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 
     static func content(for notice: Notice) -> UNMutableNotificationContent {
-        let c = UNMutableNotificationContent()
-        c.title = notice.title
-        c.body = notice.body ?? ""
-        if let tag = notice.tag { c.threadIdentifier = tag }
-        if let n = notice.waiting { c.badge = NSNumber(value: n) }
-        c.sound = notice.notificationSound
-        c.interruptionLevel = notice.urgent ? .timeSensitive : .active
-        c.userInfo = notice.userInfo
-        return c
+        notice.content
     }
 
     static var unreadable: UNNotificationContent {
