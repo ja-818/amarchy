@@ -467,7 +467,10 @@ class TermPane {
     const mouse = this.term.modes.mouseTrackingMode !== "none";
     const unit = mouse ? cell * TMUX_WHEEL : cell;
     this.scrolled = (this.scrolled || 0) + px;
-    const n = Math.trunc(this.scrolled / unit);
+    // Whole turns, but a hair short of one is one: a finger's positions are
+    // fractions of a pixel (a phone's, at 3x), and a swipe of three turns'
+    // worth came out 239.99997 px of 240, one turn short.
+    const n = Math.trunc(this.scrolled / unit + Math.sign(this.scrolled) * 1e-3);
     if (!n) return;
     this.scrolled -= n * unit;
     if (!mouse) return this.term.scrollLines(n);
