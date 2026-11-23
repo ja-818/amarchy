@@ -1,0 +1,14 @@
+{
+  "source": "local",
+  "min_release_age": "1h",
+  "upstream": {
+    "watch": {
+      "git_branch": "https://github.com/ja-818/amarchy.git",
+      "branch": "main",
+      "version": "r{count}.g{commit:.7}",
+      "variables": {
+        "_commit": "{commit}"
+      }
+    }
+  }
+}
