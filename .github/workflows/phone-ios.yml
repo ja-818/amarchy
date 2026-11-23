@@ -149,15 +149,14 @@ jobs:
                       shutil.copy(f, os.path.join(out, where + "-" + re.sub(r"[^\w.-]+", "_", name)))
           EOF
           fi
-          # The installed app as the simulator shows it, opened by its link.
+          # The installed app as the simulator shows it, started as a person
+          # starts it: on the machine the last UI test left it keeping.
           udid="${{ steps.sim.outputs.udid }}"
           if xcrun simctl get_app_container "$udid" io.github.ja818.amarchy >/dev/null 2>&1; then
-            xcrun simctl openurl "$udid" "amarchy://open?server=http://127.0.0.1:$SERVER_PORT" || true
-            sleep 12
-            xcrun simctl io "$udid" screenshot "$shots/simulator-board.png" || true
-            xcrun simctl openurl "$udid" "amarchy://chat/testbox/desk-fix" || true
-            sleep 6
-            xcrun simctl io "$udid" screenshot "$shots/simulator-chat.png" || true
+            xcrun simctl terminate "$udid" io.github.ja818.amarchy 2>/dev/null || true
+            xcrun simctl launch "$udid" io.github.ja818.amarchy || true
+            sleep 15
+            xcrun simctl io "$udid" screenshot "$shots/simulator-app.png" || true
           fi
           ls -la "$shots" "$shots/tests"
 

@@ -45,6 +45,23 @@ final class AmarchyUITests: XCTestCase {
         return text
     }
 
+    /// Text typed into the own page's address box, checked there (a fresh
+    /// simulator's first keyboard can take its time to take keys).
+    private func type(_ text: String, into app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let field = app.webViews.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "the address box", file: file, line: line)
+        for _ in 0..<3 {
+            field.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 10)
+            if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
+            }
+            field.typeText(text)
+            if (field.value as? String)?.lowercased() == text.lowercased() { return }
+        }
+        XCTFail("couldn't type \(text) into the address box: it has \(field.value ?? "nothing")", file: file, line: line)
+    }
+
     private func shot(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -63,9 +80,7 @@ final class AmarchyUITests: XCTestCase {
         shot(app, "1-own-page")
 
         // A wrong address says why, on the page, and it stays.
-        let field = app.webViews.textFields.firstMatch
-        field.tap()
-        field.typeText("http://elsewhere.example")
+        type("http://elsewhere.example", into: app)
         app.webViews.buttons["Open"].tap()
         let why = app.staticTexts["Your amarchy's address starts with https:// (Tailscale gives it its certificate)"]
         XCTAssertTrue(why.waitForExistence(timeout: 10))
@@ -78,10 +93,7 @@ final class AmarchyUITests: XCTestCase {
         try XCTSkipIf(server.isEmpty, "no test server (AMARCHY_TEST_SERVER)")
         let app = launch()
         probe(app, says: #""title":"Can't find your amarchy""#)
-        let field = app.webViews.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 20))
-        field.tap()
-        field.typeText(server)
+        type(server, into: app)
         app.webViews.buttons["Open"].tap()
 
         // The machine's board, its chats on it.
@@ -98,15 +110,26 @@ final class AmarchyUITests: XCTestCase {
         try XCTSkipIf(server.isEmpty, "no test server (AMARCHY_TEST_SERVER)")
         let app = launch()
         probe(app, says: #""title":"Can't find your amarchy""#)
-        // (XCTest starts the app again for a link: the app opened by one.)
+        // The app started by its link (XCTest starts it again, with the
+        // link, and the same arguments: without -AmarchyForget from now on,
+        // so what it keeps is kept).
+        app.launchArguments.removeAll { $0 == "-AmarchyForget" }
         app.open(try XCTUnwrap(URL(string: "amarchy://open?server=\(server)")))
         probe(app, says: "Fix the login", within: 60)
         shot(app, "4-opened-by-link")
 
-        // A chat's link: told to the page, which goes to the chat.
-        app.open(try XCTUnwrap(URL(string: "amarchy://chat/testbox/desk-fix")))
-        probe(app, says: ##""hash":"#/s/desk-fix""##, within: 45)
+        // A chat's link while it's open (as the system gives it, from
+        // another app): told to the page, which goes to the chat.
+        XCUIDevice.shared.system.open(try XCTUnwrap(URL(string: "amarchy://chat/testbox/desk-docs")))
+        let confirm = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+        if confirm.waitForExistence(timeout: 4) { confirm.tap() }
+        probe(app, says: ##""hash":"#/s/desk-docs""##, within: 45)
         shot(app, "5-a-chat-by-link")
+
+        // A chat's link starting the app: the kept machine, on that chat.
+        app.open(try XCTUnwrap(URL(string: "amarchy://chat/testbox/desk-fix")))
+        probe(app, says: ##""hash":"#/s/desk-fix""##, within: 60)
+        shot(app, "6-the-app-started-on-a-chat")
 
         // Kept: the next start opens the machine without asking.
         app.terminate()
@@ -122,6 +145,6 @@ final class AmarchyUITests: XCTestCase {
         probe(app, says: #""status":"signin""#, within: 90)
         XCTAssertTrue(app.staticTexts["Sign in to Tailscale"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.webViews.buttons["Sign in to Tailscale"].exists)
-        shot(app, "6-own-node-sign-in")
+        shot(app, "7-own-node-sign-in")
     }
 }
