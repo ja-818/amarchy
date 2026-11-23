@@ -2,14 +2,35 @@
 // last 2 MB, then desktop.log.1), readable without a terminal open. What it
 // says itself, and everything written to its stderr (GTK's and WebKit's
 // warnings, a panic), still sent on to where stderr went (a terminal, the
-// journal).
+// journal). The last lines on stderr are kept at hand too: what its page's
+// process said before it crashed says why (platform.rs).
 
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const KEEP: u64 = 2_000_000;
+const LATELY: usize = 200;
+
+/// The last lines on stderr, and when each came.
+static SAID: Mutex<VecDeque<(Instant, String)>> = Mutex::new(VecDeque::new());
+
+/// What was written to stderr in the last `within` (GTK, WebKit, GStreamer), oldest first.
+pub fn said_lately(within: Duration) -> Vec<String> {
+    let said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    said.iter().filter(|(at, _)| at.elapsed() <= within).map(|(_, l)| l.clone()).collect()
+}
+
+fn heard(line: &str) {
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    if said.len() == LATELY {
+        said.pop_front();
+    }
+    said.push_back((Instant::now(), line.to_string()));
+}
 
 pub fn file() -> PathBuf {
     crate::target::state_dir().join("desktop/desktop.log")
@@ -142,6 +163,7 @@ fn take_stderr() {
                     continue;
                 }
                 write(&format!("stderr {line}"));
+                heard(&line);
                 if let Some(e) = STDERR.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
                     let _ = writeln!(e, "{line}");
                 }
@@ -153,6 +175,17 @@ fn take_stderr() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn said_lately() {
+        super::heard("GStreamer element autoaudiosink not found. Please install it");
+        let said = super::said_lately(std::time::Duration::from_secs(5));
+        assert_eq!(said.last().map(String::as_str), Some("GStreamer element autoaudiosink not found. Please install it"));
+        for i in 0..super::LATELY + 5 {
+            super::heard(&format!("line {i}"));
+        }
+        assert_eq!(super::said_lately(std::time::Duration::from_secs(5)).len(), super::LATELY);
+    }
+
     #[test]
     fn when() {
         let t = super::now();

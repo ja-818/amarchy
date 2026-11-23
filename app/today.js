@@ -784,6 +784,8 @@ function missionSoundWarm() {
   const src = "/sound/mission";
   const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   if ((app.view || {}).sound === "off" || !Offline || typeof sounds === "undefined" || sounds.buffers.has(src)) return;
+  // The desktop app plays them itself here (its page can't: sound.rs): nothing to decode.
+  if (window.amarchyDesktopMedia && !window.amarchyDesktopMedia.sounds) return;
   setTimeout(async () => {
     try {
       const res = await fetch(src);

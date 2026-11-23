@@ -30,8 +30,14 @@
     "homepage": "https://github.com/ja-818/amarchy",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "linux": {
-      "deb": { "desktopTemplate": "amarchy.desktop.hbs" },
-      "rpm": { "desktopTemplate": "amarchy.desktop.hbs" }
+      "deb": {
+        "desktopTemplate": "amarchy.desktop.hbs",
+        "depends": ["gstreamer1.0-plugins-good", "gstreamer1.0-plugins-base", "gstreamer1.0-pipewire"]
+      },
+      "rpm": {
+        "desktopTemplate": "amarchy.desktop.hbs",
+        "depends": ["gstreamer1-plugins-good", "gstreamer1-plugins-base", "pipewire-gstreamer"]
+      }
     }
   }
 }

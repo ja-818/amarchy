@@ -4,8 +4,8 @@ helpers.lua), with Hyprland's `hl` a fake that keeps the window rules it's
 given: Super+Alt+A bound, and the desktop app's window (class amarchy)
 see-through as the terminals are in each of Omarchy's window modes:
 Transparent (Omarchy's standard transparency, the terminals' rule), Opaque
-and Glassy (no rule of its own: theirs apply), and none when you ask for a
-solid window or Omarchy has no transparent_window.
+and Glassy (no rule of its own: theirs apply), and none when Omarchy has no
+transparent_window.
 
 Needs lua (5.4) and a checkout of Omarchy (basecamp/omarchy, branch
 quattro) in OMARCHY_SRC (default /tmp/omarchy-src/omarchy).
@@ -42,7 +42,6 @@ hl = any("hl")
 dofile(src .. "/default/hypr/helpers.lua")
 local bind = o.bind
 o.bind = function(keys, ...) print("bind " .. keys) return bind(keys, ...) end
-if setup == "solid" then amarchy = { transparent = false } end
 if setup == "old" then o.transparent_window = nil end
 dofile(file)
 """
@@ -93,9 +92,6 @@ def main():
         check("the toggles where Omarchy keeps them ($XDG_STATE_HOME's when set)",
               [x for x in out if x.startswith("rule")] == [terminals], out)
         (toggles / "window-glassy.lua").unlink()
-        out = run("solid")
-        check("amarchy = { transparent = false }: a solid window", not any(x.startswith("rule") for x in out)
-              and "bind SUPER + ALT + A" in out, out)
         out = run("old")
         check("an Omarchy without transparent_window: the key only", out == ["bind SUPER + ALT + A"], out)
     finally:

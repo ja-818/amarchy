@@ -120,7 +120,8 @@ On a computer's browser:
 | `Ctrl+Alt+O` | The chat's terminal in a Ghostty window (on a desktop with Ghostty) |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, each with its key** |
 
-Every action is also a command: `amarchy help`.
+Every action is also a command: `amarchy help`. On Omarchy, **Super + Alt + A** brings amarchy to
+the front from anywhere (`amarchy key` picks another).
 
 ## More
 
