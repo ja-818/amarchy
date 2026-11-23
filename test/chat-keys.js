@@ -251,13 +251,18 @@ async function run(browser, layout, port) {
   await p.keyboard.press("Control+Alt+KeyT");
   check(as, await until(p, () => (app.desk ? !sideTab() : app.session.mode === "chat") && document.activeElement === __chat().input), "again: back to the chat, the keys in its box");
 
-  // Ctrl+Alt+Space: the menu, a chat by its name as you type.
+  // Ctrl+Alt+Space: nothing of amarchy's (Omarchy's dictation is on Alt+Space).
   await p.keyboard.press("Control+Alt+Space");
+  await sleep(250);
+  check(as, await p.evaluate(() => !document.querySelector(".picker, .sheet-back")), "Ctrl+Alt+Space: nothing of amarchy's");
+
+  // Ctrl+Alt+M: the menu, a chat by its name as you type.
+  await p.keyboard.press("Control+Alt+KeyM");
   const menu = () => p.evaluate(() => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop(); return m ? m.innerText : ""; });
   await until(p, () => !!document.querySelector(".picker, .sheet-back"));
   const m0 = await menu();
   check(as, /New chat/.test(m0) && !/Docs: the keys page/.test(m0),
-        `Ctrl+Alt+Space: the menu, no chats in it before you type (${JSON.stringify(m0.slice(0, 300))})`);
+        `Ctrl+Alt+M: the menu, no chats in it before you type (${JSON.stringify(m0.slice(0, 300))})`);
   await sleep(500);
   await shot("menu");
   if (desk) await p.keyboard.type("keys page");
@@ -270,7 +275,7 @@ async function run(browser, layout, port) {
 
   // Ctrl+Alt+K: the keys, the same on both.
   await p.keyboard.press("Control+Alt+KeyK");
-  check(as, await until(p, () => /Ctrl\+Alt\+Space/.test((document.querySelector(".sheet") || {}).innerText || "") && /Esc/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /Esc/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

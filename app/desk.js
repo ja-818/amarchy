@@ -1492,14 +1492,16 @@ function chime(v) {
 // a Mac too (Option alone types é and ñ, and jumps words), a box and a
 // terminal type nothing with it. The arrows move: ← back, → into the chat
 // lit, ↑ ↓ the chat before or after. The rest each do one thing; what else
-// there is to do is in the menu (Space). Esc is Claude Code's: it stops
-// Claude (chat.js navKey); plain keys only move, or type.
+// there is to do is in the menu (M). Never Space: Alt+Space (and Right Alt)
+// is Omarchy's dictation, and a desktop can take Ctrl+Alt+Space for it too.
+// Esc is Claude Code's: it stops Claude (chat.js navKey); plain keys only
+// move, or type.
 
 const APP_KEYS = {
   ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
   ArrowUp: (e) => step(-1, e.repeat), ArrowDown: (e) => step(1, e.repeat),
   Enter: () => boardNew(), NumpadEnter: () => boardNew(),
-  Space: () => deskMenu(),
+  KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
   KeyT: () => keysTerminal(),
   KeyP: () => keysPreview(),
@@ -1838,9 +1840,8 @@ async function closeCurrent() {
   todayComplete(s);
 }
 
-// The Amarchy menu (the Ⓐ, Ctrl+Alt+Space): everything you can do from
-// here, the keys for what has one, and every chat by its name as you type
-// (Super+Space is Omarchy's menu). A keyboard's card on a computer, a sheet
+// The Amarchy menu (the Ⓐ, Ctrl+Alt+M): everything you can do from here,
+// the keys for what has one, and every chat by its name as you type. A keyboard's card on a computer, a sheet
 // on the phone (ui.js uiMenu); what needs a chat open beside the board, on
 // a computer only.
 function deskMenu() {
@@ -1941,7 +1942,7 @@ function showKeys() {
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
   sheet(sheetHead("Keys", "Ctrl+Alt does, Esc stops"),
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
-      ["Ctrl+Alt+↑ / ↓", "The chat before / after"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+Space", "The menu: everything else, any chat by name"],
+      ["Ctrl+Alt+↑ / ↓", "The chat before / after"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
       ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+K", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),

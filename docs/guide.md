@@ -367,7 +367,7 @@ host's chats without anything else installed.
 
 - **The bar**, as Omarchy's, the same over the board and over an open chat:
   where you are on the left, what you look at in the middle, icons and one
-  outlined action on the right. On the board: the **Ⓐ** (`Ctrl+Alt+Space`),
+  outlined action on the right. On the board: the **Ⓐ** (`Ctrl+Alt+M`),
   the **Amarchy menu**: New chat, Automations (a dot on
   the Ⓐ when one failed), theme, font and wallpaper, sound, a new project,
   Settings, the [Tour](#the-tour), Keys, and any chat as you type its name; then **Chats** or **Tasks** (each with what's your move); the
@@ -474,7 +474,7 @@ host's chats without anything else installed.
   it something, the next thing that's your move lit. `Ctrl+Alt+→` goes back
   into it. The browser's Back is the board too, a reload stays on the chat, and
   a link to a chat opens it. `Ctrl+Alt+↑` / `↓` open the chat before or after in
-  the board's order, and `Ctrl+Alt+Space` any chat by its name. Dictating, the
+  the board's order, and `Ctrl+Alt+M` any chat by its name. Dictating, the
   keys go to the box: `Enter` stops it, the next `Enter` sends.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
   project and name (click: rename), where it stands (its tone a dot), `⋯` its
@@ -552,7 +552,9 @@ Three rules, the same in every layout:
 
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
-  there's a twin: `↵` a new thing, `W` close, `K` the keys, `Space` the menu).
+  there's a twin: `↵` a new thing, `W` close, `K` the keys; `M` is the menu).
+  Never `Space`: `Alt+Space` and Right Alt are Omarchy's dictation, and a desktop
+  can take `Ctrl+Alt+Space` for it too.
   `Ctrl+Alt` because nothing else has it: Omarchy only `Ctrl+Alt+Del` and `Tab`,
   a browser lets a page have it, a Mac too (Control+Option: Option alone types
   é and ñ and jumps words), and a box or a terminal types nothing with it.
@@ -565,7 +567,7 @@ Three rules, the same in every layout:
 | `Ctrl+Alt+←` / `→` | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
 | `Ctrl+Alt+↑` / `↓` | The chat before / after, in the board's order (held, in the wide layout: it opens where you let go). |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
-| `Ctrl+Alt+Space` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
+| `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
 | `Ctrl+Alt+P` | Open the chat's preview (of several: its dropdown, to pick one). |
@@ -1117,7 +1119,7 @@ can tell too, and from there `amarchy run`, `rename` and `close` act on that cha
 
 The look is the app's, on every phone and browser of yours, and it's picked in the
 app: **Settings → Look → Theme, font, wallpaper…**, or the amarchy menu
-(`Ctrl+Alt+Space`). Every phone and browser wears it at once.
+(`Ctrl+Alt+M`). Every phone and browser wears it at once.
 
 - **Theme**: Omarchy's 23 themes (Tokyo Night, Catppuccin, Gruvbox, Nord, Rosé
   Pine, Hackerman...), each a card in its own colors with its wallpaper. A theme

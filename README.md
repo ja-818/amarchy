@@ -153,7 +153,7 @@ and nothing else; every other key only moves, or types.
 | `Ctrl+Alt+←` / `→` | Back to the board / into the chat lit |
 | `Ctrl+Alt+↑` / `↓` | The chat before / after |
 | `Ctrl+Alt+↵` | New chat |
-| `Ctrl+Alt+Space` | **The amarchy menu: everything else, and any chat by its name** |
+| `Ctrl+Alt+M` | **The amarchy menu: everything else, and any chat by its name** |
 | `Ctrl+Alt+W` | Complete the chat's mission (close it, with Undo) |
 | `Ctrl+Alt+T` | The chat's terminal (again: back to the chat) |
 | `Ctrl+Alt+P` | Open the chat's preview (of several: pick one) |

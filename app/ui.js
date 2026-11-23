@@ -1012,7 +1012,7 @@ function uiAction(icon, label, act, { title = "", key = "", cls = "" } = {}) {
 
 // The Ⓐ: the Amarchy menu (everything you can do, the keys for what has
 // one, any chat by its name), as Omarchy's mark opens its own. Its dot: an automation that failed.
-function uiBrand(act, title = "Amarchy menu (Ctrl+Alt+Space)") {
+function uiBrand(act, title = "Amarchy menu (Ctrl+Alt+M)") {
   return h("button", { class: "control ui-action ui-brand auto-btn", type: "button", title, "aria-label": "Amarchy menu", "aria-haspopup": "menu",
                        onclick: act, oncontextmenu: (e) => { e.preventDefault(); act(); } },
     glyph("brand", "ui-brand-mark"), h("span", { class: "auto-dot", "aria-hidden": "true" }));

@@ -894,8 +894,8 @@ async function wide(browser, port) {
   await p.keyboard.press("m");
   await sleep(150);
   check(where, await p.evaluate(() => !document.querySelector(".picker")), "m: nothing (plain keys only move)");
-  await p.keyboard.press("Control+Alt+Space");
-  check(where, await until(p, () => !!document.querySelector(".picker") && !/Group & sort/.test(document.querySelector(".picker").innerText)), "Ctrl+Alt+Space: the Amarchy menu");
+  await p.keyboard.press("Control+Alt+KeyM");
+  check(where, await until(p, () => !!document.querySelector(".picker") && !/Group & sort/.test(document.querySelector(".picker").innerText)), "Ctrl+Alt+M: the Amarchy menu");
   check(where, await p.evaluate(() => !/Refund: old order/.test(document.querySelector(".picker").innerText)), "its chats aren't in it before you type");
   await p.keyboard.type("refund");
   check(where, await until(p, () => /Refund: old order/.test(document.querySelector(".picker").innerText)), "typed: the chat by its name");
@@ -1109,7 +1109,7 @@ async function wide(browser, port) {
   await p.keyboard.press("Tab");
   check(where, await until(p, () => board.tab === "chats"), "Tab again: round to Chats");
   await p.keyboard.press("Control+Alt+KeyK");
-  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+Space/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+M\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
   for (const k of ["n", "x", "?"]) await p.keyboard.press(k);
@@ -1152,9 +1152,9 @@ async function wide(browser, port) {
   check(where, made.length === 1 && made[0].prompt === "Fix what this shows [Image #1]" && (made[0].images || []).length === 1 && made[0].images[0].type === "image/png" && made[0].images[0].data.length > 20,
         `the picture goes with it (${JSON.stringify(made.map((x) => ({ ...x, images: (x.images || []).length })))})`);
   check(where, await p.evaluate(() => !document.querySelector(".board-new .tray .att")), "and the box is empty again");
-  // Ctrl+Alt+Space: any chat, by its name; Ctrl+Alt+←: the board.
-  await p.keyboard.press("Control+Alt+Space");
-  check(where, await until(p, () => !!document.querySelector(".picker")), "Ctrl+Alt+Space: the menu");
+  // Ctrl+Alt+M: any chat, by its name; Ctrl+Alt+←: the board.
+  await p.keyboard.press("Control+Alt+KeyM");
+  check(where, await until(p, () => !!document.querySelector(".picker")), "Ctrl+Alt+M: the menu");
   await p.keyboard.type("login");
   await p.keyboard.press("Enter");
   check(where, await until(p, () => desk.current === "proj-fresh"), "a chat picked by its name: it opens");
