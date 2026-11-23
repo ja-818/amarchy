@@ -14,7 +14,8 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending (and drawing the safe way after a crash) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why) |
+| `src/sound.rs` | What its page can play: GStreamer asked at start; without its plugins, no media in the page (one would end it), its sounds played by the app (`pw-play`), said once, and a start again once they're installed |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
 | `src/journal.rs` | Its log (below) |
@@ -34,11 +35,27 @@ GStreamer write to stderr, a panic too. Readable without a terminal open.
 - **A start never does nothing.** A second start hands its arguments to the
   running one and ends at once; the running one takes them up on its
   window's thread, and makes its window again if it's gone.
-- **Its page's process crashes**: the page loads again, and it draws the
-  safe way from then on (WebKit's DMA-BUF renderer and compositing off, its
+- **Its page's process crashes**: the page loads again, and the log says
+  why, by what that process wrote last. GStreamer's words before it: a sound
+  or a video ended it (below), so its page loads no media from then on and
+  the GPU isn't blamed. No sign why: twice in ten minutes, it draws the safe
+  way from then on (WebKit's DMA-BUF renderer and compositing off, its
   hardware acceleration never), kept in `rendering.json` beside the log;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again. Three crashes in two minutes:
   its own page says so, with the log's path.
+- **GStreamer without its plugins** (`gst-plugins-good`: WebKit's audio
+  sink; `gst-plugins-base`: the `.oga` chimes; `gst-plugin-pipewire`: the
+  microphone): WebKit aborts its page's process when a page's `<audio>` or
+  `<video>` loads with no audio sink. So at start it asks GStreamer (the
+  library and plugins WebKit's page process uses) what it has, in a few
+  milliseconds; when the page's sounds can't play, its page loads no media
+  (a `media-src 'none'` policy, before the page's scripts), and the page's
+  sounds (`window.amarchyDesktopMedia.play`) and its notifications' chimes
+  are played by the app itself, with `pw-play` (or `paplay`). It says what's
+  missing and the command in its log, once in a notification, in Settings,
+  and when dictation can't start; once they're installed it sees GStreamer's
+  plugins change and starts again by itself. `AMARCHY_DESKTOP_SOUND=1` lets
+  the page play them even so.
 - **Its window's thread stuck** (a start handed over not taken up in 8 s, or
   no answer for 45 s): it starts again as a new process, on the chat it was
   asked for, and the stuck one ends.
@@ -46,8 +63,8 @@ GStreamer write to stderr, a panic too. Readable without a terminal open.
 ## Build and run
 
 Needs Rust, WebKitGTK 4.1 and libayatana-appindicator (on Arch: `rust
-webkit2gtk-4.1 libayatana-appindicator`, and `gst-plugin-pipewire
-gst-plugins-good` for the microphone).
+webkit2gtk-4.1 libayatana-appindicator`, and `gst-plugins-good
+gst-plugins-base gst-plugin-pipewire` for its sounds and microphone).
 
 ```sh
 cargo run -- --url https://<your amarchy>.ts.net     # a server, by hand
@@ -65,9 +82,14 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # its size, no white flash, its page's own words, its
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart)
+python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5): no media
+                                                    # in the page, nothing ends it, its sounds played by the
+                                                    # app, said once; installed: it starts again; a sound's
+                                                    # crash isn't blamed on the GPU
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
 python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
-                                                    # built anyway without the mic's, mise's Rust, why
+                                                    # built anyway without the sounds' and mic's, mise's
+                                                    # Rust, why
 python3 test/compare.py                             # the window next to Chromium, phone and wide: the
                                                     # same layout (boxes to 3 px), side by side pictures
 ```

@@ -266,27 +266,41 @@ def main():
         print("it heals itself")
         home = tempfile.mkdtemp(prefix="desktop-home-")
         logf = Path(home, ".local/state/amarchy/desktop/desktop.log")
+        rendering = Path(home, ".local/state/amarchy/desktop/rendering.json")
+        # The safe way as the build before kept it, after any crash (a sound's, on Julian's M5): forgotten.
+        rendering.parent.mkdir(parents=True, exist_ok=True)
+        rendering.write_text(json.dumps({"safe": True, "why": "its page's process crashed"}))
         with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
             on_app(w)
             log = logf.read_text() if logf.exists() else ""
             check("amarchy-desktop" in log and " started (pid " in log and "graphics:" in log,
                   "its log, readable without a terminal (~/.local/state/amarchy/desktop/desktop.log)")
+            check(not rendering.exists() and "drawing with the GPU again" in log and "drawing the safe way" not in log,
+                  "the safe way an earlier build kept after any crash: forgotten (the GPU again)")
+            check("sound: GStreamer" in log, "its log says what its page can play (GStreamer)")
             w.do("destroy")
             time.sleep(0.5)
             check(w.do("visible") is None, "(its window destroyed)")
             code, _ = w.again()
             back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
             check(code == 0 and bool(back) and w.do("visible") is True, "its window gone: a start makes it again, on the app")
-            # Its page's process crashes: the page comes back, drawn the safe way from now on.
-            web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
-            for p in web:
-                os.kill(p, 9)       # as a crash ends it (JavaScriptCore catches a SIGSEGV of its own)
-            time.sleep(1)
-            back = w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
-            rendering = Path(home, ".local/state/amarchy/desktop/rendering.json")
+            # Its page's process crashes with no sign why: the page comes back;
+            # twice in ten minutes, drawn the safe way from now on. (A sound's
+            # crash, with GStreamer's words before it: sound-test.py.)
+            def crash():
+                web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
+                for p in web:
+                    os.kill(p, 9)       # as a crash ends it (JavaScriptCore catches a SIGSEGV of its own)
+                time.sleep(1)
+                return web, w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+            web, back = crash()
             check(bool(web) and bool(back), f"its page's process crashed ({len(web)}): the page comes back")
-            check(rendering.exists() and json.loads(rendering.read_text()).get("safe") is True, "and it draws the safe way from now on")
-            check("its page's process crashed" in logf.read_text(), "the crash is in its log")
+            check(not rendering.exists(), "once, with no sign why: still drawn with the GPU")
+            check("its page's process crashed, with no sign why" in logf.read_text(), "the crash is in its log, with what it said last")
+            web, back = crash()
+            check(bool(web) and bool(back), "crashed again: the page comes back")
+            check(rendering.exists() and json.loads(rendering.read_text()).get("safe") is True and "crashed twice" in logf.read_text(),
+                  "twice in ten minutes: it draws the safe way from now on")
             # Its window's thread stuck: a start hands over and ends at once,
             # and the watchdog starts it again, on the app.
             old = w.do("pid")

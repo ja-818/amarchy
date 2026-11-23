@@ -284,16 +284,32 @@ fn open(app: &AppHandle, n: &Notice) {
     crate::open_route(app, hash.as_deref(), n.ask.as_deref());
 }
 
-/// The chat's chime, rung by the app's page (its playSound), window closed or not.
+/// The chat's chime, rung by the app's page (its playSound), window closed
+/// or not; by the app itself where its page can't play sounds (sound.rs).
 fn ring(app: &AppHandle, sound: &str) {
+    let src = format!("/sound/{}", urlencode(sound));
+    if crate::sound::play(app, &src, 1.0, None) {
+        return;
+    }
     if let Some(w) = app.get_webview_window("main") {
-        let src = serde_json::to_string(&format!("/sound/{}", urlencode(sound))).unwrap();
+        let src = serde_json::to_string(&src).unwrap();
         let _ = w.eval(format!("if (typeof playSound === 'function') playSound({src});"));
     }
 }
 
 fn urlencode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>().replace('+', "%20")
+}
+
+/// One of the amarchy's files (its path: a picture, a sound), as its page
+/// gets it (this machine's with its cookie), up to limit bytes.
+pub fn fetch(app: &AppHandle, t: &Target, path: &str, limit: u64) -> Option<Vec<u8>> {
+    let url: Url = t.origin().join(path.trim_start_matches('/')).ok()?;
+    let res = authed(agent(Some(Duration::from_secs(20))).get(url.as_str()), app, t).call().ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    res.into_body().with_config().limit(limit).read_to_vec().ok()
 }
 
 /// A notice's picture (an agent's), fetched once and kept.
@@ -309,12 +325,7 @@ fn picture(app: &AppHandle, t: &Target, path: &str) -> Option<std::path::PathBuf
     if file.is_file() {
         return Some(file);
     }
-    let url: Url = t.origin().join(path.trim_start_matches('/')).ok()?;
-    let res = authed(agent(Some(Duration::from_secs(20))).get(url.as_str()), app, t).call().ok()?;
-    if !res.status().is_success() {
-        return None;
-    }
-    let bytes = res.into_body().with_config().limit(4_000_000).read_to_vec().ok()?;
+    let bytes = fetch(app, t, path, 4_000_000)?;
     std::fs::create_dir_all(&dir).ok()?;
     std::fs::write(&file, bytes).ok()?;
     Some(file)

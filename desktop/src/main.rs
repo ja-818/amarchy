@@ -10,6 +10,7 @@ mod journal;
 mod links;
 mod notify;
 mod platform;
+mod sound;
 mod target;
 mod tray;
 
@@ -243,6 +244,10 @@ fn main() {
             find(&handle);
             notify::follow(&handle);
             watchdog(&handle);
+            // What its page can't play here (sound.rs): said once, and
+            // watched for until it can.
+            sound::tell(&handle);
+            sound::watch(&handle);
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -543,7 +548,7 @@ fn again(app: &AppHandle, argv: &[String]) {
 
 /// Starts again on the build installed now (the one that asked, argv0):
 /// hidden if it was, on the chat it was on.
-fn restart(app: &AppHandle, exe: Option<&str>) {
+pub fn restart(app: &AppHandle, exe: Option<&str>) {
     let exe = exe
         .filter(|e| std::path::Path::new(e).is_absolute() && std::path::Path::new(e).is_file())
         .map(std::path::PathBuf::from)
