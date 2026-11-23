@@ -11709,9 +11709,11 @@ def dictate_lib():
     AMARCHY_DICTATE_ENGINE names (a folder: one built by hand, where amarchy
     has no build), else the package's, else the one fetched into the state.
     Only the release amarchy pins (the worker is written for its API).
-    Looked for again a minute later (fetched meanwhile).
+    Looked for again a minute later, or a few seconds while there's none (a
+    setup fetching it), and at once when it's gone (amarchy dictation remove).
     (AMARCHY_DICTATE_SYSTEM=off: as without the package, for the tests.)"""
-    if time.time() - _dictate_lib["at"] > 60:
+    found = _dictate_lib["found"]
+    if time.time() - _dictate_lib["at"] > (60 if found else 3) or (found and not os.path.isfile(found)):
         own = os.environ.get("AMARCHY_DICTATE_ENGINE")
         dirs = [Path(own).expanduser()] if own else \
             [*([DICTATE_PACKAGED] if os.environ.get("AMARCHY_DICTATE_SYSTEM") != "off" else []), DICTATE_ENGINE_DIR]
