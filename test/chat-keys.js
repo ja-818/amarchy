@@ -8,9 +8,9 @@
 //   the latest back down, i too; Page Up / Page Down scroll them from the box.
 //   Esc: Claude at work, a stop (from the box, a message, nowhere in it; on
 //   its question too, a no); Claude done, nothing at all (not back, not out
-//   of the box). Ctrl+Alt+← back to the board, → into the chat again, ↑ ↓ the
-//   chat before or after, Space the menu (a chat by its name as you type),
-//   T its terminal and back, K the keys. Plain letters on the board do
+//   of the box). Ctrl+Alt+← (H) back to the board, → (L) into the chat again,
+//   ↑ ↓ (K J) the chat before or after, M the menu (a chat by its name as you
+//   type), T its terminal and back, / the keys. Plain letters on the board do
 //   nothing but move.
 //
 // Three layouts: the phone's (touch), the phone layout on a computer (a
@@ -242,6 +242,21 @@ async function run(browser, layout, port) {
   check(as, await opened(p, ID), "Ctrl+Alt+↑: the one before");
   await sleep(400);
 
+  // h j k l, as the arrows: J the next chat, K the one before, H back, L in again; from the box, typing.
+  await p.keyboard.type("hjkl");
+  await p.keyboard.press("Control+Alt+KeyJ");
+  check(as, await opened(p, TWO), "Ctrl+Alt+J: the next chat");
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(as, await opened(p, ID), "Ctrl+Alt+K: the one before");
+  await sleep(400);
+  check(as, (await keys(p)).value === "hjkl", "and nothing typed by them (the box has what you typed before)");
+  await p.keyboard.press("Control+Alt+KeyH");
+  check(as, await isHome(p), "Ctrl+Alt+H: back to the board");
+  await p.keyboard.press("Control+Alt+KeyL");
+  check(as, await opened(p, ID), "Ctrl+Alt+L: into it again");
+  await sleep(400);
+  await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
+
   // Ctrl+Alt+T: its terminal, the keyboard in it; again, back to the chat, the keys in its box.
   await p.keyboard.press("Control+Alt+KeyT");
   check(as, await until(p, () => (app.desk ? sideTab() === "term" : app.session.mode === "terminal")), "Ctrl+Alt+T: its terminal");
@@ -273,9 +288,9 @@ async function run(browser, layout, port) {
     [...m.querySelectorAll(".picker-row, .menu-item")].find((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)).click(); });
   check(as, await opened(p, TWO), "picked: it opens");
 
-  // Ctrl+Alt+K: the keys, the same on both.
-  await p.keyboard.press("Control+Alt+KeyK");
-  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /Esc/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  // Ctrl+Alt+/: the keys, the same on both.
+  await p.keyboard.press("Control+Alt+Slash");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H J K L/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, h j k l in them");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

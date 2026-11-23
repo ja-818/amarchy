@@ -1080,7 +1080,7 @@ async function wide(browser, port) {
   await p.keyboard.press("Escape");
   check(where, await until(p, () => !board.query && !!board.box.querySelector(".ui-filter")), "Esc: Today again");
 
-  // Keys: j / k move; Ctrl+Alt+K the keys, Ctrl+Alt+↵ a new chat, Ctrl+Alt+← away.
+  // Keys: j / k move; Ctrl+Alt+/ the keys, Ctrl+Alt+↵ a new chat, Ctrl+Alt+← away.
   await p.evaluate(() => { document.activeElement.blur(); board.scroll.focus(); });
   await p.keyboard.press("j");
   const first = await p.evaluate(() => document.activeElement.closest(".ticket") && document.activeElement.closest(".ticket").dataset.id);
@@ -1108,8 +1108,8 @@ async function wide(browser, port) {
   check(where, await until(p, () => board.tab === "tasks"), "Shift+Tab: Tasks");
   await p.keyboard.press("Tab");
   check(where, await until(p, () => board.tab === "chats"), "Tab again: round to Chats");
-  await p.keyboard.press("Control+Alt+KeyK");
-  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+M\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+K: the keys");
+  await p.keyboard.press("Control+Alt+Slash");
+  check(where, await until(p, () => /On the board/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+M\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys");
   await p.keyboard.press("Escape");
   await until(p, () => !document.querySelector(".sheet-back"));
   for (const k of ["n", "x", "?"]) await p.keyboard.press(k);

@@ -469,11 +469,11 @@ host's chats without anything else installed.
   never back, never out of the box, so an `Esc` pressed out of habit can't stop
   a chat you only looked at, and one pressed to stop always does. What's open
   over the chat takes it first (a menu, a dictation), and a terminal has its own.
-- **Back** is **‹**, or `Ctrl+Alt+←` from anywhere: the board, where you were,
+- **Back** is **‹**, or `Ctrl+Alt+←` (or `H`) from anywhere: the board, where you were,
   the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. `Ctrl+Alt+→` goes back
   into it. The browser's Back is the board too, a reload stays on the chat, and
-  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` open the chat before or after in
+  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `K` / `J`) open the chat before or after in
   the board's order, and `Ctrl+Alt+M` any chat by its name. Dictating, the
   keys go to the box: `Enter` stops it, the next `Enter` sends.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
@@ -552,7 +552,9 @@ Three rules, the same in every layout:
 
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
-  there's a twin: `↵` a new thing, `W` close, `K` the keys; `M` is the menu).
+  there's a twin: `↵` a new thing, `W` close; `M` is the menu, `/` the keys).
+  The arrows move, and so do `h` `j` `k` `l`, as vim's and the board's plain
+  keys do: `Ctrl+Alt+H` is back as `←` is.
   Never `Space`: `Alt+Space` and Right Alt are Omarchy's dictation, and a desktop
   can take `Ctrl+Alt+Space` for it too.
   `Ctrl+Alt` because nothing else has it: Omarchy only `Ctrl+Alt+Del` and `Tab`,
@@ -564,15 +566,15 @@ Three rules, the same in every layout:
 
 | Key | |
 | --- | --- |
-| `Ctrl+Alt+←` / `→` | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
-| `Ctrl+Alt+↑` / `↓` | The chat before / after, in the board's order (held, in the wide layout: it opens where you let go). |
+| `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
+| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The chat before / after, in the board's order (held, in the wide layout: it opens where you let go). |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
 | `Ctrl+Alt+P` | Open the chat's preview (of several: its dropdown, to pick one). |
 | `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
-| `Ctrl+Alt+K` | All the keys. |
+| `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
 
 On a board's card in Tasks, `1`–`4` press its buttons, and `Ctrl+Alt+←` is Tasks
