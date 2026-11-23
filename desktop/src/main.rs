@@ -667,11 +667,13 @@ fn page_loaded(app: &AppHandle, url: &Url) {
     keep_background(app);
     if let Some(said) = app.state::<Shell>().said.lock().unwrap().take() {
         if let Some(w) = main_window(app) {
-            // Once the app is up (its board read), in its own toast.
+            // Once the app is up (its board read), in its own toast; what
+            // was said kept on the page (window.amarchyDesktopSaid).
+            let text = serde_json::to_string(&said).unwrap();
             let _ = w.eval(format!(
                 "(function said(n) {{ if (typeof toast === 'function' && typeof app !== 'undefined' && app.view) \
-                   return setTimeout(() => toast({}), 300); if (n < 100) setTimeout(() => said(n + 1), 100); }})(0);",
-                serde_json::to_string(&said).unwrap()
+                   return setTimeout(() => {{ toast({text}); window.amarchyDesktopSaid = {text}; }}, 300); \
+                   if (n < 600) setTimeout(() => said(n + 1), 100); }})(0);"
             ));
         }
     }

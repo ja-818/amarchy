@@ -314,11 +314,13 @@ def main():
         home = tempfile.mkdtemp(prefix="desktop-home-")
         cli = fake_cli(home, found=[{"name": "srv", "label": "Server", "url": remote.url, "version": "x"}])
         with Shell(None, home=home, env=env_for(cli)) as w:
-            # Watched from the start: it shows for a few seconds once the app is up.
-            said = w.wait("[...document.querySelectorAll('.toast')].map(e => e.textContent).join(' ').includes('Paired with Server')",
-                          timeout=40, every=0.05)
-            check(bool(said), "the window says so once (Paired with Server.)")
-            on_app(w)
+            on_app(w, timeout=60)
+            # Said in the app's toast, once the app is up (kept on the page as amarchyDesktopSaid).
+            try:
+                said = w.wait("window.amarchyDesktopSaid || ''", timeout=60)
+            except TimeoutError:
+                said = f"nothing ({w.do('url')}, {w.js('document.title')})"
+            check(said == "Paired with Server.", f"the window says so once ({said})")
             check(w.do("url").startswith(remote.url), "the one found is opened")
             check("machines add srv" in asked(cli), f"and paired with ({asked(cli)})")
             w.shot(SHOTS / "found-one.png")
