@@ -131,6 +131,19 @@
   --xpost-over: rgba(244, 33, 46, 0.32);     /* behind what goes past X's 280 */
   --xpost-radius: 16px;
   --xpost-font: "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* A board (uiKanban): its columns side by side on a wide screen, each at
+     least this wide; the page as wide as it needs for them. */
+  --kanban-col-min: 320px;
+  --kanban-gap: 12px;
+  --kanban-page-width: 1720px;
+  --kanban-col-bg: color-mix(in srgb, var(--surface) 55%, transparent);
+  --kanban-col-border: var(--border-faint);
+  --kanban-col-radius: var(--radius-card);
+  /* A thread (uiThread): what was said, yours tinted, on the right. */
+  --thread-bg: var(--control-bg);
+  --thread-you-bg: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --thread-radius: var(--radius-item);
+  --avatar-tiny: 20px;        /* by a name in a section's head (a board's lead) */
   /* One size for every control, wherever it is: a button on a card, a tab,
      the search, a tool, New chat, the buttons over a chat and in its side
      panel, the composer's menus. A finger's on a touch screen. */
@@ -174,6 +187,7 @@ html { touch-action: manipulation; }
    on its project's color (--ph). */
 .avatar { display: block; flex: none; width: var(--avatar-size, var(--avatar-card)); height: var(--avatar-size, var(--avatar-card)); border-radius: 50%; object-fit: cover; -webkit-user-drag: none; }
 .avatar.small { --avatar-size: var(--avatar-inline); }
+.avatar.tiny { --avatar-size: var(--avatar-tiny); }
 .tcard-head .avatar { --avatar-size: var(--avatar-card); }
 .tcard-head .avatar.list { --avatar-size: var(--avatar-list); }
 .avatar.head { --avatar-size: var(--avatar-head); }
@@ -933,3 +947,112 @@ body.desk .ui-slides-stage .ui-scroll { margin-inline: calc(-1 * (var(--control-
 .ui-drop-text small { color: var(--text-muted); font-size: var(--caption); }
 .ui-drop-row.t-up .ui-drop-icon { color: var(--success); }
 .ui-drop-row.bad .ui-drop-icon, .ui-drop-row.bad small { color: var(--danger); }
+
+
+/* ---- a page in the board's place (uiPageHead): Back, what it is, its line */
+.ui-page-head { display: flex; align-items: center; gap: 10px; padding: 2px 0 12px; min-width: 0; }
+.ui-page-head > .avatar { --avatar-size: var(--avatar-card); }
+.ui-page-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ui-page-title { margin: 0; font-size: var(--title); font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-page-sub { font-size: var(--caption); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- a board's columns (uiKanban): side by side where there's room; on a
+   phone one at a time, its tabs on top (they stay as the page scrolls). */
+.board-scroll .today:has(> .ui-kanban) { max-width: var(--kanban-page-width); }
+.ui-kanban { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ui-kanban-tabs { position: sticky; top: 0; z-index: 3; align-self: stretch; padding: 4px 0; background: var(--pane-bg); }
+.ui-kanban-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(var(--kanban-col-min), 1fr);
+                  gap: var(--kanban-gap); align-items: start; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 6px; }
+.ui-kanban-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0; padding: 8px;
+                 background: var(--kanban-col-bg); border: 1px solid var(--kanban-col-border); border-radius: var(--kanban-col-radius); }
+.ui-kanban-head { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 4px;
+                  font-size: var(--caption); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--section-head); }
+.ui-kanban-col.yours > .ui-kanban-head { color: var(--section-head-yours); }
+.ui-kanban-cards { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0; }
+.ui-kanban-empty { margin: 0; padding: 6px 4px; font-size: var(--caption); color: var(--text-muted); }
+@media (min-width: 760px) { .ui-kanban-tabs { display: none; } }
+@media (max-width: 759px) {
+  .ui-kanban-cols { display: block; overflow: visible; }
+  .ui-kanban-col { padding: 0; background: none; border: 0; }
+  .ui-kanban-col:not(.on), .ui-kanban-head { display: none; }
+}
+
+/* ---- a thread (uiThread): what was said, the latest last; yours on the
+   right, tinted, as a messaging app has it; what was done, a quiet line. */
+.ui-thread { list-style: none; margin: 0 var(--card-pad-x) 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ui-thread-item { align-self: flex-start; max-width: 88%; min-width: 0; padding: 6px 10px; box-sizing: border-box;
+                  background: var(--thread-bg); border-radius: var(--thread-radius); }
+.ui-thread-item.you { align-self: flex-end; background: var(--thread-you-bg); }
+.ui-thread-item.event:not(:has(.ui-thread-text)) { background: none; padding: 0 2px; max-width: 100%; }
+.ui-thread-meta { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.ui-thread-meta b { font-weight: 700; color: var(--text); }
+.ui-thread-event { font-size: var(--caption); color: var(--text-muted); font-weight: 600; }
+.ui-thread-text { line-height: 1.45; overflow-wrap: anywhere; white-space: pre-line; }
+.ui-thread-text.pre { white-space: pre-wrap; font-size: var(--caption); color: var(--text-muted); margin-top: 4px; }
+.ui-thread-before > summary { cursor: pointer; font-size: var(--caption); color: var(--link); }
+.ui-thread-earlier { align-self: center; }
+.ui-thread-more { font-size: var(--caption); }
+
+/* ---- a board's card (boards.js boardsCard): its title whole, its block
+   open (a post as X shows it), its thread, the boxes you write in. */
+.tcard.k-bcard { cursor: pointer; }
+.tcard.k-bcard > .tcard-head { align-items: flex-start; }
+.tcard.k-bcard > .tcard-head > :is(.tcard-chip, .tpill) { margin-top: 1px; }
+.tcard.k-bcard .tcard-title .task { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.tcard.k-bcard .tcard-actions { align-items: center; }
+.tcard.k-bcard > .bcard-block { margin: 0 var(--card-pad-x) 10px; }
+.tcard.k-bcard > .bcard-block .art-body { padding: 0 12px 12px; }
+/* A post: X's own frame, the card's width (no list round it, no indent). */
+.tcard.k-bcard > .bcard-block:has(> .art-xpost) { border: 0; border-radius: 0; overflow: visible; }
+.tcard.k-bcard > .bcard-block > .art-xpost > .art-body { padding: 0; }
+.tcard.k-bcard .xpost, .tcard.k-bcard .xpost-foot { width: 100%; }
+.tcard.k-bcard > .bcard-note { margin: -2px var(--card-pad-x) 10px; white-space: pre-line; }
+.tcard.k-bcard > .bcard-note.muted { font-size: var(--caption); color: var(--text-muted); }
+.tcard.k-bcard > .bcard-note > :first-child { margin-top: 0; }
+.tcard.k-bcard > .bcard-note > :last-child { margin-bottom: 0; }
+/* Its tools after its buttons, icons only (Comment, Edit, its menu): the
+   buttons and the tools on one row on a phone. */
+.tcard.k-bcard .bcard-tool { flex: none; width: var(--control-h); height: var(--control-h); padding: 0; display: inline-grid; place-items: center;
+                             color: var(--text-muted); background: none; border: 0; border-radius: var(--button-radius); }
+.tcard.k-bcard .bcard-tools { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.tcard.k-bcard .bcard-tool .glyph svg { width: 18px; height: 18px; }
+@media (hover: hover) { .tcard.k-bcard .bcard-tool:hover { color: var(--text); background: var(--button-hover-bg); } }
+.tcard.k-bcard .bcard-tool.on { color: var(--accent); }
+.tcard.k-bcard .tcard-actions { justify-content: flex-start; }
+.art-toggle.static { cursor: default; }
+@media (hover: hover) { .art-head:has(> .art-toggle.static):hover { background: none; } }
+/* The boxes on a card: a comment, the words a button asks for. */
+.bbox { margin: 0 var(--card-pad-x) 10px; min-height: 0; padding: 2px; }
+.bbox textarea { min-height: 38px; padding: 7px 6px; }
+.bbox .cbtn { width: 38px; height: 38px; }
+.bbox-ask { display: flex; flex-direction: column; gap: 6px; }
+.bbox-ask-q { margin: 0 var(--card-pad-x); font-size: var(--caption); font-weight: 700; }
+.ui-kanban-cards > .bbox.badd { margin: 2px 0 0; box-shadow: none; }
+/* Edit in place: its title, its text, and for a post X's count as you type. */
+.bedit { display: flex; flex-direction: column; gap: 8px; padding: 0 var(--card-pad-x) 12px; }
+.bedit-title, .bedit-text { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; font-size: 16px; color: var(--text);
+                            background: var(--composer-bg); border: 1px solid var(--composer-border); border-radius: var(--radius-item); outline: none; }
+.bedit-title { font-weight: 700; }
+.bedit-text { min-height: 120px; resize: vertical; line-height: 1.45; }
+.bedit-title:focus, .bedit-text:focus { border-color: var(--composer-focus); }
+.bedit-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bedit-gap { flex: 1; }
+.bedit-count { font-size: var(--caption); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.bedit-count.over { color: var(--warn, var(--warning)); font-weight: 700; }
+.bedit-note { font-size: var(--caption); color: var(--text-muted); }
+
+/* ---- Tasks: each board's section (its lead's picture by its name), the
+   box to write a task. */
+.bsec-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.bsec-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bsec-none { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; width: 100%; box-sizing: border-box;
+             padding: 12px var(--card-pad-x); text-align: left; color: var(--text-muted); font: inherit; font-size: var(--caption);
+             background: none; border: 1px dashed var(--card-border); border-radius: var(--card-radius); cursor: pointer; }
+@media (hover: hover) { .bsec-none:hover { background: var(--card-hover-bg); } }
+.bsec-counts { font-variant-numeric: tabular-nums; }
+.tbtn.bsec-more { align-self: flex-start; }
+.bwrite-wrap { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 2px; }
+.bwrite-wrap > .bbox { margin: 0; }
+.bwrite-under { display: flex; align-items: center; gap: 8px; }
+.tbtn.bwrite-for { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); padding-left: 6px; }
+.tbtn.bwrite-for .glyph svg { width: 12px; height: 12px; }

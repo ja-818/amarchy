@@ -207,7 +207,7 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         too). An agent has what your assistant has but your loops file: its
                                         place on top of every list, next to your assistant; its own picture
                                         (its initial until you give it one) and chime; it always tells you when
-                                        it needs you or is done; tasks of its own on Tasks (amarchy task); a
+                                        it needs you or is done; boards and tasks on Tasks (amarchy board); a
                                         chat like a messaging app's (bubbles, typing…, unread counts), its
                                         Claude writing as someone you text; and it's never a mission to complete
   amarchy agents <id> off               not an agent any more: a chat like the others again
@@ -277,20 +277,64 @@ state, with Close for the done ones; docs/guide.md, "Today"):
                                         or none; prints it without one. Today only reads it: its Done, Chase,
                                         Ask and New chat go to your assistant, which keeps it
 
-Your agents' tasks (cards of their own on Tasks, from your assistant or one of your agents, each with buttons
-that send it a fixed message; docs/guide.md, "Your agents' tasks"):
+Tasks: boards of what depends on you (a board's columns are its agent's: "For review", "Ready to post"...; its
+cards are what your assistant and your agents need of you, each a block the app draws, buttons, a thread you
+comment on; docs/guide.md, "Tasks: boards"). Your assistant and your agents keep them; another chat is refused:
+  amarchy board [list] [--json]         the boards: id, lead, name, each column's count
+  amarchy board set <board> [--title <text>] [--lead <agent>] [--check <command> | --no-check]
+                                        [--column <name> [--yours] [--approval] [--done]
+                                         [--button <label>[=<message>] [--to <column>] [--asks <words>] [--quiet]]...]...
+                                        make a board (yours: its lead), or change it. Columns given are all of
+                                        them, in order (none, a new board's: To do, Doing, Done). --yours: its
+                                        cards wait on the user (Tasks counts them); --done: finished; --approval:
+                                        a card gets there only by the user's hand, never an agent's, and is
+                                        approved then (who, when, the sha256 of its content, signed); any change
+                                        to it drops that, and it goes back. A column's buttons are on each of its
+                                        cards: pressed, the message goes to the card's agent as the user's own
+                                        ({title} {key} {board} {column} {words} in it; none: "<label>: “<title>”
+                                        (board <board>, card <key>)"); --to moves the card; --asks asks the user
+                                        for words first (a reason), added to the message; --quiet sends nothing.
+                                        --check: a command run on the user's edit and approval first (the text on
+                                        its input; $AMARCHY_CARD_ACTION edit or approve): failing, it refuses
+                                        them, in its words
+  amarchy board card <board> [--key <key>] [--title <text>] [--column <name>]
+                                        [--xpost <text|-> | --block <kind> --body <text|->] [--attr <name>=<value>]...
+                                        [--media <pictures>] [--handle <x handle>] [--name <name>] [--avatar <picture>]
+                                        [--note <text|->] [--link [<label>=]<url>]... [--button <label>[=<message>]
+                                        [--to <column>] [--asks <words>] [--quiet]]... [--until <when>] [--notify]
+                                        [--base <sha256>] [--over-edit] [--clear-buttons] [--clear-links]
+                                        put a card on a board (prints its id); --key (a card's key, or its id)
+                                        changes that one in place: only what's given. Its block is any the app
+                                        draws (xpost: as X shows it); a change to it is a revision on its thread,
+                                        and drops its approval. A card's own buttons (up to 4) come after its
+                                        column's; one without --to moves it to the board's done column. Refused
+                                        over the user's edit unless --over-edit, over a change since --base
+  amarchy board move <board> <card> <column>
+                                        move a card (never into a column that needs the user's approval)
+  amarchy board comment <board> <card> <text|->
+                                        answer on a card's thread (what the user said there came to you as
+                                        their message: "About “<card>” (board <board>, card <key>): ...")
+  amarchy board show <board> [--card <card>] [--json]
+                                        the board, or one card: its thread, approval {by, at, sha256}, sha256
+  amarchy board approved <board> <card> [--text <file|->] [--json]
+                                        exit 0 only when the user approved exactly what the card has now (and,
+                                        with --text, that's its text): what a script checks before it acts
+  amarchy board log [<board>] [--json] [--lines <n>]
+                                        what was done on the boards, by whom: the user's edits (before and
+                                        after), what they pressed and why, comments, moves
+  amarchy board rm <board> <card>...    take cards down (nothing is sent)
+  amarchy board drop <board>            the whole board
   amarchy task add --title <text> [--note <text>] [--link [<label>=]<url>]...
                                         [--button <label>[=<message>]]... [--until <when>] [--key <key>]
                                         [--notify] [--agent <id>]
-                                        put a task on Tasks (prints its id): its agent's picture and name
-                                        (this chat's own; --agent for another of your agents), its title, a
-                                        note, links (up to 3: a button that opens the page in a new tab; the
-                                        task stays) and buttons (up to 4; none: Done). Pressed, a button sends
-                                        its message to the agent as you'd send it (amarchy send: it wakes for
-                                        it) and the task is done; with no message it sends "<label>: <title>".
-                                        --until (2026-11-19T10:12-05:00, 10:12, 45m, 2h, 1d): it goes by
-                                        itself then. --key: the same agent's task with that key is changed in
-                                        place, not added again. --notify: on your phones too (a tap opens Tasks)
+                                        a task of the agent's on Tasks (prints its id): a card on its own board
+                                        (its id's), with its picture and name, its title, a note, links (up to
+                                        3: the page in a new tab; the task stays) and buttons (up to 4; none:
+                                        Done). Pressed, a button sends its message to the agent as you'd send
+                                        it (amarchy send: it wakes for it) and the task is done; with no message
+                                        it sends "<label>: <title>". --until (2026-11-19T10:12-05:00, 10:12, 45m,
+                                        2h, 1d): it goes by itself then. --key: the same agent's task with that
+                                        key is changed in place, not added again. --notify: on your phones too
   amarchy task list [--agent <id>] [--json]
                                         the tasks open (id, agent, until, title), or one agent's
   amarchy task done <id>... | --agent <id>
@@ -3063,7 +3107,10 @@ def hook_settings(sid):
     settings["crossSessionInbound"] = "accept"
     # The secrets' folder isn't Claude's to read (see "secrets"): their values
     # would be in the conversation. Its commands have them by name.
-    settings["permissions"] = {"deny": [f"{tool}(/{SECRETS}/**)" for tool in ("Read", "Edit")]}     # Edit: every writing tool
+    # Nor the boards' files (see "Tasks: boards"): what's done there in your
+    # name is yours, from the app; an agent's side is amarchy board.
+    settings["permissions"] = {"deny": [f"{tool}(/{folder}/**)" for folder in (SECRETS, BOARDS)
+                                        for tool in ("Read", "Edit")]}     # Edit: every writing tool
     if CLAUDE_THEME.exists():       # the app's theme (see look_claude)
         settings["theme"] = "custom:amarchy"
     return json.dumps(settings)
@@ -5802,7 +5849,7 @@ def cmd_hook(sid, state):
                                                  "additionalContext": agent_context(s)}}))
         state = "idle"
     if state == "working" and event.get("hook_event_name") == "PreToolUse":
-        refused = secret_guard(event)
+        refused = secret_guard(event) or board_guard(event)
         if refused:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                      "permissionDecisionReason": refused}}))
@@ -13983,12 +14030,14 @@ def loops_sent(open_keys=None):
 def today_view():
     """Today's part of the app's view, beside the sessions' (each has its
     own: today): your loops, where they're from, what your assistant was
-    told, your assistant, and your agents' tasks (tasks_view)."""
+    told, your assistant, its boards and yours (boards_view: Tasks), and
+    your agents' tasks as an older machine reads them (tasks_view)."""
     loops, source, error = read_loops()
     crew = team()
     mine = next((a for a in crew if a["role"] == "main"), None)
     return {"loops": loops, "source": source, "error": error, "sent": loops_sent({l["key"] for l in loops}),
-            "assistant": {"id": mine["id"], "name": mine["name"]} if mine else None, "tasks": tasks_view(crew)}
+            "assistant": {"id": mine["id"], "name": mine["name"]} if mine else None, "boards": boards_view(crew),
+            "tasks": tasks_view(crew)}
 
 
 LOOP_ASKS = {
@@ -14081,11 +14130,14 @@ def cmd_today(args):
             late = " (chase now)" if l["chase"] and l["chase"] <= today else ""
             chase = f" · chase {l['chase']}" if l["chase"] else ""
             print(f"  {l['who']}: {l['what']}{chase}{late}")
-    if t["tasks"]:
-        print("From your agents:")
-        for x in t["tasks"]:
-            until = f" (until {task_clock(x['until'])})" if x["until"] else ""
-            print(f"  {x['agent_name']}: {x['title']}{until}  [{x['id']}]")
+    yours = [x for x in t["boards"] if x["yours"]]
+    if yours:
+        print("On your boards:")
+        for x in yours:
+            print(f"  {x['title']}{'' if x['title'] == x['lead_name'] else ' (' + x['lead_name'] + ')'}: {x['yours']} for you  [{x['id']}]")
+            for c in x["cards"]:
+                until = f" (until {task_clock(c['until'])})" if c["until"] else ""
+                print(f"    {c['title']}{until}  [{c['id']}]")
     print("Chats:")
     for s in ss:
         r = s["today"]
@@ -14097,83 +14149,839 @@ def cmd_today(args):
     return 0
 
 
-# ---- your agents' tasks
+# ---- Tasks: boards your agents keep, of what depends on you
 #
-# Your loops file is yours, kept by your assistant. Your assistant and your
-# agents can also put tasks of their own on Tasks (amarchy task add): one
-# that hunts posts for you to reply to puts each one there, rather than
-# starting a chat for it. A task is a card with its agent's picture and
-# name, a title, a note, its links (a new tab: the task stays) and its
-# buttons, each with a fixed message: pressed (after its Undo), the message
-# goes to the agent as you'd send it (amarchy send: waking it) and the task
-# is done. One past its --until goes by itself. They're kept in TASKS, read
-# by the app in today_view; a button comes back through /api/tasks/press.
+# Tasks is boards (Julian, 2026-11-23: "everything I need in order to
+# complete tasks and projects that depend on me and that all my agents can
+# edit and that I can just write something and my agent helps me complete
+# it"). A board is a project's or an agent's: its columns (the agent says
+# which: "For review", "Ready to post", "Posted"...), its cards in them. A
+# card: a title, a block the app draws (an xpost first, any of
+# app/blocks.json's but a reply's own), a note, links, buttons, its thread.
+#
+# Your assistant and every agent of yours keep them (amarchy board): any of
+# them can add and change cards on any board here, the board's lead (the one
+# that made it) hears what you do on it. You, in the app:
+#
+# - Comment on a card: your words go to its agent as your own message
+#   ("About “<card>” (board b, card k): ..."), and stay on the card, its
+#   thread. The agent answers there (amarchy board comment), or by revising
+#   the card (amarchy board card --key: a new text, a new picture).
+# - Press a button: a column's (the same on every card in it) or the card's
+#   own, each a message to the agent, a column to move it to, words it asks
+#   you first (a reason), or nothing sent (--quiet).
+# - Edit it in place (its block's text, its title), move it, take it down.
+# - Write a task: a card of yours on a board, its agent told to help you get
+#   it done.
+#
+# Approving is yours alone. A column can need your approval (--approval):
+# a card gets into it only by your hand, never an agent's, and its approval
+# says who (Tailscale's login), when, and the sha256 of exactly what was
+# approved (the card's block: card_sha), signed with a key the agents can't
+# read (BOARD_KEY, in the secrets' folder their tools are kept out of). Any
+# change to it (yours, an agent's) drops the approval, and the card goes back
+# where it was before. So an agent's script posts only what `amarchy board
+# approved` says is still approved. The board's check (--check: a command of
+# the agent's, a lint) runs on your edit and your approval first: it can
+# refuse either, in its words. An agent's tools can't reach the app's board
+# actions or the boards' files either (board_guard, hook_settings).
+#
+# Everything done on a board is in its log (amarchy board log), your edits
+# with what was there before, a discard with its reason: what the agents
+# learn from.
+#
+# An agent's own tasks (amarchy task add, from before boards) are cards on
+# its own board (its id's, "For you" and "Done"): pressed, a task's button
+# sends its message and the task is done.
+#
+# Kept in BOARDS, a file a board; the app's view has a summary of each and
+# the cards of yours on it (today_view "boards"), the whole board when it's
+# open (/api/boards/<id>); what you do comes back through /api/boards/*.
 
-TASKS = STATE / "tasks.json"        # [{id, agent, title, note, links: [{label, url}], buttons: [{label, send}], until, at, key}]
-TASKS_LOCK = STATE / "tasks.lock"
+BOARDS = STATE / "boards"               # <id>.json: {id, title, lead, columns, check, at, updated, rev, cards}
+BOARDS_LOCK = BOARDS / ".lock"
+BOARDS_LOG = BOARDS / "log.jsonl"       # every action, a line each
+BOARD_KEY = SECRETS / ".board-key"      # signs your approvals (hex); in the secrets' folder: no agent tool reads it
+TASKS = STATE / "tasks.json"            # (an agent's tasks before boards: moved onto its board once)
 TASK_GRACE = 15 * 60        # s one past its time is kept, out of sight: a button pressed just before it still goes
-TASK_MAX = 30               # tasks an agent may have open at once
+TASK_MAX = 30               # tasks an agent may have open at once (amarchy task add)
 TASK_LINKS, TASK_BUTTONS = 3, 4
 TASK_LABEL = 32             # characters in a link's or a button's label
 TASK_TITLE, TASK_NOTE, TASK_SEND = 200, 2000, 4000
 TASK_ID = re.compile(r"[0-9a-f]{6}")
-_tasks_memo = {"key": None, "tasks": []}
+BOARD_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}")
+BOARD_TITLE = 80
+BOARD_COLUMNS = 8           # columns a board has at most
+BOARD_COLUMN = 32           # characters in a column's name
+BOARD_COLUMN_BUTTONS = 4    # a column's buttons
+BOARD_CARDS = 500           # cards on a board at most
+BOARD_BODY = 25_000         # characters in a card's block
+BOARD_COMMENT = 4000        # characters in a comment
+BOARD_THREAD = 200          # what a card's thread keeps (the log keeps all)
+BOARD_DONE_KEEP = 30 * 86400    # s a card in a done column stays (then only the log has it)
+BOARD_LOG_MAX = 5_000_000   # bytes of the log, the older half dropped past it
+BOARD_CHECK_TIME = 20       # s the board's check may take
+BOARD_SHOW = 3              # cards of yours each board has in the app's view (Tasks; the board has all)
+BOARD_NOT = {"brief", "actions", "choices", "goal"}     # a reply's own blocks, never a card's
+BOARD_DEFAULT = [{"name": "To do", "yours": True}, {"name": "Doing"}, {"name": "Done", "done": True}]
+TASK_BOARD = [{"name": "For you", "yours": True}, {"name": "Done", "done": True}]
+_boards_memo = {}           # file -> ((mtime, size), board)
 
 
-def tasks_read(fresh=False):
-    """Your agents' tasks as written, past their time and closed agents' too
-    (tasks_view says which are open). Read again only when the file changed,
-    unless fresh."""
+def board_file(bid):
+    return BOARDS / f"{bid}.json"
+
+
+def board_load(f):
+    """A board as written (None if it isn't one), read again only when its file changed."""
     try:
-        st = TASKS.stat()
+        st = f.stat()
         key = (st.st_mtime_ns, st.st_size)
     except OSError:
-        return []
-    if not fresh and _tasks_memo["key"] == key:
-        return [dict(t) for t in _tasks_memo["tasks"]]
+        return None
+    memo = _boards_memo.get(str(f))
+    if memo and memo[0] == key:
+        return copy.deepcopy(memo[1])
     try:
-        d = json.loads(TASKS.read_text())
+        b = json.loads(f.read_text())
     except (OSError, ValueError):
+        return None
+    if not (isinstance(b, dict) and isinstance(b.get("id"), str) and isinstance(b.get("lead"), str)
+            and isinstance(b.get("columns"), list) and isinstance(b.get("cards"), list)):
+        return None
+    b["cards"] = [c for c in b["cards"] if isinstance(c, dict) and isinstance(c.get("id"), str)]
+    _boards_memo[str(f)] = (key, b)
+    return copy.deepcopy(b)
+
+
+def boards_all():
+    """Every board here, as written (boards_view says which are in sight)."""
+    tasks_migrate()
+    try:
+        files = sorted(BOARDS.glob("*.json"))
+    except OSError:
         return []
-    tasks = [t for t in d if isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("agent"), str)] \
-        if isinstance(d, list) else []
-    _tasks_memo.update(key=key, tasks=tasks)
-    return [dict(t) for t in tasks]
+    return [b for b in (board_load(f) for f in files) if b]
 
 
-def tasks_change(fn):
-    """Change your agents' tasks in one go, under their lock: fn(tasks)
-    changes the list in place and returns what this returns. What's long
-    gone goes too: past its time by TASK_GRACE, or its agent closed."""
-    TASKS_LOCK.parent.mkdir(parents=True, exist_ok=True)
-    with open(TASKS_LOCK, "a") as lock:
+def board_get(bid):
+    tasks_migrate()
+    return board_load(board_file(bid)) if isinstance(bid, str) and BOARD_ID.fullmatch(bid) else None
+
+
+def boards_change(fn):
+    """Change the boards in one go, under their lock: fn(boards), boards a
+    dict id -> board, changes them in place (adds, deletes) and returns what
+    this returns. What's long gone goes too (board_prune)."""
+    BOARDS.mkdir(parents=True, exist_ok=True)
+    with open(BOARDS_LOCK, "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        tasks = tasks_read(fresh=True)
-        before = json.dumps(tasks)
-        out = fn(tasks)
+        tasks_migrate(locked=True)
+        boards = {}
+        for f in sorted(BOARDS.glob("*.json")):
+            _boards_memo.pop(str(f), None)
+            b = board_load(f)
+            if b:
+                boards[b["id"]] = b
+        before = {k: json.dumps(v, sort_keys=True) for k, v in boards.items()}
+        out = fn(boards)
         now = time.time()
-        tasks[:] = [t for t in tasks if not (t.get("until") and t["until"] + TASK_GRACE < now) and session(t["agent"])]
-        if json.dumps(tasks) != before:
-            write_file(TASKS, json.dumps(tasks))
+        for bid in list(boards):
+            b = boards[bid]
+            board_prune(b, now)
+            if b.get("task") and not b["cards"] and not session(b["lead"]):
+                del boards[bid]         # a closed agent's own board, its tasks gone with it
+        for bid, b in boards.items():
+            text = json.dumps(b, sort_keys=True)
+            if before.get(bid) != text:
+                b["rev"] = int(b.get("rev") or 0) + 1
+                b["updated"] = now
+                write_file(board_file(bid), json.dumps(b, ensure_ascii=False))
+        for bid in set(before) - set(boards):
+            try:
+                board_file(bid).unlink()
+            except OSError:
+                pass
         return out
 
 
-def task_open(t, now=None):
+def board_prune(b, now):
+    """What goes by itself: a task past its time (and its grace), a card done
+    a month ago, every card of a closed agent's own board."""
+    done = {c["name"] for c in b["columns"] if c.get("done")}
+    gone_agent = b.get("task") and not session(b["lead"])
+    b["cards"] = [c for c in b["cards"] if not gone_agent
+                  and not (c.get("until") and c["until"] + TASK_GRACE < now)
+                  and not (c.get("column") in done and (c.get("done_at") or c.get("updated") or 0) + BOARD_DONE_KEEP < now)]
+
+
+def tasks_migrate(locked=False):
+    """An agent's tasks from before boards (TASKS): each a card on its own
+    board, once. Then the file is kept aside (tasks.json.moved)."""
+    if not TASKS.exists():
+        return
+    if not locked:
+        boards_change(lambda boards: None)      # (it moves them, under the lock)
+        return
+    try:
+        old = json.loads(TASKS.read_text())
+    except (OSError, ValueError):
+        old = []
+    now = time.time()
+    for t in old if isinstance(old, list) else []:
+        if not (isinstance(t, dict) and isinstance(t.get("agent"), str) and isinstance(t.get("id"), str)):
+            continue
+        if t.get("until") and t["until"] + TASK_GRACE < now:
+            continue
+        f = board_file(t["agent"])
+        b = board_load(f) or task_board_new(t["agent"])
+        if not any(c["id"] == t["id"] for c in b["cards"]):
+            b["cards"].append(card_new(t["agent"], t["agent"], id=t["id"], key=t.get("key") or "", title=t.get("title") or "",
+                                       note=t.get("note") or "", links=t.get("links") or [], buttons=t.get("buttons") or [],
+                                       until=t.get("until") or 0, at=t.get("at") or now, column=TASK_BOARD[0]["name"], task=True))
+        write_file(f, json.dumps(b, ensure_ascii=False))
+    try:
+        os.replace(TASKS, TASKS.with_name("tasks.json.moved"))
+    except OSError:
+        pass
+
+
+def task_board_new(agent):
+    """An agent's own board, for its tasks: its name, "For you" and "Done"."""
+    return {"id": agent, "title": "", "lead": agent, "columns": copy.deepcopy(TASK_BOARD), "check": "", "task": True,
+            "at": time.time(), "updated": time.time(), "rev": 0, "cards": []}
+
+
+def card_new(agent, by, **kw):
+    now = time.time()
+    c = {"id": "", "key": "", "title": "", "column": "", "block": None, "note": "", "links": [], "buttons": [],
+         "agent": agent, "by": by, "at": now, "updated": now, "until": 0, "thread": [], "approval": None}
+    c.update(kw)
+    return c
+
+
+def card_taken_ids(boards):
+    return {c["id"] for b in boards.values() for c in b["cards"]}
+
+
+def card_id(boards):
+    taken = card_taken_ids(boards)
+    return next(i for i in iter(lambda: os.urandom(3).hex(), None) if i not in taken)
+
+
+def card_find(b, ref):
+    """A card on a board by its key, else by its id."""
+    if not ref:
+        return None
+    return next((c for c in b["cards"] if c.get("key") and c["key"] == ref), None) \
+        or next((c for c in b["cards"] if c["id"] == ref), None)
+
+
+def card_ref(c):
+    """How an agent names a card: its key, else its id."""
+    return c.get("key") or c["id"]
+
+
+def board_column(b, name):
+    return next((c for c in b["columns"] if c["name"] == name), None)
+
+
+def board_column_named(b, name):
+    """A column by its name as written, any case."""
+    return next((c for c in b["columns"] if c["name"].lower() == (name or "").strip().lower()), None)
+
+
+def board_first(b, *, approval=False):
+    """Where a new card goes: the first column (not one that needs your approval)."""
+    return next((c["name"] for c in b["columns"] if approval or not c.get("approval")), b["columns"][0]["name"])
+
+
+def board_done_column(b):
+    return next((c["name"] for c in b["columns"] if c.get("done")), None)
+
+
+def card_open(b, c, now=None):
     """Not past its time."""
-    return not t.get("until") or t["until"] > (now or time.time())
+    return not c.get("until") or c["until"] > (now or time.time())
+
+
+def card_content(c):
+    """What a card's approval is of: its block (kind, attributes, text), else its note."""
+    blk = c.get("block")
+    if blk:
+        return {"kind": blk.get("kind") or "", "attrs": blk.get("attrs") or {}, "body": blk.get("body") or ""}
+    return {"note": c.get("note") or ""}
+
+
+def card_sha(c):
+    """The sha256 of a card's content (card_content), as JSON with its keys
+    in order, no spaces, UTF-8: what an approval is of."""
+    return hashlib.sha256(json.dumps(card_content(c), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode()).hexdigest()
+
+
+def card_text(c):
+    """A card's text: its block's, else its note."""
+    blk = c.get("block")
+    return (blk.get("body") or "") if blk else (c.get("note") or "")
+
+
+_board_key = {}
+
+
+def board_key():
+    """The key your approvals are signed with: made once, 0600, in the
+    secrets' folder (no agent's tool reads there)."""
+    if _board_key.get("path") == str(BOARD_KEY):
+        return _board_key["key"]
+    k = board_key_read()
+    _board_key.update(path=str(BOARD_KEY), key=k)
+    return k
+
+
+def board_key_read():
+    try:
+        k = BOARD_KEY.read_text().strip()
+        if re.fullmatch(r"[0-9a-f]{64}", k):
+            return bytes.fromhex(k)
+    except OSError:
+        pass
+    BOARD_KEY.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(BOARD_KEY.parent, 0o700)
+    k = os.urandom(32)
+    tmp = BOARD_KEY.with_name(f".board-key.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(k.hex() + "\n")
+    try:
+        os.link(tmp, BOARD_KEY)      # (one made by another at the same moment wins)
+    except FileExistsError:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+    return bytes.fromhex(BOARD_KEY.read_text().strip())
+
+
+def approval_sig(bid, cid, sha, by, at):
+    msg = f"amarchy-approval\n{bid}\n{cid}\n{sha}\n{by}\n{at:.3f}".encode()
+    return hmac.new(board_key(), msg, hashlib.sha256).hexdigest()
+
+
+def approval_of(bid, c):
+    """A card's approval, when it's yours and still of what it has now:
+    {by, at, sha256}; else None."""
+    a = c.get("approval")
+    if not isinstance(a, dict) or not isinstance(a.get("at"), (int, float)) or a.get("sha256") != card_sha(c):
+        return None
+    if not hmac.compare_digest(str(a.get("sig") or ""), approval_sig(bid, c["id"], a["sha256"], str(a.get("by") or ""), a["at"])):
+        return None
+    return {"by": a.get("by") or "", "at": a["at"], "sha256": a["sha256"]}
+
+
+def card_unapprove(b, c, who, why):
+    """The approval dropped (its content changed, it was moved back): the card
+    back where it was before, if it's still in a column that needs it."""
+    had = c.get("approval")
+    c["approval"] = None
+    col = board_column(b, c.get("column"))
+    if col and col.get("approval"):
+        back = (had or {}).get("from")
+        to = back if back and board_column(b, back) and not board_column(b, back).get("approval") else board_first(b)
+        thread_add(c, who, "move", text=why, column=to, was=c["column"])
+        c["column"] = to
+        c["moved"] = time.time()
+
+
+def thread_add(c, who, kind, **kw):
+    item = {"at": time.time(), "who": who, "kind": kind, **{k: v for k, v in kw.items() if v not in (None, "")}}
+    c.setdefault("thread", []).append(item)
+    del c["thread"][:-BOARD_THREAD]
+    return item
+
+
+def board_log(b, c, who, action, **kw):
+    """One line of the board's log: what was done, by whom, to which card."""
+    BOARDS.mkdir(parents=True, exist_ok=True)
+    row = {"at": time.time(), "board": b["id"], "card": c["id"] if c else None, "key": (c or {}).get("key") or None,
+           "title": (c or {}).get("title") or None, "who": who, "action": action,
+           **{k: v for k, v in kw.items() if v not in (None, "")}}
+    try:
+        if BOARDS_LOG.exists() and BOARDS_LOG.stat().st_size > BOARD_LOG_MAX:
+            lines = BOARDS_LOG.read_text().splitlines()
+            write_file(BOARDS_LOG, "\n".join(lines[len(lines) // 2:]) + "\n")
+        with open(BOARDS_LOG, "a") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def board_lead_name(b, crew=None):
+    who = next((a for a in (team() if crew is None else crew) if a["id"] == b["lead"]), None)
+    return who["name"] if who else b["lead"]
+
+
+def board_title(b, crew=None):
+    """A board's name: its own, else an agent's own board its agent's, any
+    other its id's words ("ideas": Ideas)."""
+    if b.get("title"):
+        return b["title"]
+    return board_lead_name(b, crew) if b.get("task") else re.sub(r"[-_.]+", " ", b["id"]).strip().capitalize() or b["id"]
+
+
+def card_agent(b, c, crew=None):
+    """Who hears what you do on a card: its own agent, while it's on your
+    team, else the board's lead."""
+    ids = {a["id"] for a in (team() if crew is None else crew)}
+    return c.get("agent") if c.get("agent") in ids else b["lead"]
+
+
+def card_buttons(b, c):
+    """A card's buttons: its column's, then its own (an agent's task with
+    none has Done). Each {label, send, to, asks, own}."""
+    col = board_column(b, c.get("column")) or {}
+    out = [{**x, "own": False} for x in col.get("buttons") or []]
+    if col.get("done"):
+        return out          # done: its own buttons are done with (its column's, as Restore, stay)
+    own = c.get("buttons") or []
+    if not own and c.get("task"):
+        own = [{"label": "Done", "send": f"Done: {c.get('title') or ''}"}]
+    return out + [{**x, "own": True} for x in own]
+
+
+def button_words(b, c, button, words):
+    """What a button sends: its message, the card's name in it ({title},
+    {key}, {board}, {column}), and what it asked you ({words}, else after
+    it). "" sends nothing."""
+    send = button.get("send")
+    if send is None:
+        send = f"{button['label']}: “{c.get('title') or ''}” (board {b['id']}, card {card_ref(c)})"
+    if not send:
+        return ""
+    fills = {"title": c.get("title") or "", "key": card_ref(c), "board": b["id"], "column": c.get("column") or "",
+             "words": words or ""}
+    text = re.sub(r"\{(title|key|board|column|words)\}", lambda m: fills[m.group(1)], send)
+    if words and "{words}" not in send:
+        text = f"{text}: {words}"
+    return text
+
+
+def board_tell(agent, text):
+    """Something you did on a board, to its agent, as your own message
+    (amarchy send: waking it). None, or why it didn't go."""
+    r = run_amarchy("send", agent, text, "--no-wait", env={"AMARCHY_SENT_BY": "you"})
+    return None if r.returncode == 0 else gist(r.stderr) or "Its agent didn't take it"
+
+
+def board_check(b, c, action, column, text):
+    """The board's check on what you're about to save or approve: its
+    command, with the text on its input. None, or what it said (refused)."""
+    cmd = (b.get("check") or "").strip()
+    if not cmd:
+        return None
+    lead = session(b["lead"])
+    cwd = lead["path"] if lead and Path(lead.get("path") or "").is_dir() else str(HOME)
+    env = {**clean_env(), "AMARCHY_BOARD": b["id"], "AMARCHY_CARD": c["id"], "AMARCHY_CARD_KEY": c.get("key") or "",
+           "AMARCHY_CARD_TITLE": c.get("title") or "", "AMARCHY_CARD_COLUMN": column or "",
+           "AMARCHY_CARD_ACTION": action, "AMARCHY_CARD_KIND": (c.get("block") or {}).get("kind") or ""}
+    try:
+        r = subprocess.run(["bash", "-c", cmd], input=text, capture_output=True, text=True, cwd=cwd, env=env,
+                           timeout=BOARD_CHECK_TIME)
+    except subprocess.TimeoutExpired:
+        return f"The board's check took over {BOARD_CHECK_TIME} s"
+    except OSError as e:
+        return f"The board's check didn't run: {e}"
+    if r.returncode == 0:
+        return None
+    said = " ".join((r.stdout + "\n" + r.stderr).split())
+    return said[:600] or f"The board's check said no (exit {r.returncode})"
+
+
+# ---- what the app shows
+
+def card_view(b, c, crew, thread=None):
+    """A card as the app draws it."""
+    who = {a["id"]: a["name"] for a in crew}
+    agent = card_agent(b, c, crew)
+    items = c.get("thread") or []
+    yours = [i for i, x in enumerate(items) if x.get("who") == "you" and x.get("kind") in ("comment", "edit", "press")]
+    last = items[-1] if items else None
+    # The agent answered since your last word: a reply, a revision.
+    answered = bool(yours and last and last.get("who") != "you" and last.get("kind") in ("comment", "revise")
+                    and len(items) - 1 > yours[-1])
+    return {"id": c["id"], "key": c.get("key") or "", "title": c.get("title") or "", "column": c.get("column") or "",
+            "block": c.get("block"), "note": c.get("note") or "", "links": c.get("links") or [],
+            "buttons": [{"label": x["label"], "to": x.get("to") or "", "asks": x.get("asks") or "", "own": x["own"],
+                         "send": button_words(b, c, x, "")} for x in card_buttons(b, c)],
+            "agent": agent, "agent_name": who.get(agent, agent), "by": c.get("by") or "", "at": c.get("at") or 0,
+            "updated": c.get("updated") or 0, "until": c.get("until") or 0, "task": bool(c.get("task")),
+            "approved": approval_of(b["id"], c), "sha256": card_sha(c), "answered": answered,
+            "edited": bool(c.get("edited")), "count": len(items),
+            "thread": [{**x, "name": "You" if x.get("who") == "you" else who.get(x.get("who"), x.get("who"))}
+                       for x in (items if thread is None else items[-thread:] if thread else [])]}
+
+
+def card_order(b, c):
+    """Cards in a column: the one going soonest first, then as they came."""
+    return (not c.get("until"), c.get("until") or 0, c.get("moved") or c.get("at") or 0, c["id"])
+
+
+def board_summary(b, crew, show=BOARD_SHOW):
+    """A board as Tasks shows it: its name, lead, columns (with how many
+    cards each), how many are yours (in a column that waits on you), and the
+    first of those."""
+    now = time.time()
+    cards = sorted((c for c in b["cards"] if card_open(b, c, now)), key=lambda c: card_order(b, c))
+    yours_cols = {c["name"] for c in b["columns"] if c.get("yours")}
+    yours = [c for c in cards if c.get("column") in yours_cols]
+    return {"id": b["id"], "title": board_title(b, crew), "lead": b["lead"], "lead_name": board_lead_name(b, crew),
+            "task": bool(b.get("task")), "check": bool(b.get("check")), "rev": b.get("rev") or 0,
+            "updated": b.get("updated") or 0, "at": b.get("at") or 0,
+            "columns": [{"name": x["name"], "yours": bool(x.get("yours")), "approval": bool(x.get("approval")),
+                         "done": bool(x.get("done")), "count": sum(1 for c in cards if c.get("column") == x["name"])}
+                        for x in b["columns"]],
+            "yours": len(yours), "cards": [card_view(b, c, crew, thread=3) for c in yours[:show]]}
+
+
+def boards_view(crew=None):
+    """Every board in sight (its lead on your team), as Tasks shows them:
+    your assistant's first, then your agents' in their order, each one's
+    in the order they were made."""
+    crew = team() if crew is None else crew
+    order = {a["id"]: i for i, a in enumerate(crew)}
+    bs = [b for b in boards_all() if b["lead"] in order and (not b.get("task") or b["cards"])]
+    bs.sort(key=lambda b: (order[b["lead"]], not b.get("task"), b.get("at") or 0, b["id"]))
+    return [board_summary(b, crew) for b in bs]
+
+
+def board_whole(bid, crew=None):
+    """One board, every card in sight: what the app's open board shows."""
+    crew = team() if crew is None else crew
+    b = board_get(bid)
+    if not b or b["lead"] not in {a["id"] for a in crew}:
+        return None
+    now = time.time()
+    cards = sorted((c for c in b["cards"] if card_open(b, c, now)), key=lambda c: card_order(b, c))
+    return {**board_summary(b, crew, show=0), "cards": [card_view(b, c, crew, thread=60) for c in cards]}
 
 
 def tasks_view(crew=None):
-    """Your agents' tasks still open, as Tasks shows them: the one going
-    soonest first, then the rest, the oldest first. Only your assistant's and
-    your agents' (one that isn't an agent any more keeps its out of sight)."""
-    who = {a["id"]: a for a in (team() if crew is None else crew)}
+    """Your agents' tasks as they were before boards (an older machine's
+    board reads them): the open cards of each agent's own board."""
+    crew = team() if crew is None else crew
+    who = {a["id"]: a for a in crew}
     now = time.time()
-    out = [{"id": t["id"], "agent": t["agent"], "agent_name": who[t["agent"]]["name"], "title": t.get("title") or "",
-            "note": t.get("note") or "", "links": t.get("links") or [], "buttons": t.get("buttons") or [],
-            "until": t.get("until") or 0, "at": t.get("at") or 0}
-           for t in tasks_read() if t["agent"] in who and task_open(t, now)]
+    out = []
+    for b in boards_all():
+        if not b.get("task") or b["lead"] not in who:
+            continue
+        done = board_done_column(b)
+        for c in b["cards"]:
+            if c.get("column") != done and card_open(b, c, now):
+                out.append({"id": c["id"], "agent": b["lead"], "agent_name": who[b["lead"]]["name"], "title": c.get("title") or "",
+                            "note": c.get("note") or "", "links": c.get("links") or [],
+                            "buttons": [{"label": x["label"], "send": button_words(b, c, x, "")} for x in card_buttons(b, c) if x["own"]],
+                            "until": c.get("until") or 0, "at": c.get("at") or 0})
     return sorted(out, key=lambda t: (not t["until"], t["until"] or t["at"], t["at"], t["id"]))
+
+
+# ---- what you do, in the app (/api/boards/*)
+
+def board_act(bid, cid, fn):
+    """fn(board, card, boards) under the boards' lock, on that card: its
+    answer, or (None, what's wrong)."""
+    if not isinstance(bid, str) or not BOARD_ID.fullmatch(bid) or not isinstance(cid, str) or not TASK_ID.fullmatch(cid):
+        return None, "which board (board) and which of its cards (card)"
+
+    def act(boards):
+        b = boards.get(bid)
+        if not b or b["lead"] not in {a["id"] for a in team()}:
+            return None, "That board is gone"
+        c = next((x for x in b["cards"] if x["id"] == cid), None)
+        if not c:       # (one past its time is still there a while: a button pressed just before it still goes)
+            return None, "That card is gone: its agent took it down, or its time ran out"
+        return fn(b, c, boards)
+    return boards_change(act)
+
+
+def board_approve(b, c, by, column):
+    """You moved a card into a column that needs your approval: it's
+    approved, of exactly what it has now, signed."""
+    at = round(time.time(), 3)
+    sha = card_sha(c)
+    c["approval"] = {"by": by, "at": at, "sha256": sha, "sig": approval_sig(b["id"], c["id"], sha, by, at),
+                     "from": c.get("column") if not (board_column(b, c.get("column")) or {}).get("approval") else None}
+    board_log(b, c, "you", "approve", by=by, sha256=sha, column=column)
+
+
+def board_move_to(b, c, to, who, by="", thread=True):
+    """A card into another column (to, its name): an approval column's
+    approval yours (board_approve, before it moves), leaving one drops it
+    (not for a done column: posted as approved). thread: said on its thread
+    (a button's press says it there itself)."""
+    was = c.get("column")
+    if to == was:
+        return
+    target = board_column(b, to)
+    if target.get("approval"):
+        board_approve(b, c, by, to)
+    elif (board_column(b, was) or {}).get("approval") and not target.get("done"):
+        c["approval"] = None
+    c["column"] = to
+    c["moved"] = time.time()
+    c["done_at"] = time.time() if target.get("done") else None
+    if thread:
+        thread_add(c, who, "move", column=to, was=was, approved=True if target.get("approval") else None)
+    board_log(b, c, who, "move", column=to, was=was)
+
+
+def board_you_check(bid, cid, action, column=None, text=None):
+    """The board's check, outside the lock (it may take a while): None, or
+    why it refused."""
+    b = board_get(bid)
+    c = card_find(b, cid) if b else None
+    if not b or not c:
+        return None
+    return board_check(b, c, action, column or c.get("column"), card_text(c) if text is None else text)
+
+
+def board_press(bid, cid, n, words, by):
+    """A button on a card, pressed in the app: its message to the agent,
+    the card moved where it says (a card's own button without one, a task's:
+    to the done column), what it asked of you on its thread. None, or what's
+    wrong (then nothing happened)."""
+    words = " ".join(str(words or "").split())[:BOARD_COMMENT]
+    b0 = board_get(bid)
+    c0 = next((x for x in (b0 or {}).get("cards", []) if x["id"] == cid), None)
+    if b0 and c0 and isinstance(n, int) and 0 <= n < len(card_buttons(b0, c0)):
+        button = card_buttons(b0, c0)[n]
+        to = button.get("to") or (board_done_column(b0) if button["own"] else None)
+        if to and (board_column(b0, to) or {}).get("approval"):
+            why = board_check(b0, c0, "approve", to, card_text(c0))
+            if why:
+                return why
+    sha0 = card_sha(c0) if c0 else None
+
+    def press(b, c, boards):
+        buttons = card_buttons(b, c)
+        if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n < len(buttons):
+            return None, "That card has no such button"
+        if card_sha(c) != sha0:
+            return None, "That card changed a moment ago: look at it again"
+        button = buttons[n]
+        if button.get("asks") and not words:
+            return None, f"{button['label']} asks you first: {button['asks']}"
+        to = button.get("to") or (board_done_column(b) if button["own"] else None)
+        if to and not board_column(b, to):
+            to = None
+        text = button_words(b, c, button, words)
+        if text:
+            why = board_tell(card_agent(b, c), text)
+            if why:
+                return None, why
+        thread_add(c, "you", "press", label=button["label"], text=words, column=to if to != c.get("column") else None,
+                   approved=True if to and (board_column(b, to) or {}).get("approval") else None)
+        board_log(b, c, "you", "press", label=button["label"], words=words, sent=text)
+        if to:
+            board_move_to(b, c, to, "you", by, thread=False)
+        return {"ok": True}, None
+    return board_act(bid, cid, press)[1]
+
+
+def board_comment_you(bid, cid, text):
+    """Your comment on a card: on its thread, and to its agent as your own
+    message. None, or what's wrong."""
+    text = str(text or "").strip()
+    if not text:
+        return "Write something first"
+    if len(text) > BOARD_COMMENT:
+        return f"A comment is {BOARD_COMMENT} characters at most"
+
+    def comment(b, c, boards):
+        why = board_tell(card_agent(b, c), f"About “{c.get('title') or 'a card'}” (board {b['id']}, card {card_ref(c)}): {text}")
+        if why:
+            return None, why
+        thread_add(c, "you", "comment", text=text)
+        board_log(b, c, "you", "comment", text=text)
+        return {"ok": True}, None
+    return board_act(bid, cid, comment)[1]
+
+
+def board_move_you(bid, cid, column, by):
+    """You moved a card (its menu's Move to): into a column that needs your
+    approval, it's approved (after the board's check). None, or what's wrong."""
+    b0 = board_get(bid)
+    col = board_column(b0, column) if b0 else None
+    if not col:
+        return "That board has no such column"
+    if col.get("approval"):
+        why = board_you_check(bid, cid, "approve", column)
+        if why:
+            return why
+    c0 = card_find(b0, cid)
+    sha0 = card_sha(c0) if c0 else None
+
+    def move(b, c, boards):
+        if not board_column(b, column):
+            return None, "That board has no such column"
+        if card_sha(c) != sha0:
+            return None, "That card changed a moment ago: look at it again"
+        board_move_to(b, c, column, "you", by)
+        return {"ok": True}, None
+    return board_act(bid, cid, move)[1]
+
+
+def board_edit_you(bid, cid, title, body, base):
+    """You edited a card in place: its title, its text (its block's, else its
+    note). Its approval goes (the board's check first, on the new text);
+    what was there before is on its thread and in the log. Nothing is sent:
+    the agent finds it on the card. None, or what's wrong."""
+    title = None if title is None else " ".join(str(title).split())
+    if title is not None and not 0 < len(title) <= TASK_TITLE:
+        return f"A card's title is 1 to {TASK_TITLE} characters"
+    body = None if body is None else str(body).replace("\r\n", "\n").rstrip()
+    if body is not None and len(body) > BOARD_BODY:
+        return f"A card's text is {BOARD_BODY} characters at most"
+    if body is not None and re.search(r"^\s*```", body, re.M):
+        return "A card's text can't have a ``` line in it"
+    b0 = board_get(bid)
+    c0 = card_find(b0, cid) if b0 else None
+    if c0 and body is not None and body != card_text(c0):
+        why = board_check(b0, c0, "edit", c0.get("column"), body)
+        if why:
+            return why
+
+    def edit(b, c, boards):
+        if base and card_sha(c) != base:
+            return None, "Its agent changed it while you were editing: look at it again"
+        changed = False
+        if title is not None and title != c.get("title"):
+            thread_add(c, "you", "edit", what="title", before=c.get("title"), after=title)
+            board_log(b, c, "you", "edit", what="title", before=c.get("title"), after=title)
+            c["title"] = title
+            changed = True
+        if body is not None and body != card_text(c):
+            before = card_text(c)
+            if c.get("block"):
+                if not body.strip() and (block_kinds().get(c["block"]["kind"]) or {}).get("body", {}).get("need"):
+                    return None, "Its text can't be empty"
+                c["block"]["body"] = body
+            else:
+                c["note"] = body
+            c["edited"] = {"at": time.time(), "sha256": card_sha(c)}
+            thread_add(c, "you", "edit", what="text", before=before, after=body)
+            board_log(b, c, "you", "edit", what="text", before=before, after=body)
+            if c.get("approval"):
+                card_unapprove(b, c, "you", "Edited: not approved any more")
+            changed = True
+        if changed:
+            c["updated"] = time.time()
+        return {"ok": True, "sha256": card_sha(c)}, None
+    return board_act(bid, cid, edit)[1]
+
+
+def board_remove_you(bid, cid):
+    """You took a card down (with Undo, in the app). Nothing is sent; the log
+    has it, as it was."""
+    def remove(b, c, boards):
+        b["cards"].remove(c)
+        board_log(b, c, "you", "remove", text=card_text(c), column=c.get("column"))
+        return {"ok": True}, None
+    return board_act(bid, cid, remove)[1]
+
+
+def board_add_you(bid, text, column=None):
+    """A task you wrote, on a board: a card of yours (its first line its
+    title, the rest its note), in a column of yours there, and its lead
+    told, to help you get it done. ({id}, None), or (None, what's wrong)."""
+    text = str(text or "").replace("\r\n", "\n").strip()
+    if not text:
+        return None, "Write the task first"
+    if len(text) > TASK_NOTE + TASK_TITLE:
+        return None, f"A task is {TASK_NOTE} characters at most"
+    first, _, rest = text.partition("\n")
+    title = " ".join(first.split())
+    if len(title) > TASK_TITLE:
+        title, rest = cut_words(title, TASK_TITLE), text
+    if not isinstance(bid, str) or not BOARD_ID.fullmatch(bid):
+        return None, "Which board"
+
+    def add(boards):
+        b = boards.get(bid)
+        if not b and bid in {a["id"] for a in team()}:
+            b = boards[bid] = task_board_new(bid)        # an agent's own board, made for its first task
+        if not b or b["lead"] not in {a["id"] for a in team()}:
+            return None, "That board is gone"
+        if len(b["cards"]) >= BOARD_CARDS:
+            return None, f"That board has {BOARD_CARDS} cards: take some down first"
+        col = board_column(b, column) if column else None
+        to = col["name"] if col and not col.get("approval") else \
+            next((x["name"] for x in b["columns"] if x.get("yours") and not x.get("approval")), board_first(b))
+        c = card_new(b["lead"], "you", id=card_id(boards), title=title, note=rest.strip(), column=to, task=bool(b.get("task")))
+        why = board_tell(b["lead"], f"{text}\n\n(A task of mine on {'your board' if b.get('task') else f'the board “{board_title(b)}”'}: "
+                                    f"board {b['id']}, card {c['id']}. Help me get it done: answer me on the card, "
+                                    f"amarchy board comment {b['id']} {c['id']} \"…\", and move it along.)")
+        if why:
+            return None, why
+        b["cards"].append(c)
+        board_log(b, c, "you", "add", text=text, column=to)
+        return {"id": c["id"], "board": b["id"]}, None
+    return boards_change(add)
+
+
+def cut_words(text, n):
+    return text if len(text) <= n else text[:n - 1].rsplit(" ", 1)[0].rstrip() + "…"
+
+
+def board_notify(b, c, crew=None):
+    """A card on your phones, under its agent's name and picture; a tap
+    opens its board. None, or why it didn't go."""
+    if not app_subscriptions():
+        return "no phone or browser has turned on notifications yet (in the app: the gear, then Turn on notifications)"
+    crew = team() if crew is None else crew
+    who = next((a for a in crew if a["id"] == card_agent(b, c, crew)), None) or {"name": "Your agent", "role": "agent", "id": b["lead"]}
+    title = c["title"] if c["title"].lower().startswith(who["name"].lower()) else f"{who['name']}: {c['title']}"
+    n = push_all({"title": title[:200], "body": (c.get("note") or card_text(c))[:2000], "tag": f"amarchy-card-{c['id']}",
+                  "url": f"/#/b/{urllib.parse.quote(b['id'])}", "icon": team_icon(who)})
+    return None if n else "no phone took it"
+
+
+# ---- the CLI: amarchy board (an agent's side) and amarchy task
+
+def board_who(args_agent=None):
+    """Who runs it: (one of your team, None), or (None, what's wrong)."""
+    sid = args_agent or os.environ.get("AMARCHY_SESSION") or ""
+    if not sid:
+        return None, "who's asking: --agent <id> (from an agent's own chat, it's itself)"
+    if not session(sid):
+        return None, f"No session {sid!r}"
+    who = next((a for a in team() if a["id"] == sid), None)
+    if not who:
+        return None, (f"{sid} isn't your assistant or one of your agents, and only they keep boards "
+                      f"(amarchy agents {sid} makes it one)")
+    return who, None
+
+
+def board_parse_button(v, title=None):
+    """--button <label>[=<message>]: {label, send}, or what's wrong. Without a
+    message it sends "<label>: “<card>” (board, card)" (send None)."""
+    label, eq, send = (v or "").partition("=")
+    label, send = label.strip(), send.strip()
+    if not label or len(label) > TASK_LABEL:
+        return f"--button takes <label>[=<message>], the label 1 to {TASK_LABEL} characters (not {v!r})"
+    if len(send) > TASK_SEND:
+        return f"a button's message is {TASK_SEND} characters at most"
+    return {"label": label, "send": send if eq and send else None}
+
+
+def task_link(v):
+    """--link [<label>=]<url>: {label, url}, or what's wrong."""
+    v = (v or "").strip()
+    label, url = ("Open", v) if re.match(r"https?://", v, re.I) else (x.strip() for x in v.partition("=")[::2])
+    if not re.fullmatch(r"https?://\S+", url, re.I):
+        return f"--link takes [<label>=]<url>, the url an http(s) one (not {v!r})"
+    if not label or len(label) > TASK_LABEL:
+        return f"a link's label is 1 to {TASK_LABEL} characters"
+    return {"label": label, "url": url}
 
 
 def task_clock(when):
@@ -14209,78 +15017,561 @@ def task_until(word, now=None):
     return when, None
 
 
-def task_owner(sid):
-    """Whose task it is: (your assistant or the agent, None), or (None,
-    what's wrong)."""
-    if not sid:
-        return None, "whose task: --agent <id> (from an agent's own chat, it's its own)"
-    if not session(sid):
-        return None, f"No session {sid!r}"
-    who = next((a for a in team() if a["id"] == sid), None)
-    if not who:
-        return None, (f"{sid} isn't your assistant or one of your agents, and only they have tasks "
-                      f"(amarchy agents {sid} makes it one)")
-    return who, None
+def board_parse_columns(specs):
+    """--column groups into columns: [{name, yours, approval, done, buttons}],
+    or what's wrong."""
+    cols, names = [], set()
+    for spec in specs:
+        name = " ".join(spec["name"].split())
+        if not name or len(name) > BOARD_COLUMN:
+            return f"a column's name is 1 to {BOARD_COLUMN} characters (not {spec['name']!r})"
+        if name.lower() in names:
+            return f"two columns are called {name!r}"
+        names.add(name.lower())
+        if len(spec["buttons"]) > BOARD_COLUMN_BUTTONS:
+            return f"a column has {BOARD_COLUMN_BUTTONS} buttons at most ({name!r} has {len(spec['buttons'])})"
+        if spec.get("approval") and spec.get("done"):
+            return f"{name!r} can't both need your approval and be done"
+        cols.append({"name": name, **{k: True for k in ("yours", "approval", "done") if spec.get(k)},
+                     "buttons": spec["buttons"]})
+    if len(cols) > BOARD_COLUMNS:
+        return f"a board has {BOARD_COLUMNS} columns at most"
+    if cols and all(c.get("approval") for c in cols):
+        return "a board needs a column that doesn't need your approval, for new cards"
+    for c in cols:
+        for x in c["buttons"]:
+            if x.get("to") and x["to"].lower() not in names:
+                return f"{c['name']!r}'s button {x['label']!r} moves to {x['to']!r}, which isn't one of its columns"
+            if x.get("to"):
+                x["to"] = next(y["name"] for y in cols if y["name"].lower() == x["to"].lower())
+    return cols
 
 
-def task_link(v):
-    """--link [<label>=]<url>: {label, url}, or what's wrong."""
-    v = (v or "").strip()
-    label, url = ("Open", v) if re.match(r"https?://", v, re.I) else (x.strip() for x in v.partition("=")[::2])
-    if not re.fullmatch(r"https?://\S+", url, re.I):
-        return f"--link takes [<label>=]<url>, the url an http(s) one (not {v!r})"
-    if not label or len(label) > TASK_LABEL:
-        return f"a link's label is 1 to {TASK_LABEL} characters"
-    return {"label": label, "url": url}
+def board_card_buttons_check(b, buttons):
+    for x in buttons:
+        if x.get("to"):
+            col = board_column_named(b, x["to"])
+            if not col:
+                return f"the button {x['label']!r} moves to {x['to']!r}, which isn't one of {b['id']}'s columns"
+            x["to"] = col["name"]
+    return None
 
 
-def task_button(v, title):
-    """--button <label>[=<message>]: {label, send}, or what's wrong. Without
-    a message it sends "<label>: <the task's title>"."""
-    label, _, send = (v or "").partition("=")
-    label, send = label.strip(), send.strip()
-    if not label or len(label) > TASK_LABEL:
-        return f"--button takes <label>[=<message>], the label 1 to {TASK_LABEL} characters (not {v!r})"
-    if len(send) > TASK_SEND:
-        return f"a button's message is {TASK_SEND} characters at most"
-    return {"label": label, "send": send or f"{label}: {title}"}
+def board_args(args, card=False):
+    """An agent's options for a board (set) or a card (card), in order:
+    a --button after a --column is that column's, --to / --asks / --quiet
+    are about the --button before them. (options, None) or (None, why)."""
+    o = {"columns": None, "buttons": [], "links": [], "attrs": {}, "flags": set()}
+    single = {"--title", "--lead", "--check", "--key", "--column", "--block", "--body", "--xpost", "--media", "--note",
+              "--until", "--agent", "--base", "--handle", "--name", "--avatar"} if card else {"--title", "--lead", "--check", "--agent"}
+    it = iter(args)
+    last = None     # the button the modifiers are about
+    for a in it:
+        if a in ("--notify", "--over-edit", "--no-check", "--clear-buttons", "--clear-links", "--quiet", "--yours",
+                 "--approval", "--done"):
+            if a == "--quiet":
+                if not last:
+                    return None, "--quiet is about the --button before it"
+                last["send"] = ""
+            elif a in ("--yours", "--approval", "--done"):
+                if card or not o["columns"]:
+                    return None, f"{a} is about the --column before it (amarchy board set)"
+                o["columns"][-1][a[2:]] = True
+            else:
+                o["flags"].add(a)
+            continue
+        if not a.startswith("--"):
+            return None, f"what's {a!r}? (amarchy board --help)"
+        v = next(it, None)
+        if v is None:
+            return None, f"{a} takes a value (amarchy board --help)"
+        if a == "--column" and not card:
+            o["columns"] = (o["columns"] or []) + [{"name": v, "buttons": []}]
+            last = None
+        elif a == "--button":
+            x = board_parse_button(v)
+            if isinstance(x, str):
+                return None, x
+            (o["columns"][-1]["buttons"] if not card and o["columns"] else o["buttons"]).append(x)
+            if not card and not o["columns"]:
+                return None, "a board's --button is a column's: put it after its --column"
+            last = x
+        elif a in ("--to", "--asks"):
+            if not last:
+                return None, f"{a} is about the --button before it"
+            if a == "--asks" and not 0 < len(v.strip()) <= 120:
+                return None, "--asks is what the button asks you first, 1 to 120 characters"
+            last[a[2:]] = v.strip()
+        elif a == "--link" and card:
+            o["links"].append(v)
+        elif a == "--attr" and card:
+            k, eq, val = v.partition("=")
+            if not eq or not re.fullmatch(r"\w{1,20}", k.strip()):
+                return None, f"--attr takes <name>=<value> (not {v!r})"
+            o["attrs"][k.strip().lower()] = val
+        elif a in single:
+            o[a[2:]] = v
+        else:
+            return None, f"{'amarchy board card' if card else 'amarchy board set'} takes no {a} (amarchy board --help)"
+    return o, None
 
 
-def task_notify(who, t):
-    """A new task on your phones, under its agent's name and picture; a tap
-    opens Tasks. None, or why it didn't go."""
-    if not notified_anywhere():
-        return "no phone or browser has turned on notifications yet (in the app: the gear, then Turn on notifications)"
-    title = t["title"] if t["title"].lower().startswith(who["name"].lower()) else f"{who['name']}: {t['title']}"
-    n = push_all({"title": title[:200], "body": t["note"][:2000], "tag": f"amarchy-task-{t['id']}",
-                  "url": "/#/tasks", "icon": team_icon(who)})
-    return None if n else "no phone took it"
+def stdin_or(v):
+    return sys.stdin.read() if v == "-" else v
 
 
-def task_press(tid, n):
-    """Button n of a task, pressed in the app: its message to the task's
-    agent (amarchy send, waking it), and the task done. None, or what's
-    wrong (nothing sent then)."""
-    if not isinstance(tid, str) or not TASK_ID.fullmatch(tid) or not isinstance(n, int) or isinstance(n, bool):
-        return "which task (id) and which of its buttons (button)"
+def board_block(o, base_block):
+    """The block a card's options make (--block, --xpost, --body, --attr,
+    --media...), over the one it has: (block or None, changed, None) or
+    (None, False, what's wrong)."""
+    kind = o.get("block")
+    body = o.get("body")
+    if o.get("xpost") is not None:
+        if kind and kind != "xpost":
+            return None, False, "--xpost is an xpost block's text: not with --block " + kind
+        kind, body = "xpost", o["xpost"]
+    attrs = dict(o["attrs"])
+    for k in ("media", "handle", "name", "avatar"):
+        if o.get(k) is not None:
+            attrs[k] = o[k]
+    if not kind and not body and not attrs:
+        return base_block, False, None
+    if not kind and not base_block:
+        return None, False, "--body and --attr are a block's: say which with --block <kind> (or --xpost)"
+    kind = (kind or base_block["kind"]).strip().lower()
+    kinds = block_kinds()
+    if kind not in kinds or kind in BOARD_NOT:
+        return None, False, (f"--block takes one of the blocks the app draws: "
+                             f"{', '.join(k for k in kinds if k not in BOARD_NOT)} (not {kind!r})")
+    same = base_block and base_block["kind"] == kind
+    blk = {"kind": kind, "attrs": {**(base_block["attrs"] if same else {}), **attrs},
+           "body": stdin_or(body) if body is not None else (base_block["body"] if same else "")}
+    blk["attrs"] = {k: v for k, v in blk["attrs"].items() if str(v).strip()}
+    blk["body"] = str(blk["body"]).replace("\r\n", "\n").strip("\n").rstrip()
+    if len(blk["body"]) > BOARD_BODY:
+        return None, False, f"a card's block is {BOARD_BODY} characters at most"
+    if re.search(r"^\s*```", blk["body"], re.M):
+        return None, False, "a card's block can't have a ``` line in it"
+    bad = next((k for k, v in blk["attrs"].items() if '"' in str(v) or "\n" in str(v)), None)
+    if bad:
+        return None, False, f"--attr {bad}'s value can't have a \" or a new line in it"
+    # Its pictures, wherever they're given from: a path here, made whole.
+    spec = {**block_catalog().get("common", {}), **kinds[kind].get("attrs", {})}
+    for k, v in list(blk["attrs"].items()):
+        if (spec.get(k) or {}).get("type") == "media":
+            items = media_list(v, spec[k].get("many"))
+            blk["attrs"][k] = ", ".join(x if re.match(r"^https?://", x, re.I) or x.startswith("~") or x.startswith("/")
+                                        else str(Path.cwd() / x) for x in items)
+    fence = f"```{kind} " + " ".join(f'{k}="{v}"' for k, v in blk["attrs"].items()) + f"\n{blk['body']}\n```"
+    found = reply_blocks(fence)
+    issues = block_issues(found[0]) if found else [f"The {kind} block didn't read"]
+    if issues:
+        return None, False, " ".join(issues)
+    return blk, json.dumps(blk, sort_keys=True) != json.dumps(base_block, sort_keys=True), None
 
-    def press(tasks):
-        t = next((t for t in tasks if t["id"] == tid), None)
-        if not t:
-            return "That task is gone: its agent took it down, or its time ran out"
-        buttons = t.get("buttons") or []
-        if not 0 <= n < len(buttons):
-            return "That task has no such button"
-        r = run_amarchy("send", t["agent"], buttons[n]["send"], "--no-wait", env={"AMARCHY_SENT_BY": "you"})
-        if r.returncode != 0:
-            return gist(r.stderr) or "Its agent didn't take it"
-        tasks.remove(t)
-        return None
-    return tasks_change(press)
+
+def cmd_board(args):
+    """amarchy board [list] | set | card | move | comment | show | approved | log | rm | drop."""
+    sub, rest = (args[0], args[1:]) if args and not args[0].startswith("-") else ("list", args)
+    if sub in ("list", "ls"):
+        if any(a not in ("--json",) for a in rest):
+            print(usage("board"), file=sys.stderr)
+            return 1
+        rows = boards_view()
+        if "--json" in rest:
+            print(json.dumps([{k: v for k, v in r.items() if k != "cards"} for r in rows], ensure_ascii=False))
+            return 0
+        for r in rows:
+            cols = " · ".join(f"{c['name']} {c['count']}" for c in r["columns"])
+            print(f"{r['id']}\t{r['lead']}\t{r['title']}\t{cols}")
+        if not rows:
+            print("none")
+        return 0
+    if sub == "log":
+        return board_log_cmd(rest)
+    if not rest or rest[0].startswith("-"):
+        print(usage("board"), file=sys.stderr)
+        return 1
+    bid, rest = rest[0].strip().lower(), rest[1:]
+    if not BOARD_ID.fullmatch(bid):
+        return fail(f"a board's id is a few letters, digits, . _ or - (not {bid!r})")
+    if sub == "set":
+        return board_set_cmd(bid, rest)
+    if sub == "card":
+        return board_card_cmd(bid, rest)
+    if sub == "show":
+        return board_show_cmd(bid, rest)
+    if sub == "approved":
+        return board_approved_cmd(bid, rest)
+    if sub in ("move", "comment", "rm", "drop"):
+        return board_small_cmd(sub, bid, rest)
+    print(usage("board"), file=sys.stderr)
+    return 1
+
+
+def board_set_cmd(bid, args):
+    o, why = board_args(args)
+    if why:
+        return fail(why)
+    who, why = board_who(o.get("agent"))
+    if why:
+        return fail(why)
+    cols = board_parse_columns(o["columns"]) if o["columns"] is not None else None
+    if isinstance(cols, str):
+        return fail(cols)
+    title = " ".join((o.get("title") or "").split()) if o.get("title") is not None else None
+    if title is not None and len(title) > BOARD_TITLE:
+        return fail(f"--title is {BOARD_TITLE} characters at most")
+    lead = None
+    if o.get("lead"):
+        lead = next((a for a in team() if a["id"] == o["lead"].strip()), None)
+        if not lead:
+            return fail(f"--lead {o['lead']!r} isn't your assistant or one of your agents (amarchy agents)")
+    check = "" if "--no-check" in o["flags"] else o.get("check")
+    moved = []
+
+    def put(boards):
+        b = boards.get(bid)
+        if not b:
+            if bid in {a["id"] for a in team()} and bid != who["id"]:
+                return None, f"{bid} is {bid}'s own board (its tasks): only it makes it"
+            b = boards[bid] = {"id": bid, "title": title or "", "lead": (lead or who)["id"], "columns": cols or copy.deepcopy(TASK_BOARD if bid == who["id"] else BOARD_DEFAULT),
+                               "check": check or "", "at": time.time(), "updated": time.time(), "rev": 0, "cards": [],
+                               **({"task": True} if bid == who["id"] else {})}
+            board_log(b, None, who["id"], "board", title=title, columns=[c["name"] for c in b["columns"]])
+            return "made", None
+        if title is not None:
+            b["title"] = title
+        if lead:
+            b["lead"] = lead["id"]
+        if check is not None:
+            b["check"] = check
+        if cols is not None:
+            names = {c["name"] for c in cols}
+            first = next(c["name"] for c in cols if not c.get("approval"))
+            for c in b["cards"]:
+                if c.get("column") not in names:
+                    moved.append((card_ref(c), c.get("column")))
+                    if c.get("approval"):
+                        c["approval"] = None
+                    c["column"] = first
+            b["columns"] = cols
+        board_log(b, None, who["id"], "board", title=title, columns=[c["name"] for c in cols] if cols else None, check=check)
+        return "changed", None
+    done, why = boards_change(put)
+    if why:
+        return fail(why)
+    for ref, col in moved:
+        print(f"amarchy: {ref} was in {col!r}, which is gone: it's in the first column now", file=sys.stderr)
+    print(f"{done}\t{bid}")
+    return 0
+
+
+def board_card_cmd(bid, args):
+    """amarchy board card: a card added, or changed in place (--key): its id printed."""
+    o, why = board_args(args, card=True)
+    if why:
+        return fail(why)
+    who, why = board_who(o.get("agent"))
+    if why:
+        return fail(why)
+    title = " ".join(o["title"].split()) if o.get("title") is not None else None
+    if title is not None and not 0 < len(title) <= TASK_TITLE:
+        return fail(f"--title is 1 to {TASK_TITLE} characters")
+    note = stdin_or(o["note"]).strip() if o.get("note") is not None else None
+    if note is not None and len(note) > BOARD_BODY:
+        return fail(f"--note is {BOARD_BODY} characters at most")
+    if len(o["links"]) > TASK_LINKS or len(o["buttons"]) > TASK_BUTTONS:
+        return fail(f"a card has {TASK_LINKS} links and {TASK_BUTTONS} buttons of its own at most")
+    links = [task_link(v) for v in o["links"]]
+    bad = next((x for x in links if isinstance(x, str)), None)
+    if bad:
+        return fail(bad)
+    key = o.get("key").strip() if o.get("key") is not None else None
+    if key is not None and not 0 < len(key) <= 200:
+        return fail("--key is 1 to 200 characters")
+    until = None
+    if o.get("until") is not None:
+        until, why = task_until(o["until"])
+        if why:
+            return fail(why)
+    b0 = board_get(bid)
+    if not b0:
+        return fail(f"No board {bid!r} (amarchy board set {bid} makes it)")
+    c0 = card_find(b0, key)
+    blk, changed, why = board_block(o, (c0 or {}).get("block"))
+    if why:
+        return fail(why)
+    why = board_card_buttons_check(b0, o["buttons"])
+    if why:
+        return fail(why)
+    over = "--over-edit" in o["flags"]
+    out = {}
+
+    def put(boards):
+        b = boards.get(bid)
+        if not b:
+            return None, f"No board {bid!r}"
+        c = card_find(b, key)
+        col = board_column_named(b, o["column"]) if o.get("column") else None
+        if o.get("column") and not col:
+            return None, f"{bid} has no column {o['column']!r} (its columns: {', '.join(x['name'] for x in b['columns'])})"
+        if col and col.get("approval") and (not c or c.get("column") != col["name"]):
+            return None, (f"{col['name']!r} needs the user's approval: a card gets there only by their hand, in the app "
+                          "(a button of the column before it, or their Move)")
+        if o.get("base") and c and card_sha(c) != o["base"]:
+            return None, f"{card_ref(c)} changed since that (its sha256 is {card_sha(c)}): amarchy board show {bid} --card {card_ref(c)}"
+        if not c:
+            if title is None:
+                return None, "--title takes what the card is, in a line"
+            if len(b["cards"]) >= BOARD_CARDS:
+                return None, f"{bid} has {BOARD_CARDS} cards: take some down first (amarchy board rm)"
+            if b.get("task"):
+                mine = [x for x in b["cards"] if x.get("column") != board_done_column(b) and card_open(b, x)]
+                if len(mine) >= TASK_MAX:
+                    return None, f"{board_title(b)} has {TASK_MAX} tasks open already: take some down first (amarchy task done)"
+            c = card_new(who["id"], who["id"], id=card_id(boards), key=key or "", title=title, column=col["name"] if col else board_first(b),
+                         block=blk, note=note or "", links=links, buttons=o["buttons"], until=until or 0,
+                         task=bool(b.get("task")))
+            c["wrote"] = time.time()
+            b["cards"].append(c)
+            board_log(b, c, who["id"], "add", column=c["column"], text=card_text(c))
+            out.update(id=c["id"], new=True)
+            return c, None
+        content_was = card_sha(c)
+        text_was = card_text(c)
+        changes = changed or (note is not None and not c.get("block") and note != c.get("note"))
+        if changes and c.get("edited") and (c["edited"].get("at") or 0) > (c.get("wrote") or 0) and not over:
+            return None, (f"The user edited {card_ref(c)} since you last wrote it. Its text now:\n{text_was}\n"
+                          "Build on theirs; to replace it all the same, run this again with --over-edit")
+        if title is not None:
+            c["title"] = title
+        if blk is not None:
+            c["block"] = blk
+        if note is not None:
+            c["note"] = note
+        if o["links"] or "--clear-links" in o["flags"]:
+            c["links"] = links
+        if o["buttons"] or "--clear-buttons" in o["flags"]:
+            c["buttons"] = o["buttons"]
+        if until is not None:
+            c["until"] = until
+        if card_sha(c) != content_was:
+            c["wrote"] = time.time()
+            thread_add(c, who["id"], "revise", before=text_was, after=card_text(c))
+            board_log(b, c, who["id"], "revise", before=text_was, after=card_text(c))
+            if c.get("approval"):
+                card_unapprove(b, c, who["id"], "Revised: not approved any more")
+                out["unapproved"] = True
+        if col and col["name"] != c.get("column"):
+            board_move_to(b, c, col["name"], who["id"])
+        c["updated"] = time.time()
+        out.update(id=c["id"], new=False)
+        return c, None
+    c, why = boards_change(put)
+    if why:
+        return fail(why)
+    print(out["id"])
+    if out.get("unapproved"):
+        print(f"amarchy: {card_ref(c)} was approved; changed, it isn't any more (the user approves it again)", file=sys.stderr)
+    if "--notify" in o["flags"]:
+        why = board_notify(board_get(bid), c)
+        if why:
+            print(f"amarchy: the card is up, but not on your phones: {why}", file=sys.stderr)
+    return 0
+
+
+def board_small_cmd(sub, bid, args):
+    """amarchy board move | comment | rm | drop."""
+    who, why = board_who(next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--agent"), None))
+    if why:
+        return fail(why)
+    args = [a for i, a in enumerate(args) if a != "--agent" and (i == 0 or args[i - 1] != "--agent")]
+    if sub == "drop":
+        if args:
+            return fail("amarchy board drop <board> takes nothing more")
+
+        def drop(boards):
+            b = boards.pop(bid, None)
+            if not b:
+                return None, f"No board {bid!r}"
+            board_log(b, None, who["id"], "drop", cards=len(b["cards"]))
+            return len(b["cards"]), None
+        n, why = boards_change(drop)
+        if why:
+            return fail(why)
+        print(f"dropped\t{bid}\t{n} card{'s' if n != 1 else ''}")
+        return 0
+    if not args:
+        print(usage("board"), file=sys.stderr)
+        return 1
+    if sub == "move" and len(args) != 2:
+        return fail("amarchy board move <board> <card> <column>")
+    if sub == "comment" and len(args) != 2:
+        return fail("amarchy board comment <board> <card> <text|->")
+    text = stdin_or(args[1]).strip() if sub == "comment" else ""
+    if sub == "comment" and not 0 < len(text) <= BOARD_COMMENT:
+        return fail(f"a comment is 1 to {BOARD_COMMENT} characters")
+    refs = args if sub == "rm" else args[:1]
+
+    def act(boards):
+        b = boards.get(bid)
+        if not b:
+            return None, f"No board {bid!r}"
+        cards = [card_find(b, r) for r in refs]
+        missing = [r for r, c in zip(refs, cards) if not c]
+        if missing:
+            return None, f"{bid} has no card {missing[0]!r}"
+        if sub == "rm":
+            for c in cards:
+                b["cards"].remove(c)
+                board_log(b, c, who["id"], "remove", text=card_text(c), column=c.get("column"))
+            return [c["id"] for c in cards], None
+        c = cards[0]
+        if sub == "comment":
+            thread_add(c, who["id"], "comment", text=text)
+            board_log(b, c, who["id"], "comment", text=text)
+            c["updated"] = time.time()
+            return [c["id"]], None
+        col = board_column_named(b, args[1])
+        if not col:
+            return None, f"{bid} has no column {args[1]!r} (its columns: {', '.join(x['name'] for x in b['columns'])})"
+        if col.get("approval") and c.get("column") != col["name"]:
+            return None, f"{col['name']!r} needs the user's approval: only they move a card there, in the app"
+        board_move_to(b, c, col["name"], who["id"])
+        return [c["id"]], None
+    ids, why = boards_change(act)
+    if why:
+        return fail(why)
+    for i in ids:
+        print(f"{'removed' if sub == 'rm' else sub + 'd' if sub == 'move' else 'commented'}\t{i}")
+    return 0
+
+
+def board_show_cmd(bid, args):
+    """amarchy board show <board> [--card <card>] [--json]."""
+    as_json, ref = "--json" in args, None
+    rest = [a for a in args if a != "--json"]
+    if rest[:1] == ["--card"] and len(rest) == 2:
+        ref = rest[1]
+    elif rest:
+        print(usage("board"), file=sys.stderr)
+        return 1
+    b = board_get(bid)
+    if not b:
+        return fail(f"No board {bid!r} (amarchy board list)")
+    crew = team()
+    cards = [c for c in sorted(b["cards"], key=lambda c: card_order(b, c)) if card_open(b, c)]
+    if ref:
+        c = card_find(b, ref)
+        if not c:
+            return fail(f"{bid} has no card {ref!r}")
+        cards = [c]
+
+    def full(c):
+        v = card_view(b, c, crew)
+        a = c.get("approval")
+        v["approval"] = v.pop("approved")
+        if not v["approval"] and isinstance(a, dict):
+            v["approval_dropped"] = "it changed since" if a.get("sha256") != card_sha(c) else "its signature doesn't check"
+        v["text_sha256"] = hashlib.sha256(card_text(c).encode()).hexdigest()
+        v.pop("count", None)
+        return v
+    if as_json:
+        out = {**{k: v for k, v in board_summary(b, crew, show=0).items() if k != "cards"}, "check": b.get("check") or "",
+               "column_buttons": {c["name"]: c.get("buttons") or [] for c in b["columns"]}, "cards": [full(c) for c in cards]}
+        print(json.dumps(out if not ref else out["cards"][0], ensure_ascii=False))
+        return 0
+    print(f"{board_title(b, crew)} ({b['id']}, {board_lead_name(b, crew)}'s)")
+    for col in b["columns"]:
+        marks = [w for w, k in (("yours", "yours"), ("needs approval", "approval"), ("done", "done")) if col.get(k)]
+        inside = [c for c in cards if c.get("column") == col["name"]]
+        print(f"\n{col['name']}{' (' + ', '.join(marks) + ')' if marks else ''}: {len(inside)}")
+        for c in inside:
+            ok = " ✓ approved" if approval_of(b["id"], c) else ""
+            last = (c.get("thread") or [{}])[-1]
+            said = f"  · {last.get('who')}: {cut_words(' '.join(str(last.get('text') or last.get('kind')).split()), 60)}" if last else ""
+            print(f"  {c['id']}  {c.get('key') or '-'}  {c.get('title') or ''}{ok}{said}")
+    return 0
+
+
+def board_approved_cmd(bid, args):
+    """amarchy board approved <board> <card> [--text <file|->] [--json]:
+    exit 0 only when the user approved exactly what the card has now (and,
+    with --text, that's its text)."""
+    rest = [a for a in args if a != "--json"]
+    if not rest:
+        print(usage("board"), file=sys.stderr)
+        return 1
+    ref, rest = rest[0], rest[1:]
+    text = None
+    if rest[:1] == ["--text"] and len(rest) == 2:
+        text = sys.stdin.read() if rest[1] == "-" else Path(rest[1]).read_text()
+    elif rest:
+        print(usage("board"), file=sys.stderr)
+        return 1
+    b = board_get(bid)
+    c = card_find(b, ref) if b else None
+    if not c:
+        return fail(f"No card {ref!r} on {bid!r}")
+    a = approval_of(bid, c)
+    if not a:
+        had = c.get("approval")
+        why = "changed since it was approved" if isinstance(had, dict) and had.get("sha256") != card_sha(c) \
+            else "its approval doesn't check" if isinstance(had, dict) else "not approved"
+        print(json.dumps({"approved": False, "why": why}) if "--json" in args else f"{card_ref(c)}: {why}")
+        return 1
+    if text is not None and text.rstrip() != card_text(c).rstrip():
+        print(json.dumps({"approved": False, "why": "that isn't the text approved"}) if "--json" in args
+              else f"{card_ref(c)}: that isn't the text approved")
+        return 1
+    if "--json" in args:
+        print(json.dumps({"approved": True, **a, "text": card_text(c)}, ensure_ascii=False))
+    else:
+        print(f"{card_ref(c)}: approved by {a['by'] or 'you'} {datetime.datetime.fromtimestamp(a['at']).isoformat(timespec='minutes')}"
+              f" · sha256 {a['sha256']}")
+    return 0
+
+
+def board_log_cmd(args):
+    """amarchy board log [<board>] [--json] [--lines <n>]."""
+    as_json, n, bid = False, 50, None
+    it = iter(args)
+    for a in it:
+        if a == "--json":
+            as_json = True
+        elif a == "--lines":
+            try:
+                n = max(1, int(next(it, "")))
+            except ValueError:
+                return fail("--lines takes a number")
+        elif not a.startswith("-") and bid is None:
+            bid = a.strip().lower()
+        else:
+            print(usage("board"), file=sys.stderr)
+            return 1
+    try:
+        rows = [json.loads(l) for l in BOARDS_LOG.read_text().splitlines() if l.strip()]
+    except (OSError, ValueError):
+        rows = []
+    rows = [r for r in rows if isinstance(r, dict) and (not bid or r.get("board") == bid)][-n:]
+    if as_json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return 0
+    for r in rows:
+        at = datetime.datetime.fromtimestamp(r.get("at") or 0).strftime("%m-%d %H:%M")
+        what = " · ".join(str(x) for x in (r.get("label"), r.get("words") or r.get("text") or r.get("after"),
+                                            r.get("column") if r.get("action") == "move" else None) if x)
+        print(f"{at}  {r.get('board')}  {r.get('key') or r.get('card') or '-'}  {r.get('who')}  {r.get('action')}"
+              f"{'  ' + cut_words(' '.join(str(what).split()), 80) if what else ''}")
+    if not rows:
+        print("none")
+    return 0
 
 
 def cmd_task(args):
-    """amarchy task add | list | done: your agents' tasks (see TASKS)."""
+    """amarchy task add | list | done: an agent's own tasks, cards on its own
+    board (see "Tasks: boards")."""
     sub, rest = (args[0], args[1:]) if args else ("", [])
     if sub == "add":
         return task_add_cmd(rest)
@@ -14299,13 +15590,11 @@ def cmd_task(args):
         else:
             ids.append(a)
     if sub in ("list", "ls"):
-        crew = {a["id"]: a for a in team()}
-        now = time.time()
-        rows = [t for t in tasks_read() if task_open(t, now) and t["agent"] in crew and (not agent or t["agent"] == agent)]
-        rows.sort(key=lambda t: (not t.get("until"), t.get("until") or t.get("at") or 0, t.get("at") or 0))
+        rows = [t for t in tasks_view() if not agent or t["agent"] == agent]
         if as_json:
-            print(json.dumps([{**{k: t.get(k) for k in ("id", "agent", "title", "note", "links", "buttons", "key", "at")},
-                               "agent_name": crew[t["agent"]]["name"], "until": t.get("until") or None,
+            keys = {c["id"]: c.get("key") or "" for b in boards_all() for c in b["cards"]}
+            print(json.dumps([{**{k: t.get(k) for k in ("id", "agent", "title", "note", "links", "buttons", "at")},
+                               "key": keys.get(t["id"], ""), "agent_name": t["agent_name"], "until": t.get("until") or None,
                                "until_iso": datetime.datetime.fromtimestamp(t["until"]).astimezone().isoformat(timespec="minutes")
                                if t.get("until") else None} for t in rows]))
         else:
@@ -14321,12 +15610,18 @@ def cmd_task(args):
         if ids and agent:
             return fail("done takes the tasks' ids, or --agent <id> for all of an agent's: not both")
 
-        def done(tasks):
-            gone = [t for t in tasks if t["id"] in ids or (agent and t["agent"] == agent)]
-            for t in gone:
-                tasks.remove(t)
-            return [t["id"] for t in gone]
-        gone = tasks_change(done)
+        def done(boards):
+            gone = []
+            for b in boards.values():
+                if not b.get("task"):
+                    continue
+                for c in list(b["cards"]):
+                    if c["id"] in ids or (agent and b["lead"] == agent and c.get("column") != board_done_column(b)):
+                        b["cards"].remove(c)
+                        board_log(b, c, b["lead"], "remove", text=card_text(c))
+                        gone.append(c["id"])
+            return gone
+        gone = boards_change(done)
         for tid in gone:
             print(f"done\t{tid}")
         missing = [tid for tid in ids if tid not in gone]
@@ -14340,7 +15635,7 @@ def cmd_task(args):
 
 
 def task_add_cmd(args):
-    """amarchy task add: a task on Tasks, its id printed."""
+    """amarchy task add: a task on the agent's own board, its id printed."""
     agent = os.environ.get("AMARCHY_SESSION") or None
     title = note = until_word = key = None
     links, buttons, notify = [], [], False
@@ -14380,10 +15675,13 @@ def task_add_cmd(args):
     if len(links) > TASK_LINKS or len(buttons) > TASK_BUTTONS:
         return fail(f"a task has {TASK_LINKS} links and {TASK_BUTTONS} buttons at most")
     links = [task_link(v) for v in links]
-    buttons = [task_button(v, title) for v in buttons] or [{"label": "Done", "send": f"Done: {title}"}]
+    buttons = [board_parse_button(v) for v in buttons]
     bad = next((x for x in links + buttons if isinstance(x, str)), None)
     if bad:
         return fail(bad)
+    for x in buttons:       # a task's button alone sends "<label>: <title>", as it always did
+        if x["send"] is None:
+            x["send"] = f"{x['label']}: {title}"
     if key is not None and not 0 < len(key) <= 200:
         return fail("--key is 1 to 200 characters")
     until = None
@@ -14391,33 +15689,81 @@ def task_add_cmd(args):
         until, why = task_until(until_word)
         if why:
             return fail(why)
-    who, why = task_owner(agent)
+    who, why = board_who(agent)
     if why:
-        return fail(why)
-    t = {"agent": who["id"], "title": title, "note": note, "links": links, "buttons": buttons,
-         "until": until or 0, "at": time.time(), "key": key or ""}
+        return fail(why.replace("keep boards", "have tasks"))
+    bid = who["id"]
 
-    def add(tasks):
-        now = time.time()
-        same = next((x for x in tasks if key and x["agent"] == who["id"] and x.get("key") == key), None)
+    def add(boards):
+        b = boards.get(bid)
+        if not b:
+            b = boards[bid] = task_board_new(bid)
+        same = next((x for x in b["cards"] if key and x.get("key") == key), None)
         if same:        # the same one again: changed in place, its card where it is
-            same.update({k: v for k, v in t.items() if k != "at"})
-            return same["id"], None
-        if sum(1 for x in tasks if x["agent"] == who["id"] and task_open(x, now)) >= TASK_MAX:
+            same.update(title=title, note=note, links=links, buttons=buttons, until=until or 0)
+            if same.get("column") == board_done_column(b):
+                same["column"] = board_first(b)
+            same["updated"] = time.time()
+            return same, None
+        now = time.time()
+        if sum(1 for x in b["cards"] if x.get("column") != board_done_column(b) and card_open(b, x, now)) >= TASK_MAX:
             return None, f"{who['name']} has {TASK_MAX} tasks open already: take some down first (amarchy task done)"
-        taken = {x["id"] for x in tasks}
-        tid = next(i for i in iter(lambda: os.urandom(3).hex(), None) if i not in taken)
-        tasks.append({"id": tid, **t})
-        return tid, None
-    tid, why = tasks_change(add)
+        c = card_new(bid, bid, id=card_id(boards), key=key or "", title=title, note=note, links=links, buttons=buttons,
+                     until=until or 0, column=board_first(b), task=True)
+        c["wrote"] = now
+        b["cards"].append(c)
+        board_log(b, c, bid, "add", text=note, column=c["column"])
+        return c, None
+    c, why = boards_change(add)
     if why:
         return fail(why)
-    print(tid)
+    print(c["id"])
     if notify:
-        why = task_notify(who, {**t, "id": tid})
+        why = board_notify(board_get(bid), c)
         if why:
             print(f"amarchy: the task is up, but not on your phones: {why}", file=sys.stderr)
     return 0
+
+
+def task_press(tid, n):
+    """An older page's (or machine's) task button: the card's own button n,
+    pressed. None, or what's wrong."""
+    if not isinstance(tid, str) or not TASK_ID.fullmatch(tid) or not isinstance(n, int) or isinstance(n, bool):
+        return "which task (id) and which of its buttons (button)"
+    b = next((x for x in boards_all() if any(c["id"] == tid for c in x["cards"])), None)
+    if not b:
+        return "That task is gone: its agent took it down, or its time ran out"
+    c = next(c for c in b["cards"] if c["id"] == tid)
+    if c.get("column") == board_done_column(b):
+        return "That task is gone: it's done"
+    own = [i for i, x in enumerate(card_buttons(b, c)) if x["own"]]
+    if not 0 <= n < len(own):
+        return "That task has no such button"
+    return board_press(b["id"], tid, own[n], "", "")
+
+
+def board_guard(event):
+    """PreToolUse: an agent's command that would do on a board what only the
+    user does (the app's board actions: press, approve, edit, comment as
+    them), or reach the boards' files or their key behind amarchy's back, is
+    refused (naming them, in a grep of the code or a doc, is fine). The
+    reason Claude gets, or None."""
+    if not isinstance(event, dict) or event.get("tool_name") != "Bash":
+        return None
+    command = str((event.get("tool_input") or {}).get("command") or "")
+    home = str(HOME)
+    spelled = {p for folder in (str(BOARDS), str(BOARD_KEY))
+               for p in (folder, folder.replace(home, "~", 1), folder.replace(home, "$HOME", 1), folder.replace(home, "${HOME}", 1))}
+    paths = "|".join(re.escape(p) for p in sorted(spelled, key=len, reverse=True))
+    calls = re.search(r"/api/(?:m/[^/\s]+/api/)?(?:boards|tasks/press)\b", command) and \
+        re.search(r"(?:^|[\s;&|(`$])(?:curl|wget|http|https|xh|nc|ncat|socat|websocat)\b|urllib|requests\.|fetch\(|http\.client|aiohttp", command)
+    touches = re.search(rf"(?:^|[\s;&|(`$])(?:{SECRET_READERS}|rm|truncate|install|dd)(?:\s[^\n;&|]*)?\s[\"']?(?:{paths})"
+                        rf"|[<>]\s*[\"']?(?:{paths})|open\(\s*[\"'](?:{paths})", command)
+    if calls or touches or ".board-key" in command and re.search(rf"(?:{SECRET_READERS})\b", command):
+        return ("amarchy: what's done on a board in the user's name (pressing its buttons, approving, editing, "
+                "commenting as them) is theirs alone, from the app, and the boards' files are amarchy's. Your side "
+                "is `amarchy board` (card, move, comment, show --json, approved, log): amarchy board --help.")
+    return None
 
 
 # ---- search: a chat by its name, or by anything said in it
@@ -15465,7 +16811,7 @@ class Peers:
         self.saved_at[name] = time.time()
         try:
             write_file(PEERS_SEEN / f"{name}.json", json.dumps(
-                {**{k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "moved", "at")}, "on": bool(now.get("on"))}))
+                {**{k: now.get(k) for k in ("hello", "sessions", "projects", "tasks", "boards", "moved", "at")}, "on": bool(now.get("on"))}))
         except OSError:
             pass
 
@@ -15560,6 +16906,7 @@ class Peers:
                         self.update(name, on=True, error=None, update=None, reconnecting=None, hello=hello_now, at=time.time(),
                                     sessions=[s for s in got.get("sessions") or [] if isinstance(s, dict) and s.get("id")],
                                     projects=got.get("projects") or [], tasks=got.get("tasks") or [],
+                                    boards=got.get("boards") if isinstance(got.get("boards"), list) else None,
                                     moved=[r for r in got.get("moved") or [] if isinstance(r, dict)
                                            and isinstance(r.get("from"), str) and isinstance(r.get("to"), str)])
                         if hello_now.get("label") and hello_now["label"] != m["label"]:
@@ -15587,7 +16934,31 @@ def peer_state(view):
     """What another machine's board takes of this one: its own chats (never
     the ones it shows from others), its projects and its agents' tasks."""
     return {"machine": hello(), "sessions": view.get("sessions") or [], "projects": view.get("projects") or [],
-            "tasks": (view.get("today") or {}).get("tasks") or [], "moved": view.get("moved") or []}
+            "tasks": (view.get("today") or {}).get("tasks") or [], "boards": (view.get("today") or {}).get("boards") or [],
+            "moved": view.get("moved") or []}
+
+
+def boards_of_tasks(tasks):
+    """An older machine's tasks (before boards), as its agents' own boards:
+    each a board of its own, its cards pressed through /api/tasks/press there."""
+    out = {}
+    for t in tasks:
+        if not isinstance(t, dict) or not isinstance(t.get("agent"), str) or not isinstance(t.get("id"), str):
+            continue
+        b = out.setdefault(t["agent"], {"id": t["agent"], "title": t.get("agent_name") or "", "lead": t["agent"],
+                                        "lead_name": t.get("agent_name") or "", "task": True, "legacy": True, "rev": 0,
+                                        "updated": 0, "at": 0, "check": False, "yours": 0, "cards": [],
+                                        "columns": [{"name": "For you", "yours": True, "approval": False, "done": False, "count": 0},
+                                                    {"name": "Done", "yours": False, "approval": False, "done": True, "count": 0}]})
+        b["cards"].append({"id": t["id"], "key": "", "title": t.get("title") or "", "column": "For you", "block": None,
+                           "note": t.get("note") or "", "links": t.get("links") or [], "agent": t["agent"],
+                           "agent_name": t.get("agent_name") or "", "by": t["agent"], "at": t.get("at") or 0,
+                           "updated": t.get("at") or 0, "until": t.get("until") or 0, "task": True, "approved": None,
+                           "sha256": "", "answered": False, "edited": False, "count": 0, "thread": [],
+                           "buttons": [{"label": x.get("label") or "", "to": "", "asks": "", "own": True, "send": x.get("send") or ""}
+                                       for x in t.get("buttons") or [] if isinstance(x, dict)]})
+        b["yours"] = b["columns"][0]["count"] = len(b["cards"])
+    return list(out.values())
 
 
 def board_view(st):
@@ -15605,6 +16976,7 @@ def board_view(st):
                  "projects": [{"name": p["name"], "github": p.get("github")} for p in view.get("projects") or []]}]
     sessions = list(view.get("sessions") or [])
     tasks = list((view.get("today") or {}).get("tasks") or [])
+    boards = list((view.get("today") or {}).get("boards") or [])
     peers = st.peers.snapshot() if getattr(st, "peers", None) else {}
     paired = {m["name"]: m for m in machines_read()} if peers else {}
     for name, p in peers.items():
@@ -15625,6 +16997,9 @@ def board_view(st):
         for s in p.get("sessions") or []:
             sessions.append({**s, "machine": name, **({"machine_off": True} if off else {})})
         tasks += [{**x, "machine": name} for x in p.get("tasks") or [] if isinstance(x, dict) and not off]
+        if not off:     # its boards (an older one's tasks, as boards), each with its machine
+            theirs = p.get("boards") if isinstance(p.get("boards"), list) else boards_of_tasks(p.get("tasks") or [])
+            boards += [{**x, "machine": name} for x in theirs if isinstance(x, dict) and isinstance(x.get("id"), str)]
     # Moved chats (see "moving a chat"): every machine's, each old key to
     # the one it's under now; and one that moved a moment ago, as it was,
     # under its new key, until its new machine's list has it (its card keeps
@@ -15651,7 +17026,7 @@ def board_view(st):
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
-        board["today"] = {**(view.get("today") or {}), "tasks": tasks}
+        board["today"] = {**(view.get("today") or {}), "tasks": tasks, "boards": boards}
     st.board = (version, board)
     return board
 
@@ -18765,6 +20140,32 @@ def app_handler(st, users, address):
             host = self.headers.get("Host", "")
             return f"http://{host}" if self.via == "local" else f"https://{host}"
 
+        def board_post(self, what, data):
+            """A board's card, by your hand: {board, card, ...}. Who you are
+            is Tailscale's (an approval's by)."""
+            by = self.headers.get("Tailscale-User-Login", "") or ""
+            bid, cid = data.get("board"), data.get("card")
+            if what == "add":           # a task you wrote: {board, text, column}
+                r, why = board_add_you(bid, data.get("text"), data.get("column"))
+                return self.error(409, why) if why else self.send(200, r)
+            if what == "comment":       # {board, card, text}: on its thread, and to its agent
+                why = board_comment_you(bid, cid, data.get("text"))
+            elif what == "press":       # {board, card, button, words}
+                why = board_press(bid, cid, data.get("button"), data.get("words"), by)
+            elif what == "move":        # {board, card, column}
+                why = board_move_you(bid, cid, data.get("column"), by)
+            elif what == "edit":        # {board, card, title, body, base}
+                title, text = data.get("title"), data.get("body")
+                if (title is not None and not isinstance(title, str)) or (text is not None and not isinstance(text, str)):
+                    return self.error(400, "a title and a text")
+                r = board_edit_you(bid, cid, title, text, data.get("base") if isinstance(data.get("base"), str) else None)
+                why = r if isinstance(r, str) else None
+            elif what == "remove":      # {board, card}
+                why = board_remove_you(bid, cid)
+            else:
+                return self.error(404, "no such board action")
+            return self.error(409, why) if why else self.send(200, {})
+
         def body(self, limit=200_000):
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -19133,6 +20534,10 @@ def app_handler(st, users, address):
                 return self.list_stream()
             if path == "/api/notices":      # the desktop app's notifications (see "the desktop app's notices")
                 return self.notices_stream()
+            m = re.fullmatch(r"/api/boards/([^/]+)", path)
+            if m:       # one of your boards, whole (Tasks, a board open): every card in sight, its thread
+                b = board_whole(urllib.parse.unquote(m.group(1)))
+                return self.send(200, b) if b else self.error(404, "That board is gone")
             if path == "/api/github":       # your repos, for a new project
                 r = run_amarchy("projects", "--github", "--json")
                 try:
@@ -19693,6 +21098,8 @@ def app_handler(st, users, address):
             if self.path == "/api/today/loop":      # Done, Chase, Ask or New chat on one of your loops: {key, action, text}, to your assistant
                 why = loop_tell(data.get("key"), data.get("action"), data.get("text") or "")
                 return self.error(409, why) if why else self.send(200, {})
+            if self.path.startswith("/api/boards/"):        # what you do on a board (see "Tasks: boards")
+                return self.board_post(self.path[len("/api/boards/"):], data)
             if self.path == "/api/tasks/press":     # a button on one of your agents' tasks: {id, button}, its message to the agent
                 why = task_press(data.get("id"), data.get("button"))
                 return self.error(409, why) if why else self.send(200, {})
@@ -23356,7 +24763,7 @@ CHAT_FORMAT = f"""amarchy shows the person your messages in a chat that looks an
 - A link for them to open goes in a link block; a date to keep, in an event block; a picture you made, in a file block.
 - When your turn ends, amarchy checks your messages: one over {CHAT_MESSAGE_MAX} words, a heading, or a block it can't draw is sent back to you to fix.
 - Work that needs a chat of its own (code to write, something to build and ship): start one (`amarchy new <project> --prompt "<brief>"`), where they get the whole working view, and tell them in a line with its session block.
-- What they need to do later (a post to reply to, a form to sign) goes on their Tasks (`amarchy task add`), not in a message they'd scroll past."""
+- What they need to do or decide later (a post to review, a form to sign) goes on their Tasks, not in a message they'd scroll past: a card on a board of yours (`amarchy board card`; a board of its own for a project, `amarchy board set`), or a one-off task (`amarchy task add`). What they comment on a card reaches you as their message, "About “<card>” (board <b>, card <k>): ...", and a task they write you there says its board and card: answer on the card, revising it (`amarchy board card <b> --key <k> ...`) or on its thread (`amarchy board comment <b> <k> "..."`), and help them get it done. Only they approve, edit as themselves or press its buttons: `amarchy board --help`."""
 CHAT_VERSION = hashlib.sha1(CHAT_FORMAT.encode()).hexdigest()[:10]
 
 
@@ -24889,6 +26296,13 @@ OPTIONS = {
     "today": ({"--json", "--loops"}, set(), set()),
     "task": ({"--agent", "--title", "--note", "--link", "--button", "--until", "--key", "--notify", "--json"},
              {"--agent", "--title", "--note", "--link", "--button", "--until", "--key"}, set()),
+    "board": ({"--json", "--agent", "--title", "--lead", "--column", "--yours", "--approval", "--done", "--button", "--to",
+               "--asks", "--quiet", "--check", "--no-check", "--key", "--block", "--body", "--xpost", "--attr", "--media",
+               "--handle", "--name", "--avatar", "--note", "--link", "--until", "--notify", "--base", "--over-edit",
+               "--clear-buttons", "--clear-links", "--card", "--text", "--lines"},
+              {"--agent", "--title", "--lead", "--column", "--button", "--to", "--asks", "--check", "--key", "--block",
+               "--body", "--xpost", "--attr", "--media", "--handle", "--name", "--avatar", "--note", "--link", "--until",
+               "--base", "--card", "--text", "--lines"}, set()),
     "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
@@ -25068,6 +26482,8 @@ def main(argv):
         return cmd_today(args)
     elif cmd == "task":
         return cmd_task(args)
+    elif cmd == "board":
+        return cmd_board(args)
     elif cmd == "terminals":
         return cmd_terminals(args)
     elif cmd == "machines":
