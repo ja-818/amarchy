@@ -1,11 +1,10 @@
 // A chat's keys, in the real app: it opens with them in its box, to write,
 // whether a click or Enter on its card opened it (on a phone's touch, none:
-// its keyboard would come up over the chat). From the box: Esc stops Claude
-// while it works (as in Claude Code), else it goes up onto the latest
-// message, as ↑ does with nothing above it in the box; Page Up / Page Down
-// scroll the conversation, the keys still in the box. On the messages: i,
-// or ↓ on the latest, the box again; Esc back to the chats, never a stop
-// (a chat at work you only looked at goes on).
+// its keyboard would come up over the chat). From the box: Esc goes up onto
+// the latest message, as ↑ does with nothing above it in the box; Page Up /
+// Page Down scroll the conversation, the keys still in the box. On the
+// messages: i, or ↓ on the latest, the box again; Esc back to the chats.
+// Esc never stops Claude, at work or not: a stop by mistake loses a turn.
 //
 // Three layouts: the phone's (touch), the phone layout on a computer (a
 // narrow window), and the wide one. With screenshots.
@@ -142,7 +141,6 @@ async function run(browser, layout, port) {
   await openBy(p, "keys");
   k = await keys(p);
   check(as, k.where === "box", `opened with Enter on its card: the keys in the box, not on a message (${k.where})`);
-  check(as, await p.evaluate(() => __chat().stopBtn.title === "Stop Claude (Esc)"), "Stop says its key");
   await shot("opened");
 
   // Typed into straight away.
@@ -188,22 +186,15 @@ async function run(browser, layout, port) {
   const t2 = await scrollTop(p);
   check(as, t2 > t1 && (await keys(p)).where === "box", `Page Down: back down (${t1} → ${t2})`);
 
-  // Claude at work: Esc in the box stops it, the keys stay in the chat's box.
+  // Claude at work: Esc in the box is up onto the messages, and again back to the chats; never a stop.
   await working(p, true);
   await sleep(100);
   p.stops.length = 0;
   await p.keyboard.press("Escape");
   await sleep(300);
-  check(as, p.stops.length === 1 && /proj-keys\/interrupt/.test(p.stops[0]), `Claude at work, Esc in the box: stopped (${p.stops.join(", ") || "nothing sent"})`);
   k = await keys(p);
-  check(as, k.where === "box", `and the chat stays open, the keys in its box (${k.where})`);
-  await shot("esc-stopped");
-
-  // Claude at work, the keys on a message: Esc is back to the chats, never a stop.
-  await p.keyboard.press("ArrowUp");
-  k = await keys(p);
-  check(as, k.where === "message", `Claude at work, ↑ from the empty box: on the messages, not a stop (${k.where})`);
-  p.stops.length = 0;
+  check(as, k.where === "message" && !p.stops.length, `Claude at work, Esc in the box: on the messages, not a stop (${k.where}; ${p.stops.join(", ") || "nothing sent"})`);
+  await shot("esc-at-work");
   await p.keyboard.press("Escape");
   check(as, await isHome(p), "Esc on a message: back to the chats");
   await sleep(300);

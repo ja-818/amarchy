@@ -1465,7 +1465,7 @@ class Chat {
     this.attachBtn = uiComposerButton("attach", "Add a photo or a file", icon("plus"), () => this.toggleMenu("add"), { "aria-haspopup": "menu" });
     this.micBtn = uiComposerButton("mic", "Dictate (hold, or tap and tap again)", glyph("mic"), null, { hidden: true });
     this.sendBtn = uiComposerButton("send", "Send", glyph("send"), () => this.send());
-    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop(), { title: "Stop Claude (Esc)" });
+    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop());
     // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
@@ -1647,8 +1647,8 @@ class Chat {
   }
 
   // ---- the keys. A chat opens with them in the box, to write (takeKeys).
-  // Esc there stops Claude while it works; else it, or ↑ with nothing above
-  // it, goes up onto the latest message. On the messages, as on the board:
+  // Esc there, or ↑ with nothing above it, goes up onto the latest message
+  // (Esc never stops Claude: its Stop does). On the messages, as on the board:
   // j / k (↓ ↑) from message to message (↓ on the latest: down into the
   // box), l (→) into one, along its buttons and links, h (←) back and out of
   // it, Enter on a button presses it, g / G the first and the latest, d / u
@@ -1753,14 +1753,13 @@ class Chat {
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
     // In the box, unless the key is for something in it (a menu, the
-    // dictation, the / list): Esc stops Claude while it works, as in Claude
-    // Code (what was waiting to go comes back into the box); else it leaves
-    // the box for the messages (once more: back). ↑ with nothing above it
-    // in the box goes up onto the messages too, and Page Up / Page Down
-    // scroll them without leaving the box.
+    // dictation, the / list): Esc leaves the box for the messages (once
+    // more: back), and never stops Claude (Esc is for moving: a stop by
+    // mistake loses a turn). ↑ with nothing above it in the box goes up onto
+    // the messages too, and Page Up / Page Down scroll them without leaving
+    // the box.
     if (a === this.input) {
       if (this.menu || this.talk.on() || e.isComposing) return false;
-      if (k === "Escape" && this.working()) { this.stop(); return done(); }
       if (k === "Escape" || (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0)) return this.navLatest() ? done() : false;
       if (k === "PageUp" || k === "PageDown") {
         this.scroller.scrollBy({ top: (k === "PageDown" ? 1 : -1) * this.scroller.clientHeight * 0.85 });
