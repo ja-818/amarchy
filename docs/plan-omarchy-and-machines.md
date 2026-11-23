@@ -324,9 +324,15 @@ and tell the other tracks.
   machine's name, else `next=/%23/s/<machine>:<id>`; on a server's address,
   `/#/s/<id>` when it's that server's chat, else `/#/s/<machine>:<id>`.
 - **The page knows it's in the desktop app**: `window.amarchyDesktop`
-  (`{"version", "platform"}`), set before the app's scripts run. There the
+  (`{"version", "platform", "omarchy"}`), set before the app's scripts run. There the
   app's own browser notifications are off: the desktop app shows them,
-  natively, window closed or not.
+  natively, window closed or not. `omarchy`: the window is on an Omarchy
+  desktop (Hyprland's session, Omarchy's current theme); `<html>` is then
+  marked `on-omarchy` before the page is drawn, and theme.css, when the look
+  is Omarchy (live) with its own wallpaper, takes the wallpaper away there
+  (`html.on-omarchy { --wallpaper: none; ... }`): the desktop's own is behind
+  the window, which Hyprland makes see-through as the terminals
+  (`omarchy/hypr/amarchy.lua`).
 - **Its notifications**: every notification an app server sends the phones
   (a chat that needs you or is done, another machine's chat, an agent's task,
   `amarchy notify`, Settings' test) is also kept for the desktop apps, and

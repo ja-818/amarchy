@@ -312,11 +312,7 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
         // one it wore, else Omarchy's default.
         .background_color(saved_background())
         .visible(false)
-        .initialization_script(format!(
-            "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?} }});",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS
-        ))
+        .initialization_script(init_script(platform::omarchy()))
         .on_navigation(move |u| {
             if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
                 return true;
@@ -351,6 +347,26 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
         win.show()?;
     }
     Ok(win)
+}
+
+/// What every page in the window knows before its own scripts run: that it's
+/// the desktop app (window.amarchyDesktop), and whether the window is on an
+/// Omarchy desktop (platform::omarchy). There <html> is marked on-omarchy
+/// from the start, before the page is first drawn, so a wallpaper it
+/// wouldn't draw (app.css) never flashes.
+fn init_script(omarchy: bool) -> String {
+    let mut js = format!(
+        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy} }});",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
+    if omarchy {
+        js.push_str(
+            "(() => { const on = () => { const r = document.documentElement; if (r) r.classList.add('on-omarchy'); return !!r; }; \
+               if (!on()) new MutationObserver((_, o) => { if (on()) o.disconnect(); }).observe(document, { childList: true }); })();",
+        );
+    }
+    js
 }
 
 /// A file name in dir that isn't taken: name, name (2), ...
@@ -1020,5 +1036,13 @@ mod tests {
         let r = args(&["x".into(), "--after".into(), "12".into(), "--route".into(), "#/s/a".into()]).unwrap();
         assert_eq!((r.after, r.route.as_deref()), (Some(12), Some("#/s/a")));
         assert_eq!(args(&["x".into(), "--route".into(), "javascript:x".into()]).unwrap().route, None);
+    }
+
+    #[test]
+    fn page_told() {
+        let off = init_script(false);
+        assert!(off.contains("omarchy: false") && !off.contains("on-omarchy"));
+        let on = init_script(true);
+        assert!(on.contains("omarchy: true") && on.contains("classList.add('on-omarchy')"));
     }
 }

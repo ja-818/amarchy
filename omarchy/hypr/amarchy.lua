@@ -14,6 +14,12 @@
 -- at once (Hyprland reloads). A key you pick that Omarchy uses gives way to
 -- amarchy while it's picked; another pick, or `amarchy key default`, gives it
 -- back (a reload binds everything afresh).
+--
+-- The desktop app's window (class amarchy) is see-through as Omarchy's
+-- terminals are, in each of Omarchy's window modes (Appearance > Windows >
+-- Window Opacity): Transparent, Omarchy's standard transparency; Opaque,
+-- solid; Glassy, as glassy as every window. Wearing the desktop's look live,
+-- it draws no wallpaper of its own: the desktop's shows through.
 
 if type(o) ~= "table" or type(o.bind) ~= "function" then
   return -- not Omarchy's Lua config: nothing to bind with
@@ -44,4 +50,27 @@ if key ~= "off" then
     pcall(hl.unbind, key)
   end
   o.bind(key, "Amarchy", quoted .. " open")
+end
+
+-- The window mode Omarchy is in: its Opaque and Glassy are toggle files, and
+-- switching mode reloads Hyprland, which reads this file again. This line
+-- comes after Omarchy's toggles (the end of hyprland.lua), so a rule of its
+-- own would win over theirs: in Opaque it takes none (the window stays
+-- solid), in Glassy none either (Glassy's own rule fades every window), and
+-- only in Transparent, Omarchy's default, it opts in as the terminals do.
+local function toggle_on(name)
+  local ok, paths = pcall(require, "default.hypr.paths")
+  local xdg = os.getenv("XDG_STATE_HOME")
+  local state = ok and type(paths) == "table" and paths.state_home
+    or (xdg ~= nil and xdg ~= "" and xdg) or (home .. "/.local/state")
+  local f = io.open(state .. "/omarchy/toggles/hypr/" .. name .. ".lua", "r")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
+if type(o.transparent_window) == "function" and not toggle_on("window-opaque") and not toggle_on("window-glassy") then
+  o.transparent_window("amarchy")
 end
