@@ -147,9 +147,15 @@ function todaySort(v, ss) {
   const prio = { high: 0, normal: 1, low: 2 };
   const you = (s) => (s.today || {}).you_at || s.created || 0;
   const rank = (s) => (s.assistant === "main" ? 0 : s.assistant === "agent" ? 1 : 2);
-  const at = new Map(ss.map((s, i) => [s.id, i]));
-  return ss.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? at.get(a.id) - at.get(b.id) : 0)
-    || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || you(b) - you(a) || (a.id < b.id ? -1 : 1));
+  // Every machine's board in the same order, whichever machine draws it: its
+  // assistants and agents machine by machine (by name, not this one first),
+  // each as its own machine orders them; a tie by machine and id.
+  const machine = (s) => s.machine || (v && v.machine) || "";
+  const key = (s) => `${machine(s)}:${s.id}`;
+  const at = new Map(ss.map((s, i) => [s, i]));
+  return ss.slice().sort((a, b) => rank(a) - rank(b)
+    || (rank(a) < 2 ? machine(a).localeCompare(machine(b)) || at.get(a) - at.get(b) : 0)
+    || (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || you(b) - you(a) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
 }
 
 // At work: Claude working, or what it started running (status "running":

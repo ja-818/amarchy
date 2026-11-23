@@ -15651,6 +15651,10 @@ def board_view(st):
              "needs": needs_you([s for s in sessions if not s.get("machine_off")]),
              "moved": moved_map([r for r in moved_rows if r.get("from") not in board_keys])}
     if len(machines) > 1:
+        # Every machine's in the order tasks_view gives one's (then by machine):
+        # the same on each machine's board, not this one's first.
+        tasks.sort(key=lambda t: (not t.get("until"), t.get("until") or t.get("at") or 0, t.get("at") or 0,
+                                  t.get("machine") or me, str(t.get("id") or "")))
         board["today"] = {**(view.get("today") or {}), "tasks": tasks}
     st.board = (version, board)
     return board
