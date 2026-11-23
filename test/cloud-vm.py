@@ -93,10 +93,18 @@ end = user_data.index("  - path: /var/lib/amarchy-cloud/bootstrap.sh")
 user_data = user_data[:start] + lines + user_data[end:]
 
 TAILSCALE = r'''#!/bin/bash
-# The tests' stand-in for Tailscale (test/cloud-vm.py): answers as a node
-# signed in to a tailnet with HTTPS certificates, does nothing else.
+# The tests' stand-in for Tailscale (test/cloud-vm.py): a node that signs in
+# only with its key in a file of root's (never on its command line), then
+# answers as signed in to a tailnet with HTTPS certificates.
 case "$1" in
+  up)
+    key=""
+    for a in "$@"; do case $a in --auth-key=file:*) key=${a#--auth-key=file:} ;; --auth-key=*|--authkey=*) echo "test: the key came on the command line" >&2; exit 1 ;; esac; done
+    [ -n "$key" ] && [ -r "$key" ] && [ "$(stat -c %a "$key")" = 600 ] && grep -q '^tskey-auth-' "$key" || { echo "test: no key file" >&2; exit 1; }
+    touch /var/lib/fake-ts-up
+    ;;
   status)
+    [ -e /var/lib/fake-ts-up ] || { echo '{"BackendState": "NeedsLogin"}'; exit 0; }
     cat <<'JSON'
 {"BackendState": "Running", "Self": {"ID": "n1", "HostName": "cloudvm", "DNSName": "cloudvm.tail0000.ts.net.", "OS": "linux",
  "Online": true, "UserID": 1, "TailscaleIPs": ["100.64.0.42"]},
@@ -118,10 +126,9 @@ exit 0
 OVERRIDES = '''# The tests' own (test/cloud-vm.py): Tailscale stood in for; never on a real machine.
 install_tailscale() {
   install -m 755 /var/lib/amarchy-cloud/fake-tailscale /usr/local/bin/tailscale
+  printf '[Unit]\nDescription=stand-in tailscaled (test)\n[Service]\nExecStart=/bin/sleep infinity\n' >/etc/systemd/system/tailscaled.service
+  systemctl daemon-reload
   ip link show tailscale0 >/dev/null 2>&1 || ip link add tailscale0 type dummy 2>/dev/null || true
-}
-join_tailnet() {
-  [ -n "${TS_AUTH_KEY:-}" ] && echo "joined (test), with the key it was given"
 }
 '''
 VERIFY = r'''#!/bin/bash
@@ -135,7 +142,9 @@ echo '{'
 echo '"status":' "$(cat /var/lib/amarchy-cloud/status 2>/dev/null | j)",
 echo '"settings_left":' "$( [ -e /var/lib/amarchy-cloud/settings ] && echo true || echo false )",
 echo '"userdata_left":' "$(ls /var/lib/cloud/instances/*/user-data.txt 2>/dev/null | wc -l)",
-echo '"key_in_logs":' "$(grep -rl --exclude=verify.sh '__KEY__' /var/log /var/lib/amarchy-cloud /home/$u /tmp 2>/dev/null | head -3 | tr '\n' ' ' | j)",
+echo '"secrets_in":' "$(grep -rlF --exclude=verify.sh -e '__KEY__' -e '__TOKEN__' /var/log /var/lib /home /tmp /root /etc /run /post_install 2>/dev/null | xargs -r stat -c '%a %U %n' | tr '\n' ';' | j)",
+echo '"metadata_rule":' "$(iptables -S ufw-before-output 2>&1 | grep 169.254.169.254 | j)",
+echo '"metadata_user":' "$(as 'curl -sS --max-time 5 http://169.254.169.254/ 2>&1' | j)",
 echo '"tmux":' "$(tmux -V | j)",
 echo '"claude":' "$(as 'claude --version' 2>&1 | j)",
 echo '"git_name":' "$(as 'git config --global user.name' | j)",
@@ -158,7 +167,7 @@ echo '"log_tail":' "$(tail -n 30 /var/log/amarchy-cloud.log | j)"
 echo '}'
 } >/var/lib/amarchy-cloud/verify.json 2>/dev/null
 curl -sS --max-time 20 -H 'Content-Type: application/json' --data-binary @/var/lib/amarchy-cloud/verify.json "http://10.0.2.2:__PORT__/verify" || true
-'''.replace("__PORT__", str(PORT)).replace("__KEY__", TS_KEY)
+'''.replace("__PORT__", str(PORT)).replace("__KEY__", TS_KEY).replace("__TOKEN__", REPORT_TOKEN)
 extra = "".join(f"  - path: {path}\n    owner: root:root\n    permissions: \"{mode}\"\n    encoding: b64\n    content: {base64.b64encode(body.encode()).decode()}\n"
                 for path, mode, body in (("/var/lib/amarchy-cloud/overrides.sh", "0600", OVERRIDES),
                                          ("/var/lib/amarchy-cloud/fake-tailscale", "0755", TAILSCALE),
@@ -237,7 +246,13 @@ try:
         v = verify
         check(v.get("status", "").startswith("ready"), f"bootstrap.sh says ready ({v.get('status', '').strip()})")
         check(v.get("settings_left") is False and v.get("userdata_left") == 0, "its settings and cloud-init's copy of them are gone")
-        check(not v.get("key_in_logs", "").strip(), f"the Tailscale key isn't in any log or file ({v.get('key_in_logs')})")
+        found = [x.split(" ", 2) for x in v.get("secrets_in", "").split(";") if x.strip()]
+        loose = [f for f in found if not (f[1] == "root" and f[0][-2:] == "00" and f[2].startswith(("/var/lib/cloud/", "/run/cloud-init/")))]
+        check(not loose, f"the key and the report token: in no log, no file of yours, nothing but cloud-init's own root-only cache ({found})")
+        check("REJECT" in v.get("metadata_rule", "") and "uid-owner 0" in v.get("metadata_rule", ""),
+              f"the metadata service: root's alone ({v.get('metadata_rule', '').strip()})")
+        check("refused" in v.get("metadata_user", "").lower() or "couldn't connect" in v.get("metadata_user", "").lower(),
+              f"your user can't reach it ({v.get('metadata_user', '').strip()[:120]})")
         tv = v.get("tmux", "").split()
         check(len(tv) == 2 and tuple(int(x) for x in tv[1].rstrip("abcdefgh").split(".")[:2]) >= (3, 5), f"tmux 3.5 or newer ({v.get('tmux', '').strip()})")
         check("Claude Code" in v.get("claude", ""), f"Claude Code installed by its installer ({v.get('claude', '').strip()})")

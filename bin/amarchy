@@ -19092,7 +19092,8 @@ CLOUD_REPO_DEFAULT = "https://github.com/ja-818/amarchy.git"
 TS_KEY_NAME = "TAILSCALE_AUTH_KEY"
 TS_ADMIN_KEYS = "https://login.tailscale.com/admin/settings/keys"
 TS_KEY_HOW = ("On Tailscale's Keys page, Generate auth key: one-off (not reusable), pre-approved, "
-              "expiring in a day; no tags. Copy it, and paste it here.")
+              "expiring in a day; no tags. Copy it, and paste it here. (The provider keeps a copy of what the "
+              "machine is set up with: a one-off key is spent once it has joined.)")
 COUNTRY_NAMES = {"DE": "Germany", "FI": "Finland", "US": "United States", "SG": "Singapore", "NL": "Netherlands",
                  "GB": "United Kingdom", "UK": "United Kingdom", "FR": "France", "IN": "India", "CA": "Canada",
                  "AU": "Australia", "BR": "Brazil", "LT": "Lithuania", "ID": "Indonesia", "MY": "Malaysia",
@@ -19755,7 +19756,7 @@ def cloud_step(name, step, **changes):
 
 def cloud_fail(name, words, **changes):
     print(f"amarchy cloud: {name}: {words}", file=sys.stderr, flush=True)
-    return cloud_step(name, "failed", error=words, **changes)
+    return cloud_step(name, "failed", error=words, report=None, **changes)     # (its report token, dead)
 
 
 def cloud_drop(name):
@@ -20212,9 +20213,10 @@ def cloud_progress(name, token, step, words, log):
         return f"a step: {', '.join(CLOUD_REPORTS)}"
     words = " ".join(str(words or "").split())[:300]
     log = mask_secrets(str(log or ""))[-8000:] if log else None
-    if rec["step"] in ("paired", "removed") or rec.get("remove"):
+    if rec["step"] in ("paired", "removed", "failed") or rec.get("remove"):
         return None
-    changes = {"detail": words or step}
+    # Its last report: the token dies with it (nothing it says after counts).
+    changes = {"detail": words or step, **({"report": None} if step == "ready" else {})}
     steps = {**(rec.get("steps") or {}), f"report:{step}": int(time.time())}
     if step == "failed":
         cloud_update(name, steps=steps)
@@ -20276,7 +20278,7 @@ def cloud_remove_ask(name, move_chats=False, lose_chats=False):
         cloud_drop(name)
         return {**rec, "step": "removed", "detail": "Nothing had been made: forgotten"}
     rec = cloud_update(name, remove={"move_chats": bool(move_chats and movable), "at": int(time.time())},
-                       detail="Removing it", error=None)
+                       detail="Removing it", error=None, report=None)
     cloud_spawn(name)
     return rec
 

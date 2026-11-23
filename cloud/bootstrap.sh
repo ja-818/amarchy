@@ -71,10 +71,12 @@ report() {
   local body
   body=$(printf '{"name": %s, "step": %s, "words": %s, "log": %s}' \
     "$(json "$AMARCHY_NAME")" "$(json "$step")" "$(json "$words")" "$(json "$log")")
-  curl -fsS --max-time 20 --retry 4 --retry-delay 3 --retry-all-errors \
-    ${REPORT_RESOLVE:+--resolve "$REPORT_RESOLVE"} \
-    -H "Authorization: Bearer $REPORT_TOKEN" -H "Content-Type: application/json" \
-    --data-binary "$body" "$REPORT_URL/api/cloud/progress" >/dev/null 2>&1 || true
+  # Its token in curl's config, on stdin: never on a command line (another
+  # user here would see it in ps).
+  printf 'header = "Authorization: Bearer %s"\n' "$REPORT_TOKEN" |
+    curl -fsS --max-time 20 --retry 4 --retry-delay 3 --retry-all-errors -K - \
+      ${REPORT_RESOLVE:+--resolve "$REPORT_RESOLVE"} -H "Content-Type: application/json" \
+      --data-binary "$body" "$REPORT_URL/api/cloud/progress" >/dev/null 2>&1 || true
 }
 
 # What went wrong, in words, with the last lines of the log (no key in them).
@@ -86,6 +88,7 @@ failed() {
   say "$WHAT failed at line $line: $cmd"
   local tail_
   tail_=$(tail -n 40 "$LOG" | sed -E 's/tskey-[A-Za-z0-9_-]+/tskey-…/g')
+  if [[ -n ${REPORT_TOKEN:-} ]]; then tail_=${tail_//"$REPORT_TOKEN"/…}; fi
   printf '%s\n' "$WHAT" >"$DIR/failed"
   report failed "$WHAT failed ($cmd)" "$tail_"
   exit 1
@@ -155,7 +158,13 @@ join_tailnet() {
     return 0
   fi
   [[ -n ${TS_AUTH_KEY:-} ]] || { WHAT="Joining your tailnet (no Tailscale key came with it)"; false; }
-  tailscale up --auth-key="$TS_AUTH_KEY" --hostname="$AMARCHY_NAME" --ssh --timeout=180s
+  # The key from a file of root's (never on a command line: ps shows those),
+  # gone again at once.
+  (umask 077 && printf '%s' "$TS_AUTH_KEY" >"$DIR/ts-key")
+  local ok=0
+  tailscale up --auth-key="file:$DIR/ts-key" --hostname="$AMARCHY_NAME" --ssh --timeout=180s || ok=$?
+  rm -f "$DIR/ts-key"
+  return "$ok"
 }
 # The tests' own (test/cloud-vm.py): what stands in for Tailscale in a VM
 # that can't join a real tailnet. Never there on a real machine.
@@ -209,7 +218,14 @@ setup_firewall() {
   ufw default allow outgoing >/dev/null
   ufw allow in on tailscale0 >/dev/null
   ufw allow 41641/udp >/dev/null
+  # The metadata service (where cloud-init's user data is served, its spent
+  # key and dead report token in it) answers root alone: no chat here reads it.
+  if [[ -f /etc/ufw/before.rules ]] && ! grep -q 'amarchy: metadata' /etc/ufw/before.rules; then
+    sed -i '0,/^COMMIT$/s//# amarchy: metadata for root only (cloud\/bootstrap.sh)\n-A ufw-before-output -d 169.254.169.254\/32 -m owner ! --uid-owner 0 -j REJECT\nCOMMIT/' \
+      /etc/ufw/before.rules
+  fi
   ufw --force enable >/dev/null
+  ufw reload >/dev/null
   # Tailscale SSH (tailscale up --ssh) instead of the public sshd.
   systemctl disable --now ssh.socket ssh.service >/dev/null 2>&1 || true
   # Nor name lookups answered to the network (systemd-resolved's LLMNR and mDNS).
@@ -269,8 +285,9 @@ STEP=ready WHAT="Finishing"
 # Nothing secret stays: the settings (the report token) and cloud-init's own
 # copies of what it was given.
 report ready "amarchy is up${AMARCHY_BY:+: pairing with $AMARCHY_BY}"
-rm -f "$SETTINGS" "$DIR/tailscale-install.sh" "$DIR/failed"
+rm -f "$SETTINGS" "$DIR/tailscale-install.sh" "$DIR/failed" "$DIR/ts-key" /post_install
 rm -f /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instance/user-data.txt.i \
-  /var/lib/cloud/instances/*/user-data.txt /var/lib/cloud/instances/*/user-data.txt.i 2>/dev/null || true
+  /var/lib/cloud/instances/*/user-data.txt /var/lib/cloud/instances/*/user-data.txt.i \
+  /var/lib/cloud/instance/cloud-config.txt /var/lib/cloud/instances/*/cloud-config.txt 2>/dev/null || true
 printf 'ready %s\n' "$(date -u +%FT%TZ)" >"$DIR/status"
 say "done"

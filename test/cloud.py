@@ -32,7 +32,7 @@
 #
 #   python3 test/cloud.py        exits 0 when every check passed (about two minutes)
 
-import http.client, json, os, shutil, signal, socket, stat, subprocess, sys, tempfile, time
+import http.client, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -306,8 +306,11 @@ try:
           "Hetzner got cx33, Debian 13, its labels, cloud-init's user data")
     check("TS_AUTH_KEY='tskey-auth-kTEST-0123456789'" in ud and f"REPORT_URL='{alpha.url}'" in ud and "REPORT_TOKEN='" in ud
           and "AMARCHY_REPO='https://" in ud and "AMARCHY_NAME='cloud'" in ud, "its settings: the key, where to report, the repo")
-    import base64 as b64, gzip as gz, re as re_
-    packed = re_.search(r"encoding: gz\+b64\n    content: (\S+)", ud)
+    check(not any(f"good-{x}" in ud for x in ("hetzner", "digitalocean", "hostinger")), "no provider token in its setup (it never leaves alpha)")
+    found = re.search(r"REPORT_TOKEN='([^']+)'", ud)
+    report_token = found.group(1) if found else ""
+    import base64 as b64, gzip as gz
+    packed = re.search(r"encoding: gz\+b64\n    content: (\S+)", ud)
     check(bool(packed) and gz.decompress(b64.b64decode(packed.group(1))).decode() == (ROOT / "cloud/bootstrap.sh").read_text(),
           "its setup carries cloud/bootstrap.sh as it is")
     if shutil.which("cloud-init"):
@@ -325,6 +328,14 @@ try:
           f"its reports came (tailnet, packages, claude, amarchy, app: {sorted(steps)} {[x for x in fake_state()['log'] if 'report' in x][:8]})")
     check(rec.get("node") == "cloud.tail0000.ts.net" and rec.get("machine") == "cloud" and not rec.get("report"),
           "its node on the tailnet, the machine it is; its report token dropped once paired")
+    code, _, _ = alpha.ask("POST", "/api/cloud/progress", {"name": "cloud", "step": "failed", "words": "x"},
+                           headers={"Authorization": f"Bearer {report_token}", "Origin": ""})
+    check(code == 403 and bool(report_token) and alpha.cloud()["cloud"]["step"] == "paired",
+          "its token, dead once it's paired: a later report refused, nothing changed")
+    for path in ("/api/cloud", "/api/peer/state", "/api/peer/pair"):
+        code, _, _ = alpha.ask("POST" if path != "/api/peer/state" else "GET", path, {} if path != "/api/peer/state" else None,
+                               headers={"Authorization": f"Bearer {report_token}", "X-Amarchy-Peer": "cloud", "Origin": ""}, cookie=False)
+        check(code in (400, 403), f"its token opens nothing else ({path}: {code})")
     check("cloud" in alpha.machines() and "alpha" in cloud.machines()
           and alpha.machines()["cloud"]["key"] == cloud.machines()["alpha"]["key"], "paired both ways, one key")
     check("TAILSCALE_AUTH_KEY" not in env.read_text(), "the spent Tailscale key forgotten here")
@@ -409,6 +420,7 @@ try:
     rec = alpha.cloud().get("cloud-bad", {})
     check(rec.get("step") == "failed" and "Installing Claude Code failed" in (rec.get("error") or "")
           and "Could not resolve host" in (rec.get("log") or ""), "a setup that fails: its words, and its log's end")
+    check(not rec.get("report"), "its report token, dead once it failed")
     r = alpha.amarchy("machines", "cloud", "status", "cloud-bad")
     check("its log" in r.stdout and "Could not resolve host" in r.stdout, "amarchy machines cloud status shows it")
     alpha.amarchy("machines", "cloud", "remove", "cloud-bad", "--yes", timeout=60)
@@ -423,6 +435,9 @@ try:
     rec = until(lambda: alpha.cloud().get("cloud-hg", {}).get("step") == "paired" and alpha.cloud()["cloud-hg"], 45)
     check(bool(rec), f"set up once paid, then paired ({(alpha.cloud().get('cloud-hg') or {}).get('step')}: {(alpha.cloud().get('cloud-hg') or {}).get('detail') or (alpha.cloud().get('cloud-hg') or {}).get('error')})")
     check(not fake_state()["scripts"], "its post-install script (the key in it) deleted at Hostinger once used")
+    hs = next(iter(fake_state()["hostinger"].values()), {}).get("_script", "")
+    check(hs.startswith("#!/bin/bash") and "TS_AUTH_KEY='tskey-auth-kTEST-three'" in hs and "good-hostinger" not in hs,
+          "Hostinger's script: the key, never the Hostinger token")
     check((alpha.cloud().get("cloud-hg") or {}).get("billing") == "subscription", "billed by subscription")
 
     print("removing one")
