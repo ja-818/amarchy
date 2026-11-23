@@ -43,6 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BIN = str(ROOT / "bin/amarchy")
 BASE = Path(tempfile.mkdtemp(prefix="move-"))
+os.chdir(BASE)     # what the servers and their fakes start from: never the checkout (the fake claude's argv.txt)
 USER = "tester@example.com"
 GIT_ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
