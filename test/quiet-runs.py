@@ -83,6 +83,7 @@ check(not am.sent_by_taken("fire-fire", "Ritual: idea pass", set()), "a note lon
 
 # ---- the broker: each turn, who began it
 agent = am.Agent(S["fire-fire"])
+agent.titled = True                         # (no title to give it: chat-title.py)
 fed = io.StringIO()
 agent.claude = type("C", (), {"stdin": fed})()
 agent.live["state"] = "idle"
