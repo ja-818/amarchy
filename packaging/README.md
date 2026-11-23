@@ -44,7 +44,10 @@ see the packages and use them instead of building.
   can't see: commands amarchy runs rather than links (`git`, `tmux`, `jq`),
   libraries the desktop app opens at run time (`libayatana-appindicator`,
   GStreamer's plugins, `xdg-utils`), optional features (fontTools,
-  Quickshell) and Omarchy's own QML modules (`qs.Commons`, `qs.Ui`).
+  Quickshell) and Omarchy's own QML modules (`qs.Commons`, `qs.Ui`); and,
+  for dictation's engine, how transcribe.cpp's release was linked (no full
+  RELRO, `libdl`/`libm` linked but unused: built for any Linux from glibc
+  2.27 on, not by Arch's flags).
 - makepkg's one warning, "Package contains reference to $srcdir": Tauri's
   generated code keeps the desktop app's source folder as a string (its
   config's folder); rustc's `--remap-path-prefix` can't reach it, and it's
