@@ -16889,6 +16889,25 @@ def sync_set_at(key):
         return 0
 
 
+# What a setting is when you never set it (an install may have written it
+# so): on a machine's first look, as if never set, so the machine where you
+# did set it wins, however new this one's file is.
+SYNC_DEFAULTS = {"new-model": (NEW_MODEL,), "new-effort": ("auto",), "alerts": ("needs-you",), "machines-as": ("icon",),
+                 "missions-goal": (str(MISSION_GOAL_DEFAULT),), "show-terminals": (), "project-order": ((),),
+                 "missions-since": (), "sound": (), "sound-assistant": ()}
+
+
+def sync_unset(key, value):
+    """Whether an item's value is what it is when never set."""
+    if value is None:
+        return True
+    if key == "look":
+        c = (value or {}).get("choice") or {}
+        return (c.get("theme") in (None, LOOK_DEFAULT) and not c.get("own") and c.get("wallpaper") in (None, "theme")
+                and c.get("font") in (None, "jetbrains-mono") and not c.get("backgrounds"))
+    return value in SYNC_DEFAULTS.get(key, ()) or (isinstance(value, list) and not value)
+
+
 def sync_newer(a, b):
     """Whether stamp a ({at, by}) is later than b (the same at: the greater by)."""
     if not b:
@@ -16933,6 +16952,8 @@ def sync_items_look():
                 # as old as its file (never set: as old as can be), so the
                 # latest change of any machine's wins, whichever looked first.
                 at = sync_set_at(key)
+                if kept is None and sync_unset(key, value):
+                    at = 0
                 items[key] = {"value": value, "at": at if kept is None else (at if value is not None and at else now), "by": me}
                 changed.append(key)
         if changed:

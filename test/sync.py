@@ -61,6 +61,11 @@ try:
     time.sleep(1.2)
     beta.amarchy("theme", "ristretto")      # set later: it wins at pairing
     beta.amarchy("alerts", "all")
+    time.sleep(1.2)
+    # gamma, installed last: files at their defaults, newer than anyone's.
+    (gamma.home / "state/amarchy/app/theme").mkdir(parents=True, exist_ok=True)
+    (gamma.home / "state/amarchy/app/theme/choice.json").write_text(json.dumps({"theme": "tokyo-night"}))
+    (gamma.home / "state/amarchy/alerts").write_text("needs-you\n")
     for m in ms:
         m.start()
     for a, b in ((alpha, beta), (alpha, gamma), (beta, gamma)):
@@ -70,7 +75,7 @@ try:
     print("at pairing: the latest of each, everywhere")
     check(bool(same(lambda m: st(m)["look"]["theme"], "ristretto")), "the same look on all three")
     check(st(alpha)["look"]["theme"] == "ristretto", f"beta's, set last (alpha has {st(alpha)['look']['theme']})")
-    check(bool(same(lambda m: st(m).get("alerts"), "all")), "beta's alerts too, set where nobody else had")
+    check(bool(same(lambda m: st(m).get("alerts"), "all")), "beta's alerts too, and not gamma's newer defaults")
 
     print("a change on one machine, on the others in a moment")
     t0 = time.time()
