@@ -1,7 +1,8 @@
 # Plan: amarchy everywhere, chats on every machine
 
-Status: **approved** by Julian on 2026-11-22 (decisions below). Being built in
-parallel chats; each track ships on its own.
+Status: **approved** by Julian on 2026-11-22 (decisions below). Wave 1 is done
+and running on his Omarchy; wave 2 is being built in parallel chats, each track
+shipping on its own.
 
 Goal: amarchy is one app on every device (Omarchy, Mac, Windows, iPhone,
 Android, any browser), and every computer you have can run chats: your
@@ -283,6 +284,12 @@ piece is complete and verified; the rest comes after.
    local key, its chats and the server's on one board, "Where" for a new chat
    (A, with B loading the local machine).
 
+**Both milestones reached on 2026-11-22**: the desktop app runs on Julian's
+Omarchy (`ja`, an M5 Pro MacBook Pro, aarch64), paired with the server, and his
+first chat on `ja` started from his phone and answered. Wave 1's tracks are
+done; what's left of them is fixes from his desktop (a hung window that won't
+reopen, Super+Shift+A as the key, Where cloning a project first).
+
 ### Wave 1
 
 **A. Machines: chats from every machine on one board.** (`bin/amarchy`, `app/`)
@@ -333,7 +340,9 @@ piece is complete and verified; the rest comes after.
 ### Wave 2
 
 In this order, once both milestones are on Julian's Omarchy: D, E, H, I, F,
-and the phone apps (G) last.
+and the phone apps (G) last. Started 2026-11-22: D in the `amarchy-machines`
+chat, E in `amarchy-move-chat`, H in `amarchy-desktop-app` once its fixes are
+in. I and F wait on Julian's OK (publishing, spending).
 
 **D. Your stuff on every machine** (after A): board order, look, missions,
 streaks, goal, project order, new-chat defaults kept on every machine and
