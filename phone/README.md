@@ -152,6 +152,7 @@ the tailnet (each peer's `GET /api/peer/hello`). It reaches it:
   `-target=ios,iossimulator -iosversion 17.0 -o Tailnet.xcframework` on a Mac
   with Xcode. On Android it stands in for what Android keeps from an app's
   own code (its network interfaces, its DNS) with Tailscale's `androidbin`.
+  The phones' CI builds take the newest one built on main by themselves.
 
 `amarchy://chat/<machine>/<id>` opens that chat (`#/s/<id>` when `<machine>`
 is the machine it opens, else `#/s/<machine>:<id>`).

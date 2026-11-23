@@ -45,6 +45,11 @@ const set = (p, id, o) => p.evaluate(([id, o]) => {
   refresh();
 }, [id, o]);
 const back = (p) => p.evaluate((chats) => { app.view = { ...app.view, sessions: chats.map((c) => ({ ...c })) }; refresh(); }, AGENTS);
+// Whether the page told the host this, within a few seconds (what it sends goes after the click, not with it).
+const posted = async (p, test, ms = 3000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (p.posts.some(test)) return true;
+  return p.posts.some(test);
+};
 const sheetText = (p) => p.evaluate(() => { const s = [...document.querySelectorAll(".sheet")].pop(); return s ? s.innerText : ""; });
 
 async function run(browser, port, layout) {
@@ -72,13 +77,16 @@ async function run(browser, port, layout) {
     const letter = c.querySelector(".tcard-head svg.avatar.letter");
     return { assistant: c.classList.contains("k-assistant"), title: c.querySelector(".tcard-head").innerText.includes("Fireship"),
              letter: letter ? letter.textContent : "", hue: letter ? /ph-\d/.test(letter.getAttribute("class")) : false,
-             size: letter ? Math.round(letter.getBoundingClientRect().width) : 0,
+             // Drawn the whole size of its box (no list row's padding shrinking it), the size Chats gives a picture.
+             size: letter ? Math.round(letter.getBoundingClientRect().width) : 0, pad: letter ? getComputedStyle(letter).padding : "",
+             want: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--avatar-list")),
              chip: !!c.querySelector(".tcard-chip"), flag: !!s.querySelector(".prio"), complete: [...c.querySelectorAll(".tbtn")].some((b) => /Complete/.test(b.innerText)),
              pill: (c.querySelector(".tpill") || {}).innerText || "", sub: (c.querySelector(".tcard-sub") || {}).innerText || "",
              pic: (s.querySelector(".tcard-head img.avatar") || {}).getAttribute ? s.querySelector(".tcard-head img.avatar").getAttribute("src") : "" };
   });
   check(where, card.assistant && card.title && !card.chip, `an agent's card: its name, as your assistant's is (${JSON.stringify(card)})`);
-  check(where, card.letter === "F" && card.hue && card.size === 46, `no picture of yours: its initial, on its project's color, as big as a picture (${card.size})`);
+  check(where, card.letter === "F" && card.hue && card.size === card.want && card.want >= 64 && card.pad === "0px",
+    `no picture of yours: its initial, on its project's color, as big as a picture (${card.size}px of ${card.want}, padding ${card.pad})`);
   check(where, card.pic === "/picture/0123456789ab-192.png", `a picture of yours: that one (${card.pic})`);
   check(where, !card.flag, "pinned before it was an agent: no flag (it's on top whatever its priority)");
   check(where, !card.complete && !card.pill && !/Stalled|New|Merged|Done/.test(card.sub), `done, merged, quiet for days, unseen: still never to complete, no state pill, a conversation's row (${card.sub})`);
@@ -149,7 +157,7 @@ async function run(browser, port, layout) {
   await p.evaluate(() => [...document.querySelectorAll(".sheet .seg .control")].find((b) => b.innerText === "Fireship").click());
   check(where, await until(p, () => !!document.querySelector('.sheet .menu-item.on[data-sound="elementary"], .sheet .menu-item.on')), "Fireship's tab: its chime lit");
   await p.evaluate(() => document.querySelector('.sheet .menu-item[data-sound="tine"]').click());
-  check(where, await until(p, () => true) && p.posts.some((x) => /\/api\/sound$/.test(x.url) && x.body.agent === "fireship-fireship" && x.body.name === "tine"), "picked: Fireship's own, told to the host");
+  check(where, await posted(p, (x) => /\/api\/sound$/.test(x.url) && x.body.agent === "fireship-fireship" && x.body.name === "tine"), "picked: Fireship's own, told to the host");
   check(where, await until(p, () => row("fireship-fireship").chime === "tine"), "its row rings with it now");
   await p.evaluate(() => closeSheets());
 

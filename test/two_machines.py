@@ -75,7 +75,7 @@ class Machine:
             "HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state"), "XDG_CONFIG_HOME": str(self.home / "config"),
             "AMARCHY_WORK": str(self.work), "AMARCHY_TMUX": self.socket, "AMARCHY_HOST_NAME": name,
             "AMARCHY_HOST_APP_PORT": str(self.port), "AMARCHY_HOST_URL": self.url, "AMARCHY_HOST_APP_LINKS": "off",
-            "AMARCHY_HOST_APP_USERS": USER, "AUTO_UPDATE": "off", "AMARCHY_PEER_SILENT": "6",
+            "AMARCHY_HOST_APP_USERS": USER, "AUTO_UPDATE": "off", "AMARCHY_PEER_SILENT": "6", "AMARCHY_PEER_OFF_AFTER": "8",
             "PATH": f"{FAKE}:/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""), "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS", ""),
             "SHELL": "/bin/bash", "TERM": "xterm-256color",

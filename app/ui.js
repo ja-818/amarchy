@@ -255,10 +255,9 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
   // to read, not to act on (its buttons would go nowhere) until it's back.
   const off = s ? uiMachineOff(s) : "";
   if (off) {
-    // "Off" by its machine's icon (dimmed), the whole of it in its label.
-    pill = uiPill(/^Update/.test(off) ? "Update needed" : "Off", "quiet", { title: `${off}: what it shows is from when it last answered` });
-    actions = [];
-    count = 0;
+    // "Off" by its machine's icon (dimmed), the whole of it in its label. Its
+    // buttons stay: what you answer waits for it, and goes once it's back.
+    pill = uiPill(/^Update/.test(off) ? "Update needed" : "Off", "quiet", { title: `${off}: what it shows is from when it last answered; what you send goes once it's back` });
   }
   // Moving to another machine: that, and nothing to do to it until it's there;
   // waiting to be free, or one that didn't move: a line saying so (uiMoveNote).
@@ -281,14 +280,45 @@ function uiCard({ kind, hue, lead = null, chip = "", title, sub = null, pill = n
     two ? h("span", { class: "tcard-main" }, name, sub !== null ? h("span", { class: "tcard-sub" }, sub) : null) : name,
     two ? h("span", { class: "tcard-side" }, where || pill ? h("span", { class: "tcard-side-top" }, where, pill) : null, uiUnread(count))
         : where ? h("span", { class: "tcard-side-one" }, where, pill) : pill);
+  // Lit unseen, it breathes a few times as it turns so (or the page opens
+  // on it), then holds its glow (uiBreathing).
+  const breath = uiBreathing(id, unseen && !off);
   // The whole card opens it (its buttons, links and boxes do their own thing).
-  const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen && !off ? " unseen" : ""}${off ? " machine-off" : ""}`, "data-id": id || null,
+  const card = h("article", { class: `tcard k-${kind} ph-${hue}${unseen && !off ? " unseen" : ""}${breath ? " breathe" : ""}${off ? " machine-off" : ""}`, "data-id": id || null,
                               onclick: (e) => { if (!e.target.closest("button, a, input, textarea, select, summary")) open(e); } }, head,
     ...body.filter(Boolean), actions.filter(Boolean).length ? h("div", { class: "tcard-actions" }, ...actions.filter(Boolean)) : null);
   // A chat's: held down on a phone, a right click on a computer (the menu key
   // with the keys): its menu, priority, name, commands, Complete (app.js rowMenu).
   if (s && typeof holdable === "function") holdable(head, () => rowMenu(s));
+  // Done breathing at the end of a breath, its glow where it rests.
+  if (breath) {
+    card.addEventListener("animationiteration", (e) => {
+      if (e.target !== card || e.animationName !== "tcard-unseen" || Date.now() < breath.until - 200) return;
+      breath.done = true;
+      card.classList.remove("breathe");
+    });
+  }
   return card;
+}
+
+// A card lit unseen breathes (ui.css, tcard-unseen) a few times as it turns
+// so, or as the page opens on it, then holds its glow: a glow drawn again
+// every frame for as long as it waits (hours, a card each) is a core of a
+// computer with no GPU, and a phone's battery. Kept by chat, so a redraw
+// that makes its card again doesn't make it breathe longer, nor again once
+// done ({until, done}; null: it doesn't breathe).
+const UI_BREATHS_MS = 3 * 2600;
+const uiUnseen = new Map();
+function uiBreathing(id, lit) {
+  if (!id) return null;
+  if (!lit) {
+    uiUnseen.delete(id);
+    return null;
+  }
+  let b = uiUnseen.get(id);
+  if (!b) uiUnseen.set(id, (b = { until: Date.now() + UI_BREATHS_MS, done: false }));
+  // (Past its time, one breath more at most, to the end of the one it's on.)
+  return b.done || Date.now() > b.until + 2600 ? null : b;
 }
 
 // The machine a chat is on (docs/plan-omarchy-and-machines.md): its icon
@@ -383,7 +413,7 @@ function uiPresence(s) {
 // accent, warn, quiet; new: filled, a dot beating in it). working and running spin. long: words that may not fit, cut
 // short with "…" (all of them on hover).
 function uiPill(text, tone, { long = false, title = null } = {}) {
-  const wheel = tone === "working" || tone === "running" ? spinner() : tone === "new" ? h("span", { class: "tpill-beat", "aria-hidden": "true" }) : null;
+  const wheel = tone === "working" || tone === "running" ? spinner() : tone === "new" ? beat("tpill-beat", { "aria-hidden": "true" }) : null;
   return h("span", { class: `tpill t-${tone}${long ? " long" : ""}`, title: title || (long ? text : null) },
     wheel, long ? h("span", { class: "tpill-text" }, text) : text);
 }
@@ -539,7 +569,7 @@ function uiScore({ streak = 0, today = 0, goal = 0, risk = false, cool = false, 
   return h("span", { class: "ui-score-box" },
     flash ? h("span", { class: "ui-score-flash" }, glyph("bolt"), flash) : null,
     h("button", { class: `ui-score${risk ? " risk" : ""}${cool ? " cool" : ""}${streak ? "" : " cold"}`, type: "button", title, "aria-label": title, onclick: act },
-      h("span", { class: "ui-score-streak" }, glyph("flame"), String(streak)),
+      risk ? beat("ui-score-streak", {}, glyph("flame"), String(streak)) : h("span", { class: "ui-score-streak" }, glyph("flame"), String(streak)),
       h("span", { class: "ui-score-today" }, ring, h("span", {}, h("b", {}, String(today)), goal ? `/${goal}` : " today"))));
 }
 
@@ -588,7 +618,9 @@ function uiChart(items) {
 // assistant, and for an agent its initial on its project's color, so two of
 // them never look alike. The 192 one is what the lists show (about 70 KB, not
 // the 512's 420 KB, and every row's picture is drawn again each time the list
-// changes); the big one only where it's shown big. cls: small, big.
+// changes); the big one only where it's shown big. cls: its size (ui.css
+// --avatar-*): small (in a button), list (its line in Chats), head (over
+// its chat), big; on any card, the card's (--avatar-card) but list.
 function avatar(s, cls) {
   const size = cls === "big" ? 512 : 192;
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");

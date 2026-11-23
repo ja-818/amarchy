@@ -112,7 +112,7 @@ class Machine {
     this.env = {
       HOME: this.home, XDG_STATE_HOME: `${this.home}/state`, XDG_CONFIG_HOME: `${this.home}/config`, AMARCHY_WORK: `${this.home}/Work`,
       AMARCHY_TMUX: this.socket, AMARCHY_HOST_NAME: name, AMARCHY_HOST_APP_PORT: String(port), AMARCHY_HOST_URL: this.url,
-      AMARCHY_HOST_APP_LINKS: "off", AMARCHY_HOST_APP_USERS: USER, AMARCHY_PEER_SILENT: "6",
+      AMARCHY_HOST_APP_LINKS: "off", AMARCHY_HOST_APP_USERS: USER, AMARCHY_PEER_SILENT: "6", AMARCHY_PEER_OFF_AFTER: "8",
       PATH: `${FAKE}:/usr/local/bin:/usr/bin:/bin`, LANG: "C.UTF-8", SHELL: "/bin/bash", TERM: "xterm-256color",
       XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || "", DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS || "",
       GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
@@ -285,19 +285,30 @@ const LAYOUTS = {
       }, card("beta:proj-one")), 20000);
       await p.evaluate(() => { for (const d of document.querySelectorAll("details.today-working")) d.open = true; });     // (it's at work: under At work, folded)
       check(where, !!dim && /^beta is off · Off$/.test(dim), `beta off: its card dimmed, its icon "beta is off", its badge Off (${dim})`);
-      check(where, await p.evaluate((sel) => !document.querySelector(`${sel} .tcard-actions`), card("beta:proj-one")), "no buttons on it");
+      check(where, await p.evaluate((sel) => !document.querySelector(`${sel} .tcard-actions`) || !!document.querySelector(`${sel} .tcard-actions button`), card("beta:proj-one")),
+            "its buttons stay (what you answer waits for it)");
       check(where, await p.evaluate((sel) => !document.querySelector(sel).classList.contains("machine-off"), card("proj-mine")), "alpha's own card as it was");
       await sleep(500);
       await p.screenshot({ path: path.join(SHOTS, `${where}-off.png`) });
       await p.evaluate(() => { document.querySelector('.tcard[data-id="beta:proj-one"] .tcard-head').click(); });
       const offNote = await until(() => p.evaluate(() => { const n = document.querySelector(".chat-dock .dock-note.machine-off"); return n ? n.textContent : null; }));
       check(where, !!offNote && /beta is off/.test(offNote), `its chat: "${offNote}"`);
-      check(where, await p.evaluate(() => { const c = (app.session && app.session.chat) || desk.chat; return !c.dock.contains(c.box); }), "no box to send from");
+      check(where, await p.evaluate(() => { const c = (app.session && app.session.chat) || desk.chat; return c.dock.contains(c.box); }), "the box stays: you can still write");
+      // Sent while beta's off: it waits on alpha, says so, and goes once beta's back.
+      const waitText = `sent while beta is off (${where})`;
+      await p.evaluate((text) => { const c = (app.session && app.session.chat) || desk.chat; c.input.value = text; c.send(); }, waitText);
+      // (Sent from a chat opened from the board: back on the board. Open it again.)
+      await until(() => p.evaluate(() => !(app.session && app.session.id === "beta:proj-one") && desk.current !== "beta:proj-one"), 5000);
+      await p.evaluate(() => go2("beta:proj-one"));
+      const waits = await until(() => p.evaluate(() => { const n = document.querySelector(".chat-outbox .msg.waiting .msg-waits"); return n ? n.textContent : null; }), 10000);
+      check(where, !!waits && /Sends when beta is back/.test(waits) && /Cancel/.test(waits), `it waits, saying so, with Cancel (${waits})`);
       await sleep(400);
       await p.screenshot({ path: path.join(SHOTS, `${where}-off-chat.png`) });
       await beta.start();
       const on = await until(() => p.evaluate(() => { const c = (app.session && app.session.chat) || desk.chat; return c && c.dock.contains(c.box) && !document.querySelector(".chat-dock .dock-note.machine-off"); }), 30000);
-      check(where, !!on, "beta back: the chat takes messages again");
+      check(where, !!on, "beta back: the chat as it was");
+      check(where, !!(await until(() => beta.got(betaPath).includes(waitText), 30000)), "what waited arrived at beta's Claude");
+      check(where, !!(await until(() => p.evaluate(() => !document.querySelector(".chat-outbox .msg.waiting")), 15000)), "no longer waiting");
       await p.evaluate(() => go("#/"));
       check(where, !!(await until(() => p.evaluate((sel) => { const c = document.querySelector(sel); return c && !c.classList.contains("machine-off"); }, card("beta:proj-one")))), "its card as it was");
       check(where, errors.length === 0, `no errors on the page (${errors.join("; ").slice(0, 300)})`);

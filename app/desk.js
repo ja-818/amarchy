@@ -467,7 +467,10 @@ class TermPane {
     const mouse = this.term.modes.mouseTrackingMode !== "none";
     const unit = mouse ? cell * TMUX_WHEEL : cell;
     this.scrolled = (this.scrolled || 0) + px;
-    const n = Math.trunc(this.scrolled / unit);
+    // Whole turns, but a hair short of one is one: a finger's positions are
+    // fractions of a pixel (a phone's, at 3x), and a swipe of three turns'
+    // worth came out 239.99997 px of 240, one turn short.
+    const n = Math.trunc(this.scrolled / unit + Math.sign(this.scrolled) * 1e-3);
     if (!n) return;
     this.scrolled -= n * unit;
     if (!mouse) return this.term.scrollLines(n);
@@ -1536,7 +1539,8 @@ function talkKey(e) {
   if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
   const t = fresh ? fresh.dictate : c.talk;
   if (t.locked) { t.stop(); return; }
-  if (t.run || !t.available()) { if (!t.available()) toast("No dictation here: see Settings"); return; }
+  if (t.run) return;
+  if (t.tellWhyNot()) return;      // it can't work here: why, and what to do
   if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
   desk.talkDown = e.timeStamp;
   desk.talkCode = e.code;

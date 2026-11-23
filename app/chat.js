@@ -207,6 +207,7 @@ const CHATS_SEEN = 16;      // chats whose conversation is kept, to draw it at o
 const chatsSeen = new Map();
 const chatsOpen = new Map();      // the chat open now for an id (a message that didn't go comes back to its box)
 const ASK_HELD = 15000;     // ms a card you answered stays off the dock while Claude hasn't moved on (Chat.act)
+const STREAM_STEP_MS = 33;  // between two steps of Claude's words as it writes them (Chat.streamStep): 30 a second
 
 // A message as sent and as the conversation has it, to tell they're one (Chat.settleOutbox).
 function outKey(text) { return String(text || "").replace(/\s+/g, " ").trim(); }
@@ -1359,6 +1360,7 @@ class Chat {
       this.conversation({ reset: true, items: was.items, start: was.start });
     }
     chatsOpen.set(this.id, this);
+    this.outboxSeen();          // what waits for its machine, as it waits
     // Asked for already, as your finger landed on its card: that one, and what came on it.
     const early = chatStreamTake(this.id);
     const es = early ? early.es : new EventSource(streamURL(chatPath(this.id, "/stream")));
@@ -1656,7 +1658,8 @@ class Chat {
   // tells them itself (send).
   post(route, body, { told = false } = {}) {
     const sent = route === "send" || route === "answer" || (route === "keys" && body && body.dialog !== undefined);
-    const done = route === "send" ? sendTo(this.id, body) : api(chatPath(this.id, `/${route}`), body);
+    const done = route === "send" ? sendTo(this.id, body)
+      : api(chatPath(this.id, `/${route}`), body).then((r) => (route === "answer" ? waitsSaid(r) : r));
     if (sent && !told && this.opts.onSent) {
       this.opts.onSent(route);
       done.catch(() => this.unsent());
@@ -2781,7 +2784,7 @@ class Chat {
       if (!this.workingEl || !this.workingEl.matches(".typing")) {
         clearInterval(this.workingTimer);
         this.workingEl = h("div", { class: "msg claude typing", role: "status", "aria-label": `${this.who()} is typing` },
-          h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")));
+          beat("dots", { "aria-hidden": "true" }, h("i"), h("i"), h("i")));
       }
     } else if (now) {
       if (!this.workingEl || this.workingEl.matches(".typing")) {
@@ -2867,14 +2870,18 @@ class Chat {
     }
   }
 
+  // A step every STREAM_STEP_MS, not every frame: a 120 Hz screen drew the
+  // words 120 times a second, a core's work without a GPU, and the keys you
+  // press waited behind it. Read, it's as smooth.
   streamStep() {
     if (this.streamFrame) return;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let last = performance.now();
-    const frame = (t) => {
+    const step = () => {
       this.streamFrame = null;
       const s = this.stream;
       if (!s) return;
+      const t = performance.now();
       const behind = s.text.length - s.shown;
       if (behind > 0) {
         // Catches up in about a quarter of a second, never slower than a fast reader.
@@ -2883,9 +2890,9 @@ class Chat {
         last = t;
         this.drawStream();      // (at the bottom, it stays there as it grows: build's ResizeObserver)
       }
-      if (s.shown < s.text.length) this.streamFrame = requestAnimationFrame(frame);
+      if (s.shown < s.text.length) this.streamFrame = setTimeout(step, STREAM_STEP_MS);
     };
-    this.streamFrame = requestAnimationFrame(frame);
+    this.streamFrame = setTimeout(step, 0);
   }
 
   drawStream() {
@@ -2966,7 +2973,7 @@ class Chat {
 
   endStream() {
     clearTimeout(this.streamTimer);
-    if (this.streamFrame) cancelAnimationFrame(this.streamFrame);
+    clearTimeout(this.streamFrame);
     this.streamFrame = this.streamTimer = null;
     this.stream = null;
     this.streamEl = null;
@@ -3004,7 +3011,8 @@ class Chat {
     const now = content ? this.current() : null;
     const sleep = sleepOf(this.row);
     const stopped = !!(this.row && this.row.interrupted);
-    // Its machine doesn't answer: what's here is as it last was; nothing to send it until it's back.
+    // Its machine doesn't answer: what's here is as it last was; what you send
+    // waits for it (kept on this machine) and goes once it's back.
     const off = machineOff(this.row || this.id);
     // Moving to another machine: what it says instead of the box (moving now),
     // or over it (waiting until it's free, one that didn't move): uiMoveNote.
@@ -3018,8 +3026,8 @@ class Chat {
     this.cardKey = key;
     const kids = [content ? this.bgEl : null, content ? this.doneEl : null, ...this.view.above].filter(Boolean);
     if (off) kids.push(h("div", { class: "dock-note machine-off", role: "status" }, glyph("machine", "machine"),
-      h("span", {}, `${off}: this chat is as it last was, and takes messages again once ${machineOf(this.row || this.id).label} is back.`)));
-    else if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
+      h("span", {}, `${off}: what you send goes once ${machineOf(this.row || this.id).label} is back.`)));
+    if (uiMoving(this.row)) kids.push(uiMoveNote(this.row, { dock: true }));
     else if (now && now.card) kids.push(this.card(now.card));
     else if (now && now.note) kids.push(h("div", { class: "dock-note" }, now.note));
     else if (now && now.exited && this.engine !== "chat") {
@@ -3153,7 +3161,7 @@ class Chat {
     const rows = tasks.map((t) => {
       const el = h("span", { class: "bg-took" });
       tooks.push([el, t.started]);
-      return h("li", { class: "bg-task" }, h("span", { class: "bg-dot" }), icon(t.task_type === "local_bash" ? "run" : "helper"),
+      return h("li", { class: "bg-task" }, beat("bg-dot"), icon(t.task_type === "local_bash" ? "run" : "helper"),
         h("span", { class: "bg-name" }, cut(t.description || t.summary || t.command || t.subagent_type || "A task", 120)), el);
     });
     const tick = () => {
@@ -3163,7 +3171,7 @@ class Chat {
     this.bgEl.replaceChildren(
       h("button", { class: "bg-head", type: "button", "aria-expanded": String(open),
                     onclick: () => { this.bgOpen = !open; this.renderBackground(); } },
-        h("span", { class: "bg-pulse" }, ...tasks.slice(0, 5).map(() => h("i"))),
+        beat("bg-pulse", {}, ...tasks.slice(0, 5).map(() => h("i"))),
         h("span", { class: "bg-what" }, `${what} in the background`), took,
         icon("chevron", "bg-chev")),
       ...(open ? [h("ul", { class: "bg-list" }, ...rows)] : []));      // (replaceChildren would write a null as "null")
@@ -3621,7 +3629,7 @@ class Chat {
   }
 
   sendButtons() {
-    this.micBtn.hidden = !this.talk.available();
+    this.talk.draw();
     const empty = !this.input.value.trim() && !this.tray.length;
     const busy = this.tray.some((a) => a.state === "reading" || a.state === "uploading");
     const stop = this.working() && empty;
@@ -3696,6 +3704,8 @@ class Chat {
       const r = await done;
       out.sent = true;
       out.el.classList.remove("sending");
+      // Its machine out of reach: kept on this one, sent once it's back. Says so, with Cancel.
+      if (r && r.waits) return this.outWaits(out, r.waits, text, tray);
       this.settleOutbox();      // (the conversation may have it already)
       if (r && r.waking) toast("Waking Claude with it…");
       if (r && r.queued) this.outDone(out);       // in the broker's queue now: the queue shows it
@@ -3763,6 +3773,54 @@ class Chat {
       if (!it) continue;
       this.claimed.add(it);
       this.outDone(out);
+    }
+  }
+
+  // A message waiting for its machine (out of reach: kept on this one, sent
+  // once it's back, app.view.outbox): "Sends when <label> is back", and
+  // Cancel (its words back in the box). Once sent, as any message.
+  outWaits(out, waits, text = null, tray = []) {
+    out.waits = waits.id;
+    out.el.classList.add("waiting");
+    const cancel = h("button", { class: "text-btn", type: "button", onclick: async () => {
+      cancel.disabled = true;
+      try {
+        await api("/api/outbox/cancel", { id: waits.id });
+        this.outDone(out);
+        if (text !== null) this.takeBack(text, tray);
+      } catch (e) {
+        cancel.disabled = false;
+        toast(e.message);
+      }
+    } }, "Cancel");
+    out.el.append(h("div", { class: "msg-waits" }, glyph("clock", "clock"), h("span", {}, `Sends when ${waits.label || machineOf(this.id).label} is back`), cancel));
+  }
+
+  // What waits for this chat's machine (app.view.outbox: after a reload, or
+  // sent from another device): each as a waiting message; one sent since,
+  // a message on its way until the conversation has it.
+  outboxSeen() {
+    const waiting = ((app.view && app.view.outbox) || []).filter((w) => normKey(w.chat) === this.id && w.kind === "send");
+    const ids = new Set(waiting.map((w) => w.id));
+    for (const out of [...this.outbox]) {
+      if (!out.waits || ids.has(out.waits)) continue;
+      out.waits = null;         // sent: the conversation says it soon
+      out.el.classList.remove("waiting");
+      const note = out.el.querySelector(".msg-waits");
+      if (note) note.remove();
+      out.mark = this.items.length;
+      setTimeout(() => this.outDone(out), 30000);
+      this.settleOutbox();
+    }
+    for (const w of waiting) {
+      if (this.outbox.some((o) => o.waits === w.id)) continue;
+      const out = { text: w.text, key: outKey(w.text), shots: [], tray: [], mark: this.items.length, known: new Set(this.itemKeys),
+                    queued: false, sent: true, el: null };
+      const said = this.userView(w.text);
+      out.el = h("div", { class: "msg user" }, h("div", { class: "bubble" }, ...(said.parts || [said.note || said.summary || w.text])));
+      this.outbox.push(out);
+      this.outboxEl.append(out.el);
+      this.outWaits(out, { id: w.id, label: machineOf(this.id).label }, null);
     }
   }
 

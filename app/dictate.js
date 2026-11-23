@@ -7,13 +7,19 @@
 // one (per device: dictationWay):
 //
 //   host:   the host writes it down ("dictation on the host" in amarchy: a
-//           speech model there that tells Spanish from English by itself).
+//           speech model there that tells Spanish from English by itself),
+//           or, on a host without one, another machine of yours that has it
+//           (the board's dictation.via): the host passes it on.
 //           The phone's or the computer's microphone (micOpen), on a WebSocket
 //           to /api/dictate.
 //   device: the browser's own speech recognition (Web Speech: Apple's in
 //           Safari, Google's in Chrome), in one language you pick. Not in
 //           the home-screen app on an iPhone, where WebKit's misses words or
-//           never answers.
+//           never answers, nor in the desktop app on Linux (WebKitGTK has none).
+//
+// The mic is always there. Where it can't work (no speech model anywhere,
+// the desktop app without GStreamer's microphone), it's dimmed, and a tap
+// says why in a line, with what to do (dictationWhyNot).
 
 const DICTATE_TAP = 350;      // ms: let go sooner and it's a tap: it listens until tapped again
 const DICTATE_STOP = 6000;    // ms the browser's recognition may take to finish once stopped
@@ -31,8 +37,34 @@ function standaloneApple() {
   return apple && (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
 }
 
+// The host writes it down: itself, or through another machine of yours (via).
 function dictationHost() {
-  return !!(app.view && app.view.dictation && app.view.dictation.ready);
+  const d = app.view && app.view.dictation;
+  return !!(d && (d.ready || d.via));
+}
+
+// This machine, in words: its name with others on the board, else "your host".
+function dictationHere() {
+  const many = typeof machinesShown === "function" && machinesShown().length > 1;
+  return (many && machineOf("").label) || "your host";
+}
+
+// Why the mic can't work here, as a line and what to do about it ({text,
+// label, act, report}), or null when it can.
+function dictationWhyNot() {
+  const way = dictationWay();
+  const lacks = window.amarchyDesktopMedia;
+  if (lacks && !lacks.dictation && way !== "device") {
+    return { text: `Dictation here needs ${lacks.packages}`, label: "Copy the command",
+             act: () => copyText(lacks.fix).then(() => toast(`Copied: ${lacks.fix}`)),
+             report: { engine: "host", said_s: 0, error: `the microphone didn't start: this computer lacks ${lacks.packages}` } };
+  }
+  if (way) return null;
+  if (!app.view) return { text: "Not connected to your host yet" };
+  const d = app.view.dictation || {};
+  const settings = () => openSettings({ at: "dictation" });
+  if (d.setup && !d.setup.error) return { text: `Dictation is being set up on ${dictationHere()}`, label: "See how far", act: settings };
+  return { text: `Dictation needs a speech model on ${dictationHere()}`, label: "Set it up", act: settings };
 }
 
 // The way this device writes dictation down: host, device, or null (no mic button).
@@ -74,6 +106,7 @@ class Dictate {
         return;
       }
       if (this.run) return;     // still writing the last one down
+      if (this.tellWhyNot()) return;      // it can't work here: why, and what to do
       try { el.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
       this.down = e.timeStamp;      // when it was touched, however long starting takes
       this.start();
@@ -100,7 +133,26 @@ class Dictate {
 
   on() { return !!this.run; }
 
-  available() { return !!this.way(); }
+  available() { return !this.run && !dictationWhyNot(); }
+
+  // The mic as it stands: always there, dimmed where it can't work.
+  draw() {
+    const el = this.opts.button;
+    const why = this.run ? null : dictationWhyNot();
+    el.hidden = false;
+    el.classList.toggle("cant", !!why);
+    el.title = why ? why.text : "Dictate (hold, or tap and tap again)";
+  }
+
+  // When it can't work here: says why (a toast, with what to do) and true.
+  tellWhyNot() {
+    const why = dictationWhyNot();
+    if (!why) return false;
+    toast(why.text, why.act ? { label: why.label, act: why.act } : {});
+    if (why.report) dictationReport(why.report);
+    this.draw();
+    return true;
+  }
 
   // Enter or Esc while dictating: it stops, and what was said stays in the box,
   // unsent (a second Enter sends, once the words are in). True when the key was
@@ -191,14 +243,6 @@ class Dictate {
 
   // ---- written down on the host
   async host(r) {
-    // The desktop app on a computer without GStreamer's plugins: no microphone to start.
-    const lacks = window.amarchyDesktopMedia;
-    if (lacks && !lacks.dictation) {
-      this.done(r);
-      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: this computer lacks ${lacks.packages}` });
-      toast(`Dictation here needs ${lacks.packages}`, { label: "Copy the command", act: () => copyText(lacks.fix).then(() => toast(`Copied: ${lacks.fix}`)) });
-      return;
-    }
     this.say("Starting the microphone…");
     const queue = [];
     let ws = null;
@@ -207,9 +251,13 @@ class Dictate {
       await micOpen();
     } catch (e) {
       this.done(r);
-      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: ${e.name === "NotAllowedError" ? "not allowed" : e.message}` });
+      // No microphone at all (WebKit says "Invalid constraint"), or one another app holds.
+      const none = e.name === "NotFoundError" || e.name === "OverconstrainedError";
+      dictationReport({ engine: "host", said_s: 0, error: `the microphone didn't start: ${e.name === "NotAllowedError" ? "not allowed" : none ? `no microphone found (${e.message})` : e.message}` });
       toast(e.name === "NotAllowedError" ? "Amarchy may not use the microphone: allow it in Settings"
-                                        : `The microphone didn't start: ${e.message}`);
+          : none ? "No microphone found on this computer: plug one in, or turn it on in its sound settings"
+          : e.name === "NotReadableError" ? "The microphone can't be read: another app may have it"
+          : `The microphone didn't start: ${e.message}`);
       return;
     }
     if (r.cancelled || this.run !== r) {
@@ -271,8 +319,10 @@ class Dictate {
         try {
           const res = await fetch("/api/dictate", { headers: { Accept: "application/json" } });
           const d = await res.json();
-          toast(d.ready ? "Dictation didn't connect" : `Dictation isn't set up on the host: ${d.how}`);
-          if (d.ready) dictationReport({ engine: "host", error: "the dictation's connection closed before any answer" });
+          const can = d.ready || d.via;
+          toast(can ? `Dictation didn't connect${d.via ? ` to ${d.via.label}` : ""}` : `Dictation needs a speech model on ${dictationHere()}`,
+                can ? {} : { label: "Set it up", act: () => openSettings({ at: "dictation" }) });
+          if (can) dictationReport({ engine: "host", error: `the dictation's connection closed before any answer${d.via ? ` (through ${d.via.label})` : ""}` });
         } catch (err) {
           toast("Can't reach Amarchy");
         }
@@ -365,13 +415,12 @@ function deviceError(code) {
 // Settings → Dictation.
 function dictationSettings(draw) {
   const d = (app.view && app.view.dictation) || {};
-  const kids = [h("div", { class: "section" }, "Dictation")];
-  // "On the host": this machine's model (each machine its own).
-  if (typeof machinesShown === "function" && machinesShown().length > 1)
-    kids.push(h("p", { class: "hint" }, `On the host: ${machineOf("").label}'s speech model, when it has one.`));
+  const here = dictationHere(), Here = here === "your host" ? "Your host" : here;      // (a machine's name as it is)
+  const via = !d.ready && d.via;
+  const kids = [h("div", { class: "section", "data-section": "dictation" }, "Dictation")];
   const now = dictationWay();
   const ways = [["auto", "Automatic"]];
-  if (d.ready) ways.push(["host", "On the host"]);
+  if (dictationHost()) ways.push(["host", via ? `On ${via.label}` : "On the host"]);
   if (SpeechRec) ways.push(["device", "This browser's"]);
   const pick = store.get("dictation") || "auto";
   if (ways.length > 2) {
@@ -379,11 +428,15 @@ function dictationSettings(draw) {
       h("button", { class: `control${pick === value || (value === "auto" && !ways.some(([v]) => v === pick)) ? " on" : ""}`,
                     onclick: () => { store.set("dictation", value === "auto" ? "" : value); draw(); } }, label))));
   }
+  const langs = "Spanish, English and 23 more languages, told apart by themselves";
+  const hold = "Hold the mic while you speak, or tap it and tap again when you're done.";
+  const mb = `${Math.ceil((d.size || 0) / 1e7) * 10} MB`;
   const say = {
-    host: `Hold the mic while you speak, or tap it and tap again when you're done. Your host writes it down (${d.engine || "a speech model"}): Spanish, English and 23 more languages, told apart by themselves. The audio stays on your host.`,
+    host: via ? `${hold} ${Here} has no speech model, so it sends what you say to ${via.label}, another machine of yours, which writes it down (${via.engine || "a speech model"}): ${langs}. The audio stays on your machines.`
+              : `${hold} ${Here} writes it down (${d.engine || "a speech model"}): ${langs}. The audio stays on ${here}.`,
     device: `${/Chrome/.test(navigator.userAgent) ? "Google's" : "Apple's"} speech recognition, in this browser, in one language (below): it sends what you say to ${/Chrome/.test(navigator.userAgent) ? "Google" : "Apple"}.${iPhoneApp ? " In the home-screen app on an iPhone it often hears nothing." : ""}`,
   };
-  kids.push(h("p", {}, now ? say[now] : "No way to dictate here yet: set it up on the host (below)."));
+  kids.push(h("p", {}, now ? say[now] : `No way to dictate here yet: set it up on ${here} (below).`));
   if (now === "device" || pick === "device") {
     const langs = [["es-CO", "Español"], ["en-US", "English"]];
     const lang = dictationLang();
@@ -391,25 +444,31 @@ function dictationSettings(draw) {
     kids.push(h("div", { class: "seg" }, ...langs.map(([value, label]) =>
       h("button", { class: `control${lang === value ? " on" : ""}`, onclick: () => { store.set("dictation-lang", value); draw(); } }, label))));
   }
-  if (!d.ready) {
+  if (!d.ready && app.view && app.view.dictation) {
     const setup = d.setup;
+    const itself = via ? `: then it writes it down itself, without ${via.label}` : "";
     if (setup && !setup.error) {
-      kids.push(h("p", {}, setup.checking ? "Checking the speech model…"
-        : `Fetching the speech model: ${Math.round((setup.done || 0) / 1e6)} of ${Math.ceil((d.size || 0) / 1e7) * 10} MB.`));
+      const pct = Number.isInteger(setup.pct) ? `: ${setup.pct}%` : "…";
+      kids.push(h("p", {}, setup.build ? `${setup.build.charAt(0).toUpperCase()}${setup.build.slice(1)} on ${here}${pct} Then the speech model (${mb}).`
+        : setup.checking ? "Checking the speech model…"
+        : `Fetching the speech model: ${Math.round((setup.done || 0) / 1e6)} of ${mb}.`));
       clearTimeout(dictationSettings.timer);
       dictationSettings.timer = setTimeout(() => { if (document.querySelector(".sheet-back.settings")) draw(); }, 1000);
-    } else if (d.lib) {
-      kids.push(h("p", {}, `Your host can write down what you say, in Spanish, English and 23 more languages, once it has the speech model (${Math.ceil((d.size || 0) / 1e7) * 10} MB).${setup && setup.error ? ` The last try stopped: ${setup.error}.` : ""}`),
-        h("button", { class: "control wide accent", onclick: async (e) => {
+    } else if (d.lib || d.buildable) {
+      const stopped = setup && setup.error ? ` The last try stopped: ${setup.error}.` : "";
+      kids.push(h("p", {}, d.lib ? `${Here} can write down what you say${via ? " itself" : `, in ${langs}`}, once it has the speech model (${mb}).${stopped}`
+          : `No package has whisper.cpp for ${d.arch || "this processor"}, so ${here} builds it (a few minutes), then fetches the speech model (${mb})${itself}.${stopped}`),
+        h("button", { class: `control wide${via ? "" : " accent"}`, onclick: async (e) => {
           e.currentTarget.disabled = true;
           try {
             await api("/api/dictate/setup", {});
-            if (app.view && app.view.dictation) app.view.dictation.setup = { done: 0 };
+            if (app.view && app.view.dictation) app.view.dictation.setup = d.lib ? { done: 0 } : { build: "fetching whisper.cpp" };
           } catch (err) { toast(err.message); }
           draw();
-        } }, "Set up dictation on the host"));
-    } else if (app.view && app.view.dictation) {
-      kids.push(h("p", {}, "To write down what you say on your host (Spanish, English and 23 more languages): install whisper.cpp there (on Arch: sudo pacman -S whisper-cpp), then amarchy dictation setup."));
+        } }, `Set up dictation on ${here}`));
+    } else {
+      kids.push(h("p", {}, `To write down what you say on ${here}${via ? " itself" : ""}: ${d.how || "install whisper.cpp there, then amarchy dictation setup"}.`));
+      if (d.fix) kids.push(h("button", { class: "control wide", onclick: () => copyText(d.fix).then(() => toast(`Copied: ${d.fix}`)) }, "Copy the command"));
     }
   }
   kids.push(h("p", {}, app.desk ? "Ctrl+Alt+Space dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key) works in every box too."
