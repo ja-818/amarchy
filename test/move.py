@@ -425,6 +425,11 @@ try:
     r = alpha.amarchy("send", sid, "sent to the old id")
     check(r.returncode == 0 and "moved to beta" in r.stderr, f"amarchy send to its old id on alpha: goes on to beta ({r.stderr.strip()[:80]})")
     check(bool(until(lambda: "sent to the old id" in got(beta, bwt), limit=20)), "its Claude on beta got it")
+    (bwt / "close-me.txt").write_text("not committed\n")
+    r = alpha.amarchy("close", sid)
+    check(r.returncode != 0 and "moved to beta" in r.stderr and f"beta:{sid}: uncommitted changes" in r.stderr and beta.own(sid),
+          f"amarchy close with its old id on alpha: goes on to beta, which keeps it for its uncommitted work ({r.stderr.strip()[-160:]})")
+    (bwt / "close-me.txt").unlink()
 
     print("back again, beta to alpha (nothing to commit)")
     check(free(beta, sid, bwt, "alpha"), "free to move (its Claude done with what was sent to its old id)")

@@ -178,7 +178,11 @@ and tell the other tracks.
   project isn't on it (cloned from GitHub), then its `/api/new` (which takes
   `"name"` too). `amarchy send <machine>:<id>` is `POST /api/peer/send`
   `{"id", "text", "from": "<machine>:<chat>"}` (peers only): `amarchy send`
-  there, noted as from that chat. `/api/search` on a machine asks every
+  there, noted as from that chat. `amarchy close <machine>:<id>` is that
+  machine's own `/api/session/<id>/close` `{"discard": --force}` (the app's
+  Complete, as a peer): its 409s say what's left (uncommitted changes, a
+  preview's port), a 404 follows the chat if that machine says it moved.
+  `/api/search` on a machine asks every
   paired one too (not when a peer asks), each result with `"machine"`.
 
 ### Moving a chat (track E)
@@ -760,7 +764,7 @@ reopen, Super+Shift+A as the key, Where cloning a project first).
   send), Settings → Machines, the new chat's "Where" (the last one used for that
   project first; a project not on that machine is cloned there first, saying so).
 - CLI: `amarchy machines`, `amarchy new <project> --on <machine>`,
-  `amarchy list --all`, `amarchy send <machine>:<id>`.
+  `amarchy list --all`, `amarchy send <machine>:<id>`, `amarchy close <machine>:<id>`.
 - Versions: a peer on another protocol says "update amarchy on <label>".
 - Tests: two amarchy app servers on one box (their own state, ports, names);
   a peer going away mid-stream and coming back; view tests with chats from two

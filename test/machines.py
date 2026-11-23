@@ -17,6 +17,9 @@
 #   - beta going away in the middle of a stream and coming back: the stream
 #     ends, its chats stay on alpha's board marked off, the pass-through
 #     says it's off, then it's on again by itself;
+#   - the command line across machines: amarchy new --on, list --all, send
+#     and close <machine>:<id> (refused with uncommitted changes unless
+#     --force, and while something else holds its preview's port; off: said);
 #   - rename (on the machine itself), remove (both forget).
 #
 #   python3 test/machines.py        exits 0 when every check passed (about a minute)
@@ -161,6 +164,51 @@ try:
     r = alpha.amarchy("send", "beta:nope-chat", "x")
     check(r.returncode != 0 and "no such chat" in r.stderr, f"a chat that isn't there: said ({r.stderr.strip()[-80:]})")
 
+    print("closing a chat on another machine")
+    on_beta = lambda cid: any(s["id"] == cid for s in beta.state()["sessions"])
+    tp = Path(three["path"]) if three else beta.work / "nowhere"
+    (tp / "wip.txt").write_text("not committed\n")
+    r = alpha.amarchy("close", "beta:proj-three")
+    check(r.returncode != 0 and "uncommitted changes" in r.stderr and "amarchy close beta:proj-three --force" in r.stderr,
+          f"uncommitted changes: refused, saying --force ({r.stderr.strip()[-120:]})")
+    check(on_beta("proj-three") and (tp / "wip.txt").is_file(), "it stays on beta, its work too")
+    held = socket.socket()
+    held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    held.bind(("127.0.0.1", 0))
+    held.listen()
+    hp = held.getsockname()[1]
+    r = beta.amarchy("preview", "--id", "proj-three", "--run", f"python3 -m http.server {hp} --bind 127.0.0.1",
+                     f"http://localhost:{hp}", "--no-start")
+    check(r.returncode == 0, f"a preview of its own on beta ({(r.stdout or r.stderr).strip()[-120:]})")
+    r = alpha.amarchy("close", "proj-three", "--on", "beta", "--force")
+    check(r.returncode != 0 and "preview is still running" in r.stderr and str(hp) in r.stderr and on_beta("proj-three"),
+          f"something else on its preview's port: refused even with --force, saying what ({r.stderr.strip()[-160:]})")
+    held.close()
+    r = alpha.amarchy("close", "--force", "proj-three", "--on=beta")
+    check(r.returncode == 0, f"amarchy close proj-three --on beta --force: closed ({r.stderr.strip()[-120:]})")
+    check(bool(until(lambda: not on_beta("proj-three"), limit=15)), "off beta's list")
+    check(bool(until(lambda: not tp.exists(), limit=40)), "its worktree gone from beta, uncommitted work with it (asked)")
+    check(bool(until(lambda: not any(s["id"] == "proj-three" for s in alpha.state()["sessions"]), limit=15)), "and off alpha's board")
+    r = alpha.amarchy("close", "beta:proj-three")
+    check(r.returncode != 0 and "no such chat" in r.stderr, f"closed already: said ({r.stderr.strip()[-80:]})")
+    r = alpha.amarchy("close", "gamma:proj-three")
+    check(r.returncode != 0 and "no machine gamma" in r.stderr, "a machine not paired: said")
+    r = alpha.amarchy("close", "alpha:proj-three", "--on", "beta")
+    check(r.returncode != 0 and "not beta" in r.stderr, f"two machines named: refused ({r.stderr.strip()[-80:]})")
+    r = alpha.amarchy("new", "proj", "five", "--on", "beta")
+    ok = r.returncode == 0 and bool(until(lambda: next((s for s in beta.state()["sessions"] if s["id"] == "proj-five"
+                                                         and not s.get("setup")), None), limit=30))
+    r = alpha.amarchy("close", "beta:proj-five") if ok else r
+    check(ok and r.returncode == 0 and bool(until(lambda: not on_beta("proj-five"), limit=15)),
+          f"one with nothing uncommitted: closed, no --force ({r.stderr.strip()[-100:]})")
+    r = alpha.amarchy("new", "proj", "six")
+    six = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+    on_alpha = lambda: any(s["id"] == six for s in alpha.state()["sessions"])
+    until(lambda: next((s for s in alpha.state()["sessions"] if s["id"] == six and not s.get("setup")), None), limit=30)
+    r = alpha.amarchy("close", f"alpha:{six}")
+    check(bool(six) and r.returncode == 0 and bool(until(lambda: not on_alpha(), limit=15)),
+          f"this machine's own name: closed here ({r.stderr.strip()[-100:]})")
+
     print("another machine's agent and its task")
     r = beta.amarchy("agents", sid, "--name", "Beta")
     check(r.returncode == 0, f"beta's chat made an agent ({(r.stdout or r.stderr).strip()[:80]})")
@@ -274,6 +322,8 @@ try:
     check(any(s["id"] == sid and s.get("machine_off") for s in rows), "amarchy list --all: beta's chats as last seen, off")
     r = alpha.amarchy("send", f"beta:{sid}", "x")
     check(r.returncode != 0 and "beta is off" in r.stderr, f"amarchy send to it: says it's off ({r.stderr.strip()[-80:]})")
+    r = alpha.amarchy("close", f"beta:{sid}")
+    check(r.returncode != 0 and "beta is off" in r.stderr, f"amarchy close on it: says it's off ({r.stderr.strip()[-80:]})")
     alpha.stop()
     alpha.start()
     after = until(lambda: (v := alpha.state()) and any(s["id"] == sid for s in v["sessions"]) and v, limit=10)
