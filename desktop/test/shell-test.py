@@ -239,6 +239,23 @@ def main():
             check(code == 0 and w.do("visible") is True, "started again, its window comes back")
             check(w.do("url").startswith(remote.url), "on the same page as it was")
 
+            # An update (install.sh): started again on the new build, where it was.
+            w.js("location.hash = '#/s/desk-long'; 1")
+            time.sleep(0.5)
+            old = w.proc.pid
+            code, _ = w.again("--restart")
+            back = w.wait("location.hash === '#/s/desk-long' && typeof app !== 'undefined' && !!app.view", timeout=40)
+            ended = not Path(f"/proc/{old}").exists() or Path(f"/proc/{old}/cmdline").read_bytes() == b""     # gone, or a zombie
+            check(code == 0 and ended, "--restart: the running one ends")
+            check(bool(back) and w.do("visible") is True, "and starts again, on the chat it was on")
+            w.do("close")
+            time.sleep(0.5)
+            w.again("--restart")
+            time.sleep(4)
+            check(w.do("visible", timeout=40) is False, "a hidden one starts again hidden (in the tray)")
+            w.again()
+            time.sleep(0.8)
+
             # A link out: your browser, not this window.
             w.js("location.href = 'https://example.com/elsewhere'; 1")
             time.sleep(1)

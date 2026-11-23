@@ -135,9 +135,23 @@ class Shell:
     def __exit__(self, *exc):
         self.close()
 
+    def ours(self):
+        """Every process on this test's bus (a --restart's new app too, which
+        isn't the first one's child)."""
+        bus = self.env.get("DBUS_SESSION_BUS_ADDRESS", "").encode()
+        out = []
+        for d in Path("/proc").iterdir():
+            if d.name.isdigit():
+                try:
+                    if b"DBUS_SESSION_BUS_ADDRESS=" + bus + b"\0" in (d / "environ").read_bytes():
+                        out.append(int(d.name))
+                except OSError:
+                    pass
+        return out
+
     def close(self):
-        if getattr(self, "proc", None) and self.proc.poll() is None:
-            for p in self.tree():
+        if getattr(self, "proc", None):
+            for p in set(self.tree() + self.ours()) - {os.getpid()}:
                 try:
                     os.kill(p, 15)
                 except OSError:
