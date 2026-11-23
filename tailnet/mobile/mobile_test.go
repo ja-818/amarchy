@@ -139,7 +139,28 @@ func TestPhoneNode(t *testing.T) {
 		}
 	}
 
+	// Signed out: it waits for a sign-in again, a login page to open.
+	if err := Logout(); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if err := json.Unmarshal([]byte(State()), &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.State == "NeedsLogin" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("still signed in after Logout: %+v", st)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+
 	Stop()
+	if err := Logout(); err == nil {
+		t.Error("a Logout with the node off")
+	}
 	if ProxyURL() != "" || State() != `{"state":"Off","words":"off","login_url":"","self":"","peers":[]}` {
 		t.Error("still up after Stop")
 	}
