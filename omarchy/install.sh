@@ -6,7 +6,8 @@
 #   - the Ⓐ in the bar: the shell plugin amarchy.chats (omarchy/plugin),
 #     linked into ~/.config/omarchy/plugins and put on the bar the first
 #     time (where you move it, or whether you take it off, is yours after)
-#   - Super+Alt+A: omarchy/hypr/amarchy.lua, loaded from
+#   - Super+Alt+A, and the desktop app's window see-through as Omarchy's
+#     terminals are: omarchy/hypr/amarchy.lua, loaded from
 #     ~/.config/hypr/hyprland.lua by a line ending in "-- amarchy"
 #   - Amarchy in the Omarchy menu (Super+Space), a block of its own in
 #     ~/.config/omarchy/extensions/omarchy-menu.jsonc
@@ -56,6 +57,9 @@ placed="$state/omarchy-bar-placed"
 # gone again on --uninstall while it's still just those.
 shell_made="$state/omarchy-shell-json-made"
 load_line="dofile(\"$repo/omarchy/hypr/amarchy.lua\") -- amarchy"
+# What omarchy/hypr/amarchy.lua said when Hyprland last read it: an update
+# that changes it (not the line that loads it) has Hyprland read it again.
+hypr_read="$state/omarchy-hypr-read"
 # What the amarchy from before put here (its plugin, "amarchy", and a theme
 # hook that ran a command it no longer has).
 old_plugin_dir="$config/omarchy/plugins/amarchy"
@@ -144,13 +148,27 @@ plugin_off() {
   edit_shell_json "$(printf '.plugins |= map(select(.id != "%s")) | .bar.layout |= with_entries(.value |= map(select(.id != "%s")))' "$1" "$1")" || true
 }
 
+# Hyprland reads its config again: the running one (this session's, else
+# the newest found, as a systemd timer or ssh has none). Fails only when one
+# runs and didn't take it; with none running, it reads it when it starts.
+hypr_reload() {
+  command -v hyprctl >/dev/null || return 0
+  local sig=${HYPRLAND_INSTANCE_SIGNATURE:-} sock
+  if [[ -z $sig ]]; then
+    sock=$(ls -1t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/hypr/*/.socket.sock 2>/dev/null | head -n 1 || true)
+    [[ -n $sock ]] || return 0
+    sig=$(basename "$(dirname "$sock")")
+  fi
+  HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl reload >/dev/null 2>&1
+}
+
 # The line in hyprland.lua that loads $1 (none: takes it away), in place of
 # any other amarchy line (one to another checkout, the amarchy from before's
 # hypr/amarchy.lua), at the end, where Omarchy's `o` is set up. Hyprland
-# reloads when it changed.
+# reloads when it changed, or when amarchy.lua itself did (an update).
 hypr_line() {
   [[ -f $hypr_conf ]] || return 0
-  local tmp
+  local tmp reload=0 said=""
   tmp=$(tmp_beside "$hypr_conf")
   sed '/-- amarchy$/d' "$hypr_conf" >"$tmp"
   # The blank lines left at the end go too.
@@ -158,11 +176,21 @@ hypr_line() {
   [[ -n ${1:-} ]] && printf '\n%s\n' "$1" >>"$tmp"
   if replace_if_changed "$hypr_conf" "$tmp"; then
     if [[ -n ${1:-} ]]; then did+=("Super+Alt+A"); else did+=("Super+Alt+A (the key)"); fi
-    if command -v hyprctl >/dev/null && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
-      hyprctl reload >/dev/null 2>&1 || true
-    fi
+    reload=1
   fi
   rm -f "$tmp"
+  if [[ -n ${1:-} ]]; then
+    said=$(cksum <"$repo/omarchy/hypr/amarchy.lua")
+    [[ $(cat "$hypr_read" 2>/dev/null) == "$said" ]] || reload=1
+  fi
+  [[ -n ${1:-} ]] || rm -f "$hypr_read"
+  ((reload)) || return 0
+  # Kept once Hyprland has read it (or will, when it starts): a reload that
+  # didn't go is tried again next time.
+  if hypr_reload && [[ -n $said ]]; then
+    mkdir -p "$state"
+    echo "$said" >"$hypr_read"
+  fi
 }
 
 # amarchy's block in the Omarchy menu's extensions ($1; none: taken away),

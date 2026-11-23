@@ -14,7 +14,7 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending (and drawing the safe way after a crash) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending (and drawing the safe way after a crash), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: see-through as the terminals, its look live drawn without a wallpaper of its own) |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
 | `src/journal.rs` | Its log (below) |
@@ -66,7 +66,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # its size, no white flash, its page's own words, its
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart), its self-healing, amarchy's own
-                                                    # Tailscale node (its sign-in, through its proxy)
+                                                    # Tailscale node (its sign-in, through its proxy),
+                                                    # on an Omarchy desktop (no wallpaper of its own)
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
 python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
                                                     # built anyway without the mic's, mise's Rust, why

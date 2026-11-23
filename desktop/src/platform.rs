@@ -42,6 +42,18 @@ pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
     let _ = (win, url);
 }
 
+/// Whether its window is on an Omarchy desktop: Hyprland's session, with
+/// Omarchy's look in place (its current theme, where Omarchy 4 keeps it).
+/// There the window is one of the desktop's, as its terminals are: Hyprland
+/// makes it see-through (omarchy/hypr/amarchy.lua), so wearing the desktop's
+/// look live it draws no wallpaper of its own (app.css, html.on-omarchy).
+pub fn omarchy() -> bool {
+    #[cfg(target_os = "linux")]
+    return linux::omarchy();
+    #[cfg(not(target_os = "linux"))]
+    false
+}
+
 /// The web view's own settings, once it's made.
 pub fn webview(win: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
@@ -67,6 +79,9 @@ mod linux {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
         log::info!("graphics: {}", graphics());
+        if omarchy() {
+            log::info!("on an Omarchy desktop: the window is see-through as its terminals are, its look live drawn without a wallpaper of its own");
+        }
         // Its page crashed before: drawn the safe way (no DMA-BUF, no compositing).
         if let Some(why) = super::safe_rendering() {
             log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
@@ -90,6 +105,18 @@ mod linux {
                 }
             }
         }
+    }
+
+    pub fn omarchy() -> bool {
+        let hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|s| !s.is_empty())
+            || std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.split(':').any(|d| d.eq_ignore_ascii_case("hyprland")));
+        if !hyprland {
+            return false;
+        }
+        // Omarchy's state: $XDG_STATE_HOME's, else under $HOME (as its scripts read it).
+        let state = [std::env::var_os("XDG_STATE_HOME").filter(|s| !s.is_empty()).map(std::path::PathBuf::from),
+                     std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/state"))];
+        state.into_iter().flatten().any(|s| s.join("omarchy/current/theme").is_dir())
     }
 
     pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {

@@ -774,6 +774,14 @@ a file changed) run `amarchy theme --omarchy`; nothing checks every few seconds.
 It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
+**The window, one of the desktop's**: the desktop app's window is
+see-through as your terminals are, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
+wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
+solid, as a terminal's, and your desktop's own wallpaper is behind it
+(Settings › Look says so). For a solid window, set `amarchy = { transparent =
+false }` before amarchy's line in `~/.config/hypr/hyprland.lua`.
+
 **Which chats**: the board the desktop app shows. This machine's own amarchy
 when it has chats (or merges your other machines' in); else the first machine
 you paired with it that answers (`amarchy machines add <your server>`; see
@@ -957,7 +965,8 @@ browser. Every phone and browser wears it at once.
   Mono on Apple's).
 - **Omarchy (live)**: your Omarchy desktop's own look, as it is now (see
   [On Omarchy](#on-omarchy)): it changes when the desktop's does. Picked, it
-  wears the desktop's font too.
+  wears the desktop's font too. In the desktop app on that desktop, its
+  wallpaper is the desktop's own, behind the window, never drawn twice.
 - **Wallpaper**: one of Omarchy's own for the theme, every one Omarchy ships with it
   (a little picture of each to pick from; a theme remembers which), your own
   (choose a picture: it's cut to a phone's screen and a computer's, in the browser),

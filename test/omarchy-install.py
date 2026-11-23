@@ -185,6 +185,21 @@ def main():
         check("second run: systemd not reloaded for nothing",
               "--user daemon-reload" not in (home / "systemctl-calls").read_text(), (home / "systemctl-calls").read_text())
         check("no backup made for nothing", sorted(str(p) for p in home.rglob("*.amarchy-bak.*")) == backups)
+        reloads = (home / "hyprctl-calls").read_text().count("reload")
+        check("second run: Hyprland not reloaded for nothing", reloads == 1, reloads)
+
+        # An update that changes amarchy.lua (the window's rules), not the line
+        # that loads it: Hyprland reads it again, once.
+        read = home / ".local/state/amarchy/omarchy-hypr-read"
+        check("what Hyprland read is kept", read.is_file() and read.read_text().split()[0]
+              == subprocess.run(["cksum"], stdin=open(REPO / "omarchy/hypr/amarchy.lua"), capture_output=True,
+                                text=True).stdout.split()[0], read.read_text() if read.is_file() else "none")
+        read.write_text("1 2\n")
+        run(env)
+        run(env)
+        reloads = (home / "hyprctl-calls").read_text().count("reload")
+        check("amarchy.lua changed by an update: Hyprland reloaded, once", reloads == 2, reloads)
+        check("and nothing else changed", snapshot(home) == after, "")
 
         # You took the Ⓐ off the bar: an update doesn't put it back.
         c = json.loads((home / ".config/omarchy/shell.json").read_text())
@@ -203,6 +218,7 @@ def main():
                   "\n".join(l for l in (gone.get(f) or "").splitlines() if "amarchy" in l))
         check("uninstall takes the plugin link away", ".config/omarchy/plugins/amarchy.chats" not in gone)
         check("uninstall forgets the bar was placed", ".local/state/amarchy/omarchy-bar-placed" not in gone)
+        check("uninstall forgets what Hyprland read", not (home / ".local/state/amarchy/omarchy-hypr-read").exists())
         check("uninstall says what it took", "Took away" in r.stdout, r.stdout)
         check("uninstall takes the live theme's hook and units away", not hook.exists()
               and not (units / "amarchy-omarchy-look.path").exists() and not (units / "amarchy-omarchy-look.service").exists())
