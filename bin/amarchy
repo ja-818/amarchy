@@ -396,6 +396,7 @@ import fcntl
 import fnmatch
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import random
@@ -461,7 +462,10 @@ CLAUDE_ARGS = shlex.split(os.environ.get("AMARCHY_CLAUDE_ARGS")
 
 def sh(*args, check=False, cwd=None):
     """Run a command and capture what it says. One that isn't there (tailscale,
-    say) or a folder that's gone fails like a command would."""
+    say) or a folder that's gone fails like a command would. `tailscale` is
+    this computer's: the system's, or amarchy's own node's (track H)."""
+    if args and args[0] == "tailscale":
+        args = tuple(tailscale_argv(args[1:]))
     try:
         return subprocess.run(args, capture_output=True, text=True, check=check, cwd=cwd)
     except (FileNotFoundError, NotADirectoryError) as e:
@@ -1029,10 +1033,11 @@ def preview_tls():
     global _tailnet
     if _tailnet is None:
         name, bind = "", host_network()[1]
-        if bind and shutil.which("tailscale"):
+        own = tailnet_own()     # amarchy's own node: it serves 127.0.0.1's previews, no bind of its own
+        if (bind and shutil.which("tailscale")) or own:
             status = tailscale_status()
             me = status.get("Self") or {}
-            if status.get("CertDomains") and bind in (me.get("TailscaleIPs") or []):
+            if status.get("CertDomains") and (own or bind in (me.get("TailscaleIPs") or [])):
                 name = (me.get("DNSName") or "").rstrip(".").lower()
         _tailnet = name
     return _tailnet or None
@@ -7270,7 +7275,7 @@ def host_network():
     if _network:
         return _network
     name, bind = host_setting("NAME"), host_setting("BIND")
-    if (not name or not bind) and shutil.which("tailscale"):
+    if (not name or not bind) and tailscale_here():
         try:
             me = json.loads(sh("tailscale", "status", "--json").stdout or "{}").get("Self") or {}
         except ValueError:
@@ -7278,7 +7283,10 @@ def host_network():
         ips = [ip for ip in me.get("TailscaleIPs") or [] if "." in ip]
         if ips and me.get("Online", True):
             name = name or (me.get("DNSName") or "").split(".")[0] or None
-            bind = bind or ips[0]
+            # amarchy's own node's address isn't this computer's to listen
+            # on (its previews go through what it serves): localhost.
+            if not tailnet_own():
+                bind = bind or ips[0]
     _network = (name or socket.gethostname(), bind)
     return _network
 
@@ -9932,6 +9940,136 @@ def cmd_theme(args):
         walls = {"theme": "the theme's wallpaper", "own": "your own wallpaper", "none": "no wallpaper"}[look["wallpapers"]]
     print(f"{look['name']} · {look['font']['name']} · {walls}")
     return 0
+
+
+# ---- amarchy's own Tailscale node (track H; docs/plan-omarchy-and-machines.md,
+# "Tailscale inside the apps"). On a computer without the system's Tailscale,
+# amarchy-tailnet (tailnet/, a Go program on tsnet, the user service
+# amarchy-tailnet.service) is this computer's node: it serves Tailscale's own
+# LocalAPI on its socket and carries Tailscale's own CLI, so every `tailscale
+# ...` below runs as `amarchy-tailnet cli ...` there, unchanged (sh), and does
+# what `tailscale serve` sets. Its proxy (proxy.json) is how this computer
+# reaches the tailnet: the calls to its peers (peer_open, tailnet_dial). The
+# system's Tailscale, whenever it answers, is the one, and the node stays off.
+
+TAILNET = STATE / "tailnet"                     # its state, socket and proxy (0700)
+TAILNET_SOCKET = TAILNET / "tailscaled.sock"
+TAILNET_PROXY = TAILNET / "proxy.json"          # {"url": "http://amarchy:<secret>@127.0.0.1:<port>"}
+TAILNET_UNIT = "amarchy-tailnet.service"
+_tailnet_own = {"at": 0.0, "own": False}
+
+
+def tailnet_bin():
+    """amarchy-tailnet, where install.sh puts it (or on the PATH)."""
+    p = Path.home() / ".local/bin/amarchy-tailnet"
+    return str(p) if p.is_file() and os.access(p, os.X_OK) else shutil.which("amarchy-tailnet")
+
+
+def system_tailscale():
+    """Whether the system's Tailscale answers (its daemon, signed in or not).
+    TAILSCALE=own in the host settings sets it aside, for amarchy's own node
+    (trying it on a computer that has both)."""
+    if (host_setting("TAILSCALE") or "").lower() == "own" or not shutil.which("tailscale"):
+        return False
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+        return bool(json.loads(r.stdout or "{}").get("BackendState"))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+
+
+def tailnet_own():
+    """Whether amarchy's own node is this computer's Tailscale: its socket is
+    there and the system's doesn't answer (looked at once every 10 s)."""
+    if time.time() - _tailnet_own["at"] < 10:
+        return _tailnet_own["own"]
+    own = TAILNET_SOCKET.exists() and bool(tailnet_bin()) and not system_tailscale()
+    _tailnet_own.update(at=time.time(), own=own)
+    return own
+
+
+def tailscale_here():
+    """Whether this computer has a Tailscale amarchy can use: the system's
+    (its CLI), or its own node."""
+    return bool(shutil.which("tailscale")) or tailnet_own()
+
+
+def tailscale_argv(args):
+    """`tailscale <args>` on this computer: the system's, or its own node's."""
+    if tailnet_own():
+        return [tailnet_bin(), "cli", "--state", str(TAILNET), *args]
+    return ["tailscale", *args]
+
+
+def tailnet_proxy():
+    """The own node's proxy, (host, port, its Proxy-Authorization), or None."""
+    try:
+        u = urllib.parse.urlsplit(json.loads(TAILNET_PROXY.read_text())["url"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    cred = base64.b64encode(f"{urllib.parse.unquote(u.username or '')}:{urllib.parse.unquote(u.password or '')}".encode()).decode()
+    return u.hostname, u.port, f"Basic {cred}"
+
+
+def on_tailnet(host):
+    """Whether a host (a name or an address) is the tailnet's."""
+    host = (host or "").strip("[]").rstrip(".").lower()
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host.endswith(".ts.net")
+    return ip in ipaddress.ip_network("100.64.0.0/10") or ip in ipaddress.ip_network("fd7a:115c:a1e0::/48")
+
+
+def tailnet_via(host):
+    """The own node's proxy, when a tailnet host must be reached through it
+    (this computer uses amarchy's own node), else None."""
+    return tailnet_proxy() if on_tailnet(host) and tailnet_own() else None
+
+
+def tailnet_dial(host, port, timeout):
+    """A socket to host:port, straight or through the own node's proxy
+    (CONNECT) when it's the tailnet and this computer uses that node."""
+    via = tailnet_via(host)
+    if not via:
+        return socket.create_connection((host, port), timeout=timeout)
+    s = socket.create_connection((via[0], via[1]), timeout=timeout)
+    try:
+        s.sendall(f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: {via[2]}\r\n\r\n"
+                  .encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = s.recv(4096)
+            if not chunk:
+                raise ConnectionError("amarchy's Tailscale node closed the tunnel")
+            head += chunk
+            if len(head) > 16384:
+                raise ConnectionError("amarchy's Tailscale node answered nonsense")
+        status = head.split(b"\r\n", 1)[0].decode(errors="replace")
+        if " 200 " not in status + " ":
+            raise ConnectionError(f"amarchy's Tailscale node couldn't reach {host}: {status}")
+        return s
+    except BaseException:
+        s.close()
+        raise
+
+
+def tailnet_status_words():
+    """Where amarchy's own node stands (amarchy-tailnet status --json), or None
+    when it isn't this computer's Tailscale."""
+    b = tailnet_bin()
+    if not b:
+        return None
+    try:
+        r = subprocess.run([b, "status", "--json", "--state", str(TAILNET)], capture_output=True, text=True,
+                           timeout=10, stdin=subprocess.DEVNULL)
+        return json.loads(r.stdout or "{}")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+# ---- end of amarchy's own Tailscale node (track H)
 
 
 def tailscale_status():
@@ -14010,7 +14148,7 @@ _tailnet_memo = {"at": 0, "status": {}}
 def tailnet_status(fresh=False):
     """tailscale status --json, read at most once a minute."""
     if fresh or time.time() - _tailnet_memo["at"] > 60:
-        _tailnet_memo.update(at=time.time(), status=tailscale_status() if shutil.which("tailscale") else {})
+        _tailnet_memo.update(at=time.time(), status=tailscale_status() if tailscale_here() else {})
     return _tailnet_memo["status"]
 
 
@@ -14145,9 +14283,19 @@ def peer_open(url, timeout=PEER_TIMEOUT):
     import http.client
     import ssl
     u = urllib.parse.urlsplit(url)
+    port = u.port or (443 if u.scheme == "https" else 80)
+    via = tailnet_via(u.hostname)       # this computer on amarchy's own Tailscale node: through its proxy (track H)
     if u.scheme == "https":
+        if via:
+            conn = http.client.HTTPSConnection(via[0], via[1], timeout=timeout, context=ssl.create_default_context())
+            conn.set_tunnel(u.hostname, port, headers={"Proxy-Authorization": via[2]})
+            return conn
         return http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout,
                                            context=ssl.create_default_context())
+    if via:
+        conn = http.client.HTTPConnection(via[0], via[1], timeout=timeout)
+        conn.set_tunnel(u.hostname, port, headers={"Proxy-Authorization": via[2]})
+        return conn
     return http.client.HTTPConnection(u.hostname, u.port, timeout=timeout)
 
 
@@ -17201,10 +17349,14 @@ def app_on():
     if why:
         return fail(why)
     here = f"on, for this machine (the desktop app here, on 127.0.0.1:{app_port()})"
-    if not shutil.which("tailscale") or not address:
+    if not tailscale_here() or not address:
         # The desktop app here works without it (the local key); a phone needs the tailnet.
-        print(f"{here}. For your phone and other machines: install Tailscale and run `sudo tailscale up`, "
-              f"then amarchy app on again")
+        if tailnet_own():       # amarchy's own Tailscale node, not signed in yet (track H)
+            print(f"{here}. For your phone and other machines: sign in to Tailscale (amarchy-tailnet login), "
+                  f"then amarchy app on again")
+        else:
+            print(f"{here}. For your phone and other machines: install Tailscale and run `sudo tailscale up`, "
+                  f"then amarchy app on again")
         return 0
     if not status.get("CertDomains"):
         return fail(f"{here}, but not on your tailnet yet: Tailscale has no HTTPS certificates for it. Turn them on at "
