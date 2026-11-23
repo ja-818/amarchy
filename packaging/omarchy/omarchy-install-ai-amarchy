@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# omarchy:summary=Install amarchy: run a dozen Claude Code agents from one board, on your desktop and your phone
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+if (( EUID == 0 )); then
+  echo "Run this command as your desktop user, without sudo." >&2
+  exit 1
+fi
+
+# Every chat amarchy runs is Claude Code, signed in with your own plan.
+if ! omarchy-cmd-present claude; then
+  echo "Installing Claude Code..."
+  omarchy-default-agent claude
+fi
+
+echo "Installing amarchy..."
+omarchy-pkg-add amarchy-git amarchy-desktop-git
+
+# The part that's the user's: its timers, the skill for Claude Code, and on
+# Omarchy the Ⓐ in the bar, Super+Alt+A, Amarchy in this menu and the theme
+# Omarchy (live), which follows the desktop's.
+echo "Setting amarchy up..."
+amarchy setup
+
+# The phone reaches amarchy over Tailscale. Without the system's, amarchy has
+# a node of its own (amarchy tailscale says which, and signs in).
+if omarchy-installed-service-tailscale; then
+  amarchy app on || true
+else
+  echo "For your phone: omarchy-install-service-tailscale, or amarchy tailscale."
+fi
+
+echo "Opening amarchy..."
+setsid uwsm-app -- /usr/bin/amarchy-desktop >/dev/null 2>&1 &
+
+echo ""
+echo "amarchy has been installed. Super+Alt+A brings it up; the Ⓐ in the bar lights up when a chat needs you."

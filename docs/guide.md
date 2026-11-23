@@ -1572,6 +1572,14 @@ runs the chat engine's test against the Claude Code installed, about three minut
 few cheap turns on your login, and records the result; a failure shows in Settings. The
 update starts it when Claude Code has changed.
 
+**As Arch packages** (`packaging/arch`: `amarchy-git`, and the desktop app's
+`amarchy-desktop-git`), amarchy lives in `/usr/share/amarchy` and `amarchy setup`
+is `install.sh`, run as you: it sets up your part (the timers, the skill, Omarchy's
+pieces). A package updates with your packages, never from git; after an update
+your part is set up again by itself within five minutes (`amarchy update`), and
+the app reloads. `amarchy setup --uninstall` takes your part away before you
+remove the package. How they're built and published: `packaging/README.md`.
+
 `install.sh --uninstall` takes all of that out again (the chats' previews stop, and come
 off your tailnet); your worktrees, your chats,
 `~/.local/state/amarchy` and the secrets you gave in the app are left alone (the
