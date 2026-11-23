@@ -172,6 +172,88 @@ and tell the other tracks.
   there, noted as from that chat. `/api/search` on a machine asks every
   paired one too (not when a peer asks), each result with `"machine"`.
 
+### Moving a chat (track E)
+
+- **Only when you say so**: "Move to <label>" in a chat's menu, or
+  `amarchy move [<id>] --to <machine>`; never on its own (sleep, a lid shut).
+  Not your assistant or an agent: they live on their machine. Only once its
+  Claude's step is over: nothing waiting on you, no turn under way, nothing it
+  runs in the background, no message on its way in. Busy, it says why and
+  offers to move once it's free (`--when-free`; from the chat's own Claude,
+  always so). `hello` says `"moves": true` on a machine that takes moves;
+  one that doesn't: "Update amarchy on <label>".
+- **The old machine (A)** stops the chat's Claude (as sleep does) and its
+  previews, commits what's uncommitted as one commit on the chat's branch
+  (`WIP: moving to <label> (amarchy move)`, the index as it was kept, to put
+  back), and pushes the branch to `origin` (only forward: origin's branch
+  with commits it hasn't is refused, saying so). The project needs `origin`.
+- **`POST /api/peer/move`** (peers only), body `application/x-amarchy-move`:
+  a gzipped tar (1 GB at most) of `move.json` and the files. `move.json`:
+  `{"move": <token, 32 hex>, "from": {"machine", "id", "label"}, "session":
+  <the chat's record: name, title, priority, created, base, previews...>,
+  "repo", "github" (owner/repo), "branch", "commit", "conversation" (its
+  Claude's session id), "seen", "unseen", "status_at", "secrets": [{"name",
+  "scope": "project"|"all", "value"}] (only those you said to copy), "run":
+  {"command", "saved": {name: command}}, "previews": [<record>, "local"],
+  "merges": <its merges entry>, "wip" (the WIP commit, or null)}`, and four
+  folders: `claude-projects/` (its conversations, `<id>.jsonl` and `<id>/`),
+  `claude-home/` (`file-history/<id>/`, `todos/<id>-*.json`), `chat/`
+  (amarchy's own of it: model, title, draft, what's waiting for its Claude,
+  `sent-by.jsonl`, `quiet-turns.jsonl`) and `worktree/` (what git doesn't
+  carry: `.amarchy/` and the files git ignores, but dependencies and builds:
+  `node_modules/`, `.venv/`, `dist/`..., made again there).
+  The other machine (B) finds the project by its GitHub address (A has it
+  cloned there first, as Where does: `/api/add`), fetches the branch and
+  checks it's at `commit`, makes the worktree at
+  `~/Work/.worktrees/<project>/<name>` on that branch (tracking origin's),
+  puts the conversation where its Claude looks for it
+  (`~/.claude/projects/<the worktree's path, as Claude names it>/`), keeps the
+  chat's record (name, task, priority, `created`: its card's place), seen and
+  unread, the run commands and secrets it hasn't got (its own win), and the
+  previews (registered at this machine's address, not started), then starts
+  the chat on the chat engine (`--resume <conversation>`) and answers
+  `{"id", "key": "<B>:<id>", "notes": [words]}` once its Claude is up. Its
+  Claude is told, with the next message, that it moved and what the WIP commit
+  is. Anything wrong: all of it undone, and `{"error"}` (409 for what you can
+  fix: "a chat called <name> is on <label> already"). The same `move` again
+  answers as the first time.
+- **`POST /api/peer/move/abort`** `{"move"}` (peers only): A lost B's answer
+  (it timed out, the network went), so it asks B to drop what it took:
+  `{"dropped": true}`, `{"dropped": false}` for a move B never took, 409 when
+  the chat was used there since (it stays there; A says so). A keeps asking
+  each minute until B answers. A machine that died while taking a move drops
+  it when it starts again.
+- **A, once B answered**: the chat's tmux, its worktree (never with work not
+  committed: then the folder stays, and it says so), its local branch (when
+  origin has it) and amarchy's state of it go; its conversation files stay in
+  `~/.claude/projects`, as closing leaves them. It isn't a mission completed,
+  and its merges go with it (counted once). Anything that fails before B's
+  answer is rolled back (the WIP commit undone with the index as it was,
+  origin's branch as it was, its previews started again), saying what happened.
+- **Moved chats**: `STATE/moved.json` on A, `[{"from": "<A>:<id>", "to":
+  "<B>:<id>", "at", "row"}]`, kept 30 days. `/api/peer/state` and
+  `/api/peer/events` carry this machine's `"moved"`; the board has every
+  machine's, merged, as `"moved": {"<machine>:<id>": "<machine>:<id>"}`
+  (followed to the last, for a chat moved twice). The app opens the new key
+  for a route, a notification or a link to the old one, and its drafts go
+  with it. `amarchy send <id>` (and `/api/peer/send`) to a moved chat goes on
+  to where it is now. Until B's chats reach a board, the board shows the
+  chat as it was on A under its new key (`row`, for 2 minutes): its card
+  keeps its place.
+- A chat while it moves has `"moving": {"to", "label", "step", "since",
+  "when": "now"|"free"}`; one that couldn't, `"move_error": {"to", "label",
+  "error", "at"}` (until dismissed or moved).
+- **The app**: `GET /api/session/<id>/move?to=<machine>` says what moving it
+  would do: `{"to", "label", "on", "busy": [words], "refused" (words, or
+  null), "changes" (files not committed), "secrets": [names it asked for],
+  "previews": [labels], "left": [what isn't carried], "size"}`.
+  `POST /api/session/<id>/move` `{"to", "secrets": bool, "when": "now"|"free"}`
+  starts it (409 `{"busy"}` when it's busy and `when` is now),
+  `{"cancel": true}` (one waiting to be free), `{"dismiss": true}` (an error).
+- **CLI**: `amarchy move [<id>] --to <machine> [--when-free] [--secrets |
+  --no-secrets]`, `amarchy move [<id>] --cancel`, `amarchy move [<id>]
+  --check --to <machine> [--json]` (what it would do).
+
 ### Omarchy: the bar, the key, the theme live
 
 - **`amarchy open [<id> | <machine>/<id> | amarchy://chat/<machine>/<id>]`**
@@ -258,7 +340,7 @@ and tell the other tracks.
 
 | What | Where |
 | --- | --- |
-| A chat: worktree, Claude, terminal, previews, the secrets it asked for | The machine it runs on |
+| A chat: worktree, Claude, terminal, previews, the secrets it asked for | The machine it runs on, until you move it |
 | Projects (git checkouts) | Each machine its own; listed together by GitHub address |
 | Board order, look, missions, streaks, goal, project order, new-chat defaults | Every machine, synced (no main machine) |
 | Agents (Jaken...) and their tasks | The machine they run on (the server, by default) |
