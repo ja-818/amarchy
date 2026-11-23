@@ -257,9 +257,9 @@ class Shell:
                 last = self.js(code)
             except (TimeoutError, RuntimeError) as e:
                 last = str(e)
-            if last and last is not True or last is True:
-                if last:
-                    return last
+            # (A window not there yet answers {"error": ...}: not a yes.)
+            if last and not (isinstance(last, dict) and "error" in last):
+                return last
             time.sleep(every)
         raise TimeoutError(f"{code[:160]} (last: {str(last)[:200]})")
 

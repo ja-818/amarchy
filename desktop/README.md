@@ -14,13 +14,34 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending (and drawing the safe way after a crash) |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
-| `src/tray.rs` | The tray: Open, Reload, Quit, and how many need you |
+| `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
+| `src/journal.rs` | Its log (below) |
 | `dist/` | Its own page, while the window isn't showing amarchy: looking for it, which one, why not |
 | `install.sh` | Built and installed on the machine it runs on (amarchy's `install.sh` runs it on a computer with a desktop) |
 | `amarchy.desktop` | Its launcher entry (and `amarchy.desktop.hbs`, the same for Tauri's packages) |
 | `test/` | Its tests, on the real window |
+
+## Its log, and how it heals itself
+
+`~/.local/state/amarchy/desktop/desktop.log` (the last 2 MB, then
+`desktop.log.1`; the tray's **Its log** opens it): what it does and why
+(which board it opens, a start handed over, a notice's button that didn't
+go), the machine and its GPU driver, and everything GTK, WebKit and
+GStreamer write to stderr, a panic too. Readable without a terminal open.
+
+- **A start never does nothing.** A second start hands its arguments to the
+  running one and ends at once; the running one takes them up on its
+  window's thread, and makes its window again if it's gone.
+- **Its page's process crashes**: the page loads again, and it draws the
+  safe way from then on (WebKit's DMA-BUF renderer and compositing off, its
+  hardware acceleration never), kept in `rendering.json` beside the log;
+  `AMARCHY_DESKTOP_GPU=1` tries the GPU again. Three crashes in two minutes:
+  its own page says so, with the log's path.
+- **Its window's thread stuck** (a start handed over not taken up in 8 s, or
+  no answer for 45 s): it starts again as a new process, on the chat it was
+  asked for, and the stuck one ends.
 
 ## Build and run
 

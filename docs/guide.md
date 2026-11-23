@@ -664,6 +664,12 @@ window closed.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
   DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`).
+- **When something goes wrong**: its log is
+  `~/.local/state/amarchy/desktop/desktop.log` (the tray's **Its log**). A
+  start always brings its window up: if its window is gone it's made again,
+  if its page crashed it loads again (drawing without the GPU from then on;
+  `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
+  again by itself.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
