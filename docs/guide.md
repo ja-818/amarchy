@@ -324,6 +324,35 @@ It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see
 [Configure](#configure) for `APP_USERS=`).
 
+### The phone apps
+
+amarchy's app for iPhone and Android is the same app inside a thin native shell
+([phone/](../phone/README.md)): the same board, chats and Settings. It adds only
+what a home-screen web app can't do:
+
+- **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
+  on the notification itself, without opening the app. On a locked phone it asks
+  for Face ID (or your code) first. If it can't reach your amarchy, a
+  notification says so and opens the chat.
+- **The share sheet.** A screenshot, a photo, a link or some text: tap
+  **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
+  No Shortcut to set up.
+- **A widget.** "2 need you" and their names, on the home screen and (iPhone)
+  the lock screen.
+
+**First open**: on the phone's browser, **Settings → The phone app → Open in the
+app** opens it on that machine; or type its address
+(`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
+app when its VPN is on; a build that has amarchy's own Tailscale node signs in
+inside the app instead. Then **Turn on notifications**, as in the web app.
+
+**Private**: each notification is encrypted on your machine for that phone
+alone (the same encryption as Web Push). It goes through amarchy's push relay
+([relay/](../relay/README.md)), a tiny open-source service that hands it to
+Apple's or Google's push. The relay keeps nothing and can't read it: it sees
+the phone's push token and which machine may send to it, never what a
+notification says. Anyone can run their own.
+
 ## In a browser on your computer
 
 The same app on a computer's wide screen is **the board**: your chats and your tasks
@@ -620,6 +649,17 @@ amarchy machines remove omarchy   # both forget the other
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+- **Your stuff is the same on every machine**: the look (your own wallpaper
+  and themes too, Omarchy (live) among them), the order of your projects, what
+  a new chat starts on (model, effort), what tells you, your chimes, Show
+  terminals, how machines show, and your missions: every machine's merges,
+  streaks and badges count once, the same score everywhere, and a reset is
+  everyone's. Change it on any machine, in the app or from the command line,
+  and the others have it in a moment; one that was off catches up when it's
+  back (through any other). Two changes made apart: the later one wins. What
+  stays a machine's own: when its idle chats sleep, its dictation, its
+  secrets, the phones it notifies, its automations. A browser keeps its own
+  layout, notifications and drafts.
 - **A machine's label** (what the app calls it) is kept on that machine, so
   every machine shows the same; renaming another one asks it to rename itself.
 - **Versions**: machines on another version of the contract say "Update
@@ -799,11 +839,11 @@ It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
 **The window, one of the desktop's**: the desktop app's window is
-see-through as your terminals are, in each of Omarchy's window modes
-(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
-wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
-solid, as a terminal's, and your desktop's own wallpaper is behind it
-(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
+your desktop's own shows through its panes and cards, as a browser shows the
+app's wallpaper, lined up with the rest of the screen (Settings › Look says
+so). Hyprland fades it as your terminals, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy). For a solid window, Omarchy's Opaque mode, or its
 transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy

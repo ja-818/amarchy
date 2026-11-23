@@ -210,22 +210,31 @@ def relay_binary():
     return out
 
 
-upstream = []
-class Upstream(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if self.path == "/token":       # FCM's OAuth: a token for the relay
-            out = json.dumps({"access_token": "ya29.test", "expires_in": 3600, "token_type": "Bearer"}).encode()
-        else:
-            upstream.append({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}, "body": body})
-            out = json.dumps({"name": "projects/p/messages/1"} if "/messages:send" in self.path else {}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(out)))
-        self.end_headers()
-        self.wfile.write(out)
-    def log_message(self, *a):
-        pass
+class Upstream:
+    """The fake APNs and FCM (test/push-upstream: HTTP/2 as APNs speaks it),
+    what they got read off its output as it comes."""
+    def __init__(self):
+        out = Path(home) / "push-upstream"
+        r = subprocess.run([shutil.which("go"), "build", "-o", str(out), "."], cwd=ROOT / "test/push-upstream",
+                           capture_output=True, text=True, env={**os.environ, "GOTMPDIR": tmp or tempfile.gettempdir(), "GO111MODULE": "off"})
+        if r.returncode:
+            raise RuntimeError(r.stderr[-1000:])
+        self.proc = subprocess.Popen([str(out)], stdout=subprocess.PIPE, text=True)
+        self.url = self.proc.stdout.readline().strip()
+        self.got = []
+        threading.Thread(target=self.read, daemon=True).start()
+    def read(self):
+        for line in self.proc.stdout:
+            g = json.loads(line)
+            g["body"] = base64.b64decode(g["body"] or "")
+            self.got.append(g)
+    def clear(self):
+        self.got.clear()
+    def wait(self, n, s=10):
+        end = time.time() + s
+        while len(self.got) < n and time.time() < end:
+            time.sleep(0.05)
+        return self.got
 
 
 binary = relay_binary()
@@ -234,9 +243,8 @@ if binary is None:
 elif binary is False:
     check(False, "the relay builds")
 else:
-    up = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-    threading.Thread(target=up.serve_forever, daemon=True).start()
-    up_at = f"http://127.0.0.1:{up.server_address[1]}"
+    up = Upstream()
+    up_at = up.url
     p8 = am.openssl("genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256").decode()
     sa_key = am.openssl("genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048").decode()
     creds = json.dumps({"type": "service_account", "client_email": "relay@p.iam.gserviceaccount.com",
@@ -281,14 +289,16 @@ else:
         am.app_save_subscriptions(lambda subs: [
             {"endpoint": ios_end, "keys": ios_keys, "app": {"platform": "ios"}, "server": server_url},
             {"endpoint": droid_end, "keys": droid_keys, "app": {"platform": "android"}, "server": server_url}])
-        upstream.clear()
+        up.clear()
         with contextlib.redirect_stderr(io.StringIO()):
             n = am.push_all(payload, desktop)
         check(n == 2, f"the machine sends through it to both ({n})")
+        upstream = up.wait(2)
         apns = next((u for u in upstream if u["path"].startswith("/3/device/")), None)
         fcm = next((u for u in upstream if "/messages:send" in u["path"]), None)
         check(apns and apns["path"] == f"/3/device/{apns_token}" and apns["headers"].get("apns-topic") == "io.github.ja818.amarchy"
-              and apns["headers"].get("apns-collapse-id") == topic, "to APNs: the phone's token, the app, the chat's topic")
+              and apns["headers"].get("apns-collapse-id") == topic and apns["headers"].get("proto") == "HTTP/2.0",
+              "to APNs over HTTP/2: the phone's token, the app, the chat's topic")
         aps = json.loads(apns["body"]) if apns else {}
         check(aps.get("aps", {}).get("mutable-content") == 1 and "Fix the login" not in apns["body"].decode(),
               "for the phone's extension to decrypt, nothing of it readable to Apple")
@@ -311,15 +321,16 @@ else:
         real = am.app_key()
         am.app_key = lambda: other
         am._app_public.clear()
-        upstream.clear()
+        up.clear()
         with contextlib.redirect_stderr(io.StringIO()):
             ok = am.push_send({"endpoint": ios_end, "keys": ios_keys}, payload)
-        check(ok is None and not upstream, "a machine without the phone's machine key: refused, nothing sent on")
+        check(ok is None and not up.wait(1, 1), "a machine without the phone's machine key: refused, nothing sent on")
         am.app_key = lambda: real
         am._app_public.clear()
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+        up.proc.terminate()
 
 server.shutdown()
 sys.exit(1 if failed else 0)

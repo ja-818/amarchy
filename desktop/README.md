@@ -14,7 +14,7 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: see-through as the terminals, its look live drawn without a wallpaper of its own) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it) |
 | `src/sound.rs` | What its page can play: GStreamer asked at start; without its plugins, no media in the page (one would end it), its sounds played by the app (`pw-play`), said once, and a start again once they're installed |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
@@ -89,7 +89,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart), its self-healing, amarchy's own
                                                     # Tailscale node (its sign-in, through its proxy),
-                                                    # on an Omarchy desktop (no wallpaper of its own)
+                                                    # on an Omarchy desktop (see-through: the desktop through
+                                                    # it, under picom when it's installed)
 python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5; its core
                                                     # elements only; none at all): no media in the page,
                                                     # nothing ends it, its sounds played by the app, said

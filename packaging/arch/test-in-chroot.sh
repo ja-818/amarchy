@@ -66,6 +66,14 @@ check "the timers written" "$(as_user 'ls ~/.config/systemd/user/amarchy-sleep.t
 check "the update timer says the package updates it" "$(as_user 'grep -q "updates with your packages" ~/.config/systemd/user/amarchy-update.timer' && echo ok)"
 check "what it set up, remembered" "$(as_user 'cat ~/.local/state/amarchy/setup-version' | grep -qx "$v" && echo ok)"
 
+# The app's server, from the package: its pages, in through the local key.
+out=$(as_user 'export AMARCHY_HOST_APP_PORT=7911; (timeout 20 amarchy app serve >/tmp/serve.log 2>&1 &);
+  for i in $(seq 40); do curl -s -o /dev/null http://127.0.0.1:7911/ && break; sleep 0.25; done
+  key=$(cat ~/.local/state/amarchy/app/local.key)
+  curl -s -o /dev/null -c /tmp/jar -w "%{http_code} " "http://127.0.0.1:7911/local?key=$key"
+  curl -s -b /tmp/jar http://127.0.0.1:7911/ | grep -o "<title>[^<]*</title>"')
+check "its app server serves the app's pages, in with the local key" "$(grep -q '^303 <title>' <<<"$out" && echo ok)" "$out"
+
 out=$(as_user 'amarchy update 2>&1')
 check "amarchy update: the package's, never git" "$(grep -q 'installed by amarchy-git: it updates with your packages' <<<"$out" && echo ok)" "$out"
 out=$(as_user 'amarchy update --auto 2>&1; echo "exit $?"')

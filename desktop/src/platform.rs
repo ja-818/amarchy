@@ -88,9 +88,12 @@ pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
 
 /// Whether its window is on an Omarchy desktop: Hyprland's session, with
 /// Omarchy's look in place (its current theme, where Omarchy 4 keeps it).
-/// There the window is one of the desktop's, as its terminals are: Hyprland
-/// makes it see-through (omarchy/hypr/amarchy.lua), so wearing the desktop's
-/// look live it draws no wallpaper of its own (app.css, html.on-omarchy).
+/// There the window is one of the desktop's: see-through (what its page leaves
+/// unpainted shows the desktop behind it), faded as its terminals are
+/// (omarchy/hypr/amarchy.lua); wearing the desktop's look live, its page
+/// paints no wallpaper and nothing under it, so the desktop's own wallpaper
+/// shows through its panes and cards as a browser shows the app's (app.css,
+/// html.on-omarchy).
 pub fn omarchy() -> bool {
     #[cfg(target_os = "linux")]
     return linux::omarchy();
