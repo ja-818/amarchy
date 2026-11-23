@@ -472,7 +472,12 @@ synced, last change wins per item; works with any machine off.
 **E. Move a chat** (after A): "Move to <machine>" in a chat's menu. Commit
 (work in progress) and push the branch, make the worktree there from it, copy
 Claude's conversation file (same `$HOME` and `~/Work` layout), resume; its card
-keeps its place. Only after Claude's current step ends.
+keeps its place. Only after Claude's current step ends. **Shipped 2026-11-22**
+(`amarchy move`, the contract's "Moving a chat"; `test/move.py`,
+`test/move-view.js`), and moved for real between `amarchy` and `ja` both ways,
+its Claude remembering each time. `ja`'s home is `/home/julian`, not
+`/home/ja`: each machine puts the worktree and the conversation under its own
+home, so the layout only has to match from `~` down.
 
 **F. A cloud machine in one click** (after A; Julian's OK to spend): Settings →
 Machines → "Add a cloud machine": provider (Hetzner, DigitalOcean, Hostinger),

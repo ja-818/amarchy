@@ -16037,6 +16037,10 @@ def move_install(man, stage, rec):
         raise MoveError(f"couldn't fetch its branch from origin on {here}: {gist(r.stderr)}")
     if move_git(repo_dir, "rev-parse", f"refs/remotes/origin/{branch}").stdout.strip() != commit:
         raise MoveError(f"origin's {branch} isn't where {label} pushed it (someone pushed since?)")
+    # Its base as origin has it now (not as this machine last fetched it): its
+    # Changes here are what it changed, not what main did since.
+    if str(given.get("base") or "").startswith("origin/"):
+        fetch_base(repo_dir, given["base"])
     tip = move_git(repo_dir, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").stdout.strip()
     if tip and tip != commit and not is_ancestor(tip, commit, repo_dir):
         raise MoveError(f"{here} has a branch {branch} with commits of its own: rename or delete it there first")
