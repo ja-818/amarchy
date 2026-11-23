@@ -19016,7 +19016,11 @@ def app_handler(st, users, address):
 
         def push(self, data):
             if self.path == "/api/push/test":
-                n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"})
+                # The desktop apps ring your chime with it, as with a chat's
+                # (a phone's rings with its own sound).
+                chime = sound_name()
+                n = push_all({"title": "Amarchy", "body": "Notifications work.", "tag": "amarchy-test", "url": "/"},
+                             {"sound": chime} if chime != "off" else None)
                 return self.send(200, {"sent": n})
             endpoint = data.get("endpoint")
             if not isinstance(endpoint, str) or not endpoint.startswith("https://"):

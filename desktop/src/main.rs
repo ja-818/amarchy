@@ -173,6 +173,16 @@ fn main() {
     if let Some(pid) = start.after {
         wait_gone(pid);
     }
+    // A second start hands its arguments to the running one and ends, before
+    // anything of GTK starts (a start without a display: an update's
+    // --restart from a service, which GTK's init would abort). With none
+    // running, --restart has nothing to do.
+    if start.after.is_none() && hand_over(&argv) {
+        return;
+    }
+    if start.restart {
+        return;
+    }
     journal::start();
     platform::prepare();
 
@@ -231,6 +241,9 @@ fn main() {
             if restart_only {
                 std::process::exit(0);
             }
+            // The one that runs (a start handed over ended before this):
+            // what it draws with and what its page can play, in the log.
+            platform::started();
             let win = window(&handle, hidden)?;
             platform::webview(&win);
             tray::make(&handle)?;
@@ -281,6 +294,31 @@ fn main() {
             }
         }
     });
+}
+
+/// The app's identifier (tauri.conf.json): its single instance's D-Bus name.
+const IDENTIFIER: &str = "io.github.ja818.amarchy";
+
+/// Hands argv to the running one, as tauri-plugin-single-instance does (its
+/// D-Bus name and method), when one is running: whether it took them.
+#[cfg(target_os = "linux")]
+fn hand_over(argv: &[String]) -> bool {
+    let name = format!("{IDENTIFIER}.SingleInstance");
+    let path = format!("/{}", name.replace('.', "/").replace('-', "_"));
+    let Ok(conn) = zbus::blocking::Connection::session() else { return false };
+    let Ok(dbus) = zbus::blocking::fdo::DBusProxy::new(&conn) else { return false };
+    let Ok(bus_name) = zbus::names::BusName::try_from(name.as_str()) else { return false };
+    if !dbus.name_has_owner(bus_name).unwrap_or(false) {
+        return false;
+    }
+    let cwd = std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned();
+    conn.call_method(Some(name.as_str()), path.as_str(), Some("org.SingleInstance.DBus"), "ExecuteCallback", &(argv.to_vec(), cwd))
+        .is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn hand_over(_argv: &[String]) -> bool {
+    false
 }
 
 /// Until the process pid has ended (up to 10 s).
@@ -485,6 +523,9 @@ fn watchdog(app: &AppHandle) {
             if let Some(u) = shell.given.clone() {
                 cmd.arg("--url").arg(u.as_str());
             }
+            if let Some(e) = journal::stderr_for_child() {
+                cmd.stderr(e);
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -588,6 +629,9 @@ pub fn restart(app: &AppHandle, exe: Option<&str>) {
     }
     if let Some(u) = app.state::<Shell>().given.clone() {
         cmd.arg("--url").arg(u.as_str());
+    }
+    if let Some(e) = journal::stderr_for_child() {
+        cmd.stderr(e);
     }
     #[cfg(unix)]
     {
@@ -1016,6 +1060,12 @@ fn test_hooks(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifier_is_the_configs() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], IDENTIFIER);
+    }
 
     #[test]
     fn colors() {
