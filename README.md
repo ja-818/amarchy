@@ -58,7 +58,9 @@ One board says which one needs you and what for. You answer with a tap.
   It texts you like a coworker and puts what needs you on **Tasks**.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home
   screen, the same app on a computer, and a desktop app of its own (Linux first, Omarchy at
-  home). All of them work over your private Tailscale network, not the internet.
+  home). All of them work over your private Tailscale network, not the internet. The iPhone
+  and Android apps add answers right on the notification, the share sheet and a widget,
+  end-to-end encrypted through a tiny open-source push relay that can't read them.
 - **At home on Omarchy.** The **Ⓐ** in the bar lights up when a chat needs you and says how
   many; click it and you're on that chat. **Super + Alt + A** brings amarchy to the front, and
   it's in the Omarchy menu. Pick **Omarchy (live)** and the app wears your desktop's theme,
