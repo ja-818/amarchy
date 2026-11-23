@@ -163,6 +163,14 @@ def env_for(cli):
     return {"AMARCHY_CLI": str(cli), "PATH": path, "AMARCHY_URL": ""}
 
 
+def brightness(f):
+    """How light a screenshot is, 0 (black) to 1 (white): ImageMagick 7's
+    magick, or 6's convert."""
+    tool = ["magick"] if shutil.which("magick") else ["convert"]
+    out = subprocess.run([*tool, str(f), "-format", "%[fx:mean]", "info:"], capture_output=True, text=True).stdout
+    return float(out or 1)
+
+
 def listening(server, w, timeout=40):
     """Once the app's stream of notices is up: a notice sent reaches it."""
     end = time.time() + timeout
@@ -197,7 +205,7 @@ def main():
             frames = []
             for i in range(4):
                 f = w.shot(SHOTS / f"start-{i}.png")
-                frames.append(float(subprocess.run(["magick", str(f), "-format", "%[fx:mean]", "info:"], capture_output=True, text=True).stdout or 1))
+                frames.append(brightness(f))
                 time.sleep(0.3)
             check(max(frames) < 0.5, f"no white flash while it opens (brightness {[round(x, 2) for x in frames]})")
             on_app(w)
