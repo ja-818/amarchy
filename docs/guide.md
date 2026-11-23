@@ -668,7 +668,12 @@ amarchy machines remove omarchy   # both forget the other
   - Your assistant and your agents live on their machine: they don't move.
 - **From the command line**: `amarchy list --all` (every machine's chats,
   each with its machine), `amarchy send <machine>:<id> "<text>"`,
+  `amarchy close <machine>:<id>` (closed there as the app's Complete closes
+  it: its preview stopped first, refused while it has uncommitted changes
+  unless `--force`; `amarchy close <id> --on <machine>` is the same),
   `amarchy move [<id>] --to <machine>` (`--check` says what it would do).
+  A chat that moved is followed: `amarchy close <old id>` closes it where it
+  is now.
 - **Your stuff is the same on every machine**: the look (your own wallpaper
   and themes too, Omarchy (live) among them), the order of your projects, what
   a new chat starts on (model, effort), what tells you, your chimes, Show
@@ -1937,6 +1942,7 @@ amarchy new <project> [name] --agent <name>      one of your agents from its sta
 amarchy send <id> <text|-> [--no-wait] [--timeout <minutes>]   a message for its Claude, once Claude is free
 amarchy list [--compact]              sessions as JSON, in list order (task, age, agent, engine...)
 amarchy close [id] [--force]          close a session (the current one if no id); --force discards uncommitted changes
+amarchy close <machine>:<id> [--force]   the same for a chat on another machine of yours (or <id> --on <machine>)
 amarchy rename <title>                name the current session
 amarchy rename --id <id> <title>      the same for another; --reset goes back to the name from Claude's title
 amarchy run                           run the project in the session's terminal (again: restart it)
