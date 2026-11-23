@@ -113,6 +113,9 @@ android {
         val testdata = layout.projectDirectory.dir("../../testdata").asFile
         unitTests.all {
             it.systemProperty("amarchy.testdata", testdata.absolutePath)
+            // Android's HttpURLConnection sends the Origin the shell sets; the
+            // JDK's (these tests') drops it unless told otherwise.
+            it.systemProperty("sun.net.http.allowRestrictedHeaders", "true")
             it.inputs.dir(testdata).withPathSensitivity(PathSensitivity.RELATIVE)
         }
     }

@@ -171,11 +171,13 @@ an app widget, updated the same way.
 
 ## Builds
 
-- Android: `cd phone/android && ./gradlew assembleDebug testDebugUnitTest`
+- Android: `cd phone/android && ./gradlew assembleDebug testDebugUnitTest lint`
   (JDK 17, the Android SDK). Push needs a Firebase project: its values come
   from `phone/android/firebase.properties` (not in git) or the build's
   environment (`FIREBASE_*`); without them the app builds and runs, and says
-  notifications aren't in this build.
+  notifications aren't in this build. In CI, `.github/workflows/phone-android.yml`
+  builds it, runs its tests and lint; run by hand, it releases it to Play's
+  internal track (`android/store/README.md` says what's set up first).
 - iOS: on a Mac, `cd phone/ios && xcodegen && xcodebuild ...`; in CI,
   `.github/workflows/phone.yml` builds it for the simulator and runs its
   tests.
