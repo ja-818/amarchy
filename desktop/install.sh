@@ -84,7 +84,8 @@ fi
 
 # Installed by your packages (the amarchy-desktop package): they keep it.
 if [[ -x /usr/bin/amarchy-desktop ]] && command -v pacman >/dev/null && pacman -Qqo /usr/bin/amarchy-desktop >/dev/null 2>&1; then
-  echo "The desktop app is installed by the $(pacman -Qqo /usr/bin/amarchy-desktop) package; it updates with your packages."
+  mkdir -p "$state"
+  printf '%s\n' "installed by the $(pacman -Qqo /usr/bin/amarchy-desktop) package (it updates with your packages)" >"$state/status"
   exit 0
 fi
 
@@ -92,30 +93,53 @@ fi
 if ((background)); then
   mkdir -p "$state"
   if systemctl --user is-active --quiet "$unit.service" 2>/dev/null; then
-    echo "The desktop app is being built already."
+    printf '%s\n' "being built in the background already (its log: $state/build.log)" >"$state/status"
     exit 0
   fi
+  printf '%s\n' "being built in the background when it changed (its log: $state/build.log)" >"$state/status"
   args=()
   ((force)) && args+=(--force)
   if command -v systemd-run >/dev/null &&
     systemd-run --user --quiet --collect --unit="$unit" -p Nice=10 -p StandardOutput="truncate:$state/build.log" \
       -p StandardError=inherit -E PATH="$PATH" "$here/install.sh" ${args[@]+"${args[@]}"} 2>/dev/null; then
-    echo "The desktop app is being built in the background (its log: $state/build.log)."
+    :
   else
     nohup setsid "$here/install.sh" ${args[@]+"${args[@]}"} >"$state/build.log" 2>&1 </dev/null &
-    echo "The desktop app is being built in the background (its log: $state/build.log)."
   fi
   exit 0
 fi
 
 [[ -d $HOME/.cargo/bin ]] && PATH="$HOME/.cargo/bin:$PATH"
+mkdir -p "$state"
 
-# ---- what it needs to build
+# How it went, in a line amarchy's install.sh says at its end ("The desktop
+# app: ..."): installed, not built and why, or what it still waits on.
+told() { printf '%s\n' "$*" >"$state/status"; }
+not_built() {
+  say "The desktop app isn't built: $*"
+  told "not built: $*"
+  exit 1
+}
 
-# What's missing, as Arch's packages (Omarchy is Arch), else in words.
-missing() {
+# ---- what building it needs, and what its microphone needs
+
+# Rust's cargo: on the PATH, in ~/.cargo, or mise's (Omarchy has mise).
+cargo=""
+find_cargo() {
+  cargo=$(command -v cargo 2>/dev/null || true)
+  [[ -z $cargo && -x $HOME/.cargo/bin/cargo ]] && cargo=$HOME/.cargo/bin/cargo
+  if [[ -z $cargo ]] && command -v mise >/dev/null; then
+    cargo=$(mise which cargo 2>/dev/null || true)
+  fi
+  [[ -n $cargo ]] || return 1
+  # Its rustc beside it, for cargo to find (its folder on the PATH, if not already).
+  case ":$PATH:" in *":$(dirname "$cargo"):"*) ;; *) PATH="$(dirname "$cargo"):$PATH" ;; esac
+}
+
+# What building it needs that isn't here, as Arch's packages (Omarchy is Arch).
+build_missing() {
   local m=()
-  command -v cargo >/dev/null || m+=(rust)
+  find_cargo || m+=(rust)
   command -v cc >/dev/null || m+=(base-devel)
   command -v pkg-config >/dev/null || m+=(pkgconf)
   if command -v pkg-config >/dev/null; then
@@ -124,35 +148,84 @@ missing() {
   else
     m+=(webkit2gtk-4.1 libayatana-appindicator)
   fi
-  # The microphone (dictation) comes through GStreamer: PipeWire's source, or Pulse's.
-  if command -v pacman >/dev/null; then
-    pacman -Qq gst-plugin-pipewire >/dev/null 2>&1 || m+=(gst-plugin-pipewire)
-    pacman -Qq gst-plugins-good >/dev/null 2>&1 || m+=(gst-plugins-good)
-  fi
   echo "${m[@]}"
 }
 
-need=$(missing)
-if [[ -n $need ]]; then
-  if command -v pacman >/dev/null; then
-    say "The desktop app needs: $need"
-    if [[ -t 0 && -t 1 ]]; then
-      echo "Installing them with pacman (sudo asks for your password)."
-      # shellcheck disable=SC2086
-      sudo pacman -S --needed $need
-      need=$(missing)
-    fi
-    if [[ -n $need ]]; then
-      echo "Not built. Install them (sudo pacman -S --needed $need), then run $here/install.sh."
-      exit 1
-    fi
+# What its microphone (dictation) needs, only when it runs: GStreamer's
+# PipeWire source and its good plugins. Never in the way of building it.
+mic_missing() {
+  command -v pacman >/dev/null || return 0
+  local m=()
+  pacman -Qq gst-plugin-pipewire >/dev/null 2>&1 || m+=(gst-plugin-pipewire)
+  pacman -Qq gst-plugins-good >/dev/null 2>&1 || m+=(gst-plugins-good)
+  echo "${m[@]}"
+}
+
+# pacman -S for these packages (sudo asks for your password); when it
+# fails, why in words ($why): never a system update of its own (-Sy, -Syu),
+# which only you decide on.
+why=""
+pacman_get() {
+  local log rc=0
+  log=$(mktemp)
+  # shellcheck disable=SC2068
+  sudo pacman -S --needed $@ 2> >(tee "$log" >&2) || rc=$?
+  sleep 0.2      # (tee's last words in)
+  if ((rc == 0)); then
+    rm -f "$log"
+    return 0
+  fi
+  if grep -qiE 'error: 404|returned error: 404|failed retrieving file|failed to retrieve some files' "$log"; then
+    why="pacman couldn't download them: this computer's list of packages is older than its mirror, which has newer versions now (a 404). Bringing it up to date is a system update (pacman -Syu), yours to decide; this install never does one. Nothing was installed."
+  elif grep -qi 'target not found' "$log"; then
+    why="pacman doesn't know $(sed -n 's/.*target not found: //p' "$log" | head -3 | paste -sd ' ' -) on this computer."
+  elif grep -qiE 'could not satisfy|conflicting|breaks dependency' "$log"; then
+    why="pacman wouldn't install them: $(grep -iE 'could not satisfy|conflicting|breaks dependency' "$log" | head -1 | sed 's/^error: //')."
   else
-    say "The desktop app needs Rust (cargo), WebKitGTK 4.1, libayatana-appindicator and GStreamer's PipeWire plugin to build."
+    why="pacman didn't install them$(grep -i '^error' "$log" | tail -1 | sed 's/^error: */: /')."
+  fi
+  rm -f "$log"
+  return 1
+}
+
+need=$(build_missing)
+if [[ -n $need ]]; then
+  if ! command -v pacman >/dev/null; then
+    say "The desktop app needs Rust (cargo), WebKitGTK 4.1 and libayatana-appindicator to build (and GStreamer's PipeWire plugin for its microphone)."
     echo "On Debian or Ubuntu: sudo apt install cargo libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-pipewire"
     echo "On Fedora: sudo dnf install cargo webkit2gtk4.1-devel libayatana-appindicator-gtk3-devel gstreamer1-plugins-good"
     echo "Then run $here/install.sh."
-    exit 1
+    not_built "it needs $need to build"
   fi
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    not_built "it needs $need to build: run $repo/install.sh in a terminal, which installs them (sudo pacman)"
+  fi
+  say "To build the desktop app this computer needs: $need"
+  pacman_get $need || true
+  need=$(build_missing)
+  # Rust alone, and pacman can't get it: Rust for you alone, from mise.
+  if [[ $need == rust ]] && command -v mise >/dev/null; then
+    [[ -n $why ]] && echo "$why"
+    read -rp "Install Rust for you alone with mise instead (mise use -g rust; no system packages)? [Y/n] " answer || answer=n
+    if [[ ! $answer =~ ^[Nn] ]] && mise use -g rust@stable; then
+      need=$(build_missing)
+    fi
+  fi
+  if [[ -n $need ]]; then
+    [[ -n $why ]] || why="They weren't installed."
+    not_built "it needs $need to build. $why Once they are, run $here/install.sh again."
+  fi
+fi
+
+# The microphone's, apart: if pacman can't get them, the app is built
+# anyway, and says dictation in it waits on them.
+mic=$(mic_missing)
+if [[ -n $mic && -t 0 && -t 1 ]]; then
+  say "For dictation in the desktop app (its microphone) this computer needs: $mic"
+  why=""
+  pacman_get $mic || true
+  mic=$(mic_missing)
+  [[ -n $mic && -n $why ]] && echo "$why"
 fi
 
 # ---- built only when desktop/ changed (what's in it, the build not)
@@ -163,15 +236,14 @@ sources() {
   (cd "$here" && find . \( -path ./target -o -path ./gen -o -path ./test \) -prune -o -type f -print |
     LC_ALL=C sort | xargs -d '\n' sha1sum | sha1sum | cut -c1-40)
 }
-mkdir -p "$state"
 want=$(sources)
 built=$(cat "$state/built" 2>/dev/null || true)
 fresh=0
 if ((force)) || [[ $want != "$built" || ! -x $app ]]; then
   say "Building the desktop app (a few minutes the first time)…"
-  if ! CARGO_TARGET_DIR="$target" cargo build --release --locked --manifest-path "$here/Cargo.toml"; then
-    echo "The desktop app didn't build (above). amarchy itself is installed."
-    exit 1
+  find_cargo || not_built "Rust (cargo) isn't installed"
+  if ! CARGO_TARGET_DIR="$target" "$cargo" build --release --locked --manifest-path "$here/Cargo.toml"; then
+    not_built "cargo failed (above)"
   fi
   mkdir -p "$bin_dir"
   # In place at once: a running one keeps the build it started with.
@@ -223,4 +295,11 @@ fi
 
 if ((fresh)); then
   say "The desktop app is installed: Amarchy in your launcher, or amarchy-desktop."
+fi
+if [[ -n $mic ]]; then
+  say "Dictation in the desktop app waits on: $mic"
+  echo "The app works without them. Once pacman can install them (sudo pacman -S --needed $mic), it hears you: no rebuild."
+  told "installed (Amarchy in your launcher); dictation in it waits on $mic (sudo pacman -S --needed $mic)"
+else
+  told "installed (Amarchy in your launcher, or amarchy-desktop)"
 fi

@@ -45,6 +45,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # notifications (buttons, a click, closed, a chime,
                                                     # a restart)
 python3 ../test/desktop-notices.py                  # the server's side: kept, streamed, the buttons
+python3 test/install-test.py                        # install.sh when pacman can't get a package (a 404):
+                                                    # built anyway without the mic's, mise's Rust, why
 python3 test/compare.py                             # the window next to Chromium, phone and wide: the
                                                     # same layout (boxes to 3 px), side by side pictures
 ```

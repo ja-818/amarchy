@@ -624,9 +624,15 @@ window closed.
 - **Install**: on a computer with a desktop (Omarchy, or any Wayland or X
   session), `install.sh` builds it there (`desktop/install.sh`: Rust and
   WebKitGTK; a few minutes the first time). On Arch it offers to install what
-  the build needs with pacman (sudo asks for your password). It's **Amarchy** in
-  your launcher, or `amarchy-desktop`. `install.sh --desktop` builds it anywhere
-  (over SSH, say); `--no-desktop` leaves it out.
+  the build needs with pacman (sudo asks for your password); the microphone's
+  GStreamer plugins are asked for apart and never stop the build: when pacman
+  can't get them, the app is built anyway and says dictation in it waits on
+  them. When pacman can't get Rust, it offers mise's instead (just for you).
+  It never runs a system update (`pacman -Syu`): when your package list is too
+  old for your mirror, it says so and leaves that to you. Its install ends by
+  saying how it went ("The desktop app: …"). It's **Amarchy** in your launcher,
+  or `amarchy-desktop`. `install.sh --desktop` builds it anywhere (over SSH,
+  say); `--no-desktop` leaves it out.
 - **Updates**: with amarchy. An update builds it again in the background when
   it changed, and a running one starts again on the new build, where it was.
 - **What it opens**: this computer's amarchy when it has chats (or merges your

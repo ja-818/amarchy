@@ -374,12 +374,16 @@ desktop_here() {
   [[ -x $bin_dir/amarchy-desktop || -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} || -d $HOME/.local/share/omarchy ]] && return 0
   systemctl --user is-active --quiet graphical-session.target 2>/dev/null
 }
+desktop_said=""
 if [[ -x $repo/desktop/install.sh ]] && desktop_here; then
+  rm -f "$state/desktop/status"
   if [[ -t 0 && -t 1 ]]; then
     "$repo/desktop/install.sh" || true
   else
     "$repo/desktop/install.sh" --background || true
   fi
+  # How it went, for the summary below ("The desktop app: ...").
+  desktop_said=$(cat "$state/desktop/status" 2>/dev/null || echo "not built (desktop/install.sh stopped without saying why)")
   # A computer with the desktop app is a machine (the plan's decision 2): its
   # app server on, once (amarchy app on: for this machine alone until
   # Tailscale is up, then on your tailnet too; it says what's missing). Turned
@@ -396,6 +400,13 @@ fi
 # ---- end of the desktop app (track B)
 
 say "amarchy installed."
+# ---- the desktop app (track B): how it went, said plainly when it wasn't built.
+if [[ $desktop_said == "not built"* ]]; then
+  say "  The desktop app: $desktop_said"
+elif [[ -n $desktop_said ]]; then
+  echo "  The desktop app: $desktop_said"
+fi
+# ---- end of the desktop app (track B)
 if [[ -f $units/amarchy-app.service ]]; then
   echo "  The app: $("$bin_dir/amarchy" app --status 2>&1 || true)"
 else
