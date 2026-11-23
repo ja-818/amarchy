@@ -152,11 +152,12 @@ build_missing() {
 }
 
 # What its microphone (dictation) needs, only when it runs: GStreamer's
-# PipeWire source and its good plugins. Never in the way of building it.
+# PipeWire source, its base and good plugins. Never in the way of building it.
 mic_missing() {
   command -v pacman >/dev/null || return 0
   local m=()
   pacman -Qq gst-plugin-pipewire >/dev/null 2>&1 || m+=(gst-plugin-pipewire)
+  pacman -Qq gst-plugins-base >/dev/null 2>&1 || m+=(gst-plugins-base)
   pacman -Qq gst-plugins-good >/dev/null 2>&1 || m+=(gst-plugins-good)
   echo "${m[@]}"
 }
@@ -223,7 +224,13 @@ mic=$(mic_missing)
 if [[ -n $mic && -t 0 && -t 1 ]]; then
   say "For dictation in the desktop app (its microphone) this computer needs: $mic"
   why=""
-  pacman_get $mic || true
+  # One transaction is all or nothing: after a failure, each on its own,
+  # so the ones pacman can get still come (PipeWire's is what hears you).
+  if ! pacman_get $mic; then
+    for p in $mic; do
+      [[ $(mic_missing) == *"$p"* ]] && { pacman_get "$p" || true; }
+    done
+  fi
   mic=$(mic_missing)
   [[ -n $mic && -n $why ]] && echo "$why"
 fi

@@ -162,18 +162,21 @@ def main():
     out, code = run(home, path)
     asked = (fake / "asked.log").read_text()
     check(code == 0 and (home / ".local/bin/amarchy-desktop").is_file(), f"built and installed all the same (exit {code})")
-    check("pacman -S --needed gst-plugin-pipewire gst-plugins-good" in asked and "rust" not in asked,
+    check("pacman -S --needed gst-plugin-pipewire gst-plugins-base gst-plugins-good" in asked and "rust" not in asked,
           "the build's packages and the microphone's asked for apart (here only the microphone's)")
+    state = json.loads((fake / "state.json").read_text())
+    check("gst-plugin-pipewire" in state["installed"] and "gst-plugins-base" in state["installed"],
+          "after the 404, each on its own: the ones pacman can get come (PipeWire's)")
     check("older than its mirror" in out and "a 404" in out, "pacman's 404 said in words")
-    check("Dictation in the desktop app waits on: gst-plugin-pipewire gst-plugins-good" in out
-          and "sudo pacman -S --needed gst-plugin-pipewire gst-plugins-good" in out, "dictation waits on them, with the command")
+    check("Dictation in the desktop app waits on: gst-plugins-good" in out
+          and "sudo pacman -S --needed gst-plugins-good" in out, "dictation waits on the one missing, with the command")
     check("-Sy" not in out.replace("-Syu), yours to decide", ""), "no partial update suggested (-Sy)")
-    check(status(home).startswith("installed") and "dictation in it waits on gst-plugin-pipewire gst-plugins-good" in status(home),
+    check(status(home).startswith("installed") and "dictation in it waits on gst-plugins-good" in status(home),
           f"the summary line says so ({status(home)})")
 
     # ---- Rust: pacman can't get it, mise can (asked first).
     print("Rust: a 404, then mise")
-    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-good"], "gone": ["rust"]}, cargo=False)
+    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-base", "gst-plugins-good"], "gone": ["rust"]}, cargo=False)
     homes.append(home)
     out, code = run(home, path, answers="y\n")
     asked = (fake / "asked.log").read_text()
@@ -181,7 +184,7 @@ def main():
     check("Install Rust for you alone with mise" in out and "mise use -g rust@stable" in asked, "then mise, asked first")
     check(code == 0 and (home / ".local/bin/amarchy-desktop").is_file() and status(home).startswith("installed"),
           f"built with mise's Rust ({status(home)})")
-    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-good"], "gone": ["rust"]}, cargo=False)
+    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-base", "gst-plugins-good"], "gone": ["rust"]}, cargo=False)
     homes.append(home)
     out, code = run(home, path, answers="n\n")
     check(code == 1 and not (home / ".local/bin/amarchy-desktop").exists(), "mise declined: not built")
@@ -190,7 +193,7 @@ def main():
 
     # ---- what the build needs, a 404: not built, why, no system update.
     print("WebKitGTK: a 404")
-    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-good"], "gone": ["webkit2gtk-4.1"],
+    home, fake, path = sandbox({"installed": ["gst-plugin-pipewire", "gst-plugins-base", "gst-plugins-good"], "gone": ["webkit2gtk-4.1"],
                                 "pc_missing": ["webkit2gtk-4.1"], "pc_pkg": {"webkit2gtk-4.1": "webkit2gtk-4.1"}})
     homes.append(home)
     out, code = run(home, path)
