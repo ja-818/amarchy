@@ -2439,7 +2439,9 @@ function sleepSettings(draw) {
   const after = app.view ? app.view.sleep_after : 1;
   const choices = [[1, "1m"], [5, "5m"], [15, "15m"], [60, "1h"], ["off", "Never"]];
   if (after !== undefined && !choices.some(([v]) => v === after)) choices.splice(-1, 0, [after, `${after}m`]);
-  return [h("div", { class: "section" }, "Sleep"),
+  // Each machine's own (its memory): said so, with two or more (the rest of what's yours is the same on all).
+  const own = machinesShown().length > 1 ? h("p", { class: "hint" }, `For the chats on ${machineOf("").label}: each machine sleeps its own.`) : null;
+  return [h("div", { class: "section" }, "Sleep"), own,
     h("div", { class: "seg" }, ...choices.map(([value, label]) =>
       h("button", { class: `control${after === value ? " on" : ""}`, onclick: async () => {
         try { await api("/api/sleep", { after: value }); app.view.sleep_after = value; draw(); }

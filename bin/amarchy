@@ -4798,7 +4798,8 @@ def mission_log(rec):
     try:
         MISSIONS.parent.mkdir(parents=True, exist_ok=True)
         with open(MISSIONS, "a") as f:
-            f.write(json.dumps({"at": int(time.time()), **rec}) + "\n")
+            # rid: this record, the same on every machine (see "your stuff on every machine").
+            f.write(json.dumps({"at": int(time.time()), **rec, "rid": f"{machine_name()}:{time.time_ns() // 1000}"}) + "\n")
     except OSError as e:
         print(f"amarchy: couldn't write down the mission: {e}", file=sys.stderr)
 
@@ -4838,6 +4839,7 @@ def mission_done(s):
 MERGES = STATE / "merges.json"                 # chat id -> {merges: [...], pending, branches, since, key}
 MERGES_LOCK = STATE / "merges.lock"
 MISSIONS_SINCE = STATE / "missions-since"      # merges from then on count (a reset starts it again)
+MISSIONS_RESET = STATE / "missions-reset"      # your last reset, on any machine (see "your stuff on every machine")
 MERGE_EVERY = 60            # each open chat looked at this often
 MERGE_GH_EVERY = 120        # its GitHub pull requests this often
 MERGE_RE = re.compile(r"^Merge (?:remote-tracking )?branch '(?:origin/)?([^']+)'")
@@ -5244,20 +5246,25 @@ def mission_days_in_a_row(days, today):
 
 
 def missions_lines():
-    """MISSIONS read: its records, in the order they happened (a pull
-    request's merge is written down when it's seen, after its time)."""
-    try:
-        lines = MISSIONS.read_text().splitlines()
-    except OSError:
-        lines = []
-    out = []
-    for line in lines:
+    """Every machine's records (MISSIONS, and the others' learned: see "your
+    stuff on every machine"), each once, from the last reset on, in the
+    order they happened (a pull request's merge is written down when it's
+    seen, after its time). A chat another machine names: <machine>:<id>."""
+    me, since, seen, out = machine_name(), missions_reset_at(), set(), []
+    for r in mission_records_own() + mission_records_learned():
         try:
-            r = json.loads(line)
             r["at"] = int(r["at"])
-        except (ValueError, KeyError, TypeError, AttributeError):
+        except (ValueError, KeyError, TypeError):
             continue
-        out.append(r)
+        if r["rid"] in seen:
+            continue
+        seen.add(r["rid"])
+        origin = rid_parts(r["rid"])[0]
+        if origin and origin != me and isinstance(r.get("id"), str) and r["id"] and ":" not in r["id"] \
+                and not r["id"].startswith("task:"):
+            r["id"] = f"{origin}:{r['id']}"
+        if r["at"] >= since:
+            out.append(r)
     out.sort(key=lambda r: r["at"])
     return out
 
@@ -5273,12 +5280,18 @@ def missions_view():
     earned or null). Read again when a file or the day changes."""
     today = datetime.date.today()
     stamp = [today]
-    for f in (MISSIONS, MISSION_GOAL, MISSION_BADGES):
+    for f in (MISSIONS, MISSION_GOAL, MISSION_BADGES, MISSIONS_RESET, SYNC_LEARNED):
         try:
             st = f.stat()
             stamp.append((st.st_mtime_ns, st.st_size))
         except OSError:
             stamp.append(None)
+    for f in sorted(SYNC_LEARNED.glob("*.jsonl")) if SYNC_LEARNED.is_dir() else []:
+        try:
+            st = f.stat()
+            stamp.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
     stamp = tuple(stamp)
     if _missions.get("stamp") == stamp:
         return _missions["view"]
@@ -5292,7 +5305,7 @@ def missions_view():
     def earn(key, at):
         earned.setdefault(key, at)
 
-    for r in missions_lines() if stamp[1] else []:
+    for r in missions_lines():
         at = r["at"]
         d = datetime.date.fromtimestamp(at)
         kind = r.get("kind") or "chat"
@@ -6779,12 +6792,13 @@ def missions_reset(today=None):
         n += 1
         to = STATE / f"missions-backup-{day}-{n}"
     to.mkdir(parents=True)
-    for f in (MISSIONS, MISSION_BADGES, MISSION_GOAL, MISSION_TOLD, MISSIONS_SINCE, MERGES):
+    for f in (MISSIONS, MISSION_BADGES, MISSION_GOAL, MISSION_TOLD, MISSIONS_SINCE, MISSIONS_RESET, MERGES):
         if f.exists():
             shutil.copy2(f, to / f.name)
     write_file(MISSIONS, "")
     write_file(MISSION_BADGES, "{}")
     write_file(MISSIONS_SINCE, f"{int(time.time())}\n")
+    write_file(MISSIONS_RESET, f"{int(time.time())}\n")     # every machine's from then on (see "your stuff on every machine")
     _missions.clear()
     return to
 
@@ -14945,6 +14959,8 @@ class Peers:
             now = {**was, **change}
             if now.get("on") != was.get("on"):
                 now["since"] = time.time()
+                if now.get("on") and getattr(self.st, "sync", None):
+                    self.st.sync.soon(name)     # back: what changed meanwhile, both ways
             if now == was:
                 return
             self.seen[name] = now
@@ -16831,6 +16847,676 @@ def move_check_words(out):
     return "\n".join(lines)
 
 
+# ------------------------------------------------------------------ your stuff on every machine (track D)
+#
+# What's yours, not a chat's, is the same on every machine
+# (docs/plan-omarchy-and-machines.md, "Your stuff on every machine"): each
+# machine keeps a copy, changes go to the others as they're made, and one
+# that was off catches up when it's back, through any other. No main
+# machine.
+#
+# - Items, last change wins: what a setting is now ({value, at, by}). A
+#   change is found where it's made (the app, the CLI, a timer: whatever
+#   wrote the file), by looking every couple of seconds; one taken from
+#   another machine is written as if made here, with its stamp, so it isn't
+#   taken for a change of this one's.
+# - Sets kept whole: your missions' records (each machine's, rid
+#   <machine>:<n>), the badges (the earliest wins), when the reminders were
+#   last told, your own chimes and themes.
+# - Files (a wallpaper, a chime, a theme's font) go by their SHA-256.
+
+SYNC = STATE / "sync"
+SYNC_ITEMS = SYNC / "items.json"        # {key: {value, at, by}}: as last stamped, here or anywhere
+SYNC_FILES = SYNC / "files"             # <sha256>: files another machine may ask for
+SYNC_LEARNED = SYNC / "missions"        # <machine>.jsonl: other machines' mission records
+SYNC_THEMES = SYNC / "themes.json"      # {key: {files, at, by}}: your own themes, as last stamped
+SYNC_LOOK_EVERY = 2                     # seconds between looks for a change made here
+SYNC_PULL_EVERY = 60                    # seconds between asking each machine what it has (a push missed: caught up then)
+SYNC_FILE_MAX = 60_000_000
+
+
+def sync_text(f):
+    try:
+        return f.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def sync_write_text(f, value):
+    if value is None:
+        f.unlink(missing_ok=True)
+    else:
+        write_file(f, f"{value}\n")
+
+
+_sha_memo = {}
+
+
+def file_sha(f):
+    """A file's SHA-256 (hex), read again only when it changes; None if it's not there."""
+    try:
+        st_ = f.stat()
+    except OSError:
+        return None
+    key, sig = str(f), (st_.st_mtime_ns, st_.st_size)
+    kept = _sha_memo.get(key)
+    if kept and kept[0] == sig:
+        return kept[1]
+    h = hashlib.sha256()
+    with open(f, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    _sha_memo[key] = (sig, h.hexdigest())
+    return _sha_memo[key][1]
+
+
+def sync_keep_file(f):
+    """A file of yours, kept by its hash for the others to ask for: its hash."""
+    sha = file_sha(f)
+    if sha and not (SYNC_FILES / sha).exists():
+        SYNC_FILES.mkdir(parents=True, exist_ok=True)
+        tmp = SYNC_FILES / f".{sha}.{os.getpid()}"
+        shutil.copyfile(f, tmp)
+        os.replace(tmp, SYNC_FILES / sha)
+    return sha
+
+
+def sync_file(sha):
+    """A file by its hash, if this machine has it."""
+    f = SYNC_FILES / sha if re.fullmatch(r"[0-9a-f]{64}", sha or "") else None
+    return f if f and f.is_file() else None
+
+
+# ---- the items: each one read and written where it lives
+
+def look_value():
+    choice = look_choice()
+    own = choice.get("own") if isinstance(choice.get("own"), dict) else {}
+    files = {}
+    for name in own.values():
+        sha = sync_keep_file(APP_PICK / name) if isinstance(name, str) else None
+        if sha:
+            files[name] = sha
+    return {"choice": choice, "files": files} if choice else None
+
+
+def look_take(value, fetch):
+    """The look as another machine has it: its own wallpaper's files (fetched
+    by their hash), then its choice; Claude Code here wears its theme."""
+    if not isinstance(value, dict) or not isinstance(value.get("choice"), dict):
+        return
+    for name, sha in (value.get("files") or {}).items():
+        if not re.fullmatch(r"own-[0-9a-f]{12}-(phone|wide)\.(jpg|png|webp)", name or ""):
+            continue
+        if file_sha(APP_PICK / name) != sha:
+            data = fetch(sha)
+            if data is None:
+                raise PeerError(f"the wallpaper {name} didn't come")
+            write_file(APP_PICK / name, data)
+    was = look_choice().get("theme")
+    write_file(APP_PICK / "choice.json", json.dumps(value["choice"], indent=1))
+    keep = set((value["choice"].get("own") or {}).values()) | {"choice.json"}
+    for f in APP_PICK.iterdir():
+        if f.name not in keep and not f.name.startswith("."):
+            f.unlink(missing_ok=True)
+    if value["choice"].get("theme") != was:
+        try:
+            look_claude(look_worn()["claude"])
+        except Exception:
+            pass
+
+
+def text_item(f, ok=None):
+    """An item that's one line in a file: (read, write)."""
+    def read():
+        v = sync_text(f)
+        return v if v is None or ok is None or ok(v) else None
+
+    def write(v, fetch):
+        if v is None or ok is None or ok(v):
+            sync_write_text(f, v)
+    return read, write
+
+
+def order_item():
+    def read():
+        order = project_order()
+        return order or None
+
+    def write(v, fetch):
+        if isinstance(v, list) and all(isinstance(n, str) and n.strip() and "\n" not in n for n in v):
+            write_file(PROJECT_ORDER, "".join(n + "\n" for n in v))
+    return read, write
+
+
+def reset_item():
+    """Your last reset (amarchy missions --reset), on any machine: from then
+    on, the same score everywhere. (A machine's own first look, when it
+    starts counting merges, isn't one.)"""
+    def read():
+        return sync_text(MISSIONS_RESET)
+
+    def write(v, fetch):
+        if v is None or not str(v).isdigit():
+            return
+        write_file(MISSIONS_RESET, f"{v}\n")
+        if missions_since() < int(v):
+            write_file(MISSIONS_SINCE, f"{v}\n")       # merges here count from then on too
+        # The badges earned before it go here too.
+        kept = {k: at for k, at in mission_badges_kept().items() if isinstance(at, (int, float)) and at >= int(v)}
+        write_file(MISSION_BADGES, json.dumps(kept))
+        _missions.clear()
+    return read, write
+
+
+def missions_reset_at():
+    """Your last reset's time, on any machine (0: never)."""
+    v = sync_text(MISSIONS_RESET)
+    return int(v) if v and v.isdigit() else 0
+
+
+SYNC_KEYS = {
+    "look": (look_value, look_take),
+    "project-order": order_item(),
+    "new-model": text_item(NEW_MODEL_FILE, lambda v: bool(re.fullmatch(MODEL_RE, v))),
+    "new-effort": text_item(NEW_EFFORT_FILE, lambda v: bool(effort_choice(v))),
+    "alerts": text_item(ALERTS_FILE, lambda v: v in ALERTS),
+    "sound": text_item(SOUND_FILE, lambda v: len(v) <= 200),
+    "sound-assistant": text_item(ASSISTANT_SOUND_FILE, lambda v: len(v) <= 200),
+    "show-terminals": text_item(SHOW_TERMINALS, lambda v: v in ("on", "off")),
+    "machines-as": text_item(MACHINES_AS, lambda v: v in ("icon", "name")),
+    "missions-goal": text_item(MISSION_GOAL, lambda v: v.isdigit() and int(v) <= 50),
+    "missions-since": reset_item(),
+}
+
+
+SYNC_KEY_FILES = {"look": APP_PICK / "choice.json", "project-order": PROJECT_ORDER, "new-model": NEW_MODEL_FILE,
+                  "new-effort": NEW_EFFORT_FILE, "alerts": ALERTS_FILE, "sound": SOUND_FILE,
+                  "sound-assistant": ASSISTANT_SOUND_FILE, "show-terminals": SHOW_TERMINALS, "machines-as": MACHINES_AS,
+                  "missions-goal": MISSION_GOAL, "missions-since": MISSIONS_RESET}
+
+
+def sync_set_at(key):
+    """When an item was last set here, before sync knew it: its file's time (0: never)."""
+    try:
+        return SYNC_KEY_FILES[key].stat().st_mtime
+    except (KeyError, OSError):
+        return 0
+
+
+# What a setting is when you never set it (an install may have written it
+# so): on a machine's first look, as if never set, so the machine where you
+# did set it wins, however new this one's file is.
+SYNC_DEFAULTS = {"new-model": (NEW_MODEL,), "new-effort": ("auto",), "alerts": ("needs-you",), "machines-as": ("icon",),
+                 "missions-goal": (str(MISSION_GOAL_DEFAULT),), "show-terminals": (), "project-order": ((),),
+                 "missions-since": (), "sound": (), "sound-assistant": ()}
+
+
+def sync_unset(key, value):
+    """Whether an item's value is what it is when never set."""
+    if value is None:
+        return True
+    if key == "look":
+        c = (value or {}).get("choice") or {}
+        return (c.get("theme") in (None, LOOK_DEFAULT) and not c.get("own") and c.get("wallpaper") in (None, "theme")
+                and c.get("font") in (None, "jetbrains-mono") and not c.get("backgrounds"))
+    return value in SYNC_DEFAULTS.get(key, ()) or (isinstance(value, list) and not value)
+
+
+def sync_newer(a, b):
+    """Whether stamp a ({at, by}) is later than b (the same at: the greater by)."""
+    if not b:
+        return True
+    return (float(a.get("at") or 0), str(a.get("by") or "")) > (float(b.get("at") or 0), str(b.get("by") or ""))
+
+
+@contextlib.contextmanager
+def sync_lock():
+    SYNC.mkdir(parents=True, exist_ok=True)
+    with open(SYNC / ".lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def sync_json(f, default):
+    try:
+        v = json.loads(f.read_text())
+        return v if isinstance(v, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def sync_items_look():
+    """A change made here since the last look: each item whose value isn't
+    the one last stamped, stamped now, by this machine. The keys stamped."""
+    with sync_lock():
+        items = sync_json(SYNC_ITEMS, {})
+        changed = sync_items_seen(items)
+        if changed:
+            write_file(SYNC_ITEMS, json.dumps(items))
+    return changed
+
+
+_sync_stamped = set()       # keys stamped here, wherever (a look, before a take): pushed by Sync
+
+
+def sync_stamped():
+    """The keys stamped here since last asked."""
+    with _sync_stamped_lock:
+        keys = set(_sync_stamped)
+        _sync_stamped.clear()
+    return keys
+
+
+_sync_stamped_lock = threading.Lock()
+
+
+def sync_items_seen(items):
+    """(Under sync_lock.) Each item here whose value isn't the one stamped in
+    items, stamped in it now. The keys stamped."""
+    changed = []
+    me, now = machine_name(), time.time()
+    for key, (read, _) in SYNC_KEYS.items():
+        try:
+            value = read()
+        except Exception as e:
+            print(f"amarchy app: sync: {key}: {e}", file=sys.stderr, flush=True)
+            continue
+        kept = items.get(key)
+        if kept is None or kept.get("value") != value:
+            # When it was changed: its file's time (found a while after,
+            # a machine stopped in between: still its own time, so a later
+            # change elsewhere wins); one taken away, now. The first look:
+            # as old as its file (never set: as old as can be), so the
+            # latest change of any machine's wins, whichever looked first.
+            at = sync_set_at(key)
+            if kept is None and sync_unset(key, value):
+                at = 0
+            items[key] = {"value": value, "at": at if kept is None else (at if value is not None and at else now), "by": me}
+            changed.append(key)
+    if changed:
+        with _sync_stamped_lock:
+            _sync_stamped.update(changed)
+    return changed
+
+
+def sync_items_take(theirs, fetch):
+    """Items from another machine: each one later than ours, written here
+    as if changed here, with its stamp. The keys taken."""
+    taken = []
+    if not isinstance(theirs, dict):
+        return taken
+    with sync_lock():
+        items = sync_json(SYNC_ITEMS, {})
+        # A change made here a moment ago, not looked at yet: stamped first,
+        # so one from elsewhere doesn't overwrite it unseen.
+        if sync_items_seen(items):
+            write_file(SYNC_ITEMS, json.dumps(items))
+        for key, item in theirs.items():
+            if key not in SYNC_KEYS or not isinstance(item, dict) or not sync_newer(item, items.get(key)):
+                continue
+            try:
+                SYNC_KEYS[key][1](item.get("value"), fetch)
+            except PeerError as e:
+                print(f"amarchy app: sync: {key}: {e}", file=sys.stderr, flush=True)
+                continue
+            except Exception as e:
+                print(f"amarchy app: sync: {key}: {e}", file=sys.stderr, flush=True)
+                continue
+            # As it reads here now (a file just written), so the next look sees no change.
+            try:
+                now = SYNC_KEYS[key][0]()
+            except Exception:
+                now = item.get("value")
+            items[key] = {"value": now, "at": float(item.get("at") or 0), "by": str(item.get("by") or "")}
+            taken.append(key)
+        if taken:
+            write_file(SYNC_ITEMS, json.dumps(items))
+    return taken
+
+
+# ---- the sets: kept whole
+
+def badges_take(theirs):
+    """Badges from another machine: each the earliest it was earned, since the last reset."""
+    if not isinstance(theirs, dict):
+        return False
+    since = missions_reset_at()
+    kept = mission_badges_kept()
+    out = dict(kept)
+    for k, at in theirs.items():
+        if isinstance(k, str) and isinstance(at, (int, float)) and at >= since and (k not in out or at < out[k]):
+            out[k] = int(at)
+    if out != kept:
+        write_file(MISSION_BADGES, json.dumps(out))
+        return True
+    return False
+
+
+def told_take(theirs):
+    """When the reminder and the recap were last told: the latest of any machine's."""
+    if not isinstance(theirs, dict):
+        return False
+    kept = sync_json(MISSION_TOLD, {})
+    out = dict(kept)
+    for k, day in theirs.items():
+        if k in ("reminder", "recap") and isinstance(day, str) and re.fullmatch(r"\d{4}-\d\d-\d\d", day) and day > str(out.get(k) or ""):
+            out[k] = day
+    if out != kept:
+        write_file(MISSION_TOLD, json.dumps(out))
+        return True
+    return False
+
+
+def sounds_value():
+    """Your own chimes: name → hash."""
+    out = {}
+    if USER_SOUNDS.is_dir():
+        for f in sorted(USER_SOUNDS.iterdir()):
+            if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in AUDIO:
+                sha = sync_keep_file(f)
+                if sha:
+                    out[f.name] = sha
+    return out
+
+
+def sounds_take(theirs, fetch):
+    if not isinstance(theirs, dict):
+        return False
+    mine, got = sounds_value(), False
+    for name, sha in theirs.items():
+        if name in mine or not re.fullmatch(r"[\w .()-]{1,120}", name or "") or Path(name).suffix.lower() not in AUDIO:
+            continue
+        data = fetch(sha)
+        if data is not None:
+            write_file(USER_SOUNDS / name, data)
+            got = True
+    return got
+
+
+def themes_value():
+    """Your own themes: key → {files: name → hash, at, by}, stamped when one changes here."""
+    with sync_lock():
+        kept = sync_json(SYNC_THEMES, {})
+        out, me, changed = {}, machine_name(), False
+        for d in sorted(CUSTOM.iterdir()) if CUSTOM.is_dir() else []:
+            if not d.is_dir() or not re.fullmatch(r"[\w-]{1,60}", d.name) or not (d / "theme.json").is_file():
+                continue
+            files = {f.name: sync_keep_file(f) for f in sorted(d.iterdir()) if f.is_file() and not f.name.startswith(".")}
+            was = kept.get(d.name)
+            if was and was.get("files") == files:
+                out[d.name] = was
+            else:
+                out[d.name] = {"files": files, "at": time.time() if was else 0, "by": me}
+                changed = True
+        if changed or set(out) != set(kept):
+            write_file(SYNC_THEMES, json.dumps(out))
+    return out
+
+
+def themes_take(theirs, fetch):
+    """Themes of yours from another machine: each newer than ours, put in place whole."""
+    if not isinstance(theirs, dict):
+        return False
+    mine, got = themes_value(), False
+    for key, t in theirs.items():
+        if not re.fullmatch(r"[\w-]{1,60}", key or "") or not isinstance(t, dict) or not isinstance(t.get("files"), dict) \
+                or "theme.json" not in t["files"] or not sync_newer(t, mine.get(key)):
+            continue
+        tmp = CUSTOM / f".{key}.{os.getpid()}"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True)
+        try:
+            for name, sha in t["files"].items():
+                if not re.fullmatch(r"[\w.-]{1,80}", name or ""):
+                    raise PeerError(f"a theme's file named {name!r}")
+                data = fetch(sha)
+                if data is None:
+                    raise PeerError(f"{key}'s {name} didn't come")
+                (tmp / name).write_bytes(data)
+            old = CUSTOM / f".{key}.old.{os.getpid()}"
+            if (CUSTOM / key).exists():
+                os.replace(CUSTOM / key, old)
+            os.replace(tmp, CUSTOM / key)
+            shutil.rmtree(old, ignore_errors=True)
+        except PeerError as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            print(f"amarchy app: sync: theme {key}: {e}", file=sys.stderr, flush=True)
+            continue
+        with sync_lock():
+            kept = sync_json(SYNC_THEMES, {})
+            kept[key] = {"files": t["files"], "at": float(t.get("at") or 0), "by": str(t.get("by") or "")}
+            write_file(SYNC_THEMES, json.dumps(kept))
+        got = True
+    return got
+
+
+# ---- the missions: every machine's records
+
+def mission_records_own():
+    """This machine's records, each with its rid (<machine>:<n>; one written
+    before machines: its line's number)."""
+    me = machine_name()
+    try:
+        lines = MISSIONS.read_text().splitlines()
+    except OSError:
+        lines = []
+    out = []
+    for i, line in enumerate(lines):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict):
+            r.setdefault("rid", f"{me}:{i}")
+            out.append(r)
+    return out
+
+
+def mission_records_learned():
+    out = []
+    for f in sorted(SYNC_LEARNED.glob("*.jsonl")) if SYNC_LEARNED.is_dir() else []:
+        try:
+            for line in f.read_text().splitlines():
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict) and isinstance(r.get("rid"), str):
+                    out.append(r)
+        except OSError:
+            continue
+    return out
+
+
+def rid_parts(rid):
+    origin, _, n = str(rid).rpartition(":")
+    try:
+        return origin, int(n)
+    except ValueError:
+        return origin, -1
+
+
+def missions_have():
+    """For each machine, the last of its records this one has: {machine: n}."""
+    have = {}
+    for r in mission_records_own() + mission_records_learned():
+        origin, n = rid_parts(r["rid"])
+        if origin and n > have.get(origin, -1):
+            have[origin] = n
+    return have
+
+
+def missions_after(have):
+    """The records this one has (its own and learned) that have doesn't."""
+    have = have if isinstance(have, dict) else {}
+    out = []
+    for r in mission_records_own() + mission_records_learned():
+        origin, n = rid_parts(r["rid"])
+        if origin and n > int(have.get(origin, -1) if str(have.get(origin, -1)).lstrip("-").isdigit() else -1):
+            out.append(r)
+    return out[-20000:]
+
+
+def missions_take(records):
+    """Other machines' records, each kept once (none of this one's)."""
+    if not isinstance(records, list):
+        return False
+    me, have = machine_name(), missions_have()
+    new = {}
+    for r in records:
+        if not isinstance(r, dict) or not isinstance(r.get("rid"), str) or not isinstance(r.get("at"), (int, float)):
+            continue
+        origin, n = rid_parts(r["rid"])
+        if not re.fullmatch(MACHINE_NAME_RE, origin or "") or origin == me or n <= have.get(origin, -1):
+            continue
+        new.setdefault(origin, {})[n] = r
+    for origin, rs in new.items():
+        SYNC_LEARNED.mkdir(parents=True, exist_ok=True)
+        with open(SYNC_LEARNED / f"{origin}.jsonl", "a") as fh:
+            for n in sorted(rs):
+                fh.write(json.dumps(rs[n]) + "\n")
+    if new:
+        _missions.clear()
+    return bool(new)
+
+
+# ---- the exchange
+
+def sync_state(have=None):
+    """What this machine knows of what's yours (its own and what it learned
+    from others), for another machine: GET /api/peer/sync."""
+    sync_items_look()
+    return {"items": sync_json(SYNC_ITEMS, {}), "badges": mission_badges_kept(), "told": sync_json(MISSION_TOLD, {}),
+            "sounds": sounds_value(), "themes": themes_value(), "missions": missions_after(have) if have is not None else [],
+            "have": missions_have()}
+
+
+_sync_taking = threading.Lock()     # one machine's at a time (a push and a pull can come at once)
+
+
+def sync_take(theirs, fetch):
+    """What another machine knows: taken where it's newer, kept whole where
+    it's a set. Whether anything changed here."""
+    if not isinstance(theirs, dict):
+        return False
+    with _sync_taking:
+        return sync_taking(theirs, fetch)
+
+
+def sync_taking(theirs, fetch):
+    changed = False
+    # Files first (a theme a look wears), then the look.
+    changed |= themes_take(theirs.get("themes"), fetch)
+    changed |= sounds_take(theirs.get("sounds"), fetch)
+    changed |= bool(sync_items_take(theirs.get("items"), fetch))
+    changed |= badges_take(theirs.get("badges"))
+    changed |= told_take(theirs.get("told"))
+    changed |= missions_take(theirs.get("missions"))
+    return changed
+
+
+def peer_fetch(m):
+    """fetch(sha) for what machine m has: its file's bytes, checked, or None."""
+    def fetch(sha):
+        kept = sync_file(sha)
+        if kept:
+            return kept.read_bytes()
+        if not re.fullmatch(r"[0-9a-f]{64}", sha or ""):
+            return None
+        try:
+            conn, r = peer_request(m, "GET", f"/api/peer/sync/file/{sha}", timeout=30)
+            try:
+                data = r.read(SYNC_FILE_MAX + 1) if r.status == 200 else None
+            finally:
+                conn.close()
+        except (PeerError, OSError):
+            return None
+        if data is None or len(data) > SYNC_FILE_MAX or hashlib.sha256(data).hexdigest() != sha:
+            return None
+        SYNC_FILES.mkdir(parents=True, exist_ok=True)
+        write_file(SYNC_FILES / sha, data)
+        return data
+    return fetch
+
+
+class Sync:
+    """Your stuff kept the same on every machine: a change made here goes to
+    each machine that answers at once; each machine is asked what it has
+    when it's paired, when it comes back on, and every few minutes."""
+
+    def __init__(self, st):
+        self.st, self.wake, self.asked = st, threading.Event(), {}
+        self.lock = threading.Lock()
+        self.sets = None        # the sets and the missions as last looked at (a change: pushed)
+        self.pending = set()    # items changed here and not pushed yet (kept through a failure)
+
+    def start(self):
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def soon(self, name=None):
+        """Ask (that machine, or every one) what it has, now."""
+        with self.lock:
+            for n in [name] if name else [m["name"] for m in machines_read()]:
+                self.asked[n] = 0
+        self.wake.set()
+
+    def run(self):
+        while True:
+            try:
+                sync_items_look()
+                self.pending.update(sync_stamped())
+                sets = json.dumps([mission_badges_kept(), sync_json(MISSION_TOLD, {}), sounds_value(), themes_value(),
+                                   missions_have()], sort_keys=True)
+                if self.pending or (self.sets is not None and sets != self.sets):
+                    self.push(set(self.pending))
+                    self.pending.clear()        # (only once it's on its way)
+                self.sets = sets
+                ms = machines_read()
+                peers = self.st.peers.snapshot() if self.st.peers else {}
+                for m in ms:
+                    on = (peers.get(m["name"]) or {}).get("on")
+                    if on and time.time() - self.asked.get(m["name"], 0) > SYNC_PULL_EVERY:
+                        self.asked[m["name"]] = time.time()
+                        threading.Thread(target=self.pull, args=(m,), daemon=True).start()
+            except Exception as e:
+                print(f"amarchy app: sync: {e}", file=sys.stderr, flush=True)
+            self.wake.wait(SYNC_LOOK_EVERY)
+            self.wake.clear()
+
+    def pull(self, m):
+        """What machine m has that this one hasn't."""
+        try:
+            have = urllib.parse.quote(json.dumps(missions_have()))
+            status, theirs = peer_json(m, "GET", f"/api/peer/sync?have={have}", timeout=30)
+            if status == 200 and sync_take(theirs, peer_fetch(m)):
+                self.st.poke.set()
+        except PeerError:
+            self.asked[m["name"]] = 0       # (again when it answers)
+
+    def push(self, keys):
+        """A change made here, to each machine that answers (one that
+        doesn't asks again when it's back; one that missed it, at its next
+        pull)."""
+        state = sync_state()
+        body = {k: state[k] for k in ("items", "badges", "told", "sounds", "themes", "have")}
+        body["items"] = {k: v for k, v in state["items"].items() if k in keys}
+        # Every machine paired (one taken for off a moment may answer; one
+        # that's off doesn't, and pulls it when it's back).
+        for m in machines_read():
+            threading.Thread(target=self.send, args=(m, body), daemon=True).start()
+
+    def send(self, m, body):
+        for wait in (0, 1, 3, 10):      # (a machine busy a moment: again)
+            time.sleep(wait)
+            try:
+                status, _ = peer_json(m, "POST", "/api/peer/sync", body, timeout=30)
+                if status == 200:
+                    return
+            except PeerError:
+                pass
+
+
 def app_handler(st, users, address):
     import http.server
     trusted = tailscale_uids()
@@ -17174,21 +17860,23 @@ def app_handler(st, users, address):
 
         def peer_events(self):
             """GET /api/peer/events: this machine's own chats (never the ones
-            it shows from others), and again on every change."""
+            it shows from others), and again on every change; "still here"
+            well within the silence a machine is taken as gone after."""
             self.stream_start()
             version, beat = -1, time.time()
+            every = min(KEEPALIVE, PEER_SILENT / 3)
             try:
                 while True:
                     with st.changed:
                         if st.own_version == version or not st.view:
-                            st.changed.wait(KEEPALIVE)
+                            st.changed.wait(every)
                         if not st.view:
                             continue
                         view, changed, version = st.view, st.own_version != version, st.own_version
                     if changed:
                         self.event("state", peer_state(view))
                         beat = time.time()
-                    elif time.time() - beat >= KEEPALIVE:
+                    elif time.time() - beat >= every:
                         self.out(b": still here\n\n")
                         beat = time.time()
             except OSError:
@@ -17564,10 +18252,16 @@ def app_handler(st, users, address):
 
             def out():          # the terminal, as it draws, to the page
                 try:
-                    while True:
+                    # Never a read once the page is gone (done): its pty is
+                    # closed then, and its number may already be another
+                    # connection's (a request read here would never be answered).
+                    while not done.is_set():
                         try:
+                            ready, _, _ = select.select([master], [], [], 0.5)
+                            if not ready:
+                                continue
                             data = os.read(master, 65536)
-                        except OSError:         # attach has ended
+                        except (OSError, ValueError):   # attach has ended
                             break
                         if not data:
                             break
@@ -17590,9 +18284,10 @@ def app_handler(st, users, address):
                         self.ws_send(b"", op=9)
                     except OSError:
                         return
+            reader = threading.Thread(target=out, daemon=True)
             try:
                 self.ws_handshake()
-                threading.Thread(target=out, daemon=True).start()
+                reader.start()
                 threading.Thread(target=ping, daemon=True).start()
                 while not done.is_set():
                     try:
@@ -17628,15 +18323,18 @@ def app_handler(st, users, address):
                 done.set()
                 st.looking(sid, False)
                 try:
-                    os.close(master)
-                except OSError:
-                    pass
-                try:
                     proc.terminate()
                     proc.wait(3)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()
+                except OSError:
+                    pass
+                # Its reader stopped first (done: within half a second), then its pty closed.
+                if reader.is_alive():
+                    reader.join(2)
+                try:
+                    os.close(master)
                 except OSError:
                     pass
 
@@ -17803,6 +18501,23 @@ def app_handler(st, users, address):
                 return self.send(200, peer_state(view))
             if path == "/api/peer/events":
                 return self.peer_events()
+            if path == "/api/peer/sync" or path.startswith("/api/peer/sync/file/"):    # your stuff (see "your stuff on every machine")
+                if self.via != "peer":
+                    return self.error(403, "only from another machine of yours")
+                if path == "/api/peer/sync":
+                    try:
+                        have = json.loads((args.get("have") or ["{}"])[0])
+                    except ValueError:
+                        have = {}
+                    return self.send(200, sync_state(have if isinstance(have, dict) else {}))
+                f = sync_file(path.rsplit("/", 1)[1])
+                if not f:
+                    return self.error(404, "no such file here")
+                data = f.read_bytes()
+                self.head(200, "application/octet-stream", [("Content-Length", str(len(data)))], cache="no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if path == "/api/machines":         # Settings → Machines: each one and how it stands
                 return self.send(200, {"machines": board_view(st)["machines"],
                                        "listed": machines_listed(check=False)})
@@ -18311,6 +19026,25 @@ def app_handler(st, users, address):
             if self.path.startswith("/api/m/"):     # a chat on another machine (the pass-through)
                 self.changed_nothing = True         # (that machine's list says what changed)
                 return self.pass_through()
+            if self.path == "/api/peer/sync":       # what changed on another machine of yours (see "your stuff on every machine")
+                if self.via != "peer":
+                    return self.error(403, "only from another machine of yours")
+                theirs = self.body(limit=4_000_000)
+                m = machine_find(self.peer)
+
+                def take():
+                    try:
+                        if sync_take(theirs, peer_fetch(m)):
+                            st.poke.set()
+                        # Records it has that this one hasn't (a merge there): asked for now.
+                        mine = missions_have()
+                        if getattr(st, "sync", None) and any(isinstance(n, int) and n > mine.get(o, -1)
+                                                             for o, n in (theirs.get("have") or {}).items()):
+                            st.sync.soon(self.peer)
+                    except Exception as e:
+                        print(f"amarchy app: sync from {self.peer}: {e}", file=sys.stderr, flush=True)
+                threading.Thread(target=take, daemon=True).start()
+                return self.send(200, {})
             if self.path in ("/api/peer/unpair", "/api/peer/label", "/api/peer/send", "/api/peer/icon"):
                 if self.via != "peer":
                     return self.error(403, "only from another machine of yours")
@@ -19288,6 +20022,8 @@ def app_serve():
     threading.Thread(target=tailnet, daemon=True).start()
     st.peers = Peers(st)                # every paired machine's chats on the board (see "machines")
     st.peers.start()
+    st.sync = Sync(st)                  # your stuff the same on every machine (see "your stuff on every machine")
+    st.sync.start()
     threading.Thread(target=app_watch, args=(st,), daemon=True).start()
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
