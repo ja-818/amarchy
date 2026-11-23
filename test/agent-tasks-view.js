@@ -42,6 +42,7 @@ os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 am.app_key(); am.migrate()
 for sid, repo in [("jaken-jaken", "jaken"), ("fireship-fireship", "fireship"), ("proj-a", "proj")]:
     os.makedirs(home + "/Work/" + repo, exist_ok=True)
