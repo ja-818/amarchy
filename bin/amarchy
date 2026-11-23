@@ -16949,30 +16949,54 @@ def sync_json(f, default):
 def sync_items_look():
     """A change made here since the last look: each item whose value isn't
     the one last stamped, stamped now, by this machine. The keys stamped."""
-    changed = []
     with sync_lock():
         items = sync_json(SYNC_ITEMS, {})
-        me, now = machine_name(), time.time()
-        for key, (read, _) in SYNC_KEYS.items():
-            try:
-                value = read()
-            except Exception as e:
-                print(f"amarchy app: sync: {key}: {e}", file=sys.stderr, flush=True)
-                continue
-            kept = items.get(key)
-            if kept is None or kept.get("value") != value:
-                # When it was changed: its file's time (found a while after,
-                # a machine stopped in between: still its own time, so a later
-                # change elsewhere wins); one taken away, now. The first look:
-                # as old as its file (never set: as old as can be), so the
-                # latest change of any machine's wins, whichever looked first.
-                at = sync_set_at(key)
-                if kept is None and sync_unset(key, value):
-                    at = 0
-                items[key] = {"value": value, "at": at if kept is None else (at if value is not None and at else now), "by": me}
-                changed.append(key)
+        changed = sync_items_seen(items)
         if changed:
             write_file(SYNC_ITEMS, json.dumps(items))
+    return changed
+
+
+_sync_stamped = set()       # keys stamped here, wherever (a look, before a take): pushed by Sync
+
+
+def sync_stamped():
+    """The keys stamped here since last asked."""
+    with _sync_stamped_lock:
+        keys = set(_sync_stamped)
+        _sync_stamped.clear()
+    return keys
+
+
+_sync_stamped_lock = threading.Lock()
+
+
+def sync_items_seen(items):
+    """(Under sync_lock.) Each item here whose value isn't the one stamped in
+    items, stamped in it now. The keys stamped."""
+    changed = []
+    me, now = machine_name(), time.time()
+    for key, (read, _) in SYNC_KEYS.items():
+        try:
+            value = read()
+        except Exception as e:
+            print(f"amarchy app: sync: {key}: {e}", file=sys.stderr, flush=True)
+            continue
+        kept = items.get(key)
+        if kept is None or kept.get("value") != value:
+            # When it was changed: its file's time (found a while after,
+            # a machine stopped in between: still its own time, so a later
+            # change elsewhere wins); one taken away, now. The first look:
+            # as old as its file (never set: as old as can be), so the
+            # latest change of any machine's wins, whichever looked first.
+            at = sync_set_at(key)
+            if kept is None and sync_unset(key, value):
+                at = 0
+            items[key] = {"value": value, "at": at if kept is None else (at if value is not None and at else now), "by": me}
+            changed.append(key)
+    if changed:
+        with _sync_stamped_lock:
+            _sync_stamped.update(changed)
     return changed
 
 
@@ -16984,6 +17008,10 @@ def sync_items_take(theirs, fetch):
         return taken
     with sync_lock():
         items = sync_json(SYNC_ITEMS, {})
+        # A change made here a moment ago, not looked at yet: stamped first,
+        # so one from elsewhere doesn't overwrite it unseen.
+        if sync_items_seen(items):
+            write_file(SYNC_ITEMS, json.dumps(items))
         for key, item in theirs.items():
             if key not in SYNC_KEYS or not isinstance(item, dict) or not sync_newer(item, items.get(key)):
                 continue
@@ -17296,7 +17324,8 @@ class Sync:
     def run(self):
         while True:
             try:
-                self.pending.update(sync_items_look())
+                sync_items_look()
+                self.pending.update(sync_stamped())
                 sets = json.dumps([mission_badges_kept(), sync_json(MISSION_TOLD, {}), sounds_value(), themes_value(),
                                    missions_have()], sort_keys=True)
                 if self.pending or (self.sets is not None and sets != self.sets):
