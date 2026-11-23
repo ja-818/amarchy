@@ -16,9 +16,15 @@ One PKGBUILD (`pkgbase=amarchy-git`), two packages:
 
 - **amarchy-git**: amarchy itself in `/usr/share/amarchy` (the CLI, the app's
   server and pages, themes, fonts, chimes, the skill for Claude Code, Omarchy's
-  pieces, the installers), `/usr/bin/amarchy`, and its own Tailscale node,
-  `/usr/bin/amarchy-tailnet`. No desktop dependencies, so a server takes it as
-  it is. Your part of it (the timers, the skill, the Ⓐ, the key, the live
+  pieces, the installers), `/usr/bin/amarchy`, its own Tailscale node,
+  `/usr/bin/amarchy-tailnet`, and dictation's speech engine in
+  `/usr/lib/amarchy/transcribe.cpp`: a release of
+  [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (MIT)
+  pinned by its hash for each processor (`source_x86_64`, `source_aarch64`; the
+  same release `bin/amarchy` pins, which `check()` makes sure of), its CPU code
+  only (about 20 MB; the Vulkan module is left out). The speech model (740 MB)
+  isn't in it: it's fetched the first time it's wanted. No desktop
+  dependencies, so a server takes it as it is. Your part of it (the timers, the skill, the Ⓐ, the key, the live
   theme) is `amarchy setup`, run as you; a package's update is set up again by
   itself within five minutes (`amarchy update`), and the app reloads.
 - **amarchy-desktop-git**: the desktop app, `/usr/bin/amarchy-desktop`, its
@@ -49,7 +55,12 @@ see the packages and use them instead of building.
   key, `amarchy update` leaving updates to pacman and setting itself up again
   after a new package, the themes and the key, `amarchy setup --uninstall`,
   `pacman -R`. 23 checks.
-- Not built for aarch64 here; the Rust and Go parts are arch-neutral.
+- Not built for aarch64 here; the Rust and Go parts are arch-neutral, and
+  dictation's engine for aarch64 is transcribe.cpp's own release (checked by
+  its hash), the one a checkout fetches there too.
+- With `DICTATION_MODEL` (the model's GGUF) and `DICTATION_PCM` (JFK's speech,
+  16 kHz 16-bit mono), `test-in-chroot.sh` has the package's engine write it
+  down in the chroot.
 
 ## Publishing
 
