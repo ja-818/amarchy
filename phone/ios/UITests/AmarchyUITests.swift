@@ -50,14 +50,25 @@ final class AmarchyUITests: XCTestCase {
     private func type(_ text: String, into app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let field = app.webViews.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20), "the address box", file: file, line: line)
+        // What the box says lags what was typed: each try waits for it, so a
+        // slow one isn't typed again on top of itself.
+        let says = { (wanted: String, seconds: TimeInterval) -> Bool in
+            let p = NSPredicate { box, _ in
+                let v = ((box as? XCUIElement)?.value as? String) ?? ""
+                let shown = v == field.placeholderValue ? "" : v
+                return shown.lowercased() == wanted.lowercased()
+            }
+            return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: p, object: field)], timeout: seconds) == .completed
+        }
         for _ in 0..<3 {
             field.tap()
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 10)
             if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
                 field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
+                guard says("", 5) else { continue }
             }
             field.typeText(text)
-            if (field.value as? String)?.lowercased() == text.lowercased() { return }
+            if says(text, 5) { return }
         }
         XCTFail("couldn't type \(text) into the address box: it has \(field.value ?? "nothing")", file: file, line: line)
     }
