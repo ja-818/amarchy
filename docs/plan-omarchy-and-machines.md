@@ -829,8 +829,26 @@ in Omarchy's Install menu, and a pitch to Omarchy as its agent manager.
 Everything below is prepared to the last step; each needs his account, money
 or a decision.
 
-- **Cloud machines (F)**: its chat, `amarchy-cloud-machines`, waits on a
-  command he allows. Then a provider token and Create (that costs money).
+- **Cloud machines (F)**: built and shipped; its setup ran for real on Debian
+  13's own cloud image here (`test/cloud-vm.py`). What's left is the first real
+  one (it costs money, about €6 a month at Hetzner), about 15 minutes:
+  1. A Hetzner token: [console.hetzner.com](https://console.hetzner.com/projects)
+     → his project → Security → API tokens → Generate, Read & Write (or
+     DigitalOcean's or Hostinger's: the sheet links to each).
+  2. The app: Settings → Machines → **Add a cloud machine…** → Hetzner Cloud →
+     paste the token → Connect.
+  3. Keep the location picked and the **Recommended** 8 GB size (its price is
+     on it).
+  4. Tailscale: **Make a one-off key at Tailscale** → Generate auth key:
+     one-off, pre-approved, a day, no tags → paste → Keep the key.
+  5. **Create** (its price is on the button). Its sheet shows each step, about
+     10 minutes.
+  6. Once it says Paired: **Sign in to Claude** (open the page, paste its code
+     back) and **Sign in to GitHub** (copy the code, paste it on GitHub's page).
+  7. Tailscale's Machines page → the new machine → ⋯ → Disable key expiry.
+  That Create is the first call to a real provider's API (the tests used fakes
+  of their exact shapes): if a step fails, its sheet says what in words, and
+  Remove deletes it.
 - **The AUR and Omarchy (I)**: [packaging/README.md](../packaging/README.md).
   Add the server's AUR key to his AUR account, `git push origin master` in
   `~/Work/aur/amarchy-git`, open the draft omarchy-pkgs PR, and run
