@@ -56,6 +56,36 @@ elif args[:1] == ["up"]:
     save()
 '''
 
+# amarchy's own node (track H): its status and login, and its cli, which is
+# Tailscale's own CLI against it (the fake tailscale above, on the same
+# scenario). Running once its socket is there (the fake systemctl makes it).
+NODE = r'''#!/usr/bin/env python3
+import json, os, subprocess, sys
+home = os.environ["HOME"]
+sock = os.path.join(os.environ["XDG_STATE_HOME"], "amarchy/tailnet/tailscaled.sock")
+f = os.path.join(home, "ts.json")
+sc = json.load(open(f))
+args = sys.argv[1:]
+open(os.path.join(home, "node-calls"), "a").write(" ".join(args) + "\n")
+up = os.path.exists(sock)
+if args[:2] == ["status", "--json"]:
+    print(json.dumps({"running": up, "state": sc["state"] if up else "off", "words": "the node"}))
+elif args[:1] == ["login"]:
+    if not up: print("amarchy's own node isn't running (systemctl --user start amarchy-tailnet)"); sys.exit(1)
+    if sc["state"] != "NeedsLogin": print("Signed in already: on"); sys.exit(0)
+    sc["auth_url"] = "https://login.tailscale.com/a/own-node-0000"; json.dump(sc, open(f, "w"))
+    print(sc["auth_url"])
+elif args[:1] == ["cli"]:
+    rest = args[3:] if args[1:2] == ["--state"] else args[1:]
+    sys.exit(subprocess.run([os.path.join(os.path.dirname(sys.argv[0]), "tailscale-for-node"), *rest]).returncode)
+'''
+SYSTEMCTL = r'''#!/bin/sh
+echo "$@" >> "$HOME/systemctl-calls"
+case "$*" in *"enable --now amarchy-tailnet.service"*)
+  /usr/bin/mkdir -p "$XDG_STATE_HOME/amarchy/tailnet" && : > "$XDG_STATE_HOME/amarchy/tailnet/tailscaled.sock" ;;
+esac
+'''
+
 ONE = [{"id": "a1", "account": "julian@example.com", "tailnet": "julian@example.com", "selected": True}]
 TWO = ONE + [{"id": "b2", "account": "julian@work.example", "tailnet": "work.example", "selected": False}]
 READY = {"running": True, "state": "Running", "name": "desk.tail1234.ts.net", "magicdns": True, "https": True,
@@ -88,6 +118,48 @@ def ts(env, *args):
     r = subprocess.run([sys.executable, str(REPO / "bin/amarchy"), "tailscale", *args], env=env, capture_output=True,
                        text=True, timeout=60, stdin=subprocess.DEVNULL)
     return r.returncode, r.stdout + r.stderr
+
+
+def own_node(base):
+    """No system Tailscale; amarchy's own node built (or not) here."""
+    home, env = setup(base, tailscale=False, extra=("systemctl",))
+    fakes = Path(env["PATH"])
+    # (Only the fakes on the PATH, this machine's own tailscale being in /usr/bin: they name what they run in full.)
+    (fakes / "systemctl").write_text(SYSTEMCTL.replace("#!/bin/sh", "#!/usr/bin/sh"))
+    for f in fakes.iterdir():
+        f.chmod(0o755)
+    env["PATH"] = str(fakes)
+
+    # Neither: the node offered first, the system's Tailscale the other way.
+    code, out = ts(env)
+    check("no Tailscale at all: amarchy's own node first, nothing else to install",
+          code == 1 and f"amarchy's own node (nothing else to install): {REPO}/tailnet/install.sh" in out
+          and "Or the system's Tailscale: https://tailscale.com/download/linux" in out
+          and out.index("own node") < out.index("Or the system's"), out)
+    st = json.loads(ts(env, "--json")[1])
+    check("--json: its steps, the node then the system's as the other way",
+          [s["do"] for s in st["steps"]] == ["own-install", "install"] and st["steps"][1].get("alt") and st["node"] is None, st["steps"])
+
+    # Built, not running: started (a user service, no root, nothing asked), then the sign-in.
+    (home / ".local/bin").mkdir(parents=True)
+    (home / ".local/bin/amarchy-tailnet").write_text(NODE.replace("#!/usr/bin/env python3", f"#!{sys.executable}"))
+    (home / ".local/bin/amarchy-tailnet").chmod(0o755)
+    (home / ".local/bin/tailscale-for-node").write_text(FAKE.replace("#!/usr/bin/env python3", f"#!{sys.executable}"))
+    (home / ".local/bin/tailscale-for-node").chmod(0o755)       # the node's own CLI, beside it
+    scenario(home, state="NeedsLogin")
+    code, out = ts(env, "--no-open")
+    check("its node built but off: started, then its sign-in link", "--user enable --now amarchy-tailnet.service"
+          in (home / "systemctl-calls").read_text() and "https://login.tailscale.com/a/own-node-0000" in out, out)
+    check("signed in through amarchy-tailnet login", "login --no-open" in (home / "node-calls").read_text())
+    st = json.loads(ts(env, "--json")[1])
+    check("it says it's amarchy's own node, and that it drives it", st["node"] == "own" and st["operator"] is True
+          and st["auth_url"] == "https://login.tailscale.com/a/own-node-0000", st)
+
+    scenario(home, state="Running")
+    code, out = ts(env)
+    check("on: its words say amarchy's own node", code == 0
+          and "amarchy's own node: On: desk.tail1234.ts.net, as julian@example.com." in out and "Ready" in out, out)
+    check("its status asked through its own cli", "cli --state" in (home / "node-calls").read_text())
 
 
 def main():
@@ -157,6 +229,7 @@ def main():
             h2, e2 = setup(Path(base) / f"none-{len(extra)}-{'-'.join(extra)}", tailscale=False, extra=extra)
             code, out = ts(e2)
             check(f"not installed{' (' + extra[0] + ')' if extra else ''}: {want}", code == 1 and want in out, out)
+        own_node(Path(base) / "own")
     finally:
         shutil.rmtree(base, ignore_errors=True)
     print(f"\n{len(failed)} failed" if failed else "\nall ok")

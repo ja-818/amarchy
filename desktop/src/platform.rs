@@ -6,12 +6,15 @@ pub fn prepare() {
     linux::prepare();
 }
 
-// ---- safe rendering, after its page's process crashed
+// ---- safe rendering, after its page's process crashed with no sign why
 //
-// A web process that crashes is most often the graphics path (a new or
-// experimental GPU driver: Apple Silicon's, NVIDIA's). After one crash the
-// desktop app draws without the GPU's DMA-BUF and compositing, from then on
-// (rendering.json); AMARCHY_DESKTOP_GPU=1 tries the GPU again.
+// Its page's process crashing is first asked why: what it wrote last. One
+// that crashed with GStreamer's words before it was playing a sound or a
+// video (sound.rs): its page loads no media from then on, and the GPU isn't
+// blamed. One that crashed with no sign why loads again; twice in ten
+// minutes, it draws without the GPU's DMA-BUF and compositing from then on
+// (a new or experimental driver: Apple Silicon's, NVIDIA's), kept in
+// rendering.json; AMARCHY_DESKTOP_GPU=1 tries the GPU again.
 
 fn rendering_file() -> std::path::PathBuf {
     crate::target::state_dir().join("desktop/rendering.json")
@@ -30,7 +33,40 @@ pub fn safe_rendering() -> Option<String> {
 pub fn keep_safe_rendering(why: &str) {
     let f = rendering_file();
     let _ = std::fs::create_dir_all(f.parent().unwrap());
-    let _ = std::fs::write(&f, serde_json::json!({ "safe": true, "why": why }).to_string() + "\n");
+    let _ = std::fs::write(&f, serde_json::json!({ "safe": true, "why": why, "cause": "unexplained" }).to_string() + "\n");
+}
+
+/// The safe way as the build before kept it (after any crash, its cause
+/// not asked: on Julian's M5 they were sounds): forgotten, so it draws with
+/// the GPU again until a crash with no sign why says otherwise. Whether it was.
+fn forget_blind_safe_rendering() -> bool {
+    let f = rendering_file();
+    let Some(v) = std::fs::read_to_string(&f).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else {
+        return false;
+    };
+    if v.get("cause").is_some() {
+        return false;
+    }
+    std::fs::remove_file(&f).is_ok()
+}
+
+/// Its page's process crashed with no sign why: when (the last ten minutes').
+static UNEXPLAINED: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
+const UNEXPLAINED_WITHIN: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// A crash with no sign why: whether it's the one that makes it draw the
+/// safe way (the second in ten minutes).
+fn unexplained_again() -> bool {
+    let mut u = UNEXPLAINED.lock().unwrap();
+    u.retain(|t| t.elapsed() < UNEXPLAINED_WITHIN);
+    u.push(std::time::Instant::now());
+    u.len() >= 2
+}
+
+/// The last few of what was said, on a line.
+fn last_words(lines: &[&String], n: usize) -> String {
+    let from = lines.len().saturating_sub(n);
+    lines[from..].iter().map(|l| l.trim()).collect::<Vec<_>>().join(" | ")
 }
 
 /// The window's way to the tailnet: through amarchy's own node's proxy
@@ -40,6 +76,18 @@ pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
     linux::proxy(win, url);
     #[cfg(not(target_os = "linux"))]
     let _ = (win, url);
+}
+
+/// Whether its window is on an Omarchy desktop: Hyprland's session, with
+/// Omarchy's look in place (its current theme, where Omarchy 4 keeps it).
+/// There the window is one of the desktop's, as its terminals are: Hyprland
+/// makes it see-through (omarchy/hypr/amarchy.lua), so wearing the desktop's
+/// look live it draws no wallpaper of its own (app.css, html.on-omarchy).
+pub fn omarchy() -> bool {
+    #[cfg(target_os = "linux")]
+    return linux::omarchy();
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 /// The web view's own settings, once it's made.
@@ -52,8 +100,10 @@ pub fn webview(win: &tauri::WebviewWindow) {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::cell::RefCell;
     use std::os::unix::net::UnixStream;
     use std::path::Path;
+    use std::time::Duration;
 
     pub fn prepare() {
         // The app id Hyprland, the launcher and the bar know it by
@@ -66,8 +116,14 @@ mod linux {
         if Path::new("/proc/driver/nvidia/version").exists() && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
+        if super::forget_blind_safe_rendering() {
+            log::info!("drawing with the GPU again: the safe way was kept by an earlier build after a crash, without asking why (a sound's, most likely)");
+        }
         log::info!("graphics: {}", graphics());
-        // Its page crashed before: drawn the safe way (no DMA-BUF, no compositing).
+        if omarchy() {
+            log::info!("on an Omarchy desktop: the window is see-through as its terminals are, its look live drawn without a wallpaper of its own");
+        }
+        // Its page crashed before with no sign why: drawn the safe way (no DMA-BUF, no compositing).
         if let Some(why) = super::safe_rendering() {
             log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
             for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
@@ -90,6 +146,21 @@ mod linux {
                 }
             }
         }
+
+        // What its page can play here (GStreamer's plugins), before the window.
+        crate::sound::check();
+    }
+
+    pub fn omarchy() -> bool {
+        let hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|s| !s.is_empty())
+            || std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.split(':').any(|d| d.eq_ignore_ascii_case("hyprland")));
+        if !hyprland {
+            return false;
+        }
+        // Omarchy's state: $XDG_STATE_HOME's, else under $HOME (as its scripts read it).
+        let state = [std::env::var_os("XDG_STATE_HOME").filter(|s| !s.is_empty()).map(std::path::PathBuf::from),
+                     std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/state"))];
+        state.into_iter().flatten().any(|s| s.join("omarchy/current/theme").is_dir())
     }
 
     pub fn proxy(win: &tauri::WebviewWindow, url: Option<&str>) {
@@ -137,8 +208,10 @@ mod linux {
     }
 
     pub fn webview(win: &tauri::WebviewWindow) {
-        let _ = win.with_webview(|wv| {
-            use webkit2gtk::{SettingsExt, WebViewExt};
+        use tauri::Manager;
+        let handle = win.app_handle().clone();
+        let _ = win.with_webview(move |wv| {
+            use webkit2gtk::{SettingsExt, UserContentManagerExt, WebViewExt};
             let view = wv.inner();
             let Some(s) = WebViewExt::settings(&view) else { return };
             if super::safe_rendering().is_some() {
@@ -160,39 +233,103 @@ mod linux {
             if std::env::var_os("AMARCHY_DESKTOP_MOCK_MIC").is_some() {
                 s.set_enable_mock_capture_devices(true);
             }
+            // The sounds its page asks the app to play (sound.rs), when it
+            // can't play them itself: window.webkit.messageHandlers.amarchySound.
+            if let Some(ucm) = view.user_content_manager() {
+                ucm.register_script_message_handler("amarchySound");
+                let h = handle.clone();
+                ucm.connect_script_message_received(Some("amarchySound"), move |_, r| {
+                    if let Some(v) = r.js_value() {
+                        crate::sound::asked(&h, &v.to_string());
+                    }
+                });
+            }
+            media_script(&view);
         });
         load_failures(win);
         process_ends(win);
     }
 
+    thread_local! {
+        /// The page's script of what this computer lacks (sound.rs), as added.
+        static MEDIA_SCRIPT: RefCell<Option<webkit2gtk::UserScript>> = const { RefCell::new(None) };
+    }
+
+    /// What this computer lacks, told to each page it loads before the
+    /// page's own scripts (and no media, when its sounds are the app's).
+    fn media_script(view: &webkit2gtk::WebView) {
+        use webkit2gtk::{UserContentInjectedFrames, UserContentManagerExt, UserScript, UserScriptInjectionTime, WebViewExt};
+        let Some(ucm) = view.user_content_manager() else { return };
+        MEDIA_SCRIPT.with(|kept| {
+            if let Some(old) = kept.borrow_mut().take() {
+                ucm.remove_script(&old);
+            }
+            let Some(l) = crate::sound::lacks() else { return };
+            let script = UserScript::new(
+                &crate::sound::page_script(&l),
+                UserContentInjectedFrames::AllFrames,
+                UserScriptInjectionTime::Start,
+                &[],
+                &[],
+            );
+            ucm.add_script(&script);
+            *kept.borrow_mut() = Some(script);
+        });
+    }
+
     /// Its page's process ended (a crash, out of memory): it's said in the
-    /// log, a crash makes it draw the safe way from now on, and the page
-    /// comes back (crate::web_died: unless it keeps crashing).
+    /// log with why (what it wrote last), and the page comes back
+    /// (crate::web_died: unless it keeps crashing).
     fn process_ends(win: &tauri::WebviewWindow) {
         use tauri::Manager;
         let handle = win.app_handle().clone();
         let _ = win.with_webview(move |wv| {
-            use webkit2gtk::{SettingsExt, WebProcessTerminationReason, WebViewExt};
+            use webkit2gtk::{WebProcessTerminationReason, WebViewExt};
             wv.inner().connect_web_process_terminated(move |view, reason| {
                 let why = match reason {
-                    WebProcessTerminationReason::Crashed => "its page's process crashed",
-                    WebProcessTerminationReason::ExceededMemoryLimit => "its page's process ran out of memory",
+                    WebProcessTerminationReason::Crashed => crashed(view),
+                    WebProcessTerminationReason::ExceededMemoryLimit => "its page's process ran out of memory".to_string(),
                     WebProcessTerminationReason::TerminatedByApi => return,
-                    _ => "its page's process ended",
+                    _ => "its page's process ended".to_string(),
                 };
-                if reason == WebProcessTerminationReason::Crashed && super::safe_rendering().is_none() {
-                    super::keep_safe_rendering(why);
-                    if let Some(s) = WebViewExt::settings(view) {
-                        s.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
-                    }
-                    log::warn!("{why}: drawing the safe way from now on (no GPU compositing)");
-                }
                 // Not inside WebKit's signal: what it does asks the window
                 // things (its address), which answers once the signal is over.
-                let (h, why) = (handle.clone(), why.to_string());
+                let h = handle.clone();
                 std::thread::spawn(move || crate::web_died(&h, &why));
             });
         });
+    }
+
+    /// Why its page's process crashed, by what it wrote last: GStreamer's
+    /// words (a sound or a video: no media from now on, the app plays its
+    /// sounds), or no sign why (twice in ten minutes: the safe way).
+    fn crashed(view: &webkit2gtk::WebView) -> String {
+        use webkit2gtk::{SettingsExt, WebViewExt};
+        // (Its core dumped first, which can take a while: a minute's worth.)
+        let said = crate::journal::said_lately(Duration::from_secs(60));
+        let gst: Vec<&String> = said.iter().filter(|l| crate::sound::gstreamer_said(l)).collect();
+        if !gst.is_empty() {
+            log::warn!("its page's process crashed playing a sound or a video; GStreamer said last: {}", super::last_words(&gst, 3));
+            if crate::sound::crashed() {
+                media_script(view);
+                log::warn!("its page loads no media from now on, and the app plays its sounds itself (sound.rs); the GPU isn't why");
+            }
+            return "its page's process crashed playing a sound".into();
+        }
+        let all: Vec<&String> = said.iter().collect();
+        log::warn!(
+            "its page's process crashed, with no sign why{}",
+            if all.is_empty() { " (it said nothing in the last minute)".to_string() } else { format!("; it said last: {}", super::last_words(&all, 3)) }
+        );
+        if super::unexplained_again() && super::safe_rendering().is_none() {
+            let why = "its page's process crashed twice in ten minutes with no sign why";
+            super::keep_safe_rendering(why);
+            if let Some(s) = WebViewExt::settings(view) {
+                s.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
+            }
+            log::warn!("{why}: drawing the safe way from now on (no GPU compositing), in case it's the GPU; AMARCHY_DESKTOP_GPU=1 tries it again");
+        }
+        "its page's process crashed".into()
     }
 
     /// A page that can't load (the server away, no network): the window's

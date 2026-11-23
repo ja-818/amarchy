@@ -21,7 +21,14 @@ const SPINNER_FRAMES = 10;        // drawn in ui.css, a rule each
 const PLAIN = { waiting: "●", idle: "✓", done: "✔", asleep: "☾", interrupted: "!", high: "▲", low: "▼", check: "✓", close: "✕",
                 project: "▤", status: "●", newest: "↓", oldest: "↑", up: "▲", under: "▼", order: "⇅", clock: "◷", next: "›" };
 const ICONS = {
+  // A machine's icons (machines.js MACHINE_ICONS): its own, picked in Settings → Machines.
   machine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></svg>',
+  "m-desktop": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></svg>',
+  "m-server": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01M11 7.5h6M11 16.5h6"/></svg>',
+  "m-laptop": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M2.5 19h19"/></svg>',
+  "m-cloud": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 19h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.6 10.1 4.5 4.5 0 0 0 7.5 19z"/></svg>',
+  "m-tower": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="1.5"/><path d="M10 7h4M10 10h4M12 17h.01"/></svg>',
+  "m-mini": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8.5" width="17" height="7" rx="2.5"/><path d="M7.5 12h.01M15 12h2"/></svg>',
   interrupted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -399,6 +406,10 @@ function seenNow(id) {
 // plays the chime again instead of your music. Web Audio isn't media to the
 // system. A sound it can't decode (Safari and an .oga) plays in an element
 // let go once it ends, so it doesn't stay there either.
+//
+// The desktop app on a computer whose web view can't play sounds (Linux:
+// GStreamer without its plugins, where a media element would end the page)
+// plays them itself: window.amarchyDesktopMedia (desktop/src/sound.rs).
 
 const sounds = { ctx: null, buffers: new Map() };
 
@@ -417,6 +428,8 @@ function soundContext() {
 // src: the sound's address; rate: faster and higher (1 as it is); volume: 0 to 1.
 // Returns a stop().
 function playSound(src, { rate = 1, volume = 1 } = {}) {
+  const lacks = window.amarchyDesktopMedia;
+  if (lacks && !lacks.sounds) return lacks.play(src, { rate, volume });
   const ctx = soundContext();
   let stopped = false, node = null, el = null;
   const stop = () => {
@@ -2411,6 +2424,20 @@ function engineSettings() {
   return problem ? [h("p", { class: "note" }, `Amarchy's check of the chat with this Claude Code failed: ${problem}.`)] : [];
 }
 
+// The desktop app on a computer that lacks GStreamer's plugins (sound.rs):
+// what that means here, and the command that installs them.
+function mediaLacking() {
+  const l = window.amarchyDesktopMedia;
+  if (!l) return [];
+  // Turned off by a crash, nothing found missing: no command to give.
+  if (!l.packages) return [h("p", { class: "note", "data-lacks": "" }, "The app plays its sounds itself here: playing one ended its page.")];
+  const [it, there] = l.packages.includes(" and ") ? ["them", "they're"] : ["it", "it's"];
+  const means = !l.sounds && l.native ? `The app plays its sounds itself meanwhile${l.dictation ? "" : `; dictation waits on ${it}`}.`
+    : !l.sounds ? `No sounds${l.dictation ? "" : " or dictation"} until ${there} installed.` : `Dictation waits on ${it}.`;
+  return [h("p", { class: "note", "data-lacks": l.packages }, `This computer lacks ${l.packages}. ${means}`),
+    h("button", { class: "control wide", onclick: () => copyText(l.fix).then(() => toast(`Copied: ${l.fix}`)) }, "Copy the command")];
+}
+
 async function openSettings() {
   const open = document.querySelector(".sheet-back.settings");
   if (open) return open.redraw();      // changed from inside it: drawn again where it is, the keys where they were
@@ -2478,6 +2505,7 @@ async function openSettings() {
       h("p", {}, desktopApp ? "Rings with this desktop app's notifications, its window closed too."
                  : app.desk ? "Rings in this browser when a chat needs you or is done, unless you're looking at it."
                           : "Rings in a computer's browser; the phone's notifications ring with its own sound."),
+      ...mediaLacking(),
       h("div", { class: "section" }, "Agents"),
       ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),
         h("span", {}, `${x.assistant_name || "Assistant"}: name, picture, chime…`))),
@@ -2677,6 +2705,10 @@ async function openLook() {
       h("div", { class: "section" }, "Wallpaper"),
       wallGrid(walls),
       fetching,
+      // The desktop app on an Omarchy desktop, wearing its look live: the
+      // desktop's own wallpaper is behind the window (theme.css, app.css).
+      desktopApp && desktopApp.omarchy && worn.key === "omarchy-live" && wall() === "theme"
+        ? h("p", {}, "In this window, your desktop's own wallpaper, behind it, as behind your terminals.") : null,
       h("p", {}, (worn.backgrounds || []).length
         ? `${worn.name}'s are Omarchy's own, downloaded to your host from Omarchy's repository. Your own: ` +
           (info.own ? "the picture you chose." : "choose a picture.")
