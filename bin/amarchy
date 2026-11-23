@@ -15190,13 +15190,18 @@ def board_block(o, base_block):
     bad = next((k for k, v in blk["attrs"].items() if '"' in str(v) or "\n" in str(v)), None)
     if bad:
         return None, False, f"--attr {bad}'s value can't have a \" or a new line in it"
-    # Its pictures, wherever they're given from: a path here, made whole.
+    # Its pictures and videos, each a path here made whole (~ and all, each
+    # one: a shell expands only the first of "a.png,~/b.png"), there.
     spec = {**block_catalog().get("common", {}), **kinds[kind].get("attrs", {})}
     for k, v in list(blk["attrs"].items()):
         if (spec.get(k) or {}).get("type") == "media":
-            items = media_list(v, spec[k].get("many"))
-            blk["attrs"][k] = ", ".join(x if re.match(r"^https?://", x, re.I) or x.startswith("~") or x.startswith("/")
-                                        else str(Path.cwd() / x) for x in items)
+            items = [x if re.match(r"^https?://", x, re.I) else str(Path.cwd() / Path(x).expanduser())
+                     for x in media_list(v, spec[k].get("many"))]
+            for x in items:
+                why = media_issue(x)
+                if why:
+                    return None, False, f"--{k if k in ('media', 'avatar') else 'attr ' + k} {x!r} {why}"
+            blk["attrs"][k] = ", ".join(items)
     fence = f"```{kind} " + " ".join(f'{k}="{v}"' for k, v in blk["attrs"].items()) + f"\n{blk['body']}\n```"
     found = reply_blocks(fence)
     issues = block_issues(found[0]) if found else [f"The {kind} block didn't read"]

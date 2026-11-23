@@ -144,6 +144,16 @@ for bad, what in [(["--xpost", "hi", "--handle", "not a handle!"], "an xpost wit
                   (["--column", "Ready to post"], "straight into a column that needs approval")]:
     rc, _, err = run("board", "card", "posts", "--title", "x", *bad, me=F)
     check(rc == 1 and err.startswith("amarchy: "), f"{what}: refused ({err.strip()[:100]})")
+Path(f"{home}/pics/b.mp4").write_bytes(b"\0\0\0\x18ftypmp42" + b"\0" * 40)
+rc, out, err = run("board", "card", "posts", "--key", "media-1", "--title", "Two", "--xpost", "hi", "--handle", "ja818_",
+                   "--media", f"{home}/pics/a.png,~/pics/b.mp4", me=F)
+m = am.card_find(am.board_get("posts"), "media-1")
+check(rc == 0 and m["block"]["attrs"]["media"] == f"{home}/pics/a.png, {home}/pics/b.mp4", f"--media a,~/b: each made whole, ~ too; a video takes ({err.strip()})")
+rc, _, err = run("board", "card", "posts", "--key", "media-2", "--title", "Two", "--xpost", "hi", "--handle", "ja818_",
+                 "--media", f"{home}/pics/a.png,~/pics/nope.png", me=F)
+check(rc == 1 and f"--media '{home}/pics/nope.png' isn't a file here" in err and not am.card_find(am.board_get("posts"), "media-2"),
+      f"one that isn't there: refused, named ({err.strip()})")
+run("board", "rm", "posts", "media-1", me=F)
 rc, _, err = run("board", "card", "posts", "--key", "new-1", me=F)
 check(rc == 1 and "--title" in err, "a new card needs its title")
 rc, out, _ = run("board", "card", "posts", "--key", "fs-2", "--title", "Second", "--block", "email", "--attr", "to=ana@example.com", "--attr", "subject=Hi",
