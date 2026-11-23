@@ -13,7 +13,6 @@ options:
   bundleIdPrefix: io.github.ja818
   deploymentTarget:
     iOS: "17.0"
-  createIntermediateGroups: true
 
 include:
   - path: tailnet.yml

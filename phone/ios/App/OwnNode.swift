@@ -83,7 +83,7 @@ final class OwnNodeLink: NSObject, ASWebAuthenticationPresentationContextProvidi
         self.node = node
     }
 
-    static func builtIn() -> OwnNode? {
+    nonisolated static func builtIn() -> OwnNode? {
         #if canImport(Tailnet)
         return TailnetNode()
         #else

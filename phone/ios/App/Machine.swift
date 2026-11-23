@@ -92,8 +92,8 @@ final class Connection {
     private var choices: [Server] = []
     private var attempt = 0
 
-    init(node: OwnNodeLink = OwnNodeLink()) {
-        self.node = node
+    init(node: OwnNodeLink? = nil) {
+        self.node = node ?? OwnNodeLink()
     }
 
     func start() {

@@ -335,8 +335,8 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     /// The microphone, for the machine's own page (its dictation); nothing else.
-    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
+    func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
+                 initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
         let mine = server.map { BridgeHandler.isOrigin(origin, of: $0.url) } ?? false
         return mine && type == .microphone ? .grant : .deny
     }
