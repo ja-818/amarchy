@@ -324,6 +324,35 @@ It needs [Tailscale](https://tailscale.com) on the host and on the phone (see
 [Quick start](#quick-start)). Only your own Tailscale login reaches it (see
 [Configure](#configure) for `APP_USERS=`).
 
+### The phone apps
+
+amarchy's app for iPhone and Android is the same app inside a thin native shell
+([phone/](../phone/README.md)): the same board, chats and Settings. It adds only
+what a home-screen web app can't do:
+
+- **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
+  on the notification itself, without opening the app. On a locked phone it asks
+  for Face ID (or your code) first. If it can't reach your amarchy, a
+  notification says so and opens the chat.
+- **The share sheet.** A screenshot, a photo, a link or some text: tap
+  **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
+  No Shortcut to set up.
+- **A widget.** "2 need you" and their names, on the home screen and (iPhone)
+  the lock screen.
+
+**First open**: on the phone's browser, **Settings → The phone app → Open in the
+app** opens it on that machine; or type its address
+(`amarchy.your-tailnet.ts.net`). It reaches your machine through the Tailscale
+app when its VPN is on; a build that has amarchy's own Tailscale node signs in
+inside the app instead. Then **Turn on notifications**, as in the web app.
+
+**Private**: each notification is encrypted on your machine for that phone
+alone (the same encryption as Web Push). It goes through amarchy's push relay
+([relay/](../relay/README.md)), a tiny open-source service that hands it to
+Apple's or Google's push. The relay keeps nothing and can't read it: it sees
+the phone's push token and which machine may send to it, never what a
+notification says. Anyone can run their own.
+
 ## In a browser on your computer
 
 The same app on a computer's wide screen is **the board**: your chats and your tasks

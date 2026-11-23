@@ -19428,13 +19428,16 @@ def app_status():
     running = sh("systemctl", "--user", "is-active", APP_UNIT).stdout.strip() == "active"
     served = serve_config() == f"http://127.0.0.1:{app_port()}"
     address = app_address()
-    phones = len(app_subscriptions())
+    subs = app_subscriptions()
+    phones = len(subs)
+    apps = sum(1 for x in subs if isinstance(x.get("app"), dict))     # the phone apps among them (see "the phone apps")
     if not running and not served:
         print("off (amarchy app on starts it)")
         return 1
     where = app_url(address) if address and served else \
         "this machine only (the desktop app here): not on your tailnet (amarchy app on)"
-    print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified")
+    print(f"{'on' if running else 'stopped'}: {where}, {phones} phone{'' if phones == 1 else 's'} notified"
+          + (f" ({apps} through the phone app{'' if apps == 1 else 's'})" if apps else ""))
     return 0 if running and served else 1
 
 

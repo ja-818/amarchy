@@ -1,0 +1,10 @@
+# What `gcloud run deploy --source relay` uploads to Cloud Build: the
+# Dockerfile and the Go source, never a local build or a key.
+.gcloudignore
+.gitignore
+/amarchy-relay
+/deploy/
+README.md
+*.p8
+*.json
+*.env

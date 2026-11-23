@@ -1,0 +1,4 @@
+# A local build, and keys that must never be committed.
+/amarchy-relay
+*.p8
+*.env
