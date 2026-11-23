@@ -752,8 +752,8 @@ window closed.
   in, its window says so, with **Sign in to Tailscale** (Tailscale's own page,
   in your browser), and goes on by itself once you have.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
-  in the window already open (there's only ever one). The bar's Ⓐ, Super + Alt +
-  A and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+  in the window already open (there's only ever one). The bar's Ⓐ, Super + D
+  and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
 - **Notifications**: the same ones your phone gets (what **Tell me** in
   Settings says), as your desktop's own, window open or closed. A chat that asks
   for a permission has **Allow** and **Deny** on its notification, a question its
