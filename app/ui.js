@@ -551,6 +551,42 @@ function uiProgress({ label, value, max, note = "" }) {
     h("div", { class: "ui-progress-track" }, h("span", { class: "ui-progress-fill", style: `width:${Math.round(f * 100)}%` })));
 }
 
+// Steps toward something, in their order (a cloud machine coming up): each
+// done (✓, and when), the one under way (it spins, its words under it), one
+// that failed (✗, why), the ones to come (dim). items: [{label, state: done
+// | now | failed | next, note, at}].
+function uiSteps(items) {
+  return h("ol", { class: "ui-steps" }, ...items.map((it) => h("li", { class: `ui-step ${it.state || "next"}` },
+    h("span", { class: "ui-step-mark", "aria-hidden": "true" },
+      it.state === "now" ? spinner() : it.state === "done" ? glyph("check") : it.state === "failed" ? glyph("close") : null),
+    h("span", { class: "ui-step-text" }, h("span", { class: "ui-step-label" }, it.label), it.note ? h("small", {}, it.note) : null),
+    it.at ? h("span", { class: "ui-step-at" }, it.at) : null)));
+}
+
+// One of a few, a row each: its words (a badge by them: Recommended), a line
+// under them, what's at its end (a price), the one picked lit and checked.
+// items: [{key, label, detail, aside, badge, lead, dim, disabled}]; pick(key).
+function uiPick(items, { on = null, pick, label = "" } = {}) {
+  return h("div", { class: "ui-pick", role: "radiogroup", "aria-label": label }, ...items.map((it) =>
+    h("button", { class: `ui-pick-row${it.key === on ? " on" : ""}${it.dim ? " dim" : ""}`, type: "button", role: "radio",
+                  "aria-checked": String(it.key === on), disabled: !!it.disabled, "data-key": it.key, onclick: () => pick(it.key) },
+      it.lead || null,
+      h("span", { class: "ui-pick-text" },
+        h("span", { class: "ui-pick-label" }, it.label, it.badge ? h("span", { class: "ui-pick-badge" }, it.badge) : null),
+        it.detail ? h("small", {}, it.detail) : null),
+      it.aside ? h("span", { class: "ui-pick-aside" }, it.aside) : null,
+      h("span", { class: "ui-pick-check" }, it.key === on ? glyph("check") : null))));
+}
+
+// A price as people read it: €5.99, $48, 12.99 GBP (as bin/amarchy's cloud_money).
+function uiMoney(amount, currency) {
+  if (amount === null || amount === undefined || amount === "") return "";
+  const n = Number(amount);
+  const text = Number.isInteger(n) ? String(n) : n.toFixed(2);
+  const sign = { EUR: "€", USD: "$", GBP: "£" }[String(currency || "").toUpperCase()];
+  return sign ? `${sign}${text}` : `${text} ${currency || ""}`.trim();
+}
+
 // A number to pick, with − and +: its label, what it shows (show(n)), set(n).
 function uiStepper({ label, value, min = 0, max = 99, show = String, set }) {
   return h("div", { class: "ui-stepper" }, h("span", { class: "ui-stepper-label" }, label),

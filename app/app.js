@@ -903,6 +903,7 @@ function refresh() {
   // Its machine went off, or came back (machines): its chat says so.
   const open = (app.session && app.session.chat) || (app.desk && typeof desk !== "undefined" && desk.chat);
   if (open && !open.closed && machinesAll().length > 1) uiWhenStill("dock-machine", () => { if (!open.closed) open.renderDock(); });
+  cloudLive();      // a cloud machine's sheet, as it comes up (cloud.js)
   keptListScroll();
 }
 

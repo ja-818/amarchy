@@ -75,6 +75,19 @@
   --composer-focus: var(--focus-ring);
   --composer-send-bg: var(--primary-bg);
   --composer-send-text: var(--primary-text);
+  /* Steps toward something (uiSteps): a cloud machine coming up. */
+  --steps-done: var(--success);
+  --steps-now: var(--accent);
+  --steps-failed: var(--danger);
+  --steps-next: var(--text-muted);
+  --steps-rule: var(--border-faint);
+  /* One of a few, a row each (uiPick): a provider, a region, a size. */
+  --pick-bg: var(--control-bg);
+  --pick-border: var(--control-border);
+  --pick-radius: var(--radius-item);
+  --pick-on-bg: var(--selected-bg);
+  --pick-on-border: var(--selected-border);
+  --pick-badge: var(--accent);
   /* Your score (uiScore), badges (uiBadges), big numbers (uiTiles), a chart (uiChart), progress (uiProgress). */
   --score-flame: var(--orange, var(--warn, var(--warning)));
   --score-bg: var(--button-bg);
@@ -275,6 +288,12 @@ html { touch-action: manipulation; }
 .machine-row .machine { flex: none; width: 1.2em; height: 1.2em; display: inline-grid; color: var(--machine-color); }
 .machine-row .machine svg { width: 100%; height: 100%; display: block; }
 .machine-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-row-price { flex: none; color: var(--text-muted); font-size: var(--caption); font-variant-numeric: tabular-nums; }
+/* A cloud machine (cloud.js): its price, what its setup said when it failed, a sign-in's code to type. */
+.cloud-cost { font-weight: 700; margin-bottom: 0; }
+.cloud-log { margin: 0; max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+             font-family: var(--font-code); font-size: var(--caption); color: var(--text-muted); }
+.signin-code { font-family: var(--font-code); font-size: 1.4em; font-weight: 800; letter-spacing: .12em; justify-content: center; }
 /* A machine's icon, picked: the six, each with its word. */
 .machine-icons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .machine-icon { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; }
@@ -905,3 +924,43 @@ body.desk .ui-slides-stage .ui-scroll { margin-inline: calc(-1 * (var(--control-
 .ui-drop-text small { color: var(--text-muted); font-size: var(--caption); }
 .ui-drop-row.t-up .ui-drop-icon { color: var(--success); }
 .ui-drop-row.bad .ui-drop-icon, .ui-drop-row.bad small { color: var(--danger); }
+
+/* Steps toward something (uiSteps): a mark each, its words, when. */
+.ui-steps { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-direction: column; }
+.ui-step { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; color: var(--steps-next); }
+.ui-step + .ui-step { border-top: 1px solid var(--steps-rule); }
+.ui-step-mark { flex: none; width: 1.3em; height: 1.3em; display: inline-grid; place-items: center; margin-top: 1px;
+                border-radius: 50%; border: 1.5px solid currentColor; font-size: 0.9em; }
+.ui-step-mark .glyph, .ui-step-mark svg { width: 0.8em; height: 0.8em; display: block; }
+.ui-step-mark .spinner { width: auto; border: 0; }
+.ui-step.done { color: var(--text); }
+.ui-step.done .ui-step-mark { color: var(--steps-done); border-color: var(--steps-done); }
+.ui-step.now { color: var(--text); font-weight: 600; }
+.ui-step.now .ui-step-mark { color: var(--steps-now); border-color: transparent; }
+.ui-step.failed { color: var(--text); }
+.ui-step.failed .ui-step-mark { color: var(--steps-failed); border-color: var(--steps-failed); }
+.ui-step.next .ui-step-mark { opacity: .55; }
+.ui-step-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.35; }
+.ui-step-text small { color: var(--text-muted); font-size: var(--caption); font-weight: 400; overflow-wrap: anywhere; }
+.ui-step.failed .ui-step-text small { color: var(--steps-failed); }
+.ui-step-at { flex: none; color: var(--text-muted); font-size: var(--caption); font-variant-numeric: tabular-nums; }
+
+/* One of a few (uiPick): a row each, the one picked lit. */
+.ui-pick { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px; }
+.ui-pick-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--control-h); padding: 8px 12px;
+               text-align: left; color: var(--text); background: var(--pick-bg); border: 1px solid var(--pick-border);
+               border-radius: var(--pick-radius); font: inherit; cursor: pointer; }
+.ui-pick-row:hover { background: var(--button-hover-bg); }
+.ui-pick-row:active { background: var(--button-press-bg); }
+.ui-pick-row.on { background: var(--pick-on-bg); border-color: var(--pick-on-border); }
+.ui-pick-row.dim:not(.on) .ui-pick-label { color: var(--text-muted); }
+.ui-pick-row:disabled { opacity: .5; cursor: default; }
+.ui-pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ui-pick-label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 600; }
+.ui-pick-text small { color: var(--text-muted); font-size: var(--caption); line-height: 1.35; }
+.ui-pick-row.on .ui-pick-text small { color: inherit; opacity: .8; }
+.ui-pick-badge { font-size: var(--caption); font-weight: 700; color: var(--pick-badge); }
+.ui-pick-aside { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-pick-check { flex: none; width: 1em; display: inline-grid; place-items: center; color: var(--accent); }
+.ui-pick-check .glyph, .ui-pick-check svg { width: 1em; height: 1em; display: block; }
+

@@ -15,8 +15,13 @@
 // manage.js's field, at run time.
 "use strict";
 
-// How a machine stands, in words and a pill's tone.
+// How a machine stands, in words and a pill's tone: a cloud machine coming
+// up (or going), and what one needs of you there (cloud.js), first.
 function machineState(m) {
+  const cloud = m.cloud && m.cloud.made_here ? cloudState(m) : null;
+  if (cloud) return cloud;
+  const needs = machineNeeds(m);
+  if (needs) return needs;
   if (m.me) return { words: "This machine", tone: "accent" };
   if (m.update) return { words: "Update needed", tone: "warn" };
   if (m.on) return { words: "On", tone: "done" };
@@ -37,8 +42,10 @@ function machinesSettings() {
   return [h("div", { class: "section" }, "Machines"),
     ...ms.map((m) => {
       const st = machineState(m);
+      const price = m.cloud && m.cloud.made_here && m.cloud.monthly && m.cloud.step !== "removed" ? `${uiMoney(m.cloud.monthly, m.cloud.currency)}/mo` : "";
       return h("button", { class: "control wide machine-row", onclick: () => machineSheet(m.name) },
-        machineGlyph(m), h("span", { class: "machine-row-name" }, m.label), uiPill(st.words, st.tone));
+        machineGlyph(m), h("span", { class: "machine-row-name" }, m.label), price ? h("small", { class: "machine-row-price" }, price) : null,
+        uiPill(st.words, st.tone));
     }),
     // How a chat's machine shows on its card and over it: its icon, or its name.
     many ? h("p", { class: "hint" }, "On each chat, its machine as") : null,
@@ -48,14 +55,16 @@ function machinesSettings() {
         catch (e) { toast(e.message); }
       } }, label))) : null,
     h("button", { class: "control wide", onclick: () => addMachineSheet() }, "Add a machine…"),
+    h("button", { class: "control wide", onclick: () => cloudAddSheet() }, "Add a cloud machine…"),      // cloud.js
     h("p", {}, many ? "Every machine's chats are on one board, each with the machine it runs on. A chat stays on its machine."
-                    : "Amarchy on your other computers (your desktop, a laptop): pair them and every machine's chats are on one board.")];
+                    : "Amarchy on your other computers (your desktop, a laptop), or a machine that never sleeps in your own cloud account: every machine's chats are on one board.")];
 }
 
 // One machine: how it stands, Rename, and (another one) Remove.
 function machineSheet(name) {
   const m = machinesAll().find((x) => x.name === name);
   if (!m) return;
+  if (m.making) return cloudSheet(m.cloud.name || m.name);      // a cloud machine still coming up (cloud.js)
   const st = machineState(m);
   const label = field({ value: m.label, maxlength: "40", placeholder: "What the app calls it", "aria-label": "Its name in the app" }, () => rename());
   const rename = async () => {
@@ -99,7 +108,10 @@ function machineSheet(name) {
     label,
     h("button", { class: "control wide accent", onclick: rename, disabled: !m.me && !m.on }, "Rename"),
     !m.me && !m.on ? h("p", { class: "hint" }, `A machine keeps its own name: rename ${m.label} once it's on.`) : null,
-    m.me ? null : h("button", { class: "control wide danger", onclick: remove }, "Remove…"));
+    ...machineCloudParts(m),      // its cloud and its sign-ins (cloud.js)
+    m.me ? null : m.cloud && m.cloud.made_here
+      ? h("button", { class: "control wide danger", onclick: () => cloudRemoveSheet(m) }, `Remove (deletes it at ${m.cloud.provider_label})…`)
+      : h("button", { class: "control wide danger", onclick: remove }, "Remove…"));
 }
 
 // Asked first: yes or Cancel.

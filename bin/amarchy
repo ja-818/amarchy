@@ -137,6 +137,29 @@ board, in the app on any of them; docs/guide.md, "Machines"):
   amarchy machines show icon|name       how the board shows a chat's machine: its icon (its name on a hover),
                                         or its name
   amarchy machines found [--json]       machines of yours on the tailnet that answer as amarchy, not paired yet
+  amarchy machines cloud [--json]       the cloud machines made from here, in your own cloud accounts
+                                        (Hetzner, DigitalOcean, Hostinger): each one's size, price and where
+                                        it stands (docs/guide.md, "A cloud machine")
+  amarchy machines cloud providers      the providers, and whether each has its token here
+  amarchy machines cloud regions <provider>
+  amarchy machines cloud sizes <provider> <region>
+                                        a region's sizes, with the provider's own monthly price (8 GB and up
+                                        recommended, for a dozen chats)
+  amarchy machines cloud token <provider|tailscale> [--forget]
+                                        keep a provider's API token, or the one-off Tailscale auth key the
+                                        next machine joins your tailnet with: typed in a terminal (not
+                                        shown), else asked of you with a card in the app; never in a chat
+  amarchy machines cloud add [--provider p] [--region r] [--size s] [--name n] [--yes] [--wait]
+                                        make one in your account (it spends money: asked first, or --yes),
+                                        set up by cloud-init (Tailscale, Claude Code, amarchy) and paired
+                                        with this machine once it's up; --wait follows it
+  amarchy machines cloud status <name>  where one stands, step by step (its log, when it failed)
+  amarchy machines cloud remove <name> [--move-chats|--lose-chats] [--yes]
+                                        delete it at the provider (its billing stops), its chats moved here
+                                        first (each once it's free) or lost with it; asked first, or --yes
+  amarchy machines cloud user-data <name>
+                                        what its setup is (cloud-init's user data, or Hostinger's script),
+                                        secrets masked
   amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]
                                         move a chat to another machine of yours, never on its own: once its
                                         Claude's step is over, what it hadn't committed goes as one WIP commit,
@@ -235,14 +258,16 @@ on this machine that knows Spanish, English and 23 more languages and tells them
 Secrets (a key or password a project needs, given in the app, never in the chat; kept in
 ~/.config/amarchy/secrets, 0600, outside every repo; the session's commands, its terminal and its run
 commands have each one as an environment variable, $NAME):
-  amarchy secret ask <NAME> [--why <text>] [--all] [--again] [--timeout <seconds>]
+  amarchy secret ask <NAME> [--why <text>] [--all] [--cloud] [--again] [--timeout <seconds>]
                                         from a session's Claude: ask the user for it in the app (a card with
                                         a password field) and wait (590 s at most) until it's saved; prints
                                         only that it is, never the value. For this project's sessions, or
                                         --all projects' (the user can change that on the card); a name set
                                         already isn't asked again unless --again. Exits 1 if they decline,
                                         2 if they haven't answered yet. Never ANTHROPIC_API_KEY or Claude's
-                                        other credentials: they'd switch Claude to API billing
+                                        other credentials: they'd switch Claude to API billing. --cloud: a
+                                        cloud's token or the Tailscale key, kept for making cloud machines
+                                        (amarchy machines cloud), never given to a chat's commands
   amarchy secret list [--json]          the secrets' names and for which project (never a value)
   amarchy secret set <NAME> [--project <name>|--all]
                                         keep one, its value read from stdin (or asked for, in a terminal);
@@ -2458,7 +2483,7 @@ _MASKS = {"sig": None, "values": ()}
 def secret_values():
     """Every secret's value long enough to mask, longest first (read again
     when a file changes)."""
-    files = [SECRETS_ALL, *sorted((SECRETS / "projects").glob("*.env"))]
+    files = [SECRETS_ALL, SECRETS / "cloud.env", *sorted((SECRETS / "projects").glob("*.env"))]    # (cloud.env: track F's)
     sig = []
     for f in files:
         try:
@@ -2585,6 +2610,16 @@ def secret_answer(s, ask_id, value=None, scope="project", decline=False, message
     name = a.get("name")
     if decline:
         answer = {"declined": True, "message": str(message or "")[:2000]}
+    elif a.get("scope") == "cloud" or scope == "cloud":
+        # A cloud provider's token or the Tailscale key (secret ask --cloud;
+        # track F): kept for making cloud machines, never given to a chat.
+        if a.get("scope") != "cloud":
+            return "scope: project or all"
+        try:
+            cloud_token_set(name, value)
+        except CloudError as e:
+            return str(e)
+        answer = {"saved": True, "scope": "cloud"}
     else:
         if scope not in ("project", "all"):
             return "scope: project or all"
@@ -2614,6 +2649,8 @@ def cmd_secret_ask(s, args):
             why = a[6:]
         elif a in ("--all", "--all-projects", "--global"):
             scope = "all"
+        elif a == "--cloud":        # a cloud provider's token or the Tailscale key (track F): not a chat's
+            scope = "cloud"
         elif a == "--again":
             again = True
         elif a == "--timeout":
@@ -2631,7 +2668,13 @@ def cmd_secret_ask(s, args):
     if why_not:
         return fail(why_not)
     sid, repo = s["id"], s["repo"]
-    have = secret_scope(repo, name)
+    if scope == "cloud" and name not in CLOUD_TOKEN_NAMES:
+        return fail(f"--cloud is for a cloud's token or the Tailscale key: {', '.join(sorted(CLOUD_TOKEN_NAMES))}")
+    have = ("cloud" if cloud_token(name) else None) if scope == "cloud" else secret_scope(repo, name)
+    if have == "cloud" and not again:
+        print(f"{name} is kept already, for making cloud machines (amarchy machines cloud). If the user says it's "
+              f"wrong, ask again with --again.")
+        return 0
     if have and not again:
         print(f"{name} is set already ({'for this project' if have == 'project' else 'for every project'}): "
               f"your commands have it as ${name}. Use it by name, never print it. If the user says it's wrong, "
@@ -2690,6 +2733,10 @@ def cmd_secret_ask(s, args):
         print(f"The user chose not to give {name}." + (f" They said: \"{said}\"." if said else "") +
               " Don't ask for it in the chat.")
         return 1
+    if answer.get("scope") == "cloud":
+        print(f"Saved. {name} is kept on this machine for making cloud machines (amarchy machines cloud), never "
+              f"given to a chat's commands: run the amarchy machines cloud command again.")
+        return 0
     where = "every project's sessions" if answer.get("scope") == "all" else f"{repo}'s sessions"
     print(f"Saved. {name} is set for {where}: your Bash commands have it as ${name} from now on (no restart), "
           f"and so do the session's terminal (from its next prompt) and its run commands. Refer to it by name "
@@ -12459,7 +12506,9 @@ def app_watch(st):
                     "new_model": new_model(), "new_effort": new_effort(),
                     "default_efforts": default_efforts(), "models": known_models(), "share": share_state(),
                     "engine_problem": protocol_problem(), "today": today_view(), "needs": needs_you(ss),
-                    "missions": missions_view(), "ghostty": ghostty_here(), "moved": moved_shared()}
+                    "missions": missions_view(), "ghostty": ghostty_here(), "moved": moved_shared(),
+                    # A cloud machine (track F): the ones made here, and this machine's sign-ins.
+                    "cloud": cloud_view(), "signin": {"claude": signin_brief("claude"), "github": signin_brief("github")}}
         except Exception as e:      # a half-written file, say: the next second will do
             print(f"amarchy app: couldn't read the sessions: {e}", file=sys.stderr)
             time.sleep(1)
@@ -12497,6 +12546,8 @@ def app_asking(s):
 # What a secret's name is, in words, for the ones people mostly have (as
 # app/secrets.js's SECRET_WORDS has them).
 SECRET_WORDS = {
+    "HCLOUD_TOKEN": "Hetzner Cloud API token", "DIGITALOCEAN_TOKEN": "DigitalOcean API token",
+    "HOSTINGER_API_TOKEN": "Hostinger API token", "TAILSCALE_AUTH_KEY": "Tailscale auth key",
     "OPENAI_API_KEY": "OpenAI API key", "GEMINI_API_KEY": "Gemini API key", "GOOGLE_API_KEY": "Google API key",
     "STRIPE_SECRET_KEY": "Stripe secret key", "STRIPE_API_KEY": "Stripe API key", "GITHUB_TOKEN": "GitHub token",
     "GH_TOKEN": "GitHub token", "DATABASE_URL": "database address", "AWS_ACCESS_KEY_ID": "AWS access key",
@@ -14272,7 +14323,9 @@ def hello():
     """What /api/peer/hello says of this machine."""
     return {"name": machine_name(), "label": machine_label(), "version": amarchy_version(),
             "protocol": PROTOCOL, "user": machine_user(), "users": sorted(app_users(tailnet_status())), "merges": True,
-            "moves": True, "kind": machine_kind(), "icon": machine_icon()}
+            "moves": True, "kind": machine_kind(), "icon": machine_icon(),
+            # A cloud machine (track F): its Claude and GitHub signed in, and whether amarchy made it in a cloud.
+            "claude": signin_brief("claude"), "github": signin_brief("github"), "cloud": cloud_self()}
 
 
 def machine_url_ok(url):
@@ -14729,6 +14782,8 @@ def cmd_machines(args):
             write_file(MACHINES_AS, args[1] + "\n")
             print(f"the board shows a chat's machine by its {args[1]}")
             return 0
+        if what == "cloud":      # a cloud machine (track F; see "a cloud machine")
+            return cmd_cloud(args[1:], as_json)
         if what == "found" and len(args) == 1:
             found = machines_found()
             print(json.dumps(found, indent=2) if as_json else "\n".join(
@@ -14936,8 +14991,14 @@ def board_view(st):
     if memo and memo[0] == version:
         return memo[1]
     me = machine_name()
+    signin = view.get("signin") or {}
+    clouds = {r["name"]: r for r in view.get("cloud") or []}      # the cloud machines made here (track F)
+    made = {r.get("machine"): r for r in clouds.values() if r.get("machine")}
+    own = cloud_self()
     machines = [{"name": me, "label": machine_label(), "icon": machine_icon(), "me": True, "on": True, "since": None, "error": None,
                  "update": None, "version": amarchy_version(), "seen": True,
+                 "claude": signin.get("claude"), "github": signin.get("github"),
+                 "cloud": cloud_brief(own) if own else None,
                  "projects": [{"name": p["name"], "github": p.get("github")} for p in view.get("projects") or []]}]
     sessions = list(view.get("sessions") or [])
     tasks = list((view.get("today") or {}).get("tasks") or [])
@@ -14953,6 +15014,10 @@ def board_view(st):
                          "icon": h.get("icon") if h.get("icon") in MACHINE_ICONS else "desktop",
                          "on": not off, "since": p.get("since"), "error": p.get("error"), "update": p.get("update"),
                          "version": h.get("version") or "", "seen": bool(p.get("sessions") or p.get("at")),
+                         "claude": h.get("claude") if h.get("claude") in ("in", "out") else None,
+                         "github": h.get("github") if h.get("github") in ("in", "out") else None,
+                         "cloud": ({**made[name], "made_here": True} if name in made else
+                                   cloud_brief(h["cloud"]) if isinstance(h.get("cloud"), dict) else None),
                          "projects": [{"name": x.get("name"), "github": x.get("github")} for x in p.get("projects") or []
                                       if isinstance(x, dict) and isinstance(x.get("name"), str)]})
         if p.get("update"):
@@ -14960,6 +15025,15 @@ def board_view(st):
         for s in p.get("sessions") or []:
             sessions.append({**s, "machine": name, **({"machine_off": True} if off else {})})
         tasks += [{**x, "machine": name} for x in p.get("tasks") or [] if isinstance(x, dict) and not off]
+    # A cloud machine still being made here (or being removed, or just
+    # removed): a row of its own, until it's paired and its own row has it.
+    shown = {x["name"] for x in machines}
+    for r in clouds.values():
+        if r.get("machine") in shown:
+            continue
+        machines.append({"name": r["name"], "label": r["name"], "me": False, "icon": "cloud", "on": False, "since": None,
+                         "error": None, "update": None, "version": "", "seen": False, "making": True,
+                         "claude": None, "github": None, "projects": [], "cloud": {**r, "made_here": True}})
     # Moved chats (see "moving a chat"): every machine's, each old key to
     # the one it's under now; and one that moved a moment ago, as it was,
     # under its new key, until its new machine's list has it (its card keeps
@@ -16691,6 +16765,1790 @@ def move_check_words(out):
     return "\n".join(lines)
 
 
+# ------------------------------------------------------------------ a cloud machine (track F)
+#
+# A machine made for you in your own cloud account, in one tap: Settings →
+# Machines → Add a cloud machine, or `amarchy machines cloud add`
+# (docs/plan-omarchy-and-machines.md, "A cloud machine (track F)"; the
+# guide's "A cloud machine"). The project never runs a machine or bills
+# anyone: the provider bills you, and Remove deletes it there.
+#
+# - The providers: Hetzner Cloud, DigitalOcean, Hostinger VPS, each a class
+#   with the same few calls (its regions, its sizes with their own prices,
+#   make one, how one stands, delete one), so another is one more class.
+# - Their API tokens and the one-off Tailscale key are kept here in
+#   secrets/cloud.env (0600), never given to a chat's commands, masked in
+#   the app; given in the app's own field, a terminal, or a chat's card
+#   (amarchy secret ask NAME --cloud), never the chat.
+# - The machine is set up by one script, cloud/bootstrap.sh, carried by
+#   cloud-init (Hetzner, DigitalOcean) or as a post-install script
+#   (Hostinger): Tailscale with the key, the packages, your user, Claude
+#   Code, amarchy and its app. It reports each step here over the tailnet
+#   (POST /api/cloud/progress, with a token of its own).
+# - Its record is kept in ~/.config/amarchy/cloud.json (0600), and a watcher
+#   of its own (amarchy-cloud-<name>.service: it outlives the app server's
+#   restarts) takes it through its steps: creating → booting → installing →
+#   tailnet → pairing → paired (or failed, with words that say what to do),
+#   and removing (its chats moved here first when you say so, it leaves the
+#   tailnet, it's unpaired and deleted at the provider).
+# - Then its Claude and GitHub are signed in from the app (see "signing in
+#   on a machine"): each machine signs in on its own, never a credential
+#   copied over.
+
+CLOUD_FILE = CONFIG / "cloud.json"
+CLOUD_SECRETS = SECRETS / "cloud.env"
+CLOUD_SELF = CONFIG / "cloud-self.json"     # on a cloud machine amarchy made: {provider, by, made}
+CLOUD_BOOTSTRAP = Path(SELF).parent.parent / "cloud" / "bootstrap.sh"
+CLOUD_STEPS = ("creating", "booting", "installing", "tailnet", "pairing", "paired")
+CLOUD_REPORTS = ("tailnet", "packages", "claude", "amarchy", "app", "ready", "failed")
+CLOUD_MIN_GB = 8                # the floor for a dozen chats: the sizes from it are the ones recommended
+CLOUD_SWAP_GB = 4
+CLOUD_POLL = float(os.environ.get("AMARCHY_CLOUD_POLL") or 5)    # seconds between the watcher's looks
+# How long each step may take before it's taken as failed (seconds; the
+# tests' are shorter): the provider starting it, it joining your tailnet once
+# it runs, amarchy answering there once it's joined, the pairing.
+CLOUD_LIMITS = {"creating": 20 * 60, "booting": 10 * 60, "installing": 15 * 60, "tailnet": 30 * 60, "pairing": 10 * 60}
+if os.environ.get("AMARCHY_CLOUD_LIMITS"):
+    try:
+        CLOUD_LIMITS.update({k: float(v) for k, v in json.loads(os.environ["AMARCHY_CLOUD_LIMITS"]).items()})
+    except (ValueError, AttributeError):
+        pass
+CLOUD_REMOVED_KEEP = 10 * 60    # a removed one stays on the list this long, saying what was done
+CLOUD_REPO_DEFAULT = "https://github.com/ja-818/amarchy.git"
+TS_KEY_NAME = "TAILSCALE_AUTH_KEY"
+TS_ADMIN_KEYS = "https://login.tailscale.com/admin/settings/keys"
+TS_KEY_HOW = ("On Tailscale's Keys page, Generate auth key: one-off (not reusable), pre-approved, "
+              "expiring in a day; no tags. Copy it, and paste it here.")
+COUNTRY_NAMES = {"DE": "Germany", "FI": "Finland", "US": "United States", "SG": "Singapore", "NL": "Netherlands",
+                 "GB": "United Kingdom", "UK": "United Kingdom", "FR": "France", "IN": "India", "CA": "Canada",
+                 "AU": "Australia", "BR": "Brazil", "LT": "Lithuania", "ID": "Indonesia", "MY": "Malaysia",
+                 "JP": "Japan", "ES": "Spain", "IT": "Italy", "PL": "Poland", "SE": "Sweden", "CH": "Switzerland",
+                 "AT": "Austria", "IE": "Ireland", "ZA": "South Africa", "MX": "Mexico", "KR": "South Korea"}
+
+
+class CloudError(Exception):
+    """A provider said no, or didn't answer: the words to say."""
+
+    def __init__(self, words, status=None, gone=False, unsure=False):
+        super().__init__(words)
+        self.status, self.gone, self.unsure = status, gone, unsure
+
+
+def cloud_money(amount, currency):
+    """A price as people read it: €6.49, $48, 12.99 GBP."""
+    if amount is None:
+        return ""
+    sign = {"EUR": "€", "USD": "$", "GBP": "£"}.get((currency or "").upper())
+    text = f"{amount:.2f}".rstrip("0").rstrip(".") if float(amount) != int(amount) else f"{int(amount)}"
+    if "." in text and len(text.split(".")[1]) == 1:
+        text += "0"
+    return f"{sign}{text}" if sign else f"{text} {currency or ''}".strip()
+
+
+def cloud_country(code):
+    return COUNTRY_NAMES.get((code or "").upper(), (code or "").upper())
+
+
+# ---- the providers
+
+class CloudProvider:
+    """One cloud's API: what a provider is for amarchy. Each subclass says
+    its name, its token and where it's made, and answers the same calls;
+    another provider is one more of these in CLOUD_PROVIDERS."""
+    key = label = token_name = token_url = token_how = api = ""
+    billing = "hourly"      # billed by the hour, up to the monthly price (removing stops it)
+    carrier = "cloud-init"  # how the setup reaches the machine: user data, or a post-install script
+    user_data_max = 32 * 1024
+    notes = ""
+
+    def base(self):
+        """The API's address: its own, or the tests' fake one (AMARCHY_CLOUD_API_<KEY>, on 127.0.0.1)."""
+        fake = os.environ.get(f"AMARCHY_CLOUD_API_{self.key.upper()}")
+        if fake and urllib.parse.urlsplit(fake).hostname in ("127.0.0.1", "localhost"):
+            return fake.rstrip("/")
+        return self.api
+
+    def call(self, token, method, path, body=None, query=None, timeout=30, ok404=False):
+        """The API's JSON answer to one request, or CloudError saying why not."""
+        import urllib.error
+        import urllib.request
+        url = self.base() + path + ("?" + urllib.parse.urlencode(query, doseq=True) if query else "")
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json",
+                   "User-Agent": f"amarchy/{PROTOCOL} (open source; https://github.com/ja-818/amarchy)"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                status, raw = r.status, r.read()
+        except urllib.error.HTTPError as e:
+            status, raw = e.code, e.read() or b""
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            reason = getattr(e, "reason", e)
+            timed = isinstance(reason, socket.timeout) or "timed out" in str(reason)
+            raise CloudError(f"{self.label} didn't answer ({'it took too long' if timed else reason})",
+                             unsure=method != "GET") from None
+        try:
+            answer = json.loads(raw.decode("utf-8", "replace")) if raw.strip() else {}
+        except ValueError:
+            answer = {"_text": raw.decode("utf-8", "replace")[:300]}
+        if status == 404 and ok404:
+            return None
+        if status >= 400:
+            raise CloudError(self.why(status, answer if isinstance(answer, dict) else {}), status=status,
+                             gone=status == 404, unsure=status >= 500 and method != "GET")
+        return answer
+
+    def why(self, status, answer):
+        """A refusal in words (each provider's own codes)."""
+        said = str(answer.get("message") or answer.get("_text") or "").strip().rstrip(".")
+        if status == 401:
+            return (f"{self.label} didn't take the token: it's wrong, expired or deleted. Make a new one "
+                    f"({self.token_url}) and give it again")
+        if status == 403:
+            return f"{self.label} says the token can't do that ({said or 'forbidden'}): make one that can ({self.token_how})"
+        if status == 429:
+            return f"{self.label} says too many requests: try again in a minute"
+        if status >= 500:
+            return f"{self.label} had a problem of its own ({status}{': ' + said if said else ''}): try again in a while"
+        return f"{self.label} said no ({status}{': ' + said if said else ''})"
+
+    def pages(self, token, path, key, query=None):
+        """Every item of a listed resource, page by page."""
+        raise NotImplementedError
+
+    # What every provider answers (see each one):
+    def check(self, token):                 # words: the account it's on
+        raise NotImplementedError
+
+    def regions(self, token):               # [{id, label}]
+        raise NotImplementedError
+
+    def sizes(self, token, region):         # [{id, label, cores, memory_gb, disk_gb, monthly, currency, arch, ...}]
+        raise NotImplementedError
+
+    def image(self, token, region, arch):   # the system image it's made from (Debian 13, else Ubuntu 26.04)
+        raise NotImplementedError
+
+    def create(self, token, rec, setup):    # {id, state, ip, ...}: made (or being paid for)
+        raise NotImplementedError
+
+    def get(self, token, rec):              # {state: booting | running | off | gone | failed, ip, words}
+        raise NotImplementedError
+
+    def find(self, token, rec):             # the one it made, by its name (a create whose answer was lost), or None
+        raise NotImplementedError
+
+    def listed(self, token):                # every machine amarchy made in that account
+        raise NotImplementedError
+
+    def remove(self, token, rec):           # words: what was done (deleted, its billing stopped)
+        raise NotImplementedError
+
+    def tidy(self, token, rec):             # once it's set up: what held its setup at the provider, gone
+        return None
+
+
+def cloud_pick_image(images, prefer):
+    """The first of the preferred system images (names or slugs) that's
+    there, as (its id for the create, its name)."""
+    for want in prefer:
+        for i in images:
+            if i[1] == want or re.fullmatch(want, i[1] or "", re.I):
+                return i
+    return None
+
+
+class Hetzner(CloudProvider):
+    key, label = "hetzner", "Hetzner Cloud"
+    token_name = "HCLOUD_TOKEN"
+    token_url = "https://console.hetzner.com/projects"
+    token_how = "In the Hetzner Console, open your project, then Security → API tokens → Generate API token, Read & Write"
+    api = "https://api.hetzner.cloud/v1"
+    notes = "Germany, Finland, the US and Singapore. Billed by the hour, up to the monthly price."
+    user_data_max = 32 * 1024
+
+    def why(self, status, answer):
+        err = answer.get("error") if isinstance(answer.get("error"), dict) else {}
+        code, said = err.get("code") or "", str(err.get("message") or "").rstrip(".")
+        if code == "resource_limit_exceeded":
+            return f"Your Hetzner project's limit is reached ({said}): ask Hetzner to raise it, or remove a server"
+        if code == "uniqueness_error":
+            return f"Hetzner says that name is taken in your project ({said}): pick another name"
+        if code in ("resource_unavailable", "unavailable", "placement_error"):
+            return f"Hetzner can't make that size there right now ({said}): pick another size or region"
+        if code == "forbidden":
+            return "The Hetzner token can only read: make one with Read & Write (Security → API tokens)"
+        if code == "invalid_input":
+            return f"Hetzner didn't take it: {said}"
+        if code == "rate_limit_exceeded":
+            return "Hetzner says too many requests: try again in a minute"
+        return super().why(status, {"message": said or answer.get("_text")})
+
+    def pages(self, token, path, key, query=None):
+        out, page = [], 1
+        while page:
+            d = self.call(token, "GET", path, query={**(query or {}), "page": page, "per_page": 50})
+            out += d.get(key) or []
+            nxt = ((d.get("meta") or {}).get("pagination") or {}).get("next_page")
+            page = nxt if isinstance(nxt, int) and nxt > page and page < 40 else None
+        return out
+
+    def check(self, token):
+        n = len(self.pages(token, "/servers", "servers"))
+        return f"your Hetzner project ({n} server{'' if n == 1 else 's'} in it now)"
+
+    def regions(self, token):
+        return [{"id": loc["name"], "label": f"{loc.get('city') or loc['name']}, {cloud_country(loc.get('country'))}",
+                 "zone": loc.get("network_zone")}
+                for loc in self.pages(token, "/locations", "locations") if loc.get("name")]
+
+    def sizes(self, token, region):
+        types = self.pages(token, "/server_types", "server_types")
+        pricing = (self.call(token, "GET", "/pricing") or {}).get("pricing") or {}
+        currency = pricing.get("currency") or "EUR"
+        ipv4 = 0.0
+        for ip in pricing.get("primary_ips") or []:
+            if ip.get("type") == "ipv4":
+                for pr in ip.get("prices") or []:
+                    if pr.get("location") == region:
+                        ipv4 = float((pr.get("price_monthly") or {}).get("gross") or 0)
+        out = []
+        for t in types:
+            if t.get("deprecated") or t.get("deprecation"):
+                continue
+            here = [x for x in t.get("locations") or [] if x.get("name") == region]
+            if t.get("locations") is not None and (not here or here[0].get("deprecation") or here[0].get("available") is False):
+                continue
+            price = next((p for p in t.get("prices") or [] if p.get("location") == region), None)
+            if not price or float(t.get("memory") or 0) < 2:
+                continue
+            monthly = float((price.get("price_monthly") or {}).get("gross") or 0) + ipv4
+            arch = "arm" if t.get("architecture") == "arm" else "x86"
+            kind = "dedicated vCPU" if t.get("cpu_type") == "dedicated" else "shared vCPU"
+            out.append({"id": t["name"], "label": str(t.get("description") or t["name"]).upper(), "cores": t.get("cores"),
+                        "memory_gb": float(t.get("memory") or 0), "disk_gb": t.get("disk"), "monthly": round(monthly, 2),
+                        "currency": currency, "arch": arch,
+                        "note": f"{kind}{', Arm' if arch == 'arm' else ''}; with its IPv4 address"})
+        return out
+
+    def image(self, token, region, arch):
+        imgs = [(i["name"], i["name"]) for i in self.pages(token, "/images", "images",
+                                                           {"type": "system", "architecture": arch, "status": "available"})
+                if i.get("name") and not i.get("deprecation") and not i.get("deprecated")]
+        return cloud_pick_image(imgs, ["debian-13", "ubuntu-26.04"])
+
+    def create(self, token, rec, setup):
+        d = self.call(token, "POST", "/servers", {
+            "name": rec["name"], "server_type": rec["size"], "image": rec["image"], "location": rec["region"],
+            "user_data": setup, "start_after_create": True,
+            "labels": {"amarchy": "cloud", "amarchy-by": rec.get("by") or "amarchy"},
+            "public_net": {"enable_ipv4": True, "enable_ipv6": True}})
+        srv = d.get("server") or {}
+        if not srv.get("id"):
+            raise CloudError("Hetzner answered without the server it made", unsure=True)
+        return {"id": str(srv["id"]), **self.state(srv)}       # (its root_password, when it sends one, is never kept)
+
+    def state(self, srv):
+        s = srv.get("status")
+        state = {"running": "running", "off": "off", "stopping": "off", "deleting": "gone"}.get(s, "booting")
+        return {"state": state, "ip": ((srv.get("public_net") or {}).get("ipv4") or {}).get("ip")}
+
+    def get(self, token, rec):
+        d = self.call(token, "GET", f"/servers/{rec['id']}", ok404=True)
+        return {"state": "gone"} if d is None else self.state(d.get("server") or {})
+
+    def find(self, token, rec):
+        found = self.call(token, "GET", "/servers", query={"name": rec["name"]}).get("servers") or []
+        srv = next((s for s in found if (s.get("labels") or {}).get("amarchy") == "cloud"), None)
+        return {"id": str(srv["id"]), **self.state(srv)} if srv else None
+
+    def listed(self, token):
+        out = []
+        for s in self.pages(token, "/servers", "servers", {"label_selector": "amarchy=cloud"}):
+            loc = ((s.get("location") or (s.get("datacenter") or {}).get("location")) or {}).get("name")
+            price = next((p for p in (s.get("server_type") or {}).get("prices") or [] if p.get("location") == loc), {})
+            out.append({"id": str(s["id"]), "name": s.get("name"), "state": self.state(s)["state"], "region": loc,
+                        "size": (s.get("server_type") or {}).get("name"),
+                        "monthly": float((price.get("price_monthly") or {}).get("gross") or 0) or None, "currency": "EUR"})
+        return out
+
+    def remove(self, token, rec):
+        if rec.get("id"):
+            self.call(token, "DELETE", f"/servers/{rec['id']}", ok404=True)
+        return "Deleted at Hetzner: its billing stops now"
+
+
+class DigitalOcean(CloudProvider):
+    key, label = "digitalocean", "DigitalOcean"
+    token_name = "DIGITALOCEAN_TOKEN"
+    token_url = "https://cloud.digitalocean.com/account/api/tokens"
+    token_how = ("In DigitalOcean's API page, Generate New Token, with these scopes: droplet (create, read, delete), "
+                 "regions, sizes and image (read), tag (create, read), account (read); or Full Access")
+    api = "https://api.digitalocean.com/v2"
+    notes = "North America, Europe, Asia, Australia. Billed by the hour, up to the monthly price."
+    user_data_max = 64 * 1024
+
+    def why(self, status, answer):
+        code, said = str(answer.get("id") or ""), str(answer.get("message") or "").rstrip(".")
+        if status == 422 and "limit" in said.lower():
+            return f"Your DigitalOcean account's droplet limit is reached ({said}): ask DigitalOcean to raise it"
+        if status == 422 or code == "unprocessable_entity":
+            return f"DigitalOcean didn't take it: {said}"
+        if status == 403:
+            return f"The DigitalOcean token can't do that ({said}): make one with the scopes listed ({self.token_how})"
+        return super().why(status, {"message": said or answer.get("_text")})
+
+    def pages(self, token, path, key, query=None):
+        out, page = [], 1
+        while page:
+            d = self.call(token, "GET", path, query={**(query or {}), "page": page, "per_page": 200})
+            out += d.get(key) or []
+            more = bool(((d.get("links") or {}).get("pages") or {}).get("next"))
+            page = page + 1 if more and page < 40 else None
+        return out
+
+    def check(self, token):
+        a = (self.call(token, "GET", "/account") or {}).get("account") or {}
+        if a.get("status") == "locked":
+            raise CloudError(f"Your DigitalOcean account is locked ({a.get('status_message') or 'see your account'})")
+        return f"your DigitalOcean account{' (' + a['email'] + ')' if a.get('email') else ''}"
+
+    def regions(self, token):
+        return [{"id": r["slug"], "label": r.get("name") or r["slug"]}
+                for r in self.pages(token, "/regions", "regions") if r.get("available") and r.get("slug")]
+
+    def sizes(self, token, region):
+        out = []
+        for s in self.pages(token, "/sizes", "sizes"):
+            gb = float(s.get("memory") or 0) / 1024
+            if not s.get("available") or region not in (s.get("regions") or []) or s.get("gpu_info") or gb < 2 or gb > 64:
+                continue
+            out.append({"id": s["slug"], "label": s["slug"], "cores": s.get("vcpus"), "memory_gb": round(gb, 1),
+                        "disk_gb": s.get("disk"), "monthly": float(s.get("price_monthly") or 0), "currency": "USD",
+                        "arch": "x86", "note": s.get("description") or ""})
+        return out
+
+    def image(self, token, region, arch):
+        imgs = [(i["slug"], i["slug"]) for i in self.pages(token, "/images", "images", {"type": "distribution"})
+                if i.get("slug") and (not i.get("regions") or region in i["regions"]) and i.get("status") in (None, "available")]
+        return cloud_pick_image(imgs, ["debian-13-x64", "ubuntu-26-04-x64"])
+
+    def state(self, d):
+        state = {"active": "running", "off": "off", "archive": "gone"}.get(d.get("status"), "booting")
+        ip = next((n.get("ip_address") for n in (d.get("networks") or {}).get("v4") or [] if n.get("type") == "public"), None)
+        return {"state": state, "ip": ip}
+
+    def create(self, token, rec, setup):
+        d = (self.call(token, "POST", "/droplets", {
+            "name": rec["name"], "region": rec["region"], "size": rec["size"], "image": rec["image"],
+            "user_data": setup, "ipv6": True, "tags": ["amarchy"]}) or {}).get("droplet") or {}
+        if not d.get("id"):
+            raise CloudError("DigitalOcean answered without the droplet it made", unsure=True)
+        return {"id": str(d["id"]), **self.state(d)}
+
+    def get(self, token, rec):
+        d = self.call(token, "GET", f"/droplets/{rec['id']}", ok404=True)
+        return {"state": "gone"} if d is None else self.state(d.get("droplet") or {})
+
+    def find(self, token, rec):
+        found = self.call(token, "GET", "/droplets", query={"name": rec["name"]}).get("droplets") or []
+        d = next((x for x in found if "amarchy" in (x.get("tags") or [])), None)
+        return {"id": str(d["id"]), **self.state(d)} if d else None
+
+    def listed(self, token):
+        return [{"id": str(d["id"]), "name": d.get("name"), "state": self.state(d)["state"],
+                 "region": (d.get("region") or {}).get("slug"), "size": d.get("size_slug"),
+                 "monthly": float((d.get("size") or {}).get("price_monthly") or 0) or None, "currency": "USD"}
+                for d in self.pages(token, "/droplets", "droplets", {"tag_name": "amarchy"})]
+
+    def remove(self, token, rec):
+        if rec.get("id"):
+            self.call(token, "DELETE", f"/droplets/{rec['id']}", ok404=True)
+        return "Deleted at DigitalOcean: its billing stops now"
+
+
+# Hostinger's VPS plans, for when its catalog doesn't say a plan's size (its
+# metadata is free-form): from its plan sheet.
+HOSTINGER_PLANS = {"kvm 1": (1, 4, 50), "kvm 2": (2, 8, 100), "kvm 4": (4, 16, 200), "kvm 8": (8, 32, 400)}
+
+
+class Hostinger(CloudProvider):
+    key, label = "hostinger", "Hostinger VPS"
+    token_name = "HOSTINGER_API_TOKEN"
+    token_url = "https://hpanel.hostinger.com/profile/api"
+    token_how = "In hPanel, your profile → API → New token (its payment method pays for the VPS)"
+    api = "https://developers.hostinger.com"
+    billing = "subscription"    # paid ahead for each period; removing it stops the renewal
+    carrier = "post-install"
+    user_data_max = 48 * 1024
+    notes = ("Paid ahead each month, from your default payment method. Hostinger can't delete one at once: "
+             "removing stops it and its renewal.")
+
+    def why(self, status, answer):
+        said = str(answer.get("message") or "").rstrip(".")
+        errors = answer.get("errors") if isinstance(answer.get("errors"), dict) else {}
+        if status == 422:
+            detail = "; ".join(f"{k}: {' '.join(v) if isinstance(v, list) else v}" for k, v in errors.items())
+            return f"Hostinger didn't take it: {detail or said}"
+        if status == 404:
+            return f"Hostinger says it isn't there ({said or 'not found'})"
+        return super().why(status, {"message": said or answer.get("_text")})
+
+    def pages(self, token, path, key=None, query=None):
+        d = self.call(token, "GET", path, query=query)
+        return d if isinstance(d, list) else (d.get("data") if isinstance(d, dict) and isinstance(d.get("data"), list) else [])
+
+    def payment(self, token):
+        ms = [m for m in self.pages(token, "/api/billing/v1/payment-methods")
+              if isinstance(m, dict) and not m.get("is_expired") and not m.get("is_suspended")]
+        return next((m for m in ms if m.get("is_default")), ms[0] if ms else None)
+
+    def check(self, token):
+        self.pages(token, "/api/vps/v1/data-centers")
+        m = self.payment(token)
+        if not m:
+            raise CloudError("Your Hostinger account has no payment method that works: add one in hPanel (Billing → "
+                             "Payment methods), then give the token again")
+        return f"your Hostinger account, paying with {m.get('name') or 'your card'} {m.get('identifier') or ''}".rstrip()
+
+    def regions(self, token):
+        out = []
+        for dc in self.pages(token, "/api/vps/v1/data-centers"):
+            if isinstance(dc, dict) and dc.get("id") is not None:
+                where = ", ".join(x for x in (dc.get("city"), cloud_country(dc.get("location"))) if x)
+                out.append({"id": str(dc["id"]), "label": where or str(dc.get("name") or dc["id"])})
+        return out
+
+    def plan(self, item):
+        """A catalog item's cores, memory and disk: its metadata's, else the plan sheet's."""
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+
+        def num(*keys):
+            for k in keys:
+                v = meta.get(k)
+                try:
+                    return float(str(v).lower().replace("gb", "").strip()) if v is not None else None
+                except ValueError:
+                    continue
+            return None
+        cores, mem, disk = num("cpus", "cpu", "vcpus", "cores"), num("memory_gb", "ram_gb", "memory", "ram"), \
+            num("disk_gb", "disk", "storage")
+        if mem and mem > 256:       # in MB
+            mem = mem / 1024
+        if disk and disk > 4096:
+            disk = disk / 1024
+        sheet = HOSTINGER_PLANS.get(str(item.get("name") or "").lower().strip())
+        if sheet:
+            cores, mem, disk = cores or sheet[0], mem or sheet[1], disk or sheet[2]
+        return cores, mem, disk
+
+    def sizes(self, token, region):
+        out = []
+        for item in self.pages(token, "/api/billing/v1/catalog", query={"category": "VPS"}):
+            if not isinstance(item, dict):
+                continue
+            cores, mem, disk = self.plan(item)
+            prices = [p for p in item.get("prices") or [] if isinstance(p, dict) and p.get("period_unit") == "month"]
+            price = next((p for p in prices if p.get("period") == 1), None) or (min(prices, key=lambda p: p.get("period") or 99)
+                                                                               if prices else None)
+            if not price or not mem or mem < 2:
+                continue
+            months = max(1, int(price.get("period") or 1))
+            monthly = round((price.get("price") or 0) / 100 / months, 2)
+            first = round((price.get("first_period_price") or 0) / 100 / months, 2)
+            note = "paid ahead every month" if months == 1 else f"paid ahead every {months} months"
+            if first and first < monthly:
+                note += f"; {cloud_money(first, price.get('currency'))} a month the first {'month' if months == 1 else 'period'}"
+            out.append({"id": price["id"], "label": item.get("name") or price["id"], "cores": cores, "memory_gb": mem,
+                        "disk_gb": disk, "monthly": monthly, "first": first or None, "currency": price.get("currency") or "USD",
+                        "arch": "x86", "note": note})
+        return out
+
+    def image(self, token, region, arch):
+        ts = [t for t in self.pages(token, "/api/vps/v1/templates") if isinstance(t, dict) and t.get("id") is not None]
+        for want in (r"debian\s*13\b", r"ubuntu\s*26\.04\b"):
+            plain = sorted((t for t in ts if re.match(want, str(t.get("name") or ""), re.I)), key=lambda t: len(str(t["name"])))
+            if plain:
+                return str(plain[0]["id"]), plain[0]["name"]
+        return None
+
+    def vm_state(self, vm):
+        s = vm.get("state")
+        state = ("running" if s == "running" else "off" if s in ("stopped", "stopping", "suspended", "suspending")
+                 else "gone" if s in ("destroyed", "destroying") else "failed" if s == "error" else "booting")
+        ip = next((a.get("address") for a in vm.get("ipv4") or [] if isinstance(a, dict)), None)
+        return {"state": state, "ip": ip, "subscription": vm.get("subscription_id"),
+                **({"words": "Hostinger says its setup failed"} if s == "error" else {}),
+                **({"initial": True} if s == "initial" else {})}
+
+    def create(self, token, rec, setup):
+        script = (self.call(token, "POST", "/api/vps/v1/post-install-scripts",
+                            {"name": f"amarchy {rec['name']}", "content": setup}) or {})
+        if not script.get("id"):
+            raise CloudError("Hostinger answered without the setup script it kept")
+        m = self.payment(token)
+        try:
+            d = self.call(token, "POST", "/api/vps/v1/virtual-machines", {
+                "item_id": rec["size"], **({"payment_method_id": m["id"]} if m and m.get("id") is not None else {}),
+                "setup": {"template_id": int(rec["image"]), "data_center_id": int(rec["region"]),
+                          "post_install_script_id": script["id"], "enable_backups": False, "install_monarx": False}}) or {}
+        except CloudError as e:
+            if not e.unsure:
+                try:
+                    self.call(token, "DELETE", f"/api/vps/v1/post-install-scripts/{script['id']}", ok404=True)
+                except CloudError:
+                    pass
+            raise
+        vm = d.get("virtual_machine") if isinstance(d.get("virtual_machine"), dict) else None
+        if vm and vm.get("id") is not None:
+            return {"id": str(vm["id"]), "script": script["id"], **self.vm_state(vm)}
+        # 202: the payment is still being taken; the VM comes later (find: by its subscription).
+        return {"id": None, "script": script["id"], "subscription": d.get("subscription_id"), "state": "paying",
+                "words": d.get("message") or "Hostinger is taking the payment"}
+
+    def get(self, token, rec):
+        if not rec.get("id"):
+            found = self.find(token, rec)
+            return found or {"state": "paying"}
+        vm = self.call(token, "GET", f"/api/vps/v1/virtual-machines/{rec['id']}", ok404=True)
+        return {"state": "gone"} if vm is None else self.vm_state(vm)
+
+    def find(self, token, rec):
+        for vm in self.pages(token, "/api/vps/v1/virtual-machines"):
+            if isinstance(vm, dict) and vm.get("id") is not None and \
+                    ((rec.get("subscription") and vm.get("subscription_id") == rec["subscription"]) or
+                     (rec.get("id") and str(vm["id"]) == str(rec["id"]))):
+                return {"id": str(vm["id"]), **self.vm_state(vm)}
+        return None
+
+    def setup(self, token, rec):
+        """A VPS bought but not set up (its payment came after the order): set up now, with the same script."""
+        self.call(token, "POST", f"/api/vps/v1/virtual-machines/{rec['id']}/setup", {
+            "template_id": int(rec["image"]), "data_center_id": int(rec["region"]),
+            "post_install_script_id": rec.get("script"), "enable_backups": False, "install_monarx": False})
+
+    def listed(self, token):
+        mine = {str(r.get("id")) for r in cloud_read() if r.get("provider") == self.key}
+        return [{"id": str(vm["id"]), "name": vm.get("hostname"), "state": self.vm_state(vm)["state"],
+                 "region": str(vm.get("data_center_id")), "size": vm.get("plan"), "monthly": None, "currency": None}
+                for vm in self.pages(token, "/api/vps/v1/virtual-machines")
+                if isinstance(vm, dict) and str(vm.get("id")) in mine]
+
+    def tidy(self, token, rec):
+        if rec.get("script"):
+            self.call(token, "DELETE", f"/api/vps/v1/post-install-scripts/{rec['script']}", ok404=True)
+            rec["script"] = None
+
+    def remove(self, token, rec):
+        self.tidy(token, rec)
+        ends = ""
+        if rec.get("id"):
+            self.call(token, "POST", f"/api/vps/v1/virtual-machines/{rec['id']}/stop", ok404=True)
+            vm = self.call(token, "GET", f"/api/vps/v1/virtual-machines/{rec['id']}", ok404=True) or {}
+            rec["subscription"] = rec.get("subscription") or vm.get("subscription_id")
+        if rec.get("subscription"):
+            sub = self.call(token, "DELETE", f"/api/billing/v1/subscriptions/{rec['subscription']}/auto-renewal/disable",
+                            ok404=True) or {}
+            ends = str(sub.get("expires_at") or sub.get("next_billing_at") or "")[:10]
+        return ("Stopped at Hostinger, and its subscription isn't renewed: it ends "
+                + (f"on {ends}" if ends else "with the period you paid for") + " (Hostinger can't delete one at once)")
+
+
+CLOUD_PROVIDERS = {p.key: p for p in (Hetzner(), DigitalOcean(), Hostinger())}
+
+
+def cloud_provider(key):
+    p = CLOUD_PROVIDERS.get((key or "").lower())
+    if not p:
+        raise CloudError(f"a provider: {', '.join(CLOUD_PROVIDERS)}")
+    return p
+
+
+# ---- their tokens, and the Tailscale key
+
+CLOUD_TOKEN_NAMES = {p.token_name for p in CLOUD_PROVIDERS.values()} | {TS_KEY_NAME}
+
+
+def cloud_token(name):
+    """A token kept here (a provider's, by its key or its name; or the Tailscale key), or None."""
+    name = CLOUD_PROVIDERS[name].token_name if name in CLOUD_PROVIDERS else name
+    v = secrets_read(CLOUD_SECRETS).get(name)
+    return v[0] if v else None
+
+
+def cloud_token_set(name, value):
+    """Keep one (checked first for a provider's). Words: what it's for, or CloudError."""
+    p = CLOUD_PROVIDERS.get(name) or next((x for x in CLOUD_PROVIDERS.values() if x.token_name == name), None)
+    name = p.token_name if p else name
+    if name not in CLOUD_TOKEN_NAMES:
+        raise CloudError(f"a cloud token's name: {', '.join(sorted(CLOUD_TOKEN_NAMES))}")
+    value = (value or "").strip()
+    if not value or "\n" in value or len(value) > 4096:
+        raise CloudError("that isn't a token (one line of text)")
+    if name == TS_KEY_NAME:
+        if not value.startswith("tskey-"):
+            raise CloudError("a Tailscale auth key starts with tskey- (an auth key, not an API access token)")
+        if value.startswith("tskey-api-") or value.startswith("tskey-client-"):
+            raise CloudError("that's a Tailscale API token: make an auth key instead (Generate auth key)")
+        said = "the Tailscale key: it lets one machine join your tailnet, once"
+    else:
+        said = p.check(value)       # CloudError when it doesn't take it
+    with secrets_lock():
+        kept = secrets_read(CLOUD_SECRETS)
+        kept[name] = (value, int(time.time()))
+        secrets_write(CLOUD_SECRETS, kept)
+    return said
+
+
+def cloud_token_forget(name):
+    name = CLOUD_PROVIDERS[name].token_name if name in CLOUD_PROVIDERS else name
+    with secrets_lock():
+        kept = secrets_read(CLOUD_SECRETS)
+        if name not in kept:
+            return False
+        del kept[name]
+        secrets_write(CLOUD_SECRETS, kept)
+    return True
+
+
+# ---- the cloud machines made here (cloud.json)
+
+_cloud_memo = {"sig": None, "rows": []}
+
+
+def cloud_read():
+    try:
+        st_ = CLOUD_FILE.stat()
+        sig = (st_.st_mtime_ns, st_.st_size)
+    except OSError:
+        return []
+    if sig != _cloud_memo["sig"]:
+        try:
+            raw = json.loads(CLOUD_FILE.read_text())
+        except (OSError, ValueError):
+            raw = []
+        _cloud_memo.update(sig=sig, rows=[r for r in raw if isinstance(r, dict) and isinstance(r.get("name"), str)]
+                           if isinstance(raw, list) else [])
+    return [json.loads(json.dumps(r)) for r in _cloud_memo["rows"]]
+
+
+@contextlib.contextmanager
+def cloud_lock():
+    CONFIG.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG / ".cloud.lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def cloud_change(fn):
+    """cloud.json changed by fn(rows) -> rows, under a lock, 0600."""
+    with cloud_lock():
+        rows = fn(cloud_read())
+        tmp = CLOUD_FILE.with_name(f".cloud.json.{os.getpid()}.{threading.get_ident()}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(rows, indent=2) + "\n")
+        os.replace(tmp, CLOUD_FILE)
+        _cloud_memo["sig"] = None
+        return rows
+
+
+def cloud_find(name):
+    return next((r for r in cloud_read() if r["name"] == name), None)
+
+
+def cloud_update(name, **changes):
+    """One record changed (None for one that's gone): the record as kept."""
+    out = {}
+
+    def fn(rows):
+        for r in rows:
+            if r["name"] == name:
+                r.update(changes)
+                out.update(r)
+        return rows
+    cloud_change(fn)
+    return out or None
+
+
+def cloud_step(name, step, **changes):
+    """It's at a new step (when, kept with each)."""
+    rec = cloud_find(name) or {}
+    steps = {**(rec.get("steps") or {}), step: int(time.time())}
+    return cloud_update(name, step=step, steps=steps, **changes)
+
+
+def cloud_fail(name, words, **changes):
+    print(f"amarchy cloud: {name}: {words}", file=sys.stderr, flush=True)
+    return cloud_step(name, "failed", error=words, **changes)
+
+
+def cloud_drop(name):
+    cloud_change(lambda rows: [r for r in rows if r["name"] != name])
+
+
+def cloud_public(rec):
+    """A record as the app and the CLI show it: never its report token."""
+    p = CLOUD_PROVIDERS.get(rec.get("provider"))
+    out = {k: v for k, v in rec.items() if k not in ("report", "script", "subscription")}
+    out["provider_label"] = p.label if p else rec.get("provider")
+    out["billing"] = rec.get("billing") or (p.billing if p else "hourly")
+    return out
+
+
+def cloud_view():
+    """The cloud machines made here, for the board (removed ones only a
+    while, saying what was done)."""
+    now = time.time()
+    return [cloud_public(r) for r in cloud_read()
+            if r.get("step") != "removed" or now - ((r.get("steps") or {}).get("removed") or 0) < CLOUD_REMOVED_KEEP]
+
+
+# ---- what it's set up with
+
+def cloud_user():
+    """Your login name there: this machine's own (else amarchy)."""
+    try:
+        import pwd
+        name = pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError):
+        name = os.environ.get("USER") or ""
+    return name if re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", name) and name != "root" else "amarchy"
+
+
+def cloud_repo():
+    """Where it clones amarchy from: this checkout's origin, as https (the
+    public repository it updates itself from)."""
+    url = sh("git", "-C", str(Path(SELF).parent.parent), "remote", "get-url", "origin").stdout.strip()
+    m = re.fullmatch(r"(?:git@|ssh://git@)github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?", url)
+    if m:
+        return f"https://github.com/{m.group(1)}.git"
+    return url if re.match(r"https://", url) and "@" not in urllib.parse.urlsplit(url).netloc else CLOUD_REPO_DEFAULT
+
+
+def cloud_report_target():
+    """Where it reports, as (url, curl's --resolve): this machine's app on
+    the tailnet, reached at its Tailscale address (MagicDNS may not be up
+    there yet)."""
+    url = machine_url()
+    if not url:
+        return None, None
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != "https":
+        return url, None
+    me = tailnet_status().get("Self") or {}
+    ip = next((x for x in me.get("TailscaleIPs") or [] if "." in x), None)
+    return url, (f"{u.hostname}:{u.port or 443}:{ip}" if ip else None)
+
+
+def cloud_settings(rec, ts_key, mask=False):
+    """The settings bootstrap.sh reads (/var/lib/amarchy-cloud/settings)."""
+    url, resolve = cloud_report_target()
+    git = lambda k: " ".join(sh("git", "config", "--global", k).stdout.split())[:200]
+    out = {"AMARCHY_NAME": rec["name"], "AMARCHY_USER": rec.get("user") or cloud_user(), "AMARCHY_REPO": cloud_repo(),
+           "AMARCHY_BRANCH": "main", "AMARCHY_PROVIDER": rec["provider"], "AMARCHY_BY": machine_name(),
+           "GIT_NAME": git("user.name"), "GIT_EMAIL": git("user.email"), "APP_USERS": host_setting("APP_USERS") or "",
+           "TS_AUTH_KEY": ts_key or "", "REPORT_URL": url or "", "REPORT_RESOLVE": resolve or "",
+           "REPORT_TOKEN": rec.get("report") or "", "SWAP_GB": str(CLOUD_SWAP_GB)}
+    if mask:
+        for k in ("TS_AUTH_KEY", "REPORT_TOKEN"):
+            out[k] = SECRET_MASK if out[k] else ""
+    return {k: v for k, v in out.items() if v != ""}
+
+
+def cloud_settings_text(settings):
+    return "".join(f"{k}={secret_quote(' '.join(str(v).split()))}\n" for k, v in settings.items())
+
+
+def cloud_setup(rec, ts_key, mask=False):
+    """What the provider is given to set it up: cloud-init's user data, or
+    Hostinger's post-install script; both carry bootstrap.sh and its settings."""
+    import gzip
+    p = cloud_provider(rec["provider"])
+    settings = cloud_settings_text(cloud_settings(rec, ts_key, mask=mask))
+    script = CLOUD_BOOTSTRAP.read_text()
+    if p.carrier == "post-install":
+        text = ("#!/bin/bash\n"
+                f"# amarchy: the cloud machine {rec['name']}, made by amarchy on {machine_name()} (Hostinger's "
+                "post-install script).\n# It writes its settings and cloud/bootstrap.sh, then runs that "
+                "(https://github.com/ja-818/amarchy).\nset -e\numask 077\nmkdir -p /var/lib/amarchy-cloud\n"
+                "cat >/var/lib/amarchy-cloud/settings <<'AMARCHY_SETTINGS'\n" + settings + "AMARCHY_SETTINGS\n"
+                "cat >/var/lib/amarchy-cloud/bootstrap.sh <<'AMARCHY_BOOTSTRAP'\n" + script.rstrip("\n") + "\nAMARCHY_BOOTSTRAP\n"
+                "chmod 700 /var/lib/amarchy-cloud/bootstrap.sh\n"
+                f"hostnamectl set-hostname {shlex.quote(rec['name'])} 2>/dev/null || true\n"
+                "exec /var/lib/amarchy-cloud/bootstrap.sh\n")
+    else:
+        packed = base64.b64encode(gzip.compress(script.encode(), mtime=0)).decode()
+        indent = lambda text: "".join(f"      {line}\n" for line in text.splitlines())
+        text = ("#cloud-config\n"
+                f"# amarchy: the cloud machine {rec['name']}, made by amarchy on {machine_name()}.\n"
+                "# It runs cloud/bootstrap.sh (https://github.com/ja-818/amarchy) with the settings below.\n"
+                f"hostname: {rec['name']}\n"
+                "preserve_hostname: false\n"
+                "ssh_pwauth: false\n"
+                "disable_root: true\n"
+                "write_files:\n"
+                "  - path: /var/lib/amarchy-cloud/settings\n"
+                "    owner: root:root\n"
+                "    permissions: \"0600\"\n"
+                "    content: |\n" + indent(settings) +
+                "  - path: /var/lib/amarchy-cloud/bootstrap.sh\n"
+                "    owner: root:root\n"
+                "    permissions: \"0700\"\n"
+                "    encoding: gz+b64\n"
+                f"    content: {packed}\n"
+                "runcmd:\n"
+                "  - [/var/lib/amarchy-cloud/bootstrap.sh]\n")
+    if len(text.encode()) > p.user_data_max:
+        raise CloudError(f"its setup is {len(text.encode()) // 1024} KB, more than {p.label} takes "
+                         f"({p.user_data_max // 1024} KB)")
+    return text
+
+
+# ---- making one
+
+def cloud_name_free(name):
+    """Why a name can't be a new cloud machine's, or None."""
+    if not re.fullmatch(MACHINE_NAME_RE, name or "") or len(name) > 40:
+        raise CloudError("a name of lowercase letters, digits and -, like cloud or cloud-2 (it's its name on your tailnet)")
+    if name == machine_name() or machine_find(name):
+        raise CloudError(f"{name} is a machine of yours already: pick another name")
+    rec = cloud_find(name)
+    if rec and rec.get("step") not in ("removed",) and not (rec.get("step") == "failed" and rec.get("never_made")):
+        raise CloudError(f"there's a cloud machine called {name} already (amarchy machines cloud)")
+
+
+def cloud_name_next(base="cloud"):
+    """The first free name: cloud, cloud-2, cloud-3..."""
+    for n in range(1, 100):
+        name = base if n == 1 else f"{base}-{n}"
+        try:
+            cloud_name_free(name)
+            return name
+        except CloudError:
+            continue
+    return f"{base}-{int(time.time()) % 10000}"
+
+
+_cloud_options = {}     # (provider, token's hash, what) -> (when, answer): the provider's lists, kept 10 minutes
+
+
+def cloud_options(provider, region=None, fresh=False):
+    """The regions, and a region's sizes with their prices (the provider's
+    own), for the app and the CLI."""
+    p = cloud_provider(provider)
+    token = cloud_token(p.key)
+    if not token:
+        raise CloudError(f"no {p.label} token here yet: give one first (amarchy machines cloud token {p.key})")
+    sig = hashlib.sha256(token.encode()).hexdigest()[:16]
+
+    def kept(what, fn):
+        k = (p.key, sig, what)
+        hit = _cloud_options.get(k)
+        if hit and not fresh and time.time() - hit[0] < 600:
+            return hit[1]
+        val = fn()
+        _cloud_options[k] = (time.time(), val)
+        return val
+    out = {"provider": p.key, "regions": kept("regions", lambda: p.regions(token))}
+    if region:
+        sizes = sorted(kept(f"sizes:{region}", lambda: p.sizes(token, region)), key=lambda s: (s["monthly"] or 0, s["memory_gb"] or 0))
+        floor = [s for s in sizes if (s["memory_gb"] or 0) >= CLOUD_MIN_GB]
+        best = floor[0]["id"] if floor else None
+        out["sizes"] = [{**s, "recommended": s["id"] == best, "enough": (s["memory_gb"] or 0) >= CLOUD_MIN_GB} for s in sizes]
+        out["region"] = region
+    return out
+
+
+def cloud_add(provider, region=None, size=None, name=None, say=None):
+    """Make a cloud machine in your account (amarchy machines cloud add):
+    checked, made at the provider, and its watcher started. The record, or
+    CloudError saying why not (nothing made then)."""
+    say = say or (lambda text: None)
+    p = cloud_provider(provider)
+    token = cloud_token(p.key)
+    if not token:
+        raise CloudError(f"no {p.label} token here yet: give one first (amarchy machines cloud token {p.key})")
+    ts_key = cloud_token(TS_KEY_NAME)
+    if not ts_key:
+        raise CloudError("no Tailscale key here yet: make a one-off auth key "
+                         f"({TS_ADMIN_KEYS}) and give it (amarchy machines cloud token tailscale)")
+    if not machine_url():
+        raise CloudError("this machine isn't on your tailnet yet (amarchy app on): the new one pairs with it there")
+    status = tailnet_status(fresh=True)
+    if not host_setting("URL") and not status.get("CertDomains"):
+        raise CloudError("your tailnet has no HTTPS certificates: turn them on "
+                         "(https://login.tailscale.com/admin/dns, HTTPS Certificates), then try again")
+    name = (name or "").strip().lower() or cloud_name_next()
+    cloud_name_free(name)
+    opts = cloud_options(p.key)
+    regions = {r["id"]: r for r in opts["regions"]}
+    region = region or (opts["regions"][0]["id"] if opts["regions"] else None)
+    if region not in regions:
+        raise CloudError(f"{p.label} has no region {region!r} (amarchy machines cloud regions {p.key})")
+    sizes = cloud_options(p.key, region)["sizes"]
+    chosen = next((s for s in sizes if s["id"] == size), None) if size else next((s for s in sizes if s["recommended"]), None)
+    if not chosen:
+        raise CloudError(f"{p.label} has no size {size!r} in {regions[region]['label']} "
+                         f"(amarchy machines cloud sizes {p.key} {region})")
+    image = p.image(token, region, chosen.get("arch") or "x86")
+    if not image:
+        raise CloudError(f"{p.label} has neither Debian 13 nor Ubuntu 26.04 there (amarchy needs tmux 3.5): "
+                         "pick another region")
+    rec = {"name": name, "provider": p.key, "id": None, "region": region, "region_label": regions[region]["label"],
+           "size": chosen["id"], "size_label": chosen["label"], "cores": chosen.get("cores"),
+           "memory_gb": chosen.get("memory_gb"), "disk_gb": chosen.get("disk_gb"), "monthly": chosen.get("monthly"),
+           "first": chosen.get("first"), "currency": chosen.get("currency"), "billing": p.billing,
+           "image": image[0], "image_label": image[1], "user": cloud_user(), "by": machine_name(),
+           "made": int(time.time()), "step": "creating", "steps": {"creating": int(time.time())}, "error": None,
+           "detail": f"Creating it at {p.label}", "log": None, "ip": None, "node": None, "machine": None,
+           "report": b64u(os.urandom(24)), "key_used": True}
+    setup = cloud_setup(rec, ts_key)
+    cloud_change(lambda rows: [r for r in rows if r["name"] != name] + [rec])
+    say(f"Creating {name} at {p.label}: {chosen['label']}, {cloud_money(chosen.get('monthly'), chosen.get('currency'))} a month…")
+    try:
+        made = p.create(token, rec, setup)
+    except CloudError as e:
+        if e.unsure:
+            # Its answer was lost: it may have been made. The watcher looks for it by its name.
+            cloud_update(name, detail=f"{p.label} didn't answer: looking for it there", unsure=True)
+            cloud_spawn(name)
+            return cloud_find(name)
+        cloud_drop(name)
+        raise
+    changes = {k: made[k] for k in ("id", "ip", "script", "subscription") if made.get(k)}
+    if made.get("state") == "paying":
+        cloud_update(name, detail=made.get("words") or f"{p.label} is taking the payment", **changes)
+    else:
+        cloud_step(name, "booting", detail="Starting up", **changes)
+    cloud_spawn(name)
+    return cloud_find(name)
+
+
+def cloud_spawn(name):
+    """Its watcher, a unit of its own (so the app server's restarts don't
+    stop it), else a process let go."""
+    keep = {k: v for k, v in os.environ.items()
+            if k in ("HOME", "PATH", "LANG", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR",
+                     "DBUS_SESSION_BUS_ADDRESS") or (k.startswith("AMARCHY") and k not in SESSION_ENV)}
+    full = [sys.executable, SELF, "machines", "cloud", "watch", name]
+    if shutil.which("systemd-run") and not os.environ.get("AMARCHY_CLOUD_NO_UNITS"):
+        unit = f"amarchy-cloud-{name}"
+        if sh("systemctl", "--user", "is-active", "--quiet", f"{unit}.service").returncode == 0:
+            return True
+        sh("systemctl", "--user", "reset-failed", f"{unit}.service")
+        r = sh("systemd-run", "--user", "--quiet", "--collect", f"--unit={unit}",
+               f"--description=amarchy: the cloud machine {name}, made and paired", f"--working-directory={HOME}",
+               *(f"--setenv={k}={v}" for k, v in keep.items()), *full)
+        if r.returncode == 0:
+            return True
+    subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True, cwd=str(HOME), env={**clean_env(), **keep})
+    return True
+
+
+def cloud_watch_lock(name):
+    """This machine's one watcher of it: the lock, or None when one has it."""
+    CONFIG.mkdir(parents=True, exist_ok=True)
+    f = open(CONFIG / f".cloud-{name}.lock", "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except OSError:
+        f.close()
+        return None
+
+
+def cloud_node(rec):
+    """Its node on your tailnet, once it's joined (its name there, and
+    whether it's on): (MagicDNS name, online) or (None, False)."""
+    status = tailnet_status(fresh=True)
+    made = rec.get("made") or 0
+    best = None
+    for peer in (status.get("Peer") or {}).values():
+        host = str(peer.get("HostName") or "").lower()
+        dns = str(peer.get("DNSName") or "").rstrip(".").lower()
+        if host != rec["name"] and dns.split(".")[0] != rec["name"] and not re.fullmatch(rf"{re.escape(rec['name'])}-\d+", dns.split(".")[0]):
+            continue
+        created = peer.get("Created") or ""
+        try:
+            at = datetime.datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp() if created else made
+        except ValueError:
+            at = made
+        if at + 120 < made:
+            continue        # an older machine of that name, not this one
+        if not best or peer.get("Online"):
+            best = (dns, bool(peer.get("Online")))
+    return best or (None, False)
+
+
+def cloud_reach(rec):
+    """Where its amarchy is reached: its MagicDNS name's HTTPS address (the
+    tests' own, AMARCHY_CLOUD_REACH, on 127.0.0.1)."""
+    try:
+        fake = json.loads(os.environ.get("AMARCHY_CLOUD_REACH") or "{}").get(rec["name"])
+    except ValueError:
+        fake = None
+    if fake and urllib.parse.urlsplit(fake).hostname in ("127.0.0.1", "localhost"):
+        return fake.rstrip("/")
+    return f"https://{rec['node']}" if rec.get("node") else None
+
+
+def cloud_since(rec, step):
+    return time.time() - ((rec.get("steps") or {}).get(step) or rec.get("made") or time.time())
+
+
+def cloud_watch(name):
+    """Take a cloud machine through its steps (amarchy machines cloud watch:
+    its unit runs this): a look every few seconds, each step moved on by what
+    it sees (the provider, your tailnet, its amarchy) or by what it reports,
+    and failed with words past its time. Then its removal, when asked."""
+    lock = cloud_watch_lock(name)
+    if not lock:
+        return 0
+    misses = 0
+    while True:
+        rec = cloud_find(name)
+        if not rec:
+            return 0
+        if rec.get("remove"):
+            cloud_removing(rec)
+            continue
+        if rec["step"] in ("paired", "failed", "removed"):
+            return 0
+        p = CLOUD_PROVIDERS.get(rec["provider"])
+        token = cloud_token(p.key) if p else None
+        if not token:
+            cloud_fail(name, f"its {p.label if p else rec['provider']} token isn't kept here any more: give it again "
+                             f"(amarchy machines cloud token {rec['provider']}), then remove it and make it again")
+            return 1
+        try:
+            cloud_look(rec, p, token)
+            misses = 0
+        except CloudError as e:
+            misses += 1
+            if e.status == 401:
+                cloud_fail(name, str(e))
+                return 1
+            cloud_update(name, detail=f"{str(e)[:200]} (trying again)")
+        except PeerError as e:
+            cloud_update(name, detail=f"{str(e)[:200]} (trying again)")
+        time.sleep(CLOUD_POLL * (1 if misses < 3 else 3))
+
+
+def cloud_look(rec, p, token):
+    """One look at where it stands, and the step it's at moved on."""
+    name, step = rec["name"], rec["step"]
+    if step == "creating":
+        vm = p.find(token, rec) if (rec.get("unsure") or rec.get("subscription")) else None
+        if vm and vm.get("id"):
+            cloud_update(name, id=vm["id"], ip=vm.get("ip"), unsure=False)
+            if vm.get("initial") and p.key == "hostinger":      # paid for, never set up: set up now
+                p.setup(token, {**rec, "id": vm["id"]})
+            cloud_step(name, "booting", detail="Starting up")
+        elif rec.get("unsure") and cloud_since(rec, "creating") > 180:
+            cloud_fail(name, f"Nothing was made at {p.label}: it didn't answer when asked to make it. Remove this and "
+                             "try again", never_made=True)
+        elif cloud_since(rec, "creating") > CLOUD_LIMITS["creating"]:
+            cloud_fail(name, f"{p.label} hasn't finished taking the payment in {CLOUD_LIMITS['creating'] // 60:.0f} minutes: "
+                             f"finish it in hPanel (it sets the VPS up there too), or remove this")
+        return
+    vm = p.get(token, rec)
+    if vm.get("ip") and vm["ip"] != rec.get("ip"):
+        cloud_update(name, ip=vm["ip"])
+    if vm["state"] == "gone":
+        cloud_fail(name, f"It's gone at {p.label} (deleted there?). Remove it here too", never_made=True)
+        return
+    if vm["state"] == "failed":
+        cloud_fail(name, f"{vm.get('words') or p.label + ' says it failed'}: remove it, and make it again")
+        return
+    if step == "booting":
+        if vm["state"] == "running":
+            cloud_step(name, "installing", detail="Installing Tailscale, then joining your tailnet")
+        elif cloud_since(rec, "booting") > CLOUD_LIMITS["booting"]:
+            cloud_fail(name, f"It hasn't started at {p.label} in {CLOUD_LIMITS['booting'] // 60:.0f} minutes "
+                             f"({vm['state']} there). Remove it (that deletes it there), and try another region or size")
+        return
+    if step == "installing":
+        node, online = cloud_node(rec)
+        if node and online:
+            cloud_step(name, "tailnet", node=node, detail=rec.get("detail") if rec.get("steps", {}).get("packages") else "On your tailnet")
+        elif cloud_since(rec, "installing") > CLOUD_LIMITS["installing"]:
+            cloud_fail(name, f"It runs at {p.label}, but hasn't joined your tailnet in "
+                             f"{CLOUD_LIMITS['installing'] // 60:.0f} minutes. Most likely the Tailscale key: used "
+                             f"already, expired, made with tags, or waiting for your approval on Tailscale's Machines "
+                             f"page ({TS_ADMIN_MACHINES}). Remove it, then make it again with a new one-off key")
+        return
+    if step == "tailnet":
+        if rec.get("key_used") and cloud_token(TS_KEY_NAME):
+            cloud_token_forget(TS_KEY_NAME)         # spent: the next machine asks for a new one
+            cloud_update(name, key_used=False)
+        try:
+            p.tidy(token, rec)
+            cloud_update(name, script=None)
+        except CloudError:
+            pass
+        url = cloud_reach(rec)
+        if not rec.get("node"):
+            node, _ = cloud_node(rec)
+            if node:
+                cloud_update(name, node=node)
+        if url:
+            try:
+                h = machine_hello(url, timeout=6)
+            except PeerError as e:
+                # Not up yet (nothing answers, its name not known yet), or up
+                # but not one this machine can pair with (another version, not yours).
+                if str(e).startswith("Update amarchy") or "not yours" in str(e) or "isn't a machine's" in str(e):
+                    cloud_fail(name, f"Its amarchy answers, but: {e}")
+                    return
+                h = None
+            if h:
+                cloud_step(name, "pairing", detail=f"Pairing with {machine_label()}", hello_name=h["name"])
+                return
+        if cloud_since(rec, "tailnet") > CLOUD_LIMITS["tailnet"]:
+            at = rec.get("detail") or "installing"
+            cloud_fail(name, f"It joined your tailnet, but amarchy didn't come up there in "
+                             f"{CLOUD_LIMITS['tailnet'] // 60:.0f} minutes (it was at: {at}). Its log is "
+                             f"/var/log/amarchy-cloud.log there (tailscale ssh {rec.get('user') or cloud_user()}@{name})")
+        return
+    if step == "pairing":
+        url = cloud_reach(rec)
+        try:
+            m = machines_add(url)
+        except PeerError as e:
+            if cloud_since(rec, "pairing") > CLOUD_LIMITS["pairing"]:
+                cloud_fail(name, f"It's up, but pairing didn't work: {e}")
+            else:
+                cloud_update(name, detail=f"Pairing: {e} (trying again)")
+            return
+        cloud_step(name, "paired", machine=m["name"], report=None, detail="Paired: sign in to Claude there",
+                   error=None)
+
+
+def cloud_progress(name, token, step, words, log):
+    """What a cloud machine reports of its setup (POST /api/cloud/progress).
+    Why not taken, or None."""
+    rec = cloud_find(name) if isinstance(name, str) else None
+    if not rec or not rec.get("report") or not isinstance(token, str) or \
+            not hmac.compare_digest(token.encode(), rec["report"].encode()):
+        return "not one of the cloud machines this machine is making"
+    if step not in CLOUD_REPORTS:
+        return f"a step: {', '.join(CLOUD_REPORTS)}"
+    words = " ".join(str(words or "").split())[:300]
+    log = mask_secrets(str(log or ""))[-8000:] if log else None
+    if rec["step"] in ("paired", "removed") or rec.get("remove"):
+        return None
+    changes = {"detail": words or step}
+    steps = {**(rec.get("steps") or {}), f"report:{step}": int(time.time())}
+    if step == "failed":
+        cloud_update(name, steps=steps)
+        cloud_fail(name, f"{words or 'Its setup failed'}. Remove it, and make it again (its log is below)", log=log)
+        return None
+    if step == "tailnet" and rec["step"] in ("booting", "installing"):
+        cloud_update(name, steps=steps)
+        node, _ = cloud_node(rec)
+        cloud_step(name, "tailnet", **({"node": node} if node else {}), **changes)
+        return None
+    cloud_update(name, steps=steps, **changes)
+    return None
+
+
+# ---- removing one
+
+def cloud_chats(rec):
+    """Its chats, from its own list ([] for one not paired, or off): (all,
+    the ones that can move: not your assistant or an agent)."""
+    m = machine_find(rec.get("machine") or "")
+    if not m:
+        return [], []
+    try:
+        status, d = peer_json(m, "GET", "/api/peer/state", timeout=6)
+    except PeerError:
+        return [], []
+    ss = [s for s in d.get("sessions") or [] if isinstance(s, dict) and s.get("id")] if status == 200 else []
+    return ss, [s for s in ss if not s.get("assistant")]
+
+
+def cloud_remove_ask(name, move_chats=False, lose_chats=False):
+    """Remove it (amarchy machines cloud remove): its watcher does it
+    (its chats moved here first when asked; else they're lost, so that must
+    be said). The record, or CloudError."""
+    rec = cloud_find(name)
+    if not rec:
+        m = machine_find(name)
+        raise CloudError(f"{name} isn't a cloud machine this machine made" + (" (remove it as a machine: amarchy "
+                                                                              "machines remove)" if m else ""))
+    if rec.get("step") == "removed":
+        return rec
+    if rec.get("remove"):
+        return rec
+    every, movable = cloud_chats(rec)
+    if every and not move_chats and not lose_chats:
+        names = ", ".join(str(s.get("title") or s.get("task") or s.get("name") or s["id"]) for s in every[:5])
+        raise CloudError(f"{name} has {len(every)} chat{'' if len(every) == 1 else 's'} ({names}): "
+                         f"--move-chats moves them to {machine_label()} first; --lose-chats deletes them with it")
+    never = rec.get("step") == "failed" and rec.get("never_made") and not rec.get("id")
+    if never:
+        cloud_drop(name)
+        return {**rec, "step": "removed", "detail": "Nothing had been made: forgotten"}
+    rec = cloud_update(name, remove={"move_chats": bool(move_chats and movable), "at": int(time.time())},
+                       detail="Removing it", error=None)
+    cloud_spawn(name)
+    return rec
+
+
+def cloud_removing(rec):
+    """The removal itself, step by step (each kept, so a restart goes on):
+    its chats moved here (when asked: each once it's free), it leaves your
+    tailnet, it's unpaired, and deleted at the provider."""
+    name = rec["name"]
+    p = CLOUD_PROVIDERS.get(rec["provider"])
+    token = cloud_token(p.key) if p else None
+    plan = rec.get("remove") or {}
+    m = machine_find(rec.get("machine") or "")
+    if plan.get("move_chats") and m and not plan.get("moved"):
+        every, movable = cloud_chats(rec)
+        if movable:
+            asked = set(plan.get("asked") or [])
+            me = machine_name()
+            for s in movable:
+                if s.get("move_error"):
+                    cloud_update(name, remove=None, error=f"{s.get('title') or s['id']} couldn't move: "
+                                 f"{(s['move_error'] or {}).get('error') or 'it said no'}. Nothing was deleted",
+                                 detail=None)
+                    return
+                if s["id"] not in asked and not s.get("moving"):
+                    try:
+                        st_, said = peer_json(m, "POST", f"/api/session/{urllib.parse.quote(s['id'])}/move",
+                                              {"to": me, "when": "free", "secrets": True}, timeout=20)
+                    except PeerError as e:
+                        st_, said = 0, {"error": str(e)}
+                    if not (st_ == 200 or (st_ == 409 and "already" in str(said.get("error") or ""))):
+                        cloud_update(name, remove=None, error=f"{s.get('title') or s.get('task') or s['id']} couldn't move: "
+                                     f"{said.get('error') or st_}. Nothing was deleted", detail=None)
+                        return
+                    asked.add(s["id"])
+            moved = len(asked) - len(movable)
+            cloud_update(name, remove={**plan, "asked": sorted(asked)},
+                         detail=f"Moving its chats to {machine_label()}: {max(0, moved)} of {len(asked)} here "
+                                f"(each once it's free)")
+            if time.time() - (plan.get("at") or time.time()) > 3 * 3600:
+                cloud_update(name, remove=None, error="Its chats didn't all move in 3 hours (some still busy?). Nothing "
+                                                      "was deleted", detail=None)
+                return
+            time.sleep(CLOUD_POLL)
+            return
+        plan = {**plan, "moved": True}
+        cloud_update(name, remove=plan)
+    if m and not plan.get("left"):
+        cloud_update(name, detail="Leaving your tailnet")
+        try:
+            left, _ = peer_json(m, "POST", "/api/peer/cloud/leave", {}, timeout=10)
+        except PeerError:
+            left = 0
+        # Off your tailnet before it's deleted (else its node stays there, on).
+        if left == 200:
+            until_ = time.time() + 20
+            while time.time() < until_ and cloud_node(rec)[1]:
+                time.sleep(1)
+        try:
+            machines_remove(m["name"])
+        except PeerError:
+            machine_drop(m["name"])
+        plan = {**plan, "left": True}
+        cloud_update(name, remove=plan)
+    if not token:
+        cloud_update(name, remove=None, error=f"Its {p.label if p else rec['provider']} token isn't here: give it again "
+                                              f"to delete it there (it's still there, and billed)", detail=None)
+        return
+    cloud_update(name, detail=f"Deleting it at {p.label}")
+    try:
+        words = p.remove(token, rec)
+    except CloudError as e:
+        tries = int(plan.get("tries") or 0) + 1
+        if tries >= 4:
+            cloud_update(name, remove=None, step="failed", detail=None,
+                         error=f"Couldn't delete it at {p.label}: {e}. It's still there, and billed: try Remove again, "
+                               f"or delete it in {p.label}'s console")
+            return
+        cloud_update(name, remove={**plan, "tries": tries}, detail=f"Deleting it at {p.label}: {e} (trying again)")
+        time.sleep(CLOUD_POLL * 2)
+        return
+    if rec.get("key_used") and rec.get("step") in ("booting", "installing", "creating"):
+        pass        # it never joined: the key wasn't used, so it stays for the next one
+    (PEERS_SEEN / f"{rec.get('machine') or name}.json").unlink(missing_ok=True)
+    cloud_step(name, "removed", remove=None, detail=words, error=None, report=None)
+    print(f"amarchy cloud: {name}: {words}", file=sys.stderr, flush=True)
+
+
+def cloud_tend():
+    """Each minute in the app server, and when it starts: a watcher for
+    each one that isn't done (its own may have stopped with a reboot), and
+    removed ones forgotten after a while."""
+    now = time.time()
+    for rec in cloud_read():
+        if rec.get("step") == "removed":
+            if now - ((rec.get("steps") or {}).get("removed") or 0) > CLOUD_REMOVED_KEEP:
+                cloud_drop(rec["name"])
+            continue
+        if rec.get("remove") or rec.get("step") not in ("paired", "failed"):
+            lock = cloud_watch_lock(rec["name"])
+            if lock:
+                lock.close()
+                cloud_spawn(rec["name"])
+
+
+def cloud_tend_loop(st):
+    while True:
+        try:
+            cloud_tend()
+        except Exception as e:      # a cloud machine never stops the app
+            print(f"amarchy app: cloud: {e}", file=sys.stderr, flush=True)
+        time.sleep(60)
+
+
+def cloud_self():
+    """This machine, when amarchy made it in a cloud: {provider, by, made}, or None."""
+    try:
+        d = json.loads(CLOUD_SELF.read_text())
+        return {k: d.get(k) for k in ("provider", "by", "made")} if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def cloud_brief(d):
+    """A cloud machine as another machine's hello says it: whose cloud, made by which machine."""
+    p = CLOUD_PROVIDERS.get(d.get("provider"))
+    return {"provider": d.get("provider"), "provider_label": p.label if p else d.get("provider"),
+            "by": d.get("by"), "made": d.get("made")}
+
+
+def cloud_leave():
+    """This cloud machine is about to be deleted (POST /api/peer/cloud/leave):
+    off your tailnet, a moment after answering."""
+    def go():
+        time.sleep(0.5)         # (its answer on its way first)
+        sh("tailscale", "logout")
+    threading.Thread(target=go, daemon=True).start()
+
+
+# ---- the CLI: amarchy machines cloud
+
+def cloud_steps_words(rec):
+    """Where one stands, in words."""
+    step = rec.get("step")
+    words = {"creating": "creating it", "booting": "starting up", "installing": "installing",
+             "tailnet": "on your tailnet, installing", "pairing": "pairing", "paired": "paired",
+             "failed": "failed", "removed": "removed"}.get(step, step)
+    if rec.get("remove"):
+        words = "removing"
+    return words
+
+
+def cloud_line(rec):
+    price = cloud_money(rec.get("monthly"), rec.get("currency"))
+    size = f"{rec.get('size_label') or rec.get('size')}, {rec.get('cores') or '?'} vCPU, {rec.get('memory_gb') or '?'} GB"
+    p = CLOUD_PROVIDERS.get(rec.get("provider"))
+    return (f"{rec['name']}\t{p.label if p else rec.get('provider')} · {size} · {rec.get('region_label') or rec.get('region')}"
+            f"\t{price}/month\t{cloud_steps_words(rec)}" + (f": {rec['error']}" if rec.get("error") else
+                                                              f" ({rec['detail']})" if rec.get("detail") and rec.get("step") != "paired" else ""))
+
+
+def cloud_follow(name, out=print):
+    """--wait: each step as it comes, until it's paired, failed or gone."""
+    said = None
+    while True:
+        rec = cloud_find(name)
+        if not rec:
+            out("gone")
+            return 0
+        now = (rec.get("step"), rec.get("detail"), rec.get("error"))
+        if now != said:
+            out(f"  {cloud_steps_words(rec)}" + (f": {rec['error']}" if rec.get("error") else
+                                                 f" ({rec['detail']})" if rec.get("detail") else ""))
+            said = now
+        if not rec.get("remove") and rec.get("step") in ("paired", "failed", "removed"):
+            return 1 if rec["step"] == "failed" else 0
+        time.sleep(2)
+
+
+def cloud_token_ask(name, why):
+    """A token from you: a terminal's field (not echoed), else (a chat's
+    Claude) a card in the app, as amarchy secret ask does; never the chat."""
+    if sys.stdin.isatty():
+        import getpass
+        return getpass.getpass(f"{name} (not shown): ")
+    sid = own_session_id()
+    s = session(sid) if sid else None
+    if s:
+        r = cmd_secret_ask(s, [name, "--why", why, "--cloud"])
+        return None if r != 0 else cloud_token(name) or ""
+    return sys.stdin.read()
+
+
+def cmd_cloud(args, as_json=False):
+    """amarchy machines cloud [list] | providers | regions <provider> | sizes <provider> <region> | token
+    <provider|tailscale> [--forget] | add [...] | status <name> | remove <name> [...] | user-data <name> | watch <name>."""
+    what = args[0] if args else "list"
+    rest = args[1:]
+    flags = {}
+    words = []
+    it = iter(rest)
+    for a in it:
+        if a in ("--provider", "--region", "--size", "--name"):
+            flags[a[2:]] = next(it, "")
+        elif a.startswith(("--provider=", "--region=", "--size=", "--name=")):
+            k, _, v = a[2:].partition("=")
+            flags[k] = v
+        elif a in ("--yes", "-y", "--wait", "--move-chats", "--lose-chats", "--forget", "--fresh", "--real"):
+            flags[a.lstrip("-")] = True
+        else:
+            words.append(a)
+    try:
+        if what == "list" and not words:
+            rows = cloud_view()
+            if as_json:
+                print(json.dumps(rows, indent=2))
+                return 0
+            for rec in rows:
+                print(cloud_line(rec))
+            if not rows:
+                print("none yet (amarchy machines cloud add makes one in your own cloud account)")
+            return 0
+        if what == "providers" and not words:
+            rows = [{"key": p.key, "label": p.label, "connected": bool(cloud_token(p.key)), "token_name": p.token_name,
+                     "token_url": p.token_url, "token_how": p.token_how, "billing": p.billing, "notes": p.notes}
+                    for p in CLOUD_PROVIDERS.values()]
+            if as_json:
+                print(json.dumps({"providers": rows, "tailscale_key": bool(cloud_token(TS_KEY_NAME))}, indent=2))
+                return 0
+            for r in rows:
+                print(f"{r['key']}\t{r['label']}\t" + ("connected" if r["connected"] else
+                                                       f"no token yet (amarchy machines cloud token {r['key']})"))
+            print("tailscale\tTailscale key\t" + ("kept, for the next machine" if cloud_token(TS_KEY_NAME) else
+                                                  f"none yet: a one-off auth key ({TS_ADMIN_KEYS})"))
+            return 0
+        if what == "regions" and len(words) == 1:
+            regions = cloud_options(words[0], fresh=flags.get("fresh"))["regions"]
+            print(json.dumps(regions, indent=2) if as_json else "\n".join(f"{r['id']}\t{r['label']}" for r in regions))
+            return 0
+        if what == "sizes" and len(words) == 2:
+            sizes = cloud_options(words[0], words[1], fresh=flags.get("fresh"))["sizes"]
+            if as_json:
+                print(json.dumps(sizes, indent=2))
+                return 0
+            for s in sizes:
+                print(f"{s['id']}\t{s['cores']} vCPU, {s['memory_gb']:g} GB, {s['disk_gb']} GB disk\t"
+                      f"{cloud_money(s['monthly'], s['currency'])}/month" + ("\trecommended" if s["recommended"] else
+                                                                             "\t(under 8 GB: fewer chats)" if not s["enough"] else ""))
+            return 0
+        if what == "token" and len(words) == 1:
+            target = words[0].lower()
+            name = TS_KEY_NAME if target in ("tailscale", TS_KEY_NAME.lower()) else cloud_provider(target).token_name
+            if flags.get("forget"):
+                print(f"{name} forgotten" if cloud_token_forget(name) else f"no {name} kept here")
+                return 0
+            p = next((x for x in CLOUD_PROVIDERS.values() if x.token_name == name), None)
+            why = (f"to make cloud machines in your {p.label} account ({p.token_how})" if p
+                   else f"to join a new cloud machine to your tailnet, once: {TS_KEY_HOW}")
+            if not sys.stdin.isatty() and not own_session_id():
+                value = sys.stdin.read()
+            else:
+                print(f"{p.label}: {p.token_how}.\n  {p.token_url}" if p else f"{TS_KEY_HOW}\n  {TS_ADMIN_KEYS}",
+                      file=sys.stderr)
+                value = cloud_token_ask(name, why)
+            if value is None:
+                return fail(f"{name} wasn't given")
+            if own_session_id() and not sys.stdin.isatty() and cloud_token(name) and not value:
+                print(f"{name} kept (never shown)")
+                return 0
+            said = cloud_token_set(name, value)
+            print(f"{name} kept here (never shown, never given to a chat): {said}")
+            return 0
+        if what == "add" and not words:
+            p = cloud_provider(flags.get("provider") or next((k for k in CLOUD_PROVIDERS if cloud_token(k)), "hetzner"))
+            region, size = flags.get("region"), flags.get("size")
+            name = flags.get("name") or cloud_name_next()
+            if not flags.get("yes"):
+                opts = cloud_options(p.key, region or (cloud_options(p.key)["regions"] or [{}])[0].get("id"))
+                s = next((x for x in opts["sizes"] if x["id"] == size), None) if size else \
+                    next((x for x in opts["sizes"] if x["recommended"]), None)
+                if not s:
+                    return fail(f"no such size there (amarchy machines cloud sizes {p.key} {opts.get('region')})")
+                cost = f"{cloud_money(s['monthly'], s['currency'])} a month"
+                plan = (f"{name} at {p.label}: {s['label']} ({s['cores']} vCPU, {s['memory_gb']:g} GB) in "
+                        f"{next((r['label'] for r in opts['regions'] if r['id'] == opts.get('region')), opts.get('region'))}, {cost}")
+                if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                    return fail(f"this spends money ({plan}, billed by {p.label} to your account): run it again with "
+                                f"--yes once you've said so")
+                if input(f"Create {plan}? [y/N] ").strip().lower()[:1] != "y":
+                    print("nothing made")
+                    return 1
+                region, size = opts.get("region"), s["id"]
+            rec = cloud_add(p.key, region, size, name, say=lambda t: print(t, file=sys.stderr))
+            if as_json:
+                print(json.dumps(cloud_public(rec), indent=2))
+            else:
+                print(cloud_line(rec))
+            if flags.get("wait"):
+                return cloud_follow(rec["name"])
+            print(f"  it's on its way: amarchy machines cloud status {rec['name']} (or Settings → Machines in the app)")
+            return 0
+        if what == "status" and len(words) == 1:
+            rec = cloud_find(words[0])
+            if not rec:
+                return fail(f"no cloud machine {words[0]} here (amarchy machines cloud)")
+            if as_json:
+                print(json.dumps(cloud_public(rec), indent=2))
+                return 0
+            print(cloud_line(rec))
+            for step, at in sorted((rec.get("steps") or {}).items(), key=lambda x: x[1]):
+                print(f"  {time.strftime('%H:%M:%S', time.localtime(at))}  {step}")
+            if rec.get("log"):
+                print("  its log, as it last said:\n" + "\n".join(f"    {line}" for line in rec["log"].splitlines()[-20:]))
+            return 0
+        if what == "remove" and len(words) == 1:
+            rec = cloud_find(words[0])
+            if rec and not flags.get("yes") and not rec.get("never_made"):
+                every, movable = cloud_chats(rec)
+                lost = (f"its {len(every)} chat{'' if len(every) == 1 else 's'} " +
+                        ("(moved here first) " if flags.get("move-chats") else "(their worktrees, what isn't pushed, "
+                                                                               "their conversations) ") if every else "")
+                plan = f"Delete {rec['name']} at {CLOUD_PROVIDERS[rec['provider']].label}, with {lost}and everything on it"
+                if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                    return fail(f"{plan}: run it again with --yes once you've said so")
+                if input(f"{plan}? [y/N] ").strip().lower()[:1] != "y":
+                    print("nothing removed")
+                    return 1
+            rec = cloud_remove_ask(words[0], move_chats=flags.get("move-chats"), lose_chats=flags.get("lose-chats"))
+            if rec.get("step") == "removed":
+                print(rec.get("detail") or "removed")
+                return 0
+            print(f"removing {rec['name']}…")
+            return cloud_follow(rec["name"])
+        if what == "user-data" and len(words) == 1:
+            rec = cloud_find(words[0]) or {"name": words[0], "provider": flags.get("provider") or "hetzner",
+                                           "user": cloud_user(), "report": "x"}
+            print(cloud_setup(rec, "x", mask=not flags.get("real")) if not flags.get("real") else
+                  "--real isn't offered: a setup's secrets are never printed")
+            return 0
+        if what == "watch" and len(words) == 1:
+            return cloud_watch(words[0])
+    except CloudError as e:
+        return fail(str(e))
+    except PeerError as e:
+        return fail(str(e))
+    return fail(usage("machines") or "usage: amarchy machines cloud [list|providers|regions|sizes|token|add|status|remove|user-data]")
+
+
+# ---- signing in on a machine: Claude, GitHub
+#
+# A machine's Claude (and its gh, for GitHub) signs in on that machine, from
+# the app: its sheet's Sign in starts the CLI's own sign-in there, in a tmux
+# of its own (amarchy-signin: it outlives the app server's restarts), reads
+# the link it prints, and the app shows it. Claude's page then gives a code,
+# pasted in the app and typed into it; GitHub's asks for a code amarchy
+# shows, and ends by itself. Never a credential copied between machines.
+
+SIGNIN_DIR = STATE / "signin"
+SIGNIN_TMUX = f"{TMUX_SOCKET}-signin"      # its own tmux server (a test's amarchy: its own too)
+SIGNIN_WHAT = ("claude", "github")
+SIGNIN_ENDED = "[amarchy: it ended, exit "     # what its screen says once the sign-in's CLI is done
+_signin_memo = {}       # what -> (when, {"signed_in", "who", "plan"})
+
+
+def signin_tmux(*args):
+    """amarchy-signin's own tmux server, in a scope of its own (it outlives
+    whoever started it)."""
+    base = ["tmux", "-u", "-L", SIGNIN_TMUX, "-f", "/dev/null"]
+    run = lambda *a: subprocess.run([*base, *a], capture_output=True, text=True, stdin=subprocess.DEVNULL, env=clean_env())
+    try:
+        if args[:1] == ("new-session",) and shutil.which("systemd-run") and run("list-sessions").returncode != 0:
+            r = subprocess.run(["systemd-run", "--user", "--scope", "--quiet", "--collect",
+                                f"--unit=amarchy-signin-{os.getpid()}-{time.time_ns()}", *base, *args],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL, env=clean_env())
+            if r.returncode == 0:
+                return r
+        return run(*args)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args, 127, "", "tmux isn't installed")
+
+
+def signin_status(what, fresh=False):
+    """Whether it's signed in there: {signed_in (None: not installed), who, plan}."""
+    hit = _signin_memo.get(what)
+    if hit and not fresh and time.time() - hit[0] < 60:
+        return hit[1]
+    out = {"signed_in": None, "who": None, "plan": None}
+    if what == "claude" and shutil.which("claude"):
+        try:
+            r = subprocess.run(["claude", "auth", "status", "--json"], capture_output=True, text=True, timeout=20,
+                               stdin=subprocess.DEVNULL, env=clean_env())
+            d = json.loads(r.stdout or "{}")
+            out = {"signed_in": bool(d.get("loggedIn")), "who": d.get("email") if d.get("loggedIn") else None,
+                   "plan": d.get("subscriptionType") if d.get("loggedIn") else None}
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            out = {"signed_in": False, "who": None, "plan": None}
+    elif what == "github" and shutil.which("gh"):
+        try:
+            r = subprocess.run(["gh", "auth", "status", "--hostname", "github.com"], capture_output=True, text=True,
+                               timeout=20, stdin=subprocess.DEVNULL, env=clean_env())
+            said = r.stdout + r.stderr
+            who = re.search(r"Logged in to github\.com (?:account|as) (\S+)", said)
+            out = {"signed_in": r.returncode == 0 and bool(who), "who": who.group(1) if who and r.returncode == 0 else None,
+                   "plan": None}
+        except (OSError, subprocess.TimeoutExpired):
+            out = {"signed_in": False, "who": None, "plan": None}
+    _signin_memo[what] = (time.time(), out)
+    return out
+
+
+def signin_brief(what):
+    """hello's "claude" / "github": in, out, or None (not there). As last
+    read (the app server's signin_tend_loop keeps it fresh)."""
+    hit = _signin_memo.get(what)
+    s = hit[1] if hit and time.time() - hit[0] < 180 else signin_status(what)
+    return None if s["signed_in"] is None else "in" if s["signed_in"] else "out"
+
+
+def signin_tend_loop(st):
+    """Whether Claude and GitHub are signed in here, read again each minute
+    (the board and hello say it; a sign-in from the app reads it at once)."""
+    while True:
+        for what in SIGNIN_WHAT:
+            try:
+                signin_status(what, fresh=True)
+            except Exception as e:      # never stops the app
+                print(f"amarchy app: sign-in: {e}", file=sys.stderr, flush=True)
+        time.sleep(60)
+
+
+def signin_state(what):
+    """GET /api/signin/<what>: whether it's signed in, and a sign-in under way."""
+    s = dict(signin_status(what))
+    try:
+        login = json.loads((SIGNIN_DIR / f"{what}.json").read_text())
+    except (OSError, ValueError):
+        login = None
+    live = signin_live(what)
+    if login and not live:
+        signin_tmux("kill-session", "-t", f"={what}")
+        # It ended by itself (GitHub's, once you typed its code; a code taken).
+        s = signin_status(what, fresh=True)
+        if s["signed_in"] and what == "github" and not login.get("setup"):
+            subprocess.run(["gh", "auth", "setup-git", "--hostname", "github.com"], capture_output=True, text=True,
+                           timeout=30, stdin=subprocess.DEVNULL, env=clean_env())
+        if s["signed_in"]:
+            (SIGNIN_DIR / f"{what}.json").unlink(missing_ok=True)
+            login = None
+        else:
+            login = {**login, "error": login.get("error") or "the sign-in stopped before it was done: start it again"}
+    return {**s, "login": login}
+
+
+def signin_screen(what):
+    r = signin_tmux("capture-pane", "-p", "-J", "-t", f"={what}:", "-S", "-200")
+    return r.stdout if r.returncode == 0 else ""
+
+
+def signin_live(what):
+    """Its sign-in still waits (its CLI hasn't ended)."""
+    return signin_tmux("has-session", "-t", f"={what}").returncode == 0 and SIGNIN_ENDED not in signin_screen(what)
+
+
+def signin_start(what):
+    """Start the sign-in there: the link (and GitHub's code), or why not."""
+    if what == "claude" and not shutil.which("claude"):
+        raise CloudError("Claude Code isn't installed on this machine")
+    if what == "github" and not shutil.which("gh"):
+        raise CloudError("gh (GitHub's CLI) isn't installed on this machine: install it, then sign in")
+    signin_tmux("kill-session", "-t", f"={what}")
+    argv = (["claude", "auth", "login", "--claudeai"] if what == "claude" else
+            ["gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--skip-ssh-key"])
+    env = {**clean_env(), "BROWSER": "true", "GH_BROWSER": "true", "TERM": "xterm-256color"}
+    r = signin_tmux("new-session", "-d", "-s", what, "-x", "250", "-y", "50",
+                    *(f"-e{k}={v}" for k, v in env.items() if k in ("HOME", "PATH", "LANG", "BROWSER", "GH_BROWSER",
+                                                                       "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "GH_CONFIG_DIR")),
+                    shlex.join(argv) + f"; echo; echo {shlex.quote(SIGNIN_ENDED)}$?']'; sleep 300")
+    if r.returncode != 0:
+        raise CloudError(f"couldn't start the sign-in ({gist(r.stderr) or 'tmux'})")
+    url = code = None
+    enter = asked = False
+    end = time.time() + 25
+    while time.time() < end and not url:
+        screen = signin_screen(what)
+        if what == "claude":
+            m = re.search(r"https://(?:claude\.(?:com|ai)|console\.anthropic\.com|platform\.claude\.com)/\S*oauth/authorize\S+", screen)
+            url = m.group(0) if m else None
+        else:
+            m = re.search(r"one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})", screen)
+            code = m.group(1) if m else code
+            if code and "Press Enter" in screen and not enter:
+                signin_tmux("send-keys", "-t", f"={what}:", "Enter")
+                enter = True
+            if code and (enter or "github.com/login/device" in screen):
+                url = "https://github.com/login/device"
+            # Its one question first (git's credentials: yes, so git pushes as you).
+            if not code and not asked and re.search(r"Authenticate Git with your GitHub credentials\? \(Y/n\)", screen):
+                signin_tmux("send-keys", "-t", f"={what}:", "Enter")
+                asked = True
+        if not url:
+            time.sleep(0.4)
+    if not url:
+        said = " ".join(signin_screen(what).split())[-300:]
+        signin_tmux("kill-session", "-t", f"={what}")
+        raise CloudError(f"its sign-in didn't give a link{': ' + said if said else ''}")
+    login = {"url": url, "code": code, "since": int(time.time()), "error": None}
+    write_file(SIGNIN_DIR / f"{what}.json", json.dumps(login))
+    return login
+
+
+def signin_code(what, code):
+    """Claude's: the code Anthropic's page gave, typed into its sign-in;
+    then whether it took (signed in, or what it said)."""
+    code = (code or "").strip()
+    if what != "claude":
+        raise CloudError("only Claude's sign-in takes a code (GitHub's ends by itself)")
+    if not code or len(code) > 1000 or any(c.isspace() for c in code):
+        raise CloudError("paste the code the sign-in page gave you")
+    if not signin_live(what):
+        raise CloudError("the sign-in ended: start it again")
+    before = signin_screen(what)
+    signin_tmux("send-keys", "-t", f"={what}:", "-l", code)
+    signin_tmux("send-keys", "-t", f"={what}:", "Enter")
+    end = time.time() + 40
+    while time.time() < end:
+        time.sleep(1)
+        screen = signin_screen(what)
+        after = screen[len(before):] if screen.startswith(before[:200]) else screen
+        if re.search(r"(?i)login successful|logged in|signed in", after):
+            break
+        bad = re.search(r"(?i)(invalid[^\n]*|error[^\n]*|expired[^\n]*|failed[^\n]*)", after)
+        if bad and not re.search(r"(?i)paste code", bad.group(1)):
+            signin_tmux("kill-session", "-t", f"={what}")
+            (SIGNIN_DIR / f"{what}.json").unlink(missing_ok=True)
+            raise CloudError(f"it didn't take the code ({bad.group(1).strip()[:200]}): start again")
+        if not signin_live(what):
+            break
+    s = signin_status(what, fresh=True)
+    if s["signed_in"]:
+        signin_tmux("kill-session", "-t", f"={what}")
+        (SIGNIN_DIR / f"{what}.json").unlink(missing_ok=True)
+        return s
+    raise CloudError("it isn't signed in yet: check the code, or start again")
+
+
+def signin_cancel(what):
+    signin_tmux("kill-session", "-t", f"={what}")
+    (SIGNIN_DIR / f"{what}.json").unlink(missing_ok=True)
+
+
+# ---- end of a cloud machine (track F)
+
+
 def app_handler(st, users, address):
     import http.server
     trusted = tailscale_uids()
@@ -17053,6 +18911,100 @@ def app_handler(st, users, address):
                         beat = time.time()
             except OSError:
                 pass
+
+        # ---- a cloud machine (track F; see "a cloud machine")
+
+        def cloud_get(self, path):
+            """GET /api/cloud: the providers (connected or not), the
+            Tailscale key, the cloud machines made here; /api/cloud/options
+            ?provider=&region=: a provider's regions, and a region's sizes
+            with their prices."""
+            if self.via == "peer":
+                return self.error(403, "not from another machine")
+            if path == "/api/cloud":
+                url = machine_url()
+                return self.send(200, {
+                    "providers": [{"key": p_.key, "label": p_.label, "connected": bool(cloud_token(p_.key)),
+                                   "token_name": p_.token_name, "token_url": p_.token_url, "token_how": p_.token_how,
+                                   "billing": p_.billing, "notes": p_.notes} for p_ in CLOUD_PROVIDERS.values()],
+                    "tailscale_key": bool(cloud_token(TS_KEY_NAME)), "keys_url": TS_ADMIN_KEYS, "key_how": TS_KEY_HOW,
+                    "machines_url": TS_ADMIN_MACHINES, "min_gb": CLOUD_MIN_GB, "name": cloud_name_next(),
+                    "ready": bool(url), "why": None if url else
+                    f"{machine_label()} isn't on your tailnet yet (amarchy app on): the new machine pairs with it there",
+                    "machines": cloud_view()})
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                return self.send(200, cloud_options((q.get("provider") or [""])[0], (q.get("region") or [None])[0],
+                                                    fresh=(q.get("fresh") or [""])[0] == "1"))
+            except CloudError as e:
+                return self.error(409, str(e))
+
+        def cloud_post(self, data):
+            """POST /api/cloud {action: token (provider, value) | tailscale-key
+            (value) | forget (provider, or tailscale) | create (provider,
+            region, size, name) | remove (name, move_chats, lose_chats) |
+            dismiss (name)}."""
+            if self.via == "peer":
+                return self.error(403, "not from another machine")
+            action = data.get("action")
+            text = lambda k: data.get(k) if isinstance(data.get(k), str) else ""
+            try:
+                if action == "token":
+                    p_ = cloud_provider(text("provider"))
+                    said = cloud_token_set(p_.token_name, text("value"))
+                    return self.send(200, {"said": f"Connected to {said}"})
+                if action == "tailscale-key":
+                    return self.send(200, {"said": cloud_token_set(TS_KEY_NAME, text("value"))})
+                if action == "forget":
+                    which = text("provider")
+                    name = TS_KEY_NAME if which == "tailscale" else cloud_provider(which).token_name
+                    cloud_token_forget(name)
+                    return self.send(200, {"said": f"{name} forgotten"})
+                if action == "create":
+                    rec = cloud_add(text("provider"), text("region") or None, text("size") or None, text("name") or None)
+                    return self.send(200, {"machine": cloud_public(rec)})
+                if action == "remove":
+                    rec = cloud_remove_ask(text("name"), move_chats=data.get("move_chats") is True,
+                                           lose_chats=data.get("lose_chats") is True)
+                    return self.send(200, {"machine": cloud_public(rec)})
+                if action == "dismiss":
+                    rec = cloud_find(text("name"))
+                    if rec and (rec.get("step") == "removed" or (rec.get("step") == "failed" and rec.get("never_made"))):
+                        cloud_drop(rec["name"])
+                        return self.send(200, {})
+                    return self.error(409, "only one that's removed, or that was never made, is let go of (else Remove)")
+            except CloudError as e:
+                return self.error(409, str(e))
+            return self.error(400, "action: token, tailscale-key, forget, create, remove or dismiss")
+
+        def cloud_progress_in(self):
+            """POST /api/cloud/progress: a cloud machine being made says where
+            its setup stands (cloud/bootstrap.sh), over the tailnet as you
+            (or from you here: the tests), with its report token. Not a
+            page's: no Origin."""
+            if not self.peer_way():
+                return
+            self.changed_nothing = False
+            given = self.headers.get("Authorization", "")
+            token = given[7:].strip() if given[:7].lower() == "bearer " else ""
+            data = self.body(64_000)
+            why = cloud_progress(data.get("name"), token, data.get("step"), data.get("words"), data.get("log"))
+            return self.error(403, why) if why else self.send(200, {})
+
+        def signin_post(self, what, data):
+            """POST /api/signin/<claude|github> {do: login | code (code) | cancel}."""
+            try:
+                if data.get("do") == "login":
+                    return self.send(200, signin_start(what))
+                if data.get("do") == "code":
+                    s = signin_code(what, data.get("code") if isinstance(data.get("code"), str) else "")
+                    return self.send(200, s)
+                if data.get("do") == "cancel":
+                    signin_cancel(what)
+                    return self.send(200, signin_state(what))
+            except CloudError as e:
+                return self.error(409, str(e))
+            return self.error(400, "do: login, code or cancel")
 
         def machines_post(self, data):
             """Settings → Machines: {action: add, target} (a name on your
@@ -17668,6 +19620,10 @@ def app_handler(st, users, address):
                                        "listed": machines_listed(check=False)})
             if path == "/api/machines/found":   # Add: machines of yours on the tailnet that answer as amarchy
                 return self.send(200, {"found": machines_found()})
+            if path in ("/api/cloud", "/api/cloud/options"):    # Add a cloud machine (track F; see "a cloud machine")
+                return self.cloud_get(path)
+            if re.fullmatch(r"/api/signin/(claude|github)", path):     # signing in here, to Claude or GitHub
+                return self.send(200, signin_state(path.rsplit("/", 1)[1]))
             if path == "/api/state":
                 view = dict(board_view(st))
                 name, bind = host_network()
@@ -18166,6 +20122,8 @@ def app_handler(st, users, address):
                 return self.share_in()
             if self.path == "/api/peer/pair":       # another machine of yours pairs with this one (see "machines")
                 return self.peer_pair()
+            if self.path == "/api/cloud/progress":  # a cloud machine being made reports its setup (track F)
+                return self.cloud_progress_in()
             if not self.allowed(write=True):
                 return
             if self.path.startswith("/api/m/"):     # a chat on another machine (the pass-through)
@@ -18181,6 +20139,17 @@ def app_handler(st, users, address):
                 return self.peer_move_in() if self.path == "/api/peer/move" else self.peer_move_abort(self.body())
             if self.path == "/api/machines":        # Settings → Machines: add, remove, rename
                 return self.machines_post(self.body())
+            if self.path == "/api/cloud":           # Add a cloud machine, its tokens, Remove (track F)
+                return self.cloud_post(self.body())
+            if self.path == "/api/peer/cloud/leave":    # this cloud machine is about to be deleted: off the tailnet
+                if self.via != "peer":
+                    return self.error(403, "only from another machine of yours")
+                if not cloud_self():
+                    return self.error(409, f"{machine_label()} isn't a cloud machine amarchy made")
+                cloud_leave()
+                return self.send(200, {"leaving": True})
+            if re.fullmatch(r"/api/signin/(claude|github)", self.path):    # signing in here, to Claude or GitHub
+                return self.signin_post(self.path.rsplit("/", 1)[1], self.body())
             big = self.path in ("/api/clip", "/api/assistant/picture", "/api/sound/add", "/api/look/wallpaper", "/api/new") \
                 or bool(re.fullmatch(r"/api/session/[^/]+/(send|agent/picture)", self.path))      # images, on the chat engine; an agent's picture
             upload = bool(re.fullmatch(r"/api/session/[^/]+/upload", self.path))
@@ -19142,6 +21111,8 @@ def app_serve():
     threading.Thread(target=search_warm, args=(st,), daemon=True).start()     # Tasks' search, ready
     threading.Thread(target=app_merges, args=(st,), daemon=True).start()      # each chat's merges: your score
     threading.Thread(target=move_tend_loop, args=(st,), daemon=True).start()  # moves cut short (see "moving a chat")
+    threading.Thread(target=cloud_tend_loop, args=(st,), daemon=True).start()  # cloud machines being made (track F)
+    threading.Thread(target=signin_tend_loop, args=(st,), daemon=True).start()  # Claude and GitHub signed in here
     version = os.stat(SELF).st_mtime_ns
 
     def updated():
@@ -23350,10 +25321,11 @@ OPTIONS = {
     "today": ({"--json", "--loops"}, set(), set()),
     "task": ({"--agent", "--title", "--note", "--link", "--button", "--until", "--key", "--notify", "--json"},
              {"--agent", "--title", "--note", "--link", "--button", "--until", "--key"}, set()),
-    "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--timeout", "--project", "--json"},
+    "secret": ({"--why", "--all", "--all-projects", "--global", "--again", "--cloud", "--timeout", "--project", "--json"},
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
-    "machines": ({"--json"}, set(), set()),
+    "machines": ({"--json", "--provider", "--region", "--size", "--name", "--yes", "--wait", "--move-chats", "--lose-chats",
+                  "--forget", "--fresh"}, {"--provider", "--region", "--size", "--name"}, set()),     # (cloud's: track F)
     "move": ({"--to", "--when-free", "--spawned", "--secrets", "--no-secrets", "--check", "--json", "--cancel", "--dismiss",
               "--take", "--from", "--tend"}, {"--to", "--take", "--from"}, set()),
     "open": (set(), set(), set()),

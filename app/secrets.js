@@ -16,6 +16,8 @@
 
 // What a name is, in words, for the ones people mostly have.
 const SECRET_WORDS = {
+  HCLOUD_TOKEN: "Hetzner Cloud API token", DIGITALOCEAN_TOKEN: "DigitalOcean API token",
+  HOSTINGER_API_TOKEN: "Hostinger API token", TAILSCALE_AUTH_KEY: "Tailscale auth key",
   OPENAI_API_KEY: "OpenAI API key", GEMINI_API_KEY: "Gemini API key", GOOGLE_API_KEY: "Google API key",
   STRIPE_SECRET_KEY: "Stripe secret key", STRIPE_API_KEY: "Stripe API key", GITHUB_TOKEN: "GitHub token",
   GH_TOKEN: "GitHub token", DATABASE_URL: "database address (DATABASE_URL)", AWS_ACCESS_KEY_ID: "AWS access key ID",
@@ -74,14 +76,16 @@ function secretCard(chat, m) {
   const card = h("div", { class: "card secret", role: "group", tabindex: "-1", "aria-label": `Claude needs your ${what}` });
   card.append(h("div", { class: "card-head" }, keyIcon(), h("span", { class: "title" }, `Claude needs your ${what}`),
                 m.more ? h("span", { class: "count" }, `and ${m.more} more`) : null));
+  const cloud = a.scope === "cloud";     // a cloud's token or the Tailscale key (track F): not this chat's commands'
   card.append(h("div", { class: "card-text" }, a.why ? `${a.why.replace(/[.\s]+$/, "")}.` : "For this project's commands."),
-              h("div", { class: "card-note" }, `It's kept on your server, never shown in the chat, and this chat's commands get it as $${a.name}.` +
+              h("div", { class: "card-note" }, (cloud ? "It's kept on this machine for making cloud machines, never shown in the chat or given to a chat's commands."
+                : `It's kept on your server, never shown in the chat, and this chat's commands get it as $${a.name}.`) +
                 (a.again ? " It replaces the one kept now." : "")));
   if (!a.waiting) card.append(h("div", { class: "card-note warn" }, "Claude stopped waiting for it. Save it anyway and Claude is told."));
   const send = () => {
     const value = value_.input.value;
     if (!value.trim()) { value_.input.focus(); return toast("Paste or type it first"); }
-    chat.act(card, () => chat.post("secret", { ask: a.id, value, scope: scope.get() }).then(() => {
+    chat.act(card, () => chat.post("secret", { ask: a.id, value, scope: cloud ? "cloud" : scope.get() }).then(() => {
       value_.input.value = "";
       toast(`${what} saved`);
     }), save);
@@ -96,7 +100,7 @@ function secretCard(chat, m) {
   no.box.querySelector(".cta").classList.replace("primary", "danger");
   const actions = h("div", { class: "card-actions" }, save,
     h("button", { class: "cta", type: "button", onclick: () => { actions.hidden = true; no.open(); } }, "Don't give it…"));
-  card.append(value_.el, scope.el, actions, no.box);
+  card.append(...[value_.el, cloud ? null : scope.el, actions, no.box].filter(Boolean));
   // The field has the keyboard as the card comes up, on a computer.
   if (app.desk) setTimeout(() => { if (card.isConnected && !card.contains(document.activeElement)) value_.input.focus({ preventScroll: true }); }, 50);
   return card;
