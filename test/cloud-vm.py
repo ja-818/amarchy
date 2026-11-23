@@ -60,6 +60,7 @@ if not image.exists():
 BASE = Path(tempfile.mkdtemp(prefix="cloud-vm-", dir=TMP))
 PORT = free_port()
 REPORT_TOKEN = base64.b64encode(os.urandom(18)).decode().replace("+", "-").replace("/", "_")
+TS_KEY = f"tskey-auth-kVM-{os.urandom(8).hex()}"      # (this run's own: found nowhere else)
 NAME, USER = "cloudvm", "ja"
 reports = []
 
@@ -84,7 +85,7 @@ user_data = r.stdout
 assert user_data.startswith("#cloud-config"), r.stderr
 settings = {"AMARCHY_NAME": NAME, "AMARCHY_USER": USER, "AMARCHY_REPO": f"http://10.0.2.2:{PORT}/amarchy.git",
             "AMARCHY_BRANCH": "main", "AMARCHY_PROVIDER": "hetzner", "AMARCHY_BY": "maker", "GIT_NAME": "Cloud Test",
-            "GIT_EMAIL": "cloud@example.com", "APP_USERS": "tester@example.com", "TS_AUTH_KEY": "tskey-auth-kVM-0123456789",
+            "GIT_EMAIL": "cloud@example.com", "APP_USERS": "tester@example.com", "TS_AUTH_KEY": TS_KEY,
             "REPORT_URL": f"http://10.0.2.2:{PORT}", "REPORT_TOKEN": REPORT_TOKEN, "SWAP_GB": "2"}
 lines = "".join(f"      {k}='{v}'\n" for k, v in settings.items())
 start = user_data.index("    content: |\n") + len("    content: |\n")
@@ -103,7 +104,13 @@ case "$1" in
  "CertDomains": ["cloudvm.tail0000.ts.net"], "MagicDNSSuffix": "tail0000.ts.net", "Peer": {}}
 JSON
     ;;
-  serve) [ "$2" = status ] && echo '{}' ;;
+  serve)
+    # What it serves, remembered (as the real one does), for `serve status`.
+    if [ "$2" = status ]; then cat /tmp/fake-tailscale-serve.json 2>/dev/null || echo '{}'
+    else
+      to=""; for a in "$@"; do case $a in http://*) to=$a ;; esac; done
+      [ -n "$to" ] && printf '{"Web": {"cloudvm.tail0000.ts.net:443": {"Handlers": {"/": {"Proxy": "%s"}}}}}\n' "$to" >/tmp/fake-tailscale-serve.json
+    fi ;;
   *) echo "tailscale (test): $*" >>/var/log/fake-tailscale.log ;;
 esac
 exit 0
@@ -128,7 +135,7 @@ echo '{'
 echo '"status":' "$(cat /var/lib/amarchy-cloud/status 2>/dev/null | j)",
 echo '"settings_left":' "$( [ -e /var/lib/amarchy-cloud/settings ] && echo true || echo false )",
 echo '"userdata_left":' "$(ls /var/lib/cloud/instances/*/user-data.txt 2>/dev/null | wc -l)",
-echo '"key_in_logs":' "$(grep -rl 'kVM-0123456789' /var/log /var/lib/amarchy-cloud /home/$u 2>/dev/null | head -3 | tr '\n' ' ' | j)",
+echo '"key_in_logs":' "$(grep -rl --exclude=verify.sh '__KEY__' /var/log /var/lib/amarchy-cloud /home/$u /tmp 2>/dev/null | head -3 | tr '\n' ' ' | j)",
 echo '"tmux":' "$(tmux -V | j)",
 echo '"claude":' "$(as 'claude --version' 2>&1 | j)",
 echo '"git_name":' "$(as 'git config --global user.name' | j)",
@@ -149,7 +156,7 @@ echo '"log_tail":' "$(tail -n 30 /var/log/amarchy-cloud.log | j)"
 echo '}'
 } >/var/lib/amarchy-cloud/verify.json 2>/dev/null
 curl -sS --max-time 20 -H 'Content-Type: application/json' --data-binary @/var/lib/amarchy-cloud/verify.json "http://10.0.2.2:__PORT__/verify" || true
-'''.replace("__PORT__", str(PORT))
+'''.replace("__PORT__", str(PORT)).replace("__KEY__", TS_KEY)
 extra = "".join(f"  - path: {path}\n    owner: root:root\n    permissions: \"{mode}\"\n    encoding: b64\n    content: {base64.b64encode(body.encode()).decode()}\n"
                 for path, mode, body in (("/var/lib/amarchy-cloud/overrides.sh", "0600", OVERRIDES),
                                          ("/var/lib/amarchy-cloud/fake-tailscale", "0755", TAILSCALE),
