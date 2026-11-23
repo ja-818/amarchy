@@ -49,6 +49,20 @@ for line in sys.stdin:
 ''')
 (FAKE / "claude").chmod(0o755)
 
+# A tailscale of the tests' own: what the servers ask of it (status, serve's
+# status), never the machine's real one (its logins, its serve config).
+(FAKE / "tailscale").write_text('''#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+if args[:1] == ["status"]:
+    print(json.dumps({"Self": {"UserID": 1, "DNSName": "box.tailtest.ts.net.", "TailscaleIPs": ["127.0.0.1"], "Online": True},
+                      "User": {"1": {"LoginName": "tester@example.com"}}, "MagicDNSSuffix": "tailtest.ts.net",
+                      "CertDomains": ["box.tailtest.ts.net"], "Peer": {}}))
+elif args[:2] == ["serve", "status"]:
+    print("{}")
+''')
+(FAKE / "tailscale").chmod(0o755)
+
 
 class Machine:
     def __init__(self, name):
