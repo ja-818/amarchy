@@ -12424,7 +12424,8 @@ def device_name(ua, standalone=False):
     ua = ua or ""
     dev = ("iPhone" if "iPhone" in ua else "iPad" if "iPad" in ua else "Android" if "Android" in ua
            else "Mac" if "Macintosh" in ua else "Windows" if "Windows" in ua else "Linux" if "Linux" in ua else "?")
-    app = ("Chrome" if re.search(r"Chrome/|CriOS/", ua) and "Edg" not in ua else "Edge" if "Edg" in ua
+    app = ("desktop app" if " Amarchy/" in ua       # (amarchy's own: desktop/src/platform.rs)
+           else "Chrome" if re.search(r"Chrome/|CriOS/", ua) and "Edg" not in ua else "Edge" if "Edg" in ua
            else "Firefox" if re.search(r"Firefox/|FxiOS/", ua) else "Safari" if "Safari/" in ua or "AppleWebKit" in ua
            else "?")
     return f"{dev} {'home-screen app' if standalone else app}"
