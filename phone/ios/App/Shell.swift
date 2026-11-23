@@ -70,6 +70,13 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     private var pageLoading = false
     /// It's on its own page (no machine, or the machine didn't load).
     private(set) var showingOwn = true
+    /// A machine that answered while the own page was still loading: loaded
+    /// once it has (a load started over a file page's own was lost).
+    private var loadWhenOwnPageIsUp: Server?
+    /// The machine's page must at least start coming in this long after
+    /// it's asked for, else the own page says it didn't.
+    private var loadWatch: Task<Void, Never>?
+    static let loadWait: UInt64 = 30
     /// For the machine's page, once it has loaded.
     private var forPage: [OpenRequest] = []
     /// For the machine, once one answers.
@@ -157,6 +164,12 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     /// A machine that answered: its app (on the route asked for, if any).
     private func load(_ server: Server) {
         self.server = server
+        if showingOwn, pageLoading {
+            trace("load after the own page")
+            loadWhenOwnPageIsUp = server
+            return
+        }
+        loadWhenOwnPageIsUp = nil
         installScripts(for: server)
         let o = nextOpen
         nextOpen = nil
@@ -166,8 +179,26 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         showingOwn = false
         let url = Address.page(server.url, go: o?.go, ask: o?.ask)
         trace("load \(url.absoluteString)")
-        machineLoad = webView.load(URLRequest(url: url))
+        let navigation = webView.load(URLRequest(url: url))
+        machineLoad = navigation
+        watch(navigation, of: server)
         if shareWanted { sendShared(tellPage: true) }
+    }
+
+    /// A load of the machine's page that neither comes in nor fails: why,
+    /// on the own page, rather than a page that never changes.
+    private func watch(_ navigation: WKNavigation?, of server: Server) {
+        loadWatch?.cancel()
+        loadWatch = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.loadWait * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.machineLoad === navigation, !self.pageReady else { return }
+            trace("load stuck")
+            self.webView.stopLoading()
+            self.machineLoad = nil
+            self.connection.failed(server.url, why: "\(server.url.host ?? "It") answered, but its page didn't come in "
+                                   + "\(Self.loadWait) seconds: try again")
+            self.showOwnPage()
+        }
     }
 
     /// Something to show (a notification tapped, a chat's link, a share):
@@ -283,9 +314,17 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         pageLoading = true
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if navigation == machineLoad { loadWatch?.cancel() }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoading = false
         trace("loaded \(webView.url?.lastPathComponent ?? "?")")
+        if showingOwn, let waiting = loadWhenOwnPageIsUp {
+            load(waiting)
+            return
+        }
         if let server, let url = webView.url, Address.sameOrigin(url, server.url) {
             pageReady = true
             machineLoad = nil
@@ -300,12 +339,18 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         pageLoading = false
+        if showingOwn, let waiting = loadWhenOwnPageIsUp { load(waiting) }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         pageLoading = false
         trace("load failed: \(error.localizedDescription)")
+        if showingOwn, let waiting = loadWhenOwnPageIsUp {
+            load(waiting)
+            return
+        }
         guard navigation == machineLoad, let server, !Self.superseded(error) else { return }
+        loadWatch?.cancel()
         machineLoad = nil
         connection.failed(server.url, why: Net.words(for: error, host: server.url.host ?? "it"))
         showOwnPage()

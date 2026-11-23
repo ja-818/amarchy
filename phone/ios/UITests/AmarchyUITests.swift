@@ -84,12 +84,13 @@ final class AmarchyUITests: XCTestCase {
         field.typeText(server)
         app.webViews.buttons["Open"].tap()
 
-        let text = probe(app, says: #""bridge":true"#, within: 60)
+        // The machine's board, its chats on it.
+        let text = probe(app, says: "Fix the login", within: 60)
+        XCTAssertTrue(text.contains(#""bridge":true"#), "window.amarchyPhone on the machine's page: \(text)")
         XCTAssertTrue(text.contains(#""platform":"ios""#), text)
         XCTAssertTrue(text.contains(#""state":"unsupported""#), "push.state answers (no relay in this build): \(text)")
         XCTAssertTrue(text.contains("The app doesn't know no.such.command"), "an unknown command is refused in words: \(text)")
         XCTAssertTrue(text.contains("AmarchyApp/"), "the user agent says it's the app: \(text)")
-        XCTAssertTrue(text.contains("Fix the login") || text.contains("Write the docs"), "the machine's chats on the page: \(text)")
         shot(app, "3-the-machine")
     }
 
@@ -99,7 +100,7 @@ final class AmarchyUITests: XCTestCase {
         probe(app, says: #""title":"Can't find your amarchy""#)
         // (XCTest starts the app again for a link: the app opened by one.)
         app.open(try XCTUnwrap(URL(string: "amarchy://open?server=\(server)")))
-        probe(app, says: #""bridge":true"#, within: 60)
+        probe(app, says: "Fix the login", within: 60)
         shot(app, "4-opened-by-link")
 
         // A chat's link: told to the page, which goes to the chat.
@@ -110,7 +111,7 @@ final class AmarchyUITests: XCTestCase {
         // Kept: the next start opens the machine without asking.
         app.terminate()
         let again = launch(forget: false)
-        probe(again, says: #""bridge":true"#, within: 60)
+        probe(again, says: "Fix the login", within: 60)
     }
 
     func testItsOwnNodesSignIn() throws {
