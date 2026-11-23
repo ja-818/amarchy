@@ -34,8 +34,11 @@ go), the machine and its GPU driver, and everything GTK, WebKit and
 GStreamer write to stderr, a panic too. Readable without a terminal open.
 
 - **A start never does nothing.** A second start hands its arguments to the
-  running one and ends at once; the running one takes them up on its
-  window's thread, and makes its window again if it's gone.
+  running one and ends at once (asking GStreamer nothing, logging only that
+  it started); the running one takes them up on its window's thread, and
+  makes its window again if it's gone. One it starts in its place
+  (`--restart`, the watchdog) writes its stderr where this one's went, never
+  into this one's pipe, which ends with it.
 - **Its page's process crashes**: the page loads again, and the log says
   why, by what that process wrote last. GStreamer's words before it: a sound
   or a video ended it (below), so its page loads no media from then on and

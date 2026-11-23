@@ -231,6 +231,9 @@ fn main() {
             if restart_only {
                 std::process::exit(0);
             }
+            // The one that runs (a start handed over ended before this):
+            // what it draws with and what its page can play, in the log.
+            platform::started();
             let win = window(&handle, hidden)?;
             platform::webview(&win);
             tray::make(&handle)?;
@@ -469,6 +472,9 @@ fn watchdog(app: &AppHandle) {
             if let Some(u) = shell.given.clone() {
                 cmd.arg("--url").arg(u.as_str());
             }
+            if let Some(e) = journal::stderr_for_child() {
+                cmd.stderr(e);
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -572,6 +578,9 @@ pub fn restart(app: &AppHandle, exe: Option<&str>) {
     }
     if let Some(u) = app.state::<Shell>().given.clone() {
         cmd.arg("--url").arg(u.as_str());
+    }
+    if let Some(e) = journal::stderr_for_child() {
+        cmd.stderr(e);
     }
     #[cfg(unix)]
     {

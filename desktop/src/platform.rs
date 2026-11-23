@@ -1,9 +1,17 @@
 // What each system needs before the window, and of its web view.
 
 /// Before anything starts (no threads yet: the environment is set here).
+/// Every start does it, one that only hands its arguments over too.
 pub fn prepare() {
     #[cfg(target_os = "linux")]
     linux::prepare();
+}
+
+/// In the one that runs (not a start that hands over and ends), before its
+/// window: said in the log once, and what its page can play asked.
+pub fn started() {
+    #[cfg(target_os = "linux")]
+    linux::started();
 }
 
 // ---- safe rendering, after its page's process crashed with no sign why
@@ -91,7 +99,11 @@ mod linux {
     use std::cell::RefCell;
     use std::os::unix::net::UnixStream;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
+
+    /// The safe way an earlier build kept, forgotten by prepare (said by started).
+    static FORGOT: AtomicBool = AtomicBool::new(false);
 
     pub fn prepare() {
         // The app id Hyprland, the launcher and the bar know it by
@@ -105,12 +117,10 @@ mod linux {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
         if super::forget_blind_safe_rendering() {
-            log::info!("drawing with the GPU again: the safe way was kept by an earlier build after a crash, without asking why (a sound's, most likely)");
+            FORGOT.store(true, Ordering::SeqCst);
         }
-        log::info!("graphics: {}", graphics());
         // Its page crashed before with no sign why: drawn the safe way (no DMA-BUF, no compositing).
-        if let Some(why) = super::safe_rendering() {
-            log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
+        if super::safe_rendering().is_some() {
             for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
                 if std::env::var_os(var).is_none() {
                     std::env::set_var(var, "1");
@@ -132,6 +142,16 @@ mod linux {
             }
         }
 
+    }
+
+    pub fn started() {
+        if FORGOT.load(Ordering::SeqCst) {
+            log::info!("drawing with the GPU again: the safe way was kept by an earlier build after a crash, without asking why (a sound's, most likely)");
+        }
+        log::info!("graphics: {}", graphics());
+        if let Some(why) = super::safe_rendering() {
+            log::info!("drawing the safe way (no GPU compositing) since {why}; AMARCHY_DESKTOP_GPU=1 tries the GPU again");
+        }
         // What its page can play here (GStreamer's plugins), before the window.
         crate::sound::check();
     }
