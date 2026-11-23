@@ -45,6 +45,7 @@ os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=hom
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 am.app_key(); am.migrate()
 st = am.AppState(); st.transcriber = None
 Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")

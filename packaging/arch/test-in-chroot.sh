@@ -86,7 +86,7 @@ check "after a new package: set up again" "$(grep -q 'set up again for amarchy-g
 check "and remembered" "$(as_user 'cat ~/.local/state/amarchy/setup-version' | grep -qx 0000000new01 && echo ok)"
 
 out=$(as_user 'amarchy theme --list 2>&1 | head -3; amarchy key 2>&1')
-check "themes and the key, from the package" "$(grep -q 'Super+Alt+A brings amarchy to the front' <<<"$out" && grep -q 'catppuccin' <<<"$out" && echo ok)" "$out"
+check "themes and the key, from the package" "$(grep -q 'Super+D brings amarchy to the front' <<<"$out" && grep -q 'catppuccin' <<<"$out" && echo ok)" "$out"
 
 out=$(as_user 'amarchy setup --uninstall 2>&1')
 check "amarchy setup --uninstall" "$(as_user 'test ! -e ~/.local/bin/amarchy && test ! -e ~/.claude/skills/amarchy && test ! -e ~/.config/systemd/user/amarchy-update.timer && echo gone' | grep -q gone && echo ok)" "$(tail -3 <<<"$out")"

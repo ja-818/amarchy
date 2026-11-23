@@ -687,7 +687,9 @@ function show(id) {
   desk.current = id;
   desk.el.classList.toggle("chat-open", !!id);
   if (changed) {
-    if (desk.chat) desk.chat.close();
+    // One that can't close (an error in it) is let go of all the same: the
+    // next one opens (app.js route).
+    if (desk.chat) try { desk.chat.close(); } catch (e) { console.error("Couldn't close the chat:", e); }
     desk.chat = id ? deskChat(id) : null;
     desk.chatSlot.replaceChildren(...(desk.chat ? [desk.chat.el] : []));
     if (desk.chat) desk.chat.open();

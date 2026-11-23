@@ -20,7 +20,7 @@ echo "Installing amarchy..."
 omarchy-pkg-add amarchy-git amarchy-desktop-git
 
 # The part that's the user's: its timers, the skill for Claude Code, and on
-# Omarchy the Ⓐ in the bar, Super+Alt+A, Amarchy in this menu and the theme
+# Omarchy the Ⓐ in the bar, Super+D, Amarchy in this menu and the theme
 # Omarchy (live), which follows the desktop's.
 echo "Setting amarchy up..."
 amarchy setup
@@ -37,4 +37,4 @@ echo "Opening amarchy..."
 setsid uwsm-app -- /usr/bin/amarchy-desktop >/dev/null 2>&1 &
 
 echo ""
-echo "amarchy has been installed. Super+Alt+A brings it up; the Ⓐ in the bar lights up when a chat needs you."
+echo "amarchy has been installed. Super+D brings it up; the Ⓐ in the bar lights up when a chat needs you."

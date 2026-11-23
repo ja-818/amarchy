@@ -786,7 +786,8 @@ window closed.
   if its page crashed it loads again and the log says why (what the page
   wrote last; twice with no sign why, it draws without the GPU from then on;
   `AMARCHY_DESKTOP_GPU=1` tries the GPU again), and if it's stuck it starts
-  again by itself.
+  again by itself. What goes wrong in its page (an error, with where) is
+  in the log too, as `page: …`.
 - **Uninstall**: `install.sh --uninstall` takes it away with amarchy
   (`desktop/install.sh --uninstall` takes only it).
 
@@ -804,11 +805,13 @@ a backup of each file it changes).
   `amarchy.chats`, put at the end of the bar's left side the first time; move
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
-- **Super + Alt + A** brings amarchy to the front: the desktop app's window if
-  it has one, else the app started. Omarchy leaves it free (Super + A and Super +
-  Shift + A are its own). It's a setting: `amarchy key Super+Ctrl+M` picks another
-  (one Omarchy uses gives way to amarchy while it's picked), `amarchy key off`
-  none, `amarchy key default` Super + Alt + A again; it changes at once.
+- **Super + D** brings amarchy to the front: the desktop app's window if it has
+  one, else the app started. Omarchy leaves it free, and one hand reaches it.
+  It's a setting: `amarchy key Super+Ctrl+M` picks another (one Omarchy uses
+  gives way to amarchy while it's picked), `amarchy key off` none, `amarchy key
+  default` Super + D again; it changes at once. `amarchy key` (and the install)
+  says when this machine's Hyprland has something else on it, your own bindings
+  say. A machine that never picked a key follows the default when it changes.
 - **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
   under it.
 
@@ -1769,7 +1772,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
-amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Alt+A)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+D)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

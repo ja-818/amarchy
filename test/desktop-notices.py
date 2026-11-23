@@ -28,6 +28,7 @@ for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY"):
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
 
 failed = []
 

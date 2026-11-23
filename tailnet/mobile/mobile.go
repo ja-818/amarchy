@@ -154,3 +154,18 @@ func LoginURL() (string, error) {
 	defer cancel()
 	return r.node.LoginURL(ctx)
 }
+
+// Logout signs the node out of the tailnet: its key is forgotten, State
+// says NeedsLogin, and LoginURL signs in again (as someone else, maybe).
+// The node stays started.
+func Logout() error {
+	mu.Lock()
+	r := cur
+	mu.Unlock()
+	if r == nil {
+		return errors.New("the node isn't started")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return r.node.LocalClient().Logout(ctx)
+}

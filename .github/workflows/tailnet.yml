@@ -1,6 +1,7 @@
 # amarchy's own Tailscale node (tailnet/): built, vetted and tested on a
 # tailnet of the test's own (Tailscale's test control server and DERP, in
-# the test), with bin/amarchy driven on it (test/tailnet-own.py).
+# the test), with bin/amarchy driven on it (test/tailnet-own.py); and its
+# phone apps' side (tailnet/mobile) bound for Android and iOS (gomobile).
 name: Tailscale node
 
 on:
@@ -41,3 +42,45 @@ jobs:
       - run: go vet ./...
       - run: go build -trimpath -ldflags "-s -w" -o amarchy-tailnet ./cmd/amarchy-tailnet
       - run: go test ./...
+
+  # The phone apps' node (tailnet/mobile), bound with gomobile: Android's
+  # tailnet.aar (Java's mobile.Mobile) and iOS's Tailnet.xcframework (Swift's
+  # MobileStart...), kept as the run's artifacts for phone/ to pick up
+  # (phone/android/app/libs/tailnet.aar, phone/ios/Frameworks/Tailnet.xcframework).
+  phone:
+    name: Phone build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Android, os: ubuntu-24.04, target: "android", out: tailnet.aar, flags: "-androidapi 26" }
+          - { name: iOS, os: macos-latest, target: "ios,iossimulator", out: Tailnet.xcframework, flags: "-iosversion 17.0" }
+    defaults:
+      run:
+        working-directory: tailnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tailnet/go.mod
+          cache-dependency-path: tailnet/go.sum
+      - if: matrix.name == 'Android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - if: matrix.name == 'Android'
+        run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      - name: gomobile, the version go.mod has
+        run: |
+          v=$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+          go install "golang.org/x/mobile/cmd/gomobile@$v" "golang.org/x/mobile/cmd/gobind@$v"
+          gomobile init
+      - name: Bind
+        run: gomobile bind -target=${{ matrix.target }} ${{ matrix.flags }} -trimpath -ldflags "-s -w" -o ${{ matrix.out }} ./mobile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tailnet-${{ matrix.name == 'Android' && 'android' || 'ios' }}
+          path: tailnet/${{ matrix.out }}
+          if-no-files-found: error
