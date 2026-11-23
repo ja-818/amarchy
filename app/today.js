@@ -583,7 +583,7 @@ function todayTask(t) {
     btn.title = `Sends ${name}: ${b.send}`;
     return btn;
   });
-  const card = uiCard({ kind: "task", hue: todayHue(s.repo), lead: avatar(s, "small"), chip: name, title: t.title, label: `${name}: ${t.title}`,
+  const card = uiCard({ kind: "task", hue: todayHue(s.repo), lead: avatar(s, "small"), chip: name, title: t.title, label: `${name}: ${t.title}`, on: rowOf(t.agent),
     pill: when ? uiPill(when.text, when.tone) : null, id: null, unseen: false,
     open: () => { const chat = rowOf(t.agent); if (chat) todayOpen(chat); },
     body: [t.note ? h("p", { class: "tcard-text", html: inline(t.note) }) : null],

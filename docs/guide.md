@@ -560,18 +560,24 @@ amarchy machines remove omarchy   # both forget the other
   else it says what to update. Both machines keep the other in
   `~/.config/amarchy/machines.json` (readable by you only), with one key the
   pair shares.
-- **The board** shows each chat with its machine (a screen and its name on
-  the card and over the chat, once there are two or more). Every chat action
+- **The board** shows each chat's machine, once there are two or more: its
+  icon on the right of its card, by where the chat stands, and over the open
+  chat by its state. Each machine has an icon of its own (a server, a desktop,
+  a laptop, a cloud, a tower, a mini), picked to fit it until you pick another
+  (Settings → Machines, or `amarchy machines icon <name> <icon>`; kept on that
+  machine, so every machine shows the same). Hover it for the machine's name,
+  or hold the card (its menu says where it runs); or show machines by name
+  instead (Settings → Machines → Names, `amarchy machines show name`). Every chat action
   works wherever the chat runs: its conversation, its questions, its terminal,
   its previews, its changes, search and your agents' tasks, all through the
   machine you opened the app on. A machine that doesn't answer (shut, asleep,
   off the network: silent for 45 s) keeps its chats as last seen: their cards
   dimmed, "<name> is off", no buttons, and its chats say so in place of the box
   until it's back. It comes back by itself.
-- **Settings → Machines**: each machine and how it stands (This machine, On,
-  Off, Update needed), **Add a machine…** (the machines of yours on the
-  tailnet that answer as amarchy, or one by its name or address), and on each
-  one, Rename and Remove.
+- **Settings → Machines**: each machine with its icon and how it stands
+  (This machine, On, Off, Update needed), Icons or Names on the cards, **Add a
+  machine…** (the machines of yours on the tailnet that answer as amarchy, or
+  one by its name or address), and on each one, its icon, Rename and Remove.
 - **A new chat's Where** (by the model, with two or more machines): the
   machine it runs on. The last one you used for that project comes first; a
   project that isn't on the machine you pick is cloned there first, from
@@ -1676,6 +1682,8 @@ amarchy machines [--json]             this machine, then the paired ones: name, 
 amarchy machines add <name|address>   pair with another machine of yours on the tailnet
 amarchy machines remove <name>        unpair (both forget the other)
 amarchy machines rename <name> <label>   what the app calls a machine (kept on that machine)
+amarchy machines icon <name> <icon>   a machine's icon: server, desktop, laptop, cloud, tower or mini
+amarchy machines show icon|name       how the board shows a chat's machine
 amarchy machines found [--json]       machines of yours that answer as amarchy, not paired yet
 amarchy move [<id>] --to <machine> [--when-free] [--secrets|--no-secrets]   move a chat to another machine of yours
 amarchy move [<id>] --check --to <machine> [--json]   what moving it would do; --cancel | --dismiss
