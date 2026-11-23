@@ -1288,7 +1288,7 @@ class Chat {
     this.attachBtn = uiComposerButton("attach", "Add a photo or a file", icon("plus"), () => this.toggleMenu("add"), { "aria-haspopup": "menu" });
     this.micBtn = uiComposerButton("mic", "Dictate (hold, or tap and tap again)", glyph("mic"), null, { hidden: true });
     this.sendBtn = uiComposerButton("send", "Send", glyph("send"), () => this.send());
-    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop());
+    this.stopBtn = uiComposerButton("stop", "Stop Claude", glyph("stop"), () => this.stop(), { title: "Stop Claude (Esc)" });
     // What you say, into the box (dictate.js).
     this.talk = new Dictate({ field: this.input, button: this.micBtn,
                               changed: () => this.typed(),
@@ -1350,8 +1350,8 @@ class Chat {
   open() {
     this.loadInfo();
     // Opened (its stream coming back later, reopen, isn't: you may have
-    // moved by then, and where you are stays, conversationDraw).
-    if (!this.landed) { this.landed = true; this.landing = true; this.navOpened = false; }
+    // moved by then, and where you are stays, conversation).
+    if (!this.landed) { this.landed = true; this.landing = true; }
     // Opened before: drawn at once as it was when you left it, the stream's
     // own then adding only what came since (conversation), and landing on
     // the latest of it.
@@ -1417,7 +1417,7 @@ class Chat {
     const items = this.items.slice(), start = this.start;
     this.items = [];
     this.itemKeys = new Set();
-    this.conversationDraw({ reset: true, items, start });
+    this.conversation({ reset: true, items, start });
   }
 
   close() {
@@ -1469,11 +1469,13 @@ class Chat {
     card.classList.add("called");
   }
 
-  // ---- the keys, as on the board: j / k (↓ ↑) from message to message,
-  // l (→) into one, along its buttons and links, h (←) back and out of it,
-  // Enter on a button presses it, g / G the first and the latest, d / u half
-  // a page, i the box you type in and Esc out of it again. Esc on a message:
-  // opts.back.
+  // ---- the keys. A chat opens with them in the box, to write (takeKeys).
+  // Esc there stops Claude while it works; else it, or ↑ with nothing above
+  // it, goes up onto the latest message. On the messages, as on the board:
+  // j / k (↓ ↑) from message to message (↓ on the latest: down into the
+  // box), l (→) into one, along its buttons and links, h (←) back and out of
+  // it, Enter on a button presses it, g / G the first and the latest, d / u
+  // half a page, i the box. Esc on a message: back (opts.back), never a stop.
   // Messages are commands then, not words: i to write (Ctrl+Alt+Enter to
   // dictate works from anywhere).
 
@@ -1543,6 +1545,23 @@ class Chat {
     return true;
   }
 
+  // From the messages to the box, at the bottom; false when a card's up
+  // (its keys are its own).
+  toBox() {
+    if (!this.dock.contains(this.input)) return false;
+    this.input.focus({ preventScroll: true });
+    this.toBottom(true);
+    return true;
+  }
+
+  // The keys to the chat as it opens: what it asks you (its card), else the
+  // box, to write. (The messages are a key away: ↑ or Esc.)
+  takeKeys() {
+    const card = this.dock.querySelector(".card");
+    if (card) (menuStart(card) || card).focus({ preventScroll: true });
+    else if (this.dock.contains(this.input)) this.input.focus({ preventScroll: true });
+  }
+
   // Whether the keys are in this chat's messages (not the box, the side, a sheet).
   navHere() {
     const a = document.activeElement;
@@ -1556,11 +1575,21 @@ class Chat {
     const a = document.activeElement;
     const k = e.key;
     const done = () => { e.preventDefault(); e.stopPropagation(); return true; };
-    // In the box: Esc leaves it for the messages (once more: back), unless
-    // it's for something in it (a menu, the dictation, the / list).
+    // In the box, unless the key is for something in it (a menu, the
+    // dictation, the / list): Esc stops Claude while it works, as in Claude
+    // Code (what was waiting to go comes back into the box); else it leaves
+    // the box for the messages (once more: back). ↑ with nothing above it
+    // in the box goes up onto the messages too, and Page Up / Page Down
+    // scroll them without leaving the box.
     if (a === this.input) {
-      if (k !== "Escape" || this.menu || this.talk.on()) return false;
-      return this.navLatest() ? done() : false;
+      if (this.menu || this.talk.on() || e.isComposing) return false;
+      if (k === "Escape" && this.working()) { this.stop(); return done(); }
+      if (k === "Escape" || (k === "ArrowUp" && !e.shiftKey && this.input.selectionEnd === 0)) return this.navLatest() ? done() : false;
+      if (k === "PageUp" || k === "PageDown") {
+        this.scroller.scrollBy({ top: (k === "PageDown" ? 1 : -1) * this.scroller.clientHeight * 0.85 });
+        return done();
+      }
+      return false;
     }
     // The box's card, the side panel, the terminal: theirs. A button of the
     // bar clicked (one Safari didn't focus, too): the messages' still.
@@ -1579,12 +1608,7 @@ class Chat {
     let on = inside.indexOf(a);
     if (on < 0 && !focused) on = inside.indexOf(uiInnerOf(item, inside));
     const go = (i, up) => { this.navTo(items[Math.max(0, Math.min(items.length - 1, i))], false, up); return done(); };
-    if (k === "i") {
-      if (!this.dock.contains(this.input)) return false;      // a card's up: its keys are its own
-      this.input.focus({ preventScroll: true });
-      this.toBottom(true);
-      return done();
-    }
+    if (k === "i") return this.toBox() ? done() : false;
     if (!items.length) return false;
     // A message taller than the page reads as pages going down: j goes
     // through it first, then on. k goes straight to the one before (going
@@ -1592,6 +1616,9 @@ class Chat {
     const v = this.scroller.getBoundingClientRect(), step = v.height * 0.7;
     const r = item && (a === item || !focused) ? item.getBoundingClientRect() : null;
     if ((k === "j" || k === "ArrowDown") && r && r.bottom > v.bottom + 8) { this.scroller.scrollBy({ top: Math.min(step, r.bottom - v.bottom + 16) }); return done(); }
+    // ↓ on the latest, its end in sight: down into the box, as ↑ came up
+    // out of it (not j: held or tapped on, the rest would be typed in it).
+    if (k === "ArrowDown" && at === items.length - 1 && this.toBox()) return done();
     if (k === "j" || k === "ArrowDown") return go(at < 0 ? items.length - 1 : at + 1);
     if (k === "k" || k === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1, true);
     if (k === "g" || k === "Home") { this.navTo(items[0], true); return done(); }
@@ -1761,24 +1788,6 @@ class Chat {
   // ---- the conversation
 
   conversation(d) {
-    this.conversationDraw(d);
-    // Opened with the keys: on the latest message, once there is one (and
-    // the latest again, should newer ones come before you move).
-    if (this.navWanted && Date.now() - this.navWanted < 8000 && (document.activeElement === document.body || document.activeElement === this.input)
-        && this.navLatest()) { this.navWanted = 0; this.navOpened = true; }
-    else if (this.landing && this.navOpened && this.navHere()) this.navLatest();
-  }
-
-  // The keys on the latest message, now or once the conversation's in (a
-  // chat opened with the keys: Enter on its card). False when they can't be.
-  navStart() {
-    if (this.dock.querySelector(".card")) return false;      // what it asks you: that, first
-    if (this.navLatest()) { this.navOpened = true; return true; }
-    this.navWanted = Date.now();
-    return true;
-  }
-
-  conversationDraw(d) {
     // The stream again (it reconnected: the phone woke, the server restarted)
     // with the conversation as it was and maybe more: only the more, so the
     // view doesn't jump, nor the answers you started go.
@@ -3045,7 +3054,9 @@ class Chat {
     // The keys, if they were here, stay: on the card (its first choice), and
     // back in the box you type in once it's answered.
     if (!kids.includes(this.box)) this.closeMenu();
-    const had = lastInput.keys && (this.dock.contains(document.activeElement) || document.activeElement === document.body);
+    // (In the dock, whatever put them there: the box a click opened the chat
+    // with is still the box after its first redraw.)
+    const had = this.dock.contains(document.activeElement) || (lastInput.keys && document.activeElement === document.body);
     const stick = this.atBottom();
     this.dock.replaceChildren(...kids);
     if (had) {

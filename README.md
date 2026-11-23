@@ -146,6 +146,7 @@ On a computer's browser:
 | `Ctrl+Alt+N` | New chat |
 | `Ctrl+Alt+J` / `K` | Next / previous chat |
 | `j` / `k`, `Enter`, `Esc` | On the board: card to card, open it, back (`?`: every key) |
+| `Esc`, `↑` in a chat's box | Stop Claude while it works / up onto the messages to read (`Esc` there: back) |
 | `Ctrl+Alt+S` | Search chats |
 | `Ctrl+Alt+Space` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+←` / `→` | The chat / the terminal |

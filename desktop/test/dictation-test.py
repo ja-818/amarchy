@@ -1,7 +1,7 @@
 # Dictation in the real desktop app (WebKitGTK: no speech recognition of its
 # own) on a machine without the speech model, as on Julian's M5 (ja): two
 # real amarchy app servers (test/two_machines.py), alpha with the model (this
-# host's libparakeet and model), beta without; a chat on each; the desktop
+# host's engine, transcribe.cpp, and model), beta without; a chat on each; the desktop
 # app on beta, through its local key, with WebKit's own test microphone
 # (a tone: what's said is test/dictation-machines.py's, through the same
 # WebSocket).
@@ -44,7 +44,9 @@ sys.path.insert(0, str(ROOT / "test"))
 import two_machines as tm  # noqa: E402
 
 check, failed, SHOTS = st.check, st.failed, st.SHOTS
-MODEL = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amarchy/dictation/parakeet-tdt-0.6b-v3-q8_0.bin"
+HOST = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amarchy/dictation"
+MODEL = HOST / "parakeet-tdt-0.6b-v3-Q8_0.gguf"
+ENGINE = next((d for d in (HOST / "transcribe.cpp", Path("/usr/lib/amarchy/transcribe.cpp")) if (d / "libtranscribe.so").is_file()), None)
 
 
 def cli_for(m, home):
@@ -89,15 +91,15 @@ def click_mic(w, clear=True):
 
 def main():
     need("Xvfb", "xdotool", "dbus-daemon", "import")
-    if not MODEL.is_file() or not any(Path(d, "libparakeet.so.1").exists() for d in ("/usr/lib", "/usr/local/lib")):
+    if not MODEL.is_file() or not ENGINE:
         raise SystemExit("Needs this host's dictation set up (amarchy dictation)")
-    (tm.FAKE / "pacman").write_text("#!/bin/sh\necho \"error: package 'whisper-cpp' was not found\" >&2\nexit 1\n")
-    (tm.FAKE / "pacman").chmod(0o755)
 
     alpha, beta = tm.Machine("alpha"), tm.Machine("beta")
-    beta.env["AMARCHY_DICTATE_SYSTEM"] = "off"          # as on ja: no libparakeet
+    for m in (alpha, beta):
+        m.env["AMARCHY_DICTATE_SYSTEM"] = "off"     # no package's engine: only what's in its own state
     (alpha.home / "state/amarchy/dictation").mkdir(parents=True)
     (alpha.home / "state/amarchy/dictation" / MODEL.name).symlink_to(MODEL)
+    (alpha.home / "state/amarchy/dictation/transcribe.cpp").symlink_to(ENGINE)
     # The desktop app reads its state and config at ~/.local/state and ~/.config: beta's.
     (beta.home / ".local").mkdir()
     (beta.home / ".local/state").symlink_to(beta.home / "state")
