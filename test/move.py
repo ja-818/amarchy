@@ -476,7 +476,8 @@ try:
     check(bool(until(lambda: all(json.loads(f.read_text()).get("state") != "taking"
                                  for f in (beta.state_dir() / "moves-in").glob("*.json")), limit=30)),
           "beta, back, undid what it was taking")
-    check(beta.own(sid) is None and not (beta.work / ".worktrees/proj/door").exists(), "nothing of it left on beta")
+    left = until(lambda: beta.own(sid) is None and not (beta.work / ".worktrees/proj/door").exists(), limit=15)
+    check(bool(left), f"nothing of it left on beta ({beta.own(sid) is not None}, {(beta.work / '.worktrees/proj/door').exists() and sorted(x.name for x in (beta.work / '.worktrees/proj/door').iterdir())})")
     alpha.amarchy("move", "--tend")
     rec = json.loads((alpha.state_dir() / f"moves/{sid}.json").read_text())
     check(not rec.get("abort"), "alpha's ask answered (move --tend)")

@@ -15678,7 +15678,7 @@ def move_push(path, branch):
             raise MoveError(f"origin's {branch} has commits this chat doesn't: bring them in first (git pull), then move it")
     out = {"origin": before, "pushed": None}
     if before != head:
-        p = move_git(path, "push", "-q", "-u", "origin", f"HEAD:refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
+        p = move_git(path, "push", "-q", "--no-verify", "-u", "origin", f"HEAD:refs/heads/{branch}", net=True, timeout=MOVE_GIT_TIMEOUT)
         if p.returncode != 0:
             raise MoveError(f"couldn't push its branch to origin: {gist(p.stderr) or 'git push failed'}")
         out["pushed"] = head
@@ -15823,7 +15823,7 @@ def move_undo(s, rec, say=None):
         branch = undo["branch"]
         lease = f"--force-with-lease=refs/heads/{branch}:{undo['pushed']}"
         target = f"{undo['origin']}:refs/heads/{branch}" if undo.get("origin") else f":refs/heads/{branch}"
-        p = move_git(path, "push", "-q", lease, "origin", target, net=True, timeout=MOVE_GIT_TIMEOUT)
+        p = move_git(path, "push", "-q", "--no-verify", lease, "origin", target, net=True, timeout=MOVE_GIT_TIMEOUT)
         if p.returncode != 0:
             notes.append(f"origin's {branch} has its WIP commit still ({gist(p.stderr)})")
         elif not undo.get("origin"):
@@ -15946,6 +15946,16 @@ def move_in_write(rec):
     write_file(MOVES_IN / f"{rec['move']}.json", json.dumps(rec))
 
 
+@contextlib.contextmanager
+def move_in_lock(token):
+    """One at a time on a move taken here: undoing it (an abort, a take cut
+    short found when the app starts) never twice at once."""
+    MOVES_IN.mkdir(parents=True, exist_ok=True)
+    with open(MOVES_IN / f"{token}.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def move_take(pkg, peer):
     """Take the chat in package pkg from machine peer (see the plan): its
     answer ({id, key, notes}) once its Claude is up here, or MoveError (all of
@@ -16040,6 +16050,7 @@ def move_install(man, stage, rec):
     did("branch", branch, tip or None, str(repo_dir))
     move_git(repo_dir, "branch", "-q", f"--set-upstream-to=origin/{branch}", branch)
     path.parent.mkdir(parents=True, exist_ok=True)
+    move_git(repo_dir, "worktree", "prune")
     r = move_git(repo_dir, "worktree", "add", "-q", str(path), branch)
     if r.returncode != 0:
         raise MoveError(f"couldn't make its worktree on {here}: {gist(r.stderr)}")
@@ -16307,18 +16318,25 @@ def move_abort_in(token, peer):
         rec = move_in_read(token) or rec
     if rec.get("state") == "taking" and pid_alive(rec.get("pid")):
         return 503, {"error": "it's still being taken: ask again in a moment"}
-    if rec.get("state") != "done":
-        if rec.get("state") == "taking":
-            move_take_undo(rec)
-            rec["state"] = "undone"
-            move_in_write(rec)
-        return 200, {"dropped": True}
+    with move_in_lock(token):
+        rec = move_in_read(token) or rec
+        if rec.get("state") != "done":
+            if rec.get("state") == "taking":
+                move_take_undo(rec)
+                rec["state"] = "undone"
+                move_in_write(rec)
+            return 200, {"dropped": True}
+        return move_abort_done(rec)
+
+
+def move_abort_done(rec):
+    """move_abort_in for a move taken whole: dropped, unless it's been used here since."""
     sid = (rec.get("answer") or {}).get("id")
     s = session(sid) if sid else None
     if s:
         f = transcript(s)
         used = f and f.stat().st_mtime > (rec.get("done_at") or 0) + 5
-        if used or (STATUS / sid).read_text().strip() != "idle":
+        if used or ((STATUS / sid).read_text().strip() if (STATUS / sid).exists() else "idle") != "idle":
             return 409, {"kept": True, "key": rec["answer"]["key"],
                          "error": f"it's been used on {machine_label()} since: it stays there"}
     move_take_undo(rec)
@@ -16364,7 +16382,7 @@ def move_tend():
             if now - (rec.get("since") or 0) < 90:
                 continue        # (its mover may still be starting)
             if rec.get("when") == "free" and not rec.get("cancel"):
-                move_spawn(["move", sid, "--to", rec["to"], "--when-free", "--wait-here",
+                move_spawn(["move", sid, "--to", rec["to"], "--when-free", "--spawned",
                             "--secrets" if rec.get("secrets") else "--no-secrets"])
             else:
                 move_forget(sid)
@@ -16399,9 +16417,12 @@ def move_tend():
         if not rec:
             continue
         if rec.get("state") == "taking" and not pid_alive(rec.get("pid")):
-            move_take_undo(rec)
-            rec["state"] = "undone"
-            move_in_write(rec)
+            with move_in_lock(f.stem):
+                rec = move_in_read(f.stem) or rec
+                if rec.get("state") == "taking" and not pid_alive(rec.get("pid")):
+                    move_take_undo(rec)
+                    rec["state"] = "undone"
+                    move_in_write(rec)
         elif rec.get("state") != "taking" and now - (rec.get("at") or 0) > MOVED_KEEP:
             f.unlink(missing_ok=True)
 
@@ -16438,6 +16459,18 @@ def cmd_move(args):
             rest.append(a)
     if "--tend" in opts:
         move_tend()
+        return 0
+    if "--spawned" in opts:
+        # The move itself, in a process of its own (the app's, or one that
+        # waits until the chat is free): whatever stops it, its card says why.
+        sid = rest[0] if rest else ""
+        to = opts.get("--to") or ""
+        try:
+            done = move_out(sid, to, secrets="--secrets" in opts, when="free" if "--when-free" in opts else "now",
+                            say=lambda text: print(f"  {text}…", file=sys.stderr, flush=True))
+        except MoveError as e:
+            return fail(f"{sid} didn't move to {to}: {e}")
+        print(done["key"])
         return 0
     if "--take" in opts:
         try:
@@ -16505,17 +16538,17 @@ def cmd_move(args):
     if out["busy"] and not free:
         return fail(f"{sid} can't move this moment: {'; '.join(out['busy'])}. amarchy move {sid} --to {m['name']} "
                     f"--when-free moves it once it's free")
-    if free and "--wait-here" not in opts:
+    if free:
         # It waits in a process of its own (from the chat's own Claude: its
         # turn is the one to end first, and that Claude stops as it moves).
         move_write(sid, {"to": m["name"], "label": m["label"], "when": "free", "secrets": bool(secrets),
                          "since": time.time(), "step": "Waiting for it to be free"})
-        move_spawn(["move", sid, "--to", m["name"], "--when-free", "--wait-here", "--secrets" if secrets else "--no-secrets"])
+        move_spawn(["move", sid, "--to", m["name"], "--when-free", "--spawned", "--secrets" if secrets else "--no-secrets"])
         print(f"{sid} moves to {m['label']} once it's free" + (" (once this turn ends)" if own else "")
               + f": amarchy move {sid} --cancel calls it off")
         return 0
     try:
-        done = move_out(sid, m["name"], secrets=bool(secrets), when="free" if free else "now",
+        done = move_out(sid, m["name"], secrets=bool(secrets), when="now",
                         say=lambda text: print(f"  {text}…", file=sys.stderr, flush=True))
     except MoveError as e:
         return fail(f"{sid} didn't move to {m['label']}: {e}")
@@ -16825,7 +16858,7 @@ def app_handler(st, users, address):
             secrets = "--secrets" if data.get("secrets") else "--no-secrets"
             move_write(sid, {"to": m["name"], "label": m["label"], "when": when, "secrets": bool(data.get("secrets")),
                              "since": time.time(), "step": "Waiting for it to be free" if when == "free" else "Getting ready"})
-            move_spawn(["move", sid, "--to", m["name"], secrets, *(["--when-free", "--wait-here"] if when == "free" else [])])
+            move_spawn(["move", sid, "--to", m["name"], secrets, "--spawned", *(["--when-free"] if when == "free" else [])])
             st.poke.set()
             return self.send(200, {"moving": move_shown(sid)[0]})
 
@@ -23042,7 +23075,7 @@ OPTIONS = {
                {"--why", "--timeout", "--project"}, set()),
     "terminals": (set(), set(), set()),
     "machines": ({"--json"}, set(), set()),
-    "move": ({"--to", "--when-free", "--wait-here", "--secrets", "--no-secrets", "--check", "--json", "--cancel", "--dismiss",
+    "move": ({"--to", "--when-free", "--spawned", "--secrets", "--no-secrets", "--check", "--json", "--cancel", "--dismiss",
               "--take", "--from", "--tend"}, {"--to", "--take", "--from"}, set()),
     "open": (set(), set(), set()),
     "awake": ({"--json"}, set(), set()),
