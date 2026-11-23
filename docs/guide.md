@@ -1547,7 +1547,8 @@ press a card's buttons, **comment** on it (the agent answers by revising the car
 - **Approving is yours alone.** A column can need your approval (**Ready to post**): a
   card gets there only by your hand (a button, or **Move to**), never an agent's. Its
   approval says who (your Tailscale login), when, and the sha256 of exactly what it
-  has, signed with a key only amarchy reads (in the secrets' folder). Any change to it
+  has, signed with a key only amarchy reads (in the secrets' folder); changed since
+  you looked (the agent revised it a moment ago), your Approve is refused. Any change to it
   (your edit, the agent's revision) drops it, and the card goes back where it was. A
   board can have a check (its agent's lint): it runs on your edit and your approval
   first, and can refuse either, in its words. An agent's tools can't reach the app's
