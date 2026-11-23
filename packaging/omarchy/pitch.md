@@ -1,12 +1,3 @@
-# amarchy: stop babysitting your agents. Manage them.
-
-*A draft for an issue (or a discussion) on basecamp/omarchy. Not posted:
-that's Julian's call.*
-
----
-
-**Title:** amarchy: run a dozen Claude Code agents from Omarchy, and from your phone
-
 **Stop babysitting your agents. Manage them.**
 
 One Claude Code at a time, you babysit it: you watch it, wait on it and read
@@ -104,8 +95,8 @@ echo "amarchy has been installed. Super+Alt+A brings it up; the Ⓐ in the bar l
 
 ## What we'd ask
 
-1. Take the omarchy-pkgs recipe (the PR is ready; it builds both packages on
-   x86_64 and aarch64).
+1. Take the omarchy-pkgs recipe (a draft PR there, `amarchy-git`: both
+   packages, built in a clean chroot and tested installed).
 2. If you like it, the installer above and its row in Install › AI. Happy to
    send that PR too, in Omarchy's style, with its i18n.
 3. Anything about it that doesn't feel like Omarchy: we'd rather fix it than
