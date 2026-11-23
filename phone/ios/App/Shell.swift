@@ -268,7 +268,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         case .link(let link):
             handle(link)
         case .outside:
-            UIApplication.shared.open(url)
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
         case .deny:
             break
         }
@@ -329,7 +329,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         if let link = AmarchyLink(url) {
             handle(link)
         } else if !["about", "javascript", "blob", "data"].contains(url.scheme?.lowercased() ?? "") {
-            UIApplication.shared.open(url)
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
         }
         return nil
     }
