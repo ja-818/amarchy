@@ -1,8 +1,12 @@
 # amarchy's own Tailscale node in the app: tailnet/mobile built with
 # gomobile into Frameworks/Tailnet.xcframework (not in git). Included by
 # project.yml only when it's there (generate.sh sets AMARCHY_TAILNET).
+# Get it from the newest "Tailscale node" run on main (its artifact
+# tailnet-ios holds the xcframework's contents), as phone-ios.yml does:
 #
-#   cd tailnet && gomobile bind -target ios,iossimulator -o ../phone/ios/Frameworks/Tailnet.xcframework ./mobile
+#   gh run download <run> -n tailnet-ios -D phone/ios/Frameworks/Tailnet.xcframework
+#
+# or build it: cd tailnet && gomobile bind -target ios,iossimulator -o ../phone/ios/Frameworks/Tailnet.xcframework ./mobile
 
 targets:
   Amarchy:

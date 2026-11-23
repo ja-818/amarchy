@@ -178,11 +178,14 @@ an app widget, updated the same way.
   notifications aren't in this build.
 - iOS: on a Mac, `cd phone/ios && ./generate.sh` (XcodeGen: `brew install
   xcodegen`), then open `Amarchy.xcodeproj`, or `xcodebuild test -scheme
-  Amarchy -destination 'platform=iOS Simulator,name=iPhone 17'`; in CI,
+  Amarchy -destination 'platform=iOS Simulator,name=iPhone 17'`; with
+  amarchy's own node when `phone/ios/Frameworks/Tailnet.xcframework` is
+  there (`phone/ios/tailnet.yml` says how to get it). In CI,
   `.github/workflows/phone-ios.yml` builds every target for the simulator
-  and runs its unit tests and its UI tests (against this checkout's
-  `bin/amarchy`), and keeps their screenshots. TestFlight: by hand only,
-  `phone/ios/store/README.md`.
+  (with the own node, from the newest "Tailscale node" run on main, and
+  without it), runs its unit tests and its UI tests (against this
+  checkout's `bin/amarchy`), and keeps their screenshots. TestFlight: by
+  hand only, `phone/ios/store/README.md`.
 - The relay's address is built in: `AMARCHY_RELAY` (iOS: a build setting,
   in the app's `Info.plist` as `AmarchyRelay`; Android: a Gradle property or
   the environment, `BuildConfig.AMARCHY_RELAY`). Without it, notifications

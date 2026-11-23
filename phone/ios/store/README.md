@@ -83,7 +83,8 @@ set IOS_DIST_CERT_P12 < dist.p12.b64`, `gh secret set ASC_KEY_ID` (it asks).
 7. GitHub → Actions → **iPhone app** → **Run workflow** → branch `main`,
    tick **release** → Run. It builds and tests first, then `fastlane beta`:
    the profiles (made the first time), a Release build numbered after
-   TestFlight's last, signed, uploaded. About 25 minutes.
+   TestFlight's last (with amarchy's own Tailscale node when the "Tailscale
+   node" workflow on main has built it), signed, uploaded. About 25 minutes.
 8. App Store Connect → the app → **TestFlight**: the build shows after
    Apple processes it (10 to 30 minutes). Add yourself to an internal
    testing group; on the iPhone, the TestFlight app installs it.
