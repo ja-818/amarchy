@@ -40,7 +40,7 @@ function cloudBilling(c) {
   const who = c.provider_label || "the provider";
   return c.billing === "subscription"
     ? `Paid ahead each month to ${who}, until you remove it (then it isn't renewed).`
-    : `Billed by ${who} by the hour, up to that, until you remove it.`;
+    : `Billed by ${who} by the hour, never more than that a month, until you remove it.`;
 }
 
 // Its size and where, in a line: "CX33 · 4 vCPU, 8 GB · Falkenstein, Germany".
@@ -213,7 +213,8 @@ async function cloudAddSheet() {
         kids.push(h("div", { class: "section" }, "Size"));
         if (zs.loading) kids.push(h("p", { class: "hint" }, "Its sizes and prices…"));
         else if (zs.error) kids.push(h("p", { class: "note" }, zs.error));
-        else if (zs.sizes) kids.push(uiPick(zs.sizes.map((z) => ({
+        else if (zs.sizes && zs.sizes.some((z) => z.with)) kids.push(h("p", { class: "hint" }, `Prices with ${zs.sizes.find((z) => z.with).with}, as ${p.label} bills it.`));
+        if (zs.sizes) kids.push(uiPick(zs.sizes.map((z) => ({
           key: z.id, label: z.label, badge: z.recommended ? "Recommended" : null, dim: !z.enough,
           detail: [`${z.cores} vCPU · ${z.memory_gb} GB · ${z.disk_gb} GB disk`, z.enough ? z.note : `under ${s.d.min_gb} GB: fewer chats`].filter(Boolean).join(" · "),
           aside: `${uiMoney(z.monthly, z.currency)}/mo` })), { on: s.size, label: "Size", pick: (k) => { s.size = k; draw(); } }));
@@ -306,10 +307,20 @@ function cloudSheet(name) {
   draw();
 }
 
-// Every open sheet of these drawn again as the board changes (refresh: app.js).
+// The open sheets that show machines (a cloud machine's, a machine's,
+// Settings' machines) drawn again as the board changes (refresh: app.js),
+// only when the machines did.
+let cloudLiveSig = "";
 function cloudLive() {
+  const sig = JSON.stringify(machinesAll().map((m) => [m.name, m.label, m.on, m.seen, m.update, m.icon, m.claude, m.github, m.making,
+    m.cloud && [m.cloud.step, m.cloud.detail, m.cloud.error, !!m.cloud.remove, m.cloud.monthly]]));
+  if (sig === cloudLiveSig) return;
+  cloudLiveSig = sig;
   for (const b of document.querySelectorAll(".sheet-back")) {
     if (b.live && !b.hidden) uiWhenStill(`cloud-live-${b.key || ""}`, () => { if (b.isConnected && !b.hidden) b.live(); });
+    for (const part of b.querySelectorAll(".machines-part")) {
+      if (part.live && !b.hidden) uiWhenStill("cloud-live-settings", () => { if (part.isConnected) part.live(); });
+    }
   }
 }
 

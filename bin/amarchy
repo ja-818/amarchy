@@ -16966,7 +16966,7 @@ class Hetzner(CloudProvider):
     token_url = "https://console.hetzner.com/projects"
     token_how = "In the Hetzner Console, open your project, then Security → API tokens → Generate API token, Read & Write"
     api = "https://api.hetzner.cloud/v1"
-    notes = "Germany, Finland, the US and Singapore. Billed by the hour, up to the monthly price."
+    notes = "Germany, Finland, the US, Singapore. By the hour, up to its monthly price."
     user_data_max = 32 * 1024
 
     def why(self, status, answer):
@@ -17026,11 +17026,11 @@ class Hetzner(CloudProvider):
                 continue
             monthly = float((price.get("price_monthly") or {}).get("gross") or 0) + ipv4
             arch = "arm" if t.get("architecture") == "arm" else "x86"
-            kind = "dedicated vCPU" if t.get("cpu_type") == "dedicated" else "shared vCPU"
+            kind = "dedicated" if t.get("cpu_type") == "dedicated" else "shared"
             out.append({"id": t["name"], "label": str(t.get("description") or t["name"]).upper(), "cores": t.get("cores"),
                         "memory_gb": float(t.get("memory") or 0), "disk_gb": t.get("disk"), "monthly": round(monthly, 2),
-                        "currency": currency, "arch": arch,
-                        "note": f"{kind}{', Arm' if arch == 'arm' else ''}; with its IPv4 address"})
+                        "currency": currency, "arch": arch, "note": f"{kind}{', Arm' if arch == 'arm' else ''}",
+                        "with": "its IPv4 address"})
         return out
 
     def image(self, token, region, arch):
@@ -17087,7 +17087,7 @@ class DigitalOcean(CloudProvider):
     token_how = ("In DigitalOcean's API page, Generate New Token, with these scopes: droplet (create, read, delete), "
                  "regions, sizes and image (read), tag (create, read), account (read); or Full Access")
     api = "https://api.digitalocean.com/v2"
-    notes = "North America, Europe, Asia, Australia. Billed by the hour, up to the monthly price."
+    notes = "The Americas, Europe, Asia, Australia. By the hour, up to its monthly price."
     user_data_max = 64 * 1024
 
     def why(self, status, answer):
@@ -17183,8 +17183,7 @@ class Hostinger(CloudProvider):
     billing = "subscription"    # paid ahead for each period; removing it stops the renewal
     carrier = "post-install"
     user_data_max = 48 * 1024
-    notes = ("Paid ahead each month, from your default payment method. Hostinger can't delete one at once: "
-             "removing stops it and its renewal.")
+    notes = "Europe, the Americas, Asia. Paid ahead monthly; removing stops it and its renewal."
 
     def why(self, status, answer):
         said = str(answer.get("message") or "").rstrip(".")
@@ -18388,20 +18387,23 @@ def signin_status(what, fresh=False):
             r = subprocess.run(["claude", "auth", "status", "--json"], capture_output=True, text=True, timeout=20,
                                stdin=subprocess.DEVNULL, env=clean_env())
             d = json.loads(r.stdout or "{}")
-            out = {"signed_in": bool(d.get("loggedIn")), "who": d.get("email") if d.get("loggedIn") else None,
-                   "plan": d.get("subscriptionType") if d.get("loggedIn") else None}
+            # (A Claude Code from before `auth status`: not known, never "signed out".)
+            if isinstance(d, dict) and isinstance(d.get("loggedIn"), bool):
+                out = {"signed_in": d["loggedIn"], "who": d.get("email") if d["loggedIn"] else None,
+                       "plan": d.get("subscriptionType") if d["loggedIn"] else None}
         except (OSError, ValueError, subprocess.TimeoutExpired):
-            out = {"signed_in": False, "who": None, "plan": None}
+            pass
     elif what == "github" and shutil.which("gh"):
         try:
             r = subprocess.run(["gh", "auth", "status", "--hostname", "github.com"], capture_output=True, text=True,
                                timeout=20, stdin=subprocess.DEVNULL, env=clean_env())
             said = r.stdout + r.stderr
             who = re.search(r"Logged in to github\.com (?:account|as) (\S+)", said)
-            out = {"signed_in": r.returncode == 0 and bool(who), "who": who.group(1) if who and r.returncode == 0 else None,
-                   "plan": None}
+            if who or "not logged in" in said.lower() or "gh auth login" in said:
+                out = {"signed_in": r.returncode == 0 and bool(who), "who": who.group(1) if who and r.returncode == 0 else None,
+                       "plan": None}
         except (OSError, subprocess.TimeoutExpired):
-            out = {"signed_in": False, "who": None, "plan": None}
+            pass
     _signin_memo[what] = (time.time(), out)
     return out
 
