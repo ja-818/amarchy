@@ -439,6 +439,126 @@ up when it's back. No main machine; any one can be off.
   its machine: its priority (Now, For later, pinned), seen and unread, its
   name: the same on every board already.
 
+### A cloud machine (track F)
+
+A machine made for you in **your own** cloud account (Hetzner Cloud,
+DigitalOcean, Hostinger VPS), from Settings → Machines → **Add a cloud
+machine** or `amarchy machines cloud add`. The project never runs a machine
+or bills anyone: the provider bills you, and Remove deletes it there.
+
+- **Made by one of your machines** (the one you asked: its CLI, or its app
+  server for the app), which keeps it in `~/.config/amarchy/cloud.json`
+  (0600): `[{"name", "provider", "id" (the provider's), "region", "size",
+  "cores", "memory_gb", "disk_gb", "monthly", "currency", "billing"
+  (`hourly`: billed by the hour up to the monthly price, Hetzner and
+  DigitalOcean; `subscription`: paid ahead each period, Hostinger), "image", "user",
+  "made", "step", "steps": {<step>: at}, "error", "detail", "log", "ip",
+  "node" (its MagicDNS name once on the tailnet), "report" (its report
+  token)}]`. Steps, in order: `creating` → `booting` (the provider made it)
+  → `installing` (it runs: cloud-init at work) → `tailnet` (on your tailnet;
+  the report's `detail` says what it's installing) → `pairing` (its
+  amarchy answers) → `paired`; or `failed` (with `error`, words that say
+  what to do) and `removing` → gone. A watcher of its own
+  (`amarchy-cloud-<name>.service`, a user unit: it outlives the app
+  server's restarts; the app server starts it again for one left
+  unfinished) takes it through them.
+- **Tokens stay on that machine**: the provider's API token and the
+  Tailscale key in `~/.config/amarchy/secrets/cloud.env` (0600; never given
+  to a chat's commands, masked wherever the app would show one), each
+  under its usual name (`HCLOUD_TOKEN`, `DIGITALOCEAN_TOKEN`,
+  `HOSTINGER_API_TOKEN`, `TAILSCALE_AUTH_KEY`). Given in the app's own
+  password field, in a terminal (not echoed), or asked of you by a chat's
+  Claude with `amarchy secret ask <NAME> --cloud` (the card, as any
+  secret's): never in a chat.
+- **Joining the tailnet: a one-off auth key**, made by you on Tailscale's
+  Keys page (the app links straight to it: one-off, pre-approved, a day's
+  expiry), kept until the machine joins and then forgotten (spent). The
+  soundest way: it can add one device, once, and expires; nothing with
+  standing power over your tailnet is kept anywhere or handed to the
+  provider (an API token or an OAuth client would be: a tagged OAuth key
+  also makes a node that isn't yours, so it couldn't pair). The node is
+  yours (the key's), named for the machine. Not the VM signing in by itself
+  (track H's node): its sign-in link would be on a machine nothing can
+  reach yet.
+- **Its setup**: `cloud/bootstrap.sh`, one script for every provider,
+  carried by cloud-init (Hetzner, DigitalOcean: user data with the script
+  and its settings, `amarchy machines cloud user-data <name>` shows it,
+  secrets masked) or as the post-install script (Hostinger, which has no
+  cloud-init). On Debian 13 (tmux 3.5; else Ubuntu 26.04), as root:
+  Tailscale (its install script, then `tailscale up --auth-key --hostname
+  <name> --ssh`, the operator set to your user), a swap file, git, tmux,
+  python3, gh, unattended security upgrades; a user of your login name with
+  sudo, lingering, and your git name and email (this machine's); Claude
+  Code (its installer) and amarchy (`git clone` of this machine's origin,
+  `install.sh --no-desktop`, `amarchy app on`), its icon `cloud`, and
+  `~/.config/amarchy/cloud-self.json` `{"provider", "by", "made"}`.
+  Nothing listens on the public network: the firewall lets in only
+  `tailscale0` and Tailscale's UDP port, and sshd is off (Tailscale SSH
+  instead). Secrets are wiped from the VM once used.
+- **Its reports**: `POST /api/cloud/progress` on the machine that made it,
+  over the tailnet (`--resolve` to that machine's Tailscale address), with
+  `Authorization: Bearer <report token>` and `{"name", "step" (tailnet,
+  packages, claude, amarchy, app, ready, failed), "words", "log"}` (the last
+  lines of its log when it failed): let in through tailscale serve as you
+  (or straight, from you, on 127.0.0.1: the tests), no Origin (it isn't a
+  page). What the watcher can see for itself (the provider's state, the
+  node on `tailscale status`, its hello) moves it on without them.
+- **Pairing**: once its `/api/peer/hello` answers, the machine that made it
+  pairs as `amarchy machines add <node>` does. Then the board's row says
+  **Sign in to Claude** until its Claude is signed in, and **Sign in to
+  GitHub** until `gh` is (its chats clone, push and move through it).
+- **`hello`** says `"claude": "in" | "out" | null` (its Claude signed in,
+  `claude auth status`, read at most once a minute), `"github": "in" |
+  "out" | null` (`gh auth status`, the same) and `"cloud": {"provider",
+  "by", "made"} | null` (a cloud machine amarchy made). The board's
+  `machines` rows carry `claude` and `github`, and `cloud` for a cloud
+  machine:
+  `{"provider", "provider_label", "size", "cores", "memory_gb", "region",
+  "region_label", "monthly", "currency", "billing", "step", "steps", "error",
+  "detail", "made_here": true}` from `cloud.json` on the machine that made
+  it (a machine still being made is a row too, `"making": true`), else
+  just `{"provider", "provider_label"}` from its hello.
+- **Signing in on a machine** to Claude or GitHub, any machine (through the
+  pass-through for another): `GET /api/signin/<claude|github>` →
+  `{"signed_in", "who", "plan", "login": {"url", "code", "since", "error"}
+  | null}`; `POST /api/signin/<claude|github>` `{"do": "login"}` starts
+  `claude auth login` (or `gh auth login --web`) there, in amarchy's tmux,
+  and answers `{"url"}` (Anthropic's sign-in page) or `{"url", "code"}`
+  (GitHub's device page and the code to type there); `{"do": "code",
+  "code"}` types the code Anthropic's page gives into Claude's and answers
+  once signed in (`{"signed_in", "who"}`, or `{"error"}`); `{"do":
+  "cancel"}`. GitHub's ends by itself once you've typed its code (then
+  `gh auth setup-git`, so git pushes as you). Never a credential copied
+  between machines (each signs in on its own: a shared refresh token would
+  sign the other out).
+- **Removing one** (`amarchy machines cloud remove <name>`, or its sheet's
+  Remove): it says what's lost (its chats: their worktrees, what isn't
+  pushed, their conversations) and offers to move them to this machine
+  first (`--move-chats`: each as `amarchy move` would, waiting for each to
+  be free). Then `POST /api/peer/cloud/leave` (peers only, on a cloud
+  machine amarchy made: it logs out of Tailscale), unpaired, and deleted at
+  the provider, which stops its billing (Hostinger can't delete one at
+  once: it's stopped, and its subscription isn't renewed, so it ends with
+  the period you paid for).
+- **The app** (this machine's own API): `GET /api/cloud` → `{"providers":
+  [{"key", "label", "connected", "token_name", "token_url", "token_how",
+  "notes"}], "tailscale_key": bool, "keys_url", "machines": [...]}`;
+  `GET /api/cloud/options?provider=&region=` → `{"regions": [{"id",
+  "label"}], "sizes": [{"id", "label", "cores", "memory_gb", "disk_gb",
+  "monthly", "currency", "arch", "recommended"}]}` (the provider's own
+  prices); `POST /api/cloud` `{"action": "token", "provider", "value"}`
+  (checked with the provider first), `{"action": "tailscale-key",
+  "value"}`, `{"action": "forget", "provider"}`, `{"action": "create",
+  "provider", "region", "size", "name"}`, `{"action": "remove", "name",
+  "move_chats"}`, `{"action": "dismiss", "name"}` (a failed one that was
+  never made).
+- **CLI**: `amarchy machines cloud [list] [--json]`, `amarchy machines cloud
+  providers`, `... regions <provider>`, `... sizes <provider> <region>`,
+  `... token <provider|tailscale>`, `... add [--provider p --region r
+  --size s --name n] [--wait]`, `... status <name>`, `... remove <name>
+  [--move-chats | --lose-chats] [--yes]`, `... user-data <name>` (what
+  cloud-init would get, secrets masked).
+
 ### What lives where
 
 | What | Where |
@@ -451,6 +571,7 @@ up when it's back. No main machine; any one can be off.
 | Web Push to a phone | The machine the phone subscribed on, for every machine's chats |
 | Desktop notifications | The desktop app, for every machine's chats |
 | Claude's usage limits | Shared (same account): shown once |
+| A cloud machine's record, its provider token, the Tailscale key until used | The machine that made it (`cloud.json`, `secrets/cloud.env`) |
 
 ## The tracks
 
