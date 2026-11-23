@@ -537,7 +537,7 @@ function boardSearchDraw() {
   const cards = rows.map((s) => {
     const r = byId.get(s.id);
     const lines = (r && r.lines) || [];
-    const name = isAgent(s) ? teamName(s) : s.task || "New chat";
+    const name = isAgent(s) ? s.assistant_name || "Assistant" : s.task || "New chat";
     return boardTicket(s, uiCard({ kind: "search", hue: todayHue(s.repo), chip: todayChip(s), id: s.id,
       title: h("span", { class: "task", html: lit(name, words) }), lead: isAgent(s) ? avatar(s, "small") : null,
       pill: todayStatePill(s), open: () => boardOpen(s.id),

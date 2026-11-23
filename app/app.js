@@ -2618,7 +2618,7 @@ async function openSettings({ at = "" } = {}) {
       ...mediaLacking(),
       h("div", { class: "section" }, "Agents"),
       ...team.map((x) => h("button", { class: "control wide", onclick: () => agentSheet(x) }, avatar(x, "small"),
-        h("span", {}, `${teamName(x)}: who it is, picture, chime…`))),
+        h("span", {}, `${x.assistant_name || "Assistant"}: who it is, picture, chime…`))),
       h("button", { class: "control wide", onclick: () => newAgentSheet() }, "New agent…"),
       h("p", {}, team.length ? `Chats that live on rather than finish, on top of the list${helper ? `; ${helper.assistant_name || "your assistant"} is your assistant, and your tasks go to it` : ""}. `
                                + "New agent… makes another; a chat's menu (⋯, or hold it in the list) makes it one."

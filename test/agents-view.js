@@ -5,8 +5,8 @@
 // no Complete on its card, its head, its menu or its keys, no Stalled, no Done
 // to complete, not new for Needs you, no priority. Asking you something, it's
 // your move like any chat's, on top still (its row has the question). Its chat: its name and picture on the bar, "Message
-// Fireship" in the box, no Done strip. Who it is: its emoji by its name (Scout
-// 🦉), its picture without one of yours; its sheet's emoji and tone. Its sheet
+// Fireship" in the box, no Done strip. Who it is: its emoji and tone, set in
+// its sheet and never shown anywhere else (the emoji is for chatting). Its sheet
 // (name, who it is, picture, chime, Not an agent any more), the sheet that
 // makes one, Settings' Agents and Tell me, the chimes' sheet with a tab each,
 // and its own chime when it rings. With screenshots.
@@ -91,7 +91,7 @@ async function run(browser, port, layout) {
     `no picture of yours: its initial, on its project's color, as big as a picture (${card.size}px of ${card.want}, padding ${card.pad})`);
   check(where, card.pic === "/picture/0123456789ab-192.png", `a picture of yours: that one (${card.pic})`);
   const scout = await p.evaluate(() => document.querySelector(".board-today .tcard[data-id=scout-scout] .tcard-title").innerText);
-  check(where, scout === "Scout 🦉", `its emoji by its name, its picture as it is (${scout})`);
+  check(where, scout === "Scout", `with an emoji: its name alone, its picture as it is (${scout})`);
   check(where, !card.flag, "pinned before it was an agent: no flag (it's on top whatever its priority)");
   check(where, !card.complete && !card.pill && !/Stalled|New|Merged|Done/.test(card.sub), `done, merged, quiet for days, unseen: still never to complete, no state pill, a conversation's row (${card.sub})`);
   const parts = await p.evaluate(() => { const q = todayParts(app.view); const ids = (l) => l.map((s) => s.id);
@@ -185,33 +185,35 @@ async function run(browser, port, layout) {
   check(where, await until(p, () => /Agents only/.test((document.querySelector(".sheet") || {}).innerText || "")), "Tell me: Agents only");
   t = await sheetText(p);
   check(where, /Jaken, Scout and Fireship, your agents, always tell you/.test(t), "and who always tells you");
-  check(where, /Jaken: who it is, picture, chime/.test(t) && /Jaken is your assistant/.test(t) && /Scout 🦉: who it is, picture, chime/.test(t) && /Fireship: who it is, picture, chime/.test(t), "Agents: each by its name and emoji, your assistant first");
+  check(where, /Jaken: who it is, picture, chime/.test(t) && /Jaken is your assistant/.test(t) && /Scout: who it is, picture, chime/.test(t) && !/🦉/.test(t) && /Fireship: who it is, picture, chime/.test(t), "Agents: each by its name, your assistant first");
   check(where, /Fireship's: Tine|Fireship's: Elementary/.test(t), "the chimes' line names each agent's");
   await p.evaluate(() => { const s = [...document.querySelectorAll(".sheet .section")].find((x) => x.innerText === "Agents"); if (s) s.scrollIntoView(); });
   await sleep(500);
   await p.screenshot({ path: path.join(SHOTS, `${where}-settings.png`) });
   await p.evaluate(() => closeSheets());
 
-  // Who it is: an emoji without a picture of yours is its picture, by its
-  // name everywhere it's named (its card, a chat of its project's chip, its
-  // head); its sheet sets it, with its tone; none yet, the sheet says it'll pick.
+  // Who it is: its emoji and tone are its voice, not an icon: with them, its
+  // card, a chat of its project's chip and its head are as they were (its
+  // initial, its name); its sheet sets them; none yet, it says it'll pick.
   await set(p, "fireship-fireship", { emoji: "💀", tone: "smooth-talking showman of the underworld" });
   await set(p, "fireship-ideas", { emoji: "💀" });
-  check(where, await until(p, () => { const c = document.querySelector(".board-today .tcard[data-id=fireship-fireship]");
-    const a = c && c.querySelector(".tcard-head svg.avatar.letter.emoji");
-    return !!a && a.textContent === "💀" && c.querySelector(".tcard-title").innerText === "Fireship 💀"; }),
-    "no picture of yours: its emoji is its picture, and goes by its name");
-  check(where, await p.evaluate(() => [...document.querySelectorAll(".today-now .tcard[data-id=fireship-ideas] .tcard-chip")].some((c) => c.innerText === "Fireship 💀")),
-        "another chat of its project: under its name and emoji");
+  await sleep(300);
+  check(where, await p.evaluate(() => { const c = document.querySelector(".board-today .tcard[data-id=fireship-fireship]");
+    const a = c && c.querySelector(".tcard-head svg.avatar.letter");
+    return !!a && a.textContent === "F" && c.querySelector(".tcard-title").innerText === "Fireship" && !c.innerText.includes("💀"); }),
+    "with an emoji: still its initial and its name, no emoji");
+  check(where, await p.evaluate(() => [...document.querySelectorAll(".today-now .tcard[data-id=fireship-ideas] .tcard-chip")].some((c) => c.innerText === "Fireship")),
+        "another chat of its project: under its name");
   await p.screenshot({ path: path.join(SHOTS, `${where}-agents-emoji.png`), fullPage: true });
   await p.evaluate(() => agentSheet(row("fireship-fireship")));
   const fields = await p.evaluate(() => { const s = [...document.querySelectorAll(".sheet")].pop();
     const e = s.querySelector(".identity-line .emoji-field"), tn = s.querySelector(".identity-line .input:not(.emoji-field)");
-    return { emoji: e && e.value, tone: tn && tn.value, head: s.querySelector(".sheet-head, h2, .title") ? s.innerText.split("\n")[0] : "",
-             said: /stays in character/.test(s.innerText), w: e ? Math.round(e.getBoundingClientRect().width) : 0,
-             tw: tn ? Math.round(tn.getBoundingClientRect().width) : 0, big: !!s.querySelector("svg.avatar.letter.emoji.big") }; });
-  check(where, fields.emoji === "💀" && fields.tone === "smooth-talking showman of the underworld" && fields.said && fields.big,
-        `its sheet: its emoji and tone, its emoji big as its picture (${JSON.stringify(fields)})`);
+    return { emoji: e && e.value, tone: tn && tn.value,
+             said: /uses its emoji in its messages/.test(s.innerText), w: e ? Math.round(e.getBoundingClientRect().width) : 0,
+             tw: tn ? Math.round(tn.getBoundingClientRect().width) : 0, big: !!s.querySelector("svg.avatar.letter.big:not(.emoji)"),
+             title: s.innerText.split("\n")[0] }; });
+  check(where, fields.emoji === "💀" && fields.tone === "smooth-talking showman of the underworld" && fields.said && fields.big && fields.title === "Fireship",
+        `its sheet: its emoji and tone to change, its picture and name as they are (${JSON.stringify(fields)})`);
   check(where, fields.w > 30 && fields.w < 80 && fields.tw > fields.w * 2, `the emoji a small box, the tone the rest of the row (${fields.w}px, ${fields.tw}px)`);
   await sleep(400);
   await p.screenshot({ path: path.join(SHOTS, `${where}-agent-identity-sheet.png`) });
@@ -230,7 +232,7 @@ async function run(browser, port, layout) {
   await back(p);
   // The new agent's sheet says it picks who it is with you.
   await p.evaluate(() => newAgentSheet());
-  check(where, /offers you three, each an emoji and a tone/.test(await sheetText(p)), "a new agent: picks who it is with you");
+  check(where, /offers you three, each a tone and the emoji it chats with/.test(await sheetText(p)), "a new agent: picks who it is with you");
   await p.evaluate(() => closeSheets());
 
   // Its chat: its name and picture on the bar, no Complete, the box calls it by name, no Done strip.
@@ -243,8 +245,8 @@ async function run(browser, port, layout) {
   await sleep(300);
   await p.screenshot({ path: path.join(SHOTS, `${where}-agent-chat.png`) });
   await p.evaluate(() => todayOpen(row("scout-scout")));
-  check(where, await until(p, () => [...document.querySelectorAll(".head-title .head-name")].some((x) => x.offsetParent && /^Scout 🦉/.test(x.innerText))),
-        "its chat's bar: its name and emoji");
+  check(where, await until(p, () => [...document.querySelectorAll(".head-title .head-name")].some((x) => x.offsetParent && /^Scout/.test(x.innerText) && !/🦉/.test(x.innerText))),
+        "its chat's bar: its name, no emoji");
   await sleep(300);
   await p.screenshot({ path: path.join(SHOTS, `${where}-agent-chat-emoji.png`) });
   check(where, !p.errors.length, `no page errors (${p.errors.join("; ")})`);

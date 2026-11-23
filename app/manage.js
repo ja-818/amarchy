@@ -19,8 +19,8 @@ function agentsOf(v) {
 function agentChime(s) { return s.chime || (s.assistant === "main" ? (app.view || {}).assistant_sound : "") || "herald"; }
 // Its line in a chat's menu.
 function agentMenuLabel(s) {
-  return s.assistant === "main" ? `${teamName(s)}: who it is, picture, chime…`
-    : s.assistant === "agent" ? `${teamName(s)}, an agent: who it is, picture, chime…` : "Make it an agent…";
+  return s.assistant === "main" ? `${s.assistant_name || "Assistant"}: who it is, picture, chime…`
+    : s.assistant === "agent" ? `${s.assistant_name || "Agent"}, an agent: who it is, picture, chime…` : "Make it an agent…";
 }
 
 // A text field in a sheet, ↵ doing what its sheet's button does.
@@ -293,9 +293,9 @@ async function soundSheet(whose) {
 // ---- your assistant and your agents (amarchy assistant, amarchy agents)
 //
 // A chat that's neither: make it an agent (or your assistant, in place of the
-// one you have). One of them: who it is (its name, emoji and tone: its
-// Claude is handed them at every start), its picture, its chime, and back
-// to a chat like the others.
+// one you have). One of them: who it is (its name, and the emoji and tone
+// it chats with: its Claude is handed them at every start), its picture,
+// its chime, and back to a chat like the others.
 
 function agentSheet(s) {
   const helper = mainAssistant();
@@ -335,11 +335,11 @@ function agentSheet(s) {
     } catch (e) { toast(e.message); }
   };
   const own = /^[0-9a-f]{12}$/.test(s.picture || "");
-  sheet(sheetHead(teamName(s), `${main ? "Your assistant" : "An agent"} · ${where(s)}`),
+  sheet(sheetHead(who, `${main ? "Your assistant" : "An agent"} · ${where(s)}`),
     h("div", { class: "section" }, "Name"), name,
     h("div", { class: "section" }, "Who it is"),
     h("div", { class: "identity-line" }, emoji, tone),
-    h("p", {}, s.emoji && s.tone ? `Its emoji goes by its name, and its Claude is handed both at every start: it stays in character.`
+    h("p", {}, s.emoji && s.tone ? `${who} chats in that tone and uses its emoji in its messages: its Claude is handed both at every start.`
                : `None yet: the next time you write ${who}, it offers you three to pick from. Or set them here.`),
     h("button", { class: "control wide accent", onclick: save }, "Save"),
     h("div", { class: "section" }, "Picture"),
@@ -416,7 +416,7 @@ function newAgentSheet() {
   sheet({ key: "new-agent" }, sheetHead("New agent", "A chat that lives on"),
     h("p", {}, "A chat in a project does one job and is done. An agent never is: it keeps a job going (your inbox, your X account, "
                + "Monday's report), texts you like a coworker, and puts what needs you on Tasks. It sits on top of your chats."),
-    h("p", {}, "Who it is, it picks with you: the first time you write it, it offers you three, each an emoji and a tone, and becomes the one you tap."),
+    h("p", {}, "Who it is, it picks with you: the first time you write it, it offers you three, each a tone and the emoji it chats with, and becomes the one you tap."),
     h("div", { class: "section" }, "Its name"), name,
     h("div", { class: "section" }, "Its job"), job,
     h("div", { class: "section" }, "Where it lives"), list,

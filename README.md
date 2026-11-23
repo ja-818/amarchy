@@ -61,8 +61,8 @@ One board says which one needs you and what for. You answer with a tap.
 - **Agents with a job.** A chat that never ends: your inbox, your X account, Monday's report.
   It texts you like a coworker and keeps what needs you on **Tasks**, as boards: comment on a
   card and it revises it, write it a task and it helps you get it done. Approving is yours alone.
-  Each has a character: an emoji and a tone it picks with you (🔥 Calcifer, a proud, grumpy fire
-  demon under contract), and stays in it in every message.
+  Each has a character it picks with you, a tone and an emoji it chats with (Calcifer: a proud,
+  grumpy fire demon under contract, 🔥), and stays in it in every message.
 - **On your phone, in your browser, and on your desktop.** An app you add to your home
   screen, the same app on a computer, and a desktop app of its own (Linux first, Omarchy at
   home). All of them work over your private Tailscale network, not the internet. The iPhone

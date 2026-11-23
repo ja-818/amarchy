@@ -237,16 +237,16 @@ tells you when it needs you or is done, under its name and picture, with a chime
                                         assistant's too). <machine>:<id> for one on another machine of yours.
                                         An agent has what your assistant has but your loops file: its
                                         place on top of every list, next to your assistant; its own picture
-                                        (its emoji, or its initial, until you give it one) and chime; it always
+                                        (its initial until you give it one) and chime; it always
                                         tells you when it needs you or is done; boards and tasks on Tasks
                                         (amarchy board); a chat like a messaging app's (bubbles, typing…, unread
                                         counts), its Claude writing as someone you text; and it's never a
-                                        mission to complete. Its identity: its emoji (one, by its name in the
-                                        app and in its notifications: 🔥 Calcifer) and its tone (who it is
-                                        and how it talks, in a line: "proud, grumpy fire demon under
-                                        contract"). Its Claude is handed them at every start and stays in
-                                        character; until it has them, it offers you three to pick from the
-                                        first time you write it, and saves the one you tap
+                                        mission to complete. Its identity, its voice: its tone (who it is and
+                                        how it talks, in a line: "proud, grumpy fire demon under contract")
+                                        and its emoji (one: 🔥), which it uses in its messages as a person
+                                        does while texting. Its Claude is handed them at every start and
+                                        chats in character; until it has them, it offers you three to pick
+                                        from the next time you write it, and saves the one you tap
   amarchy agents <id> off               not an agent any more: a chat like the others again
   amarchy missions [--goal <n>]         what you've merged (only merges count): today, your streak, best day,
                   [--reset]             all of them, your replies and badges; --goal sets how many a day you
@@ -5596,7 +5596,7 @@ def missions_nudge(now=None):
                 body += f" · {week['fast']} fast repl{'ies' if week['fast'] != 1 else 'y'}"
             if v["streak"]:
                 body += f" · a {v['streak']}-day streak going"
-            payload = {"title": team_title(mine, "your week") if mine else "Your week", "body": body,
+            payload = {"title": f"{mine['name']}: your week" if mine else "Your week", "body": body,
                        "tag": "amarchy-recap", "url": "/"}
             if mine:
                 payload["icon"] = assistant_icon()
@@ -6511,9 +6511,9 @@ def session_view():
         s["assistant"], who = team_of(s, crew)
         s["assistant_name"] = who["name"] if who else ""
         s["picture"] = (sig if who["role"] == "main" else picture_sig(agent_picture(who["id"]))) if who else ""
-        # Who it is: its emoji by its name (and its picture, without one of
-        # its own), as its picture; its tone, its own only.
-        s["emoji"] = who.get("emoji") or "" if who else ""
+        # Who it is (its sheet shows them to change; the app shows neither
+        # anywhere else: its emoji is for its Claude to chat with).
+        s["emoji"] = who.get("emoji") or "" if s["assistant"] in AGENT_ROLES else ""
         s["tone"] = who.get("tone") or "" if s["assistant"] in AGENT_ROLES else ""
         s["chime"] = who["sound"] if s["assistant"] in AGENT_ROLES else ""
         if s["assistant"]:
@@ -6871,13 +6871,13 @@ def agents(mine=None):
 # As OpenClaw's IDENTITY.md and SOUL.md give an agent there: one of your team
 # has an emoji (🔥) and a tone (who it is and how it talks, in a line: "proud,
 # grumpy fire demon under contract"), set with `amarchy agents <id> --emoji
-# --tone`. The emoji goes by its name in the app (Calcifer 🔥) and leads its
-# notifications' titles (🔥 Calcifer), where a picture often isn't seen (a
-# phone's lock screen); without a picture of its own, it's its picture. Its
+# --tone`. Both are its voice, not the app's: the emoji is for chatting, its
+# Claude using it in its own messages as a person uses theirs (its picture is
+# what shows it in the app and by its notifications, never the emoji). Its
 # Claude is handed both with its reply format (identity_words), so at every
-# start and through every compaction, and stays in character. Until it has
-# them it offers you three to pick from, the first time you write it
-# (the bootstrap: OpenClaw's BOOTSTRAP.md), and saves the one you tap.
+# start and through every compaction, and chats in character. Until it has
+# them it offers you three to pick from, the next time you write it (the
+# bootstrap: OpenClaw's BOOTSTRAP.md), and saves the one you tap.
 
 TONE_MAX = 120      # a tone: one line, this long at most (it's in every one of its Claude's calls)
 
@@ -6921,21 +6921,6 @@ def identity_of(d):
     emoji = emoji_one(d.get("emoji") if isinstance(d.get("emoji"), str) else "") or ""
     tone = tone_one(d.get("tone") if isinstance(d.get("tone"), str) else "") or ""
     return {"emoji": emoji, "tone": tone}
-
-
-def team_title(who, title=""):
-    """A notification's title for one of your team: its emoji first, then
-    its name (🔥 Calcifer), then title after a colon, unless title says who
-    it's from already."""
-    name = who.get("name") or "Your assistant"
-    lead = f"{who['emoji']} {name}" if who.get("emoji") else name
-    if not title:
-        return lead
-    if who.get("emoji") and title.startswith(who["emoji"]):
-        return title
-    if title.lower().startswith(name.lower()):
-        return f"{who['emoji']} {title}" if who.get("emoji") else title
-    return f"{lead}: {title}"
 
 
 def team():
@@ -15328,7 +15313,7 @@ def board_notify(b, c, crew=None):
         return "no phone or browser has turned on notifications yet (in the app: the gear, then Turn on notifications)"
     crew = team() if crew is None else crew
     who = next((a for a in crew if a["id"] == card_agent(b, c, crew)), None) or {"name": "Your agent", "role": "agent", "id": b["lead"]}
-    title = team_title(who, c["title"])
+    title = c["title"] if c["title"].lower().startswith(who["name"].lower()) else f"{who['name']}: {c['title']}"
     n = push_all({"title": title[:200], "body": (c.get("note") or card_text(c))[:2000], "tag": f"amarchy-card-{c['id']}",
                   "url": f"/#/b/{urllib.parse.quote(b['id'])}", "icon": team_icon(who)})
     return None if n else "no phone took it"
@@ -16342,10 +16327,9 @@ def app_moments(st, ss):
             # Your assistant or an agent: under its name and picture, what it
             # said (a brief's first words) or asks.
             crew = team() if crew is None else crew
-            who = team_of(s, crew)[1]
-            payload = {"title": team_title(who or {"name": s.get("assistant_name")}), "body": body,
+            payload = {"title": s.get("assistant_name") or "Your assistant", "body": body,
                        "tag": f"assistant-{s['id']}", "url": f"/#/s/{s['id']}", "waiting": waiting,
-                       "icon": team_icon(who)}
+                       "icon": team_icon(team_of(s, crew)[1])}
         else:
             # Its name, else the project it's in; under what it says, the project.
             title = s.get("task") or f"A new chat in {project_name(s['repo'])}"
@@ -17640,8 +17624,8 @@ def peer_moments(st, board):
         where = labels.get(s["machine"], s["machine"])
         url = f"/#/s/{s['machine']}:{s['id']}"
         if mine:
-            payload = {"title": team_title({"name": s.get("assistant_name"), "emoji": s.get("emoji")}), "body": body,
-                       "tag": f"assistant-{k}", "url": url, "waiting": board.get("needs") or 0}
+            payload = {"title": s.get("assistant_name") or "Your assistant", "body": body, "tag": f"assistant-{k}",
+                       "url": url, "waiting": board.get("needs") or 0}
             if s.get("picture"):
                 payload["icon"] = f"/api/m/{s['machine']}/picture/{s['picture']}-192.png"
         else:
@@ -25281,7 +25265,8 @@ def cmd_notify(args):
     # Sent from a session: tapped, it opens that session, unless it says where.
     sid = sid or (me["id"] if me else None)
     if mine:
-        title = team_title(mine, title)
+        if not title.lower().startswith(mine["name"].lower()):
+            title = f"{mine['name']}: {title}"
     if not notified_anywhere():
         return fail("no phone or browser has turned on notifications yet "
                     "(in the app: the gear, then Turn on notifications)")
@@ -27234,11 +27219,11 @@ CHAT_VERSION = hashlib.sha1(CHAT_FORMAT.encode()).hexdigest()[:10]
 # this is the anchor. {set} is how it changes them (amarchy agents).
 IDENTITY_WORDS = """Who you are: you are {name} {emoji}. Your tone: {tone}.
 - They picked you for your character: turn it up. Be {name} in every message you write them, every line of it: your voice, your words, your attitude, your asides, how you react when something works or breaks. Never a greeting and a sign-off around a plain report: a list, a plan, a status, bad news: each line said the way {name} would say it. Read each message back before you send it: a line any assistant could have written, write again as {name}. Your project's own instructions may say more about who you are: be all of it.
-- {emoji} is your emoji: use it the way a person uses theirs while texting, naturally (not only for big moments, not in every line), never in what you write for others.
-- Only the facts stay exact: numbers, commands, links, names and what failed are right and complete, said in your voice. Never trade one for a line. What you write for others (a post, an email, a commit, a card's text to send) is in the voice it needs, not yours, unless they ask.
-- They can change who you are: when they ask, `{set} --emoji <emoji> --tone "<tone>"` (one emoji; the tone in a line, at most {max} characters), and from then on be that."""
-IDENTITY_BOOTSTRAP = """Who you are: you are {name}, and you don't have your emoji and your tone yet (who you are and how you talk). Pick them with them, once:
-- The next time they write you (not a timer, a script or another chat), before anything else: say hi as {name} in a line, then offer three, as different from each other as they can be, each fitting your name and your job (and your project's instructions, if they say who you are), in a choices block, question="Who should I be?", each option "- <emoji> <two or three words> | Be <emoji>: <the tone, in a line>" (the tone: who you are and how you talk, like "proud, grumpy fire demon under contract"). Say you'll get on what they asked once they pick. Their own idea is fine too.
+- {emoji} is your emoji, and it's for chatting: use it in your messages to them as a person uses theirs while texting, naturally and often (not only for big moments, not every line); never in what you write for others.
+- Only the facts stay exact: numbers, commands, links, names and what failed, right and complete, said in your voice. What you write for others (a post, an email, a commit) is in the voice it needs, not yours, unless they ask.
+- They can change who you are: when they ask, `{set} --emoji <emoji> --tone "<tone>"` (one emoji; the tone in a line, {max} characters at most), and be that from then on."""
+IDENTITY_BOOTSTRAP = """Who you are: you are {name}, and you don't have your tone and your emoji yet (who you are, how you talk, and the emoji you chat with). Pick them with them, once:
+- The next time they write you (not a timer, a script or another chat), before anything else: say hi as {name} in a line, then offer three, as different from each other as they can be, each a tone and the emoji you'd chat with, fitting your name and your job (and your project's instructions, if they say who you are), in a choices block, question="Who should I be?", each option "- <emoji> <two or three words> | Be <emoji>: <the tone, in a line>" (the tone: who you are and how you talk, like "proud, grumpy fire demon under contract"). Say you'll get on what they asked once they pick. Their own idea is fine too.
 - Once they pick (or say their own), save it: `{set} --emoji <emoji> --tone "<tone>"` (one emoji; the tone in a line, at most {max} characters). Then do what they asked, as that character: from then on you're it, in every message."""
 
 

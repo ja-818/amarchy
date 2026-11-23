@@ -1541,21 +1541,20 @@ assistant's); it has [boards and tasks of its own](#tasks-boards) instead:
   of its project wear its name.
 - **Its chat is a messaging app's**, not a working chat's: see [Chatting with your
   assistant and your agents](#chatting-with-your-assistant-and-your-agents).
-- **Who it is**: an emoji and a tone, as OpenClaw's IDENTITY.md and SOUL.md give an
-  agent. The emoji (one: 🔥) goes by its name everywhere the app names it (Calcifer 🔥:
-  its row, its bar, the chips of its project's chats, its board) and leads its
-  notifications' titles (🔥 Calcifer), where its picture often isn't seen. The tone is
-  who it is and how it talks, in a line ("proud, grumpy fire demon under contract", 120
-  characters at most). amarchy hands both to its Claude with the format it writes in,
-  at every start, so it stays in character in every message and through compactions,
-  the facts kept exact; its project's own instructions (its `CLAUDE.md`) can say much
-  more about its character. A change starts its Claude again once idle, the same
-  conversation, as who it is now. Until it has both, the next time you write it, it
-  says hi and offers you three as buttons, and saves the one you tap (or your own idea):
-  a new agent always starts that way, unless `amarchy new --agent <name> --emoji
-  --tone` gave it one.
+- **Who it is**: a tone and an emoji, its voice, as OpenClaw's IDENTITY.md and
+  SOUL.md give an agent. The tone is who it is and how it talks, in a line ("proud,
+  grumpy fire demon under contract", 120 characters at most); the emoji (one: 🔥) is for
+  chatting: it uses it in its own messages, as a person uses theirs while texting.
+  Neither is an icon: its picture and name show it in the app and by its notifications.
+  amarchy hands both to its Claude with the format it writes in, at every start, so it
+  chats in character in every message and through compactions, the facts kept exact;
+  its project's own instructions (its `CLAUDE.md`) can say much more about its
+  character. A change starts its Claude again once idle, the same conversation, as who
+  it is now. Until it has both, the next time you write it, it says hi and offers you
+  three as buttons, and saves the one you tap (or your own idea): a new agent always
+  starts that way, unless `amarchy new --agent <name> --emoji --tone` gave it one.
 - **Its picture**: yours (cut round, kept in `~/.config/amarchy/agents/`), else its
-  emoji, else its initial, on its project's color, so two agents never look alike.
+  initial on its project's color, so two agents never look alike.
 - **Its chime**: one of its own, picked as it's made from the chimes nothing else
   rings with (the chats', your assistant's, your other agents'), and yours to change.
 - **It always tells you** when it needs you or is done, under its name and picture,
@@ -1578,8 +1577,8 @@ for you to text it) and where it lives, a folder of its own (a new, empty projec
 named after it, the usual) or one of your projects; it's an agent from its start
 (`amarchy new <project> --agent <name>`), its chat open. A chat's menu, **Make it
 an agent…**, makes one of a chat you have (or your assistant, in place of the one
-you have); on an agent, **who it is, picture, chime…**: rename it, set its emoji and
-tone (**Who it is**), choose its picture
+you have); on an agent, **who it is, picture, chime…**: rename it, set the tone and
+the emoji it chats with (**Who it is**), choose its picture
 (cut in the circle as your assistant's is), pick its chime, or **Not an agent any
 more**. **Settings → Agents** lists them, your assistant first, and **Settings →
 Sound** has a tab for each.

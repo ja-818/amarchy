@@ -182,7 +182,7 @@ function boardsSection(b) {
   const lead = boardsLeadRow(b);
   const cards = (b.cards || []).filter(boardsShown);
   const yours = boardsYours(b);
-  const name = h("span", { class: "bsec-name" }, avatar(lead, "tiny"), h("span", {}, b.task ? teamName(lead, b.title) : b.title));
+  const name = h("span", { class: "bsec-name" }, avatar(lead, "tiny"), h("span", {}, b.title));
   const kids = cards.map((c) => boardsCard(b, c, { list: true }));
   if (yours > cards.length) {
     kids.push(h("button", { class: "tbtn quiet bsec-more", type: "button", onclick: () => boardsOpen(b.key) },
@@ -391,7 +391,7 @@ function boardsCard(b, c, { list = false } = {}) {
   if (c.block) card.classList.add(`bcard-${c.block.kind}`);
   card.todayData = JSON.stringify([b.key, c, list, multi, editing, boardsUI.threads.has(c.id), boardsUI.talk.has(c.id),
     boardsUI.ask && boardsUI.ask.card === c.id ? boardsUI.ask.n : null, boardsSaying(c).length,
-    boardsPillWords(b, c), who.picture, who.emoji, who.repo]);
+    boardsPillWords(b, c), who.picture, who.repo]);
   return card;
 }
 
@@ -587,11 +587,11 @@ function boardsAskBox(b, c) {
 // or the one you pick), its agent told to help you get it done.
 function boardsTargets(v = app.view) {
   const boards = boardsList(v).filter((b) => !b.legacy);
-  const out = boards.map((b) => ({ key: b.key, id: b.id, machine: b.machine || "", title: b.task ? teamName(boardsLeadRow(b), b.lead_name) : b.title, lead: b.lead_name, own: !!b.task, row: boardsLeadRow(b) }));
+  const out = boards.map((b) => ({ key: b.key, id: b.id, machine: b.machine || "", title: b.task ? b.lead_name : b.title, lead: b.lead_name, row: boardsLeadRow(b) }));
   // Your assistant and every agent, a board of its own or not yet (made with its first task).
   for (const s of (v && v.sessions) || []) {
     if (!isAgent(s) || out.some((t) => t.key === s.id)) continue;
-    out.push({ key: s.id, id: s.sid || s.id, machine: s.machine || "", title: teamName(s, s.task), lead: s.assistant_name || s.task, own: true, row: s });
+    out.push({ key: s.id, id: s.sid || s.id, machine: s.machine || "", title: s.assistant_name || s.task, lead: s.assistant_name || s.task, row: s });
   }
   const main = ((v && v.sessions) || []).find((s) => s.assistant === "main");
   out.sort((a, b) => (b.key === (main && main.id)) - (a.key === (main && main.id)));
@@ -611,7 +611,7 @@ function boardsWriteBox(v) {
     title: "Which board it goes on",
     onclick: (e) => {
       e.stopPropagation();
-      uiDropdown(e.currentTarget, boardsTargets().map((x) => ({ label: x.title, detail: x.own || x.title === x.lead ? "" : `${x.lead}'s board`,
+      uiDropdown(e.currentTarget, boardsTargets().map((x) => ({ label: x.title, detail: x.title === x.lead ? "" : `${x.lead}'s board`,
         lead: avatar(x.row, "tiny"), act: () => { boardsUI.target = x.key; store.set("board-target", x.key); boardsRedraw(); boardsFocusBox("write"); } })),
       { label: "Which board", key: "board-target" });
     } }, avatar(t.row, "tiny"), h("span", {}, `For ${t.title}`), glyph("down"));

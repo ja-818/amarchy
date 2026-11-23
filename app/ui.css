@@ -208,7 +208,6 @@ html { touch-action: manipulation; }
 .avatar.letter { overflow: visible; }
 .avatar.letter circle { fill: color-mix(in srgb, var(--ph, var(--accent)) 24%, var(--card-bg, var(--surface))); }
 .avatar.letter text { fill: var(--ph, var(--accent)); font-family: inherit; font-size: 54px; font-weight: 700; }
-.avatar.letter.emoji text { font-size: 56px; font-weight: 400; }
 /* A conversation, as a messaging app lists it (uiCard sub, count: today.js
    todayAgent): its picture, its name over its last message (or typing…), its
    time over how many you haven't read. */

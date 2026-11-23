@@ -5,11 +5,12 @@
 # list say them; off takes them away. Its Claude is handed who it is with its
 # reply format, so at every start: the chat format, then its name, emoji and
 # tone; until it has them, the bootstrap (offer three, save the one tapped).
+# The emoji is for chatting: its Claude is told to use it in its messages.
 # A change starts its Claude again (once idle) as who it is now; a chime
-# doesn't. The list's rows carry the emoji (and an agent's tone); its
-# notifications lead with the emoji (🔥 Calcifer). amarchy new --agent takes
-# them from the start. Another machine's: amarchy agents --all, and
-# <machine>:<id> through its app.
+# doesn't. Its row carries both (for its sheet); the app's lists and its
+# notifications don't show the emoji: its name and picture, as before.
+# amarchy new --agent takes them from the start. Another machine's: amarchy
+# agents --all, and <machine>:<id> through its app.
 #
 #   python3 test/agent-identity.py     exits 0 when every check passed
 
@@ -120,6 +121,8 @@ check(fmt.startswith(am.CHAT_FORMAT) and "you are Calcifer 🔥" in fmt and "pro
       "an agent's: the chat format, then who it is")
 check("every message" in fmt and "Only the facts stay exact" in fmt and "amarchy agents calcifer-calcifer --emoji" in fmt,
       "in character in every message, the facts exact; how they change it")
+check("it's for chatting: use it in your messages to them" in fmt and "never in what you write for others" in fmt,
+      "its emoji: for chatting, in its own messages, not in what it writes for others")
 check("Who you are" not in am.reply_format(am.session("proj-a")) and "Who you are" not in am.reply_format(am.session("fireship-ideas")),
       "a chat, an agent's project's too: nothing of it")
 v1 = am.format_version(am.session("calcifer-calcifer"))
@@ -137,11 +140,11 @@ reloads.clear()
 rc, out, _ = run("agents", "calcifer-calcifer", "--emoji", "off", "--tone", "off")
 check(rc == 0 and out.strip() == "calcifer-calcifer\tCalcifer" and reloads == ["calcifer-calcifer"], f"off: none, its Claude started again ({out!r})")
 boot = am.reply_format(am.session("calcifer-calcifer"))
-check(boot.startswith(am.CHAT_FORMAT) and "you don't have your emoji and your tone yet" in boot and 'question="Who should I be?"' in boot
+check(boot.startswith(am.CHAT_FORMAT) and "you don't have your tone and your emoji yet" in boot and "the emoji you'd chat with" in boot and 'question="Who should I be?"' in boot
       and "amarchy agents calcifer-calcifer --emoji" in boot and "not a timer, a script or another chat" in boot,
       "none: it offers three the next time you write it (a choices block), and saves the one tapped")
 run("agents", "calcifer-calcifer", "--emoji", "🔥")
-check("you don't have your emoji and your tone yet" in am.reply_format(am.session("calcifer-calcifer")),
+check("you don't have your tone and your emoji yet" in am.reply_format(am.session("calcifer-calcifer")),
       "an emoji alone: still the bootstrap (a tone too, to be someone)")
 run("agents", "calcifer-calcifer", "--tone", "proud, grumpy fire demon under contract")
 
@@ -149,31 +152,24 @@ run("agents", "calcifer-calcifer", "--tone", "proud, grumpy fire demon under con
 view = am.session_view()
 row = {s["id"]: s for s in view}
 check(row["calcifer-calcifer"]["emoji"] == "🔥" and row["calcifer-calcifer"]["tone"].startswith("proud"), "its row: its emoji and tone")
-check(row["fireship-ideas"]["emoji"] == "💀" and row["fireship-ideas"]["tone"] == "", "another chat of its project: under its emoji, not its tone")
+check(row["fireship-ideas"]["emoji"] == "" and row["fireship-ideas"]["tone"] == "", "another chat of its project: neither (they're the agent's own voice)")
 check(row["proj-a"]["emoji"] == "" and row["proj-a"]["tone"] == "", "a chat: none")
 am.save_session(dict(am.session("calcifer-calcifer"), emoji="x", tone="y"))
 check("emoji" not in json.loads((am.SESSIONS / "calcifer-calcifer.json").read_text()), "the list's, never saved in its file")
-crew = am.team()
-cal = next(a for a in crew if a["id"] == "calcifer-calcifer")
-check(am.team_title(cal) == "🔥 Calcifer", "a notification's title: its emoji first")
-check(am.team_title(cal, "Card ready") == "🔥 Calcifer: Card ready", "with a title: after a colon")
-check(am.team_title(cal, "Calcifer says hi") == "🔥 Calcifer says hi", "a title that names it: its emoji before it")
-check(am.team_title(cal, "🔥 done") == "🔥 done", "one that leads with its emoji already: as it is")
-check(am.team_title({"name": "Scout", "emoji": ""}, "Hi") == "Scout: Hi" and am.team_title({"name": None}) == "Your assistant",
-      "without an emoji: as before")
 sent = []
 am.push_all = lambda payload, desktop=None: sent.append(payload) or 1
 am.notified_anywhere = lambda: True
 os.environ["AMARCHY_SESSION"] = "calcifer-calcifer"
 run("notify", "Your build is done", "All green")
 os.environ.pop("AMARCHY_SESSION")
-check(sent and sent[-1]["title"] == "🔥 Calcifer: Your build is done", f"amarchy notify from it: under its emoji and name ({sent[-1:]})")
+check(sent and sent[-1]["title"] == "Calcifer: Your build is done", f"amarchy notify from it: under its name and picture, no emoji ({sent[-1:]})")
 am.app_subscriptions = lambda: [{}]
 am.board_notify({"id": "calcifer-calcifer", "lead": "calcifer-calcifer"}, {"id": "c1", "title": "Approve the post", "note": "n", "agent": "calcifer-calcifer"})
-check(sent[-1]["title"] == "🔥 Calcifer: Approve the post", f"a card on your phones: the same ({sent[-1]['title']})")
+check(sent[-1]["title"] == "Calcifer: Approve the post", f"a card on your phones: the same ({sent[-1]['title']})")
 
 # The real pushes: one of your team here that finished its turn, and one on
-# another machine (from its row there), each under its emoji and name.
+# another machine (from its row there), each under its name and picture,
+# never its emoji (that's for chatting).
 import types
 pushed = []
 am.push_all = lambda payload, desktop=None: pushed.append(payload) or 1
@@ -188,8 +184,8 @@ for _ in range(50):
     if pushed:
         break
     time.sleep(0.05)
-check(pushed and pushed[-1]["title"] == "🔥 Calcifer" and pushed[-1]["body"] == "The build's done, no thanks to you",
-      f"done, here: its push under its emoji and name ({pushed[-1:]})")
+check(pushed and pushed[-1]["title"] == "Calcifer" and pushed[-1]["body"] == "The build's done, no thanks to you",
+      f"done, here: its push under its name, no emoji ({pushed[-1:]})")
 pushed.clear()
 st = types.SimpleNamespace(peer_statuses={"ja:calcifer-calcifer": ("working", False)}, seen={})
 row = {"id": "calcifer-calcifer", "machine": "ja", "status": "idle", "unseen": True, "assistant": "agent", "assistant_name": "Calcifer",
@@ -199,7 +195,7 @@ for _ in range(50):
     if pushed:
         break
     time.sleep(0.05)
-check(pushed and pushed[-1]["title"] == "🔥 Calcifer" and pushed[-1]["icon"].endswith("/picture/62310b2f6206-192.png"),
+check(pushed and pushed[-1]["title"] == "Calcifer" and pushed[-1]["icon"].endswith("/picture/62310b2f6206-192.png"),
       f"done, on another machine: the same, its picture by it ({pushed[-1:]})")
 pushed.clear()
 am.peer_moments(st, {"machine": am.machine_name(), "sessions": [dict(row, status="working", unseen=False)], "machines": []})
@@ -208,15 +204,15 @@ for _ in range(50):
     if pushed:
         break
     time.sleep(0.05)
-check(pushed and pushed[-1]["title"] == "Calcifer", f"a machine with an older amarchy (no emoji in its row): its name, as before ({pushed[-1:]})")
+check(pushed and pushed[-1]["title"] == "Calcifer", f"a machine with an older amarchy (no emoji in its row): the same ({pushed[-1:]})")
 
-# Monday's recap: your assistant's, under its emoji and name.
+# Monday's recap: your assistant's, under its name.
 import datetime
 am.missions_view = lambda: {"streak": 0, "today": []}
 am.missions_last_week = lambda today: {"n": 4, "best": (today, 3), "fast": 0}
 monday = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
 r = am.missions_nudge(datetime.datetime(monday.year, monday.month, monday.day, 9, 30))
-check(r and r["title"] == "🐸 Jaken: your week", f"Monday's recap: under your assistant's emoji and name ({r})")
+check(r and r["title"] == "Jaken: your week", f"Monday's recap: under your assistant's name ({r})")
 
 # ---- made your assistant: it keeps who it is
 run("assistant", "calcifer-calcifer")
