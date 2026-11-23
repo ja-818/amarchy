@@ -9630,10 +9630,24 @@ def cuts_kick(force=False):
     return True
 
 
+def own_home():
+    """Whether amarchy runs in the account's own home, not one made up for a
+    test (HOME elsewhere: the tests' app servers and CLIs)."""
+    import pwd
+    try:
+        return os.path.realpath(os.path.expanduser("~")) == os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except (KeyError, OSError):
+        return True
+
+
 def apart(unit, argv):
     """Run a command in the background, in a unit of its own where there's
     systemd (so restarting the app, which started it, doesn't stop it).
-    Whether it started."""
+    Whether it started. Never from a test's home: it would run on the
+    account's systemd, outliving the test (a whole fetch of Omarchy's
+    wallpapers, cut with ImageMagick, for each test's app server)."""
+    if not own_home():
+        return False
     if shutil.which("systemd-run"):
         env = [f"--setenv={k}={os.environ[k]}" for k in ("XDG_STATE_HOME", "PATH") if os.environ.get(k)]
         if sh("systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}-{int(time.time())}",

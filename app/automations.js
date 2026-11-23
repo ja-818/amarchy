@@ -147,6 +147,11 @@ function autoGroups(list) {
   return owners.map((o) => [o, top.filter((a) => a.owner === o).sort((x, y) => x.name.localeCompare(y.name))]);
 }
 
+// Its mark: running, it fades and comes back with the spinners' beat (app.js).
+function autoMarkEl(mark, attrs = {}) {
+  return mark === "running" ? beat("auto-mark running", attrs) : h("span", { ...attrs, class: `auto-mark ${mark}` });
+}
+
 function autoRow(a, byId) {
   const mark = autoMark(a);
   const next = a.state === "paused" ? "paused" : a.state === "stopped" ? "stopped" : a.next ? `next ${autoNext(a.next)}` : null;
@@ -154,7 +159,7 @@ function autoRow(a, byId) {
   const kids = (a.children || []).map((id) => byId[id]).filter(Boolean);
   const soon = kids.find((c) => c.next);
   return h("button", { class: `auto-row ${mark}`, type: "button", "data-id": a.id, onclick: () => automationSheet(a.id) },
-    h("span", { class: `auto-mark ${mark}`, title: AUTO_MARK_WORDS[mark], "aria-label": AUTO_MARK_WORDS[mark] }),
+    autoMarkEl(mark, { title: AUTO_MARK_WORDS[mark], "aria-label": AUTO_MARK_WORDS[mark] }),
     h("span", { class: "text" },
       h("b", {}, a.name),
       a.about ? h("span", { class: "about" }, a.about) : null,
@@ -169,7 +174,7 @@ function previewRow(p) {
   const s = (typeof rowOf === "function" && rowOf(p.id)) || { id: p.id, task: p.task, previews: [p] };
   const several = uiPreviews(s).length > 1;
   return h("button", { class: "auto-row running", type: "button", "data-id": p.id, "data-key": p.key || "", onclick: () => uiPreviewSheet(s, p) },
-    h("span", { class: "auto-mark running", "aria-hidden": "true" }),
+    autoMarkEl("running", { "aria-hidden": "true" }),
     h("span", { class: "text" }, h("b", {}, several && p.name ? `${p.task} · ${p.label}` : p.task), h("span", { class: "about" }, p.url), h("small", {}, uiPreviewStatus(p))),
     glyph("next", "go"));
 }
@@ -329,7 +334,7 @@ async function automationSheet(id) {
         : h("button", { class: "control", type: "button", onclick: confirmPause }, "Pause…"))
       : null;
     const parts = [
-      h("div", { class: `auto-state ${mark}` }, h("span", { class: `auto-mark ${mark}` }), AUTO_MARK_WORDS[mark],
+      h("div", { class: `auto-state ${mark}` }, autoMarkEl(mark), AUTO_MARK_WORDS[mark],
         mark === "failed" && a.last.why ? `: ${a.last.why}` : ""),
       a.about ? h("p", { class: "auto-about" }, a.about) : a.description ? h("p", { class: "auto-about" }, a.description) : null,
       h("dl", { class: "auto-facts" },
