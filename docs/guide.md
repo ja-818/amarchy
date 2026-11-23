@@ -838,11 +838,11 @@ It's kept on the desktop and sent to every machine paired with it (the server
 the desktop app shows), which keeps the last one it got.
 
 **The window, one of the desktop's**: the desktop app's window is
-see-through as your terminals are, in each of Omarchy's window modes
-(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy), and
-wearing **Omarchy (live)** it draws no wallpaper of its own: its background is
-solid, as a terminal's, and your desktop's own wallpaper is behind it
-(Settings › Look says so). For a solid window, Omarchy's Opaque mode, or its
+see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
+your desktop's own shows through its panes and cards, as a browser shows the
+app's wallpaper, lined up with the rest of the screen (Settings › Look says
+so). Hyprland fades it as your terminals, in each of Omarchy's window modes
+(Appearance › Windows › Window Opacity: Transparent, Opaque, Glassy). For a solid window, Omarchy's Opaque mode, or its
 transparency key on the window itself.
 
 **Which chats**: the board the desktop app shows. This machine's own amarchy
