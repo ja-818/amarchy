@@ -10872,6 +10872,15 @@ def user_item(text):
     return {"kind": "user", "text": text}
 
 
+def you_said(content):
+    """The words of a message, if they're yours (user_item): not a slash
+    command, a ! command, or only a picture. None otherwise."""
+    if not isinstance(content, (str, list)):
+        return None
+    item = user_item(message_text(content))
+    return item["text"] if item and item["kind"] == "user" else None
+
+
 def brief_text(b):
     """An old reply written with update_brief (its input), as the text it
     held, in the reply format: its title, its answer and explanation, its
@@ -27530,7 +27539,8 @@ class Agent:
         self.at_line_start = True
         self.typed = []             # a paste arriving in the pane, line by line
         self.pasting = False
-        self.titled = False         # asked for a title for the conversation already
+        self.titled = False         # asked for a title for the conversation already (name_soon)
+        self.said = None            # the first thing you said to this Claude: what a conversation with no title is named from
         self.taken = set()          # amarchy send's notes matched to a message already (sent_by_taken)
         self.delivered = {}         # our messages given to Claude: uuid -> {elsewhere, at, what}, until it starts on them
         self.ended = time.time()    # when the last turn ended (its result): what comes after is the next one's
@@ -27708,6 +27718,7 @@ class Agent:
 
     def deliver(self, message, priority=None):
         now = time.time()
+        said = message["content"]       # (what you wrote: the notes below aren't)
         with self.lock:
             self.busy = True
             elsewhere = bool(message.get("elsewhere"))
@@ -27747,6 +27758,8 @@ class Agent:
         # one says how it stands (working, or waiting for your answer).
         if priority is None:
             self.status_as(lambda: "working" if self.busy else None)
+        # A new chat is named from it as it goes in, not once its turn ends.
+        self.name_soon(you_said(said))
         self.write({"type": "user", "message": {"role": "user", "content": message["content"]},
                     "parent_tool_use_id": None, "session_id": "", "uuid": message["uuid"],
                     **({"priority": priority} if priority else {})})
@@ -28159,22 +28172,32 @@ class Agent:
         # own; one you stopped, or one that failed, ends without it.
         self.status_as(lambda: "idle" if not self.busy and not self.live["pending"] and not self.queue else None, done=not stopped)
         self.next_queued()
-        if not self.titled:
+        self.name_soon()        # (one that couldn't be named yet: tried again)
+
+    def name_soon(self, said=None):
+        """Name the conversation, once (name_conversation, on a thread of its
+        own): said is what you said in it first, if this is the first thing,
+        the name made from it when it has none."""
+        with self.lock:
+            if said and not self.said:
+                self.said = said
+            if self.titled:
+                return
             self.titled = True
-            threading.Thread(target=self.name_conversation, daemon=True).start()
+        threading.Thread(target=self.name_conversation, daemon=True).start()
 
     def name_conversation(self):
         """Claude Code's TUI titles a conversation (the list's name for the
         session comes from it); under -p it doesn't. A conversation without
-        one gets one, from its first message, the way the TUI's would read."""
+        one gets one from the first thing you said in it, the way the TUI's
+        would read, as soon as you've said it: a new chat is at work on its
+        first message, perhaps for half an hour, and its card says what
+        about from the start, not "New chat" until that turn ends."""
         s = session(self.sid) or self.s
         f = transcript(s)
-        if not f:
-            self.titled = False     # no conversation yet: after the next turn
-            return
         first, title = None, None
         try:
-            with open(f, "rb") as fh:
+            with open(f if f else os.devnull, "rb") as fh:
                 for line in fh:
                     if b'"ai-title"' in line or b'"custom-title"' in line:
                         try:
@@ -28190,23 +28213,41 @@ class Agent:
                         content = (r.get("message") or {}).get("content")
                         if r.get("isMeta") or r.get("isSidechain") or not isinstance(content, (str, list)):
                             continue
-                        item = user_item(message_text(content))
-                        first = item["text"] if item and item["kind"] == "user" else None
+                        first = you_said(content)
         except OSError:
+            with self.lock:
+                self.titled = False     # (after the next turn)
             return
-        title = title or our_title(self.sid, f)
+        title = title or (our_title(self.sid, f) if f else "")
         if title:
             self.set_title(title)
             return
-        if not first:
-            self.titled = False     # nothing said yet: after the next turn
-            return
-        title = conversation_title(first)
-        if title:
-            # Kept by amarchy (saved_title reads it), not given to Claude:
-            # rename_session would rename the session for ListAgents too.
+        # A new chat's conversation isn't there yet (its Claude makes it as
+        # it takes the message), but what you said is: it's named from that,
+        # while its Claude starts. Read and given up under the lock name_soon
+        # takes, so a message on its way in is never missed.
+        with self.lock:
+            said = first or self.said
+            if not said:
+                self.titled = False     # nothing said yet: named as soon as something is
+                return
+        title = conversation_title(said) or conversation_title(said)    # (once more: Haiku may fail)
+        with self.lock:
+            if not title:
+                self.titled = False     # tried again with the next message, or after the turn
+                return
+            if self.live["title"]:
+                return      # named meanwhile, by its Claude (/rename: session_title_changed): that one it is
+        self.set_title(title)       # on the list now, as its Claude works on it
+        # Kept by amarchy (saved_title reads it, asleep), not given to Claude:
+        # rename_session would rename the session for ListAgents too. It's
+        # the conversation's, so it waits for that to be there: a moment.
+        end = time.time() + 120
+        while not f and time.time() < end and not self.done.is_set():
+            time.sleep(0.5)
+            f = transcript(session(self.sid) or s)
+        if f:
             write_file(self.dir / "title", json.dumps({"conversation": f.stem, "title": title}))
-            self.set_title(title)
 
     def set_title(self, title):
         """The conversation's title, as the TUI shows it: the pane's title,
@@ -28500,8 +28541,9 @@ class Agent:
         write_file(self.dir / "driver", json.dumps({"pid": os.getpid(), "claude_pid": self.claude.pid,
                                                     "engine": "chat", "since": time.time()}))
         self.flush_live()
-        self.titled = True
-        threading.Thread(target=self.name_conversation, daemon=True).start()     # one it has already
+        # The name it has already, or (a new chat) one from its first message,
+        # made while its Claude starts.
+        self.name_soon(you_said(first[0]) if first else None)
         for target in (self.read_claude, self.read_claude_err, self.serve, self.live_writer):
             threading.Thread(target=target, daemon=True).start()
         for sig in (signal.SIGTERM, signal.SIGHUP):

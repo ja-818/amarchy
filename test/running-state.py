@@ -143,6 +143,7 @@ try:
     # ---- the broker: a background command's command kept; cut when its Claude
     # stops; the next Claude told with its first message, unseen in the chat.
     agent = am.Agent({"id": sid, "path": str(wt), "repo": "proj"})
+    agent.titled = True                     # (no title to give it: chat-title.py)
     fed = io.StringIO()
     agent.claude = type("C", (), {"stdin": fed})()
     agent.live["state"] = "idle"
@@ -165,6 +166,7 @@ try:
           f"its Claude killed: nothing runs, the CI watch cut, not the server ({[t['task_id'] for t in got['cut']]})")
     check([t["task_id"] for t in am.live_cut(am.agent_live(sid))] == ["brg50f8j2"], "what the next Claude starts with (Agent.run: live_cut)")
     nxt = am.Agent({"id": sid, "path": str(wt), "repo": "proj"})
+    nxt.titled = True
     nxt.live["cut"] = am.live_cut(am.agent_live(sid))
     fed = io.StringIO()
     nxt.claude = type("C", (), {"stdin": fed})()
