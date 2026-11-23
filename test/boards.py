@@ -220,6 +220,12 @@ why = am.board_press("posts", c3, 0, "", "julian@example.com")
 check(why == "Lint (approve): BANNED is banned" and am.card_find(am.board_get("posts"), "fs-3")["column"] == "For review", f"approve: the check says no, in its words ({why})")
 why = am.board_move_you("posts", c3, "Ready to post", "julian@example.com")
 check(why == "Lint (approve): BANNED is banned", "Move to it too")
+seen = am.card_sha(am.card_find(am.board_get("posts"), "fs-2"))
+run("board", "card", "posts", "--key", "fs-2", "--body", "Hello Ana, again", me=F)
+c2 = am.card_find(am.board_get("posts"), "fs-2")["id"]
+check(am.board_press("posts", c2, 0, "", "julian@example.com", seen) == "That card changed since you looked: look at it again"
+      and am.card_find(am.board_get("posts"), "fs-2")["column"] == "For review", "Approve after the agent revised what you saw: refused")
+check(am.board_move_you("posts", c2, "Ready to post", "julian@example.com", seen) == "That card changed since you looked: look at it again", "Move to it too")
 why = am.board_edit_you("posts", c1, None, "Now BANNED too", None)
 check(why == "Lint (edit): BANNED is banned" and "BANNED" not in am.card_find(am.board_get("posts"), "fs-1")["block"]["body"], "an edit: refused, nothing saved")
 

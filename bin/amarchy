@@ -14777,11 +14777,12 @@ def board_you_check(bid, cid, action, column=None, text=None):
     return board_check(b, c, action, column or c.get("column"), card_text(c) if text is None else text)
 
 
-def board_press(bid, cid, n, words, by):
+def board_press(bid, cid, n, words, by, base=None):
     """A button on a card, pressed in the app: its message to the agent,
     the card moved where it says (a card's own button without one, a task's:
-    to the done column), what it asked of you on its thread. None, or what's
-    wrong (then nothing happened)."""
+    to the done column), what it asked of you on its thread. base: the
+    sha256 of the card as you saw it (an approval is of what you saw: a
+    change since refuses it). None, or what's wrong (then nothing happened)."""
     words = " ".join(str(words or "").split())[:BOARD_COMMENT]
     b0 = board_get(bid)
     c0 = next((x for x in (b0 or {}).get("cards", []) if x["id"] == cid), None)
@@ -14798,8 +14799,8 @@ def board_press(bid, cid, n, words, by):
         buttons = card_buttons(b, c)
         if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n < len(buttons):
             return None, "That card has no such button"
-        if card_sha(c) != sha0:
-            return None, "That card changed a moment ago: look at it again"
+        if card_sha(c) != sha0 or (base and card_sha(c) != base):
+            return None, "That card changed since you looked: look at it again"
         button = buttons[n]
         if button.get("asks") and not words:
             return None, f"{button['label']} asks you first: {button['asks']}"
@@ -14839,9 +14840,10 @@ def board_comment_you(bid, cid, text):
     return board_act(bid, cid, comment)[1]
 
 
-def board_move_you(bid, cid, column, by):
+def board_move_you(bid, cid, column, by, base=None):
     """You moved a card (its menu's Move to): into a column that needs your
-    approval, it's approved (after the board's check). None, or what's wrong."""
+    approval, it's approved (after the board's check), of what you saw
+    (base). None, or what's wrong."""
     b0 = board_get(bid)
     col = board_column(b0, column) if b0 else None
     if not col:
@@ -14856,8 +14858,8 @@ def board_move_you(bid, cid, column, by):
     def move(b, c, boards):
         if not board_column(b, column):
             return None, "That board has no such column"
-        if card_sha(c) != sha0:
-            return None, "That card changed a moment ago: look at it again"
+        if card_sha(c) != sha0 or (base and card_sha(c) != base):
+            return None, "That card changed since you looked: look at it again"
         board_move_to(b, c, column, "you", by)
         return {"ok": True}, None
     return board_act(bid, cid, move)[1]
@@ -20183,10 +20185,10 @@ def app_handler(st, users, address):
                 return self.error(409, why) if why else self.send(200, r)
             if what == "comment":       # {board, card, text}: on its thread, and to its agent
                 why = board_comment_you(bid, cid, data.get("text"))
-            elif what == "press":       # {board, card, button, words}
-                why = board_press(bid, cid, data.get("button"), data.get("words"), by)
-            elif what == "move":        # {board, card, column}
-                why = board_move_you(bid, cid, data.get("column"), by)
+            elif what == "press":       # {board, card, button, words, base: the card's sha256 as you saw it}
+                why = board_press(bid, cid, data.get("button"), data.get("words"), by, str(data.get("base") or ""))
+            elif what == "move":        # {board, card, column, base}
+                why = board_move_you(bid, cid, data.get("column"), by, str(data.get("base") or ""))
             elif what == "edit":        # {board, card, title, body, base}
                 title, text = data.get("title"), data.get("body")
                 if (title is not None and not isinstance(title, str)) or (text is not None and not isinstance(text, str)):

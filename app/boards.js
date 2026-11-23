@@ -687,7 +687,7 @@ async function boardsPress(b, c, i, words = "") {
   todayUndo(`${said}${x.send ? `: sent to ${name}` : leaves ? ` → ${to}` : ""}`, () => {
     const own = (c.buttons || []).slice(0, i + 1).filter((x) => x.own).length - 1;
     (b.legacy ? api(machinePath(b.key, "/api/tasks/press"), { id: c.id, button: own }, { keepalive: true })
-      : api(machinePath(b.key, "/api/boards/press"), { board: b.id, card: c.id, button: i, words }, { keepalive: true }))
+      : api(machinePath(b.key, "/api/boards/press"), { board: b.id, card: c.id, button: i, words, base: c.sha256 }, { keepalive: true }))
       .catch((e) => { back(); toast(e.message); });
   }, back, TODAY_UNDO, { hide: true });
 }
@@ -707,7 +707,7 @@ function boardsMove(b, c, column) {
   boardsRedraw();
   const back = () => { boardsUI.pending.delete(c.id); boardsRedraw(); };
   todayUndo(`${col && col.approval ? "Approved" : "Moved"}: ${c.title} → ${column}`, () => {
-    api(machinePath(b.key, "/api/boards/move"), { board: b.id, card: c.id, column }, { keepalive: true })
+    api(machinePath(b.key, "/api/boards/move"), { board: b.id, card: c.id, column, base: c.sha256 }, { keepalive: true })
       .catch((e) => { back(); toast(e.message); });
   }, back, TODAY_UNDO, { hide: true });
 }
