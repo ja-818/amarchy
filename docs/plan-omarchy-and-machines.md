@@ -1,8 +1,9 @@
 # Plan: amarchy everywhere, chats on every machine
 
-Status: **approved** by Julian on 2026-11-22 (decisions below). Wave 1 is done
-and running on his Omarchy; wave 2 is being built in parallel chats, each track
-shipping on its own.
+Status: **built** (2026-11-23). Approved by Julian on 2026-11-22; every track
+is on main. What's left needs Julian's accounts, money or a decision: see
+[What's left](#whats-left-julians-own-steps). The coordinating chat is closed:
+each remaining chat reports on its own card.
 
 Goal: amarchy is one app on every device (Omarchy, Mac, Windows, iPhone,
 Android, any browser), and every computer you have can run chats: your
@@ -817,3 +818,25 @@ in Omarchy's Install menu, and a pitch to Omarchy as its agent manager.
   changes in sections of its own and catches up with main before shipping.
 - **Apple's review** for the phone app; **Tailscale's free plan** is
   non-commercial.
+
+## What's left: Julian's own steps
+
+Everything below is prepared to the last step; each needs his account, money
+or a decision.
+
+- **Cloud machines (F)**: its chat, `amarchy-cloud-machines`, waits on a
+  command he allows. Then a provider token and Create (that costs money).
+- **The AUR and Omarchy (I)**: [packaging/README.md](../packaging/README.md).
+  Add the server's AUR key to his AUR account, `git push origin master` in
+  `~/Work/aur/amarchy-git`, open the draft omarchy-pkgs PR, and run
+  `packaging/omarchy/post-pitch.sh`. After the AUR push, the README's install
+  line becomes `yay -S amarchy-git amarchy-desktop-git`.
+- **The phone apps (G)**: [phone/RELEASE.md](../phone/RELEASE.md), about an
+  hour. Decide the app id first (`io.github.ja818.amarchy` is permanent after
+  the first upload).
+- **Tailscale inside the apps (H)**: a real sign-in against Tailscale's servers
+  needs a computer without Tailscale, or his OK for a throwaway node.
+- **On `ja`**: hold Backspace in New chat and check it stops on release (the
+  typing-lag fix); glance at the one-time "This computer lacks gst-plugins…"
+  notice.
+
