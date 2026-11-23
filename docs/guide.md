@@ -334,7 +334,9 @@ what a home-screen web app can't do:
 - **Answer from the notification.** Allow, Deny, a question's answer, Ship it:
   on the notification itself, without opening the app. On a locked phone it asks
   for Face ID (or your code) first. If it can't reach your amarchy, a
-  notification says so and opens the chat.
+  notification says so and opens the chat. It rings the chime picked in
+  **Settings → Sound** (your assistant's, its own); a sound of your own
+  rings the phone's default.
 - **The share sheet.** A screenshot, a photo, a link or some text: tap
   **Amarchy** in the share sheet and **Send it to a chat** is waiting in the app.
   No Shortcut to set up.
