@@ -1,0 +1,157 @@
+# The iPhone app (phone/README.md): an XcodeGen project. The Xcode project
+# itself isn't kept in git; make it with ./generate.sh (xcodegen generate,
+# with amarchy's own Tailscale node when Frameworks/Tailnet.xcframework is
+# there: tailnet.yml).
+#
+#   AMARCHY_RELAY        the push relay built in (Info.plist AmarchyRelay);
+#                        empty: notifications are "unsupported" in that build
+#   DEVELOPMENT_TEAM     empty here; fastlane (or Xcode) sets it to sign
+
+name: Amarchy
+
+options:
+  bundleIdPrefix: io.github.ja818
+  deploymentTarget:
+    iOS: "17.0"
+
+include:
+  - path: tailnet.yml
+    enable: ${AMARCHY_TAILNET}
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    AMARCHY_RELAY: ""
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    GENERATE_INFOPLIST_FILE: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Debug:
+      AMARCHY_APS_ENVIRONMENT: development
+    Release:
+      AMARCHY_APS_ENVIRONMENT: production
+
+targets:
+  Amarchy:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+      # The own page is the desktop app's (desktop/dist), copied in at
+      # each build, never by hand.
+      - path: ../../desktop/dist
+        type: folder
+        buildPhase: resources
+      # The chimes a notification may ring with (its "sound").
+      - path: ../../sounds
+        includes: ["*.wav"]
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy
+        PRODUCT_NAME: Amarchy
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Amarchy.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - target: AmarchyNotifications
+      - target: AmarchyWidget
+      - target: AmarchyShare
+
+  AmarchyNotifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: NotificationService
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy.notifications
+        PRODUCT_NAME: AmarchyNotifications
+        INFOPLIST_FILE: NotificationService/Info.plist
+        CODE_SIGN_ENTITLEMENTS: NotificationService/NotificationService.entitlements
+
+  AmarchyWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy.widget
+        PRODUCT_NAME: AmarchyWidget
+        INFOPLIST_FILE: Widget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Widget/Widget.entitlements
+
+  AmarchyShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Share
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy.share
+        PRODUCT_NAME: AmarchyShare
+        INFOPLIST_FILE: Share/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Share/Share.entitlements
+
+  AmarchyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+      # Every side decrypts the same notifications (make-vectors.py).
+      - path: ../testdata/push-vectors.json
+        buildPhase: resources
+    dependencies:
+      - target: Amarchy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Amarchy.app/Amarchy
+        BUNDLE_LOADER: $(TEST_HOST)
+
+  AmarchyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+        excludes: ["*.py"]
+    dependencies:
+      - target: Amarchy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ja818.amarchy.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Amarchy
+
+schemes:
+  Amarchy:
+    build:
+      targets:
+        Amarchy: all
+        AmarchyNotifications: all
+        AmarchyWidget: all
+        AmarchyShare: all
+        AmarchyTests: [test]
+        AmarchyUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AmarchyTests
+        - AmarchyUITests
+    archive:
+      config: Release
