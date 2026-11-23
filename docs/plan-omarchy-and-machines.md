@@ -648,10 +648,10 @@ or bills anyone: the provider bills you, and Remove deletes it there.
     see), the token reaches curl in its config on stdin, and the log's end
     sent with a failure has any `tskey-` masked. Its settings file loses the
     key once it joined, and goes with the token once it's ready.
-  - On the VM: cloud-init's own copies of the user data are removed once it's
-    ready, Hostinger's `/post_install` too, and the metadata service is
-    reachable by root alone (the firewall refuses everyone else), so no chat
-    there reads what's left. At the provider: Hostinger's script is deleted
+  - On the VM: cloud-init's copies of the user data are removed once it's
+    ready (its own cache stays, root's alone), Hostinger's `/post_install`
+    too, and the metadata service is reachable by root alone (the firewall
+    refuses everyone else), so no chat there reads what's left. At the provider: Hostinger's script is deleted
     from the account once the machine is on the tailnet. What remains (the
     provider's own copy of the user data) holds a spent key and a dead token.
   - `test/cloud-vm.py` checks it on the real image: neither secret in any
