@@ -40,14 +40,21 @@ an error nothing caught, with where; a promise nothing caught;
   it started); the running one takes them up on its window's thread, and
   makes its window again if it's gone. One it starts in its place
   (`--restart`, the watchdog) writes its stderr where this one's went, never
-  into this one's pipe, which ends with it.
+  into this one's pipe, which ends with it (`AMARCHY_DESKTOP_STDERR=given`
+  says so). Started in another's place by a build before 2026-11-22 22:48,
+  which handed over its own pipe, it writes to the journal itself (a stream
+  of its own, as `amarchy-desktop`). Wherever its stderr goes, a line goes on
+  only when it's taken at once: a pipe nobody reads, full, never holds it up
+  (its log has every line).
 - **Its page's process crashes**: the page loads again, and the log says
   why, by what that process wrote last. GStreamer's words before it: a sound
   or a video ended it (below), so its page loads no media from then on and
   the GPU isn't blamed. No sign why: twice in ten minutes, it draws the safe
   way from then on (WebKit's DMA-BUF renderer and compositing off, its
   hardware acceleration never), kept in `rendering.json` beside the log;
-  `AMARCHY_DESKTOP_GPU=1` tries the GPU again. Three crashes in two minutes:
+  `AMARCHY_DESKTOP_GPU=1` tries the GPU again. With no GPU here (its GL the
+  CPU's) there's no driver to blame, and that way is slower still: it draws
+  on as it does. Three crashes in two minutes:
   its own page says so, with the log's path.
 - **GStreamer without its plugins** (`gst-plugins-good`: WebKit's audio
   sink; `gst-plugins-base`: the `.oga` chimes; `gst-plugin-pipewire`: the
@@ -100,7 +107,9 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # a restart), its self-healing, amarchy's own
                                                     # Tailscale node (its sign-in, through its proxy),
                                                     # on an Omarchy desktop (see-through: the desktop through
-                                                    # it, under picom when it's installed)
+                                                    # it, under picom when it's installed), how it draws
+                                                    # (no GPU: painted on the CPU, light at work, held keys
+                                                    # in as pressed), its stderr (a pipe nobody reads)
 python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5; its core
                                                     # elements only; none at all): no media in the page,
                                                     # nothing ends it, its sounds played by the app, said

@@ -687,6 +687,16 @@ def main():
                 check(len(keys) == 40 and left == 60 and late is not None and late < 2000,
                       f"40 Backspaces held (30 ms apart): all in, the last {late} ms after it was pressed, none after ({len(keys)} in, {left} left)")
                 w.shot(SHOTS / "agent-typing.png")
+                if soft:
+                    # Its page's process crashing twice with no sign why: no GPU to blame, it draws on as it does.
+                    for _ in range(2):
+                        for p in [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]:
+                            os.kill(p, 9)
+                        time.sleep(1)
+                        w.wait("typeof app !== 'undefined' && !!app.view", timeout=40)
+                    log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+                    check(not Path(home, ".local/state/amarchy/desktop/rendering.json").exists() and "no GPU here to blame" in log
+                          and w.do("drawing").get("policy") != "never", "no GPU: two crashes with no sign why aren't the GPU's, it draws on composited")
             home = tempfile.mkdtemp(prefix="desktop-home-")
             with Shell(agent.url, home=home, env={**env_for(fake_cli(home)), "AMARCHY_DESKTOP_GPU": "1"}) as w:
                 on_app(w)
@@ -694,6 +704,71 @@ def main():
                       "AMARCHY_DESKTOP_GPU=1: painted through GL anyway, the page told it has a GPU")
         finally:
             agent.stop()
+
+        # ---- its stderr. Started in another's place by a build before
+        # 2026-11-22 22:48, it was handed that one's own pipe, which nobody
+        # reads once it ends: the journal instead, never a word held up. And
+        # wherever its stderr goes, a full pipe never holds it up.
+        print("its stderr")
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        logf = Path(home, ".local/state/amarchy/desktop/desktop.log")
+        with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
+            on_app(w)
+            old = w.proc.pid
+            w.proc.kill()
+            w.proc.wait()
+            read, write = os.pipe()      # the old build's pipe: kept open here, never read
+            env = {k: v for k, v in w.env.items() if k != "AMARCHY_DESKTOP_STDERR"}
+            new = subprocess.Popen([str(BIN), "--after", str(old), "--url", remote.url], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=write, env=env, text=True, bufsize=1)
+            os.close(write)
+            try:
+                got = []
+                threading.Thread(target=lambda: [got.append(line) for line in new.stdout], daemon=True).start()
+                def do(what, rid, timeout=20):
+                    new.stdin.write(json.dumps({"id": rid, "do": what}) + "\n")
+                    new.stdin.flush()
+                    end = time.time() + timeout
+                    while time.time() < end:
+                        hit = next((line for line in got if line.startswith(f"@@{rid} ")), None)
+                        if hit:
+                            return json.loads(hit.split(" ", 1)[1])
+                        time.sleep(0.2)
+                    return None
+                for _ in range(100):
+                    if logf.exists() and f"pid {new.pid}" in logf.read_text():
+                        break
+                    time.sleep(0.2)
+                time.sleep(3)
+                log = logf.read_text()
+                journal = Path("/run/systemd/journal/stdout").exists()
+                check(("its stderr was the pipe of the build before it" in log) and (("writes to the journal itself" in log) == journal),
+                      f"handed the old build's pipe: {'the journal instead' if journal else 'its log alone'}, and its log says so")
+                check(do("stderr", "s1") is True and do("pid", "s2") == new.pid, "200 KB on its stderr, into a pipe nobody reads: it goes on")
+                check("a test's line 1999 on stderr" in logf.read_text(), "and its log has every line")
+            finally:
+                new.kill()
+                new.wait()
+                os.close(read)
+            # Where stderr went full (a pipe nobody reads, as given): its words never held up.
+            read, write = os.pipe()
+            fresh = subprocess.Popen([str(BIN), "--url", remote.url], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=write,
+                                     env=env, text=True, bufsize=1)
+            os.close(write)
+            try:
+                got2 = []
+                threading.Thread(target=lambda: [got2.append(line) for line in fresh.stdout], daemon=True).start()
+                time.sleep(4)
+                fresh.stdin.write(json.dumps({"id": "f1", "do": "stderr"}) + "\n")
+                fresh.stdin.flush()
+                end = time.time() + 20
+                while time.time() < end and not any(line.startswith("@@f1 ") for line in got2):
+                    time.sleep(0.2)
+                check(any(line.startswith("@@f1 true") for line in got2), "started with a stderr nobody reads: 200 KB on it, and it goes on")
+            finally:
+                fresh.kill()
+                fresh.wait()
+                os.close(read)
 
         # ---- it heals itself: its log; a window gone, a crashed page, a
         # stuck window thread: a start always brings it back.
@@ -704,7 +779,8 @@ def main():
         # The safe way as the build before kept it, after any crash (a sound's, on Julian's M5): forgotten.
         rendering.parent.mkdir(parents=True, exist_ok=True)
         rendering.write_text(json.dumps({"safe": True, "why": "its page's process crashed"}))
-        with Shell(remote.url, home=home, env=env_for(fake_cli(home))) as w:
+        # (As on a computer with a GPU: with none, a crash isn't the GPU's, "how it draws".)
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "AMARCHY_DESKTOP_GPU": "1"}) as w:
             on_app(w)
             log = logf.read_text() if logf.exists() else ""
             check("amarchy-desktop" in log and " started (pid " in log and "graphics:" in log,
