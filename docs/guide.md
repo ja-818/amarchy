@@ -1163,11 +1163,17 @@ on each phone or browser picks another:
   model. Not in the home-screen app on an iPhone, where WebKit's often hears nothing,
   nor in the desktop app on Linux (its WebKitGTK has none).
 
-The mic is always there. Where it can't work (no model on any of your machines, or
-the desktop app on a computer without GStreamer's microphone, `gst-plugin-pipewire`),
-it's dimmed, and a tap says why in a line, with what to do: **Set it up** (Settings →
-Dictation, which fetches it with one button), or **Copy the command** that installs
-what's missing.
+The mic is always there, and the model comes with your first tap on it: a host
+without it fetches it then, by itself (*Getting dictation ready on your host: 770 MB,
+once*). A ring around the mic fills as it comes (a tap meanwhile says how far, and
+Settings → Dictation too), and *Dictation is ready* says when you can speak. Where the
+tap can dictate some other way meanwhile (another machine of yours, this browser's
+own recognition), it does, and the host's model comes behind it; a phone or browser
+set to **This browser's** in Settings never fetches it. Where the mic can't work (a
+processor amarchy has no engine for, or the desktop app on a computer without
+GStreamer's microphone, `gst-plugin-pipewire`), it's dimmed, and a tap says why in a
+line, with what to do: **Set it up** (Settings → Dictation), or **Copy the command**
+that installs what's missing.
 
 The keyboard's own dictation (its mic key) works in every box too. On a computer,
 `Ctrl+Alt+Space` (or `Ctrl+Alt+Enter`) dictates into the chat's box: hold it, or tap it

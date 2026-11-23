@@ -20,6 +20,14 @@
 // The mic is always there. Where it can't work (no speech model anywhere,
 // the desktop app without GStreamer's microphone), it's dimmed, and a tap
 // says why in a line, with what to do (dictationWhyNot).
+//
+// The host's speech model comes with the first tap: a host without it that
+// can fetch it by itself (the board's dictation.auto: amarchy has the
+// engine for its processor) fetches it the first time a mic is tapped,
+// unless this device was set to the browser's own recognition. Where the
+// tap can dictate some other way meanwhile (another machine of yours, this
+// browser's), it does, and the model comes behind it; where it can't, the
+// mic fills a ring as the model comes, and says when it's ready.
 
 const DICTATE_TAP = 350;      // ms: let go sooner and it's a tap: it listens until tapped again
 const DICTATE_STOP = 6000;    // ms the browser's recognition may take to finish once stopped
@@ -49,8 +57,71 @@ function dictationHere() {
   return (many && machineOf("").label) || "your host";
 }
 
+// ---- the model, with the first tap
+
+const mics = new Set();       // every box's Dictate (WeakRefs), drawn again as the board changes
+let fetching = false;         // this page asked the host for its model: say when it's there
+let wanted = false;           // a tap while another setup ran (an install's, the engine alone): the model next
+
+// The host's setup under way, or null.
+function dictationSetup() {
+  const d = app.view && app.view.dictation;
+  return d && !d.ready && d.setup && !d.setup.error ? d.setup : null;
+}
+
+// How far the model's come: 0 to 1, and in MB as Settings says it.
+function dictationGot() {
+  const s = dictationSetup(), d = app.view.dictation;
+  const size = (s && s.size) || d.size || 0;
+  return { part: size ? Math.min(1, (s && s.done || 0) / size) : 0,
+           words: `${Math.round((s && s.done || 0) / 1e6)} of ${Math.ceil(size / 1e7) * 10} MB` };
+}
+
+// Whether a tap should have the host fetch its model now.
+function dictationFetchable() {
+  const d = app.view && app.view.dictation;
+  return !!(d && !d.ready && d.auto && !dictationSetup() && store.get("dictation") !== "device");
+}
+
+// The host fetches its model (its engine too), in the background there.
+async function dictationFetch() {
+  fetching = true;
+  try {
+    await api("/api/dictate/setup", {});
+    const d = app.view && app.view.dictation;
+    if (d && !d.ready) d.setup = { pid: null, done: 0, size: d.size };     // (the board says so in a moment)
+  } catch (e) {
+    fetching = false;
+    toast(`Dictation couldn't start getting ready: ${e.message}`);
+  }
+  dictationViewed();
+}
+
+// The board changed: every mic as it stands, and a word once the model's here.
+function dictationViewed() {
+  for (const ref of [...mics]) {
+    const t = ref.deref();
+    if (!t) mics.delete(ref);
+    else if (t.opts.button.isConnected) t.draw();
+  }
+  const d = app.view && app.view.dictation;
+  if (wanted && d && !dictationSetup()) {
+    wanted = false;
+    if (dictationFetchable()) return dictationFetch();     // that setup ended without the model: now it
+  }
+  if (!fetching || !d) return;
+  if (d.ready) {
+    fetching = false;
+    toast("Dictation is ready: hold the mic and speak");
+  } else if (d.setup && d.setup.error) {
+    fetching = false;        // (the next tap says why, and tries again)
+  }
+}
+
 // Why the mic can't work here, as a line and what to do about it ({text,
-// label, act, report}), or null when it can.
+// label, act, report}), or null when it can. kind: "blocked" (dimmed), or,
+// where the host can fetch its model by itself, "start" (the tap fetches
+// it) and "getting" (it's on its way: the mic fills a ring).
 function dictationWhyNot() {
   const way = dictationWay();
   const lacks = window.amarchyDesktopMedia;
@@ -63,8 +134,12 @@ function dictationWhyNot() {
   if (!app.view) return { text: "Not connected to your host yet" };
   const d = app.view.dictation || {};
   const settings = () => openSettings({ at: "dictation" });
-  if (d.setup && !d.setup.error) return { text: `Dictation is being set up on ${dictationHere()}`, label: "See how far", act: settings };
-  return { text: `Dictation needs a speech model on ${dictationHere()}`, label: "Set it up", act: settings };
+  if (dictationSetup()) return { kind: "getting", text: `Getting dictation ready on ${dictationHere()}: ${dictationGot().words}`, label: "See how far", act: settings };
+  if (d.auto && store.get("dictation") !== "device") {
+    const stopped = d.setup && d.setup.error ? `The last try stopped (${d.setup.error}). ` : "";
+    return { kind: "start", text: `${stopped}Getting dictation ready on ${dictationHere()}: ${Math.ceil((d.size || 0) / 1e7) * 10} MB, once. The mic works as soon as it's here.` };
+  }
+  return { kind: "blocked", text: `Dictation needs a speech model on ${dictationHere()}`, label: "Set it up", act: settings };
 }
 
 // The way this device writes dictation down: host, device, or null (no mic button).
@@ -95,6 +170,7 @@ function dictationReport(entry) {
 class Dictate {
   constructor(opts) {
     this.opts = opts;
+    mics.add(new WeakRef(this));
     this.run = null;          // the dictation under way
     this.locked = false;      // tapped: listening until tapped again
     const el = opts.button;
@@ -135,19 +211,26 @@ class Dictate {
 
   available() { return !this.run && !dictationWhyNot(); }
 
-  // The mic as it stands: always there, dimmed where it can't work.
+  // The mic as it stands: always there, dimmed where it can't work, a ring
+  // filling while the host's model comes (behind another way, too).
   draw() {
     const el = this.opts.button;
     const why = this.run ? null : dictationWhyNot();
     el.hidden = false;
-    el.classList.toggle("cant", !!why);
-    el.title = why ? why.text : "Dictate (hold, or tap and tap again)";
+    el.classList.toggle("cant", !!why && (why.kind || "blocked") === "blocked");
+    const getting = !!dictationSetup() && !(why && why.kind === "blocked");
+    el.classList.toggle("getting", getting);
+    if (getting) el.style.setProperty("--got", dictationGot().part.toFixed(3));
+    el.title = why ? why.text : getting ? `Dictate (the host's speech model is on its way: ${dictationGot().words})` : "Dictate (hold, or tap and tap again)";
   }
 
   // When it can't work here: says why (a toast, with what to do) and true.
+  // Where the host can fetch its model, this tap has it do so.
   tellWhyNot() {
     const why = dictationWhyNot();
     if (!why) return false;
+    if (why.kind === "start") dictationFetch();
+    if (why.kind === "getting") wanted = true;
     toast(why.text, why.act ? { label: why.label, act: why.act } : {});
     if (why.report) dictationReport(why.report);
     this.draw();
@@ -168,6 +251,9 @@ class Dictate {
     if (this.run) return;
     const way = this.way();
     if (!way) return;
+    if (way !== "host" || !app.view.dictation.ready) {
+      if (dictationFetchable()) dictationFetch();      // dictating another way: the host's model comes behind it
+    }
     const field = this.opts.field;
     const base = field.value.replace(/\s+$/, "");
     const r = this.run = { way, base, first: base, held: true, words: "", wrote: false, started: Date.now() };
