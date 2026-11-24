@@ -14,7 +14,9 @@
 # localhost is registered at the tailnet's name; while it runs, tailscale
 # serve has each of its ports, and they come off when it stops, fails, is
 # cleared or its chat is completed; a port tailscale sends elsewhere, a
-# server on 0.0.0.0, the app's own address: refused, saying why.
+# server on 0.0.0.0, the app's own address: refused, saying why. One at the
+# machine's name on a tailnet it was on before: at the one it's on now,
+# saved, registered or running (its ports put on the tailnet).
 #
 #   python3 test/preview.py         exits 0 when every check passed
 
@@ -387,6 +389,26 @@ else:
         check("tailscale serve" in am.holder_words(front), "and said as such")
         check(am.address_words("6447591D") == "29.89.71.100" and am.address_words("00000000") == "0.0.0.0", "addresses, as people write them")
         served_file.write_text("{}")
+        # A chat from before the machine moved to another tailnet: its preview at the old name.
+        check(am.preview_here(f"https://box.tailold.ts.net:{tp}/x?y=1") == f"https://box.tail1234.ts.net:{tp}/x?y=1"
+              and all(am.preview_here(u) == u for u in ("https://other.tailold.ts.net:5/", "https://example.com/", turl,
+                                                         "http://box.tailold.ts.net:5/", "https://box.a.tailold.ts.net:5/")),
+              "an address at this machine's name on another tailnet: at its name now; any other as it is")
+        s0 = am.session(tid)
+        am.save_session({**s0, "previews": [{**s0["previews"][0], "url": f"https://box.tailold.ts.net:{tp}/"}, *s0["previews"][1:]]})
+        check(tfirst()["url"] == turl and am.preview_fronted(tfirst()["url"]) and am.preview_label(tfirst()) == f"box:{tp}",
+              "saved at the old name: read at its name now, served over HTTPS")
+        am.preview_note(tid, fronted=[])
+        am.preview_tend()
+        check(served() == both and am.preview_record(tid).get("fronted") == sorted([tp, thmr])
+              and am.preview_state(am.session(tid), tfirst()) == "up",
+              "running, its ports not on the tailnet (started at the old name): the sleep timer puts them there")
+        am.preview_tend()
+        check(served() == both, "and leaves them be")
+        r, out = said("--run", f"PUBLIC_URL=https://box.tailold.ts.net:{tp} {tserve}", f"https://box.tailold.ts.net:{tp}/", "--port", str(thmr))
+        check(r == 0 and am.session(tid)["previews"][0]["url"] == turl and "box.tail1234.ts.net now, not box.tailold.ts.net" in out
+              and "Its command still says box.tailold.ts.net" in out and served() == both,
+              f"registered at the old name: at its name now, and said, with its command's old name ({out.strip()[-160:]})")
         # Complete: off the tailnet with it.
         am.preview_start(am.session(tid), tfirst(), wait=20)
         check(served() == both, "running again")

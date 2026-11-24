@@ -1185,6 +1185,25 @@ def preview_fronted(url):
     return bool(tls) and u.scheme == "https" and (u.hostname or "").lower() == tls and bool(port) and port != app_https()
 
 
+def preview_here(url):
+    """A preview's address at this machine's name on a tailnet it's no longer
+    on (https://amarchy.tailefa8ce.ts.net:4630, from a chat that began before
+    the machine moved to another tailnet): the same address on the one it's
+    on now, which amarchy serves (its old name answers nowhere). Any other
+    address as it is."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        host, port = (u.hostname or "").lower(), u.port
+    except (ValueError, TypeError, AttributeError):
+        return url
+    if u.scheme != "https" or not host.endswith(".ts.net"):
+        return url
+    tls = preview_tls()
+    if not tls or host == tls or host.split(".")[0] != tls.split(".")[0] or host.count(".") != tls.count("."):
+        return url
+    return urllib.parse.urlunsplit((u.scheme, f"{tls}:{port}" if port else tls, u.path, u.query, u.fragment))
+
+
 def preview_local(url):
     """Where on this machine a preview's address lands: (host, port), or None
     for one served elsewhere (a deploy). One amarchy serves over HTTPS lands
@@ -1307,7 +1326,8 @@ def previews(s):
     got = s.get("previews")
     if not isinstance(got, list):
         got = [s["preview"]] if isinstance(s.get("preview"), dict) else []
-    return [{**{k: v for k, v in p.items() if k not in PREVIEW_VIEW}, "key": p.get("key") or ""}
+    # (One at this machine's old tailnet name: at its name now, preview_here.)
+    return [{**{k: v for k, v in p.items() if k not in PREVIEW_VIEW}, "url": preview_here(p["url"]), "key": p.get("key") or ""}
             for p in got if isinstance(p, dict) and p.get("url")]
 
 
@@ -2011,6 +2031,12 @@ def preview_tend():
                 if rec.get("fronted") and now - (rec.get("fronted_at") or 0) > 60:
                     preview_unfront(slot)
                 continue
+            # Running, served over HTTPS, but not every port of it on the
+            # tailnet (it started at the machine's old tailnet name, before
+            # preview_here): put there.
+            if preview_fronted(p["url"]) and not set(preview_ports(p)) <= set(rec.get("fronted") or []):
+                preview_front(s, p)
+                rec = preview_record(slot)
             if watched(pids) or s["id"] in shown or s.get("status") in ("working", "waiting", "running"):
                 if now - (rec.get("used") or 0) > 60:
                     preview_note(slot, used=now)
@@ -2183,6 +2209,10 @@ def preview_command(sid, opts, ports, flags, args, unlock):
             and (given.hostname or "").lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0")):
         moved = url
         url = urllib.parse.urlunsplit(("https", f"{tls}:{given_port}", given.path or "/", given.query, given.fragment))
+    # At this machine's name on a tailnet it was on before: at the one it's on now.
+    stale = urllib.parse.urlsplit(url).hostname if url and preview_here(url) != url else None
+    if stale:
+        url = preview_here(url)
     # Which one this is: the one of that name; else the one at that address;
     # with no name, else its only one (its address changed); else a new one.
     target = one or next((p for p in ps if url and p["url"] == url), None)
@@ -2280,11 +2310,13 @@ def preview_command(sid, opts, ports, flags, args, unlock):
     if run:
         preview_note(slot, sid=sid, key=key, path=os.environ.get("PATH", ""))
     unlock()
+    renamed = (f"(This machine is {tls} now, not {stale}: registered there."
+               + (f" Its command still says {stale}: change it to {tls} too." if run and stale in run else "") + ")") if stale else ""
     if run:
         at = f"It's at {url} (amarchy serves {moved} there, on their tailnet over HTTPS)." if moved else ""
         if "--no-start" in flags:
-            if also or at:
-                print(" ".join(x for x in (at, also.strip()) if x))
+            if also or at or renamed:
+                print(" ".join(x for x in (at, renamed, also.strip()) if x))
             return 0
         why = preview_start(s, new, wait=PREVIEW_WAIT, say=print)
         if why:
@@ -2293,6 +2325,8 @@ def preview_command(sid, opts, ports, flags, args, unlock):
             return fail(f"Saved, but {why}" + (f"\n{at}" if at else "") + (f"\nIts log ends:\n{log}" if log else "") +
                         f"\nFix it, then: amarchy preview restart{again}")
         print(f"Up at {url}: its Preview button opens it, and starts it again whenever it isn't running." + also)
+        if renamed:
+            print(renamed)
         if moved:
             print(f"(amarchy serves {moved} there, on their tailnet over HTTPS.)")
         elif tls and not preview_fronted(url):
@@ -2301,6 +2335,8 @@ def preview_command(sid, opts, ports, flags, args, unlock):
                   f"time, each a round trip away): make it listen on 127.0.0.1 and register "
                   f"https://{tls}:{where[1] if where else '<port>'} instead, and amarchy serves it over HTTPS.")
         return 0
+    if renamed:
+        print(renamed)
     if not preview_up(url):
         print(f"Saved, but nothing answers at {url} yet: its button says so until it does." + also)
     elif also:
