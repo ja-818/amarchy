@@ -68,9 +68,28 @@ function boardsYours(b) {
   return Math.max(0, (b.yours || 0) - gone);
 }
 
-// Tasks' count: every board's cards of yours.
-function boardsCount(v = app.view) {
-  return boardsList(v).reduce((n, b) => n + boardsYours(b), 0);
+// Tasks' count: every board's cards of yours (scoped: the boards the
+// project filter shows, today.js todayProject).
+function boardsCount(v = app.view, scoped = false) {
+  return boardsList(v).filter((b) => !scoped || boardsInProject(b, v)).reduce((n, b) => n + boardsYours(b), 0);
+}
+
+// A board's project: the one its lead (the agent that keeps it) works in;
+// your commitments, your assistant's.
+function boardsProject(b, v = app.view) {
+  if (b.loops || b.key === "commitments") return todayLoopsProject(v);
+  return boardsLeadRow(b).repo || "";
+}
+
+// Whether the project filter shows it.
+function boardsInProject(b, v = app.view) {
+  return todayInProject({ repo: boardsProject(b, v) });
+}
+
+// A project's boards, your commitments among them (the filter's list says how many).
+function boardsIn(v, name) {
+  const loops = boardsLoops(v);
+  return [...(loops ? [loops] : []), ...boardsList(v)].filter((b) => boardsProject(b, v) === name);
 }
 
 // Whether a card says how long it has left (Tasks draws itself again each minute then).
@@ -166,12 +185,15 @@ function boardsNodes(v) {
   if (boardsUI.open) return boardsOpenNodes(v, boardsUI.open);
   const boards = boardsList(v);
   const loops = boardsLoops(v);
-  const all = [...(loops ? [loops] : []), ...boards];
+  const every = [...(loops ? [loops] : []), ...boards];
+  // The project filter's: only its boards (today.js todayProject).
+  const all = every.filter((b) => boardsInProject(b, v));
   const order = (b) => (boardsYours(b) || (b.loops ? b.yours : 0) ? 0 : 1);
   const nodes = [boardsWriteBox(v)];
   for (const b of [...all].sort((a, c) => order(a) - order(c))) nodes.push(b.loops ? boardsLoopsSection(v, b) : boardsSection(b));
-  if (!all.length) nodes.push(h("p", { class: "today-note" }, "Your agents' boards show here: what they need of you, and what you ask them. "
+  if (!every.length) nodes.push(h("p", { class: "today-note" }, "Your agents' boards show here: what they need of you, and what you ask them. "
     + "Make one of your chats your assistant, or start an agent, and write it a task above."));
+  else if (!all.length) nodes.push(todayProjectEmpty(`No boards in ${projectName(todayProject())}.`));
   if (v.today && v.today.error) nodes.push(h("p", { class: "today-note bad" }, v.today.error));
   return nodes;
 }
@@ -596,15 +618,19 @@ function boardsTargets(v = app.view) {
     if (!isAgent(s) || out.some((t) => t.key === s.id)) continue;
     out.push({ key: s.id, id: s.sid || s.id, machine: s.machine || "", title: s.assistant_name || s.task, lead: s.assistant_name || s.task, row: s });
   }
+  // The project filter's first (today.js todayProject), then your assistant.
   const main = ((v && v.sessions) || []).find((s) => s.assistant === "main");
-  out.sort((a, b) => (b.key === (main && main.id)) - (a.key === (main && main.id)));
+  out.sort((a, b) => todayInProject(b.row) - todayInProject(a.row) || (b.key === (main && main.id)) - (a.key === (main && main.id)));
   return out;
 }
 
+// The board a task you write goes to: the one you last picked, else your
+// assistant's; with the project filter on, one of that project's first.
 function boardsTarget(v = app.view) {
   const all = boardsTargets(v);
   const want = boardsUI.target || store.get("board-target");
-  return all.find((t) => t.key === want) || all[0] || null;
+  const here = all.filter((t) => todayInProject(t.row));
+  return here.find((t) => t.key === want) || here[0] || all.find((t) => t.key === want) || all[0] || null;
 }
 
 function boardsWriteBox(v) {

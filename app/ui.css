@@ -643,6 +643,17 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 .ui-tool { padding: 0; font-size: 16px; }
 @media (hover: hover) { .ui-tool:hover, .head-btn:hover, .ui-tabs .control:hover { color: var(--text); background: var(--control-hover); } }
 .ui-filter:disabled { opacity: .55; }
+/* A filter to one of several (uiFilterPick): what it shows, ▾; lit while one is picked, its color's dot by its name. */
+.ui-filter-pick { flex: 0 1 auto; min-width: 0; gap: 6px; }
+.ui-filter-pick-label { min-width: 0; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+.ui-filter-pick-short { display: none; }
+@media (max-width: 520px) {
+  .ui-filter-pick-label { max-width: 11ch; }
+  .ui-filter-pick-long { display: none; }
+  .ui-filter-pick-short { display: inline; }
+}
+.ui-filter-pick > .glyph:first-child svg { width: 16px; height: 16px; }
+.ui-filter-pick > .ui-drop-mark { margin-left: -2px; }
 .head-btn.on, .ui-tabs .control.on { color: var(--selected-text); background: var(--selected-bg); border-color: var(--selected-border); }
 .ui-tool .glyph svg, .head-btn .glyph svg, .ui-action .glyph svg { width: 18px; height: 18px; }
 .head-btn .ic { width: 18px; height: 18px; }
@@ -999,6 +1010,11 @@ body.desk .ui-slides-stage .ui-scroll { margin-inline: calc(-1 * (var(--control-
 .ui-drop-text { display: flex; flex-direction: column; min-width: 0; }
 .ui-drop-text b, .ui-drop-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-drop-text small { color: var(--text-muted); font-size: var(--caption); }
+.ui-drop-row.on .ui-drop-text b { color: var(--selected-text); }
+.ui-drop-on { flex: none; margin-left: auto; display: inline-grid; place-items: center; color: var(--accent); }
+.ui-drop-on svg { width: 16px; height: 16px; }
+/* A dot in a thing's color (a project's: --ph), in a row's icon's place or by its name. */
+.ui-dot { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--ph, currentColor); }
 .ui-drop-row.t-up .ui-drop-icon { color: var(--success); }
 .ui-drop-row.bad .ui-drop-icon, .ui-drop-row.bad small { color: var(--danger); }
 

@@ -249,8 +249,9 @@ function boardKeys(e) {
 // The board's tabs, Chats and Tasks, each with what's your move.
 function modeButtons() {
   if (!app.view || !board.switchEl) return;
-  uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats"), title: "Chats (Tab)" },
-          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks"), title: "Tasks (Tab)" }], board.tab, boardTab, board.switchEl);
+  // (Each counts what it shows: the project filter's, today.js todayProject.)
+  uiTabs([{ key: "chats", label: "Chats", count: todayCount(app.view, "chats", true), title: "Chats (Tab)" },
+          { key: "tasks", label: "Tasks", count: todayCount(app.view, "tasks", true), title: "Tasks (Tab)" }], board.tab, boardTab, board.switchEl);
 }
 
 // Chats or Tasks on the board, kept for the next time.
@@ -399,8 +400,9 @@ function boardSentToast(id) {
 function boardNew() {
   const ps = whereProjects();         // every machine's (machines.js)
   if (ps.length < 2) return boardCompose();
-  const last = (desk.newChat && desk.newChat.repo()) || store.get("last-project");
-  const lit = ps.some((p) => p.name === last) ? last : ps[0].name;
+  // (The project filter on: that one, today.js todayProject.)
+  const last = [todayProject(), desk.newChat && desk.newChat.repo(), store.get("last-project")].find((n) => n && ps.some((p) => p.name === n));
+  const lit = last || ps[0].name;
   uiMenu("New chat: which project?", [
     ...ps.map((p) => ({ label: projectName(p.name), icon: "project", on: p.name === lit,
                         detail: p.sessions ? `${p.sessions} chat${p.sessions === 1 ? "" : "s"}` : "",

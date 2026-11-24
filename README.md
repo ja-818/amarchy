@@ -25,7 +25,7 @@ One board says which one needs you and what for. You answer with a tap.
 ## What you get
 
 - **A board that says who needs you.** **Needs you** filters to the chats waiting on you,
-  **At work** has the busy ones, and **Now** and **For later** are in the order you decide. A
+  the project filter to one project's chats and boards, **At work** has the busy ones, and **Now** and **For later** are in the order you decide. A
   chat's question shows on its card: answer it there, without opening the chat.
 - **Briefings, not walls of text.** Every reply opens with what happened, what was checked and
   what's on you. Your choices are buttons; the details stay folded until you want them.
@@ -134,7 +134,7 @@ More in the guide: [On Omarchy](docs/guide.md#on-omarchy).
 
 - **The list**: your chats, each with its name, what it's doing ("Needs your answer",
   "Working", "Done", "Ready") and its project, in **At work** (folded, on top) and two lists you decide: **Now**
-  (pinned on top) and **For later**. Only working moves a card; **Needs you** filters to what waits on you.
+  (pinned on top) and **For later**. Only working moves a card; **Needs you** filters to what waits on you, **All projects ▾** to one project.
 - **The chat**: what you said, what Claude says, the steps it took (folded into one line you
   can open), and the cards for its questions and permissions. Under it, the box you type in,
   with the model and how Claude asks for permission.
