@@ -26,6 +26,7 @@ the change.
 | `uiTabs(items, on, pick, el, label, {scroll})` | One of a few, each with its count (what's your move there). `scroll`: one of many, in a row that scrolls sideways, the one that's on kept in view. | the board's Chats \| Tasks, a new chat's projects |
 | `uiSearch({placeholder, label, key, cls, input})` | The search box, the key that gets to it on a computer. | the board's search |
 | `uiComposer({field, before, after, top, cls})`, `uiComposerButton(kind, label, content, act, extra)` | The box you write in and send from, as a messaging app's: the field (a textarea with its own keys) between the buttons before it (+) and after it (the mic, Send), and over them what goes with it (`top`: the pictures and files). Its buttons are round, a finger's size (`kind`: `attach`, `mic`, `send`, `stop`). | a chat's box (chat.js), a terminal's message line (terminal.js) |
+| `uiGhost(field, {ask, said, on, key, wait, max})` | Gray text after what you've written in a box: what comes next (a suggestion), laid exactly over the field. Tab takes it all (and the next one is there at once), → at the end a word, a tap on it all; typing what it says eats it, anything else drops it. Never Esc (Claude's). `ask(text, signal)` fetches one, `said(id, outcome, took)` hears what became of it. | a chat's box (chat.js, Settings → Suggestions) |
 | `uiTool(icon, label, act, {title, cls, extra})` | A tool's icon in a bar's slot: no box until you point at it. | an open chat's Terminal, Changes, Details |
 | `uiPreview(s, {head})` | A chat's live preview (`amarchy preview`): opens it, starts it, or asks its Claude to start it again when nothing answers. With several: **Previews ▾**, a `uiDropdown` of them by name, each doing what its own button would. | Over a chat, on its card |
 | `uiAction(icon, label, act, {title, key, cls})` | A bar's one thing to do, outlined (its key beside its words; an icon alone on a phone). | New chat, Complete |
@@ -91,7 +92,7 @@ A theme can set any of them in its `vars`, and every screen changes at once:
 | `--act-mark` | What's yours to do: a line's mark |
 | `--tab-bg`, `--tab-border`, `--tab-on-bg`, `--tab-count-bg` | Tabs, the one that's on, a count |
 | `--search-bg`, `--search-border` | The search box |
-| `--composer-bg`, `--composer-border`, `--composer-border-width`, `--composer-radius`, `--composer-shadow`, `--composer-focus`, `--composer-send-bg`, `--composer-send-text` | The box you write in (a chat's, a terminal's message line): its ground, rule, corners, shadow, its rule while you write in it, and Send |
+| `--composer-bg`, `--composer-border`, `--composer-border-width`, `--composer-radius`, `--composer-shadow`, `--composer-focus`, `--composer-send-bg`, `--composer-send-text`, `--composer-ghost` | The box you write in (a chat's, a terminal's message line): its ground, rule, corners, shadow, its rule while you write in it, Send, and a suggestion's gray text (uiGhost) |
 | `--score-flame`, `--score-cool`, `--score-ring`, `--score-flash`, `--score-bg`, `--score-border`, `--score-radius` | Your score's flame (and cooled), its goal ring, a fast reply's flash, its button |
 | `--badge-on` | An earned badge, and a badge's moment |
 | `--tile-bg`, `--tile-border`, `--tile-on`, `--chart-bg`, `--chart-on` | Big numbers and bars, and the lit one |

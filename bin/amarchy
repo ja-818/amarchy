@@ -277,6 +277,14 @@ machine without it, by another machine of yours that has it, paired with amarchy
                                         write down a recording (anything ffmpeg reads), as a dictation would
                                         be: here, or on the machine that writes this one's down (or the one named)
 
+Suggestions as you type (Settings → Suggestions: the composer's gray text, Tab to take it; through Haiku, with
+your Anthropic key kept as the secret SUGGEST_ANTHROPIC_KEY, else your Claude login, slower):
+  amarchy suggest [--days <n>] [--json] how the last days' went (7 unless --days): how many, how fast, what
+                                        they cost, how many you took
+  amarchy suggest try <text> [--id <chat>]
+                                        what it would suggest after that text in a chat (this one unless --id),
+                                        and how long it took
+
 Secrets (a key or password a project needs, given in the app, never in the chat; kept in
 ~/.config/amarchy/secrets, 0600, outside every repo; the session's commands, its terminal and its run
 commands have each one as an environment variable, $NAME):
@@ -23613,6 +23621,19 @@ def app_handler(st, users, address):
                 if why == "gone":
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
+            m = re.fullmatch(r"/api/session/([^/]+)/suggest", self.path)
+            if m:       # the composer's gray text (see "suggestions as you type"): {text} → {text, id}; {id, outcome, took}
+                self.changed_nothing = True         # (nothing on any screen changes)
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                if data.get("outcome"):
+                    why = suggest_outcome(s, data)
+                    return self.error(400, why) if why else self.send(200, {})
+                if not isinstance(data.get("text"), str):
+                    return self.error(400, "text: what you've written so far")
+                r = suggest(s, data["text"])
+                return self.error(502, r["error"]) if "error" in r else self.send(200, r)
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|effort|mode|unqueue|engine|classic)", self.path)
             if m:
@@ -25232,6 +25253,56 @@ def cmd_quiet(args):
         print(f"{when}  {e.get('what') or '(another chat, or its own background job)'}")
         if e.get("note"):
             print(f"                  → {e['note']}")
+    return 0
+
+
+def cmd_suggest(args):
+    """amarchy suggest [--days <n>] [--json] | amarchy suggest try <text>
+    [--id <chat>]: the suggestions as you type, summed up; or one asked for."""
+    opts, rest, it = {}, [], iter(args)
+    for a in it:
+        if a in ("--days", "--id"):
+            opts[a] = next(it, "")
+        elif a == "--json":
+            opts[a] = True
+        else:
+            rest.append(a)
+    if rest[:1] == ["try"]:
+        text = " ".join(rest[1:])
+        sid = opts.get("--id") or own_session_id()
+        s = session(sid) if sid else None
+        if not s:
+            return fail(f"No session {sid!r}" if sid else "Not in a session: name one, --id <chat>")
+        suggest_style_text()
+        for _ in range(100):        # (how you write: read the first time, in the background)
+            if _SUGGEST_STYLE["at"]:
+                break
+            time.sleep(0.1)
+        r = suggest(s, text, tried=True)
+        if "error" in r:
+            return fail(r["error"])
+        print(json.dumps(r) if opts.get("--json") else f"{text}\033[2m{r['text']}\033[0m\n({r['via']}, {r['ms']} ms)")
+        return 0
+    if rest:
+        print(usage("suggest"), file=sys.stderr)
+        return 1
+    try:
+        days = float(opts.get("--days") or 7)
+    except ValueError:
+        return fail("--days: a number of days")
+    st = suggest_stats(days)
+    if opts.get("--json"):
+        print(json.dumps(st, indent=1))
+        return 0
+    if not st["asked"]:
+        print(f"No suggestions in the last {days:g} days (Settings → Suggestions turns them on).")
+        return 0
+    speed = ", ".join(f"{via}: {v['p50']} ms typical, {v['p90']} ms slow" for via, v in st["ms"].items())
+    print(f"{st['asked']} asked in {days:g} days, {st['shown']} shown, {st['errors']} failed. {speed}.")
+    if st["rate"] is not None:
+        print(f"Taken: {st['taken']} ({st['rate']:.0%} of those shown): {st['taken_whole']} with Tab, "
+              f"{st['taken_by_word']} a word at a time, {st['typed_as_said']} typed as it said; {st['chars_taken']} characters.")
+    print(f"Cost: ${st['cost_usd']:.4f} on your Anthropic key.")
     return 0
 
 
@@ -27120,6 +27191,402 @@ def conversation_title(text):
     return title if 0 < len(title) <= 80 else None
 
 
+# ---- suggestions as you type (Settings → Suggestions, off unless turned on)
+#
+# The composer's gray text after what you've written: what you'd most likely
+# write next, Tab to take it (ui.js uiGhost, chat.js). Asked of Haiku with
+# the chat's latest (the agent's last reply, what you said before in it) and
+# how you write (your latest messages, in every chat). Through an Anthropic
+# key of yours when you've kept one (the secret SUGGEST_ANTHROPIC_KEY): Haiku
+# answers in well under a second that way, for cents a day; else through
+# your Claude login (claude -p), a second and a half or more. Each one is
+# logged (suggest.jsonl: how long it took, its tokens, whether you took it),
+# for `amarchy suggest`.
+
+SUGGEST_MODEL = "claude-haiku-5-5"
+SUGGEST_KEY = "SUGGEST_ANTHROPIC_KEY"
+SUGGEST_LOG = STATE / "suggest.jsonl"
+SUGGEST_DRAFT_MAX = 6000        # what you've written, its end: that's what's continued
+SUGGEST_MAX = 160               # a suggestion, at most (characters)
+# Haiku 5.5's prices (per million tokens, up to 100K of prompt): input,
+# output, cache read, 5-minute cache write.
+SUGGEST_PRICE = {"in": 0.10, "out": 0.50, "cache_read": 0.01, "cache_write": 0.125}
+
+SUGGEST_PROMPT = """You predict how a person will finish the message they are typing to their AI coding agent (Claude Code, in an app called amarchy). Your words show in gray after their cursor and Tab inserts them, so write what THEY would type next, as them. The draft is the start of their own message: never answer it, reply to it or comment on it.
+
+Reply in this form and nothing else:
+<continuation>the words</continuation>
+
+The words:
+- Start where the line after the draft says: with the word they're typing (whole, its first letters included), or the next word.
+- Finish the current sentence or clause: about 3 to 12 words, one line.
+- The draft's language, and their voice as in their recent messages (short, direct, informal), spelled correctly.
+- Grounded in this chat: what the agent just said or asked, the names it used. Their messages from other chats show only how they write, never what this chat is about.
+- With an empty draft: the whole short message they'd most likely send now, usually their answer to the agent's last question, and only if that's clear.
+- Not sure what comes next? Reply <continuation></continuation>. A wrong guess is worse than none.
+
+Examples:
+draft "fix the scroll ", typing a word that starts with "ju" → <continuation>jump when a turn ends</continuation>
+draft "Looks good. ", typing a word that starts with "Now" → <continuation>Now ship it</continuation>
+draft "Why does the build ", the next word → <continuation>fail on the phone but not on the desktop?</continuation>
+empty, the agent asked "Ship it?" → <continuation>Yes, ship it</continuation>
+draft "The thing ", typing "is", nothing in the chat says what → <continuation></continuation>"""
+
+
+def suggest_key(s):
+    """The Anthropic key suggestions go through, if you kept one."""
+    return session_secrets(s["repo"]).get(SUGGEST_KEY) or ""
+
+
+def suggest_yours(text):
+    """Whether a message in your name reads as typed by you, not handed on
+    (a timer's, a forwarded mail's): only those show how you write."""
+    return not re.search(r"\(automatic\)|noreply@|<[^>\s]+@[^>\s]+>", text)
+
+
+def suggest_turns(records, s):
+    """A conversation's messages for suggesting, in order: ("you", what you
+    wrote yourself) and ("agent", Claude's reply that ended a turn)."""
+    out = []
+    for item in app_items(records, s):
+        if item.get("aside"):
+            continue
+        if item.get("kind") == "user" and item.get("turn") and "from" not in item and item.get("text") != "[image]":
+            out.append(("you" if suggest_yours(item["text"]) else "sent", item["text"]))
+        elif item.get("kind") == "claude":
+            if out and out[-1][0] == "agent":
+                out[-1] = ("agent", item["text"])       # its last words in the turn: the reply
+            else:
+                out.append(("agent", item["text"]))
+    return out
+
+
+_SUGGEST_CHATS = {}         # session id → (its transcript as it was, its turns)
+_SUGGEST_STYLE = {"at": 0.0, "text": "", "busy": False}
+
+
+def suggest_chat_turns(s):
+    f = transcript(s)
+    if not f:
+        return []
+    try:
+        st = f.stat()
+    except OSError:
+        return []
+    sig = (str(f), st.st_size, st.st_mtime_ns)
+    had = _SUGGEST_CHATS.get(s["id"])
+    if had and had[0] == sig:
+        return had[1]
+    turns = suggest_turns(conversation_records(f, tail=600_000), s)
+    _SUGGEST_CHATS[s["id"]] = (sig, turns)
+    return turns
+
+
+def suggest_style_text():
+    """Your latest messages in every chat (how you write), a few hundred
+    words: read again every ten minutes, in the background."""
+    now = time.time()
+    if now - _SUGGEST_STYLE["at"] > 600 and not _SUGGEST_STYLE["busy"]:
+        _SUGGEST_STYLE["busy"] = True
+
+        def read():
+            try:
+                said = []
+                for s in sessions():
+                    f = transcript(s)
+                    if not f:
+                        continue
+                    for item in app_items(conversation_records(f, tail=200_000), s):
+                        text = (item.get("text") or "").strip()
+                        if item.get("kind") == "user" and item.get("turn") and "from" not in item and text and text != "[image]" \
+                                and suggest_yours(text):
+                            said.append((item.get("at") or "", " ".join(text.split())))
+                said.sort(reverse=True)
+                seen, lines = set(), []
+                for _, text in said:
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    lines.append("- " + (text[:280] + "…" if len(text) > 280 else text))
+                    if len(lines) >= 30:
+                        break
+                _SUGGEST_STYLE.update(text="\n".join(lines), at=time.time())
+            finally:
+                _SUGGEST_STYLE["busy"] = False
+        threading.Thread(target=read, daemon=True).start()
+    return _SUGGEST_STYLE["text"]
+
+
+def suggest_parts(s, draft, turns=None, style=None):
+    """What Haiku is given: how you write (the same for every chat), this
+    chat (the same while you write in it), and the draft (what changes).
+    turns, style: given instead of read (a replay of an earlier moment)."""
+    style = suggest_style_text() if style is None else style
+    turns = suggest_chat_turns(s) if turns is None else turns
+    reply = next((t for who, t in reversed(turns) if who == "agent"), "")
+    yours = [t for who, t in turns if who == "you"][-5:]
+    last_is_reply = bool(turns) and turns[-1][0] == "agent"
+    chat = [f'<chat project="{s.get("repo", "")}" title="{(s.get("title") or s.get("task") or "").replace(chr(34), "")}">']
+    if yours:
+        chat.append("<their_earlier_messages_here>\n" + "\n".join(
+            "- " + (" ".join(t.split())[:600]) for t in yours) + "\n</their_earlier_messages_here>")
+    if reply:
+        r = reply.strip()
+        since = "" if last_is_reply else ' note="they wrote since"'
+        chat.append(f"<agent_last_reply{since}>\n" + ("…" + r[-3500:] if len(r) > 3500 else r) + "\n</agent_last_reply>")
+    chat.append("</chat>")
+    # The word the cursor is in, left out of the draft and named: the words
+    # then follow from a word's start, as a model writes them (from inside
+    # one it loses its letters), and the first of them must begin with it.
+    word = re.search(r"\S+$", draft)
+    if not draft.strip():
+        shown, cursor = "", "The box is empty: their whole next message."
+    elif not word:
+        shown, cursor = draft, "Next: the word after the draft."
+    else:
+        shown, cursor = draft[:word.start()], f'Next: the word they\'re typing, which starts with "{word.group(0)}", whole, then the words after it.'
+    return ("<their_recent_messages_in_all_chats>\n" + (style or "(none yet)") + "\n</their_recent_messages_in_all_chats>",
+            "\n".join(chat),
+            f"<draft>{shown}</draft>\n{cursor}")
+
+
+def suggest_clean(draft, text):
+    """Haiku's words as gray text after draft: its first line, joined where
+    the draft stops (it starts with the draft's last word, finished: that
+    word's own letters left out), no longer than a line or two."""
+    m = re.search(r"<continuation>(.*?)(?:</continuation>|$)", text or "", re.S)
+    if not m:
+        return ""           # (not in the form asked: words about the task, not the words)
+    t = m.group(1).split("\n")[0].strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'`":
+        t = t[1:-1].strip()
+    if not t or re.search(r"</?(draft|continuation)>", t):
+        return ""
+    if draft.strip() and not draft[-1].isspace():
+        last = re.search(r"\S+$", draft).group(0)
+        if not t.lower().startswith(last.lower()):
+            return ""           # it didn't take up the word the cursor is in: there's no telling how it joins
+        t = t[len(last):]       # the rest of that word, or a space and what comes after it
+    elif draft.strip():
+        # After a space, the draft's last word said again: left out.
+        last = draft.split()[-1]
+        if t.lower().startswith(last.lower() + " "):
+            t = t[len(last) + 1:]
+    if len(t) > SUGGEST_MAX:
+        cut = t[:SUGGEST_MAX].rsplit(" ", 1)[0]
+        t = cut if len(cut) > SUGGEST_MAX // 2 else t[:SUGGEST_MAX]
+    return t if t.strip() else ""
+
+
+_SUGGEST_CONNS = []         # kept open to the API: no new TLS handshake for each one
+_SUGGEST_LOCK = threading.Lock()
+
+
+def suggest_api(key, parts):
+    """Haiku's continuation through the API: (text, what it took)."""
+    import http.client
+    import ssl
+    style, chat, draft = parts
+    body = {
+        "model": SUGGEST_MODEL, "max_tokens": 64, "stream": True,
+        "thinking": {"type": "disabled"}, "output_config": {"effort": "low"},
+        "stop_sequences": ["</continuation>", "\n"],
+        "system": [{"type": "text", "text": SUGGEST_PROMPT}],
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": style, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": chat, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": draft}]}],
+    }
+    with _SUGGEST_LOCK:
+        conn = _SUGGEST_CONNS.pop() if _SUGGEST_CONNS else None
+    reused = conn is not None
+    if conn is None:
+        conn = http.client.HTTPSConnection("api.anthropic.com", timeout=15, context=ssl.create_default_context())
+    start = time.monotonic()
+    info, text, done = {"via": "api", "reused": reused}, [], False
+    try:
+        try:
+            conn.request("POST", "/v1/messages", json.dumps(body).encode(), {
+                "content-type": "application/json", "x-api-key": key, "anthropic-version": "2026-10-21",
+                "accept": "text/event-stream"})
+            r = conn.getresponse()
+        except (OSError, http.client.HTTPException):
+            if not reused:
+                raise
+            # A kept connection the API had closed meanwhile: once more, a new one.
+            conn.close()
+            conn = http.client.HTTPSConnection("api.anthropic.com", timeout=15, context=ssl.create_default_context())
+            info["reused"] = False
+            conn.request("POST", "/v1/messages", json.dumps(body).encode(), {
+                "content-type": "application/json", "x-api-key": key, "anthropic-version": "2026-10-21",
+                "accept": "text/event-stream"})
+            r = conn.getresponse()
+        if r.status != 200:
+            raw = r.read()
+            try:
+                why = json.loads(raw).get("error", {}).get("message") or ""
+            except ValueError:
+                why = raw[:200].decode(errors="replace")
+            raise RuntimeError(f"the API said {r.status}: {why}")
+        usage = {}
+        while True:
+            line = r.readline()
+            if not line:
+                break
+            line = line.decode(errors="replace").strip()
+            if not line.startswith("data:"):
+                continue
+            try:
+                ev = json.loads(line[5:])
+            except ValueError:
+                continue
+            kind = ev.get("type")
+            if kind == "message_start":
+                usage.update((ev.get("message") or {}).get("usage") or {})
+            elif kind == "content_block_delta" and (ev.get("delta") or {}).get("type") == "text_delta":
+                if "ttft" not in info:
+                    info["ttft"] = round((time.monotonic() - start) * 1000)
+                text.append(ev["delta"].get("text") or "")
+            elif kind == "message_delta":
+                usage.update(ev.get("usage") or {})
+            elif kind == "error":
+                raise RuntimeError(f"the API said: {(ev.get('error') or {}).get('message') or 'an error'}")
+            elif kind == "message_stop":
+                done = True
+        r.read()
+        info.update({"in": usage.get("input_tokens") or 0, "out": usage.get("output_tokens") or 0,
+                     "cache_read": usage.get("cache_read_input_tokens") or 0,
+                     "cache_write": usage.get("cache_creation_input_tokens") or 0})
+    finally:
+        if done:
+            with _SUGGEST_LOCK:
+                if len(_SUGGEST_CONNS) < 4:
+                    _SUGGEST_CONNS.append(conn)
+                    conn = None
+        if conn is not None:
+            conn.close()
+    info["ms"] = round((time.monotonic() - start) * 1000)
+    return "".join(text), info
+
+
+_SUGGEST_RUNNING = {}       # session id → the claude -p asked for it last (a newer one ends it)
+
+
+def suggest_claude(sid, parts):
+    """Haiku's continuation through your Claude login (claude -p): slower,
+    and the one asked for before for the same chat is stopped."""
+    start = time.monotonic()
+    p = subprocess.Popen(
+        ["claude", "-p", "--model", "haiku", "--effort", "low", "--no-session-persistence", "--setting-sources", "",
+         "--tools", "", "--strict-mcp-config", "--system-prompt", SUGGEST_PROMPT, "\n\n".join(parts)],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True,
+        env={**agent_env(), "MAX_THINKING_TOKENS": "0"}, cwd=STATE)
+    old, _SUGGEST_RUNNING[sid] = _SUGGEST_RUNNING.get(sid), p
+    if old and old.poll() is None:
+        old.kill()
+    try:
+        out, _ = p.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out = ""
+    finally:
+        if _SUGGEST_RUNNING.get(sid) is p:
+            del _SUGGEST_RUNNING[sid]
+    if p.returncode != 0:
+        out = ""
+    return out.strip("\n"), {"via": "claude", "ms": round((time.monotonic() - start) * 1000)}
+
+
+def suggest_log(entry):
+    try:
+        SUGGEST_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(SUGGEST_LOG, "a") as fh:
+            fh.write(json.dumps({"at": round(time.time(), 2), **entry}) + "\n")
+        if SUGGEST_LOG.stat().st_size > 8_000_000:        # (kept to its latest half)
+            lines = SUGGEST_LOG.read_text().splitlines()
+            write_file(SUGGEST_LOG, "\n".join(lines[len(lines) // 2:]) + "\n")
+    except OSError:
+        pass
+
+
+def suggest(s, draft, tried=False):
+    """The gray text for a chat's draft: {text, id, via, ms}, or {"error"}.
+    tried: asked for by amarchy suggest try (logged as such, not counted)."""
+    draft = draft[-SUGGEST_DRAFT_MAX:]
+    if draft.lstrip().startswith("/"):
+        return {"text": "", "id": ""}           # a command (its menu), not words to continue
+    parts = suggest_parts(s, draft)
+    key = suggest_key(s)
+    try:
+        raw, info = suggest_api(key, parts) if key else suggest_claude(s["id"], parts)
+    except Exception as e:
+        suggest_log({"chat": s["id"], "error": str(e)[:300], "via": "api" if key else "claude"})
+        return {"error": f"No suggestion: {e}"}
+    text = suggest_clean(draft, raw)
+    sid = uuid.uuid4().hex[:12]
+    suggest_log({"id": sid, "chat": s["id"], **info, "draft": len(draft), "raw": len(raw), "chars": len(text),
+                 "empty_draft": not draft.strip(), **({"tried": True} if tried else {})})
+    return {"text": text, "id": sid, "via": info["via"], "ms": info["ms"]}
+
+
+def suggest_outcome(s, data):
+    """What became of one (the composer says): taken whole (tab), a word at a
+    time (word), typed over as it said (typed), or left (gone)."""
+    if data.get("outcome") not in ("tab", "word", "typed", "gone") or not re.fullmatch(r"[0-9a-f]{12}", str(data.get("id") or "")):
+        return "outcome: tab, word, typed or gone, and the suggestion's id"
+    took = data.get("took")
+    suggest_log({"id": data["id"], "chat": s["id"], "outcome": data["outcome"],
+                 "took": took if isinstance(took, int) and 0 <= took < 10_000 else 0})
+    return None
+
+
+def suggest_stats(days=7):
+    """The suggestions of the last days, summed up: how many, how fast, what
+    they cost, how many you took."""
+    since = time.time() - days * 86400
+    asked, outcomes, errors = {}, {}, 0
+    try:
+        lines = SUGGEST_LOG.read_text().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("at", 0) < since or e.get("tried"):
+            continue
+        if e.get("error"):
+            errors += 1
+        elif e.get("outcome"):
+            outcomes[e["id"]] = e
+        elif e.get("id"):
+            asked[e["id"]] = e
+
+    def pct(xs, p):
+        xs = sorted(xs)
+        return xs[min(len(xs) - 1, int(len(xs) * p))] if xs else None
+    shown = [e for e in asked.values() if e.get("chars")]
+    took = [o for o in outcomes.values() if o["outcome"] in ("tab", "word", "typed")]
+    cost = sum((e.get("in", 0) * SUGGEST_PRICE["in"] + e.get("out", 0) * SUGGEST_PRICE["out"]
+                + e.get("cache_read", 0) * SUGGEST_PRICE["cache_read"] + e.get("cache_write", 0) * SUGGEST_PRICE["cache_write"])
+               / 1e6 for e in asked.values() if e.get("via") == "api")
+    by = {}
+    for e in asked.values():
+        by.setdefault(e.get("via") or "?", []).append(e.get("ms") or 0)
+    return {
+        "days": days, "asked": len(asked), "shown": len(shown), "errors": errors,
+        "taken": len(took), "taken_whole": sum(1 for o in took if o["outcome"] == "tab"),
+        "taken_by_word": sum(1 for o in took if o["outcome"] == "word"),
+        "typed_as_said": sum(1 for o in took if o["outcome"] == "typed"),
+        "chars_taken": sum(o.get("took") or 0 for o in took),
+        "rate": round(len(took) / len(shown), 3) if shown else None,
+        "ms": {via: {"p50": pct(ms, 0.5), "p90": pct(ms, 0.9)} for via, ms in by.items()},
+        "ttft_p50": pct([e["ttft"] for e in asked.values() if e.get("ttft")], 0.5),
+        "cost_usd": round(cost, 4),
+    }
+
+
 # An old conversation's replies may be calls to update_brief, the tool amarchy
 # once had Claude write each reply with (until 2026-11): app_items shows them
 # as the text they held (brief_text).
@@ -28815,6 +29282,7 @@ OPTIONS = {
     "send": ({"--no-wait", "--timeout", "--queued"}, {"--timeout", "--queued"}, set()),
     "notify": ({"--session", "--urgent"}, {"--session"}, set()),
     "quiet": ({"--json"}, set(), set()),
+    "suggest": ({"--json", "--days", "--id"}, {"--days", "--id"}, set()),
     "assistant": ({"--name", "--picture", "--crop"}, {"--name", "--picture", "--crop"}, set()),
     "agents": ({"--json", "--all", "--name", "--emoji", "--tone", "--picture", "--crop", "--sound"},
                {"--name", "--emoji", "--tone", "--picture", "--crop", "--sound"}, set()),
@@ -28995,6 +29463,8 @@ def main(argv):
         return cmd_notify(args)
     elif cmd == "quiet":
         return cmd_quiet(args)
+    elif cmd == "suggest":
+        return cmd_suggest(args)
     elif cmd == "assistant":
         return cmd_assistant(args)
     elif cmd == "agents":

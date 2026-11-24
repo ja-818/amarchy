@@ -578,6 +578,17 @@ Three rules, the same in every layout:
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
 
+With **Settings → Suggestions** on, what you'd likely write next shows in gray
+after the cursor as you write in a chat's box: `Tab` takes it all (the next one
+follows, so `Tab`, `Tab`, `Tab` writes on), `→` at the end takes a word, and a
+tap on it takes it (a phone has no `Tab`). Typing what it says eats it; typing
+anything else, moving the cursor or leaving the box drops it. `Esc` stays
+Claude's, and `Enter` sends only what you wrote. Haiku writes it, from the chat
+and how you write, through an Anthropic key of yours kept as the secret
+`SUGGEST_ANTHROPIC_KEY` (well under a second, cents a day), else your Claude
+login (a second and a half or more). `amarchy suggest` says how it's going: how
+fast, what it cost, how many you took.
+
 On a board's card in Tasks, `1`–`4` press its buttons, and `Ctrl+Alt+←` is Tasks
 again. Every menu takes the keys: a chat's menu (its •••), closing
 one, settings, the order of your projects, the project for a

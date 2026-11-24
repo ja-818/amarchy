@@ -82,6 +82,7 @@
   --composer-focus: var(--focus-ring);
   --composer-send-bg: var(--primary-bg);
   --composer-send-text: var(--primary-text);
+  --composer-ghost: color-mix(in srgb, var(--text) 42%, transparent);     /* a suggestion's gray text (uiGhost): faded, on any theme */
   /* Steps toward something (uiSteps): a cloud machine coming up. */
   --steps-done: var(--success);
   --steps-now: var(--accent);
@@ -604,6 +605,25 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
           mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
 }
 .composer.listening { border-color: var(--accent); animation: listen 1.2s ease-in-out infinite; }
+
+/* A suggestion after what you've written (uiGhost): a copy of the box's
+   text laid over it, invisible but for the gray words that would come next
+   (and their key, on a computer). A tap on them takes them. */
+.ui-ghost-host { position: relative; }
+.ui-ghost-host .ghosting::placeholder { color: transparent; }
+.ui-ghost {
+  position: absolute; z-index: 1; margin: 0; box-sizing: border-box;
+  overflow: hidden; pointer-events: none;
+  white-space: pre-wrap; overflow-wrap: break-word;
+  color: transparent;
+}
+.ui-ghost-text { color: var(--composer-ghost); pointer-events: auto; cursor: pointer; }
+.ui-ghost-key {
+  display: inline-block; margin-left: 6px; padding: 0 5px; vertical-align: 1px;
+  border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: var(--caption); line-height: 1.4; color: var(--composer-ghost);
+  pointer-events: auto; cursor: pointer;
+}
 
 /* ---- a bar (.ui-bar): the board's and an open chat's are one, as
    Omarchy's bar is: where you are on the left (the Ⓐ and Chats | Tasks;

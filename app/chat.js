@@ -1068,6 +1068,7 @@ function tableize(el) {
 // finger scrolled, or went elsewhere): closed.
 
 const STREAM_EVENTS = ["session", "conversation", "screen", "live", "gone"];
+let suggestFailedSaid = false;    // a suggestion failed: said once (a toast), not at every pause
 let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: listener}, timer}
 
 function chatStreamEarly(id) {
@@ -1475,6 +1476,15 @@ class Chat {
     this.trayEl = h("div", { class: "tray", hidden: true });
     this.composer = uiComposer({ field: this.input, top: this.trayEl, before: [this.attachBtn],
                                  after: [this.micBtn, this.stopBtn, this.sendBtn] });
+    // Gray text after what you write, Tab to take it (Settings → Suggestions).
+    this.ghost = uiGhost(this.input, {
+      on: () => suggestionsOn() && !this.talk.on() && !this.menu && !this.sending,
+      key: () => `${this.suggestContext()}|${this.sentOn || ""}`,
+      wait: () => (this.suggestVia === "claude" ? 400 : 150),
+      max: () => window.innerHeight * 0.4,
+      ask: (text, signal) => this.suggestAsk(text, signal),
+      said: (id, outcome, took) => { api(chatPath(this.id, "/suggest"), { id, outcome, took }, { keepalive: true }).catch(() => {}); },
+    });
     // Over it: the model and the mode, and the menu that's open (+, /, a pill's).
     this.info = null;           // /composer: the commands, the models, the model and mode
     this.modelPill = h("button", { class: "pill", type: "button", "aria-haspopup": "menu", onclick: () => this.toggleMenu("model") });
@@ -1559,9 +1569,9 @@ class Chat {
         if (this.opts.onSession) this.opts.onSession(this.row);
         this.renderDock();
         this.renderTail();
-        if (this.working() !== working) this.reland();
+        if (this.working() !== working) { this.reland(); this.suggestAgain(); }
       },
-      conversation: (e) => this.conversation(JSON.parse(e.data)),
+      conversation: (e) => { this.conversation(JSON.parse(e.data)); this.suggestAgain(); },
       screen: (e) => {
         this.screen = JSON.parse(e.data);
         if (this.opts.onScreen) this.opts.onScreen(this.screen);
@@ -1572,7 +1582,7 @@ class Chat {
         this.live = JSON.parse(e.data);
         this.renderDock();
         this.renderTail();
-        if (this.working() !== working) this.reland();      // at work: its end; done: its reply
+        if (this.working() !== working) { this.reland(); this.suggestAgain(); }     // at work: its end; done: its reply
       },
       gone: () => { if (this.opts.onGone) this.opts.onGone(); },
     };
@@ -3639,6 +3649,43 @@ class Chat {
     store.set(`draft:${this.id}`, this.input.value);
     this.sendButtons();
     this.slashCheck();
+    if (this.ghost) this.ghost.typed();
+  }
+
+  // Claude's reply came, or it went to work: with nothing written yet, what
+  // you'd answer (asked again only when that changed).
+  suggestAgain() {
+    if (!this.ghost || this.input.value || document.activeElement !== this.input) return;
+    const now = this.suggestContext();
+    if (now === this.suggestedFor) return;
+    this.suggestedFor = now;
+    this.ghost.refresh();
+  }
+
+  // Where the conversation is, for suggesting: its latest message, and
+  // whether Claude is at work.
+  suggestContext() {
+    const last = this.items[this.items.length - 1];
+    return `${last ? last.key : ""}|${this.working() ? "working" : ""}`;
+  }
+
+  // What would come next after text (uiGhost asks): with nothing written
+  // yet, only once Claude's reply is there to answer (not one you answered).
+  async suggestAsk(text, signal) {
+    if (!text.trim()) {
+      const you = this.items.findLastIndex((it) => it.kind === "user" && it.turn);
+      const reply = this.items.findLastIndex((it) => it.kind === "claude");
+      if (this.working() || reply < 0 || reply < you || this.sentOn === this.suggestContext()) return null;
+    }
+    const res = await fetch(chatPath(this.id, "/suggest"), { method: "POST", headers: { "Content-Type": "application/json" },
+                                                             body: JSON.stringify({ text }), signal });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (!suggestFailedSaid) { suggestFailedSaid = true; toast(d.error || "No suggestions: they didn't work just now"); }
+      return null;
+    }
+    this.suggestVia = d.via;
+    return d.text ? { text: d.text, id: d.id, ahead: d.via === "api" } : null;
   }
 
   // Its height to what's in it (uiFitField: the conversation over it doesn't
@@ -3748,6 +3795,7 @@ class Chat {
 
   // What was sent is off the box: its words, its draft, the tray's.
   sentOff(tray, keepPictures = false) {
+    this.sentOn = this.suggestContext();      // (an empty box isn't asked to answer the reply you just answered)
     this.input.value = "";
     this.takenBack = "";
     store.set(`draft:${this.id}`, "");

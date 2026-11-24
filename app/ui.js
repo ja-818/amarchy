@@ -556,6 +556,226 @@ function uiComposerButton(kind, label, content, act, extra = {}) {
   return h("button", { class: `cbtn ${kind}`, type: "button", "aria-label": label, onclick: act || null, ...extra }, content);
 }
 
+// Gray text after what you've written in a box (field, a textarea): what
+// it suggests comes next, as Cursor's Tab and Gmail's Smart Compose show
+// it. Tab takes it all (and the next one is asked for at once, already
+// fetched when it can be: Tab, Tab, Tab); → at the end (or Ctrl+→,
+// Option+→ on a Mac) takes a word; a tap on it takes it all (a phone has no
+// Tab). Typing what it says eats it as you go; anything else, moving the
+// cursor or leaving the box drops it. Esc stays Claude's: it never
+// dismisses one (Esc stops Claude), and Enter sends only what you wrote.
+//   ask(text, signal) → {text, id, ahead} | null: what follows text (a
+//     fetch the signal cancels when you type on). Asked once you pause
+//     (wait() ms), only with the cursor at the end and when on() says so;
+//     one asked before for the same text and context (key()) is shown again
+//     at once. ahead: the next one may be fetched while this one shows.
+//   said(id, outcome, took): what became of one: "tab", "word" (taken a
+//     word at a time, at least one), "typed" (written as it said), "gone";
+//     took, how many of its characters ended up in the box.
+//   max(): how tall the box may grow for it.
+// Returns {typed(), refresh(), clear(), shown()}: the box's owner calls
+// typed() after every change to the field (typing, dictation, a draft put
+// back, sending), refresh() when what it's asked with changed (a new reply).
+function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "", wait = () => 150, max = () => Infinity }) {
+  const host = field.parentElement;
+  host.classList.add("ui-ghost-host");
+  const typedEl = h("span", { class: "ui-ghost-typed" });
+  const textEl = h("span", { class: "ui-ghost-text" });
+  const keyEl = h("kbd", { class: "ui-ghost-key" });
+  const box = h("div", { class: "ui-ghost", "aria-hidden": "true", hidden: true }, typedEl, textEl, keyEl);
+  field.after(box);
+  // shown: {id, whole (the box's text with all of it), text (what's left of
+  // it to take), took (taken: Tab, →, a tap), ate (typed as it said), words}.
+  // asking: the fetches under way ({text, ctl}): one for text a later text
+  // goes on from is kept (its answer may still fit), the rest cancelled.
+  let shown = null, timer = 0, asking = [], grew = false, taking = false;
+  const seen = new Map();       // context + text → what it suggested (the latest 40), or its fetch
+  const atEnd = () => field.selectionStart === field.value.length && field.selectionEnd === field.value.length;
+  const here = () => document.activeElement === field;
+  const keyOf = (text) => `${key()}\u0000${text}`;
+  const remember = (k, v) => { seen.delete(k); seen.set(k, v); if (seen.size > 40) seen.delete(seen.keys().next().value); };
+
+  function draw() {
+    field.classList.toggle("ghosting", !!(shown && shown.text));      // (its placeholder hidden under it)
+    if (!shown || !shown.text) {
+      if (!box.hidden) {
+        box.hidden = true;
+        if (grew) { grew = false; uiFitField(field, { max: max() }); }
+      }
+      return;
+    }
+    // Laid exactly over the box's own text: its font, its padding, its width
+    // without a scrollbar.
+    const cs = getComputedStyle(field);
+    for (const p of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing", "wordSpacing",
+                     "textTransform", "textIndent", "tabSize", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+                     "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth"]) box.style[p] = cs[p];
+    box.style.borderStyle = "solid";
+    box.style.borderColor = "transparent";
+    box.style.left = `${field.offsetLeft}px`;
+    box.style.top = `${field.offsetTop}px`;
+    box.style.width = `${field.clientWidth + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth)}px`;
+    typedEl.textContent = field.value;
+    textEl.textContent = shown.text;
+    keyEl.textContent = matchMedia("(pointer: coarse)").matches ? "⇥" : "Tab";
+    box.hidden = false;
+    // The box a line taller for it, when it wraps past its end (up to its most).
+    box.style.height = "auto";
+    const need = box.scrollHeight - parseFloat(cs.borderTopWidth) - parseFloat(cs.borderBottomWidth);
+    if (need > field.clientHeight + 1 && field.clientHeight < max()) {
+      uiFitField(field, { max: max(), extra: Math.max(0, need - field.scrollHeight) });
+      grew = true;
+    }
+    box.style.height = `${field.offsetHeight}px`;
+    box.scrollTop = field.scrollTop;
+  }
+
+  // The one shown is done with: what became of it said, gone from the box.
+  function end(outcome) {
+    const was = shown;
+    shown = null;
+    if (was && was.id) {
+      const got = was.took + was.ate;
+      said(was.id, outcome || (was.words ? "word" : got && !was.text ? "typed" : "gone"), got);
+    }
+    draw();
+  }
+
+  function show(text, s) {
+    if (shown) end();
+    shown = { id: s.id, whole: text + s.text, text: s.text, took: 0, ate: 0, words: 0 };
+    const now = field.value;
+    if (now.length > text.length) { shown.ate = now.length - text.length; shown.text = shown.whole.slice(now.length); }
+    draw();
+    // The one after it, fetched meanwhile: Tab shows it at once.
+    if (s.ahead) fetchFor(shown.whole).catch(() => {});
+  }
+
+  // What follows text: asked for once (the same fetch for both who want it).
+  function fetchFor(text, signal) {
+    const k = keyOf(text);
+    const had = seen.get(k);
+    if (had) return had instanceof Promise ? had : Promise.resolve(had);
+    const ctl = new AbortController();
+    if (signal) signal.addEventListener("abort", () => ctl.abort(), { once: true });
+    const p = Promise.resolve(ask(text, ctl.signal)).then((s) => {
+      if (s) remember(k, s); else seen.delete(k);
+      return s;
+    }, (e) => { seen.delete(k); throw e; });
+    remember(k, p);
+    return p;
+  }
+
+  function stop(keep) {
+    clearTimeout(timer);
+    asking = asking.filter((a) => {
+      if (keep !== undefined && keep.startsWith(a.text) && a.text) return true;
+      a.ctl.abort();
+      return false;
+    });
+  }
+
+  function schedule(soon) {
+    const text = field.value;
+    stop(text);
+    if (!on() || !atEnd() || !here() || text.trimStart().startsWith("/")) return;
+    const had = seen.get(keyOf(text));
+    if (had && !(had instanceof Promise)) return show(text, had);
+    timer = setTimeout(async () => {
+      const a = { text, ctl: new AbortController() };
+      asking.push(a);
+      let s = null;
+      try { s = await fetchFor(text, had ? null : a.ctl.signal); } catch (e) { s = null; }
+      asking = asking.filter((x) => x !== a);
+      if (a.ctl.signal.aborted || !s || !s.text) return;
+      // Written on meanwhile as it says: what's left of it, else nothing.
+      const now = field.value;
+      if (!on() || !atEnd() || !here() || shown || !(text + s.text).startsWith(now) || (text + s.text).length <= now.length) return;
+      show(text, s);
+    }, soon || had || !text ? 0 : wait());
+  }
+
+  // The field changed: typed as it says (it shrinks), else asked again.
+  function typed() {
+    if (taking) return;
+    if (shown) {
+      const now = field.value, before = shown.whole.length - shown.text.length;
+      if (atEnd() && shown.whole.startsWith(now) && now.length >= before) {
+        shown.ate += now.length - before;
+        shown.text = shown.whole.slice(now.length);
+        if (shown.text) return draw();
+        end();
+        return schedule(true);
+      }
+      end();
+    }
+    schedule();
+  }
+
+  // Some or all of it into the box, as if typed (Ctrl+Z takes it back).
+  function take(n) {
+    if (!shown || !shown.text) return;
+    const piece = shown.text.slice(0, n);
+    taking = true;
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    let put = false;
+    try { put = document.execCommand("insertText", false, piece); } catch (e) { put = false; }
+    if (!put || !field.value.endsWith(piece)) field.setRangeText(piece, field.value.length, field.value.length, "end");
+    shown.took += piece.length;
+    shown.text = shown.whole.slice(field.value.length);
+    field.dispatchEvent(new Event("input", { bubbles: true }));     // (its owner's typed(): saved, grown; not ours)
+    taking = false;
+    if (shown && !shown.text) {
+      end(shown.words ? "word" : "tab");
+      schedule(true);         // Tab, Tab, Tab: the next one
+    } else draw();
+  }
+
+  field.addEventListener("keydown", (e) => {
+    if (!shown || !shown.text || e.isComposing || !atEnd()) return;
+    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      take(shown.text.length);
+    } else if (e.key === "ArrowRight" && !e.shiftKey && !e.metaKey && !(e.ctrlKey && e.altKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      shown.words += 1;
+      // A word, with the punctuation before it (", like": not "," alone).
+      const m = shown.text.match(/^\s*[^\p{L}\p{N}\s]*\s*[^\s]*/u);
+      take(m && m[0].trim() ? m[0].length : shown.text.length);
+    }
+  });
+  // A tap on it: taken, the keyboard staying up (no blur on the way).
+  for (const el of [textEl, keyEl]) {
+    el.addEventListener("pointerdown", (e) => { e.preventDefault(); });
+    el.addEventListener("click", (e) => { e.preventDefault(); if (shown) take(shown.text.length); });
+  }
+  field.addEventListener("scroll", () => { box.scrollTop = field.scrollTop; });
+  field.addEventListener("compositionstart", () => { stop(); end(); });
+  field.addEventListener("compositionend", () => schedule());
+  field.addEventListener("focus", () => schedule());
+  field.addEventListener("blur", () => { stop(); end(); });
+  // The cursor moved off the end (a click, the arrows, a selection):
+  // dropped; back at the end (End, a click there): asked again.
+  let wasEnd = true;
+  document.addEventListener("selectionchange", () => {
+    if (!here() || taking) return;
+    const now = atEnd();
+    if (!now && shown) end();
+    else if (now && !wasEnd && !shown) schedule();
+    wasEnd = now;
+  });
+  window.addEventListener("resize", () => { if (shown) draw(); });
+  return {
+    typed,
+    refresh: () => { if (shown) end(); schedule(); },
+    clear: () => { stop(); end(); },
+    shown: () => (shown && shown.text ? shown.text : ""),
+  };
+}
+
 // A tool in a bar: its icon, its name for a screen reader and on hover.
 function uiTool(icon, label, act, { title = "", cls = "", extra = {} } = {}) {
   return h("button", { class: `control ui-tool${cls ? ` ${cls}` : ""}`, type: "button", title: title || label, "aria-label": label,

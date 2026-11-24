@@ -2522,6 +2522,20 @@ function sleepSettings(draw) {
     } }, "Put idle chats to sleep now")];
 }
 
+// Settings → Suggestions: gray text after what you write in a chat's box,
+// what you'd likely write next (Tab takes it: ui.js uiGhost). Each phone and
+// browser its own; off until you turn it on (a trial, for now).
+function suggestionsOn() { return store.get("suggest") === "on"; }
+function suggestSettings(draw) {
+  const on = suggestionsOn();
+  return [h("div", { class: "section", "data-section": "suggestions" }, "Suggestions"),
+    h("div", { class: "seg" }, ...[[true, "On"], [false, "Off"]].map(([value, label]) =>
+      h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => { store.set("suggest", value ? "on" : ""); draw(); } }, label))),
+    h("p", {}, on ? `As you write in a chat, what you'd likely write next shows in gray: ${app.desk ? "Tab takes it, → a word" : "tap it to take it"}. `
+                  + "Haiku writes it from the chat and how you write, with your Anthropic key if you keep one as the secret SUGGEST_ANTHROPIC_KEY (fast, cents a day), else your Claude login (slower)."
+                : "Gray text in a chat's box, as you write, with what you'd likely write next. On this device only.")];
+}
+
 // The chat engine's check (the protocol test) failed on this Claude Code:
 // said once, in Settings, only then.
 function engineSettings() {
@@ -2630,6 +2644,7 @@ async function openSettings({ at = "" } = {}) {
     kids.push(...shareSettings(), ...phoneAppSettings());
     kids.push(...sleepSettings(draw));
     kids.push(...dictationSettings(draw));
+    kids.push(...suggestSettings(draw));
     kids.push(...engineSettings());
     kids.push(...todaySettings());      // today.js
     kids.push(...terminalSettings(draw), ...secretsSettings(), ...automationsSettings());     // terminal.js, secrets.js, automations.js
