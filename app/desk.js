@@ -1485,31 +1485,45 @@ function chime(v) {
 // has it: Omarchy only Ctrl+Alt+Del and Tab, a browser lets a page have it,
 // a Mac too (Option alone types é and ñ, and jumps words), a box and a
 // terminal type nothing with it. The arrows move: ← back, → into the chat
-// lit, ↑ ↓ Chats or Tasks; h l k j too, as vim's and the board's plain keys
-// are. (Not from chat to chat: the board's order changes as they work, so
-// where that would land is anyone's guess.) The rest each do one thing; what else there is to do is in
-// the menu (M), and / (or ?) shows them all. Never Space: Alt+Space (and Right Alt)
-// is Omarchy's dictation, and a desktop can take Ctrl+Alt+Space for it too.
-// Esc is Claude Code's: it stops Claude (chat.js navKey); plain keys only
-// move, or type.
+// lit, ↑ ↓ Chats or Tasks. (Not from chat to chat: the board's order changes
+// as they work, so where that would land is anyone's guess.) The rest each do
+// one thing; what else there is to do is in the menu (M), and / (or ?) shows
+// them all. Never Space: Alt+Space (and Right Alt) is Omarchy's dictation, and
+// a desktop can take Ctrl+Alt+Space for it too.
+//
+// Never a key the input method takes either. Omarchy runs fcitx5 in every box
+// (and a terminal's is a box too), and it has the key before the page does:
+// Ctrl+Alt+H turns its word hints on (a list under all you type, in every app,
+// until pressed again), J for one word, P its preedit; E in its Chinese
+// tables, Shift+U and Shift+C too. So no vim letters here (H J K L were, for
+// a day), and the preview is O. test/input-method-keys.py holds every key
+// below against a real fcitx5; test/input-method-view.py presses them
+// through one, in Chromium and WebKitGTK. Esc is Claude Code's: it stops
+// Claude (chat.js navKey); plain keys only move, or type.
 
 const APP_KEYS = {
   ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
   ArrowUp: () => keysTab(-1), ArrowDown: () => keysTab(1),
-  KeyH: () => keysBack(), KeyL: () => keysInto(),
-  KeyK: () => keysTab(-1), KeyJ: () => keysTab(1),
   Enter: () => boardNew(), NumpadEnter: () => boardNew(),
   KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
   KeyT: () => keysTerminal(),
-  KeyP: () => keysPreview(),
+  KeyO: () => keysPreview(),
   Slash: () => showKeys(),
+};
+
+// What those keys were, said when one reaches the page (outside a box, or
+// with no input method): the key it is now, and nothing done.
+const KEYS_MOVED = {
+  KeyH: ["Back", "←"], KeyL: ["Into the chat", "→"], KeyK: ["Chats", "↑"], KeyJ: ["Tasks", "↓"],
+  KeyP: ["The preview", "O"],
 };
 
 function deskKeys(e) {
   if (!(e.ctrlKey && e.altKey) || e.metaKey) return;
   if (e.getModifierState && e.getModifierState("AltGraph")) return;      // (AltGr, as Windows has it: a character)
   if (TALK_KEYS.includes(e.code)) return talkKey(e);
+  if (KEYS_MOVED[e.code] && !e.shiftKey) return keysMoved(e);
   // (/ wherever a keyboard has it, ? too: Shift+7 on a Spanish one.)
   const act = APP_KEYS[e.code] || (e.key === "/" || e.key === "?" ? APP_KEYS.Slash : null);
   if (!act) return;
@@ -1519,6 +1533,14 @@ function deskKeys(e) {
   closeSheets();
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
   act(e);
+}
+
+function keysMoved(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.repeat) return;
+  const [what, key] = KEYS_MOVED[e.code];
+  toast(`${what} is Ctrl+Alt+${key} now: Ctrl+Alt+${e.code.slice(3)} is left to the input method`);
 }
 
 window.addEventListener("keydown", deskKeys, true);
@@ -1534,7 +1556,7 @@ function openChat() {
   return app.session && app.session.mode === "chat" ? app.session.chat : null;
 }
 
-// Ctrl+Alt+← (H): back. A chat: the board, where you were (the phone's
+// Ctrl+Alt+←: back. A chat: the board, where you were (the phone's
 // terminal: its chat first, as its ‹ does); a board open in Tasks: Tasks;
 // the new chat's box: put away (what you wrote stays).
 function keysBack() {
@@ -1547,7 +1569,7 @@ function keysBack() {
   if (board.composing) return leaveNewChat();
 }
 
-// Ctrl+Alt+→ (L): into the chat lit on the board (back from a chat, the one you
+// Ctrl+Alt+→: into the chat lit on the board (back from a chat, the one you
 // left: it's lit), as Enter on its card.
 function keysInto() {
   if (openId()) return;
@@ -1569,7 +1591,7 @@ function keysTerminal() {
   toTerminal();
 }
 
-// Ctrl+Alt+P: its preview (of several: which).
+// Ctrl+Alt+O: its preview (of several: which). (Not P: fcitx5's.)
 function keysPreview() {
   const s = row(keyedId());
   if (s) uiPreviewGo(s);
@@ -1614,7 +1636,7 @@ function deskKeysUp(e) {
   t.stop();
 }
 
-// Ctrl+Alt+↑ / ↓ (K / J): the board's tab before or after, Chats then Tasks
+// Ctrl+Alt+↑ / ↓: the board's tab before or after, Chats then Tasks
 // (from a chat: the board, on that tab). At the first or the last, it stays.
 function keysTab(n) {
   const at = BOARD_TABS.indexOf(board.tab);
@@ -1831,8 +1853,8 @@ function deskMenu() {
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+↵", act: () => boardNew() },
     open ? { label: "Back to the board", icon: "back", key: "Ctrl+Alt+←", act: () => keysBack() } : null,
-    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+P", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
-      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+P", act: () => uiPreviewGo(s) } : null,
+    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+O", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+O", act: () => uiPreviewGo(s) } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     !open && boardTabNow() === "chats" && !board.query ? { label: todayUI.needsOnly ? "Show every chat" : "Only what needs you", icon: "waiting", act: () => todayNeedsOnly(!todayUI.needsOnly) } : null,
@@ -1923,9 +1945,9 @@ function showKeys() {
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
   sheet(sheetHead("Keys", "Ctrl+Alt does, Esc stops"),
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
-      ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H J K L", "The same, as vim's ← ↓ ↑ →"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
+      ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
+      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],

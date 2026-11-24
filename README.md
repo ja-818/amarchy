@@ -152,13 +152,13 @@ and nothing else; every other key only moves, or types.
 
 | Key | |
 | --- | --- |
-| `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board / into the chat lit |
-| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | Chats / Tasks |
+| `Ctrl+Alt+←` / `→` | Back to the board / into the chat lit |
+| `Ctrl+Alt+↑` / `↓` | Chats / Tasks |
 | `Ctrl+Alt+↵` | New chat |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, and any chat by its name** |
 | `Ctrl+Alt+W` | Complete the chat's mission (close it, with Undo) |
 | `Ctrl+Alt+T` | The chat's terminal (again: back to the chat) |
-| `Ctrl+Alt+P` | Open the chat's preview (of several: pick one) |
+| `Ctrl+Alt+O` | Open the chat's preview (of several: pick one) |
 | `Ctrl+Alt+D` | Dictate into the chat (hold it, or tap it and tap again) |
 | `Ctrl+Alt+/` | Every key |
 | `Esc` | Stop Claude (on its question: no) |
