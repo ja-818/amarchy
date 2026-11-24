@@ -1502,7 +1502,7 @@ const APP_KEYS = {
   KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
   KeyT: () => keysTerminal(),
-  KeyP: () => keysPreview(),
+  KeyO: () => keysPreview(),
   Slash: () => showKeys(),
 };
 
@@ -1526,8 +1526,8 @@ function deskKeys(e) {
 // On Omarchy fcitx5 is in every box (the chat's, a terminal's), and while a
 // box takes text the compositor gives it the keys before the page: it keeps
 // Ctrl+Alt+H (its word hints: a list under all you type, in every app, until
-// pressed again), J (one word's) and P (its preedit), and amarchy would
-// never see them. So as Ctrl and Alt go down together, the box stops taking
+// pressed again) and J (one word's), amarchy's both, and P (its preedit):
+// amarchy would never see them, and they'd turn its things on. So as Ctrl and Alt go down together, the box stops taking
 // text (read-only: it keeps the keys, nothing moves), the input method lets
 // go of the keyboard, and the key that comes next is amarchy's, whatever it
 // is (5 ms after them is enough; a person is slower). A box amarchy puts the
@@ -1626,7 +1626,7 @@ function keysTerminal() {
   toTerminal();
 }
 
-// Ctrl+Alt+P: its preview (of several: which).
+// Ctrl+Alt+O: its preview (of several: which).
 function keysPreview() {
   const s = row(keyedId());
   if (s) uiPreviewGo(s);
@@ -1888,8 +1888,8 @@ function deskMenu() {
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+↵", act: () => boardNew() },
     open ? { label: "Back to the board", icon: "back", key: "Ctrl+Alt+←", act: () => keysBack() } : null,
-    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+P", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
-      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+P", act: () => uiPreviewGo(s) } : null,
+    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+O", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+O", act: () => uiPreviewGo(s) } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     !open && boardTabNow() === "chats" && !board.query ? { label: todayUI.needsOnly ? "Show every chat" : "Only what needs you", icon: "waiting", act: () => todayNeedsOnly(!todayUI.needsOnly) } : null,
@@ -1982,7 +1982,7 @@ function showKeys() {
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
       ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H J K L", "The same, as vim's ← ↓ ↑ →"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
+      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],

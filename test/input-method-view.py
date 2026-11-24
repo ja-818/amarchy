@@ -25,7 +25,7 @@ Here, for each browser:
   entry) and Ctrl+Alt+? amarchy's;
 - and they do amarchy's things from the box: H the board, L the chat again
   (what you wrote still there, the keys in its box), J K Tasks and Chats, /
-  the keys (H J K L in them, P the preview), M the menu; Ctrl+Alt held down
+  the keys (H J K L in them, O the preview), M the menu; Ctrl+Alt held down
   across them, L into a chat and H back out of it (the box it lands in steps
   aside too).
 
@@ -752,7 +752,7 @@ def run(where, name, b, desktop, kb):
     time.sleep(0.3)
     seen = b.js("__seen.slice()") or []
     missing = [c for c, s in sent if s not in seen]
-    check(where, not missing, "from the box, every amarchy key gets to the page" + (f": not {', '.join(missing)}" if missing else f" ({len(sent)}, H J P too)"))
+    check(where, not missing, "from the box, every amarchy key gets to the page" + (f": not {', '.join(missing)}" if missing else f" ({len(sent)}, H and J too)"))
     kb.type(" ok")
     check(where, until(b, f"{box}.value === 'half ok' && !{box}.readOnly", 3000),
           f"fcitx5's hints never came on: what's typed next goes in, the box taking text again ({value()!r})")
@@ -805,7 +805,7 @@ def run(where, name, b, desktop, kb):
     time.sleep(0.3)
     kb.press("Slash")
     sheet = "(document.querySelector('.sheet') || {}).innerText || ''"
-    check(where, until(b, f"/H J K L/.test({sheet}) && /Ctrl\\+Alt\\+P\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, H J K L and P in them")
+    check(where, until(b, f"/H J K L/.test({sheet}) && /Ctrl\\+Alt\\+O\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, H J K L and O in them")
     if SHOTS:
         time.sleep(0.6)      # (the sheet in)
         b.shot(SHOTS / f"{name}-keys.png")
