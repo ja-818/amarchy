@@ -554,31 +554,32 @@ Three rules, the same in every layout:
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
   there's a twin: `↵` a new thing, `W` close; `M` is the menu, `/` the keys).
-  The arrows move.
+  The arrows move, and so do `h` `j` `k` `l`, as vim's and the board's plain
+  keys do: `Ctrl+Alt+H` is back as `←` is.
   Never `Space`: `Alt+Space` and Right Alt are Omarchy's dictation, and a desktop
-  can take `Ctrl+Alt+Space` for it too. Never a key your input method takes
-  either: on Omarchy, fcitx5 has every box (a terminal's too) before the page
-  does, and keeps `Ctrl+Alt+H` (its word hints: a list under all you type, in
-  every app, until you press it again), `J` (a hint for one word) and `P` (its
-  preedit). So no vim letters (the board's plain `h` `j` `k` `l` still move),
-  and the preview is `O`. Pressed where they reach amarchy, the old ones say
-  the key they are now.
+  can take `Ctrl+Alt+Space` for it too.
   `Ctrl+Alt` because nothing else has it: Omarchy only `Ctrl+Alt+Del` and `Tab`,
   a browser lets a page have it, a Mac too (Control+Option: Option alone types
   é and ñ and jumps words), and a box or a terminal types nothing with it.
+  In a box, your input method steps aside for them: on Omarchy, fcitx5 has
+  `Ctrl+Alt+H` (its word hints), `J` and `P` of its own, and gets the keys
+  before the page. While `Ctrl` and `Alt` are down, amarchy's box stops
+  taking text for a moment, so the key is amarchy's; the next key you type
+  goes in as typed, and the input method is back for the rest. `Ctrl+Alt+Shift`
+  stays the input method's (its Unicode entry, `Ctrl+Alt+Shift+U`).
 - **`Esc` stops Claude**, as in Claude Code, and nothing else (see
   [the chat](#in-a-browser-on-your-computer)).
 - **Every other key only moves**, or types.
 
 | Key | |
 | --- | --- |
-| `Ctrl+Alt+←` / `→` | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
-| `Ctrl+Alt+↑` / `↓` | The board's Chats / Tasks (from a chat: the board, on that tab). |
+| `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
+| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The board's Chats / Tasks (from a chat: the board, on that tab). |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
-| `Ctrl+Alt+O` | Open the chat's preview (of several: its dropdown, to pick one). |
+| `Ctrl+Alt+P` | Open the chat's preview (of several: its dropdown, to pick one). |
 | `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
@@ -1093,7 +1094,7 @@ its own ports and log. The button is then **Previews ▾**: a tap opens a dropdo
 under it, each preview by its name with where it stands (**Open**, **Not running:
 start it**, **Starting…**, **Failed: see why**), and a tap on one does what its own
 button would. It turns while one starts and is red when one failed. A tap outside
-or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+O`,
+or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+P`,
 Enter on it) it opens with its first one lit, ↑ ↓ to move, ↵ to open.
 
 The chat's menu has **Preview…** (**Previews…** with several: pick one): its sheet,
@@ -1106,7 +1107,7 @@ and the chat sat idle. **Complete** stops it (every one, with several; its `--st
 command too) and checks it's really gone: its service, and every one of its ports free. If something still
 holds one, the chat stays open and says what: **Ask Claude to stop it**, then
 complete it. A preview served elsewhere (a deploy) is an address only:
-`amarchy preview <url>`. `Ctrl+Alt+O` (on the board: the chat lit's) opens it.
+`amarchy preview <url>`. `Ctrl+Alt+P` (on the board: the chat lit's) opens it.
 
 Each chat's Claude starts knowing where it is: which chat, worktree and branch it's
 on, where the project's main checkout is, and that the terminal runs the project.

@@ -2,25 +2,32 @@
 """amarchy's keys through a real input method, in the real app: Omarchy's
 Chromium and the desktop app's WebKitGTK, on a Wayland desktop with fcitx5.
 
-On Omarchy fcitx5 has every box before the page does, and keeps what it
-binds: Ctrl+Alt+H (its word hints: a list under all you type, in every app,
-until pressed again), J (a hint for one word), P (its preedit). amarchy had
-H J K L moving, as vim's, and P the preview: in the chat's box, H J P never
-reached it and turned fcitx5's things on instead. Here, for each browser:
+On Omarchy fcitx5 has every box before the page does (the compositor gives
+it the keys while a box takes text), and keeps what it binds: Ctrl+Alt+H (its
+word hints: a list under all you type, in every app, until pressed again), J
+(a hint for one word), P (its preedit), all three amarchy's too. amarchy
+keeps them: while Ctrl and Alt are down its box stops taking text, fcitx5
+lets go of the keyboard, and the key is amarchy's (app/desk.js, imKeys).
+Here, for each browser:
 
 - a desktop of its own: sway with no screen (headless), fcitx5 on it with
   Omarchy's config (its D-Bus the test's own), and a keyboard on its seat
   with a real US keymap (a small Wayland client built here: the page gets
-  each key's own KeyboardEvent.code, as from a person's keyboard);
+  each key's own KeyboardEvent.code, as from a person's keyboard; the letter
+  30 ms after Ctrl+Alt, as a person's chord: 5 ms is enough);
 - the app (this checkout's, with demo chats), a chat open, typing in its box:
-  fcitx5 has the box (its input context is focused), what's typed goes in
-  through it, and every Ctrl+Alt key of amarchy's (app/desk.js) gets to the
-  page; H J P don't (fcitx5's, as Julian had them; K L do, and amarchy left
-  them all the same);
-- and they do amarchy's things from the box: ← the board, → the chat again
-  (what you wrote still there), ↓ ↑ Tasks and Chats, / the keys (O the
-  preview, none of the input method's), M the menu; on the board, where no
-  box has the keys, Ctrl+Alt+H says back is ← now.
+  fcitx5 has it, what's typed goes in through it;
+- without the stepping aside (turned off, as it was): H J P never get to the
+  page from the box (fcitx5's: what Julian hit);
+- with it: every Ctrl+Alt key of amarchy's (app/desk.js) gets to the page
+  from the box, fcitx5's hints never come on (what's typed next goes in, the
+  box taking text again), Ctrl+Alt+Shift+U is still fcitx5's (its Unicode
+  entry) and Ctrl+Alt+? amarchy's;
+- and they do amarchy's things from the box: H the board, L the chat again
+  (what you wrote still there, the keys in its box), J K Tasks and Chats, /
+  the keys (H J K L in them, P the preview), M the menu; Ctrl+Alt held down
+  across them, L into a chat and H back out of it (the box it lands in steps
+  aside too).
 
 Browsers: Chromium as Omarchy starts it (its chromium-flags.conf: Wayland),
 Chromium with --enable-wayland-ime, and WebKitGTK 4.1 under GTK 3, what
@@ -124,6 +131,8 @@ static struct zwp_virtual_keyboard_manager_v1 *manager;
 static struct zwp_virtual_keyboard_v1 *kb;
 static struct zwlr_virtual_pointer_manager_v1 *pointers;
 static struct xkb_keymap *keymap;
+static int gap_ms = 30;
+static uint32_t held;
 
 static void global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t v) {
   if (!strcmp(iface, wl_seat_interface.name)) seat = wl_registry_bind(r, name, &wl_seat_interface, 1);
@@ -160,6 +169,7 @@ static int press(xkb_keysym_t sym, int ctrl, int alt, int shift) {
   if (ctrl) { key(37, 1); m |= mask(XKB_MOD_NAME_CTRL); mods(m); }
   if (alt) { key(64, 1); m |= mask(XKB_MOD_NAME_ALT); mods(m); }
   if (shift) { key(50, 1); m |= mask(XKB_MOD_NAME_SHIFT); mods(m); }
+  if (m && gap_ms) { wl_display_roundtrip(display); usleep(gap_ms * 1000); }
   key(code, 1);
   wl_display_roundtrip(display);
   usleep(20000);
@@ -167,6 +177,21 @@ static int press(xkb_keysym_t sym, int ctrl, int alt, int shift) {
   if (shift) { key(50, 0); m &= ~mask(XKB_MOD_NAME_SHIFT); mods(m); }
   if (alt) { key(64, 0); m &= ~mask(XKB_MOD_NAME_ALT); mods(m); }
   if (ctrl) { key(37, 0); mods(0); }
+  if (held) mods(held);
+  wl_display_roundtrip(display);
+  usleep(20000);
+  return 1;
+}
+
+// A key held down, or let go: Control_L, Alt_L and Shift_L keep the modifiers as a keyboard does.
+static int hold(xkb_keysym_t sym, int down) {
+  xkb_keycode_t code; int level;
+  if (!find(sym, &code, &level)) return 0;
+  uint32_t bit = sym == XKB_KEY_Control_L ? mask(XKB_MOD_NAME_CTRL) : sym == XKB_KEY_Alt_L ? mask(XKB_MOD_NAME_ALT)
+               : sym == XKB_KEY_Shift_L ? mask(XKB_MOD_NAME_SHIFT) : 0;
+  if (!bit && down && held && gap_ms) usleep(gap_ms * 1000);
+  key(code, down);
+  if (bit) { held = down ? held | bit : held & ~bit; mods(held); }
   wl_display_roundtrip(display);
   usleep(20000);
   return 1;
@@ -206,7 +231,12 @@ int main(void) {
       while ((w = strtok_r(NULL, " ", &save))) { ctrl |= !strcmp(w, "ctrl"); alt |= !strcmp(w, "alt"); shift |= !strcmp(w, "shift"); }
       xkb_keysym_t sym = name ? xkb_keysym_from_name(name, XKB_KEYSYM_NO_FLAGS) : XKB_KEY_NoSymbol;
       ok = sym != XKB_KEY_NoSymbol && press(sym, ctrl, alt, shift);
-    } else ok = 0;
+    } else if (!strncmp(line, "down ", 5) || !strncmp(line, "up ", 3)) {
+      int down = line[0] == 'd';
+      xkb_keysym_t sym = xkb_keysym_from_name(line + (down ? 5 : 3), XKB_KEYSYM_NO_FLAGS);
+      ok = sym != XKB_KEY_NoSymbol && hold(sym, down);
+    } else if (!strncmp(line, "gap ", 4)) gap_ms = atoi(line + 4);
+    else ok = 0;
     printf(ok ? "ok\n" : "no\n");
     fflush(stdout);
   }
@@ -240,6 +270,12 @@ class Keyboard:
 
     def type(self, text):
         return self.send(f"type {text}")
+
+    def down(self, sym):
+        return self.send(f"down {sym}")
+
+    def up(self, sym):
+        return self.send(f"up {sym}")
 
     def close(self):
         if self.p.poll() is None:
@@ -657,10 +693,6 @@ def until(b, code, ms=8000):
     return False
 
 
-def toast(b):
-    return b.js("[...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | ')") or ""
-
-
 def desk_js(name, opener):
     """A block of app/desk.js: const <name> = <opener>...; its keys, as KeyboardEvent.codes."""
     src = (REPO / "app/desk.js").read_text()
@@ -680,30 +712,37 @@ def run(where, name, b, desktop, kb):
         return
     size = b.js("`${innerWidth}×${innerHeight}, ${matchMedia('(hover: hover) and (pointer: fine)').matches ? 'a mouse' : 'no mouse'}`")
     check(where, b.js("app.desk") is True, f"the wide layout ({size})")
-
-    # On the board, no box has the keys: Ctrl+Alt+H reaches amarchy, and says where back went.
-    b.js("document.activeElement && document.activeElement.blur && document.activeElement.blur(); __seen.length = 0; true")
-    time.sleep(0.2)
-    check(where, desktop.im_has_a_box() == "", "on the board: no box, the input method has none")
-    kb.press("KeyH")
-    check(where, until(b, "[...document.querySelectorAll('.toast')].some((t) => /Back is Ctrl\\+Alt\\+← now/.test(t.innerText))", 3000),
-          f"Ctrl+Alt+H on the board: back is ← now ({toast(b)!r})")
+    check(where, b.js("imAside.on") is True, "on Linux: the input method steps aside for Ctrl+Alt")
+    box = "__chat().input"
+    value = lambda: b.js(f"{box}.value")
 
     # A chat open, typing in its box: the input method has it.
     b.js(f"boardOpen({json.dumps(ID)}); true")
     if not check(where, until(b, "__chat() && __chat().id === 'proj-keys' && __chat().scroller.isConnected && !!document.querySelector('.chat .msg.claude')"), "the chat open"):
         return
     time.sleep(0.6)
-    b.js("__chat().input.focus(); true")
+    b.js(f"{box}.focus(); true")
     time.sleep(0.4)
     im = desktop.im_has_a_box()
     if not check(where, im != "", f"in its box, fcitx5 has the keys ({im or 'no input context focused'})"):
         return
     kb.type("half")
-    check(where, until(b, "__chat().input.value === 'half'", 3000), f"typed through it: {b.js('__chat().input.value')!r}")
+    check(where, until(b, f"{box}.value === 'half'", 3000), f"typed through it: {value()!r}")
 
-    # Every key of amarchy's gets to the page from the box (nothing done with them here).
-    b.js("__swallow = true; __seen.length = 0; true")
+    # Without the stepping aside (as it was): fcitx5 takes H J P in the box; amarchy never sees them.
+    b.js("imAside.on = false; __swallow = true; __seen.length = 0; true")
+    for code in ("KeyH", "KeyJ", "KeyP"):
+        kb.press(code)
+    time.sleep(0.3)
+    seen = b.js("__seen.slice()") or []
+    check(where, not seen, f"without stepping aside, Ctrl+Alt+H J P from the box never get to the page: fcitx5's ({', '.join(seen) or 'none got there'})")
+    for code in ("KeyH", "KeyJ", "KeyP"):      # (again: its hints, its one-word hint and its preedit as they were)
+        kb.press(code)
+    time.sleep(0.2)
+    b.js(f"{box}.value = 'half'; __chat().typed(); imAside.on = true; true")
+
+    # With it: every key of amarchy's gets to the page from the box (nothing done with them here).
+    b.js("__seen.length = 0; true")
     sent = []
     for code in amarchy_codes():
         shift = code == "Slash?"
@@ -713,45 +752,60 @@ def run(where, name, b, desktop, kb):
     time.sleep(0.3)
     seen = b.js("__seen.slice()") or []
     missing = [c for c, s in sent if s not in seen]
-    check(where, not missing, "from the box, every amarchy key gets to the page" + (f": not {', '.join(missing)}" if missing else f" ({len(sent)})"))
+    check(where, not missing, "from the box, every amarchy key gets to the page" + (f": not {', '.join(missing)}" if missing else f" ({len(sent)}, H J P too)"))
+    kb.type(" ok")
+    check(where, until(b, f"{box}.value === 'half ok' && !{box}.readOnly", 3000),
+          f"fcitx5's hints never came on: what's typed next goes in, the box taking text again ({value()!r})")
 
-    # The ones amarchy left: fcitx5's own never get there (the bug, as it was), the rest do.
+    # Ctrl+Alt+Shift stays the input method's: its Unicode entry takes U; amarchy's ? still gets through.
     b.js("__seen.length = 0; true")
-    moved = desk_js("KEYS_MOVED", "{")
-    for code in moved:
-        kb.press(code)
+    kb.press("KeyU", shift=True)
     time.sleep(0.3)
-    seen = b.js("__seen.slice()") or []
-    taken = [c[3:] for c in moved if c not in seen]
-    reach = [c[3:] for c in moved if c in seen]
-    check(where, {"H", "J", "P"} <= set(taken), f"fcitx5 takes Ctrl+Alt+{', '.join(taken) or 'none'} in the box: never amarchy's (it had H J P)"
-          + (f"; {', '.join(reach)} get through, amarchy's no more" if reach else ""))
-    for code in moved:      # (again: its hints, its one-word hint and its preedit as they were)
-        if code[3:] in taken:
-            kb.press(code)
+    check(where, "KeyU+shift" not in (b.js("__seen.slice()") or []), "Ctrl+Alt+Shift+U from the box: fcitx5's (its Unicode entry)")
+    kb.send("key Escape")
     time.sleep(0.2)
-    check(where, b.js("__chat().input.value") == "half", f"and the box as it was ({b.js('__chat().input.value')!r})")
+    b.js(f"{box}.value = 'half'; __chat().typed(); true")
+    kb.press("Slash", shift=True)
+    time.sleep(0.3)
+    check(where, "Slash+shift" in (b.js("__seen.slice()") or []), "and Ctrl+Alt+? amarchy's")
 
     # From the box, they do amarchy's things.
     b.js("__swallow = false; true")
-    kb.press("ArrowLeft")
-    check(where, until(b, "!openId() && !!document.querySelector('.tcard .today-go')", 4000), "Ctrl+Alt+← from the box, typing: the board")
-    kb.press("ArrowRight")
-    check(where, until(b, "openId() === 'proj-keys' && document.activeElement === __chat().input", 4000), "Ctrl+Alt+→: the chat again, the keys in its box")
-    check(where, until(b, "__chat().input.value === 'half'", 2000), f"what you wrote still there ({b.js('__chat().input.value')!r})")
+    kb.press("KeyH")
+    check(where, until(b, "!openId() && !!document.querySelector('.tcard .today-go')", 4000), "Ctrl+Alt+H from the box, typing: the board")
+    kb.press("KeyL")
+    check(where, until(b, f"openId() === 'proj-keys' && document.activeElement === {box}", 4000), "Ctrl+Alt+L: the chat again, the keys in its box")
+    check(where, until(b, f"{box}.value === 'half'", 2000), f"what you wrote still there ({value()!r})")
+    kb.type("!")
+    check(where, until(b, f"{box}.value === 'half!' && !{box}.readOnly", 2000), f"typed: it goes in ({value()!r})")
     check(where, desktop.im_has_a_box() != "", "and the input method on it again")
-    kb.press("ArrowDown")
-    check(where, until(b, "!openId() && board.tab === 'tasks'", 4000), "Ctrl+Alt+↓ from the chat: the board, on Tasks")
-    kb.press("ArrowUp")
-    check(where, until(b, "board.tab === 'chats'", 4000), "Ctrl+Alt+↑: Chats")
+    kb.press("KeyJ")
+    check(where, until(b, "!openId() && board.tab === 'tasks'", 4000), "Ctrl+Alt+J from the chat: the board, on Tasks")
+    kb.press("KeyK")
+    check(where, until(b, "board.tab === 'chats'", 4000), "Ctrl+Alt+K: Chats")
+
+    # Held down across them: L into the chat lit (the keys in its box: it steps aside too), H back out.
+    b.js(f"boardSelectId({json.dumps(ID)}); true")
+    kb.down("Control_L")
+    kb.down("Alt_L")
+    kb.down("l")
+    kb.up("l")
+    into = until(b, f"openId() === 'proj-keys' && document.activeElement === {box}", 4000)
+    time.sleep(0.3)
+    kb.down("h")
+    kb.up("h")
+    check(where, into and until(b, "!openId()", 4000), "Ctrl+Alt held: L into the chat, then H back out (its box stepped aside too)")
+    kb.up("Alt_L")
+    kb.up("Control_L")
+
     b.js(f"boardOpen({json.dumps(ID)}); true")
     until(b, "openId() === 'proj-keys'")
     time.sleep(0.5)
-    b.js("__chat().input.focus(); true")
+    b.js(f"{box}.focus(); true")
     time.sleep(0.3)
     kb.press("Slash")
     sheet = "(document.querySelector('.sheet') || {}).innerText || ''"
-    check(where, until(b, f"/Ctrl\\+Alt\\+O\\b/.test({sheet}) && !/H J K L|Ctrl\\+Alt\\+P\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, O the preview, none of the input method's")
+    check(where, until(b, f"/H J K L/.test({sheet}) && /Ctrl\\+Alt\\+P\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, H J K L and P in them")
     if SHOTS:
         time.sleep(0.6)      # (the sheet in)
         b.shot(SHOTS / f"{name}-keys.png")
@@ -804,7 +858,7 @@ def main():
         url = f"http://127.0.0.1:{proxy.server_address[1]}/"
         init = INIT % json.dumps(demo_chats())
         print(f"fcitx5 with {'Omarchy' + chr(39) + 's config' if om else 'its own defaults'}; amarchy's keys: "
-              + ", ".join(k[0] for k in m.amarchy_keys()[0]))
+              + ", ".join(k[0] for k in m.amarchy_keys()))
         ran = 0
         for key, where, make in browsers:
             if ONLY and ONLY != key:
