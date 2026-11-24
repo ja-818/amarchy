@@ -1069,6 +1069,7 @@ function tableize(el) {
 
 const STREAM_EVENTS = ["session", "conversation", "screen", "live", "gone"];
 let suggestFailedSaid = false;    // a suggestion failed: said once (a toast), not at every pause
+let suggestWarmed = 0;            // when a box's focus last had Haiku made ready
 let streamEarly = null;       // {id, es, got: [[type, event]], keep: {type: listener}, timer}
 
 function chatStreamEarly(id) {
@@ -1477,10 +1478,16 @@ class Chat {
     this.composer = uiComposer({ field: this.input, top: this.trayEl, before: [this.attachBtn],
                                  after: [this.micBtn, this.stopBtn, this.sendBtn] });
     // Gray text after what you write, Tab to take it (Settings → Suggestions).
+    // The box in focus: Haiku made ready for the first one (once a minute at most).
+    this.input.addEventListener("focus", () => {
+      if (!suggestionsOn() || Date.now() - suggestWarmed < 60000) return;
+      suggestWarmed = Date.now();
+      api(chatPath(this.id, "/suggest"), { warm: true }).catch(() => {});
+    });
     this.ghost = uiGhost(this.input, {
       on: () => suggestionsOn() && !this.talk.on() && !this.menu && !this.sending,
       key: () => `${this.suggestContext()}|${this.sentOn || ""}`,
-      wait: () => (this.suggestVia === "claude" ? 400 : 150),
+      wait: () => 250,
       max: () => window.innerHeight * 0.4,
       ask: (text, signal) => this.suggestAsk(text, signal),
       said: (id, outcome, took) => { api(chatPath(this.id, "/suggest"), { id, outcome, took }, { keepalive: true }).catch(() => {}); },
@@ -3684,8 +3691,7 @@ class Chat {
       if (!suggestFailedSaid) { suggestFailedSaid = true; toast(d.error || "No suggestions: they didn't work just now"); }
       return null;
     }
-    this.suggestVia = d.via;
-    return d.text ? { text: d.text, id: d.id, ahead: d.via === "api" } : null;
+    return d.text ? { text: d.text, id: d.id, ahead: true } : null;
   }
 
   // Its height to what's in it (uiFitField: the conversation over it doesn't

@@ -52,9 +52,14 @@ async function run(browser, layout, port) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const asked = [], outcomes = [], sent = [];
+  let warmed = 0;
   let n = 0, slow = 0;
   await page.route("**/api/session/fake-suggest/**", async (route) => {
     const url = route.request().url(), body = JSON.parse(route.request().postData() || "{}");
+    if (url.endsWith("/suggest") && body.warm) {
+      warmed += 1;
+      return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    }
     if (url.endsWith("/suggest") && body.outcome) {
       outcomes.push(body);
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
@@ -65,7 +70,7 @@ async function run(browser, layout, port) {
       const text = SAYS[body.text] || "";
       n += 1;
       return route.fulfill({ status: 200, contentType: "application/json",
-                             body: JSON.stringify({ text, id: `a${String(n).padStart(11, "0")}`, via: "api", ms: 5 }) });
+                             body: JSON.stringify({ text, id: `a${String(n).padStart(11, "0")}`, via: "claude", ms: 5 }) });
     }
     if (url.endsWith("/send")) sent.push(body.text);
     return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
@@ -102,6 +107,7 @@ async function run(browser, layout, port) {
   await sleep(250);
   check(layout, (await ghost()) === "Yes, ship it", `an empty box suggests an answer to the reply ("${await ghost()}")`);
   check(layout, asked[0] === "", "asked with nothing written");
+  check(layout, warmed === 1, `the box's focus has Haiku made ready first (${warmed} asked)`);
   await shot("empty-box");
   await clear();
 

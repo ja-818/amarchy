@@ -2532,7 +2532,7 @@ function suggestSettings(draw) {
     h("div", { class: "seg" }, ...[[true, "On"], [false, "Off"]].map(([value, label]) =>
       h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => { store.set("suggest", value ? "on" : ""); draw(); } }, label))),
     h("p", {}, on ? `As you write in a chat, what you'd likely write next shows in gray: ${app.desk ? "Tab takes it, → a word" : "tap it to take it"}. `
-                  + "Haiku writes it from the chat and how you write, with your Anthropic key if you keep one as the secret SUGGEST_ANTHROPIC_KEY (fast, cents a day), else your Claude login (slower)."
+                  + "Haiku writes it from the chat and how you write, on your Claude subscription: nothing more to pay."
                 : "Gray text in a chat's box, as you write, with what you'd likely write next. On this device only.")];
 }
 
