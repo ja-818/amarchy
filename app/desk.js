@@ -1487,10 +1487,11 @@ function chime(v) {
 // has it: Omarchy only Ctrl+Alt+Del and Tab, a browser lets a page have it,
 // a Mac too (Option alone types é and ñ, and jumps words), a box and a
 // terminal type nothing with it. The arrows move: ← back, → into the chat
-// lit, ↑ ↓ Chats or Tasks; h l k j too, as vim's and the board's plain keys
-// are. (Not from chat to chat: the board's order changes as they work, so
-// where that would land is anyone's guess.) The rest each do one thing; what else there is to do is in
-// the menu (M), and / (or ?) shows them all. Never Space: Alt+Space (and Right Alt)
+// lit, ↑ ↓ Chats or Tasks. H and L are ← and →, as vim's; J and K are Chats
+// and Tasks, left and right on the keyboard as the tabs are on the board. (Not
+// from chat to chat: the board's order changes as they work, so where that
+// would land is anyone's guess.) The rest each do one thing; what else there
+// is to do is in the menu (M), and / (or ?) shows them all. Never Space: Alt+Space (and Right Alt)
 // is Omarchy's dictation, and a desktop can take Ctrl+Alt+Space for it too.
 // Esc is Claude Code's: it stops Claude (chat.js navKey); plain keys only
 // move, or type. In a box, the input method steps aside for them (below).
@@ -1499,7 +1500,7 @@ const APP_KEYS = {
   ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
   ArrowUp: () => keysTab(-1), ArrowDown: () => keysTab(1),
   KeyH: () => keysBack(), KeyL: () => keysInto(),
-  KeyK: () => keysTab(-1), KeyJ: () => keysTab(1),
+  KeyJ: () => keysTab(-1), KeyK: () => keysTab(1),
   Enter: () => boardNew(), NumpadEnter: () => boardNew(),
   KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
@@ -1673,7 +1674,7 @@ function deskKeysUp(e) {
   t.stop();
 }
 
-// Ctrl+Alt+↑ / ↓ (K / J): the board's tab before or after, Chats then Tasks
+// Ctrl+Alt+↑ / ↓ (J / K): the board's tab before or after, Chats then Tasks
 // (from a chat: the board, on that tab). At the first or the last, it stays.
 function keysTab(n) {
   const at = BOARD_TABS.indexOf(board.tab);
@@ -1982,7 +1983,7 @@ function showKeys() {
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
   sheet(sheetHead("Keys", "Ctrl+Alt does, Esc stops"),
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
-      ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H J K L", "The same, as vim's ← ↓ ↑ →"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
+      ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H / L", "← / →, as vim's"], ["Ctrl+Alt+J / K", "Chats / Tasks, as the tabs sit"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
       ["Ctrl+Alt+O", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
