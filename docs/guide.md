@@ -579,7 +579,7 @@ Three rules, the same in every layout:
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
-| `Ctrl+Alt+P` | Open the chat's preview (of several: its dropdown, to pick one). |
+| `Ctrl+Alt+O` | Open the chat's preview (of several: its dropdown, to pick one). |
 | `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
@@ -1098,7 +1098,7 @@ its own ports and log. The button is then **Previews ▾**: a tap opens a dropdo
 under it, each preview by its name with where it stands (**Open**, **Not running:
 start it**, **Starting…**, **Failed: see why**), and a tap on one does what its own
 button would. It turns while one starts and is red when one failed. A tap outside
-or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+P`,
+or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+O`,
 Enter on it) it opens with its first one lit, ↑ ↓ to move, ↵ to open.
 
 The chat's menu has **Preview…** (**Previews…** with several: pick one): its sheet,
@@ -1111,7 +1111,7 @@ and the chat sat idle. **Complete** stops it (every one, with several; its `--st
 command too) and checks it's really gone: its service, and every one of its ports free. If something still
 holds one, the chat stays open and says what: **Ask Claude to stop it**, then
 complete it. A preview served elsewhere (a deploy) is an address only:
-`amarchy preview <url>`. `Ctrl+Alt+P` (on the board: the chat lit's) opens it.
+`amarchy preview <url>`. `Ctrl+Alt+O` (on the board: the chat lit's) opens it.
 
 Each chat's Claude starts knowing where it is: which chat, worktree and branch it's
 on, where the project's main checkout is, and that the terminal runs the project.
