@@ -473,7 +473,7 @@ host's chats without anything else installed.
   the keys on the card you opened (what you were writing stays); so is sending
   it something, the next thing that's your move lit. `Ctrl+Alt+→` goes back
   into it. The browser's Back is the board too, a reload stays on the chat, and
-  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `K` / `J`) are the board's
+  a link to a chat opens it. `Ctrl+Alt+↑` / `↓` (or `J` / `K`) are the board's
   Chats and Tasks (from a chat too), and `Ctrl+Alt+M` opens any chat by its name
   (not the chat before or after: the board's order changes as they work). Dictating, the
   keys go to the box: `Enter` stops it, the next `Enter` sends.
@@ -554,8 +554,9 @@ Three rules, the same in every layout:
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
   there's a twin: `↵` a new thing, `W` close; `M` is the menu, `/` the keys).
-  The arrows move, and so do `h` `j` `k` `l`, as vim's and the board's plain
-  keys do: `Ctrl+Alt+H` is back as `←` is.
+  The arrows move, and so do `h` and `l` (back and in, as vim's `←` and `→`);
+  `j` and `k` are Chats and Tasks, left and right on the keyboard as the tabs
+  are on the board.
   Never `Space`: `Alt+Space` and Right Alt are Omarchy's dictation, and a desktop
   can take `Ctrl+Alt+Space` for it too.
   `Ctrl+Alt` because nothing else has it: Omarchy only `Ctrl+Alt+Del` and `Tab`,
@@ -574,7 +575,7 @@ Three rules, the same in every layout:
 | Key | |
 | --- | --- |
 | `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board (from the phone's terminal: its chat) / into the chat lit on the board. |
-| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | The board's Chats / Tasks (from a chat: the board, on that tab). |
+| `Ctrl+Alt+↑` / `↓` (or `J` / `K`) | The board's Chats / Tasks (from a chat: the board, on that tab). `J` and `K` sit left and right on the keyboard, as the tabs do. |
 | `Ctrl+Alt+↵` | New chat ("What do you want to do?"). |
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |

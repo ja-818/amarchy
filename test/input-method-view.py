@@ -24,8 +24,8 @@ Here, for each browser:
   box taking text again), Ctrl+Alt+Shift+U is still fcitx5's (its Unicode
   entry) and Ctrl+Alt+? amarchy's;
 - and they do amarchy's things from the box: H the board, L the chat again
-  (what you wrote still there, the keys in its box), J K Tasks and Chats, /
-  the keys (H J K L in them, O the preview), M the menu; Ctrl+Alt held down
+  (what you wrote still there, the keys in its box), K J Tasks and Chats, /
+  the keys (H / L and J / K in them, O the preview), M the menu; Ctrl+Alt held down
   across them, L into a chat and H back out of it (the box it lands in steps
   aside too).
 
@@ -782,10 +782,10 @@ def run(where, name, b, desktop, kb):
     kb.type("!")
     check(where, until(b, f"{box}.value === 'half!' && !{box}.readOnly", 2000), f"typed: it goes in ({value()!r})")
     check(where, desktop.im_has_a_box() != "", "and the input method on it again")
-    kb.press("KeyJ")
-    check(where, until(b, "!openId() && board.tab === 'tasks'", 4000), "Ctrl+Alt+J from the chat: the board, on Tasks")
     kb.press("KeyK")
-    check(where, until(b, "board.tab === 'chats'", 4000), "Ctrl+Alt+K: Chats")
+    check(where, until(b, "!openId() && board.tab === 'tasks'", 4000), "Ctrl+Alt+K from the chat: the board, on Tasks")
+    kb.press("KeyJ")
+    check(where, until(b, "board.tab === 'chats'", 4000), "Ctrl+Alt+J: Chats")
 
     # Held down across them: L into the chat lit (the keys in its box: it steps aside too), H back out.
     b.js(f"boardSelectId({json.dumps(ID)}); true")
@@ -808,7 +808,7 @@ def run(where, name, b, desktop, kb):
     time.sleep(0.3)
     kb.press("Slash")
     sheet = "(document.querySelector('.sheet') || {}).innerText || ''"
-    check(where, until(b, f"/H J K L/.test({sheet}) && /Ctrl\\+Alt\\+O\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, H J K L and O in them")
+    check(where, until(b, f"/H \\/ L/.test({sheet}) && /J \\/ K/.test({sheet}) && /Ctrl\\+Alt\\+O\\b/.test({sheet})", 4000), "Ctrl+Alt+/ from the box: the keys, H / L, J / K and O in them")
     if SHOTS:
         time.sleep(0.6)      # (the sheet in)
         b.shot(SHOTS / f"{name}-keys.png")

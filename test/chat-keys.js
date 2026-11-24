@@ -9,7 +9,7 @@
 //   Esc: Claude at work, a stop (from the box, a message, nowhere in it; on
 //   its question too, a no); Claude done, nothing at all (not back, not out
 //   of the box). Ctrl+Alt+← (H) back to the board, → (L) into the chat again,
-//   ↑ ↓ (K J) the board's Chats and Tasks, M the menu (a chat by its name as you
+//   ↑ ↓ (J K) the board's Chats and Tasks, M the menu (a chat by its name as you
 //   type), T its terminal and back, / the keys. Plain letters on the board do
 //   nothing but move.
 //
@@ -247,11 +247,11 @@ async function run(browser, layout, port) {
   await p.keyboard.press("Control+Alt+ArrowUp");
   check(as, await until(p, () => board.tab === "chats"), `Ctrl+Alt+↑: Chats (${await tabNow()})`);
 
-  // h j k l, as the arrows: J Tasks, K Chats, L into the chat lit, H back; from the box, typing.
-  await p.keyboard.press("Control+Alt+KeyJ");
-  check(as, await until(p, () => board.tab === "tasks"), "Ctrl+Alt+J: Tasks");
+  // J and K, as the tabs sit: K Tasks, J Chats; L into the chat lit, H back; from the box, typing.
   await p.keyboard.press("Control+Alt+KeyK");
-  check(as, await until(p, () => board.tab === "chats"), "Ctrl+Alt+K: Chats");
+  check(as, await until(p, () => board.tab === "tasks"), "Ctrl+Alt+K: Tasks");
+  await p.keyboard.press("Control+Alt+KeyJ");
+  check(as, await until(p, () => board.tab === "chats"), "Ctrl+Alt+J: Chats");
   await p.evaluate((id) => boardSelectId(id), ID);
   await p.keyboard.press("Control+Alt+KeyL");
   check(as, await opened(p, ID), "Ctrl+Alt+L: into the chat lit");
@@ -301,7 +301,7 @@ async function run(browser, layout, port) {
 
   // Ctrl+Alt+/: the keys, the same on both.
   await p.keyboard.press("Control+Alt+Slash");
-  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H J K L/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, h j k l in them");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H \/ L/.test(document.querySelector(".sheet").innerText) && /J \/ K[\s\S]*Chats \/ Tasks/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, H / L and J / K in them");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

@@ -153,7 +153,7 @@ and nothing else; every other key only moves, or types.
 | Key | |
 | --- | --- |
 | `Ctrl+Alt+←` / `→` (or `H` / `L`) | Back to the board / into the chat lit |
-| `Ctrl+Alt+↑` / `↓` (or `K` / `J`) | Chats / Tasks |
+| `Ctrl+Alt+↑` / `↓` (or `J` / `K`) | Chats / Tasks |
 | `Ctrl+Alt+↵` | New chat |
 | `Ctrl+Alt+M` | **The amarchy menu: everything else, and any chat by its name** |
 | `Ctrl+Alt+W` | Complete the chat's mission (close it, with Undo) |
