@@ -894,6 +894,8 @@ def main():
             print("  (the journal can't be read here: crashes not checked)")
         else:
             check("the test", not hits, "nothing it started crashed (Omarchy would toast it)" + (f": {', '.join(hits)}" if hits else ""))
+            if crashes.others:
+                print(f"  (meanwhile, not the test's: {len(crashes.others)} crashed: {', '.join(sorted(set(crashes.others)))})")
     finally:
         if proxy:
             proxy.shutdown()

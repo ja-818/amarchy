@@ -108,6 +108,7 @@ class Crashes:
 
     def __init__(self, marker):
         self.marker, self.since = str(marker), int(time.time()) - 1
+        self.others = []      # (what else crashed meanwhile: not the test's, said so you can tell)
 
     def found(self):
         time.sleep(2)      # (systemd-coredump writes it down after the process is gone)
@@ -115,7 +116,7 @@ class Crashes:
                            capture_output=True, text=True)
         if r.returncode != 0:
             return None
-        hits = []
+        hits, self.others = [], []
         for line in r.stdout.splitlines():
             try:
                 e = json.loads(line)
@@ -124,8 +125,8 @@ class Crashes:
             env = e.get("COREDUMP_ENVIRON") or ""
             if isinstance(env, list):      # (binary fields come as bytes)
                 env = bytes(env).decode(errors="replace")
-            if self.marker in env:
-                hits.append(f"{e.get('COREDUMP_EXE') or e.get('COREDUMP_COMM')} ({e.get('COREDUMP_SIGNAL_NAME')})")
+            what = f"{e.get('COREDUMP_EXE') or e.get('COREDUMP_COMM')} ({e.get('COREDUMP_SIGNAL_NAME')})"
+            (hits if self.marker in env else self.others).append(what)
         return hits
 
 
@@ -441,6 +442,8 @@ def main():
             note("the journal can't be read here: crashes not checked")
         else:
             check("nothing it started crashed (Omarchy would toast it)", not hits, ", ".join(hits))
+            if crashes.others:
+                note(f"meanwhile, not the test's: {len(crashes.others)} crashed: {', '.join(sorted(set(crashes.others)))}")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     if failed:
