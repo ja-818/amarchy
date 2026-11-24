@@ -16,6 +16,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const { loadPlaywright, freePort, startServer, findChrome, page, until, sleep, check, failures, T, NOW } = require("./today-view.js");
 
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "machines-look-"));
@@ -50,7 +51,7 @@ const LAYOUTS = { phone: { viewport: { width: 390, height: 844 } }, wide: { view
 (async () => {
   const pw = loadPlaywright();
   const port = await freePort();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "machines-look-home-"));
+  const home = homes.home("machines-look");
   const server = await startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
   try {

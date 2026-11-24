@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = Path(os.environ.get("OMARCHY_SRC", "/tmp/omarchy-src/omarchy"))
@@ -58,7 +59,7 @@ def main():
     if not lua or not (SRC / "default/hypr/helpers.lua").is_file():
         print(f"skipped: needs lua and Omarchy's source in {SRC}")
         return 0
-    base = Path(tempfile.mkdtemp(prefix="omarchy-hypr-"))
+    base = Path(homes.home("omarchy-hypr"))
     try:
         harness = base / "harness.lua"
         harness.write_text(HARNESS)
@@ -95,7 +96,7 @@ def main():
         out = run("old")
         check("an Omarchy without transparent_window: the key only", out == ["bind SUPER + D"], out)
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        homes.clean_up()      # its home goes now (not only at the exit)
     if failed:
         print(f"{len(failed)} failed")
         return 1

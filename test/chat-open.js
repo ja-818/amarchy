@@ -33,6 +33,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const { loadPlaywright, freePort, startServer, findChrome, until, sleep, check, failures, T } = require("./today-view.js");
 
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "chat-open-"));
@@ -285,7 +286,7 @@ async function run(browser, layout, engine, port) {
 
 (async () => {
   const pw = loadPlaywright();
-  const home_ = fs.mkdtempSync(path.join(os.tmpdir(), "chat-open-home-"));
+  const home_ = homes.home("chat-open");
   const port = await freePort();
   const srv = await startServer(port, home_);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
@@ -300,7 +301,6 @@ async function run(browser, layout, engine, port) {
   } finally {
     await browser.close();
     srv.kill();
-    fs.rmSync(home_, { recursive: true, force: true });
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : `\nAll passed. Screenshots: ${SHOTS}`);
   process.exit(failures.length ? 1 : 0);

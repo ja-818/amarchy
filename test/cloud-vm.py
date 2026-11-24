@@ -20,6 +20,7 @@
 
 import argparse, base64, gzip, http.server, json, os, shutil, socket, subprocess, sys, tempfile, threading, time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin/amarchy"
@@ -57,7 +58,7 @@ image = Path(opts.image)
 if not image.exists():
     sys.exit(f"no image at {image}: fetch {IMAGE_URL} there (and check it against its SHA512SUMS)")
 
-BASE = Path(tempfile.mkdtemp(prefix="cloud-vm-", dir=TMP))
+BASE = Path(homes.home("cloud-vm", TMP))
 PORT = free_port()
 REPORT_TOKEN = base64.b64encode(os.urandom(18)).decode().replace("+", "-").replace("/", "_")
 TS_KEY = f"tskey-auth-kVM-{os.urandom(8).hex()}"      # (this run's own: found nowhere else)
@@ -294,8 +295,8 @@ finally:
         vm.kill()
     server.shutdown()
     print(f"\nconsole: {BASE / 'console.log'}" if failed or opts.keep else "")
-    if not failed and not opts.keep:
-        shutil.rmtree(BASE, ignore_errors=True)
+    if failed or opts.keep:
+        homes.keep(BASE)      # to look at
 
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed: ' + '; '.join(failed)}")
 sys.exit(1 if failed else 0)

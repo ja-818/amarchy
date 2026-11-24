@@ -21,14 +21,15 @@ import time
 import urllib.request
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="desktop-notices-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("desktop-notices")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY"):
     os.environ.pop(k, None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 
 failed = []
 
@@ -172,8 +173,6 @@ sent, t = send_test()
 check(t and "sound" not in t, "chimes off: the test rings none")
 
 server.shutdown()
-import shutil  # noqa: E402
-shutil.rmtree(home, ignore_errors=True)
 if failed:
     print(f"{len(failed)} failed")
     sys.exit(1)

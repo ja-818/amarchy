@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -48,8 +49,11 @@ class Shell:
                 break
             time.sleep(0.1)
         # A session bus of its own (the single instance is found on it), so
-        # a second start (again()) reaches this one and nothing else.
-        self.bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"],
+        # a second start (again()) reaches this one and nothing else. Its
+        # socket in the test's folder (shell-test.py's tempfile.tempdir),
+        # gone with it even when the test is killed.
+        self.bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1",
+                                     f"--address=unix:tmpdir={tempfile.gettempdir()}"],
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                                     env={**os.environ, "DISPLAY": f":{self.display}"})
         address = self.bus.stdout.readline().strip()

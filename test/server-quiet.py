@@ -11,7 +11,8 @@
 import importlib.machinery, importlib.util, json, os, socket, subprocess, sys, tempfile, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="server-quiet-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("server-quiet")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config",
                   XDG_RUNTIME_DIR=home + "/run")
 os.makedirs(home + "/run")

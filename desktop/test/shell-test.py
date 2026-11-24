@@ -33,15 +33,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shell import BIN, ROOT, Shell, need  # noqa: E402
+sys.path.insert(0, str(ROOT / "test")); import homes  # noqa: E402
 
-# Its homes (each with a web view's data) in one folder, gone at the end:
-# under ~/.cache unless TMPDIR says (a server's /tmp can be small).
+# Its homes (each with a web view's data) in one folder, gone with it however
+# it ends (test/homes.py; KEEP=1 keeps it): under ~/.cache unless TMPDIR says
+# (a server's /tmp can be small). Its screenshots beside it, kept.
 if not os.environ.get("TMPDIR"):
     tempfile.tempdir = str(Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "amarchy-tests")
     os.makedirs(tempfile.tempdir, exist_ok=True)
-tempfile.tempdir = tempfile.mkdtemp(prefix="desktop-shell-test-")
-SHOTS = Path(os.environ.get("SHOTS") or tempfile.mkdtemp(prefix="shots-"))
+SHOTS = Path(os.environ.get("SHOTS") or tempfile.mkdtemp(prefix="desktop-shots-"))
 SHOTS.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = homes.temp_dir("desktop-shell-test-")
+if os.environ.get("KEEP"):
+    homes.keep(tempfile.tempdir)
 failed = []
 
 
@@ -1241,14 +1245,6 @@ def main():
         remote.stop()
 
     print(f"screenshots: {SHOTS}")
-    if not os.environ.get("KEEP"):
-        for d in Path(tempfile.tempdir).iterdir():
-            if d != SHOTS:
-                shutil.rmtree(d, ignore_errors=True)
-        try:
-            os.rmdir(tempfile.tempdir)      # unless the screenshots are in it
-        except OSError:
-            pass
     if failed:
         print(f"{len(failed)} failed")
         sys.exit(1)

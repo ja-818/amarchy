@@ -14,7 +14,8 @@ import importlib.machinery, importlib.util, io, json, os, shutil, sys, tempfile,
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="agent-chat-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("agent-chat")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY"):
     os.environ.pop(k, None)
@@ -176,6 +177,5 @@ run("assistant", "off")
 check([a[2] for a in started] == ["proj-a"], "no assistant: the one it was")
 run("assistant", "jaken-jaken")
 
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")
 sys.exit(1 if failed else 0)

@@ -23,7 +23,8 @@
 import contextlib, importlib.machinery, importlib.util, io, json, os, socket, sys, tempfile, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="preview-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("preview")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
@@ -168,7 +169,7 @@ if not shutil.which("systemd-run") or subprocess.run(["systemctl", "--user", "is
     print("  (no systemd user manager here: the service checks are skipped)")
 else:
     sid = f"t{os.getpid()}-prev"
-    work = tempfile.mkdtemp(prefix="preview-work-")
+    work = homes.temp_dir("preview-work-")
     am.save_session({"id": sid, "repo": "p", "name": "prev", "branch": "prev", "base": "main", "path": work})
     first = lambda: am.previews(am.session(sid))[0]
     port, hmr = free_port(), free_port()
@@ -312,7 +313,7 @@ else:
         # ---- over HTTPS: tailscale serve in front of it, its server on 127.0.0.1
         am._tailnet = "box.tail1234.ts.net"
         tid = f"t{os.getpid()}-tls"
-        twork = tempfile.mkdtemp(prefix="preview-tls-")
+        twork = homes.temp_dir("preview-tls-")
         am.save_session({"id": tid, "repo": "p", "name": "tls", "branch": "tls", "base": "main", "path": twork})
         tp, thmr = free_port(), free_port()
         tserve = f"python3 -m http.server {tp} --bind 127.0.0.1"

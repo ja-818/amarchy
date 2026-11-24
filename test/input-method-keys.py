@@ -53,6 +53,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 failed = []
@@ -416,7 +417,7 @@ def main():
         return 2
     keys = amarchy_keys()
     print("amarchy's keys: " + ", ".join(k[0] for k in keys))
-    work = Path(tempfile.mkdtemp(prefix="input-method-keys-", dir=os.environ.get("TMPDIR") or None))
+    work = Path(homes.temp_dir("input-method-keys-"))
     crashes = Crashes(work)
     # (Yours first, then Omarchy's: the ones that matter, before fcitx5's bare defaults.)
     configs = []
@@ -445,7 +446,7 @@ def main():
             if crashes.others:
                 note(f"meanwhile, not the test's: {len(crashes.others)} crashed: {', '.join(sorted(set(crashes.others)))}")
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        homes.clean_up()      # its folder goes now (not only at the exit)
     if failed:
         print(f"{len(failed)} failed:\n  " + "\n  ".join(failed))
         return 1

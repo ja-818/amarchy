@@ -45,7 +45,11 @@ ROOT = Path(__file__).resolve().parents[2]
 flags = [a for a in sys.argv[1:] if a.startswith("--")]
 pos = [a for a in sys.argv[1:] if not a.startswith("--")]
 port = int(pos[0])
-home = pos[1] if len(pos) > 1 else tempfile.mkdtemp(prefix="amarchy-desktop-test-")
+if len(pos) > 1:
+    home = pos[1]
+else:       # run by hand: a home of its own, gone when it stops (test/homes.py)
+    sys.path.insert(0, str(ROOT / "test")); import homes
+    home = homes.home("desktop-server")
 LOCAL, CHATS = "--local" in flags, "--no-chats" not in flags
 PREVIEW = "--preview" in flags
 PREVIEW_URL, DOCS_URL = "https://preview.example:4631/", "https://docs.example/page"
@@ -61,7 +65,7 @@ for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY", "TMUX"):
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(ROOT / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-sys.path.insert(0, str(ROOT / "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+sys.path.insert(0, str(ROOT / "test")); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 am.app_key()
 am.migrate()
 

@@ -5,10 +5,11 @@
 #
 #   python3 test/same-name.py       exits 0 when every check passed
 
-import importlib.machinery, importlib.util, json, os, tempfile, time
+import importlib.machinery, importlib.util, json, os, sys, tempfile, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="same-name-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("same-name")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))

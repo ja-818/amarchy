@@ -25,7 +25,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 port = int(sys.argv[1])
-home = sys.argv[2] if len(sys.argv) > 2 else tempfile.mkdtemp(prefix="amarchy-ios-test-")
+if len(sys.argv) > 2:
+    home = sys.argv[2]
+else:       # run by hand: a home of its own, gone when it stops (test/homes.py)
+    sys.path.insert(0, str(ROOT / "test")); import homes
+    home = homes.home("ios-server")
 os.makedirs(home, exist_ok=True)
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/.local/state", XDG_CONFIG_HOME=home + "/.config",
                   AMARCHY_WORK=home + "/Work", TMUX_TMPDIR=home + "/tmux")

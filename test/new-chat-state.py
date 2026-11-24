@@ -10,7 +10,8 @@
 import importlib.machinery, importlib.util, io, json, os, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="new-chat-state-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("new-chat-state")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 entry = str(Path(__file__).resolve().parent.parent / "bin/amarchy")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", entry)

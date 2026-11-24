@@ -14,6 +14,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const { loadPlaywright, freePort, startServer, findChrome, page, ready, until, sleep, check, failures } = require("./today-view.js");
 
 const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15";
@@ -125,7 +126,7 @@ async function run(browser, port, mac) {
 
 (async () => {
   const pw = loadPlaywright();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "links-out-home-"));
+  const home = homes.home("links-out");
   const port = await freePort();
   const server = await startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
@@ -137,7 +138,6 @@ async function run(browser, port, mac) {
   } finally {
     await browser.close();
     server.kill();
-    fs.rmSync(home, { recursive: true, force: true });
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : "\nAll passed.");
   process.exit(failures.length ? 1 : 0);

@@ -16,6 +16,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const { loadPlaywright, freePort, startServer, findChrome, page, ready, until, sleep, check, failures } = require("./today-view.js");
 
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "push-notice-"));
@@ -128,7 +129,7 @@ async function run(browser, port, home, layout, log) {
 
 (async () => {
   const pw = loadPlaywright();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "push-notice-home-"));
+  const home = homes.home("push-notice");
   const port = await freePort();
   const server = await startServer(port, home);
   let out = "";
@@ -143,7 +144,6 @@ async function run(browser, port, home, layout, log) {
   } finally {
     await browser.close();
     server.kill();
-    fs.rmSync(home, { recursive: true, force: true });
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : `\nAll passed. Screenshots: ${SHOTS}`);
   process.exit(failures.length ? 1 : 0);

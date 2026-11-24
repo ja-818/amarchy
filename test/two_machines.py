@@ -8,7 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = str(ROOT / "bin/amarchy")
-BASE = Path(tempfile.mkdtemp(prefix="machines-"))
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
+BASE = Path(homes.home("machines"))
 os.chdir(BASE)     # what the servers and their fakes start from: never the checkout (the fake claude's argv.txt)
 USER = "tester@example.com"
 

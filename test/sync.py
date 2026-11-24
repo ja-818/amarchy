@@ -246,7 +246,6 @@ finally:
             log = (m.home / "server.log")
             if log.exists():
                 print(f"--- {m.name}'s log\n" + log.read_text()[-2500:])
-    shutil.rmtree(BASE, ignore_errors=True)
 
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed'}")
 sys.exit(1 if failed else 0)

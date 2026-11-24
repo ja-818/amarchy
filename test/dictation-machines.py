@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from two_machines import *      # Machine, until, check, failed, the WebSockets' helpers
+import homes      # (test/homes.py: BASE gone with it, unless kept)
 
 HOST = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amarchy/dictation"
 MODEL = HOST / "parakeet-tdt-0.6b-v3-Q8_0.gguf"
@@ -234,8 +235,8 @@ try:
 finally:
     for m in (alpha, beta):
         m.stop()
-    if not failed:
-        shutil.rmtree(BASE, ignore_errors=True)
+    if failed:
+        homes.keep(BASE)      # to look at
 
 print(f"\n{'FAILED: ' + ', '.join(failed) if failed else 'all passed'}")
 sys.exit(1 if failed else 0)

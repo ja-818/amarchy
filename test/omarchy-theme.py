@@ -42,6 +42,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 BIN = str(REPO / "bin/amarchy")
@@ -506,13 +507,13 @@ def main():
     if not (SRC / "bin/omarchy-theme-set-templates").is_file():
         print(f"skip: no Omarchy checkout in {SRC} (OMARCHY_SRC=)")
         return 0
-    base = tempfile.mkdtemp(prefix="omarchy-theme-")
+    base = homes.home("omarchy-theme")
     try:
         desk = local_test(base)
         peer_test(base, desk)
         sync_test(base)
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        homes.clean_up()      # its home goes now (not only at the exit)
     print(f"\n{len(failed)} failed" if failed else "\nall ok")
     return 1 if failed else 0
 

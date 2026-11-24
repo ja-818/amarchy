@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "test")); import homes as test_homes  # noqa: E402  (test/homes.py: its homes gone with it, however it ends)
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "amarchy-tests"
 BUILD = CACHE / "desktop-install-build"      # the build, kept between runs (its cargo target)
 failed = []
@@ -116,7 +117,7 @@ sys.exit(2)
 def sandbox(state, cargo=True):
     """A home, and a PATH whose pacman, sudo, mise and pkg-config are made
     up (and, cargo=False, no cargo but mise's)."""
-    home = Path(tempfile.mkdtemp(prefix="desktop-install-"))
+    home = Path(test_homes.home("desktop-install"))
     fake = home / "fakebin"
     fake.mkdir()
     for name, text in (("pacman", FAKE_PACMAN), ("sudo", FAKE_SUDO), ("pkg-config", FAKE_PKG_CONFIG), ("mise", FAKE_MISE)):
@@ -241,9 +242,9 @@ def main():
         check(r.returncode == 0 and r.stdout.endswith("done\n") and said in line and line.startswith("BOLD:") == bold,
               f"\"The desktop app: {said[:40]}…\"{' in bold' if bold else ''}")
 
-    if not os.environ.get("KEEP"):
+    if os.environ.get("KEEP"):
         for h in homes:
-            shutil.rmtree(h, ignore_errors=True)
+            test_homes.keep(h)
     if failed:
         print(f"{len(failed)} failed")
         sys.exit(1)

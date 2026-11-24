@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 failed = []
@@ -163,7 +164,7 @@ def own_node(base):
 
 
 def main():
-    base = tempfile.mkdtemp(prefix="omarchy-tailscale-")
+    base = homes.home("omarchy-tailscale")
     try:
         home, env = setup(Path(base) / "a")
         scenario(home)
@@ -231,7 +232,7 @@ def main():
             check(f"not installed{' (' + extra[0] + ')' if extra else ''}: {want}", code == 1 and want in out, out)
         own_node(Path(base) / "own")
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        homes.clean_up()      # its home goes now (not only at the exit)
     print(f"\n{len(failed)} failed" if failed else "\nall ok")
     return 1 if failed else 0
 

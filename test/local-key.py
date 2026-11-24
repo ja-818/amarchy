@@ -14,13 +14,14 @@
 import http.client, importlib.machinery, importlib.util, json, os, shutil, socket, stat, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="local-key-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("local-key")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/work")
 entry = str(Path(__file__).resolve().parent.parent / "bin/amarchy")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", entry)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 
 failed = []
 def check(ok, what):
@@ -170,6 +171,5 @@ code, h, _ = ask("GET", "/", ts, host=ADDRESS)
 check(f"wss://{ADDRESS}" in h.get("Content-Security-Policy", ""), "its page's WebSockets on wss:// as before")
 
 server.shutdown()
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed'}")
 sys.exit(1 if failed else 0)

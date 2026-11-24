@@ -16,7 +16,8 @@ import importlib.machinery, importlib.util, io, json, os, shutil, subprocess, sy
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="agents-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("agents")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
@@ -187,6 +188,5 @@ check(rc == 1 and "40 characters" in err, "a name too long: refused")
 rc, _, err = run("new", "inbox", "--agent")
 check(rc == 1, "--agent with no name: refused")
 
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")
 sys.exit(1 if failed else 0)

@@ -8,7 +8,8 @@
 import datetime, importlib.machinery, importlib.util, json, os, sys, tempfile
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="today-parse-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("today-parse")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
@@ -128,6 +129,4 @@ check(am.loop_tell(ecos["key"], "ask") and am.loop_tell("nope", "session") and a
 check(am.loops_sent()[adidas["key"]]["action"] == "session", "the loop shows it was sent")
 
 print(f"\n{len(failed)} failed: {failed}" if failed else "\nAll passed.")
-import shutil
-shutil.rmtree(home, ignore_errors=True)
 sys.exit(1 if failed else 0)

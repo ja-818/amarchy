@@ -18,7 +18,8 @@ import importlib.machinery, importlib.util, io, json, os, shutil, subprocess, sy
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="agent-identity-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("agent-identity")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 for k in ("AMARCHY_SESSION", "AMARCHY_SENT_BY"):
     os.environ.pop(k, None)
@@ -272,6 +273,5 @@ check(rc == 1 and "no machine nowhere" in err, "a machine that isn't paired: sai
 rc, out, _ = run("agents", f"{me}:calcifer-calcifer", "--emoji", "🔥")
 check(rc == 0 and out.startswith("calcifer-calcifer\t🔥 Calcifer"), "this machine's own name: here")
 
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")
 sys.exit(1 if failed else 0)

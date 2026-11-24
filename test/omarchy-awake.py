@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 failed = []
@@ -208,12 +209,12 @@ def real_test(base):
 
 
 def main():
-    base = tempfile.mkdtemp(prefix="omarchy-awake-")
+    base = homes.home("omarchy-awake")
     try:
         fake_test(base)
         real_test(base)
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        homes.clean_up()      # its home goes now (not only at the exit)
     print(f"\n{len(failed)} failed" if failed else "\nall ok")
     return 1 if failed else 0
 

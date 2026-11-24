@@ -10,7 +10,8 @@
 import importlib.machinery, importlib.util, json, os, sys, tempfile
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="machine-identity-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("machine-identity")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 for k in [k for k in os.environ if k.startswith("AMARCHY_HOST_")]:
     del os.environ[k]

@@ -9,7 +9,8 @@
 import importlib.machinery, importlib.util, json, os, sys, tempfile
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="push-vectors-", dir=os.environ.get("TMPDIR"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "test")); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("push-vectors")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 os.environ.pop("AMARCHY_SESSION", None)
 root = Path(__file__).resolve().parent.parent.parent

@@ -18,7 +18,8 @@ import datetime, importlib.machinery, importlib.util, io, json, os, re, shutil, 
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="agent-tasks-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("agent-tasks")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
@@ -262,6 +263,5 @@ check(len(pushed) == 1, "without --notify: no notification")
 # Written in one go: the file is always whole JSON.
 check(all(isinstance(json.loads(f.read_text()), dict) for f in am.BOARDS.glob("*.json")), "the files: whole")
 
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed")
 sys.exit(1 if failed else 0)

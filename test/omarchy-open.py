@@ -23,6 +23,7 @@ import tempfile
 import time
 import urllib.parse
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: a kill ends it as an exit does, its folders gone)
 
 REPO = Path(__file__).resolve().parent.parent
 failed = []
