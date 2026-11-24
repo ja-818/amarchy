@@ -38,7 +38,7 @@ const LEGACY = new Set([
   "agent-chat-view", "agent-tasks", "agents-view", "automations", "boards-view", "chat-keys", "chat-open",
   "chat-scroll", "cloud-view", "compare", "desktop", "ghostty", "image-names", "links-out", "local-key-view",
   "machines-look", "machines-view", "mic-first-tap", "mic-release", "mic-why", "move-view", "new-chat-project",
-  "new-chat-share", "open-new-chat", "phone-app-view", "preview-view", "push-notice", "reply-view", "snappy",
+  "new-chat-share", "open-new-chat", "phone-app-view", "preview-view", "project-filter", "push-notice", "reply-view", "snappy",
   "spinner-view", "still-view", "suggest-view", "tailscale", "terminal-view", "today-view", "tour-view",
   "whole-view", "xpost-view",
 ]);

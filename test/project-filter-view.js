@@ -22,6 +22,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const tv = require("./today-view.js");
 const { check, failures, until, sleep, ready, CHATS, T } = tv;
 
@@ -245,7 +246,7 @@ async function run(browser, port, layout) {
 
 (async () => {
   const pw = tv.loadPlaywright();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "project-filter-home-"));
+  const home = homes.home("project-filter");
   const port = await tv.freePort();
   const server = await tv.startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: tv.findChrome() });
@@ -258,7 +259,6 @@ async function run(browser, port, layout) {
   } finally {
     await browser.close();
     server.kill();
-    fs.rmSync(home, { recursive: true, force: true });
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : `\nAll passed. Screenshots: ${SHOTS}`);
   process.exit(failures.length ? 1 : 0);
