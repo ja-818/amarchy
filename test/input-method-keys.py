@@ -158,13 +158,14 @@ class Fcitx:
         else:
             raise RuntimeError("fcitx5 never answered on its D-Bus")
 
-    def call(self, path, iface, method, args, rtype):
+    def call(self, path, iface, method, args, rtype, timeout=20):
         GLib = self.GLib
-        v = self.bus.call_sync("org.fcitx.Fcitx5", path, iface, method, args, GLib.VariantType(rtype) if rtype else None, 0, 5000, None)
+        v = self.bus.call_sync("org.fcitx.Fcitx5", path, iface, method, args, GLib.VariantType(rtype) if rtype else None, 0,
+                               int(timeout * 1000), None)
         return v.unpack() if v is not None else None
 
-    def controller(self, method, args=None, rtype=None):
-        return self.call("/controller", "org.fcitx.Fcitx.Controller1", method, args, rtype)
+    def controller(self, method, args=None, rtype=None, timeout=20):
+        return self.call("/controller", "org.fcitx.Fcitx.Controller1", method, args, rtype, timeout)
 
     def version(self):
         out = subprocess.run([str(self.exe), "--version"], env=self.env, capture_output=True, text=True).stdout.strip()
@@ -193,8 +194,17 @@ class Fcitx:
         ic = Context(self, path)
         ic.do("SetCapability", V("(t)", (0,)))
         ic.do("FocusIn")
-        if method:
-            self.controller("SetCurrentIM", V("(s)", (method,)))
+        if method and self.current() != method:
+            # An engine loads its tables the first time it's switched to: a big one
+            # (cangjie-large, wbx) takes a while on a slow machine. Waited for.
+            try:
+                self.controller("SetCurrentIM", V("(s)", (method,)), timeout=120)
+            except Exception as e:
+                if "Timeout" not in str(e):
+                    raise
+            end = time.time() + 120
+            while self.current() != method and time.time() < end and self.proc.poll() is None:
+                time.sleep(0.2)
         return ic
 
     def current(self):
@@ -255,35 +265,47 @@ def run(where, config, exe, env, keys, work):
         note(f"fcitx5 {fx.version()}; the config's own: {', '.join(own) or 'none'}; testing {len(methods)}: {', '.join(methods)}")
         fx.use(methods)
         for method in methods:
-            ic = fx.context(method)
-            if fx.current() != method:
-                note(f"{method}: couldn't switch to it ({fx.current() or 'none'}): skipped")
-                ic.close()
-                continue
-            mods = not ic.key(*CONTROL_L, 0) and not ic.key(*ALT_L, CTRL)
-            check(f"{where}, {method}: Ctrl and Alt get through as they go down (the box steps aside on them)", mods)
-            taken = [label for label, sym, code, state in keys if not state & SHIFT and ic.key(sym, code, state)]
-            note(f"{method}, an empty box: it takes {', '.join(taken) or 'none'} of amarchy's (the box steps aside for them)")
-            shifted = [label for label, sym, code, state in keys if state & SHIFT and ic.key(sym, code, state)]
-            check(f"{where}, {method}: amarchy's Ctrl+Alt+Shift keys get through (Shift leaves the box to it)", not shifted,
-                  f"it took {', '.join(shifted)}" if shifted else "")
-            check(f"{where}, {method}: it takes Ctrl+Alt+P (the test reaches its keys)", ic.key(*CODES["KeyP"], CTRL | ALT))
-            ic.close()
-
-            # Something typed first, each time: in an engine, a half-made word; with the keyboard, hints on.
-            ic = fx.context(method)
-            hints = method.startswith("keyboard-") and ic.key(*CODES["KeyH"], CTRL | ALT)
-            held = []
-            for label, sym, code, state in keys:
-                ic.type("he")
-                if ic.key(sym, code, state):
-                    held.append(label)
-                ic.do("Reset")
-            what = "word hints on, a word typed" if hints else "a word typed"
-            note(f"{method}, {what}: " + (f"it holds {', '.join(held)}" if held else "every amarchy key gets through"))
-            ic.close()
+            try:
+                test_method(where, fx, method, keys)
+            except Exception as e:
+                if fx.proc.poll() is not None:
+                    check(f"{where}: fcitx5 kept running", False, f"it stopped ({fx.proc.returncode}) at {method}: {(fx.work / 'fcitx5.log').read_text()[-400:]}")
+                    return
+                note(f"{method}: couldn't test it ({e}): skipped")
     finally:
         fx.close()
+
+
+def test_method(where, fx, method, keys):
+    """One input method, in a box of its own: what it does with Ctrl, Alt and amarchy's keys."""
+    ic = fx.context(method)
+    if fx.current() != method:
+        note(f"{method}: couldn't switch to it ({fx.current() or 'none'}): skipped")
+        ic.close()
+        return
+    mods = not ic.key(*CONTROL_L, 0) and not ic.key(*ALT_L, CTRL)
+    check(f"{where}, {method}: Ctrl and Alt get through as they go down (the box steps aside on them)", mods)
+    taken = [label for label, sym, code, state in keys if not state & SHIFT and ic.key(sym, code, state)]
+    note(f"{method}, an empty box: it takes {', '.join(taken) or 'none'} of amarchy's (the box steps aside for them)")
+    shifted = [label for label, sym, code, state in keys if state & SHIFT and ic.key(sym, code, state)]
+    check(f"{where}, {method}: amarchy's Ctrl+Alt+Shift keys get through (Shift leaves the box to it)", not shifted,
+          f"it took {', '.join(shifted)}" if shifted else "")
+    check(f"{where}, {method}: it takes Ctrl+Alt+P (the test reaches its keys)", ic.key(*CODES["KeyP"], CTRL | ALT))
+    ic.close()
+
+    # Something typed first, each time: in an engine, a half-made word; with the keyboard, hints on.
+    ic = fx.context(method)
+    hints = method.startswith("keyboard-") and ic.key(*CODES["KeyH"], CTRL | ALT)
+    held = []
+    for label, sym, code, state in keys:
+        ic.type("he")
+        if ic.key(sym, code, state):
+            held.append(label)
+        ic.do("Reset")
+    what = "word hints on, a word typed" if hints else "a word typed"
+    note(f"{method}, {what}: " + (f"it would hold {', '.join(held)} (the box steps aside first: it never gets them)" if held
+                                   else "every amarchy key gets through"))
+    ic.close()
 
 
 def main():
@@ -306,18 +328,23 @@ def main():
     keys = amarchy_keys()
     print("amarchy's keys: " + ", ".join(k[0] for k in keys))
     work = Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
-    configs = [("fcitx5's own defaults", None)]
+    # (Yours first, then Omarchy's: the ones that matter, before fcitx5's bare defaults.)
+    configs = []
+    mine = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "fcitx5"
+    if mine.is_dir():
+        configs.append(("yours", mine))
     om = omarchy_config()
     if om:
         configs.append(("Omarchy's", om))
     else:
         note("no Omarchy checkout (OMARCHY_SRC): its config not tested")
-    mine = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "fcitx5"
-    if mine.is_dir():
-        configs.append(("yours", mine))
+    configs.append(("fcitx5's own defaults", None))
     configs += [(f"--config {c}", Path(c).expanduser()) for c in args.config]
     for where, config in configs:
-        run(where, config, exe, env, keys, work)
+        try:
+            run(where, config, exe, env, keys, work)
+        except Exception as e:
+            check(f"{where}: tested", False, str(e))
     print()
     if failed:
         print(f"{len(failed)} failed:\n  " + "\n  ".join(failed))
