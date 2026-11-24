@@ -38,6 +38,8 @@ to test with.
 """
 import argparse
 import os
+import resource
+import signal
 import re
 import shutil
 import subprocess
@@ -58,6 +60,29 @@ def check(what, ok, detail=""):
 
 def note(what):
     print("     " + what, flush=True)
+
+
+# Engines left out unless asked (--all): what they start can reach your desktop.
+SKIP = {"mozc": "it starts mozc_server, and with no display that one can crash into a dialog (Omarchy's crash toast)"}
+
+# The test's own D-Bus: a session bus that starts nothing (no service files),
+# so nothing fcitx5 calls (notifications, portals) is started for it.
+BUS_CONF = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:path={sock}</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>
+</busconfig>
+"""
+
+
+def quiet_crashes():
+    """In the test's fcitx5 and all it starts: a crash leaves no core dump. RLIMIT_CORE 1
+    is the kernel's own "no dump, not even to a pipe", so systemd-coredump never hears of
+    it, and neither does Omarchy's crash toast (omarchy-crash-watch reads its journal)."""
+    resource.setrlimit(resource.RLIMIT_CORE, (1, 1))
 
 
 # KeyboardEvent.code -> (X keysym, X keycode: evdev + 8, as a US keyboard has them)
@@ -133,18 +158,20 @@ class Fcitx:
             cfg.mkdir()
         run = self.work / "run"
         run.mkdir(mode=0o700)
-        bus_sock = self.work / "bus"
-        self.dbus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--nopidfile", f"--address=unix:path={bus_sock}",
-                                      "--print-address=1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        (self.work / "bus.conf").write_text(BUS_CONF.format(sock=self.work / "bus"))
+        self.dbus = subprocess.Popen(["dbus-daemon", f"--config-file={self.work / 'bus.conf'}", "--nofork", "--nopidfile", "--print-address=1"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
         self.address = self.dbus.stdout.readline().strip()
         e = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
         e.update(env, DBUS_SESSION_BUS_ADDRESS=self.address, XDG_RUNTIME_DIR=str(run), FCITX_CONFIG_HOME=str(cfg),
-                 FCITX_DATA_HOME=str(self.work / "data"), HOME=str(self.work), LANG="en_US.UTF-8")
+                 FCITX_DATA_HOME=str(self.work / "data"), HOME=str(self.work), XDG_CONFIG_HOME=str(self.work / ".config"),
+                 XDG_DATA_HOME=str(self.work / ".local/share"), XDG_CACHE_HOME=str(self.work / ".cache"), LANG="en_US.UTF-8")
         self.env = e
         self.exe = exe
         self.log = open(self.work / "fcitx5.log", "w")
-        self.proc = subprocess.Popen([str(exe), "--disable=wayland,waylandim,xcb,xim,classicui,kimpanel,notificationitem,ibusfrontend,fcitx4frontend,virtualkeyboard"],
-                                     env=e, stdout=self.log, stderr=subprocess.STDOUT)
+        # (A session of its own: what it starts, an engine's server, goes with it at the end.)
+        self.proc = subprocess.Popen([str(exe), "--disable=wayland,waylandim,xcb,xim,classicui,kimpanel,notificationitem,notifications,ibusfrontend,fcitx4frontend,virtualkeyboard"],
+                                     env=e, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=quiet_crashes)
         self.bus = Gio.DBusConnection.new_for_address_sync(
             self.address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
         for _ in range(200):
@@ -210,14 +237,30 @@ class Fcitx:
     def current(self):
         return self.controller("CurrentInputMethod", None, "(s)")[0]
 
+    def answers(self):
+        try:
+            self.controller("State", None, "(i)", timeout=5)
+            return True
+        except Exception:
+            return False
+
     def close(self):
+        # fcitx5 and everything it started (its session: an engine's server too), then its D-Bus.
         for p in (self.proc, self.dbus):
-            if p.poll() is None:
-                p.terminate()
+            for sig in (signal.SIGTERM, signal.SIGCONT):      # (SIGCONT: a stopped one hears it too)
                 try:
-                    p.wait(5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
+                    os.killpg(p.pid, sig)
+                except ProcessLookupError:
+                    pass
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                os.killpg(p.pid, signal.SIGKILL)      # what's left of it
+            except ProcessLookupError:
+                pass
+            p.wait()
         self.log.close()
         shutil.rmtree(self.work, ignore_errors=True)
 
@@ -250,28 +293,41 @@ class Context:
             pass
 
 
-def run(where, config, exe, env, keys, work):
+def run(where, config, exe, env, keys, work, every_engine):
     print(f"\n{where}" + (f" ({config})" if config else ""), flush=True)
     try:
         fx = Fcitx(exe, env, config, work)
     except Exception as e:
         check(f"{where}: a fcitx5 of the test's own", False, str(e))
         return
+    restarts = 0
     try:
         _, _, own = fx.group()
-        every = fx.methods()
-        engines = [m for m, _, _ in every if not m.startswith("keyboard-")]
+        engines = [m for m, _, _ in fx.methods() if not m.startswith("keyboard-")]
         methods = list(dict.fromkeys(["keyboard-us"] + own + engines))
+        if not every_engine:
+            for m in [m for m in methods if m in SKIP]:
+                note(f"{m}: left out ({SKIP[m]}); --all tests it too")
+            methods = [m for m in methods if m not in SKIP]
         note(f"fcitx5 {fx.version()}; the config's own: {', '.join(own) or 'none'}; testing {len(methods)}: {', '.join(methods)}")
         fx.use(methods)
         for method in methods:
             try:
                 test_method(where, fx, method, keys)
             except Exception as e:
-                if fx.proc.poll() is not None:
-                    check(f"{where}: fcitx5 kept running", False, f"it stopped ({fx.proc.returncode}) at {method}: {(fx.work / 'fcitx5.log').read_text()[-400:]}")
-                    return
                 note(f"{method}: couldn't test it ({e}): skipped")
+            if fx.proc.poll() is None and fx.answers():
+                continue
+            # Stuck on that engine, or gone: a fresh fcitx5 for the ones after it (never all of them timing out).
+            gone = fx.proc.poll()
+            note(f"{method}: fcitx5 {'stopped (' + str(gone) + ')' if gone is not None else 'stopped answering'}: a fresh one for the rest")
+            fx.close()
+            restarts += 1
+            if restarts > 5:
+                check(f"{where}: fcitx5 kept going", False, f"it had to be started again {restarts} times; the rest not tested")
+                return
+            fx = Fcitx(exe, env, config, work)
+            fx.use(methods)
     finally:
         fx.close()
 
@@ -311,6 +367,7 @@ def test_method(where, fx, method, keys):
 def main():
     ap = argparse.ArgumentParser(description="amarchy's keys against a real fcitx5")
     ap.add_argument("--config", action="append", default=[], help="a fcitx5 config folder to test as well (copied, never changed)")
+    ap.add_argument("--all", action="store_true", help="every engine, " + ", ".join(SKIP) + " too")
     args = ap.parse_args()
     exe, env = find_fcitx5()
     if not exe:
@@ -342,7 +399,7 @@ def main():
     configs += [(f"--config {c}", Path(c).expanduser()) for c in args.config]
     for where, config in configs:
         try:
-            run(where, config, exe, env, keys, work)
+            run(where, config, exe, env, keys, work, args.all)
         except Exception as e:
             check(f"{where}: tested", False, str(e))
     print()

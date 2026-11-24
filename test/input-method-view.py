@@ -54,6 +54,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import socketserver
 import struct
@@ -437,14 +438,19 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
 # ---- the desktop: sway with no screen, fcitx5 on it
 
 class Desktop:
-    def __init__(self, work, fcitx_exe, fcitx_env, config):
+    """Everything here runs in a session of its own (stopped whole at the end), and a crash
+    in it leaves no core dump (Omarchy's crash toast never hears of it); its D-Bus starts
+    nothing (no portals, no notifications: test/input-method-keys.py's BUS_CONF)."""
+
+    def __init__(self, work, fcitx_exe, fcitx_env, config, m):
         self.work = work
         self.procs = []
+        self.quiet = m.quiet_crashes
         run = work / "run"
         run.mkdir(mode=0o700)
-        bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--nopidfile", f"--address=unix:path={work / 'bus'}", "--print-address=1"],
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        self.procs.append(bus)
+        (work / "bus.conf").write_text(m.BUS_CONF.format(sock=work / "bus"))
+        bus = self.start(["dbus-daemon", f"--config-file={work / 'bus.conf'}", "--nofork", "--nopidfile", "--print-address=1"],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         address = bus.stdout.readline().strip()
         self.env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "GTK_IM_MODULE")}
         # (Omarchy's environment.d: fcitx for Qt, SDL and X; GTK on Wayland goes through text-input, as there.)
@@ -452,7 +458,7 @@ class Desktop:
                         XMODIFIERS="@im=fcitx", SDL_IM_MODULE="fcitx", NO_AT_BRIDGE="1")
         (work / "sway.conf").write_text("output HEADLESS-1 resolution 1280x800\ndefault_border none\nfocus_follows_mouse no\n")
         sway_env = dict(self.env, WLR_BACKENDS="headless", WLR_RENDERER="pixman", WLR_LIBINPUT_NO_DEVICES="1")
-        self.procs.append(subprocess.Popen(["sway", "-c", str(work / "sway.conf")], env=sway_env, stdout=open(work / "sway.log", "w"), stderr=subprocess.STDOUT))
+        self.start(["sway", "-c", str(work / "sway.conf")], env=sway_env, stdout=open(work / "sway.log", "w"), stderr=subprocess.STDOUT)
         for _ in range(100):
             socks = [s for s in run.glob("wayland-*") if not s.name.endswith(".lock")]
             if socks:
@@ -467,8 +473,8 @@ class Desktop:
         else:
             cfg.mkdir()
         fx_env = dict(self.env, **fcitx_env, FCITX_CONFIG_HOME=str(cfg), FCITX_DATA_HOME=str(work / "fcitx5-data"))
-        self.procs.append(subprocess.Popen([str(fcitx_exe), "--disable=xcb,xim,kimpanel,notificationitem,ibusfrontend,fcitx4frontend"],
-                                           env=fx_env, stdout=open(work / "fcitx5.log", "w"), stderr=subprocess.STDOUT))
+        self.start([str(fcitx_exe), "--disable=xcb,xim,kimpanel,notificationitem,notifications,ibusfrontend,fcitx4frontend"],
+                   env=fx_env, stdout=open(work / "fcitx5.log", "w"), stderr=subprocess.STDOUT)
         from gi.repository import Gio, GLib
         self.GLib = GLib
         self.bus = Gio.DBusConnection.new_for_address_sync(
@@ -495,19 +501,31 @@ class Desktop:
         except Exception:
             return ""
 
-    def spawn(self, args, log, **kw):
-        p = subprocess.Popen(args, stdout=kw.pop("stdout", open(self.work / log, "w")), stderr=kw.pop("stderr", subprocess.STDOUT), **kw)
+    def start(self, args, **kw):
+        p = subprocess.Popen(args, start_new_session=True, preexec_fn=self.quiet, **kw)
         self.procs.append(p)
         return p
 
+    def spawn(self, args, log, **kw):
+        return self.start(args, stdout=kw.pop("stdout", open(self.work / log, "w")), stderr=kw.pop("stderr", subprocess.STDOUT), **kw)
+
     def close(self):
+        # Each one and all it started (its session), the last started first.
         for p in reversed(self.procs):
-            if p.poll() is None:
-                p.terminate()
+            for sig in (signal.SIGTERM, signal.SIGCONT):
                 try:
-                    p.wait(5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
+                    os.killpg(p.pid, sig)
+                except ProcessLookupError:
+                    pass
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            p.wait()
 
 
 # ---- the browsers: each answers js(code)
@@ -871,7 +889,7 @@ def main():
             d.mkdir()
             desktop = kb = b = None
             try:
-                desktop = Desktop(d, fcitx_exe, fcitx_env, om)
+                desktop = Desktop(d, fcitx_exe, fcitx_env, om, m)
                 kb = Keyboard(vk, desktop.env)      # (first: a seat with no keyboard crashes Chromium)
                 b = make(desktop, url, init)
                 run(where, key, b, desktop, kb)
