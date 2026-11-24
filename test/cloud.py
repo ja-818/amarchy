@@ -39,7 +39,8 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN = str(ROOT / "bin/amarchy")
 TMP = Path(os.environ.get("TMPDIR") or Path.home() / ".cache")
 TMP.mkdir(parents=True, exist_ok=True)
-BASE = Path(tempfile.mkdtemp(prefix="cloud-test-", dir=TMP))
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
+BASE = Path(homes.home("cloud", TMP))
 USER = "tester@example.com"
 TAILNET = BASE / "tailnet.json"
 
@@ -470,8 +471,8 @@ finally:
         m.stop()
     fakes.terminate()
     subprocess.run(["pkill", "-f", f"{BASE}"], capture_output=True)
-    if not failed:
-        shutil.rmtree(BASE, ignore_errors=True)
+    if failed:
+        homes.keep(BASE)      # to look at
 
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed: ' + '; '.join(failed)}" + ("" if not failed else f" (kept: {BASE})"))
 sys.exit(1 if failed else 0)

@@ -13,7 +13,8 @@ import base64, importlib.machinery, importlib.util, json, os, shutil, subprocess
 import http.server
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="terminal-text-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("terminal-text")
 # A tmux server of the test's own: its socket under the test's home.
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", TMUX_TMPDIR=home)
 for k in ("AMARCHY_SESSION", "TMUX", "TMUX_PANE"):
@@ -21,7 +22,7 @@ for k in ("AMARCHY_SESSION", "TMUX", "TMUX_PANE"):
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 
 failed = []
 def check(ok, what):
@@ -126,7 +127,6 @@ try:
     server.shutdown()
 finally:
     subprocess.run(["tmux", "-L", "amarchy", "kill-server"], capture_output=True, env=am.clean_env())
-    shutil.rmtree(home, ignore_errors=True)
 
 print(f"\n{len(failed)} failed:\n  " + "\n  ".join(failed) if failed else "\nAll passed.")
 sys.exit(1 if failed else 0)

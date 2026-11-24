@@ -339,14 +339,6 @@ def main():
         remote.stop()
 
     print(f"screenshots: {SHOTS}")
-    if not os.environ.get("KEEP"):
-        for d in Path(tempfile.tempdir).iterdir():
-            if d != SHOTS:
-                shutil.rmtree(d, ignore_errors=True)
-        try:
-            os.rmdir(tempfile.tempdir)
-        except OSError:
-            pass
     if failed:
         print(f"{len(failed)} failed")
         sys.exit(1)

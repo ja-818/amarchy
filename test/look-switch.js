@@ -19,6 +19,7 @@ const fs = require("fs");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "bin", "amarchy");
@@ -34,7 +35,7 @@ os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=hom
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 am.app_key(); am.migrate()
 st = am.AppState(); st.transcriber = None
 Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")
@@ -312,7 +313,7 @@ function fetched(home, theme, n) {
 
 (async () => {
   const chromium = loadPlaywright().chromium;
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "amarchy-look-test-"));
+  const home = homes.home("look-switch");
   const port = await freePort();
   const server = await startServer(port, home);
   const base = `http://127.0.0.1:${port}/`;
@@ -335,7 +336,6 @@ function fetched(home, theme, n) {
   } finally {
     await browser.close();
     server.kill();
-    fs.rmSync(home, { recursive: true, force: true });
   }
   if (failures.length) {
     console.log(`\n${failures.length} check(s) failed`);

@@ -38,6 +38,7 @@ const fs = require("fs");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 const zlib = require("zlib");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -54,7 +55,7 @@ os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=hom
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 am.app_key(); am.migrate()
 am.save_session({"id": "${SID}", "repo": "fireship", "name": "test", "branch": "test", "base": "main", "path": home + "/work"})
 st = am.AppState(); st.transcriber = None
@@ -535,7 +536,7 @@ async function runWebKit(pw, base, home) {
 (async () => {
   const pw = loadPlaywright();
   const port = await freePort();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "xpost-view-home-"));
+  const home = homes.home("xpost-view");
   const m = path.join(home, "media");
   fs.mkdirSync(m, { recursive: true });
   fs.mkdirSync(path.join(home, "work"), { recursive: true });

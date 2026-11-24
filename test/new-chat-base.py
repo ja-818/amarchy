@@ -8,7 +8,8 @@
 import importlib.machinery, importlib.util, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="chat-base-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("new-chat-base")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config",
                   AMARCHY_WORK=home + "/work", GIT_CONFIG_GLOBAL=home + "/gitconfig", GIT_CONFIG_NOSYSTEM="1")
 os.environ.pop("AMARCHY_SESSION", None)

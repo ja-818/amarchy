@@ -1,4 +1,5 @@
-# What a test's amarchy sees of this machine: none of its automations.
+# What a test's amarchy sees of this machine: none of its automations, and
+# nothing big fetched by itself.
 #
 # A test gives amarchy a home of its own, but systemctl --user is still this
 # machine's user manager: its timers would be the test's, and one that
@@ -31,3 +32,12 @@ def timers(am):
         return r
 
     am.systemctl_user = systemctl_user
+
+
+def downloads(am):
+    """Dictation's setup in a test's app server only says it started: a tap
+    on the mic where dictation isn't set up (every test's home) had it fetch
+    the speech model, 740 MB, into the test's home, by a process of its own
+    that outlived the test (test/mic-first-tap.js, test/mic-release.js).
+    test/dictation-machines.py sets it up for real, on servers of its own."""
+    am.dictate_kick = lambda engine=False: True

@@ -29,6 +29,7 @@ import threading
 import time
 import zlib
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = Path(os.environ.get("OMARCHY_SRC", "/tmp/omarchy-src/omarchy"))
@@ -132,7 +133,7 @@ class Board:
 
 def watcher_test():
     board = Board()
-    home = Path(tempfile.mkdtemp())
+    home = Path(homes.home("omarchy-bar"))
     env = {**os.environ, "HOME": str(home), "XDG_STATE_HOME": str(home / "state"),
            "XDG_CONFIG_HOME": str(home / "config"), "AMARCHY_URL": board.url}
     env.pop("AMARCHY_SESSION", None)
@@ -232,7 +233,6 @@ def watcher_test():
     # /api/state isn't served by the fake: a no, said as such.
     check("amarchy bar: a board that says no", r.returncode == 1 and json.loads(r.stdout)["up"] is False
           and "404" in json.loads(r.stdout)["why"], r.stdout + r.stderr)
-    shutil.rmtree(home, ignore_errors=True)
 
 
 # ---- the widget, drawn
@@ -293,7 +293,7 @@ ShellRoot {
 def draw(name, line, installed=True, wait=2):
     """The widget with a fake amarchy saying line (then staying, as the real
     one does), or none at all: its state, what it ran, its log."""
-    work = Path(tempfile.mkdtemp())
+    work = Path(homes.temp_dir("omarchy-bar-draw-"))
     home, config = work / "home", work / "config"
     (home / ".local/bin").mkdir(parents=True)
     theme = home / ".local/state/omarchy/current/theme"
@@ -363,7 +363,7 @@ def lint_test():
     if not Path(lint).exists():
         print("skip: no qmllint")
         return
-    q = Path(tempfile.mkdtemp())
+    q = Path(homes.temp_dir("omarchy-bar-lint-"))
     (q / "qs").mkdir()
     (q / "qs/Commons").symlink_to(SRC / "shell/Commons")
     (q / "qs/Ui").symlink_to(SRC / "shell/Ui")

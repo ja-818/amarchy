@@ -7,10 +7,11 @@
 #
 #   python3 test/missions.py         exits 0 when every check passed
 
-import datetime, importlib.machinery, importlib.util, json, os, shutil, subprocess, tempfile, time
+import datetime, importlib.machinery, importlib.util, json, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="missions-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("missions")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config", AMARCHY_WORK=home + "/Work")
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
@@ -290,6 +291,5 @@ v = am.missions_view()
 check(v["total"] == 0 and v["today"] == [] and not any(b["at"] for b in v["badges"]) and v["goal"], "from 0, the goal kept")
 check(am.missions_reset(datetime.date(2026, 11, 15)).name == "missions-backup-2026-11-15-2" and to.exists(), "a second reset: its own backup, the first kept")
 
-shutil.rmtree(home, ignore_errors=True)
 print(f"\n{len(failed)} failed" if failed else "\nAll passed.")
 raise SystemExit(1 if failed else 0)

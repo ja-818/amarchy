@@ -19,6 +19,7 @@ const fs = require("fs");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "bin", "amarchy");
@@ -199,7 +200,7 @@ async function run(browser, port, layout, home) {
 (async () => {
   const pw = loadPlaywright();
   fs.mkdirSync(SHOTS, { recursive: true });
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "automations-home-"));
+  const home = homes.home("automations");
   const port = await freePort();
   makeTimer();
   const server = await startServer(port, home);

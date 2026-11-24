@@ -21,10 +21,13 @@ const fs = require("fs");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "bin", "amarchy");
-const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "today-view-"));
+// Its screenshots, kept to look at: a folder only when it runs (not each time
+// another test borrows its helpers: that left an empty one in /tmp).
+const SHOTS = process.env.SHOTS || (require.main === module ? fs.mkdtempSync(path.join(os.tmpdir(), "today-view-")) : "");
 const ONLY = process.argv[2];
 
 const SHIM = `
@@ -34,7 +37,7 @@ os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=hom
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", bin)
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(bin)), "..", "test")); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 am.app_key(); am.migrate()
 st = am.AppState(); st.transcriber = None
 Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")
@@ -1176,7 +1179,7 @@ module.exports = { loadPlaywright, freePort, startServer, findChrome, page, read
 
 if (require.main === module) (async () => {
   const pw = loadPlaywright();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "today-view-home-"));
+  const home = homes.home("today-view");
   const port = await freePort();
   const server = await startServer(port, home);
   const browser = await pw.chromium.launch({ executablePath: findChrome() });
@@ -1189,7 +1192,6 @@ if (require.main === module) (async () => {
   } finally {
     await browser.close();
     server.kill();
-    fs.rmSync(home, { recursive: true, force: true });      // its own home: 70 MB in /tmp each run otherwise
   }
   console.log(failures.length ? `\n${failures.length} failed:\n  ${failures.join("\n  ")}` : `\nAll passed. Screenshots: ${SHOTS}`);
   process.exit(failures.length ? 1 : 0);

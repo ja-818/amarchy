@@ -65,6 +65,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
 
 REPO = Path(__file__).resolve().parent.parent
 BIN = REPO / "bin/amarchy"
@@ -848,7 +849,7 @@ def main():
     browsers = [("omarchy", "Chromium, as Omarchy starts it", chrome and (lambda d, url, init: Chromium(d, url, init, omarchy_flags, "omarchy"))),
                 ("ime", "Chromium, --enable-wayland-ime", chrome and (lambda d, url, init: Chromium(d, url, init, omarchy_flags + ["--enable-wayland-ime"], "ime"))),
                 ("webkit", "WebKitGTK (the desktop app's)", webkit and (lambda d, url, init: WebKitGTK(d, url, init, "webkit")))]
-    work = Path(tempfile.mkdtemp(prefix="input-method-view-", dir=os.environ.get("TMPDIR") or None))
+    work = Path(homes.temp_dir("input-method-view-"))
     crashes = m.Crashes(work)
     home = work / "home"
     home.mkdir()
@@ -901,9 +902,8 @@ def main():
             proxy.shutdown()
         if server:
             server.terminate()
-        if not failed:
-            shutil.rmtree(work, ignore_errors=True)
-        else:
+        if failed:
+            homes.keep(work)
             print(f"\n(logs kept: {work})")
     print(f"\n{len(failed)} failed:\n  " + "\n  ".join(failed) if failed else "\nAll passed." + (f" Screenshots: {SHOTS}" if SHOTS else ""))
     return 1 if failed else 0

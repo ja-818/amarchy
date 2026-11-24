@@ -42,7 +42,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = str(ROOT / "bin/amarchy")
-BASE = Path(tempfile.mkdtemp(prefix="move-"))
+sys.path.insert(0, str(Path(__file__).resolve().parent)); import homes      # (test/homes.py: its home gone with it, however it ends)
+BASE = Path(homes.home("move"))
 os.chdir(BASE)     # what the servers and their fakes start from: never the checkout (the fake claude's argv.txt)
 USER = "tester@example.com"
 GIT_ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
@@ -608,7 +609,6 @@ finally:
             log_ = (m.home / "server.log")
             if log_.exists():
                 print(f"--- {m.name}'s log\n" + log_.read_text()[-3000:])
-    shutil.rmtree(BASE, ignore_errors=True)
 
 print(f"\n{'all passed' if not failed else f'{len(failed)} failed'}")
 sys.exit(1 if failed else 0)

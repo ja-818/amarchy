@@ -9,7 +9,8 @@
 import contextlib, http.server, importlib.machinery, importlib.util, io, json, os, sys, tempfile, threading
 from pathlib import Path
 
-home = tempfile.mkdtemp(prefix="push-gone-")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("push-gone")
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(Path(__file__).resolve().parent.parent / "bin/amarchy"))

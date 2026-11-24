@@ -148,7 +148,9 @@ records what it shows and presses its buttons.
 server through Tailscale or as this machine's own (`--local`, the real local
 key). Nothing in them reaches a real machine: amarchy's CLI there is a made-up
 one, or this checkout's on a test home with pairing refused. Its homes go under
-`~/.cache/amarchy-tests` (unless `TMPDIR` says) and away at the end. Needs Xvfb,
+`~/.cache/amarchy-tests` (unless `TMPDIR` says) and away at the end, however
+the test ends (`test/homes.py`, as every amarchy test's: a Ctrl-C or a kill too;
+`KEEP=1` keeps them). Needs Xvfb,
 xdotool, ImageMagick, dbus, tmux and PyGObject (and for compare.py, Chromium
 with playwright-core, as the app's view tests).
 

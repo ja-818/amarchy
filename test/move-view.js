@@ -30,12 +30,13 @@ const http = require("http");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const homes = require("./homes");      // (test/homes.js: its home gone with it, however it ends)
 
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "bin", "amarchy");
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "move-view-"));
 const ONLY = process.argv[2];
-const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "move-view-home-"));
+const BASE = homes.home("move-view");
 const USER = "tester@example.com";
 const GIT_ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
@@ -154,6 +155,7 @@ class Machine {
     this.home = path.join(BASE, name);
     this.url = `http://127.0.0.1:${port}`;
     this.socket = `amarchy-test-${process.pid}-${name}`;
+    homes.whenDone(() => { try { execFileSync("tmux", ["-L", this.socket, "kill-server"], { stdio: "ignore" }); } catch (e) { /* none */ } });      // stopped before its finally
     this.env = {
       HOME: this.home, XDG_STATE_HOME: `${this.home}/state`, XDG_CONFIG_HOME: `${this.home}/config`, AMARCHY_WORK: `${this.home}/Work`,
       AMARCHY_TMUX: this.socket, AMARCHY_HOST_NAME: name, AMARCHY_HOST_APP_PORT: String(port), AMARCHY_HOST_URL: this.url,
@@ -348,7 +350,6 @@ const LAYOUTS = {
     if (failures.length) for (const m of [alpha, beta]) {
       try { console.log(`--- ${m.name}'s log\n${fs.readFileSync(path.join(m.home, "server.log"), "utf8").slice(-2000)}`); } catch (e) { /* none */ }
     }
-    fs.rmSync(BASE, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
   }
   console.log(`\nscreenshots: ${SHOTS}`);
   console.log(failures.length ? `${failures.length} failed` : "all passed");

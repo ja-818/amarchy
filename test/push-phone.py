@@ -16,13 +16,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 tmp = os.environ.get("TMPDIR") or None
-home = tempfile.mkdtemp(prefix="push-phone-", dir=tmp)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import homes      # (test/homes.py: its home gone with it, however it ends)
+home = homes.home("push-phone", tmp)
+BINS = homes.temp_dir("push-phone-bin-", homes.ON_DISK)      # the relay and fake APNs it builds (21 MB): on disk, not in /tmp
 os.environ.update(HOME=home, XDG_STATE_HOME=home + "/state", XDG_CONFIG_HOME=home + "/config")
 os.environ.pop("AMARCHY_SESSION", None)
 loader = importlib.machinery.SourceFileLoader("amarchy_under_test", str(ROOT / "bin/amarchy"))
 am = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(am)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am)      # (test/isolate.py: none of this machine's automations)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import isolate; isolate.timers(am); isolate.downloads(am)      # (test/isolate.py: none of this machine's automations, nor its big downloads)
 
 failed = []
 def check(ok, what):
@@ -202,7 +204,7 @@ def relay_binary():
     go = shutil.which("go")
     if not go or not (ROOT / "relay/go.mod").exists():
         return None
-    out = Path(home) / "amarchy-relay"
+    out = Path(BINS) / "amarchy-relay"
     r = subprocess.run([go, "build", "-o", str(out), "./cmd/amarchy-relay"], cwd=ROOT / "relay", capture_output=True, text=True,
                        env={**os.environ, "GOTMPDIR": tmp or tempfile.gettempdir(), "GOFLAGS": "-mod=mod"})
     if r.returncode:
@@ -215,7 +217,7 @@ class Upstream:
     """The fake APNs and FCM (test/push-upstream: HTTP/2 as APNs speaks it),
     what they got read off its output as it comes."""
     def __init__(self):
-        out = Path(home) / "push-upstream"
+        out = Path(BINS) / "push-upstream"
         r = subprocess.run([shutil.which("go"), "build", "-o", str(out), "."], cwd=ROOT / "test/push-upstream",
                            capture_output=True, text=True, env={**os.environ, "GOTMPDIR": tmp or tempfile.gettempdir(), "GO111MODULE": "off"})
         if r.returncode:
