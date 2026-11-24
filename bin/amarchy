@@ -9382,6 +9382,91 @@ def custom_themes():
     return out
 
 
+# A theme of yours comes three ways: from another machine of yours (the sync,
+# themes_take), the desktop's Omarchy look (look_custom_put: made here by
+# `amarchy theme --omarchy`, or sent by the desktop), and the look a desktop
+# sent before themes (migrate_look). Each puts it in place the same way,
+# custom_swap: app/custom/<key> is a link to a folder beside it
+# (.<key>.<random>), written whole first and turned to in one step, so the
+# app never reads one half written or missing, and no way leaves what
+# another trips on (a link where it moves a folder, a name it takes again).
+
+CUSTOM_LOCK = APP / "custom.lock"       # held while one is turned (custom_swap)
+CUSTOM_LEFT_FOR = 600                   # seconds before what a put cut short left is taken away
+
+
+@contextlib.contextmanager
+def custom_lock():
+    """One theme of yours turned at a time on this machine: the app's server
+    takes them from other machines while `amarchy theme --omarchy` keeps its
+    own."""
+    APP.mkdir(parents=True, exist_ok=True)
+    with open(CUSTOM_LOCK, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def custom_drop(p):
+    """A folder, a link (not what it points at) or a file in app/custom,
+    taken away; gone already is fine."""
+    if p.is_symlink() or (p.exists() and not p.is_dir()):
+        p.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(p, ignore_errors=True)
+
+
+def custom_swap(key, fill):
+    """Theme <key> put in app/custom whole: fill(folder) writes its files in
+    a new folder beside it, then <key>, a link to that folder, is turned to
+    it in one step. What <key> was (a link and the folder it pointed at, or a
+    folder from before links) is taken away once it's turned, with what a
+    put cut short left. None, or why it couldn't, in words; fill's own
+    errors other than an OSError go up, its folder taken away."""
+    try:
+        CUSTOM.mkdir(parents=True, exist_ok=True)
+        new = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=CUSTOM))
+    except OSError as e:
+        return e.strerror or str(e)
+    try:
+        fill(new)
+        new.chmod(0o755)
+        with custom_lock():
+            return custom_turn(key, new)
+    except OSError as e:
+        custom_drop(new)
+        return e.strerror or str(e)
+    except BaseException:
+        custom_drop(new)
+        raise
+
+
+def custom_turn(key, new):
+    """custom_swap's turn, its lock held: <key> pointed at the folder new."""
+    here, link = CUSTOM / key, CUSTOM / f"{new.name}.link"
+    was = aside = None
+    try:
+        if here.is_symlink():
+            was = CUSTOM / os.readlink(here)
+        elif os.path.lexists(here):     # a folder from before links: aside, in a folder of its own
+            aside = Path(tempfile.mkdtemp(prefix=f".{key}.old.", dir=CUSTOM))
+            os.replace(here, aside / key)
+        os.symlink(new.name, link)
+        os.replace(link, here)
+    except OSError:
+        link.unlink(missing_ok=True)
+        if aside:
+            with contextlib.suppress(OSError):
+                if not os.path.lexists(here):
+                    os.replace(aside / key, here)       # back as it was
+                aside.rmdir()
+        raise
+    for p in CUSTOM.glob(f".{key}.*"):
+        with contextlib.suppress(OSError):
+            if p != new and (p in (was, aside) or time.time() - p.lstat().st_mtime > CUSTOM_LEFT_FOR):
+                custom_drop(p)
+    return None
+
+
 def custom_url(key, f, which=None):
     """A file of a theme of yours; a wallpaper (which: "phone", "wide" or
     "thumb") as its cut once that's made."""
@@ -21527,12 +21612,16 @@ def sounds_take(theirs, fetch):
 
 
 def themes_value():
-    """Your own themes: key → {files: name → hash, at, by}, stamped when one changes here."""
+    """Your own themes: key → {files: name → hash, at, by}, stamped when one
+    changes here. Not "Omarchy (live)": the desktop that makes it sends it
+    to each machine itself (see "the theme live"); two ways would race, an
+    older one taken over the one just sent."""
     with sync_lock():
         kept = sync_json(SYNC_THEMES, {})
         out, me, changed = {}, machine_name(), False
         for d in sorted(CUSTOM.iterdir()) if CUSTOM.is_dir() else []:
-            if not d.is_dir() or not re.fullmatch(r"[\w-]{1,60}", d.name) or not (d / "theme.json").is_file():
+            if d.name == OMARCHY_LIVE or not d.is_dir() or not re.fullmatch(r"[\w-]{1,60}", d.name) \
+                    or not (d / "theme.json").is_file():
                 continue
             files = {f.name: sync_keep_file(f) for f in sorted(d.iterdir()) if f.is_file() and not f.name.startswith(".")}
             was = kept.get(d.name)
@@ -21547,33 +21636,33 @@ def themes_value():
 
 
 def themes_take(theirs, fetch):
-    """Themes of yours from another machine: each newer than ours, put in place whole."""
+    """Themes of yours from another machine: each newer than ours, put in
+    place whole (custom_swap). One that can't be is said in the app's log
+    and left as it is here, the rest of what that machine has taken still."""
     if not isinstance(theirs, dict):
         return False
     mine, got = themes_value(), False
     for key, t in theirs.items():
+        if key == OMARCHY_LIVE:
+            continue        # its own way (themes_value): one from a machine on an older amarchy
         if not re.fullmatch(r"[\w-]{1,60}", key or "") or not isinstance(t, dict) or not isinstance(t.get("files"), dict) \
                 or "theme.json" not in t["files"] or not sync_newer(t, mine.get(key)):
             continue
-        tmp = CUSTOM / f".{key}.{os.getpid()}"
-        shutil.rmtree(tmp, ignore_errors=True)
-        tmp.mkdir(parents=True)
-        try:
+
+        def fill(new, key=key, t=t):
             for name, sha in t["files"].items():
-                if not re.fullmatch(r"[\w.-]{1,80}", name or ""):
+                if not re.fullmatch(r"[\w-][\w.-]{0,79}", name or "") or not isinstance(sha, str):
                     raise PeerError(f"a theme's file named {name!r}")
                 data = fetch(sha)
                 if data is None:
                     raise PeerError(f"{key}'s {name} didn't come")
-                (tmp / name).write_bytes(data)
-            old = CUSTOM / f".{key}.old.{os.getpid()}"
-            if (CUSTOM / key).exists():
-                os.replace(CUSTOM / key, old)
-            os.replace(tmp, CUSTOM / key)
-            shutil.rmtree(old, ignore_errors=True)
+                (new / name).write_bytes(data)
+        try:
+            why = custom_swap(key, fill)
         except PeerError as e:
-            shutil.rmtree(tmp, ignore_errors=True)
-            print(f"amarchy app: sync: theme {key}: {e}", file=sys.stderr, flush=True)
+            why = str(e)
+        if why:
+            print(f"amarchy app: sync: theme {key}: {why}", file=sys.stderr, flush=True)
             continue
         with sync_lock():
             kept = sync_json(SYNC_THEMES, {})
@@ -21742,6 +21831,7 @@ class Sync:
         self.lock = threading.Lock()
         self.sets = None        # the sets and the missions as last looked at (a change: pushed)
         self.pending = set()    # items changed here and not pushed yet (kept through a failure)
+        self.live_at = {}       # machine -> when "Omarchy (live)" was last sent it from here (Sync.live)
 
     def start(self):
         threading.Thread(target=self.run, daemon=True).start()
@@ -21781,10 +21871,24 @@ class Sync:
         try:
             have = urllib.parse.quote(json.dumps(missions_have()))
             status, theirs = peer_json(m, "GET", f"/api/peer/sync?have={have}", timeout=30)
+            if status == 200:
+                self.live(m)
             if status == 200 and sync_take(theirs, peer_fetch(m)):
                 self.st.poke.set()
         except PeerError:
             self.asked[m["name"]] = 0       # (again when it answers)
+
+    def live(self, m):
+        """Machine m answers: "Omarchy (live)", made on this desktop, sent it
+        if it hasn't it (it was off when it was made, or paired since; see
+        "the theme live"), made as a switch makes it (its unit), at most
+        every few minutes."""
+        if not omarchy_live_due(m["name"]) or time.time() - self.live_at.get(m["name"], 0) < 300:
+            return
+        self.live_at[m["name"]] = time.time()
+        print(f"amarchy app: {OMARCHY_LIVE_NAME}: sending it to {m.get('label') or m['name']}, which answers again",
+              file=sys.stderr, flush=True)
+        cmd_theme_omarchy(["--in-background"])
 
     def push(self, keys):
         """A change made here, to each machine that answers (one that
@@ -25442,31 +25546,37 @@ def migrate_look():
         key = (slug(name) or "desktop") + "-yours"
         files = desk.get("files") if isinstance(desk.get("files"), dict) else {}
         d = CUSTOM / key
-        shutil.rmtree(d, ignore_errors=True)
-        d.mkdir(parents=True)
-
-        def keep(what, as_name):
-            """A file of the old look, kept under the theme as as_name (its
-            own extension): the name it got, or None."""
-            src = old / Path(str(files.get(what) or "")).name if files.get(what) else None
-            m = re.search(r"\.(jpg|png|webp|ttf|otf|woff2?)$", src.name) if src else None
-            if not m or not src.is_file():
-                return None
-            shutil.copyfile(src, d / f"{as_name}.{m.group(1)}")
-            return f"{as_name}.{m.group(1)}"
-        phone = keep("wallpaper", "wallpaper")
-        wide = keep("wallpaper-wide", "wallpaper-wide") or (keep("wallpaper", "wallpaper-wide") if phone else None)
         family = str(desk.get("family") or "")
         ours = next((k for k, (_, f) in LOOK_FONTS.items() if f and f == family), None)
-        fonts = {w: f for w in ("regular", "bold") for f in [None if ours else keep(w, w)] if f}
         term = desk.get("terminal") if isinstance(desk.get("terminal"), dict) else {}
-        write_file(d / "theme.json", json.dumps({
-            "name": f"{name} (yours)", "mode": desk.get("mode") if desk.get("mode") in ("light", "dark") else "dark",
-            "vars": look_tokens(variables),
-            "terminal": {k: term[k] for k in ("size", "alpha") if isinstance(term.get(k), (int, float))},
-            "wallpaper": {"phone": phone, "wide": wide} if phone else None,
-            "font": {"family": family, "nerd": bool(desk.get("nerd")), "files": fonts} if fonts else None,
-            "from": "the look your Omarchy desktop sent the app"}, indent=1))
+        got = {}
+
+        def fill(new):
+            def keep(what, as_name):
+                """A file of the old look, kept under the theme as as_name
+                (its own extension): the name it got, or None."""
+                src = old / Path(str(files.get(what) or "")).name if files.get(what) else None
+                m = re.search(r"\.(jpg|png|webp|ttf|otf|woff2?)$", src.name) if src else None
+                if not m or not src.is_file():
+                    return None
+                shutil.copyfile(src, new / f"{as_name}.{m.group(1)}")
+                return f"{as_name}.{m.group(1)}"
+            phone = keep("wallpaper", "wallpaper")
+            wide = keep("wallpaper-wide", "wallpaper-wide") or (keep("wallpaper", "wallpaper-wide") if phone else None)
+            fonts = {w: f for w in ("regular", "bold") for f in [None if ours else keep(w, w)] if f}
+            write_file(new / "theme.json", json.dumps({
+                "name": f"{name} (yours)", "mode": desk.get("mode") if desk.get("mode") in ("light", "dark") else "dark",
+                "vars": look_tokens(variables),
+                "terminal": {k: term[k] for k in ("size", "alpha") if isinstance(term.get(k), (int, float))},
+                "wallpaper": {"phone": phone, "wide": wide} if phone else None,
+                "font": {"family": family, "nerd": bool(desk.get("nerd")), "files": fonts} if fonts else None,
+                "from": "the look your Omarchy desktop sent the app"}, indent=1))
+            got.update(phone=phone, wide=wide, fonts=fonts)
+        why = custom_swap(key, fill)
+        if why:
+            print(f"amarchy: couldn't keep the desktop's look: {why}", file=sys.stderr)
+            return          # (app/look as it was)
+        phone, wide, fonts = got["phone"], got["wide"], got["fonts"]
         choice = look_choice()
         theme = font = own = None
         # What showed was the desktop's look until a theme of amarchy's was picked.
@@ -26001,13 +26111,22 @@ def cmd_key(args):
 # installed by omarchy/install.sh) for the wallpaper, the font, the theme's
 # name and your shell.toml and looknfeel.lua. Made the same as last time and
 # sent everywhere already, it does nothing.
+#
+# It goes only this way, never with the sync of your other themes
+# (themes_value): two ways would race, and an older one could be taken over
+# the one just sent. A machine that's off when it's made isn't a failure
+# (the unit succeeds; one that refused it fails it): the app here sends it
+# that machine as soon as it answers again (Sync.live, omarchy_live_due), and
+# one that refused it again an hour later, or at the next switch.
 
 # Where Omarchy keeps them: under $HOME always, as its own scripts do (not XDG's).
 OMARCHY_CURRENT = HOME / ".local/state/omarchy/current"
 OMARCHY_CONFIG = HOME / ".config"
 OMARCHY_LIVE = "omarchy-live"               # its key, in app/custom
 OMARCHY_LIVE_NAME = "Omarchy (live)"
-OMARCHY_LIVE_SENT = STATE / "omarchy-live.json"     # what was made last ({"sig"}) and sent where ({"sent": {machine: sig}})
+OMARCHY_LIVE_SENT = STATE / "omarchy-live.json"     # what was made last ({"sig"}), sent where ({"sent": {machine: sig}}), tried where ({"tried": {machine: {sig, answered, at}}})
+OMARCHY_LIVE_LOCK = STATE / "omarchy-live.lock"     # held while it's made and sent (a switch and a catch-up at once: one, then the other)
+OMARCHY_LIVE_AGAIN = 3600           # seconds before a machine that refused it is sent it again by itself
 LOOK_FONT_MAX = 12_000_000          # bytes of one font file a live theme carries
 LOOK_PUT_MAX = 48_000_000           # bytes of a theme a machine of yours sends (its files, in base64)
 FONT_MAGIC = {"ttf": (b"\x00\x01\x00\x00", b"true"), "otf": (b"OTTO",), "woff": (b"wOFF",), "woff2": (b"wOF2",)}
@@ -26120,11 +26239,9 @@ def omarchy_live_make():
 
 
 def look_custom_put(key, theme, files):
-    """A theme of yours put whole into app/custom/<key>: theme, its
-    theme.json as a dict; files, {name: bytes}, every file it names and
-    nothing else. Written beside it, then <key> (a link to it) turned to it
-    in one step, so the app never reads it half written or missing. None, or
-    why it isn't one."""
+    """A theme of yours put whole into app/custom/<key> (custom_swap): theme,
+    its theme.json as a dict; files, {name: bytes}, every file it names and
+    nothing else. None, or why it isn't one, or couldn't be kept."""
     if not isinstance(theme, dict) or not isinstance(files, dict):
         return "a theme is its theme.json and its files"
     variables = theme.get("vars")
@@ -26160,43 +26277,45 @@ def look_custom_put(key, theme, files):
             "wallpaper": theme.get("wallpaper"), "font": theme.get("font"),
             "from": str(theme.get("from") or "")[:120],
             **({"omarchy": theme["omarchy"]} if isinstance(theme.get("omarchy"), dict) else {})}
-    CUSTOM.mkdir(parents=True, exist_ok=True)
-    here = CUSTOM / key
-    was = os.readlink(here) if here.is_symlink() else None
-    new = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=CUSTOM))
-    link = CUSTOM / f".{key}.link.{os.getpid()}"
-    try:
+
+    def fill(new):
         for f, raw in files.items():
             (new / f).write_bytes(raw)
         (new / "theme.json").write_text(json.dumps(kept, indent=1))
-        new.chmod(0o755)
-        if here.is_dir() and not here.is_symlink():     # one from before kept as a folder: aside, once
-            os.replace(here, CUSTOM / f".{key}.old.{os.getpid()}")
-            was = f".{key}.old.{os.getpid()}"
-        link.unlink(missing_ok=True)
-        os.symlink(new.name, link)
-        os.replace(link, here)
-    except OSError as e:
-        shutil.rmtree(new, ignore_errors=True)
-        link.unlink(missing_ok=True)
-        return f"couldn't keep it ({e.strerror or e})"
-    # What it was before, and anything left from a put cut short.
-    for d in CUSTOM.glob(f".{key}.*"):
-        if d.name != new.name and (d.name == was or time.time() - d.lstat().st_mtime > 600):
-            shutil.rmtree(d, ignore_errors=True) if d.is_dir() and not d.is_symlink() else d.unlink(missing_ok=True)
-    return None
+    why = custom_swap(key, fill)
+    return f"couldn't keep it ({why})" if why else None
 
 
 def omarchy_live_send(made, m):
-    """Send "Omarchy (live)" to machine m (PUT /api/peer/look): None, or why
-    it didn't take it."""
+    """Send "Omarchy (live)" to machine m (PUT /api/peer/look): (None, True)
+    once it's taken it, else (why not, whether it answered at all)."""
     body = {"key": OMARCHY_LIVE, "theme": made["theme"],
             "files": {f: base64.b64encode(raw).decode() for f, raw in made["files"].items()}}
     try:
         status, said = peer_json(m, "PUT", "/api/peer/look", body, timeout=60)
     except PeerError as e:
-        return str(e)
-    return None if status == 200 else said.get("error") or f"it answered {status}"
+        return str(e), False
+    return (None, True) if status == 200 else (said.get("error") or f"it answered {status}", True)
+
+
+def omarchy_live_due(name):
+    """Whether machine <name>, answering now, is due "Omarchy (live)" from
+    this desktop: one was made here and that machine hasn't it, and it was
+    never tried there (paired since), or it was off then, or it refused it
+    OMARCHY_LIVE_AGAIN ago."""
+    try:
+        last = json.loads(OMARCHY_LIVE_SENT.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(last, dict) or not last.get("sig") or not OMARCHY_CURRENT.is_dir():
+        return False
+    sent = last.get("sent") if isinstance(last.get("sent"), dict) else {}
+    if sent.get(name) == last["sig"]:
+        return False
+    tried = (last.get("tried") if isinstance(last.get("tried"), dict) else {}).get(name)
+    if not isinstance(tried, dict) or tried.get("sig") != last["sig"] or not tried.get("answered"):
+        return True
+    return time.time() - float(tried.get("at") or 0) > OMARCHY_LIVE_AGAIN
 
 
 def omarchy_live_inputs():
@@ -26226,8 +26345,17 @@ def omarchy_live_inputs():
 def omarchy_live(force=False):
     """Make "Omarchy (live)" again, keep it, send it to every machine paired
     with this one that doesn't have this one yet. What happened, in lines, and
-    whether all of it went: ([words], ok). Made again until what it's made
-    from holds still (a theme switch writes several files)."""
+    whether all of it went: ([words], ok); a machine that's off doesn't make
+    it not ok (it's sent there when it's back). Made again until what it's
+    made from holds still (a theme switch writes several files)."""
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(OMARCHY_LIVE_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return omarchy_live_locked(force)
+
+
+def omarchy_live_locked(force):
+    """omarchy_live, with its lock held."""
     try:
         last = json.loads(OMARCHY_LIVE_SENT.read_text())
     except (OSError, ValueError):
@@ -26248,6 +26376,7 @@ def omarchy_live(force=False):
         inputs = now        # it changed while it was made (a theme switch under way): again
     if last.get("sig") != made["sig"]:
         sent = {}
+    tried = last.get("tried") if isinstance(last.get("tried"), dict) else {}
     out, ok = [], True
     if force or last.get("sig") != made["sig"] or not (CUSTOM / OMARCHY_LIVE / "theme.json").is_file():
         why = look_custom_put(OMARCHY_LIVE, made["theme"], made["files"])
@@ -26257,14 +26386,21 @@ def omarchy_live(force=False):
     for m in paired:
         if not force and sent.get(m["name"]) == made["sig"]:
             continue
-        why = omarchy_live_send(made, m)
-        if why:
+        why, answered = omarchy_live_send(made, m)
+        if not why:
+            sent[m["name"]] = made["sig"]
+            tried.pop(m["name"], None)
+            out.append(f"sent to {m['label']}")
+            continue
+        tried[m["name"]] = {"sig": made["sig"], "answered": answered, "at": int(time.time())}
+        if answered:
             ok = False
             out.append(f"not sent to {m['label']}: {why}")
         else:
-            sent[m["name"]] = made["sig"]
-            out.append(f"sent to {m['label']}")
+            out.append(f"not sent to {m['label']} yet: {why} (sent when it's back)")
+    names = {m["name"] for m in paired}
     write_file(OMARCHY_LIVE_SENT, json.dumps({"sig": made["sig"], "inputs": inputs, "sent": sent,
+                                              "tried": {n: t for n, t in tried.items() if n in names},
                                               "at": int(time.time())}))
     return out, ok
 

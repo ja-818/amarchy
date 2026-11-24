@@ -693,7 +693,7 @@ amarchy machines remove omarchy   # both forget the other
   A chat that moved is followed: `amarchy close <old id>` closes it where it
   is now.
 - **Your stuff is the same on every machine**: the look (your own wallpaper
-  and themes too, Omarchy (live) among them), the order of your projects, what
+  and themes too; Omarchy (live) goes its own way, below), the order of your projects, what
   a new chat starts on (model, effort), what tells you, your chimes, Show
   terminals, how machines show, and your missions: every machine's merges,
   streaks and badges count once, the same score everywhere, and a reset is
@@ -968,7 +968,10 @@ again and sent on, and every app wearing it changes too: Omarchy's `theme-set`
 hook and a systemd path unit (`amarchy-omarchy-look.path`, the kernel telling it
 a file changed) run `amarchy theme --omarchy`; nothing checks every few seconds.
 It's kept on the desktop and sent to every machine paired with it (the server
-the desktop app shows), which keeps the last one it got.
+the desktop app shows), which keeps the last one it got. A machine that's off
+then gets it as soon as it's back (the desktop's app sends it), so only one
+that refuses it makes `amarchy-omarchy-look.service` fail, saying why in its
+journal.
 
 **The window, one of the desktop's**: the desktop app's window is
 see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
