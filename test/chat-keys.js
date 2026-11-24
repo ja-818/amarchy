@@ -8,10 +8,9 @@
 //   the latest back down, i too; Page Up / Page Down scroll them from the box.
 //   Esc: Claude at work, a stop (from the box, a message, nowhere in it; on
 //   its question too, a no); Claude done, nothing at all (not back, not out
-//   of the box). Ctrl+Alt+← back to the board, → into the chat again, ↑ ↓
-//   the board's Chats and Tasks, M the menu (a chat by its name as you type),
-//   T its terminal and back, / the keys; never H J K L or P (the input
-//   method's: they say where they went). Plain letters on the board do
+//   of the box). Ctrl+Alt+← (H) back to the board, → (L) into the chat again,
+//   ↑ ↓ (K J) the board's Chats and Tasks, M the menu (a chat by its name as you
+//   type), T its terminal and back, / the keys. Plain letters on the board do
 //   nothing but move.
 //
 // Three layouts: the phone's (touch), the phone layout on a computer (a
@@ -248,32 +247,22 @@ async function run(browser, layout, port) {
   await p.keyboard.press("Control+Alt+ArrowUp");
   check(as, await until(p, () => board.tab === "chats"), `Ctrl+Alt+↑: Chats (${await tabNow()})`);
 
-  // h j k l and P, the input method's (fcitx5 takes Ctrl+Alt+H J P in every box): never amarchy's,
-  // whatever they were. Where one reaches the page, it says the key it is now and does nothing.
+  // h j k l, as the arrows: J Tasks, K Chats, L into the chat lit, H back; from the box, typing.
+  await p.keyboard.press("Control+Alt+KeyJ");
+  check(as, await until(p, () => board.tab === "tasks"), "Ctrl+Alt+J: Tasks");
+  await p.keyboard.press("Control+Alt+KeyK");
+  check(as, await until(p, () => board.tab === "chats"), "Ctrl+Alt+K: Chats");
   await p.evaluate((id) => boardSelectId(id), ID);
-  const toastNow = () => p.evaluate(() => [...document.querySelectorAll(".toast")].map((t) => t.innerText).join(" | "));
-  for (const [code, says] of [["KeyJ", /Tasks is Ctrl\+Alt\+↓ now/], ["KeyK", /Chats is Ctrl\+Alt\+↑ now/], ["KeyL", /Into the chat is Ctrl\+Alt\+→ now/],
-    ["KeyP", /The preview is Ctrl\+Alt\+O now/]]) {
-    await p.keyboard.press(`Control+Alt+${code}`);
-    check(as, await until(p, (re) => [...document.querySelectorAll(".toast")].some((t) => new RegExp(re).test(t.innerText)), says.source),
-          `Ctrl+Alt+${code.slice(3)} on the board: where it went (${JSON.stringify(await toastNow())})`);
-    check(as, (await tabNow()) === "chats" && !(await openNow(p)) && await p.evaluate(() => !document.querySelector(".ui-dropdown, .picker, .sheet-back")),
-          `and nothing done (${await tabNow()})`);
-  }
-  await p.keyboard.press("Control+Alt+ArrowRight");
-  check(as, await opened(p, ID), "Ctrl+Alt+→: into the chat lit");
+  await p.keyboard.press("Control+Alt+KeyL");
+  check(as, await opened(p, ID), "Ctrl+Alt+L: into the chat lit");
   await sleep(400);
   await p.keyboard.type("hjkl");
   await p.keyboard.press("Control+Alt+KeyH");
-  check(as, await until(p, () => [...document.querySelectorAll(".toast")].some((t) => /Back is Ctrl\+Alt\+← now: Ctrl\+Alt\+H is left to the input method/.test(t.innerText))),
-        `Ctrl+Alt+H from the box, typing: where back went (${JSON.stringify(await toastNow())})`);
-  check(as, (await openNow(p)) === ID && (await keys(p)).value === "hjkl", "still in the chat, nothing typed by it (the box has what you typed)");
-  await p.keyboard.press("Control+Alt+ArrowLeft");
-  check(as, await isHome(p), "Ctrl+Alt+← from the box: back to the board");
-  await p.keyboard.press("Control+Alt+ArrowRight");
-  check(as, await opened(p, ID), "Ctrl+Alt+→: into it again");
+  check(as, await isHome(p), "Ctrl+Alt+H from the box, typing: back to the board");
+  await p.keyboard.press("Control+Alt+KeyL");
+  check(as, await opened(p, ID), "Ctrl+Alt+L: into it again");
   await sleep(400);
-  check(as, (await keys(p)).value === "hjkl", "the box as you left it");
+  check(as, (await keys(p)).value === "hjkl", "and nothing typed by them (the box has what you typed)");
   await p.evaluate(() => { const c = __chat(); c.input.value = ""; c.typed(); });
 
   // Ctrl+Alt+T: its terminal, the keyboard in it; again, back to the chat, the keys in its box.
@@ -300,7 +289,10 @@ async function run(browser, layout, port) {
   await sleep(500);
   await shot("menu");
   if (desk) await p.keyboard.type("keys page");
-  else await p.fill(".sheet .ui-menu-search input", "keys page");
+  else {      // (a tap on its search first, as on a phone: a box stepped aside for Ctrl+Alt takes text again with a key or a tap)
+    await p.click(".sheet .ui-menu-search input");
+    await p.fill(".sheet .ui-menu-search input", "keys page");
+  }
   check(as, await until(p, () => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();
     return !!m && [...m.querySelectorAll(".picker-row, .menu-item")].some((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)); }), "typed: the chat by its name");
   await p.evaluate(() => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();
@@ -309,7 +301,7 @@ async function run(browser, layout, port) {
 
   // Ctrl+Alt+/: the keys, the same on both.
   await p.keyboard.press("Control+Alt+Slash");
-  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /Ctrl\+Alt\+O\b/.test(document.querySelector(".sheet").innerText) && !/H J K L|Ctrl\+Alt\+P\b/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, O the preview, none of the input method's");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H J K L/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, h j k l in them");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

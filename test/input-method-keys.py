@@ -4,21 +4,26 @@
 fcitx5 has every text field (the chat's box, a terminal's) before the page
 does, and keeps the keys it binds: Ctrl+Alt+H turns its word hints on (a list
 under all you type, in every app, until pressed again), J for one word, P its
-preedit. A key of amarchy's it took would never reach amarchy, and would do
-fcitx5's thing instead. This presses every Ctrl+Alt key of amarchy's (read
-from app/desk.js: APP_KEYS and TALK_KEYS) into a focused input context of a
-private fcitx5, with every input method it has (the keyboard, and each engine
-installed: Pinyin, Mozc, Hangul, Chewing, the tables...), and checks it lets
-each through:
+preedit. amarchy keeps those keys its own: while Ctrl and Alt are down, its
+box stops taking text, the input method lets go of the keyboard, and the key
+comes to amarchy (app/desk.js, imKeys; test/input-method-view.py shows it in
+the browsers). That needs, from every input method (the keyboard, and each
+engine installed: Pinyin, Mozc, Hangul, Chewing, the tables...), checked here
+in a focused input context of a private fcitx5:
 
-- in an empty box, under fcitx5's own defaults, Omarchy's (its config/fcitx5)
-  and, where there is one, yours (~/.config/fcitx5, copied: never changed);
-- in a box with something typed, with the keyboard's word hints on (what
-  Ctrl+Alt+H left on) and in an engine's half-made word: said, not failed (an
-  input method may hold keys while you compose);
-- the keys amarchy left to it (H J K L, P: they were amarchy's, for a day)
-  are said too, and P (fcitx5's own, under every method) must be taken, else
-  the test isn't reaching fcitx5 at all.
+- Ctrl and Alt themselves let through, as they go down (the page steps aside
+  on them);
+- what it takes of amarchy's Ctrl+Alt keys (read from app/desk.js): said, the
+  ones the stepping aside is for;
+- Ctrl+Alt+? let through: with Shift held amarchy leaves the box to the input
+  method (Ctrl+Alt+Shift+U is its Unicode entry), so ? must get past it;
+- Ctrl+Alt+P taken (fcitx5's own, under every method), else the test isn't
+  reaching fcitx5 at all;
+- and, said: with something typed first (the keyboard's word hints on, an
+  engine's half-made word), what it holds.
+
+Under fcitx5's own defaults, Omarchy's config (its config/fcitx5) and, where
+there is one, yours (~/.config/fcitx5, copied: never changed).
 
 The fcitx5 runs on a D-Bus of the test's own, with no display: the desktop's
 input method is never touched. It is /usr/bin/fcitx5, or one unpacked in
@@ -28,8 +33,8 @@ extracted there, on a machine without it).
     python3 test/input-method-keys.py            # every config it finds
     python3 test/input-method-keys.py --config ~/some/fcitx5   # and that one
 
-Exits 0 when every key of amarchy's got through, 1 when one didn't, 2 when
-there's no fcitx5 to test with.
+Exits 0 when every check passed, 1 when one didn't, 2 when there's no fcitx5
+to test with.
 """
 import argparse
 import os
@@ -66,6 +71,7 @@ for row, first in zip(LETTERS, (24, 38, 52)):
         CODES["Key" + ch.upper()] = (ord(ch), first + i)
 SHIFT, CTRL, ALT = 1, 4, 8
 QUESTION = (0x3f, 61)      # Shift+/
+CONTROL_L, ALT_L = (0xffe3, 37), (0xffe9, 64)
 
 
 def names(code):
@@ -78,7 +84,6 @@ def amarchy_keys():
     src = (REPO / "app/desk.js").read_text()
     block = re.search(r"const APP_KEYS = \{(.*?)\n\};", src, re.S)
     talk = re.search(r"const TALK_KEYS = \[(.*?)\];", src, re.S)
-    moved = re.search(r"const KEYS_MOVED = \{(.*?)\n\};", src, re.S)
     if not block or not talk:
         sys.exit("app/desk.js: no APP_KEYS / TALK_KEYS to read")
     codes = re.findall(r"(\w+):\s*\(", block[1]) + re.findall(r'"(\w+)"', talk[1])
@@ -90,8 +95,7 @@ def amarchy_keys():
         keys.append((f"Ctrl+Alt+{names(code)}", *CODES[code], CTRL | ALT))
     if "Slash" in codes:
         keys.append(("Ctrl+Alt+?", *QUESTION, CTRL | ALT | SHIFT))
-    left = [(f"Ctrl+Alt+{names(c)}", *CODES[c], CTRL | ALT) for c in re.findall(r"(\w+):\s*\[", moved[1] if moved else "")]
-    return keys, left
+    return keys
 
 
 def find_fcitx5():
@@ -236,7 +240,7 @@ class Context:
             pass
 
 
-def run(where, config, exe, env, keys, left, work):
+def run(where, config, exe, env, keys, work):
     print(f"\n{where}" + (f" ({config})" if config else ""), flush=True)
     try:
         fx = Fcitx(exe, env, config, work)
@@ -256,11 +260,14 @@ def run(where, config, exe, env, keys, left, work):
                 note(f"{method}: couldn't switch to it ({fx.current() or 'none'}): skipped")
                 ic.close()
                 continue
-            taken = [label for label, sym, code, state in keys if ic.key(sym, code, state)]
-            check(f"{where}, {method}, an empty box: every amarchy key gets through", not taken, f"it took {', '.join(taken)}" if taken else "")
-            theirs = [label for label, sym, code, state in left if ic.key(sym, code, state)]
-            note(f"{method}: of the keys amarchy left, it takes {', '.join(theirs) or 'none'}")
-            check(f"{where}, {method}: it takes Ctrl+Alt+P (the test reaches its keys)", "Ctrl+Alt+P" in theirs)
+            mods = not ic.key(*CONTROL_L, 0) and not ic.key(*ALT_L, CTRL)
+            check(f"{where}, {method}: Ctrl and Alt get through as they go down (the box steps aside on them)", mods)
+            taken = [label for label, sym, code, state in keys if not state & SHIFT and ic.key(sym, code, state)]
+            note(f"{method}, an empty box: it takes {', '.join(taken) or 'none'} of amarchy's (the box steps aside for them)")
+            shifted = [label for label, sym, code, state in keys if state & SHIFT and ic.key(sym, code, state)]
+            check(f"{where}, {method}: amarchy's Ctrl+Alt+Shift keys get through (Shift leaves the box to it)", not shifted,
+                  f"it took {', '.join(shifted)}" if shifted else "")
+            check(f"{where}, {method}: it takes Ctrl+Alt+P (the test reaches its keys)", ic.key(*CODES["KeyP"], CTRL | ALT))
             ic.close()
 
             # Something typed first, each time: in an engine, a half-made word; with the keyboard, hints on.
@@ -273,7 +280,7 @@ def run(where, config, exe, env, keys, left, work):
                     held.append(label)
                 ic.do("Reset")
             what = "word hints on, a word typed" if hints else "a word typed"
-            note(f"{method}, {what}: " + (f"it holds {', '.join(held)} (yours again once the word is in)" if held else "every amarchy key gets through"))
+            note(f"{method}, {what}: " + (f"it holds {', '.join(held)}" if held else "every amarchy key gets through"))
             ic.close()
     finally:
         fx.close()
@@ -296,9 +303,8 @@ def main():
     if not shutil.which("dbus-daemon"):
         print("needs dbus-daemon")
         return 2
-    keys, left = amarchy_keys()
+    keys = amarchy_keys()
     print("amarchy's keys: " + ", ".join(k[0] for k in keys))
-    print("left to the input method: " + ", ".join(k[0] for k in left))
     work = Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
     configs = [("fcitx5's own defaults", None)]
     om = omarchy_config()
@@ -311,7 +317,7 @@ def main():
         configs.append(("yours", mine))
     configs += [(f"--config {c}", Path(c).expanduser()) for c in args.config]
     for where, config in configs:
-        run(where, config, exe, env, keys, left, work)
+        run(where, config, exe, env, keys, work)
     print()
     if failed:
         print(f"{len(failed)} failed:\n  " + "\n  ".join(failed))
