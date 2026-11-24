@@ -1490,7 +1490,7 @@ class Chat {
       wait: () => 250,
       max: () => window.innerHeight * 0.4,
       ask: (text, signal) => this.suggestAsk(text, signal),
-      said: (id, outcome, took) => { api(chatPath(this.id, "/suggest"), { id, outcome, took }, { keepalive: true }).catch(() => {}); },
+      said: (id, outcome, took, waited) => { api(chatPath(this.id, "/suggest"), { id, outcome, took, waited }, { keepalive: true }).catch(() => {}); },
     });
     // Over it: the model and the mode, and the menu that's open (+, /, a pill's).
     this.info = null;           // /composer: the commands, the models, the model and mode
@@ -3660,13 +3660,15 @@ class Chat {
   }
 
   // Claude's reply came, or it went to work: with nothing written yet, what
-  // you'd answer (asked again only when that changed).
+  // you'd answer, asked for now (shown if you're in the box, else there at
+  // once when you get to it). Asked again only when that changed.
   suggestAgain() {
-    if (!this.ghost || this.input.value || document.activeElement !== this.input) return;
+    if (!this.ghost || this.input.value || !suggestionsOn()) return;
     const now = this.suggestContext();
     if (now === this.suggestedFor) return;
     this.suggestedFor = now;
-    this.ghost.refresh();
+    if (document.activeElement === this.input) this.ghost.refresh();
+    else this.ghost.prefetch("");
   }
 
   // Where the conversation is, for suggesting: its latest message, and

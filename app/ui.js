@@ -568,17 +568,20 @@ function uiComposerButton(kind, label, content, act, extra = {}) {
 // cursor or leaving the box drops it. Esc stays Claude's: it never
 // dismisses one (Esc stops Claude), and Enter sends only what you wrote.
 //   ask(text, signal) → {text, id, ahead} | null: what follows text (a
-//     fetch the signal cancels when you type on). Asked once you pause
-//     (wait() ms), only with the cursor at the end and when on() says so;
-//     one asked before for the same text and context (key()) is shown again
-//     at once. ahead: the next one may be fetched while this one shows.
-//   said(id, outcome, took): what became of one: "tab", "word" (taken a
-//     word at a time, at least one), "typed" (written as it said), "gone";
-//     took, how many of its characters ended up in the box.
+//     fetch the signal cancels when you type on). Asked the moment you
+//     finish a word (a space), else once you pause in one (wait() ms), only
+//     with the cursor at the end and when on() says so; one asked before for
+//     the same text and context (key()) is shown again at once. ahead: the
+//     next one may be fetched while this one shows.
+//   said(id, outcome, took, waited): what became of one: "tab", "word"
+//     (taken a word at a time, at least one), "typed" (written as it said),
+//     "gone"; took, how many of its characters ended up in the box; waited,
+//     ms from your last key (or the focus) to it on the screen.
 //   max(): how tall the box may grow for it.
-// Returns {typed(), refresh(), clear(), shown()}: the box's owner calls
-// typed() after every change to the field (typing, dictation, a draft put
-// back, sending), refresh() when what it's asked with changed (a new reply).
+// Returns {typed(), refresh(), prefetch(text), clear(), shown()}: the box's
+// owner calls typed() after every change to the field (typing, dictation, a
+// draft put back, sending), refresh() when what it's asked with changed (a
+// new reply), prefetch(text) to have one ready before the box is used.
 function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "", wait = () => 150, max = () => Infinity }) {
   const host = field.parentElement;
   host.classList.add("ui-ghost-host");
@@ -591,7 +594,7 @@ function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "",
   // it to take), took (taken: Tab, →, a tap), ate (typed as it said), words}.
   // asking: the fetches under way ({text, ctl}): one for text a later text
   // goes on from is kept (its answer may still fit), the rest cancelled.
-  let shown = null, timer = 0, asking = [], grew = false, taking = false;
+  let shown = null, timer = 0, asking = [], grew = false, taking = false, lastKey = performance.now();
   const seen = new Map();       // context + text → what it suggested (the latest 40), or its fetch
   const atEnd = () => field.selectionStart === field.value.length && field.selectionEnd === field.value.length;
   const here = () => document.activeElement === field;
@@ -639,14 +642,15 @@ function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "",
     shown = null;
     if (was && was.id) {
       const got = was.took + was.ate;
-      said(was.id, outcome || (was.words ? "word" : got && !was.text ? "typed" : "gone"), got);
+      said(was.id, outcome || (was.words ? "word" : got && !was.text ? "typed" : "gone"), got, was.waited);
     }
     draw();
   }
 
   function show(text, s) {
     if (shown) end();
-    shown = { id: s.id, whole: text + s.text, text: s.text, took: 0, ate: 0, words: 0 };
+    shown = { id: s.id, whole: text + s.text, text: s.text, took: 0, ate: 0, words: 0,
+              waited: Math.max(0, Math.round(performance.now() - lastKey)) };
     const now = field.value;
     if (now.length > text.length) { shown.ate = now.length - text.length; shown.text = shown.whole.slice(now.length); }
     draw();
@@ -695,12 +699,13 @@ function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "",
       const now = field.value;
       if (!on() || !atEnd() || !here() || shown || !(text + s.text).startsWith(now) || (text + s.text).length <= now.length) return;
       show(text, s);
-    }, soon || had || !text ? 0 : wait());
+    }, soon || had || !text || /\S\s$/.test(text) ? 0 : wait());     // (a word just finished: at once)
   }
 
   // The field changed: typed as it says (it shrinks), else asked again.
   function typed() {
     if (taking) return;
+    lastKey = performance.now();
     if (shown) {
       const now = field.value, before = shown.whole.length - shown.text.length;
       if (atEnd() && shown.whole.startsWith(now) && now.length >= before) {
@@ -758,7 +763,7 @@ function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "",
   field.addEventListener("scroll", () => { box.scrollTop = field.scrollTop; });
   field.addEventListener("compositionstart", () => { stop(); end(); });
   field.addEventListener("compositionend", () => schedule());
-  field.addEventListener("focus", () => schedule());
+  field.addEventListener("focus", () => { lastKey = performance.now(); schedule(); });
   field.addEventListener("blur", () => { stop(); end(); });
   // The cursor moved off the end (a click, the arrows, a selection):
   // dropped; back at the end (End, a click there): asked again.
@@ -773,7 +778,8 @@ function uiGhost(field, { ask, said = () => {}, on = () => true, key = () => "",
   window.addEventListener("resize", () => { if (shown) draw(); });
   return {
     typed,
-    refresh: () => { if (shown) end(); schedule(); },
+    refresh: () => { if (shown) end(); lastKey = performance.now(); schedule(); },
+    prefetch: (text) => { if (on()) fetchFor(text).catch(() => {}); },
     clear: () => { stop(); end(); },
     shown: () => (shown && shown.text ? shown.text : ""),
   };

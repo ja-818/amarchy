@@ -25301,7 +25301,11 @@ def cmd_suggest(args):
         print(f"No suggestions in the last {days:g} days (Settings → Suggestions turns them on).")
         return 0
     speed = ", ".join(f"{v['p50']} ms typical, {v['p90']} ms slow" for via, v in st["ms"].items())
-    print(f"{st['asked']} asked in {days:g} days, {st['shown']} shown, {st['errors']} failed. {speed}.")
+    print(f"{st['asked']} asked in {days:g} days, {st['shown']} shown, {st['errors']} failed. Haiku: {speed}.")
+    w = st["waited"]
+    if w["p50"] is not None:
+        print(f"On your screen, after your last key: {w['p50']} ms typical, {w['p90']} ms slow; "
+              f"{w['at_once']} were there at once.")
     if st["rate"] is not None:
         print(f"Taken: {st['taken']} ({st['rate']:.0%} of those shown): {st['taken_whole']} with Tab, "
               f"{st['taken_by_word']} a word at a time, {st['typed_as_said']} typed as it said; {st['chars_taken']} characters.")
@@ -27211,6 +27215,8 @@ SUGGEST_DRAFT_MAX = 6000        # what you've written, its end: that's what's co
 SUGGEST_MAX = 160               # a suggestion, at most (characters)
 SUGGEST_WAIT = 10               # seconds for one, at most (a claude -p that hangs is ended)
 SUGGEST_SPARE_IDLE = 300        # seconds a waiting claude -p is kept with nothing asked of it
+SUGGEST_SPARES = 2              # claude -p kept waiting while you write
+SUGGEST_WORDS = 7               # a suggestion, at most (words): short ones are the ones taken
 
 SUGGEST_PROMPT = """Answer at once: this is a split-second guess, never a problem to think through. You predict how a person will finish the message they are typing to their AI coding agent (Claude Code, in an app called amarchy). Your words show in gray after their cursor and Tab inserts them, so write what THEY would type next, as them. Their draft is the start of their own message: never answer it, reply to it or comment on it.
 
@@ -27219,7 +27225,7 @@ You get <draft>: what they've written, up to the word they're on; and <typing>: 
 
 The words:
 - Begin with the word they're typing, whole (its letters from <typing> included), then the words after it. With nothing in <typing>, begin with the next word.
-- Finish the current sentence or clause: about 3 to 12 words, one line.
+- Short: the rest of the current phrase, 2 to 6 words. Never a whole sentence more.
 - The draft's language, and their voice as in their recent messages (short, direct, informal), spelled correctly.
 - Grounded in this chat: what the agent just said or asked, the names it used. Their messages from other chats show only how they write, never what this chat is about.
 - With an empty draft: the whole short message they'd most likely send now, usually their answer to the agent's last question, and only if that's clear.
@@ -27229,7 +27235,7 @@ Examples:
 <draft>fix the scroll </draft><typing>ju</typing> → <continuation>jump when a turn ends</continuation>
 <draft>Looks good. </draft><typing>Now</typing> → <continuation>Now ship it</continuation>
 <draft>Cuanto es eso en pesos </draft><typing>co</typing> → <continuation>colombianos al día?</continuation>
-<draft>Why does the build </draft><typing></typing> → <continuation>fail on the phone but not on the desktop?</continuation>
+<draft>Why does the build </draft><typing></typing>, the agent said it fails on the phone → <continuation>fail on the phone?</continuation>
 <draft></draft><typing></typing>, the agent asked "Ship it?" → <continuation>Yes, ship it</continuation>
 <draft>The thing </draft><typing>is</typing>, nothing in the chat says what → <continuation></continuation>"""
 
@@ -27363,6 +27369,9 @@ def suggest_clean(draft, text):
         last = draft.split()[-1]
         if t.lower().startswith(last.lower() + " "):
             t = t[len(last) + 1:]
+    words = re.findall(r"\s*\S+", t)
+    if len(words) > SUGGEST_WORDS + (0 if t[:1].isspace() or not draft.strip() or draft[-1].isspace() else 1):
+        t = "".join(words[:SUGGEST_WORDS])
     if len(t) > SUGGEST_MAX:
         cut = t[:SUGGEST_MAX].rsplit(" ", 1)[0]
         t = cut if len(cut) > SUGGEST_MAX // 2 else t[:SUGGEST_MAX]
@@ -27373,15 +27382,17 @@ import queue      # (SuggestPool's)
 
 
 class SuggestPool:
-    """claude -p for suggestions, one kept started and waiting: each answers
-    one suggestion and ends (its conversation never grows), and the next is
-    started meanwhile. A suggestion of a chat that can't be used any more (you
-    wrote on otherwise) ends its claude -p. The one waiting goes after
-    SUGGEST_SPARE_IDLE seconds with nothing asked (~200 MB)."""
+    """claude -p for suggestions, SUGGEST_SPARES kept started and waiting
+    (one is asked for at every word you finish: several can be under way):
+    each answers one suggestion and ends (its conversation never grows), and
+    another is started meanwhile. A suggestion of a chat that can't be used
+    any more (you wrote on otherwise) ends its claude -p. The waiting ones go
+    after SUGGEST_SPARE_IDLE seconds with nothing asked (~200 MB each)."""
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.spare = None
+        self.spares = []
+        self.starting = 0
         self.used = 0.0
         self.flying = {}            # session id → [(the text it's for, its claude -p)]
         self.reaper = None
@@ -27395,38 +27406,44 @@ class SuggestPool:
             env={**agent_env(), "MAX_THINKING_TOKENS": "0"}, cwd=STATE)
 
     def warm(self):
-        """One started and waiting (a box you write in got the focus)."""
+        """Them started and waiting (a box you write in got the focus)."""
         with self.lock:
             self.used = time.time()
-            if self.spare and self.spare.poll() is None:
-                return
-            self.spare = None
-        threading.Thread(target=self.refill, daemon=True).start()
+        self.fill()
+
+    def fill(self):
+        """As many started as are missing (each in a thread of its own)."""
+        with self.lock:
+            self.spares = [q for q in self.spares if q.poll() is None]
+            need = SUGGEST_SPARES - len(self.spares) - self.starting
+            self.starting += max(0, need)
+            if not self.reaper:
+                self.reaper = threading.Thread(target=self.reap, daemon=True)
+                self.reaper.start()
+        for _ in range(max(0, need)):
+            threading.Thread(target=self.refill, daemon=True).start()
 
     def refill(self):
         try:
             p = self.start()
         except OSError:
-            return
+            p = None
         with self.lock:
-            if self.spare and self.spare.poll() is None:
-                old, self.spare = p, self.spare
-            else:
-                old, self.spare = None, p
-            if not self.reaper:
-                self.reaper = threading.Thread(target=self.reap, daemon=True)
-                self.reaper.start()
-        if old:
-            self.end(old)
+            self.starting -= 1
+            keep = p is not None and len(self.spares) < SUGGEST_SPARES
+            if keep:
+                self.spares.append(p)
+        if p is not None and not keep:
+            self.end(p)
 
     def reap(self):
         while True:
             time.sleep(30)
             with self.lock:
-                idle = self.spare and time.time() - self.used > SUGGEST_SPARE_IDLE
-                p, self.spare = (self.spare, None) if idle else (None, self.spare)
-            if p:
-                self.end(p)
+                idle = time.time() - self.used > SUGGEST_SPARE_IDLE
+                gone, self.spares = (self.spares, []) if idle else ([], self.spares)
+            for q in gone:
+                self.end(q)
 
     @staticmethod
     def end(p):
@@ -27438,13 +27455,16 @@ class SuggestPool:
         p.wait()
 
     def take(self):
-        """The one waiting (started anew if none), another started for next time."""
+        """One waiting (started anew if none), another started for next time."""
         with self.lock:
             self.used = time.time()
-            p, self.spare = self.spare, None
-        if not p or p.poll() is not None:
+            p = None
+            while self.spares and p is None:
+                q = self.spares.pop(0)
+                p = q if q.poll() is None else None
+        if p is None:
             p = self.start()
-        threading.Thread(target=self.refill, daemon=True).start()
+        self.fill()
         return p
 
     def ask(self, sid, draft, parts):
@@ -27532,6 +27552,9 @@ def suggest_log(entry):
         pass
 
 
+_SUGGEST_SEEN = {}          # (chat, its transcript as it was, draft) → (when, the suggestion): asked once
+
+
 def suggest(s, draft, tried=False):
     """The gray text for a chat's draft: {text, id, via, ms}, or {"error"}.
     tried: asked for by amarchy suggest try (logged as such, not counted)."""
@@ -27539,12 +27562,25 @@ def suggest(s, draft, tried=False):
     if draft.lstrip().startswith("/"):
         return {"text": "", "id": ""}           # a command (its menu), not words to continue
     parts = suggest_parts(s, draft)
+    had = _SUGGEST_CHATS.get(s["id"])
+    key = (s["id"], had[0] if had else None, draft)
+    seen = _SUGGEST_SEEN.get(key)
+    if seen and time.time() - seen[0] < 600 and not tried:
+        sid = uuid.uuid4().hex[:12]
+        suggest_log({"id": sid, "chat": s["id"], "via": "claude", "ms": 0, "again": True, "draft": len(draft),
+                     "chars": len(seen[1]), "empty_draft": not draft.strip()})
+        return {"text": seen[1], "id": sid, "via": "claude", "ms": 0}
     try:
         raw, info = SUGGEST_POOL.ask(s["id"], draft, parts)
     except Exception as e:
         suggest_log({"chat": s["id"], "error": str(e)[:300], "via": "claude"})
         return {"error": f"No suggestion: {e}"}
     text = suggest_clean(draft, raw)
+    if had and raw:
+        _SUGGEST_SEEN[key] = (time.time(), text)
+        if len(_SUGGEST_SEEN) > 300:
+            for k in sorted(_SUGGEST_SEEN, key=lambda k: _SUGGEST_SEEN[k][0])[:100]:
+                _SUGGEST_SEEN.pop(k, None)
     sid = uuid.uuid4().hex[:12]
     suggest_log({"id": sid, "chat": s["id"], **info, "draft": len(draft), "raw": len(raw), "chars": len(text),
                  "empty_draft": not draft.strip(), **({"tried": True} if tried else {})})
@@ -27556,9 +27592,10 @@ def suggest_outcome(s, data):
     time (word), typed over as it said (typed), or left (gone)."""
     if data.get("outcome") not in ("tab", "word", "typed", "gone") or not re.fullmatch(r"[0-9a-f]{12}", str(data.get("id") or "")):
         return "outcome: tab, word, typed or gone, and the suggestion's id"
-    took = data.get("took")
+    took, waited = data.get("took"), data.get("waited")
     suggest_log({"id": data["id"], "chat": s["id"], "outcome": data["outcome"],
-                 "took": took if isinstance(took, int) and 0 <= took < 10_000 else 0})
+                 "took": took if isinstance(took, int) and 0 <= took < 10_000 else 0,
+                 **({"waited": waited} if isinstance(waited, int) and 0 <= waited < 120_000 else {})})
     return None
 
 
@@ -27603,6 +27640,10 @@ def suggest_stats(days=7):
         "ms": {via: {"p50": pct(ms, 0.5), "p90": pct(ms, 0.9)} for via, ms in by.items()},
         "ttft_p50": pct([e["ttft"] for e in asked.values() if e.get("ttft")], 0.5),
         "thought": sum(1 for e in asked.values() if e.get("thought")),
+        # From your last key to the gray text on your screen (0: there already).
+        "waited": {"p50": pct([o["waited"] for o in outcomes.values() if "waited" in o], 0.5),
+                   "p90": pct([o["waited"] for o in outcomes.values() if "waited" in o], 0.9),
+                   "at_once": sum(1 for o in outcomes.values() if o.get("waited", 1) <= 50)},
     }
 
 

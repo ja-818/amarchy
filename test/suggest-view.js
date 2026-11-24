@@ -46,6 +46,7 @@ const SAYS = {
 };
 
 async function run(browser, layout, port) {
+  SAYS[""] = "Yes, ship it";        // (a run changes it: each starts from the same)
   const ctx = await browser.newContext({ ...LAYOUTS[layout], extraHTTPHeaders: { "Tailscale-User-Login": "tester@test" } });
   await ctx.addInitScript(() => { localStorage.setItem("tour", "1"); localStorage.setItem("suggest", "on"); });
   const page = await ctx.newPage();
@@ -240,6 +241,43 @@ async function run(browser, layout, port) {
   await sleep(500);
   check(layout, (await ghost()) === " the phone too", `typed on as it said while it came: the rest of it ("${await ghost()}")`);
   slow = 0;
+  await clear();
+
+  // A word just finished (a space): asked at once, no pause waited for.
+  SAYS["Check the board "] = "on the phone too";
+  await box().click();
+  await page.keyboard.type("Check the board ");
+  const askedAt = Date.now();
+  while (!asked.includes("Check the board ") && Date.now() - askedAt < 1000) await sleep(10);
+  check(layout, asked.includes("Check the board ") && Date.now() - askedAt < 200,
+    `a finished word is asked for at once (${Date.now() - askedAt} ms, not after a pause)`);
+  // Typing on as it says while it comes: what's left of it, with nothing more asked.
+  await page.keyboard.type("on t");
+  await sleep(300);
+  check(layout, (await ghost()) === "he phone too", `typed on as it said: the rest of it ("${await ghost()}")`);
+  await page.keyboard.press("Tab");
+  await sleep(150);
+  check(layout, outcomes.at(-1) && typeof outcomes.at(-1).waited === "number",
+    `what became of it says how long you waited for it (${JSON.stringify(outcomes.at(-1))})`);
+  await clear();
+
+  // Claude's reply comes while you're elsewhere: its answer asked for then,
+  // and there at once when you get to the box.
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  const before2 = asked.filter((t) => t === "").length;
+  SAYS[""] = "Yes, and the phone too";
+  await page.evaluate(() => {
+    const c = window.__chat;
+    c.live = { state: "working" }; c.renderTail(); c.suggestAgain();
+    c.conversation({ reset: false, start: 0, items: [...c.items, { kind: "user", text: "Ship it", turn: true, key: "u9:0", at: "" },
+      { kind: "claude", text: "Shipped. Check it on the phone too?", key: "c9:0", at: "" }] });
+    c.live = { state: "idle" }; c.renderTail(); c.suggestAgain();
+  });
+  await sleep(250);
+  check(layout, asked.filter((t) => t === "").length === before2 + 1, "a new reply: its answer asked for, the box not even in focus");
+  await box().click();
+  await sleep(40);
+  check(layout, (await ghost()) === "Yes, and the phone too", `and there at once in the box ("${await ghost()}")`);
   await clear();
 
   // A command (/...): nothing suggested.

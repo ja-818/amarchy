@@ -590,9 +590,10 @@ follows, so `Tab`, `Tab`, `Tab` writes on), `→` at the end takes a word, and a
 tap on it takes it (a phone has no `Tab`). Typing what it says eats it; typing
 anything else, moving the cursor or leaving the box drops it. `Esc` stays
 Claude's, and `Enter` sends only what you wrote. Haiku writes it, from the chat
-and how you write, on your Claude subscription (nothing more to pay): about 0.7 s
-after you pause, as a `claude -p` is kept started and waiting for it while you
-use them. `amarchy suggest` says how it's going: how fast, how many you took.
+and how you write, on your Claude subscription (nothing more to pay). It's asked
+for the moment you finish a word, and your answer to Claude's reply the moment
+the reply comes, so it's often there before you pause; a few words at most.
+`amarchy suggest` says how it's going: how long you waited, how many you took.
 
 On a board's card in Tasks, `1`–`4` press its buttons, and `Ctrl+Alt+←` is Tasks
 again. Every menu takes the keys: a chat's menu (its •••), closing
