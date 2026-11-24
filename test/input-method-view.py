@@ -438,14 +438,14 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
 # ---- the desktop: sway with no screen, fcitx5 on it
 
 class Desktop:
-    """Everything here runs in a session of its own (stopped whole at the end), and a crash
-    in it leaves no core dump (Omarchy's crash toast never hears of it); its D-Bus starts
-    nothing (no portals, no notifications: test/input-method-keys.py's BUS_CONF)."""
+    """Everything here runs in a session of its own, stopped whole at the end with SIGKILL
+    (sway and Chromium can crash at SIGTERM, and Omarchy toasts every crash), leaving no core
+    file; its D-Bus starts nothing (no portals, no notifications: input-method-keys.py's BUS_CONF)."""
 
     def __init__(self, work, fcitx_exe, fcitx_env, config, m):
         self.work = work
         self.procs = []
-        self.quiet = m.quiet_crashes
+        self.m = m
         run = work / "run"
         run.mkdir(mode=0o700)
         (work / "bus.conf").write_text(m.BUS_CONF.format(sock=work / "bus"))
@@ -502,7 +502,7 @@ class Desktop:
             return ""
 
     def start(self, args, **kw):
-        p = subprocess.Popen(args, start_new_session=True, preexec_fn=self.quiet, **kw)
+        p = subprocess.Popen(args, start_new_session=True, preexec_fn=self.m.no_core_files, **kw)
         self.procs.append(p)
         return p
 
@@ -510,23 +510,8 @@ class Desktop:
         return self.start(args, stdout=kw.pop("stdout", open(self.work / log, "w")), stderr=kw.pop("stderr", subprocess.STDOUT), **kw)
 
     def close(self):
-        # Each one and all it started (its session), the last started first.
-        for p in reversed(self.procs):
-            for sig in (signal.SIGTERM, signal.SIGCONT):
-                try:
-                    os.killpg(p.pid, sig)
-                except ProcessLookupError:
-                    pass
-            try:
-                p.wait(5)
-            except subprocess.TimeoutExpired:
-                pass
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            p.wait()
-
+        for p in reversed(self.procs):      # (the last started first)
+            self.m.stop(p)
 
 # ---- the browsers: each answers js(code)
 
@@ -534,6 +519,7 @@ class Chromium:
     """Chromium on the desktop, driven over its DevTools protocol (a websocket of our own: no packages)."""
 
     def __init__(self, desktop, url, init, flags, name):
+        self.desktop = desktop
         self.port = free_port()
         prof = desktop.work / f"chromium-{name}"
         exe = os.environ.get("CHROME") or shutil.which("chromium") or shutil.which("chromium-browser")
@@ -627,8 +613,7 @@ class Chromium:
             self.sock.close()
         except OSError:
             pass
-        if self.p.poll() is None:
-            self.p.terminate()
+        self.desktop.m.stop(self.p)      # (all of it at once: SIGTERM can crash its helpers)
 
 
 KIOSK = r"""
@@ -672,6 +657,7 @@ class WebKitGTK:
     """WebKitGTK 4.1 under GTK 3 in a window of its own: what the desktop app (Tauri) is."""
 
     def __init__(self, desktop, url, init, name):
+        self.desktop = desktop
         (desktop.work / "kiosk.py").write_text(KIOSK)
         (desktop.work / "init.js").write_text(init)
         home = desktop.work / "webkit-home"
@@ -695,8 +681,7 @@ class WebKitGTK:
         pass
 
     def close(self):
-        if self.p.poll() is None:
-            self.p.terminate()
+        self.desktop.m.stop(self.p)
 
 
 def until(b, code, ms=8000):
@@ -864,6 +849,7 @@ def main():
                 ("ime", "Chromium, --enable-wayland-ime", chrome and (lambda d, url, init: Chromium(d, url, init, omarchy_flags + ["--enable-wayland-ime"], "ime"))),
                 ("webkit", "WebKitGTK (the desktop app's)", webkit and (lambda d, url, init: WebKitGTK(d, url, init, "webkit")))]
     work = Path(tempfile.mkdtemp(prefix="input-method-view-", dir=os.environ.get("TMPDIR") or None))
+    crashes = m.Crashes(work)
     home = work / "home"
     home.mkdir()
     server = proxy = None
@@ -903,6 +889,11 @@ def main():
         if not ran and not failed:
             print("no browser here to test")
             return 2
+        hits = crashes.found()
+        if hits is None:
+            print("  (the journal can't be read here: crashes not checked)")
+        else:
+            check("the test", not hits, "nothing it started crashed (Omarchy would toast it)" + (f": {', '.join(hits)}" if hits else ""))
     finally:
         if proxy:
             proxy.shutdown()
