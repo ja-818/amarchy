@@ -277,12 +277,11 @@ machine without it, by another machine of yours that has it, paired with amarchy
                                         write down a recording (anything ffmpeg reads), as a dictation would
                                         be: here, or on the machine that writes this one's down (or the one named)
 
-Suggestions as you type (Settings → Suggestions: the composer's gray text, Tab to take it; Haiku writes them, on
-your Claude subscription):
+Your answer, suggested (Settings → Suggestions: once Claude has replied, what you'd likely answer, in gray in the
+empty box, Tab to take it; Haiku writes it, on your Claude subscription):
   amarchy suggest [--days <n>] [--json] how the last days' went (7 unless --days): how many, how fast, how many
                                         you took
-  amarchy suggest try <text> [--id <chat>]
-                                        what it would suggest after that text in a chat (this one unless --id),
+  amarchy suggest try [--id <chat>]     what it would suggest you answer in a chat now (this one unless --id),
                                         and how long it took
 
 Secrets (a key or password a project needs, given in the app, never in the chat; kept in
@@ -23622,7 +23621,7 @@ def app_handler(st, users, address):
                     return self.error(409, "Claude doesn't ask for it any more")
                 return self.error(400, why) if why else self.send(200, {})
             m = re.fullmatch(r"/api/session/([^/]+)/suggest", self.path)
-            if m:       # the composer's gray text (see "suggestions as you type"): {text} → {text, id}; {id, outcome, took}; {warm}
+            if m:       # your answer in gray (see "your answer, suggested"): {text: ""} → {text, id}; {id, outcome, took, waited}; {warm}
                 self.changed_nothing = True         # (nothing on any screen changes)
                 s = self.session(m.group(1))
                 if not s:
@@ -23634,8 +23633,10 @@ def app_handler(st, users, address):
                     SUGGEST_POOL.warm()
                     return self.send(200, {})
                 if not isinstance(data.get("text"), str):
-                    return self.error(400, "text: what you've written so far")
-                r = suggest(s, data["text"])
+                    return self.error(400, "text: what's in the box (only an empty one is answered)")
+                if data["text"].strip():
+                    return self.send(200, {"text": "", "id": ""})       # (nothing is suggested while you write)
+                r = suggest(s)
                 return self.error(502, r["error"]) if "error" in r else self.send(200, r)
             # The chat engine's own (docs/agent-protocol.md, "The app's API").
             m = re.fullmatch(r"/api/session/([^/]+)/(answer|interrupt|model|effort|mode|unqueue|engine|classic)", self.path)
@@ -25260,8 +25261,8 @@ def cmd_quiet(args):
 
 
 def cmd_suggest(args):
-    """amarchy suggest [--days <n>] [--json] | amarchy suggest try <text>
-    [--id <chat>]: the suggestions as you type, summed up; or one asked for."""
+    """amarchy suggest [--days <n>] [--json] | amarchy suggest try [--id
+    <chat>]: the suggested answers, summed up; or one asked for."""
     opts, rest, it = {}, [], iter(args)
     for a in it:
         if a in ("--days", "--id"):
@@ -25271,7 +25272,9 @@ def cmd_suggest(args):
         else:
             rest.append(a)
     if rest[:1] == ["try"]:
-        text = " ".join(rest[1:])
+        if rest[1:]:
+            print(usage("suggest"), file=sys.stderr)
+            return 1
         sid = opts.get("--id") or own_session_id()
         s = session(sid) if sid else None
         if not s:
@@ -25281,10 +25284,10 @@ def cmd_suggest(args):
             if _SUGGEST_STYLE["at"]:
                 break
             time.sleep(0.1)
-        r = suggest(s, text, tried=True)
+        r = suggest(s, tried=True)
         if "error" in r:
             return fail(r["error"])
-        print(json.dumps(r) if opts.get("--json") else f"{text}\033[2m{r['text']}\033[0m\n({r['ms']} ms)")
+        print(json.dumps(r) if opts.get("--json") else f"\033[2m{r['text'] or '(nothing: not clear what you would answer)'}\033[0m\n({r['ms']} ms)")
         return 0
     if rest:
         print(usage("suggest"), file=sys.stderr)
@@ -27199,45 +27202,42 @@ def conversation_title(text):
     return title if 0 < len(title) <= 80 else None
 
 
-# ---- suggestions as you type (Settings → Suggestions, off unless turned on)
+# ---- your answer, suggested (Settings → Suggestions, off unless turned on)
 #
-# The composer's gray text after what you've written: what you'd most likely
-# write next, Tab to take it (ui.js uiGhost, chat.js). Asked of Haiku on your
-# Claude subscription (claude -p: nothing more to pay, no key), with the
-# chat's latest (the agent's last reply, what you said before in it) and how
-# you write (your latest messages, in every chat). A claude -p takes ~0.65 s
-# to start, so one is kept started and waiting (SuggestPool): Haiku's answer
-# then comes in ~0.7 s. Each one is logged (suggest.jsonl: how long it took,
-# whether you took it), for `amarchy suggest`.
+# Once Claude has replied, the chat's empty box shows in gray what you'd most
+# likely answer, Tab (or a tap) to take it (ui.js uiGhost, chat.js); typing
+# what it says eats it, anything else drops it. Nothing is suggested while
+# you write: on Julian's own messages that was right 10-20% of the time, and
+# he took 6% of what it showed (2026-11-24). Asked of Haiku on your Claude
+# subscription (claude -p: nothing more to pay, no key), with the chat's
+# latest (Claude's reply, what you said before in it) and how you write
+# (your latest messages, in every chat), the moment the reply comes: it's
+# there when you get to the box. A claude -p takes ~0.65 s to start, so one
+# is kept started and waiting (SuggestPool). Each one is logged
+# (suggest.jsonl: how long it took, whether you took it), for `amarchy
+# suggest`.
 
 SUGGEST_LOG = STATE / "suggest.jsonl"
-SUGGEST_DRAFT_MAX = 6000        # what you've written, its end: that's what's continued
 SUGGEST_MAX = 160               # a suggestion, at most (characters)
-SUGGEST_WAIT = 10               # seconds for one, at most (a claude -p that hangs is ended)
+SUGGEST_WORDS = 15              # and words: a short answer
+SUGGEST_WAIT = 20               # seconds for one, at most (a claude -p that hangs is ended)
 SUGGEST_SPARE_IDLE = 300        # seconds a waiting claude -p is kept with nothing asked of it
-SUGGEST_SPARES = 2              # claude -p kept waiting while you write
-SUGGEST_WORDS = 7               # a suggestion, at most (words): short ones are the ones taken
 
-SUGGEST_PROMPT = """Answer at once: this is a split-second guess, never a problem to think through. You predict how a person will finish the message they are typing to their AI coding agent (Claude Code, in an app called amarchy). Your words show in gray after their cursor and Tab inserts them, so write what THEY would type next, as them. Their draft is the start of their own message: never answer it, reply to it or comment on it.
+SUGGEST_PROMPT = """You suggest a person's answer to their AI coding agent (Claude Code, in an app called amarchy). The agent just replied; their message box is empty. Your words show there in gray and Tab sends them into the box, so write what THEY would most likely type now, as them: not the agent's words, not advice to them.
 
-You get <draft>: what they've written, up to the word they're on; and <typing>: the letters of the word they're typing now (none when they're between words). Reply in this form and nothing else:
-<continuation>the words</continuation>
+Reply in this form and nothing else:
+<answer>the words</answer>
 
 The words:
-- Begin with the word they're typing, whole (its letters from <typing> included), then the words after it. With nothing in <typing>, begin with the next word.
-- Short: the rest of the current phrase, 2 to 6 words. Never a whole sentence more.
-- The draft's language, and their voice as in their recent messages (short, direct, informal), spelled correctly.
-- Grounded in this chat: what the agent just said or asked, the names it used. Their messages from other chats show only how they write, never what this chat is about.
-- With an empty draft: the whole short message they'd most likely send now, usually their answer to the agent's last question, and only if that's clear.
-- Not sure what comes next? Reply <continuation></continuation>. A wrong guess is worse than none.
+- Short: what they'd type, 2 to 12 words, one line. Usually their answer to the agent's question or the next step it offered ("Yes, ship it", "Do the first one", "Ship it and close the chat").
+- In their language and their voice, as in their recent messages (short, direct, informal), spelled correctly.
+- Grounded in the agent's last reply: answer what it asked, pick among what it offered, use the names it used. Their messages from other chats show only how they write, never what this chat is about.
+- Not clear what they'd answer (the reply asks nothing, or the choice is theirs to make)? Reply <answer></answer>. A wrong guess is worse than none.
 
 Examples:
-<draft>fix the scroll </draft><typing>ju</typing> → <continuation>jump when a turn ends</continuation>
-<draft>Looks good. </draft><typing>Now</typing> → <continuation>Now ship it</continuation>
-<draft>Cuanto es eso en pesos </draft><typing>co</typing> → <continuation>colombianos al día?</continuation>
-<draft>Why does the build </draft><typing></typing>, the agent said it fails on the phone → <continuation>fail on the phone?</continuation>
-<draft></draft><typing></typing>, the agent asked "Ship it?" → <continuation>Yes, ship it</continuation>
-<draft>The thing </draft><typing>is</typing>, nothing in the chat says what → <continuation></continuation>"""
+the agent asked "Ship it?" → <answer>Yes, ship it</answer>
+the agent offered "Want me to also fix the phone layout?" → <answer>Yes, fix the phone layout too</answer>
+the agent asked which of three logos they like → <answer></answer>"""
 
 
 def suggest_yours(text):
@@ -27319,82 +27319,61 @@ def suggest_style_text():
     return _SUGGEST_STYLE["text"]
 
 
-def suggest_parts(s, draft, turns=None, style=None):
-    """What Haiku is given: how you write (the same for every chat), this
-    chat (the same while you write in it), and the draft (what changes).
-    turns, style: given instead of read (a replay of an earlier moment)."""
+def suggest_parts(s, turns=None, style=None):
+    """What Haiku is given: how you write (the same for every chat) and this
+    chat (its last reply, what you said before in it). turns, style: given
+    instead of read (a replay of an earlier moment)."""
     style = suggest_style_text() if style is None else style
     turns = suggest_chat_turns(s) if turns is None else turns
     reply = next((t for who, t in reversed(turns) if who == "agent"), "")
     yours = [t for who, t in turns if who == "you"][-5:]
-    last_is_reply = bool(turns) and turns[-1][0] == "agent"
     chat = [f'<chat project="{s.get("repo", "")}" title="{(s.get("title") or s.get("task") or "").replace(chr(34), "")}">']
     if yours:
         chat.append("<their_earlier_messages_here>\n" + "\n".join(
             "- " + (" ".join(t.split())[:600]) for t in yours) + "\n</their_earlier_messages_here>")
     if reply:
         r = reply.strip()
-        since = "" if last_is_reply else ' note="they wrote since"'
-        chat.append(f"<agent_last_reply{since}>\n" + ("…" + r[-3500:] if len(r) > 3500 else r) + "\n</agent_last_reply>")
+        chat.append("<agent_last_reply>\n" + ("…" + r[-3500:] if len(r) > 3500 else r) + "\n</agent_last_reply>")
     chat.append("</chat>")
-    # The word the cursor is in, left out of the draft and named: the words
-    # then follow from a word's start, as a model writes them (from inside
-    # one it loses its letters), and the first of them must begin with it.
-    word = re.search(r"\S+$", draft) if draft.strip() else None
-    shown, typing = (draft[:word.start()], word.group(0)) if word else (draft if draft.strip() else "", "")
     return ("<their_recent_messages_in_all_chats>\n" + (style or "(none yet)") + "\n</their_recent_messages_in_all_chats>",
-            "\n".join(chat),
-            f"<draft>{shown}</draft><typing>{typing}</typing>")
+            "\n".join(chat), "Their answer, now:")
 
 
-def suggest_clean(draft, text):
-    """Haiku's words as gray text after draft: its first line, joined where
-    the draft stops (it starts with the draft's last word, finished: that
-    word's own letters left out), no longer than a line or two."""
-    m = re.search(r"<continuation>(.*?)(?:</continuation>|$)", text or "", re.S)
+def suggest_clean(text):
+    """Haiku's answer as gray text: its first line, in the form asked (else
+    nothing: words about the task, not the words), no longer than a line or
+    two."""
+    m = re.search(r"<answer>(.*?)(?:</answer>|$)", text or "", re.S)
     if not m:
-        return ""           # (not in the form asked: words about the task, not the words)
-    t = m.group(1).split("\n")[0].strip()
+        return ""
+    t = m.group(1).strip().split("\n")[0].strip()
     if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'`":
         t = t[1:-1].strip()
-    if not t or re.search(r"</?(draft|continuation)>", t):
+    if not t or re.search(r"</?answer>", t):
         return ""
-    if draft.strip() and not draft[-1].isspace():
-        last = re.search(r"\S+$", draft).group(0)
-        if not t.lower().startswith(last.lower()):
-            return ""           # it didn't take up the word the cursor is in: there's no telling how it joins
-        t = t[len(last):]       # the rest of that word, or a space and what comes after it
-    elif draft.strip():
-        # After a space, the draft's last word said again: left out.
-        last = draft.split()[-1]
-        if t.lower().startswith(last.lower() + " "):
-            t = t[len(last) + 1:]
-    words = re.findall(r"\s*\S+", t)
-    if len(words) > SUGGEST_WORDS + (0 if t[:1].isspace() or not draft.strip() or draft[-1].isspace() else 1):
-        t = "".join(words[:SUGGEST_WORDS])
+    words = t.split()
+    if len(words) > SUGGEST_WORDS:
+        t = " ".join(words[:SUGGEST_WORDS])
     if len(t) > SUGGEST_MAX:
         cut = t[:SUGGEST_MAX].rsplit(" ", 1)[0]
         t = cut if len(cut) > SUGGEST_MAX // 2 else t[:SUGGEST_MAX]
-    return t if t.strip() else ""
+    return t
 
 
 import queue      # (SuggestPool's)
 
 
 class SuggestPool:
-    """claude -p for suggestions, SUGGEST_SPARES kept started and waiting
-    (one is asked for at every word you finish: several can be under way):
-    each answers one suggestion and ends (its conversation never grows), and
-    another is started meanwhile. A suggestion of a chat that can't be used
-    any more (you wrote on otherwise) ends its claude -p. The waiting ones go
-    after SUGGEST_SPARE_IDLE seconds with nothing asked (~200 MB each)."""
+    """claude -p for suggestions, one kept started and waiting: each answers
+    one suggestion and ends (its conversation never grows), and the next is
+    started meanwhile. The waiting one goes after SUGGEST_SPARE_IDLE seconds
+    with nothing asked (~200 MB)."""
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.spares = []
-        self.starting = 0
+        self.spare = None
+        self.starting = False
         self.used = 0.0
-        self.flying = {}            # session id → [(the text it's for, its claude -p)]
         self.reaper = None
 
     def start(self):
@@ -27406,22 +27385,20 @@ class SuggestPool:
             env={**agent_env(), "MAX_THINKING_TOKENS": "0"}, cwd=STATE)
 
     def warm(self):
-        """Them started and waiting (a box you write in got the focus)."""
+        """One started and waiting (a box you write in got the focus)."""
         with self.lock:
             self.used = time.time()
         self.fill()
 
     def fill(self):
-        """As many started as are missing (each in a thread of its own)."""
         with self.lock:
-            self.spares = [q for q in self.spares if q.poll() is None]
-            need = SUGGEST_SPARES - len(self.spares) - self.starting
-            self.starting += max(0, need)
+            if (self.spare and self.spare.poll() is None) or self.starting:
+                return
+            self.spare, self.starting = None, True
             if not self.reaper:
                 self.reaper = threading.Thread(target=self.reap, daemon=True)
                 self.reaper.start()
-        for _ in range(max(0, need)):
-            threading.Thread(target=self.refill, daemon=True).start()
+        threading.Thread(target=self.refill, daemon=True).start()
 
     def refill(self):
         try:
@@ -27429,10 +27406,10 @@ class SuggestPool:
         except OSError:
             p = None
         with self.lock:
-            self.starting -= 1
-            keep = p is not None and len(self.spares) < SUGGEST_SPARES
+            self.starting = False
+            keep = p is not None and not (self.spare and self.spare.poll() is None)
             if keep:
-                self.spares.append(p)
+                self.spare = p
         if p is not None and not keep:
             self.end(p)
 
@@ -27440,10 +27417,10 @@ class SuggestPool:
         while True:
             time.sleep(30)
             with self.lock:
-                idle = time.time() - self.used > SUGGEST_SPARE_IDLE
-                gone, self.spares = (self.spares, []) if idle else ([], self.spares)
-            for q in gone:
-                self.end(q)
+                idle = self.spare and time.time() - self.used > SUGGEST_SPARE_IDLE
+                p, self.spare = (self.spare, None) if idle else (None, self.spare)
+            if p:
+                self.end(p)
 
     @staticmethod
     def end(p):
@@ -27455,32 +27432,19 @@ class SuggestPool:
         p.wait()
 
     def take(self):
-        """One waiting (started anew if none), another started for next time."""
+        """The one waiting (started anew if none), another started for next time."""
         with self.lock:
             self.used = time.time()
-            p = None
-            while self.spares and p is None:
-                q = self.spares.pop(0)
-                p = q if q.poll() is None else None
-        if p is None:
+            p, self.spare = self.spare, None
+        if p is None or p.poll() is not None:
             p = self.start()
         self.fill()
         return p
 
-    def ask(self, sid, draft, parts):
-        """Haiku's continuation of draft: (its words, what it took). The ones
-        under way for the same chat that draft doesn't go on from are ended
-        (you wrote on otherwise: nobody will use them)."""
+    def ask(self, parts):
+        """Haiku's answer: (its words, what it took)."""
         start = time.monotonic()
-        with self.lock:
-            mine = self.flying.setdefault(sid, [])
-            stale = [(t, q) for t, q in mine if not draft.startswith(t)]
-            mine[:] = [x for x in mine if x not in stale]
-        for _, q in stale:
-            q.kill()
         p = self.take()
-        with self.lock:
-            self.flying.setdefault(sid, []).append((draft, p))
         info, text, done = {"via": "claude"}, [], False
         lines = queue.Queue()       # (read in a thread of its own: a pipe's buffer hides lines from select)
 
@@ -27502,7 +27466,7 @@ class SuggestPool:
                 except queue.Empty:
                     raise RuntimeError(f"Haiku didn't answer in {SUGGEST_WAIT} s")
                 if line is None:
-                    break           # (ended: a newer one for the chat, or claude -p failed)
+                    break
                 try:
                     m = json.loads(line)
                 except ValueError:
@@ -27515,7 +27479,7 @@ class SuggestPool:
                     elif ev.get("type") == "content_block_delta" and (ev.get("delta") or {}).get("type") == "text_delta":
                         info.setdefault("ttft", round((time.monotonic() - start) * 1000))
                         text.append(ev["delta"].get("text") or "")
-                        done = "</continuation>" in "".join(text)
+                        done = "</answer>" in "".join(text)
                 elif m.get("type") == "assistant" and not text:
                     for b in (m.get("message") or {}).get("content") or []:
                         if isinstance(b, dict) and b.get("type") == "text":
@@ -27527,11 +27491,6 @@ class SuggestPool:
         except (OSError, ValueError) as e:
             raise RuntimeError(f"claude -p: {e}")
         finally:
-            with self.lock:
-                mine = self.flying.get(sid) or []
-                mine[:] = [x for x in mine if x[1] is not p]
-                if not mine:
-                    self.flying.pop(sid, None)
             threading.Thread(target=self.end, args=(p,), daemon=True).start()
         info["ms"] = round((time.monotonic() - start) * 1000)
         return "".join(text), info
@@ -27552,38 +27511,35 @@ def suggest_log(entry):
         pass
 
 
-_SUGGEST_SEEN = {}          # (chat, its transcript as it was, draft) → (when, the suggestion): asked once
+_SUGGEST_SEEN = {}          # (chat, its conversation as it was) → (when, the suggestion): asked once
 
 
-def suggest(s, draft, tried=False):
-    """The gray text for a chat's draft: {text, id, via, ms}, or {"error"}.
-    tried: asked for by amarchy suggest try (logged as such, not counted)."""
-    draft = draft[-SUGGEST_DRAFT_MAX:]
-    if draft.lstrip().startswith("/"):
-        return {"text": "", "id": ""}           # a command (its menu), not words to continue
-    parts = suggest_parts(s, draft)
+def suggest(s, tried=False):
+    """Your answer to a chat's last reply, in gray: {text, id, via, ms}, or
+    {"error"}. Asked once for a conversation as it is (again: from what it
+    said). tried: asked for by amarchy suggest try (logged as such, not
+    counted)."""
+    parts = suggest_parts(s)
     had = _SUGGEST_CHATS.get(s["id"])
-    key = (s["id"], had[0] if had else None, draft)
+    key = (s["id"], had[0] if had else None)
     seen = _SUGGEST_SEEN.get(key)
-    if seen and time.time() - seen[0] < 600 and not tried:
+    if seen and time.time() - seen[0] < 3600 and not tried:
         sid = uuid.uuid4().hex[:12]
-        suggest_log({"id": sid, "chat": s["id"], "via": "claude", "ms": 0, "again": True, "draft": len(draft),
-                     "chars": len(seen[1]), "empty_draft": not draft.strip()})
+        suggest_log({"id": sid, "chat": s["id"], "via": "claude", "ms": 0, "again": True, "chars": len(seen[1])})
         return {"text": seen[1], "id": sid, "via": "claude", "ms": 0}
     try:
-        raw, info = SUGGEST_POOL.ask(s["id"], draft, parts)
+        raw, info = SUGGEST_POOL.ask(parts)
     except Exception as e:
         suggest_log({"chat": s["id"], "error": str(e)[:300], "via": "claude"})
         return {"error": f"No suggestion: {e}"}
-    text = suggest_clean(draft, raw)
+    text = suggest_clean(raw)
     if had and raw:
         _SUGGEST_SEEN[key] = (time.time(), text)
         if len(_SUGGEST_SEEN) > 300:
             for k in sorted(_SUGGEST_SEEN, key=lambda k: _SUGGEST_SEEN[k][0])[:100]:
                 _SUGGEST_SEEN.pop(k, None)
     sid = uuid.uuid4().hex[:12]
-    suggest_log({"id": sid, "chat": s["id"], **info, "draft": len(draft), "raw": len(raw), "chars": len(text),
-                 "empty_draft": not draft.strip(), **({"tried": True} if tried else {})})
+    suggest_log({"id": sid, "chat": s["id"], **info, "raw": len(raw), "chars": len(text), **({"tried": True} if tried else {})})
     return {"text": text, "id": sid, "via": info["via"], "ms": info["ms"]}
 
 

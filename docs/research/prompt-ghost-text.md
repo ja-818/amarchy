@@ -21,6 +21,17 @@ local models were measured too.
 
 ---
 
+## Decision (2026-11-24): only your answer to Claude's reply
+
+After the first day Julian kept only the answer to Claude's reply, in gray in the
+empty box ("let's remove the auto suggestion while I type because it is really
+bad"). Nothing is suggested while you write. The server's prompt is now only that
+job (`<answer>`, 2-12 words, empty when the reply asks nothing or the choice is
+his); it's asked the moment the reply comes and kept per conversation, so it's
+there when he gets to the box. On his chats as they were: short answers where a
+reply asks something ("Ship it", "Yes, close the session", "Done, go ahead"),
+nothing on the 9 of 13 where it doesn't. What follows is the history.
+
 ## Live, first day (2026-11-24)
 
 Julian's own use, the first hours: ~1.0 s of Haiku per suggestion (1.3 s on his screen), 131 shown, 8 taken (6%). "PRETTY BAD and really slow." Cursor's way was tried on this server (base models 1B–4B continuing the text, the chat cached in llama.cpp): 0.12–0.26 s, but junk ("Can you also check that the phone shows" → "100% battery?"). So Haiku stays, made instant where it can be and shorter:

@@ -1996,7 +1996,7 @@ function showKeys() {
       ["j / k  or  ↓ / ↑", "Next / previous message (↓ on the latest: the box)"], ["l / h  or  → / ←", "Along a message's buttons and links / back out"],
       ["Enter", "Open or fold a reply; on a button, press it"], ["g / G", "The first / the latest message"], ["d / u", "Half a page down / up"],
       ["i", "Back into the box"], ["⌘V / drop", "A picture goes with your message"],
-      ...(suggestionsOn() ? [["Tab / →", "Take the gray suggestion / a word of it"]] : [])]));
+      ...(suggestionsOn() ? [["Tab / →", "Take the gray answer to Claude's reply / a word of it"]] : [])]));
 }
 
 // Settings that are this browser's own (the rest is in app.js's sheet).

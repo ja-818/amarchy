@@ -1477,15 +1477,17 @@ class Chat {
     this.trayEl = h("div", { class: "tray", hidden: true });
     this.composer = uiComposer({ field: this.input, top: this.trayEl, before: [this.attachBtn],
                                  after: [this.micBtn, this.stopBtn, this.sendBtn] });
-    // Gray text after what you write, Tab to take it (Settings → Suggestions).
-    // The box in focus: Haiku made ready for the first one (once a minute at most).
+    // Your answer to Claude's reply, in gray in the empty box, Tab to take it
+    // (Settings → Suggestions). Nothing while you write: it was right too
+    // rarely there (bin/amarchy, "your answer, suggested").
+    // The empty box in focus: Haiku made ready for it (once a minute at most).
     this.input.addEventListener("focus", () => {
-      if (!suggestionsOn() || Date.now() - suggestWarmed < 60000) return;
+      if (!suggestionsOn() || this.input.value.trim() || Date.now() - suggestWarmed < 60000) return;
       suggestWarmed = Date.now();
       api(chatPath(this.id, "/suggest"), { warm: true }).catch(() => {});
     });
     this.ghost = uiGhost(this.input, {
-      on: () => suggestionsOn() && !this.talk.on() && !this.menu && !this.sending,
+      on: () => suggestionsOn() && !this.input.value.trim() && !this.talk.on() && !this.menu && !this.sending,
       key: () => `${this.suggestContext()}|${this.sentOn || ""}`,
       wait: () => 250,
       max: () => window.innerHeight * 0.4,
@@ -3678,14 +3680,13 @@ class Chat {
     return `${last ? last.key : ""}|${this.working() ? "working" : ""}`;
   }
 
-  // What would come next after text (uiGhost asks): with nothing written
-  // yet, only once Claude's reply is there to answer (not one you answered).
+  // Your answer, for an empty box (uiGhost asks): only once Claude's reply
+  // is there to answer, and not one you answered already.
   async suggestAsk(text, signal) {
-    if (!text.trim()) {
-      const you = this.items.findLastIndex((it) => it.kind === "user" && it.turn);
-      const reply = this.items.findLastIndex((it) => it.kind === "claude");
-      if (this.working() || reply < 0 || reply < you || this.sentOn === this.suggestContext()) return null;
-    }
+    if (text.trim()) return null;
+    const you = this.items.findLastIndex((it) => it.kind === "user" && it.turn);
+    const reply = this.items.findLastIndex((it) => it.kind === "claude");
+    if (this.working() || reply < 0 || reply < you || this.sentOn === this.suggestContext()) return null;
     const res = await fetch(chatPath(this.id, "/suggest"), { method: "POST", headers: { "Content-Type": "application/json" },
                                                              body: JSON.stringify({ text }), signal });
     const d = await res.json().catch(() => ({}));
@@ -3693,7 +3694,7 @@ class Chat {
       if (!suggestFailedSaid) { suggestFailedSaid = true; toast(d.error || "No suggestions: they didn't work just now"); }
       return null;
     }
-    return d.text ? { text: d.text, id: d.id, ahead: true } : null;
+    return d.text ? { text: d.text, id: d.id } : null;
   }
 
   // Its height to what's in it (uiFitField: the conversation over it doesn't

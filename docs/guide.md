@@ -585,16 +585,15 @@ Three rules, the same in every layout:
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
 
-With **Settings → Suggestions** on, what you'd likely write next shows in gray
-after the cursor as you write in a chat's box: `Tab` takes it all (the next one
-follows, so `Tab`, `Tab`, `Tab` writes on), `→` at the end takes a word, and a
-tap on it takes it (a phone has no `Tab`). Typing what it says eats it; typing
-anything else, moving the cursor or leaving the box drops it. `Esc` stays
-Claude's, and `Enter` sends only what you wrote. Haiku writes it, from the chat
-and how you write, on your Claude subscription (nothing more to pay). It's asked
-for the moment you finish a word, and your answer to Claude's reply the moment
-the reply comes, so it's often there before you pause; a few words at most.
-`amarchy suggest` says how it's going: how long you waited, how many you took.
+With **Settings → Suggestions** on, once Claude has replied, what you'd likely
+answer shows in gray in the chat's empty box ("Yes, ship it"): `Tab` takes it,
+`→` a word of it, and a tap takes it (a phone has no `Tab`). Typing what it says
+eats it; typing anything else, moving the cursor or leaving the box drops it.
+Nothing is suggested while you write. `Esc` stays Claude's, and `Enter` sends
+only what you wrote. Haiku writes it, from the chat and how you write, on your
+Claude subscription (nothing more to pay), the moment the reply comes: it's
+there when you get to the box. `amarchy suggest` says how it's going: how long
+you waited, how many you took.
 
 On a board's card in Tasks, `1`–`4` press its buttons, and `Ctrl+Alt+←` is Tasks
 again. Every menu takes the keys: a chat's menu (its •••), closing

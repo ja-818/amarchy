@@ -2522,18 +2522,18 @@ function sleepSettings(draw) {
     } }, "Put idle chats to sleep now")];
 }
 
-// Settings → Suggestions: gray text after what you write in a chat's box,
-// what you'd likely write next (Tab takes it: ui.js uiGhost). Each phone and
-// browser its own; off until you turn it on (a trial, for now).
+// Settings → Suggestions: once Claude has replied, what you'd likely answer,
+// in gray in the chat's empty box (Tab or a tap takes it: ui.js uiGhost).
+// Each phone and browser its own; off until you turn it on.
 function suggestionsOn() { return store.get("suggest") === "on"; }
 function suggestSettings(draw) {
   const on = suggestionsOn();
   return [h("div", { class: "section", "data-section": "suggestions" }, "Suggestions"),
     h("div", { class: "seg" }, ...[[true, "On"], [false, "Off"]].map(([value, label]) =>
       h("button", { class: `control${on === value ? " on" : ""}`, onclick: () => { store.set("suggest", value ? "on" : ""); draw(); } }, label))),
-    h("p", {}, on ? `As you write in a chat, what you'd likely write next shows in gray: ${app.desk ? "Tab takes it, → a word" : "tap it to take it"}. `
+    h("p", {}, on ? `Once Claude has replied, what you'd likely answer shows in gray in the empty box: ${app.desk ? "Tab takes it, → a word" : "tap it to take it"}. `
                   + "Haiku writes it from the chat and how you write, on your Claude subscription: nothing more to pay."
-                : "Gray text in a chat's box, as you write, with what you'd likely write next. On this device only.")];
+                : "Your likely answer to Claude's reply, in gray in the empty box, a Tab away. On this device only.")];
 }
 
 // The chat engine's check (the protocol test) failed on this Claude Code:
