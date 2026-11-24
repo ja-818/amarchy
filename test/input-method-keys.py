@@ -22,11 +22,16 @@ in a focused input context of a private fcitx5:
 - and, said: with something typed first (the keyboard's word hints on, an
   engine's half-made word), what it holds.
 
-Under fcitx5's own defaults, Omarchy's config (its config/fcitx5) and, where
-there is one, yours (~/.config/fcitx5, copied: never changed).
+Under yours (~/.config/fcitx5, copied: never changed), Omarchy's config (its
+config/fcitx5) and fcitx5's own defaults. Mozc is left out unless --all (it
+starts a server of its own, which headless can crash into a dialog). An
+engine that leaves fcitx5 stuck gets a fresh fcitx5 for the ones after it.
 
-The fcitx5 runs on a D-Bus of the test's own, with no display: the desktop's
-input method is never touched. It is /usr/bin/fcitx5, or one unpacked in
+The fcitx5 runs on a D-Bus of the test's own that starts nothing, with no
+display: the desktop's input method is never touched. Each one is stopped
+whole (it and all it started) with SIGKILL, which can't crash on the way out,
+and the test checks the journal: nothing it started may have crashed (on
+Omarchy every crash is a toast on your screen). It is /usr/bin/fcitx5, or one unpacked in
 FCITX5_ROOT (its usr/bin/fcitx5, usr/lib, usr/share/fcitx5: a package
 extracted there, on a machine without it).
 
@@ -37,6 +42,7 @@ Exits 0 when every check passed, 1 when one didn't, 2 when there's no fcitx5
 to test with.
 """
 import argparse
+import json
 import os
 import resource
 import signal
@@ -78,11 +84,49 @@ BUS_CONF = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configur
 """
 
 
-def quiet_crashes():
-    """In the test's fcitx5 and all it starts: a crash leaves no core dump. RLIMIT_CORE 1
-    is the kernel's own "no dump, not even to a pipe", so systemd-coredump never hears of
-    it, and neither does Omarchy's crash toast (omarchy-crash-watch reads its journal)."""
-    resource.setrlimit(resource.RLIMIT_CORE, (1, 1))
+def no_core_files():
+    """No core file on disk from what a test starts. The crash itself still reaches the
+    journal (systemd-coredump takes it from the kernel whatever the limit), and Omarchy's
+    crash watch toasts every one there: so a test must crash nothing (Crashes checks)."""
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def stop(p):
+    """A process and everything it started (its session), at once: SIGKILL, which can't
+    crash on the way out (fcitx5 with engines loaded, sway, Chromium can, at SIGTERM)."""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    p.wait()
+
+
+class Crashes:
+    """Crashes of what a test started (its processes carry its folder in their environment),
+    as the journal has them: what Omarchy's crash toast would show."""
+    COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"
+
+    def __init__(self, marker):
+        self.marker, self.since = str(marker), int(time.time()) - 1
+
+    def found(self):
+        time.sleep(2)      # (systemd-coredump writes it down after the process is gone)
+        r = subprocess.run(["journalctl", "-q", "-o", "json", f"--since=@{self.since}", f"MESSAGE_ID={self.COREDUMP}"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return None
+        hits = []
+        for line in r.stdout.splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            env = e.get("COREDUMP_ENVIRON") or ""
+            if isinstance(env, list):      # (binary fields come as bytes)
+                env = bytes(env).decode(errors="replace")
+            if self.marker in env:
+                hits.append(f"{e.get('COREDUMP_EXE') or e.get('COREDUMP_COMM')} ({e.get('COREDUMP_SIGNAL_NAME')})")
+        return hits
 
 
 # KeyboardEvent.code -> (X keysym, X keycode: evdev + 8, as a US keyboard has them)
@@ -160,7 +204,8 @@ class Fcitx:
         run.mkdir(mode=0o700)
         (self.work / "bus.conf").write_text(BUS_CONF.format(sock=self.work / "bus"))
         self.dbus = subprocess.Popen(["dbus-daemon", f"--config-file={self.work / 'bus.conf'}", "--nofork", "--nopidfile", "--print-address=1"],
-                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True,
+                                     preexec_fn=no_core_files)
         self.address = self.dbus.stdout.readline().strip()
         e = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
         e.update(env, DBUS_SESSION_BUS_ADDRESS=self.address, XDG_RUNTIME_DIR=str(run), FCITX_CONFIG_HOME=str(cfg),
@@ -171,7 +216,7 @@ class Fcitx:
         self.log = open(self.work / "fcitx5.log", "w")
         # (A session of its own: what it starts, an engine's server, goes with it at the end.)
         self.proc = subprocess.Popen([str(exe), "--disable=wayland,waylandim,xcb,xim,classicui,kimpanel,notificationitem,notifications,ibusfrontend,fcitx4frontend,virtualkeyboard"],
-                                     env=e, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=quiet_crashes)
+                                     env=e, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=no_core_files)
         self.bus = Gio.DBusConnection.new_for_address_sync(
             self.address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
         for _ in range(200):
@@ -245,22 +290,8 @@ class Fcitx:
             return False
 
     def close(self):
-        # fcitx5 and everything it started (its session: an engine's server too), then its D-Bus.
-        for p in (self.proc, self.dbus):
-            for sig in (signal.SIGTERM, signal.SIGCONT):      # (SIGCONT: a stopped one hears it too)
-                try:
-                    os.killpg(p.pid, sig)
-                except ProcessLookupError:
-                    pass
-            try:
-                p.wait(5)
-            except subprocess.TimeoutExpired:
-                pass
-            try:
-                os.killpg(p.pid, signal.SIGKILL)      # what's left of it
-            except ProcessLookupError:
-                pass
-            p.wait()
+        stop(self.proc)
+        stop(self.dbus)
         self.log.close()
         shutil.rmtree(self.work, ignore_errors=True)
 
@@ -384,7 +415,8 @@ def main():
         return 2
     keys = amarchy_keys()
     print("amarchy's keys: " + ", ".join(k[0] for k in keys))
-    work = Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
+    work = Path(tempfile.mkdtemp(prefix="input-method-keys-", dir=os.environ.get("TMPDIR") or None))
+    crashes = Crashes(work)
     # (Yours first, then Omarchy's: the ones that matter, before fcitx5's bare defaults.)
     configs = []
     mine = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "fcitx5"
@@ -397,12 +429,20 @@ def main():
         note("no Omarchy checkout (OMARCHY_SRC): its config not tested")
     configs.append(("fcitx5's own defaults", None))
     configs += [(f"--config {c}", Path(c).expanduser()) for c in args.config]
-    for where, config in configs:
-        try:
-            run(where, config, exe, env, keys, work, args.all)
-        except Exception as e:
-            check(f"{where}: tested", False, str(e))
-    print()
+    try:
+        for where, config in configs:
+            try:
+                run(where, config, exe, env, keys, work, args.all)
+            except Exception as e:
+                check(f"{where}: tested", False, str(e))
+        print()
+        hits = crashes.found()
+        if hits is None:
+            note("the journal can't be read here: crashes not checked")
+        else:
+            check("nothing it started crashed (Omarchy would toast it)", not hits, ", ".join(hits))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     if failed:
         print(f"{len(failed)} failed:\n  " + "\n  ".join(failed))
         return 1
