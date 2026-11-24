@@ -257,6 +257,7 @@ function modeButtons() {
 function boardTab(tab) {
   // Tasks again, a board open there: back to Tasks' list.
   if (tab === "tasks" && board.tab === "tasks" && typeof boardsUI !== "undefined" && boardsUI.open) return boardsClose();
+  if (tab !== board.tab) uiWhole();      // the board's all of it new: drawn whole a moment (ui.js)
   board.tab = BOARD_TABS.includes(tab) ? tab : "chats";
   store.set("board-tab", board.tab);
   if (desk.current) boardBack(true);

@@ -884,7 +884,11 @@ window closed.
   there yet, a virtual machine), it paints its page on the CPU, the way a CPU
   does it best, so a chat at work doesn't take a core and the keys you hold
   don't stick (`amarchy-desktop --graphics` says which; `AMARCHY_DESKTOP_GPU=1`
-  draws through GL anyway).
+  draws through GL anyway). On Omarchy, where its window is see-through, it
+  draws the whole window again for a moment after each big change (a chat
+  opened or closed, the other tab, a sheet), so nothing from the screen
+  before is left showing; `AMARCHY_DESKTOP_WHOLE_FRAMES=1` draws every frame
+  whole, at three or four times the CPU on a computer with no GPU.
 - **Sounds**: its window plays them through GStreamer. On a computer without
   GStreamer's plugins (`gst-plugins-good`, `gst-plugins-base`,
   `gst-plugin-pipewire`), where a sound would crash its page, the app plays

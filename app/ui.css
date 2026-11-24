@@ -856,6 +856,11 @@ a.tbtn .glyph svg { width: 12px; height: 12px; }
 @keyframes ui-px-bob { 50% { transform: translateY(-8%); } }
 @keyframes ui-px-flicker { 50% { transform: scaleY(.92) scaleX(1.04); } }
 
+/* The desktop app's see-through window drawn whole a few frames (ui.js uiWhole):
+   a veil over everything, black at 1 or 2 of 255, too little to see. A layer
+   of its own: only it is painted again, the rest composited. */
+.ui-whole { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; background: transparent; will-change: transform; }
+
 /* ---- confetti (uiBurst), in the theme's hues, from the middle of its box */
 .ui-burst { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .ui-burst i { position: absolute; left: 50%; top: 46%; width: 9px; height: 16px; border-radius: 2px; background: var(--c);

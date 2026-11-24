@@ -5,7 +5,8 @@
 # open or it didn't load (Try again, an address typed in), a chat's link
 # handed to the running one, closing to the tray and coming back, the page
 # knowing it's the app (and on an Omarchy desktop: see-through, the desktop's
-# wallpaper through it when it wears the desktop's look live), what it may and may not do (the microphone yes,
+# wallpaper through it when it wears the desktop's look live, its whole
+# window drawn again a moment after a big change, every frame when asked), what it may and may not do (the microphone yes,
 # notifications and the shell's own commands no), its window size kept.
 #
 #   python3 desktop/test/shell-test.py          exits 0 when every check passed
@@ -439,6 +440,31 @@ def tint(f, box="300x120+100+600"):
     return float(out or 0)
 
 
+# Every veil the page puts up over its window and takes down (app/ui.js
+# uiWhole: its whole window drawn again a few frames after a big change).
+VEIL_WATCH = """(() => { window.__veils = [];
+  new MutationObserver(ms => ms.forEach(m => {
+    m.addedNodes.forEach(n => { if (n.classList && n.classList.contains('ui-whole')) __veils.push({in: performance.now(), out: null}); });
+    m.removedNodes.forEach(n => { if (n.classList && n.classList.contains('ui-whole') && __veils.length) __veils[__veils.length - 1].out = performance.now(); });
+  })).observe(document.documentElement, {childList: true}); return 1; })()"""
+
+
+def tiny_cpu(w, secs=4):
+    """How much of a core its page and the app take while a dot of 6 px moves
+    every frame: little when WebKit draws only what changes, a lot when it
+    draws every frame whole."""
+    w.js("(() => { const s = document.createElement('style'); s.textContent = '@keyframes zz { to { transform: translateX(6px); } } #zz { position: fixed; left: 600px; top: 400px; width: 6px; height: 6px; background: red; animation: zz .5s linear infinite alternate; z-index: 99; }'; document.head.append(s); const d = document.createElement('div'); d.id = 'zz'; document.body.append(d); return 1; })()")
+    time.sleep(1.5)
+    web = [p for p in w.tree() if Path(f"/proc/{p}/comm").read_text().strip().startswith("WebKitWebProces")]
+    hz = os.sysconf("SC_CLK_TCK")
+    use = lambda: sum(sum(map(int, Path(f"/proc/{p}/stat").read_text().rsplit(")", 1)[1].split()[11:13])) for p in [w.proc.pid, *web])
+    a, t0 = use(), time.time()
+    time.sleep(secs)
+    cpu = round(100 * (use() - a) / hz / (time.time() - t0))
+    w.js("(() => { document.getElementById('zz').remove(); return 1; })()")
+    return cpu
+
+
 def omarchy_desktop(remote):
     """On an Omarchy desktop (Hyprland's session, Omarchy's current theme):
     the page is told so, and <html> marked before it's drawn, and the window
@@ -478,6 +504,30 @@ def omarchy_desktop(remote):
             d = w.js("window.amarchyDesktop")
             check(isinstance(d, dict) and d.get("omarchy") is True, f"the page knows it's on an Omarchy desktop ({d})")
             check(w.js("document.documentElement.classList.contains('on-omarchy')"), "<html> is marked on-omarchy")
+            # Old frames through the glass: WebKit draws what changes, and the
+            # page draws its whole window again a few frames after a big change.
+            damage = w.do("drawing").get("damage") or {}
+            log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+            if damage:
+                check(all(damage.values()) and "see-through: what changes drawn, the whole window again after each big change" in log,
+                      f"see-through: WebKit draws what changes, the page the whole window after a big change, its log says so ({damage})")
+            else:
+                check("see-through: this WebKit draws every frame whole" in log,
+                      "see-through, on a WebKit that doesn't track what changed (before 2.50): every frame drawn whole, its log says so")
+            w.js(VEIL_WATCH)
+            still = "!document.querySelector('.ui-whole') && uiWholeState.left === 0"      # (one at a time: one going on goes on)
+            w.wait(still)
+            w.js("location.hash = '#/s/desk-long'; 1")
+            w.wait("!!desk.current")
+            w.wait(still)
+            time.sleep(0.5)
+            w.js("location.hash = '#/today'; 1")
+            w.wait("!desk.current")
+            time.sleep(1.5)
+            veils = w.js("window.__veils.map(v => v.out === null ? null : Math.round(v.out - v.in))")
+            check(len(veils) >= 2 and all(v is not None and v < 2000 for v in veils),
+                  f"a chat opened, then the board again: its whole window drawn again each time, a moment, then the veil's gone ({veils} ms)")
+            idle_cpu = tiny_cpu(w)
             bg = wear(w, {"theme": "omarchy-live", "wallpaper": "theme"}, "#121212")
             check(bg == "none", f"wearing Omarchy (live): no wallpaper of its own, the desktop's behind it ({bg[:80]})")
             got = w.js(under)
@@ -507,6 +557,25 @@ def omarchy_desktop(remote):
             check(bg == "none" and got[1] not in ("", "rgba(0, 0, 0, 0)"), f"Omarchy (live) with no wallpaper: solid ({got})")
             w.js("lookWorn(await api('/api/look', {theme: 'omarchy-live', wallpaper: 'theme'})); return 1;")
             w.wait("getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() === '#121212'")
+            w.do("close")
+            time.sleep(0.5)
+        # Every frame drawn whole, asked for: set before its page is (WebKit
+        # reads it once), so a dot moving costs every frame of the window.
+        home = tempfile.mkdtemp(prefix="desktop-home-")
+        (Path(home) / ".local/state/omarchy/current/theme").mkdir(parents=True)
+        with Shell(remote.url, home=home, env={**env_for(fake_cli(home)), "HYPRLAND_INSTANCE_SIGNATURE": "test",
+                                                "AMARCHY_DESKTOP_WHOLE_FRAMES": "1"}) as w:
+            on_app(w)
+            damage = w.do("drawing").get("damage") or {}
+            log = Path(home, ".local/state/amarchy/desktop/desktop.log").read_text()
+            if damage:
+                check(not any(damage.values()) and "every frame drawn whole (AMARCHY_DESKTOP_WHOLE_FRAMES" in log,
+                      f"AMARCHY_DESKTOP_WHOLE_FRAMES=1: every frame drawn whole, its log says so ({damage})")
+                whole_cpu = tiny_cpu(w)
+                check(whole_cpu > 2 * idle_cpu + 20,
+                      f"and WebKit draws so (set before its page was): a dot moving takes {whole_cpu}% of a core, {idle_cpu}% drawing what changes")
+            else:
+                print("  (a WebKit before 2.50: it draws every frame whole already)")
             w.do("close")
             time.sleep(0.5)
         # Drawn the safe way (after a crash; no GPU): see-through all the same.

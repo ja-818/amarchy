@@ -623,6 +623,7 @@ function deskLayout() {
   const tab = desk.current ? sideTab() : null;
   const wide = !!tab && desk.sideWide;
   const { side, over } = sideRoom(tab, wide);
+  if (desk.el.classList.contains("side-open") !== !!tab || desk.el.classList.contains("side-wide") !== wide) uiWhole();      // (ui.js)
   desk.el.classList.toggle("side-open", !!tab);
   desk.el.classList.toggle("side-over", over);
   desk.el.classList.toggle("side-wide", wide);
@@ -684,6 +685,7 @@ function show(id) {
   if (changed && desk.chat) letGoOf(desk.chat.el);
   desk.current = id;
   desk.el.classList.toggle("chat-open", !!id);
+  if (changed) uiWhole();      // the window's all of it new: drawn whole a moment (ui.js)
   if (changed) {
     // One that can't close (an error in it) is let go of all the same: the
     // next one opens (app.js route).

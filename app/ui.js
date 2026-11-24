@@ -55,6 +55,9 @@
 // - uiPixels, uiPixmap: pixel art in the theme's own colors.
 // - uiBurst: confetti in the theme's hues (a mission complete, the tour's end).
 // - uiScrollRow: a row that scrolls sideways, square ‹ › beside it, the wheel too.
+// - uiWhole: the desktop app's see-through window drawn whole again after a
+//   big change (a chat opened or closed, the other tab, a sheet): nothing
+//   old left on screen.
 //
 // The two bars (the board's, an open chat's) are one bar (.ui-bar), as
 // Omarchy's: where you are on the left (the Ⓐ and Chats | Tasks; Back),
@@ -1554,4 +1557,61 @@ function uiSlides(slides, { key = "slides", label = "Slides", start = 0, done = 
   el.go = go;
   el.at = () => at;
   return el;
+}
+
+
+// ---- the desktop app's see-through window, drawn whole after a big change
+//
+// WebKit draws a frame's changes only (its "damage") into buffers it takes
+// turns with, and tells the window under it only that part changed; so do
+// the window and the desktop. In the desktop app's see-through window on
+// Omarchy, with no GPU (Julian's M5, 2026-11-23), a screen that changed all
+// over left one of those buffers behind: back from a chat, the board's bar
+// and the chat's head took turns on screen, many times a second. Drawing
+// every frame whole costs a computer with no GPU three or four times the
+// CPU (desktop/src/platform.rs whole_frames, AMARCHY_DESKTOP_WHOLE_FRAMES).
+// So after a big change (a chat opened or closed, a view put in another's
+// place, the other tab, a sheet, a menu or a toast come or gone), its whole
+// window changes for a few frames, too little to see (a veil over all of
+// it, black at 1 or 2 of 255): each frame is drawn whole, through
+// every buffer there is, then only what changes again. Its color changes,
+// not its opacity: WebKit counts an opacity that changed as nothing drawn,
+// and draws the rest as it was. Anywhere else (a browser, the phones, a
+// window with a background of its own): nothing.
+const UI_WHOLE_FRAMES = 8;          // frames drawn whole: WebKit's buffers (up to 4) and the desktop's, twice
+const UI_WHOLE_VEILS = ["rgba(0, 0, 0, 0.004)", "rgba(0, 0, 0, 0.008)"];      // black at 1 and 2 of 255: there to WebKit, not to you
+const uiWholeState = { el: null, left: 0 };
+
+function uiWholeHere() {
+  const d = window.amarchyDesktop;
+  return !!(d && d.omarchy);
+}
+
+function uiWhole() {
+  if (!uiWholeHere()) return;
+  const was = uiWholeState.left;
+  uiWholeState.left = UI_WHOLE_FRAMES;
+  if (was) return;      // (at it already: from the start again)
+  const el = uiWholeState.el || (uiWholeState.el = h("div", { class: "ui-whole", "aria-hidden": "true" }));
+  document.documentElement.append(el);      // (outside the body: what watches the body's own isn't told)
+  const step = () => {
+    if (uiWholeState.left <= 0) { el.remove(); return; }
+    el.style.backgroundColor = UI_WHOLE_VEILS[uiWholeState.left-- % 2];
+    requestAnimationFrame(step);
+  };
+  step();
+}
+
+// What comes and goes over the page (a sheet, a menu, a toast, the keys'
+// card) and a view in another's place (the phone layout's chat or board):
+// drawn whole again. The rest calls uiWhole itself (desk.js show, tasks.js
+// boardTab, boards.js).
+if (uiWholeHere()) {
+  const big = new MutationObserver(() => uiWhole());
+  const watch = () => {
+    big.observe(document.body, { childList: true });
+    const root = document.getElementById("root");
+    if (root) big.observe(root, { childList: true });
+  };
+  if (document.body) watch(); else addEventListener("DOMContentLoaded", watch, { once: true });
 }

@@ -360,6 +360,11 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
     // while a page loads (not WebKit's white): the last one it wore, else
     // Omarchy's default.
     let win = if omarchy { win.transparent(true) } else { win.background_color(saved_background()) };
+    // Its page draws its whole window again after each big change (app/ui.js
+    // uiWhole); every frame, when that's asked (platform.rs, whole_frames).
+    if omarchy {
+        platform::see_through();
+    }
     let win = win
         .visible(false)
         .initialization_script(init_script(omarchy, platform::gpu()))
