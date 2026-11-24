@@ -16,6 +16,9 @@
 # server through Tailscale, its login and Origin given to every request.
 # --no-chats: an amarchy with no chats. --address=<name>: the name it's
 # asked for at (a tailnet name, reached through a proxy), else 127.0.0.1.
+# --preview: a third chat, "desk-preview", with a preview that answers
+# (served elsewhere: PREVIEW_URL) and a link in its reply (DOCS_URL), for
+# what the window does with links out.
 #
 # Dictation is set up on it, with a made-up speech model: what it hears is
 # written down as "heard <n> seconds" (the audio's length), so a test sees
@@ -44,6 +47,8 @@ pos = [a for a in sys.argv[1:] if not a.startswith("--")]
 port = int(pos[0])
 home = pos[1] if len(pos) > 1 else tempfile.mkdtemp(prefix="amarchy-desktop-test-")
 LOCAL, CHATS = "--local" in flags, "--no-chats" not in flags
+PREVIEW = "--preview" in flags
+PREVIEW_URL, DOCS_URL = "https://preview.example:4631/", "https://docs.example/page"
 # --address=<name>: the name it's asked for at (a tailnet name, reached through a proxy).
 ADDRESS = next((f.split("=", 1)[1] for f in flags if f.startswith("--address=")), "127.0.0.1")
 os.makedirs(home, exist_ok=True)
@@ -75,13 +80,14 @@ def repo(path):
     return path
 
 
-def chat(sid, title, turns):
-    """A chat on the chat engine with a conversation of turns (you, Claude)."""
+def chat(sid, title, turns, **more):
+    """A chat on the chat engine with a conversation of turns (you, Claude);
+    more: what else its record has (its previews)."""
     name = sid.split("-", 1)[1]
     path = repo(Path(home) / "Work/.worktrees/desk" / name)
     am.write_file(am.SESSIONS / f"{sid}.json", json.dumps({
         "id": sid, "repo": "desk", "name": name, "branch": name, "base": "origin/main", "path": str(path),
-        "created": int(time.time()) - 7200, "title": title, "engine": "chat"}))
+        "created": int(time.time()) - 7200, "title": title, "engine": "chat", **more}))
     conv = str(uuid.uuid4())
     am.set_conversation_id(sid, conv)
     lines, parent = [], None
@@ -106,6 +112,9 @@ am.SESSIONS.mkdir(parents=True, exist_ok=True)
 if CHATS:
     chat("desk-long", "Long: a chat with 120 turns", LONG)
     chat("desk-term", "Term: a real terminal", [("Run the tests", "They pass.")])
+if CHATS and PREVIEW:
+    chat("desk-preview", "Preview: a page to look at", [("Serve it", f"It's up. The API is in [the docs]({DOCS_URL}).")],
+         previews=[{"url": PREVIEW_URL}])
 if LOCAL:
     am.write_file(am.HOST_CONFIG, f"APP_PORT={port}\n")
     am.local_key()

@@ -5,7 +5,11 @@
 .today[hidden] { display: none; }
 .today-summary { font-size: var(--title); font-weight: 700; color: var(--text); padding: 2px 2px 0;
                  display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.today-summary-text { min-width: 0; }
+.today-summary-text { min-width: 0; flex-shrink: 50; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The project filter, beside your streak: both at the row's end. */
+.today-summary > .ui-filter-pick { margin-left: auto; }
+.today-summary > .ui-filter-pick + * { margin-left: -4px; }
+.today-project-none { flex-wrap: wrap; justify-content: space-between; }
 .today-clear { margin: 2px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
 .today-clear .glyph { color: var(--success); }
 .today-note { margin: 6px 2px 0; font-size: var(--caption); color: var(--text-muted); }

@@ -7,7 +7,8 @@
 # knowing it's the app (and on an Omarchy desktop: see-through, the desktop's
 # wallpaper through it when it wears the desktop's look live, its whole
 # window drawn again a moment after a big change, every frame when asked), what it may and may not do (the microphone yes,
-# notifications and the shell's own commands no), its window size kept.
+# notifications and the shell's own commands no), links out in your browser (a
+# chat's Preview by click and key, a link in a reply), its window size kept.
 #
 #   python3 desktop/test/shell-test.py          exits 0 when every check passed
 #
@@ -257,6 +258,48 @@ def opens_chats(w, server, how):
     got = wait_for(lambda: any(l.startswith(f"acted /api/session/{sid}/send ") and words in l for l in server.lines), timeout=15)
     check(bool(got), f"{how}: and what's written in it is sent")
     board()
+
+
+def links_out(w, server, log):
+    """A chat's Preview and a link in a reply open in your browser (xdg-open),
+    by real clicks and keys: Preview on its card, on its head, Ctrl+Alt+O,
+    the reply's link. The window stays on amarchy. (Julian's M5: the opener
+    plugin's script took every link that opens a new window and asked the
+    plugin from the page, which no page may: nothing opened.)"""
+    preview, docs = "https://preview.example:4631/", "https://docs.example/page"
+
+    def opened(url, what):
+        got = wait_for(lambda: log.exists() and url in log.read_text(), timeout=10, every=0.2)
+        said = log.read_text().strip() if log.exists() else ""
+        log.unlink(missing_ok=True)
+        check(bool(got), f"{what}: it opens in your browser ({said or 'nothing opened'})")
+        check(w.do("url").startswith(server.url), f"{what}: and the window stays on amarchy")
+
+    def click(js_el, what):
+        """A real click on the element js_el finds (in sight)."""
+        r = w.wait(f"(() => {{ const e = {js_el}; if (!e) return null; e.scrollIntoView({{block: 'center'}});"
+                   " const r = e.getBoundingClientRect(); return r.width ? [r.left + r.width / 2, r.top + r.height / 2] : null; })()",
+                   timeout=20)
+        w.click(r[0], r[1])
+
+    w.js("location.hash = '#/'; 1")
+    w.wait("!!document.querySelector('.tcard[data-id=\"desk-preview\"]')", timeout=20)
+    w.js("document.querySelectorAll('details').forEach((d) => { d.open = true; }); 1")
+    click("document.querySelector('.today:not([hidden]) .tcard[data-id=\"desk-preview\"] a.ui-preview')", "card")
+    opened(preview, "Preview on a chat's card")
+    check(bool(w.js("!(app.desk ? desk.current : app.session)")), "Preview on a chat's card: the chat doesn't open")
+
+    w.js("location.hash = '#/s/desk-preview'; 1")
+    w.wait(CHAT_OPEN, timeout=20)
+    head = "[...document.querySelectorAll('button.ui-action.ui-preview')].find((b) => b.offsetParent)"
+    w.wait(f"!!({head})", timeout=20)
+    click(head, "head")
+    opened(preview, "Preview on the chat's head")
+    w.key("ctrl+alt+o")
+    opened(preview, "Ctrl+Alt+O in the chat")
+    link = f"[...document.querySelectorAll('.msg a[href=\"{docs}\"]')].find((a) => a.offsetParent)"
+    click(link, "link")
+    opened(docs, "A link in a reply")
 
 
 def on_app(w, timeout=30):
@@ -1162,6 +1205,22 @@ def main():
         finally:
             proxy.stop()
             tsnet_srv.stop()
+
+        # ---- links out: a chat's Preview and a link in a reply, from
+        # real clicks and keys, open in your browser.
+        print("links out")
+        linked = Server("--preview")
+        try:
+            home = tempfile.mkdtemp(prefix="desktop-home-")
+            opener = fake_opener(home)
+            env = env_for(fake_cli(home))
+            env["PATH"] = f"{opener}:{env['PATH']}"
+            with Shell(linked.url, home=home, env=env) as w:
+                on_app(w)
+                links_out(w, linked, Path(opener, "opened.log"))
+                w.shot(SHOTS / "links-out.png")
+        finally:
+            linked.stop()
 
         # ---- the window's size, kept.
         omarchy_desktop(remote)

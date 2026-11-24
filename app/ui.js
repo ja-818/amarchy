@@ -19,6 +19,8 @@
 //   reply's briefing). uiActions: what's yours to do, a line each.
 // - uiTabs: one of a few (Chats | Tasks), each with what's your move.
 // - uiFilter: shows only some of what's there, on or off, with how many.
+// - uiFilterPick: shows only one of several (a project), picked in a
+//   dropdown under it; it names the one picked, lit, else all of them.
 // - uiSearch: the search box.
 // - uiTool: a tool's icon button in a bar.
 // - uiScore: your score in a word or two (the streak's flame, today's
@@ -529,6 +531,30 @@ function uiTabs(items, on, pick, el = null, label = "", { scroll = false } = {})
 function uiFilter({ label, count = 0, on = false, title = null, act }) {
   return h("button", { class: `head-btn ui-filter${on ? " on" : ""}`, type: "button", title, "aria-pressed": String(on), disabled: !count && !on ? true : null, onclick: act },
     label, count ? h("span", { class: "tab-count" }, String(count)) : "");
+}
+
+// A filter to one of several (a project): its button names the one
+// picked, lit (its color's dot by it: hue), else what all of them are
+// (all); ▾. A tap opens them under it (uiDropdown): all first, then each
+// (items(): [{key, label, detail, hue}]), the one picked checked; pick(key)
+// told ("" for all). key: which dropdown it is. short: its words where
+// there's little room (a phone), none picked ("All").
+function uiFilterPick({ key, on = "", all, label, short = "", items, pick, hue = null, title = null, allDetail = "" }) {
+  const dot = (n) => h("span", { class: `ui-drop-icon ph-${n}` }, h("span", { class: "ui-dot" }));
+  const rows = () => [{ key: "", label: all, detail: typeof allDetail === "function" ? allDetail() : allDetail }, ...items()].map((it) => ({
+    label: it.label, detail: it.detail || "", on: it.key === on, act: () => pick(it.key),
+    ...(it.key ? { lead: dot(it.hue) } : { icon: "project" }) }));
+  const b = h("button", { class: `head-btn ui-filter-pick${on ? " on" : ""}`, type: "button", title, "aria-label": title || label,
+    "aria-haspopup": "menu", "aria-expanded": "false", "data-dropdown": key,
+    onclick: (e) => {
+      e.stopPropagation();
+      if (uiDropdownOpen(key)) return uiDropdownClose();
+      uiDropdown(e.currentTarget, rows, { label: all, key });
+    } },
+  on && hue !== null ? h("span", { class: `ph-${hue}` }, h("span", { class: "ui-dot" })) : glyph("project"),
+  h("span", { class: "ui-filter-pick-label" }, short && !on ? [h("span", { class: "ui-filter-pick-long" }, label), h("span", { class: "ui-filter-pick-short" }, short)] : label),
+  glyph("down", "ui-drop-mark"));
+  return b;
 }
 
 // The search box: its icon, the field, and the key that gets there (a
@@ -1291,7 +1317,7 @@ function uiMenu(title, items, { search = "" } = {}) {
 // it when there's no room under), the same on the phone and the computer.
 // items() (drawn again with uiDropdownRedraw, as what they say changes):
 // [{label, detail, icon (a glyph's name), lead (a node instead), bad,
-// disabled, act}]. A tap picks one; ↑ ↓ (j k) move, ↵ picks, Esc, Tab or a
+// disabled, on (the one picked: lit, checked at its end), act}]. A tap picks one; ↑ ↓ (j k) move, ↵ picks, Esc, Tab or a
 // tap outside close it. Its button says it's open (aria-expanded); key: which
 // one it is, to find its button again when the list draws it anew.
 function uiDropdown(anchor, items, { label = "", key = "" } = {}) {
@@ -1302,15 +1328,18 @@ function uiDropdown(anchor, items, { label = "", key = "" } = {}) {
   const rows = () => [...menu.querySelectorAll(".ui-drop-row:not(:disabled)")];
   // Drawn again only when what it says changed, and never under a finger
   // (uiWhenStill): the row you're tapping stays the row you tap.
-  const sig = (all) => JSON.stringify(all.map((it) => [it.label, it.detail, it.icon, !!it.lead, it.bad, it.tone, it.disabled]));
+  const sig = (all) => JSON.stringify(all.map((it) => [it.label, it.detail, it.icon, !!it.lead, it.bad, it.tone, it.disabled, !!it.on]));
   const draw = (all = list()) => {
     dd.sig = sig(all);
     const had = rows().indexOf(document.activeElement);
+    const picks = all.some((it) => "on" in it);
     menu.replaceChildren(...all.map((it) => h("button", {
-      class: `ui-drop-row${it.bad ? " bad" : ""}${it.tone ? ` t-${it.tone}` : ""}`, type: "button", role: "menuitem", disabled: it.disabled || null,
+      class: `ui-drop-row${it.bad ? " bad" : ""}${it.tone ? ` t-${it.tone}` : ""}${it.on ? " on" : ""}`, type: "button",
+      role: picks ? "menuitemradio" : "menuitem", "aria-checked": picks ? String(!!it.on) : null, disabled: it.disabled || null,
       onclick: (e) => { e.stopPropagation(); close(); if (it.act) it.act(); } },
     it.lead || (it.icon ? glyph(it.icon, "ui-drop-icon") : h("span", { class: "ui-drop-icon" })),
-    h("span", { class: "ui-drop-text" }, h("b", {}, it.label), it.detail ? h("small", {}, it.detail) : null))));
+    h("span", { class: "ui-drop-text" }, h("b", {}, it.label), it.detail ? h("small", {}, it.detail) : null),
+    it.on ? glyph("check", "ui-drop-on") : null)));
     if (had >= 0 && rows()[had]) rows()[had].focus({ preventScroll: true });
   };
   // Under its button, its right edge on the button's when that's on the
@@ -1389,8 +1418,8 @@ function uiDropdown(anchor, items, { label = "", key = "" } = {}) {
   window.addEventListener("keydown", keys, true);
   window.addEventListener("resize", place);
   document.addEventListener("scroll", moved, true);
-  // Opened from the keys: they're on its first one.
-  if (dd.keyed) { const first = rows()[0]; if (first) first.focus({ preventScroll: true }); }
+  // Opened from the keys: they're on the one picked, else its first.
+  if (dd.keyed) { const first = menu.querySelector(".ui-drop-row.on:not(:disabled)") || rows()[0]; if (first) first.focus({ preventScroll: true }); }
   return menu;
 }
 

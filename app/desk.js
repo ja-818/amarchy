@@ -1896,6 +1896,9 @@ function deskMenu() {
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     !open && boardTabNow() === "chats" && !board.query ? { label: todayUI.needsOnly ? "Show every chat" : "Only what needs you", icon: "waiting", act: () => todayNeedsOnly(!todayUI.needsOnly) } : null,
+    !open && !board.query && (todayProject() || todayProjects().length > 1)
+      ? { label: todayProject() ? `Only ${projectName(todayProject())}` : "Only one project…", icon: "project", detail: todayProject() ? "pick another, or all" : "its chats and its boards",
+          group: () => ({ title: "Show one project", items: todayProjectItems() }) } : null,
     { label: "Automations", icon: "clock", detail: autoState.failed ? `${autoState.failed} failed last time` : "what runs by itself", act: () => automationsSheet() },
     { label: "Theme, font and wallpaper…", icon: "image", act: () => openLook() },
     { label: "Sound…", icon: "status", detail: "the chimes", act: () => soundSheet(null) },

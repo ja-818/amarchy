@@ -126,6 +126,36 @@ try:
     (theme / "wallpaper.png").write_bytes(png)
     check(bool(until(lambda: (alpha.home / "state/amarchy/app/custom/mine/wallpaper.png").read_bytes() == png, limit=20)),
           "a theme of yours, made on gamma: on alpha, whole")
+    custom = lambda m: m.home / "state/amarchy/app/custom"
+
+    def beside(m):
+        """What's in m's app/custom beside its themes and the folders they point at."""
+        c = custom(m)
+        targets = {os.readlink(p) for p in c.iterdir() if p.is_symlink()}
+        return sorted(p.name for p in c.iterdir() if p.name.startswith(".") and p.name not in targets)
+    check((custom(alpha) / "mine").is_symlink(), "kept there behind a link, turned in one step")
+    (theme / "theme.json").write_text(json.dumps({"name": "Mine", "mode": "dark", "vars": {"--accent": "#00ff88"}}))
+    check(bool(until(lambda: "#00ff88" in (custom(alpha) / "mine/theme.json").read_text()
+                     and "#00ff88" in (custom(beta) / "mine/theme.json").read_text(), limit=20)),
+          "changed on gamma: on alpha and beta again")
+    check(not beside(alpha) and not beside(beta), f"nothing left beside it ({beside(alpha)}, {beside(beta)})")
+    # One that can't be kept on beta (its folder read-only): said in its log,
+    # and the rest of what alpha has still taken there.
+    custom(beta).chmod(0o555)
+    try:
+        other = custom(alpha) / "other"
+        other.mkdir()
+        (other / "theme.json").write_text(json.dumps({"name": "Other", "mode": "light", "vars": {"--accent": "#123456"}}))
+        code, _, _ = alpha.ask("POST", "/api/sound/add", {"name": "dong.wav", "data": base64.b64encode(
+            b"RIFF$\0\0\0WAVEfmt \x10\0\0\0\1\0\1\0D\xac\0\0\x88X\1\0\2\0\x10\0data\0\0\0\0").decode()})
+        check(bool(until(lambda: (beta.home / "config/amarchy/sounds/dong.wav").is_file(), limit=20)),
+              "a theme beta can't keep doesn't stop the rest: alpha's new chime there")
+        check("sync: theme other: Permission denied" in (beta.home / "server.log").read_text()
+              and "PermissionError" not in (beta.home / "server.log").read_text(), "said in beta's log, not raised")
+    finally:
+        custom(beta).chmod(0o755)
+    check(bool(until(lambda: (custom(beta) / "other/theme.json").is_file(), limit=80)),
+          "once it can: taken there at its next look")
     r = alpha.amarchy("theme", "mine")
     check(r.returncode == 0 and bool(same(lambda m: st(m)["look"]["theme"], "mine")),
           "worn on alpha: worn everywhere")

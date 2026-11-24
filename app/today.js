@@ -39,6 +39,7 @@ const todayUI = {
   closing: new Set(),   // chats closing (their Undo still up): off the page
   more: new Set(),      // lists with "+N more" opened
   needsOnly: false,     // Chats shows only what needs you (the filter beside your streak)
+  project: null,        // Chats and Tasks show only this project's ("" all; null: not read from this device yet)
   seen: new Set(),      // chats you marked seen here (until the view says so)
   expand: new Set(),    // loops whose whole text you opened
   version: 0,           // bumped by what's done here: drawn again (todayFill)
@@ -163,14 +164,115 @@ function todayBusy(s) { return s.status === "working" || s.status === "running";
 // Your agents' tasks still open (bin/amarchy tasks_view), as the server
 // orders them: but for one whose button you pressed, or whose time ran out
 // (the server's next list says so too, in a second).
-function todayTasks(v) {
-  return typeof boardsCount === "function" ? boardsCount(v) : 0;
+function todayTasks(v, scoped = false) {
+  return typeof boardsCount === "function" ? boardsCount(v, scoped) : 0;
 }
 
-// The chats and loops, sorted into Today's parts.
-function todayParts(v) {
-  const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
-  const loops = (v.today && v.today.loops) || [];
+// ---- one project at a time: the filter beside your streak
+//
+// Picked, Chats and Tasks show only that project's: its chats (your
+// assistant and your agents too, each in its own), the boards its agents
+// lead, your commitments with your assistant's. Their counts (the tabs',
+// Needs you's, the line on Tasks) are what it shows; the app's icon, its
+// title and what tells you stay every project's: nothing waits unseen. One
+// filter for both tabs, kept on this device; a new chat starts in it.
+
+function todayProject() {
+  if (todayUI.project === null) todayUI.project = store.get("board-project") || "";
+  return todayUI.project;
+}
+
+function todaySetProject(name) {
+  name = name || "";
+  if (name === todayProject()) return;
+  todayUI.project = name;
+  store.set("board-project", name);
+  if (typeof uiWhole === "function") uiWhole();   // the board's all of it new (ui.js)
+  // Another list: from its top.
+  for (const el of document.querySelectorAll(".board-scroll")) el.scrollTop = 0;
+  todayRedraw();
+}
+
+// Whether it shows a chat (or what's its: a board, by the chat that leads it).
+function todayInProject(s) {
+  const on = todayProject();
+  return !on || !!(s && s.repo === on);
+}
+
+// The projects to pick from: every one with a chat here, in your order (the
+// new-chat picker's), and the one picked even with none left; each with
+// what it holds where you are (Chats: its chats and how many need you;
+// Tasks: its boards and what's yours on them).
+function todayProjects(v = app.view, only = "chats") {
+  const ss = ((v && v.sessions) || []).filter((s) => !s.setup && s.repo);
+  const order = (typeof whereProjects === "function" ? whereProjects() : (v && v.projects) || []).map((p) => p.name);
+  const names = [...new Set([...ss.map((s) => s.repo), ...(todayProject() ? [todayProject()] : [])])]
+    .sort((a, b) => ((order.indexOf(a) + 1) || 1e6) - ((order.indexOf(b) + 1) || 1e6) || a.localeCompare(b));
+  const p = v ? todayParts(v) : null;
+  const needs = p ? [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)) : [];
+  return names.map((name) => {
+    const chats = ss.filter((s) => s.repo === name);
+    let detail;
+    if (only === "tasks") {
+      const bs = typeof boardsIn === "function" ? boardsIn(v, name) : [];
+      const yours = bs.reduce((n, b) => n + (b.loops ? b.yours : boardsYours(b)), 0);
+      detail = bs.length ? [`${bs.length} board${bs.length === 1 ? "" : "s"}`, yours ? `${yours} for you` : ""].filter(Boolean).join(" · ") : "No boards";
+    } else {
+      const n = needs.filter((s) => s.repo === name).length;
+      detail = chats.length ? [`${chats.length} chat${chats.length === 1 ? "" : "s"}`, n ? `${n} need${n === 1 ? "s" : ""} you` : ""].filter(Boolean).join(" · ") : "No chats now";
+    }
+    return { key: name, label: projectName(name), hue: todayHue(name), detail };
+  });
+}
+
+// Your commitments' project: your assistant's (it keeps them).
+function todayLoopsProject(v) {
+  const id = ((v && v.today && v.today.assistant) || {}).id, ss = (v && v.sessions) || [];
+  const s = (id && ss.find((x) => x.id === id)) || ss.find((x) => x.assistant === "main");
+  return s ? s.repo : "";
+}
+
+// The filter's button: All projects, or the one picked (lit). With one
+// project, none (nothing to filter).
+function todayProjectPick(v, only) {
+  const on = todayProject();
+  if (!on && new Set((v.sessions || []).filter((s) => !s.setup && s.repo).map((s) => s.repo)).size < 2) return null;
+  return uiFilterPick({ key: "board-project", on, all: "All projects", title: on ? `Only ${projectName(on)}: pick another, or all` : "Show one project's only",
+                        items: () => todayProjects(app.view, boardTabNow()), pick: todaySetProject, hue: on ? todayHue(on) : null,
+                        label: on ? projectName(on) : "All projects", short: "All", allDetail: () => todayProjectsAll(app.view, boardTabNow()) });
+}
+
+// All projects' row: what there is in all (Chats: chats, what needs you; Tasks: boards, what's yours).
+function todayProjectsAll(v, only) {
+  if (!v) return "";
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  if (only === "tasks") {
+    const loops = boardsLoops(v), n = boardsList(v).length + (loops ? 1 : 0), y = todayCount(v, "tasks");
+    return n ? [plural(n, "board"), y ? `${y} for you` : ""].filter(Boolean).join(" · ") : "";
+  }
+  const n = (v.sessions || []).filter((s) => !s.setup).length, y = todayCount(v, "chats");
+  return [plural(n, "chat"), y ? `${y} need${y === 1 ? "s" : ""} you` : ""].filter(Boolean).join(" · ");
+}
+
+// The Amarchy menu's (desk.js deskMenu): the same projects to pick from.
+function todayProjectItems() {
+  const on = todayProject();
+  return [{ key: "", label: "All projects", detail: todayProjectsAll(app.view, boardTabNow()) }, ...todayProjects(app.view, boardTabNow())].map((p) => ({
+    label: p.label, detail: p.detail || "", icon: p.key === on ? "check" : "project", on: p.key === on, act: () => todaySetProject(p.key) }));
+}
+
+// What the project filter leaves is nothing: said, and every project's a tap away.
+function todayProjectEmpty(words) {
+  return h("div", { class: "today-clear today-project-none" }, h("span", {}, words),
+    uiButton("Show all projects", () => todaySetProject(""), false, "quiet"));
+}
+
+// The chats and loops, sorted into Today's parts. scoped: only what the
+// project filter shows (todayProject).
+function todayParts(v, scoped = false) {
+  const all = (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id));
+  const ss = todaySort(v, scoped ? all.filter(todayInProject) : all);
+  const loops = scoped && !todayInProject({ repo: todayLoopsProject(v) }) ? [] : (v.today && v.today.loops) || [];
   const isMain = (s) => s.assistant === "main";
   const now = Date.now() / 1000;
   const asks = ss.filter(todayAsking);
@@ -199,7 +301,7 @@ function todayParts(v) {
   const someday = loops.filter((l) => l.kind === "someday" || l.kind === "other");
   // Ready: every other chat, stalled ones among them (as the list orders them).
   const ready = rest.filter((s) => !done.includes(s) && !working.includes(s));
-  return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, agents, done, stale, working, idle, ready, someday, tasks: todayTasks(v) };
+  return { asks, blocked, fresh, dueNow, week, later, waiting, chaseNow, main, agents, done, stale, working, idle, ready, someday, tasks: todayTasks(v, scoped) };
 }
 
 // Whether a chat asks you something you haven't answered: a question, a
@@ -215,9 +317,11 @@ function todayMergedAll(s) {
 }
 
 // What's your move: the count on Today's tab, the switch, the page's top.
-function todayCount(v, only = null) {
+// scoped: what the project filter shows (the tabs', Needs you's); else
+// every project's (the app's icon and title: manage.js markWaiting).
+function todayCount(v, only = null, scoped = false) {
   if (!v) return 0;
-  const p = todayParts(v);
+  const p = todayParts(v, scoped);
   // (Not a chat on a machine that's off: nothing answers it until it's back. Its card still shows, dimmed.)
   const chats = [...p.asks, ...p.blocked, ...p.fresh].filter((s) => !uiMachineOff(s)).length, tasks = p.tasks + p.dueNow.length + p.chaseNow.length;
   return only === "chats" ? chats : only === "tasks" ? tasks : chats + tasks;
@@ -225,8 +329,8 @@ function todayCount(v, only = null) {
 
 // The one count line: what's your move, what's to close.
 function todaySummary(v, only = null) {
-  const p = todayParts(v);
-  const yours = todayCount(v, only);
+  const p = todayParts(v, true);
+  const yours = todayCount(v, only, true);
   if (only === "tasks") return yours ? `${yours} task${yours === 1 ? "" : "s"} for now` : "No task is due now";
   return [yours ? `${yours} need${yours === 1 ? "s" : ""} you` : "Nothing needs you", only !== "tasks" && p.done.length ? `${p.done.length} done` : ""].filter(Boolean).join(" · ");
 }
@@ -951,16 +1055,17 @@ function missionsSheet() {
 function todayNodes({ board = false, top = true, only = null } = {}) {
   const v = app.view;
   if (!v) return [h("div", { class: "empty" }, app.failed || "Connecting…")];
-  const p = todayParts(v);
+  const p = todayParts(v, true);
   // Each card with what it shows of its chat or task (todayData): drawn
   // again, the same one is kept (todayPatch).
   const tk = (draw, ...more) => (s) => { const n = board ? boardTicket(s, draw(s, ...more)) : draw(s, ...more); n.todayData = todayRowKey(s); return n; };
   const nodes = [];
   const needing = (s) => p.asks.includes(s) || p.blocked.includes(s) || p.fresh.includes(s);
-  // On Chats, Needs you beside your streak; on Tasks, what's for now.
+  // On Chats, Needs you; on Tasks, what's for now; then the project filter
+  // beside your streak.
   if (top && !(only === "tasks" && boardsUI.open)) nodes.push(h("div", { class: "today-summary" }, only === "chats"
-    ? uiFilter({ label: "Needs you", count: todayCount(v, "chats"), on: todayUI.needsOnly, title: "Only what needs you (o)", act: () => todayNeedsOnly(!todayUI.needsOnly) })
-    : h("span", { class: "today-summary-text" }, todaySummary(v, only)), missionScore()));
+    ? uiFilter({ label: "Needs you", count: todayCount(v, "chats", true), on: todayUI.needsOnly, title: "Only what needs you", act: () => todayNeedsOnly(!todayUI.needsOnly) })
+    : h("span", { class: "today-summary-text" }, todaySummary(v, only)), todayProjectPick(v, only), missionScore()));
   // Notifications don't reach this device (app.js pushNotice): said above your chats.
   if (only !== "tasks" && typeof pushNotice === "function") nodes.push(pushNotice());
   // A chat's card, wherever it stands.
@@ -972,7 +1077,7 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
   // them (todaySort). Done working, a chat is back in its place there; one
   // put for later that has something new for you is in Now until you see it.
   if (only === "chats") {
-    const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id)));
+    const ss = todaySort(v, (v.sessions || []).filter((s) => !s.setup && !todayUI.closing.has(s.id) && todayInProject(s)));
     const on = todayUI.needsOnly;
     const later = (s) => s.priority === "low" && !isAgent(s) && !p.fresh.includes(s);
     const free = ss.filter((s) => !p.working.includes(s) && (on || (s !== p.main && !p.agents.includes(s))));
@@ -988,7 +1093,9 @@ function todayNodes({ board = false, top = true, only = null } = {}) {
         p.working.map(cardOf)));
     }
     nodes.push(uiSection("now", "Now", { count: now.length, extra: on ? null : todayAll(now.filter((s) => p.done.includes(s))) }, now.map(cardOf)));
-    if (on && !now.length && !put.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), " Nothing needs you."));
+    const pn = todayProject() ? ` in ${projectName(todayProject())}` : "";
+    if (pn && !ss.length) nodes.push(todayProjectEmpty(`No chats${pn} now.`));
+    else if (on && !now.length && !put.length) nodes.push(h("p", { class: "today-clear" }, glyph("check"), ` Nothing needs you${pn}.`));
     else if (!now.length && !on && laterAll.length) nodes.push(h("p", { class: "today-clear" }, "Nothing in Now. Bring one back from For later."));
     // Folded, what waits in it counted on its head; filtered, in sight.
     nodes.push(uiSection(on ? "forlater-needs" : "forlater", "For later", { count: put.length, fold: on ? true : false,
@@ -1023,7 +1130,7 @@ function todayKey(v) {
   const m = missionsNow();
   // A card's pill says its minutes left: drawn again each minute while there's one.
   const minute = boardsTimed(v) ? Math.floor(Date.now() / 60000) : 0;
-  return JSON.stringify([todayUI.version, new Date().toDateString(), minute, v.today, v.needs, todayUI.needsOnly, boardsKey(),
+  return JSON.stringify([todayUI.version, new Date().toDateString(), minute, v.today, v.needs, todayUI.needsOnly, todayProject(), boardsKey(),
     [m.n, m.streak, m.goal, m.total], (v.sessions || []).map((s) => s.id).join(), (v.sessions || []).map((s) => [todayRowKey(s), todayTimes(s)])]);
 }
 

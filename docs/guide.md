@@ -103,8 +103,15 @@ you decide what's in them:
 
 Inside each, the chat you last wrote to comes first. A chat's state (Asks you,
 New, Done) is a label on its card and never moves it, so nothing shifts while you
-read. **Needs you**, beside your streak, shows only the chats waiting on
-you, For later's too (`o`). Hold a card (a right click on a computer) to pin it or
+read. **Needs you** shows only the chats waiting on you, For later's too.
+Beside your streak, **All projects ▾** (**All** on a phone) shows one project
+only: pick it, and Chats has just its chats (your assistant and agents only in
+their own) and Tasks just the boards its agents lead (your commitments with
+your assistant's project); the tabs and Needs you count only what it shows. It
+stays picked on both tabs and after a reload on that device, a new chat starts
+in it, and **All projects** brings back the rest. The app's icon and your
+notifications still count every project. Both are in the Amarchy menu too
+(`Ctrl+Alt+M`). Hold a card (a right click on a computer) to pin it or
 put it for later; on a computer `p` pins and `f` puts it for later, and again puts
 it back in Now. Every chat still notifies you, wherever it is.
 
@@ -377,9 +384,10 @@ host's chats without anything else installed.
   it and New chat a +; the menu a sheet.
 - **Chats**: every chat a card (its project, its state, its goal and what it last
   said, its question's buttons), in **At work** (folded), **Now** and **For later**: pinned on top, then
-  the one you last wrote to (`p` pins, `f` for later). **Needs you** (`o`) shows only
+  the one you last wrote to (`p` pins, `f` for later). **Needs you** shows only
   what asks you, what's blocked, what was interrupted (**Resume**) and what finished
-  that you haven't opened yet. A done
+  that you haven't opened yet; **All projects ▾**, beside your streak, one
+  project's only (Tasks too). A done
   chat's **Review** opens the link its last reply gave, **Complete mission** closes
   it, with Undo.
 - **Tasks**: your boards ([Tasks: boards](#tasks-boards)): a box to write a task
@@ -692,7 +700,7 @@ amarchy machines remove omarchy   # both forget the other
   A chat that moved is followed: `amarchy close <old id>` closes it where it
   is now.
 - **Your stuff is the same on every machine**: the look (your own wallpaper
-  and themes too, Omarchy (live) among them), the order of your projects, what
+  and themes too; Omarchy (live) goes its own way, below), the order of your projects, what
   a new chat starts on (model, effort), what tells you, your chimes, Show
   terminals, how machines show, and your missions: every machine's merges,
   streaks and badges count once, the same score everywhere, and a reset is
@@ -967,7 +975,10 @@ again and sent on, and every app wearing it changes too: Omarchy's `theme-set`
 hook and a systemd path unit (`amarchy-omarchy-look.path`, the kernel telling it
 a file changed) run `amarchy theme --omarchy`; nothing checks every few seconds.
 It's kept on the desktop and sent to every machine paired with it (the server
-the desktop app shows), which keeps the last one it got.
+the desktop app shows), which keeps the last one it got. A machine that's off
+then gets it as soon as it's back (the desktop's app sends it), so only one
+that refuses it makes `amarchy-omarchy-look.service` fail, saying why in its
+journal.
 
 **The window, one of the desktop's**: the desktop app's window is
 see-through. Wearing **Omarchy (live)**, it paints no wallpaper of its own:
