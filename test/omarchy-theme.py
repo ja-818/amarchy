@@ -16,7 +16,14 @@
   wallpaper served (and not drawn again in a window on the Omarchy desktop,
   html.on-omarchy), and again when the desktop's theme changes; refused from a
   page, with a wrong key, for another theme's name, with files it doesn't
-  name, too big.
+  name, too big;
+- with the desktop's own app up too, as on a desktop and its Cloud, their
+  sync running both ways: switched again and again, taken every time, and
+  never synced as a theme of yours (that raced it: a folder left where a
+  link was, then "couldn't keep it (Not a directory)" on every switch, and
+  the sync stopped short); the server taking it again from that state, its
+  leftovers gone; a server that refuses it fails the unit, one that's off
+  doesn't, and it's sent there by the desktop's app once it answers again.
 
 Needs a checkout of Omarchy in OMARCHY_SRC (default /tmp/omarchy-src/omarchy),
 and ImageMagick or ffmpeg (the wallpaper's cut).
@@ -133,21 +140,26 @@ class Desk:
 
 
 class Box:
-    """A machine running amarchy's app server (its own home, port, name)."""
+    """A machine running amarchy's app server (its own home, port, name;
+    env: more of its environment, a desktop's own)."""
 
-    def __init__(self, base, name="box"):
+    def __init__(self, base, name="box", env=None):
         self.name, self.port = name, free_port()
         self.home = Path(base) / name
         self.url = f"http://127.0.0.1:{self.port}"
-        (self.home / "Work").mkdir(parents=True)
+        (self.home / "Work").mkdir(parents=True, exist_ok=True)
         self.env = {"HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state"),
                     "XDG_CONFIG_HOME": str(self.home / "config"), "AMARCHY_WORK": str(self.home / "Work"),
                     "AMARCHY_TMUX": f"amarchy-test-{os.getpid()}-{name}", "AMARCHY_HOST_NAME": name,
                     "AMARCHY_HOST_APP_PORT": str(self.port), "AMARCHY_HOST_URL": self.url,
                     "AMARCHY_HOST_APP_LINKS": "off", "AMARCHY_HOST_APP_USERS": USER, "AUTO_UPDATE": "off",
                     "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "SHELL": "/bin/bash",
-                    "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "")}
-        self.log = open(Path(base) / f"{name}.log", "a")
+                    "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""), **(env or {})}
+        self.logfile = Path(base) / f"{name}.log"
+        self.start()
+
+    def start(self):
+        self.log = open(self.logfile, "a")
         self.proc = subprocess.Popen([sys.executable, BIN, "app", "serve"], env=self.env, stdout=self.log,
                                      stderr=self.log, stdin=subprocess.DEVNULL, start_new_session=True)
         for _ in range(100):
@@ -183,7 +195,39 @@ class Box:
         if self.proc.poll() is None:
             os.killpg(self.proc.pid, signal.SIGTERM)
             self.proc.wait(10)
+        self.log.close()
         subprocess.run(["tmux", "-L", self.env["AMARCHY_TMUX"], "kill-server"], capture_output=True)
+
+    @property
+    def live(self):
+        return self.home / "state/amarchy/app/custom/omarchy-live"
+
+    def kept(self):
+        try:
+            return json.loads((self.live / "theme.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def leftovers(self):
+        """What's in app/custom beside its themes and the folders they point at."""
+        custom = self.home / "state/amarchy/app/custom"
+        targets = {os.readlink(p) for p in custom.iterdir() if p.is_symlink() and not p.name.startswith(".")}
+        return sorted(p.name for p in custom.iterdir() if p.name.startswith(".") and p.name not in targets)
+
+    def synced_themes(self):
+        try:
+            return set(json.loads((self.home / "state/amarchy/sync/themes.json").read_text()))
+        except (OSError, ValueError):
+            return set()
+
+
+def until(fn, limit=20, every=0.5):
+    end = time.time() + limit
+    while True:
+        got = fn()
+        if got or time.time() > end:
+            return got
+        time.sleep(every)
 
 
 def shell_value(desk, section, key):
@@ -360,6 +404,104 @@ def peer_test(base, desk):
         box.stop()
 
 
+def sync_test(base):
+    """A desktop and its Cloud, both up, as Julian's are."""
+    desk = Desk(base, "ja")
+    desk.theme("tokyo-night")
+    desk.background(sorted((SRC / "themes/tokyo-night/backgrounds").iterdir())[0])
+    # The desktop's own app, with the desktop's environment (its fakes; no
+    # systemd: its catch-up runs `amarchy theme --omarchy` itself).
+    app = Box(base, "ja", env={k: desk.env[k] for k in ("PATH", "XDG_RUNTIME_DIR", "HYPRLAND_INSTANCE_SIGNATURE")})
+    desk.env.update(AMARCHY_HOST_URL=app.url, AMARCHY_HOST_APP_PORT=str(app.port), AMARCHY_TMUX=app.env["AMARCHY_TMUX"])
+    cloud = Box(base, "cloud")
+    try:
+        r = desk.amarchy("machines", "add", cloud.url)
+        check("both up: the desktop pairs with its Cloud", r.returncode == 0, r.stderr + r.stdout)
+        r = desk.amarchy("theme", "--omarchy")
+        check("made and sent", r.returncode == 0 and "sent to cloud" in r.stdout, r.stdout + r.stderr)
+        time.sleep(8)       # the sync, both ways, a few times (it looks every 2 s; a change: pushed)
+
+        surfaces = set()
+        for name in ("rose-pine", "gruvbox", "nord", "kanagawa", "rose-pine"):
+            desk.theme(name)
+            r = desk.amarchy("theme", "--omarchy", "--quiet")
+            surface = desk.kept()["vars"]["surface"]
+            surfaces.add(surface)
+            check(f"switched to {name}: taken, the unit succeeds", r.returncode == 0 and not r.stderr.strip()
+                  and cloud.kept().get("vars", {}).get("surface") == surface, (r.returncode, r.stdout, r.stderr))
+            time.sleep(3)   # a sync between switches, as there was between Julian's
+        check("the switches were the server's to see", len(surfaces) >= 3, surfaces)
+        check("kept behind a link on both", desk.live.is_symlink() and cloud.live.is_symlink())
+        check("never synced as a theme of yours", "omarchy-live" not in cloud.synced_themes()
+              and "omarchy-live" not in app.synced_themes(), (cloud.synced_themes(), app.synced_themes()))
+        check("nothing left beside it", not cloud.leftovers() and not app.leftovers(),
+              (cloud.leftovers(), app.leftovers()))
+
+        # What the sync left on Julian's Cloud: the link moved aside under the
+        # server's pid, a folder where it was, the folder a take cut short left.
+        custom = cloud.live.parent
+        pid = cloud.proc.pid
+        target = os.readlink(cloud.live)
+        os.rename(cloud.live, custom / f".omarchy-live.old.{pid}")
+        shutil.copytree(custom / target, cloud.live)
+        (custom / f".omarchy-live.{pid}").mkdir()
+        (custom / f".omarchy-live.{pid}/theme.json").write_text("{}")
+        old = time.time() - 1800
+        for f in (custom / f".omarchy-live.old.{pid}", custom / f".omarchy-live.{pid}", custom / target):
+            os.utime(f, (old, old), follow_symlinks=False)
+        desk.theme("everforest")
+        r = desk.amarchy("theme", "--omarchy", "--quiet")
+        check("the state Julian's Cloud was in: taken again", r.returncode == 0 and not r.stderr.strip()
+              and cloud.live.is_symlink() and cloud.kept()["vars"]["surface"] == desk.kept()["vars"]["surface"],
+              (r.stdout, r.stderr))
+        check("its leftovers gone", not cloud.leftovers(), cloud.leftovers())
+
+        # A machine on an older amarchy still syncs it as a theme of yours: not taken.
+        key = json.loads((cloud.home / "config/amarchy/machines.json").read_text())[0]["key"]
+        peer = {"X-Amarchy-Peer": "ja", "Authorization": f"Bearer {key}", "X-Amarchy-Protocol": "1"}
+        before = os.readlink(cloud.live)
+        code, _, said = cloud.ask("POST", "/api/peer/sync", {"themes": {"omarchy-live": {
+            "files": {"theme.json": "0" * 64}, "at": 9e9, "by": "zzz"}}}, headers=peer)
+        time.sleep(3)
+        check("one an older machine syncs: not taken", code == 200 and os.readlink(cloud.live) == before, (code, said))
+
+        # Refused: the unit fails, saying why.
+        custom.chmod(0o555)
+        try:
+            desk.theme("nord")
+            r = desk.amarchy("theme", "--omarchy", "--quiet")
+        finally:
+            custom.chmod(0o755)
+        check("refused there: the unit fails, saying why", r.returncode == 1
+              and "not sent to cloud: couldn't keep it (Permission denied)" in r.stderr, (r.returncode, r.stderr))
+
+        # Off: not a failure, and sent once it answers again.
+        cloud.stop()
+        desk.theme("catppuccin")
+        r = desk.amarchy("theme", "--omarchy")
+        check("its Cloud off: the unit succeeds, saying it's sent when it's back", r.returncode == 0
+              and "not sent to cloud yet" in r.stdout, (r.returncode, r.stdout, r.stderr))
+        r = desk.amarchy("theme", "--omarchy", "--quiet")
+        check("quiet, nothing said", r.returncode == 0 and not r.stdout.strip() and not r.stderr.strip(),
+              (r.stdout, r.stderr))
+        want = desk.kept()["vars"]["surface"]
+        time.sleep(1)
+        cloud.start()
+        t0 = time.time()
+        got = until(lambda: cloud.kept().get("vars", {}).get("surface") == want, limit=100, every=1)
+        check(f"back on: the desktop's app sends it there ({time.time() - t0:.0f} s)", bool(got),
+              cloud.kept().get("vars", {}).get("surface"))
+        sent = json.loads((desk.home / "state/amarchy/omarchy-live.json").read_text())
+        check("and it's kept as sent", sent["sent"].get("cloud") == sent["sig"] and "cloud" not in sent.get("tried", {}),
+              sent.get("tried"))
+        logs = {b.name: b.logfile.read_text() for b in (app, cloud)}
+        check("no error in either app's log", not any("Traceback" in t or "Not a directory" in t for t in logs.values()),
+              {n: t[-1500:] for n, t in logs.items() if "Traceback" in t or "Not a directory" in t})
+    finally:
+        cloud.stop()
+        app.stop()
+
+
 def main():
     if not (SRC / "bin/omarchy-theme-set-templates").is_file():
         print(f"skip: no Omarchy checkout in {SRC} (OMARCHY_SRC=)")
@@ -368,6 +510,7 @@ def main():
     try:
         desk = local_test(base)
         peer_test(base, desk)
+        sync_test(base)
     finally:
         shutil.rmtree(base, ignore_errors=True)
     print(f"\n{len(failed)} failed" if failed else "\nall ok")

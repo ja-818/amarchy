@@ -289,8 +289,12 @@ and tell the other tracks.
   regular|bold.ttf|otf|woff|woff2, checked by their bytes), 48 MB at most.
   The machine keeps it as the theme of yours `omarchy-live` ("Omarchy
   (live)"), replacing the last one in one step, and answers `{"key", "worn"}`;
-  400 says what's wrong with it. Only `omarchy-live` comes this way (syncing
-  the rest of your look is track D's).
+  400 says what's wrong with it. Only `omarchy-live` comes this way, and it
+  comes only this way: the sync of your themes (track D's) leaves it out, so
+  an older one never races the one just sent. A machine that's off when it's
+  made doesn't fail `amarchy theme --omarchy` (one that refuses it does); the
+  desktop's app sends it there once it answers again (its sync's next pull),
+  one that refused it an hour later or at the next switch.
 
 ### The desktop app: how it's opened, what it opens
 
@@ -531,8 +535,11 @@ up when it's back. No main machine; any one can be off.
     in another machine's record is `<machine>:<id>` there);
   - `badges`: key → when first earned (the earliest wins);
   - `sounds`: your own chimes, name → the file's hash;
-  - `themes`: your own themes (`omarchy-live` among them), key → its
-    `theme.json` and its files' hashes; the newest of each wins.
+  - `themes`: your own themes (not `omarchy-live`: it goes by
+    `PUT /api/peer/look` alone), key → its `theme.json` and its files'
+    hashes; the newest of each wins, put in place the way `omarchy-live` is
+    (a link to a folder written whole beside it, turned in one step); one a
+    machine can't keep is said in its app's log, and the rest still taken.
 - **Files** (a wallpaper, a chime, a theme's font) go by their SHA-256:
   `GET /api/peer/sync/file/<sha256>` (peers only), fetched by a machine that
   hasn't it, checked against the hash.
