@@ -232,6 +232,7 @@ function boardsOpen(key, card = null) {
   boardsUI.route = hash;
   board.scroll.scrollTop = 0;
   boardsRedraw();
+  uiWhole();      // the board's all of it new: drawn whole a moment (ui.js)
   boardRefocus();
 }
 
@@ -255,6 +256,7 @@ function boardsClose() {
   }
   boardsUI.route = here();
   boardsRedraw();
+  uiWhole();
   const sec = board.box.querySelector(`.tsec[data-board="${CSS.escape(was)}"]`);
   if (sec) uiReveal(sec, { scroller: board.scroll, block: "start" });
   boardRefocus();
@@ -279,6 +281,7 @@ function boardsRoute(hash) {
     boardsUI.open = key;
     boardsUI.edit = null;
     boardsUI.ask = null;
+    uiWhole();
   }
   if (board.tab !== "tasks") boardTab("tasks");
   else boardsRedraw();

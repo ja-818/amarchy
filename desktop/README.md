@@ -14,7 +14,7 @@ opened, what it opens").
 | `src/main.rs` | The window, its navigation rule (amarchy's pages in it, anything else in your browser), the permissions it answers (the microphone yes, the app's own notifications no), links, closing to the tray, `--restart` after an update |
 | `src/target.rs` | What it opens (the contract's order), through amarchy's CLI; this machine's amarchy with the local key (its cookie asked for natively, never in an address) |
 | `src/links.rs` | `amarchy://chat/<machine>/<id>`, and the app's route to it |
-| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, what draws its GL (no GPU: its page painted on the CPU, the page told, `--graphics`), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it) |
+| `src/platform.rs` | Linux: the app id `amarchy`, NVIDIA, the PulseAudio guard, WebKitGTK's settings (the microphone), its load failures, its page's process ending and why (drawing the safe way only after crashes with no sign why), its page's errors in its log, what draws its GL (no GPU: its page painted on the CPU, the page told, `--graphics`), whether it's on an Omarchy desktop (the page told, `amarchyDesktop.omarchy`: the window see-through, its look live showing the desktop's own wallpaper through it; every frame drawn whole when asked, `AMARCHY_DESKTOP_WHOLE_FRAMES=1`, WebKit's settings set as they're made) |
 | `src/sound.rs` | What its page can play: GStreamer asked at start; without its plugins, no media in the page (one would end it), its sounds played by the app (`pw-play`), said once, and a start again once they're installed |
 | `src/notify.rs` | Its notifications: it follows `GET /api/notices` of what it opens (the contract's "Its notifications"), shows each natively with its buttons, does what a button says as the page would, opens the chat on a click, rings the chat's chime |
 | `src/tray.rs` | The tray: Open, Reload, Its log, Quit, and how many need you |
@@ -79,6 +79,21 @@ an error nothing caught, with where; a promise nothing caught;
   out seconds late). `AMARCHY_DESKTOP_GPU=1` paints through GL anyway. The
   page itself draws as few frames as it can, anywhere: what moves for as long
   as it's on screen moves with the spinners' tick (app.js, the beat).
+- **Old frames through a see-through window**: WebKit (2.50 and later) draws
+  only what changed in a frame into buffers it takes turns with, and tells
+  the window only that part changed. In the see-through window on Omarchy
+  with no GPU (an M5), back from a chat, one of them kept the chat's head
+  under the board's bar, and the two took turns on screen, many times a
+  second (WebKit bug 305758 is one of this kind). After each big change (a
+  chat opened or closed, the other tab, a board, the side panel, a sheet, a
+  menu or a toast come or gone) its page draws the whole window again for a
+  few frames, through every buffer (`app/ui.js` `uiWhole`: a veil of black
+  at 1 or 2 of 255, a color WebKit counts as changed, too little to see),
+  then only what changes. Every frame drawn whole costs a computer with no
+  GPU three or four times the CPU, so it's there to ask for when the page's
+  own way isn't enough: `AMARCHY_DESKTOP_WHOLE_FRAMES=1` (set as WebKit makes
+  its settings: it reads them once, as it sets its page up). Its log says
+  which way it draws.
 - **Its window's thread stuck** (a start handed over not taken up in 8 s, or
   no answer for 45 s): it starts again as a new process, on the chat it was
   asked for, and the stuck one ends.
@@ -107,7 +122,8 @@ python3 test/shell-test.py                          # the real window under Xvfb
                                                     # a restart), its self-healing, amarchy's own
                                                     # Tailscale node (its sign-in, through its proxy),
                                                     # on an Omarchy desktop (see-through: the desktop through
-                                                    # it, under picom when it's installed), how it draws
+                                                    # it, under picom when it's installed; drawn whole a
+                                                    # moment after a big change, every frame when asked), how it draws
                                                     # (no GPU: painted on the CPU, light at work, held keys
                                                     # in as pressed), its stderr (a pipe nobody reads)
 python3 test/sound-test.py                          # GStreamer without its plugins (Julian's M5; its core

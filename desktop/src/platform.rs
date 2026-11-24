@@ -169,8 +169,20 @@ pub fn omarchy() -> bool {
     false
 }
 
+/// A see-through window, about to be made: its page draws every frame
+/// whole when that's asked for (AMARCHY_DESKTOP_WHOLE_FRAMES=1,
+/// linux::whole_frames). Before its window is made: WebKit reads it as it
+/// sets the page up.
+pub fn see_through() {
+    #[cfg(target_os = "linux")]
+    if linux::whole_frames_asked() {
+        linux::whole_frames();
+    }
+}
+
 /// How its page draws now, for the tests: WebKit's hardware acceleration
-/// policy ("always", "never"), and whether its tiles are painted on the CPU.
+/// policy ("always", "never"), whether its tiles are painted on the CPU, and
+/// WebKit's draw-only-what-changed switches ({name: on}, linux::DAMAGE).
 #[cfg(feature = "test-hooks")]
 pub fn drawing(win: &tauri::WebviewWindow) -> serde_json::Value {
     let cpu = std::env::var_os("WEBKIT_SKIA_ENABLE_CPU_RENDERING").is_some_and(|v| v == "1");
@@ -179,15 +191,20 @@ pub fn drawing(win: &tauri::WebviewWindow) -> serde_json::Value {
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = win.with_webview(move |wv| {
             use webkit2gtk::{SettingsExt, WebViewExt};
-            let p = WebViewExt::settings(&wv.inner()).map(|s| match s.hardware_acceleration_policy() {
-                webkit2gtk::HardwareAccelerationPolicy::Never => "never".to_string(),
-                webkit2gtk::HardwareAccelerationPolicy::Always => "always".to_string(),
-                other => format!("{other:?}").to_lowercase(),
+            let got = WebViewExt::settings(&wv.inner()).map(|s| {
+                let policy = match s.hardware_acceleration_policy() {
+                    webkit2gtk::HardwareAccelerationPolicy::Never => "never".to_string(),
+                    webkit2gtk::HardwareAccelerationPolicy::Always => "always".to_string(),
+                    other => format!("{other:?}").to_lowercase(),
+                };
+                (policy, linux::features(&s, &linux::DAMAGE, None))
             });
-            let _ = tx.send(p);
+            let _ = tx.send(got);
         });
-        let policy = rx.recv_timeout(std::time::Duration::from_secs(5)).ok().flatten();
-        serde_json::json!({ "policy": policy, "cpu_painting": cpu })
+        let (policy, damage) = rx.recv_timeout(std::time::Duration::from_secs(5)).ok().flatten().unzip();
+        let damage: serde_json::Map<String, serde_json::Value> =
+            damage.unwrap_or_default().into_iter().map(|(k, v)| (k, serde_json::Value::Bool(v))).collect();
+        serde_json::json!({ "policy": policy, "cpu_painting": cpu, "damage": damage })
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -511,6 +528,155 @@ mod linux {
         out.join("; ")
     }
 
+    // ---- a see-through window: every frame drawn whole, when asked
+    //
+    // WebKit (2.50 and later) draws only what changed in a frame (its
+    // "damage") into buffers it takes turns with, and tells the window only
+    // that part changed. In the see-through window on Omarchy with no GPU
+    // (Julian's M5, 2026-11-23), back from a chat to the board, the board's
+    // bar and the chat's head took turns on screen, many times a second:
+    // what was left alone in one of the buffers was a screen old (WebKit bug
+    // 305758 is one of this kind: "rendering glitches with
+    // UseDamagingInformationForCompositing and semi-transparent background
+    // color"). Its page draws its whole window again a few frames after
+    // each big change (app/ui.js uiWhole): that costs a moment. Every frame
+    // drawn whole costs a computer with no GPU three or four times the CPU
+    // (an agent typing in a 2560x1600 window: 35% of a core, 127% whole),
+    // so it's there to be asked for, for a window the page's own way doesn't
+    // keep clean: AMARCHY_DESKTOP_WHOLE_FRAMES=1.
+    //
+    // WebKit reads these once, as it sets its page up, and the web view's
+    // first page is asked for as it's made (wry, before the app has the
+    // view): set later, they'd change nothing. So they're set as WebKit makes
+    // a web view's settings (its class's constructed, wrapped), before
+    // anything is loaded.
+    pub const DAMAGE: [&str; 2] = ["UseDamagingInformationForCompositing", "PropagateDamagingInformation"];
+
+    /// WebKit's own constructed for its settings, wrapped by whole_frames.
+    static SETTINGS_MADE: std::sync::OnceLock<Option<unsafe extern "C" fn(*mut gtk::glib::gobject_ffi::GObject)>> =
+        std::sync::OnceLock::new();
+
+    unsafe extern "C" fn settings_made(obj: *mut gtk::glib::gobject_ffi::GObject) {
+        if let Some(Some(theirs)) = SETTINGS_MADE.get() {
+            // SAFETY: WebKitSettings' own constructed, on the object it was called for.
+            unsafe { theirs(obj) };
+        }
+        // SAFETY: obj is a WebKitSettings, just made (only its class calls this).
+        unsafe { features_of(obj.cast(), &DAMAGE, Some(false)) };
+    }
+
+    /// Whether every frame is to be drawn whole (AMARCHY_DESKTOP_WHOLE_FRAMES=1).
+    pub fn whole_frames_asked() -> bool {
+        std::env::var_os("AMARCHY_DESKTOP_WHOLE_FRAMES").is_some_and(|v| !v.is_empty() && v != "0")
+    }
+
+    /// Every web view's settings made from now on draw every frame whole.
+    pub fn whole_frames() {
+        if SETTINGS_MADE.get().is_some() {
+            return;
+        }
+        use gtk::glib::gobject_ffi::{g_type_class_ref, GObjectClass};
+        use gtk::glib::translate::IntoGlib;
+        use gtk::glib::StaticType;
+        // SAFETY: WebKitSettings' class, kept (a class ref is never let go);
+        // its constructed wrapped once, on the main thread, before a web view.
+        unsafe {
+            let class = g_type_class_ref(webkit2gtk::Settings::static_type().into_glib()) as *mut GObjectClass;
+            if class.is_null() {
+                return;
+            }
+            let _ = SETTINGS_MADE.set((*class).constructed);
+            (*class).constructed = Some(settings_made);
+        }
+    }
+
+    /// How a see-through window's page draws, said in the log: every frame
+    /// whole (asked, and WebKit has it so), or what changes, cleaned up
+    /// after each big change by the page (app/ui.js uiWhole).
+    fn see_through_said(s: &webkit2gtk::Settings) {
+        let got = features(s, &DAMAGE, None);
+        if got.is_empty() {
+            log::info!("see-through: this WebKit draws every frame whole (it doesn't track what changed)");
+            return;
+        }
+        let on: Vec<String> = got.into_iter().filter(|(_, on)| *on).map(|(n, _)| n).collect();
+        if !whole_frames_asked() {
+            log::info!("see-through: what changes drawn, the whole window again after each big change (the page's uiWhole)");
+        } else if on.is_empty() {
+            log::info!("see-through: every frame drawn whole (AMARCHY_DESKTOP_WHOLE_FRAMES; {} off)", DAMAGE.join(", "));
+        } else {
+            log::warn!("see-through: every frame drawn whole was asked, but WebKit kept {} on", on.join(", "));
+        }
+    }
+
+    /// WebKit's own switches (WebKitFeature, 2.42 and later) by name: each
+    /// one of names it has, and whether it's on (after setting it, with
+    /// set). Looked up as it runs, so a WebKit without them still starts
+    /// (it has none of them: nothing).
+    pub fn features(s: &webkit2gtk::Settings, names: &[&str], set: Option<bool>) -> Vec<(String, bool)> {
+        use gtk::glib::object::ObjectType;
+        // SAFETY: s is a live WebKitSettings for as long as this borrows it.
+        unsafe { features_of(s.as_ptr().cast(), names, set) }
+    }
+
+    /// features, on a WebKitSettings by its pointer.
+    ///
+    /// # Safety
+    /// settings is a live WebKitSettings.
+    unsafe fn features_of(settings: *mut std::ffi::c_void, names: &[&str], set: Option<bool>) -> Vec<(String, bool)> {
+        use std::ffi::{c_char, c_void, CStr};
+        type GetAll = unsafe extern "C" fn() -> *mut c_void;
+        type Len = unsafe extern "C" fn(*mut c_void) -> usize;
+        type Get = unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void;
+        type Ident = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+        type SetOn = unsafe extern "C" fn(*mut c_void, *mut c_void, i32);
+        type GetOn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32;
+        type Unref = unsafe extern "C" fn(*mut c_void);
+        fn sym<T: Copy>(name: &CStr) -> Option<T> {
+            // SAFETY: a symbol of the WebKit this process is linked with, looked up by its C name.
+            let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+            // SAFETY: T is the C function's own signature (WebKitGTK's webkit/WebKitFeature.h, WebKitSettings.h).
+            (!p.is_null()).then(|| unsafe { std::mem::transmute_copy::<*mut c_void, T>(&p) })
+        }
+        let (Some(all), Some(len), Some(get), Some(ident), Some(set_on), Some(get_on), Some(unref)) = (
+            sym::<GetAll>(c"webkit_settings_get_all_features"),
+            sym::<Len>(c"webkit_feature_list_get_length"),
+            sym::<Get>(c"webkit_feature_list_get"),
+            sym::<Ident>(c"webkit_feature_get_identifier"),
+            sym::<SetOn>(c"webkit_settings_set_feature_enabled"),
+            sym::<GetOn>(c"webkit_settings_get_feature_enabled"),
+            sym::<Unref>(c"webkit_feature_list_unref"),
+        ) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        // SAFETY: the list is ours until unref; its features are the list's,
+        // used only while it's held; settings is alive (s borrows it).
+        unsafe {
+            let list = all();
+            if list.is_null() {
+                return out;
+            }
+            for i in 0..len(list) {
+                let f = get(list, i);
+                let id = if f.is_null() { std::ptr::null() } else { ident(f) };
+                if id.is_null() {
+                    continue;
+                }
+                let id = CStr::from_ptr(id).to_string_lossy();
+                if !names.contains(&id.as_ref()) {
+                    continue;
+                }
+                if let Some(v) = set {
+                    set_on(settings, f, v as i32);
+                }
+                out.push((id.into_owned(), get_on(settings, f) != 0));
+            }
+            unref(list);
+        }
+        out
+    }
+
     pub fn webview(win: &tauri::WebviewWindow) {
         use tauri::Manager;
         let handle = win.app_handle().clone();
@@ -521,6 +687,10 @@ mod linux {
             // Kept after crashes: drawn without compositing.
             if super::safe_rendering().is_some() {
                 s.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
+            }
+            // See-through: how it draws (whole_frames, before it was made), in the log.
+            if super::omarchy() {
+                see_through_said(&s);
             }
             // The microphone (dictation): WebKitGTK has it off unless asked,
             // and denies it unless the app answers its permission request

@@ -289,7 +289,10 @@ async function run(browser, layout, port) {
   await sleep(500);
   await shot("menu");
   if (desk) await p.keyboard.type("keys page");
-  else await p.fill(".sheet .ui-menu-search input", "keys page");
+  else {      // (a tap on its search first, as on a phone: a box stepped aside for Ctrl+Alt takes text again with a key or a tap)
+    await p.click(".sheet .ui-menu-search input");
+    await p.fill(".sheet .ui-menu-search input", "keys page");
+  }
   check(as, await until(p, () => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();
     return !!m && [...m.querySelectorAll(".picker-row, .menu-item")].some((r) => !r.hidden && /Docs: the keys page/.test(r.innerText)); }), "typed: the chat by its name");
   await p.evaluate(() => { const m = document.querySelector(".picker") || [...document.querySelectorAll(".sheet")].pop();

@@ -623,6 +623,7 @@ function deskLayout() {
   const tab = desk.current ? sideTab() : null;
   const wide = !!tab && desk.sideWide;
   const { side, over } = sideRoom(tab, wide);
+  if (desk.el.classList.contains("side-open") !== !!tab || desk.el.classList.contains("side-wide") !== wide) uiWhole();      // (ui.js)
   desk.el.classList.toggle("side-open", !!tab);
   desk.el.classList.toggle("side-over", over);
   desk.el.classList.toggle("side-wide", wide);
@@ -684,6 +685,7 @@ function show(id) {
   if (changed && desk.chat) letGoOf(desk.chat.el);
   desk.current = id;
   desk.el.classList.toggle("chat-open", !!id);
+  if (changed) uiWhole();      // the window's all of it new: drawn whole a moment (ui.js)
   if (changed) {
     // One that can't close (an error in it) is let go of all the same: the
     // next one opens (app.js route).
@@ -1491,7 +1493,7 @@ function chime(v) {
 // the menu (M), and / (or ?) shows them all. Never Space: Alt+Space (and Right Alt)
 // is Omarchy's dictation, and a desktop can take Ctrl+Alt+Space for it too.
 // Esc is Claude Code's: it stops Claude (chat.js navKey); plain keys only
-// move, or type.
+// move, or type. In a box, the input method steps aside for them (below).
 
 const APP_KEYS = {
   ArrowLeft: () => keysBack(), ArrowRight: () => keysInto(),
@@ -1502,7 +1504,7 @@ const APP_KEYS = {
   KeyM: () => deskMenu(),
   KeyW: () => closeCurrent(),
   KeyT: () => keysTerminal(),
-  KeyP: () => keysPreview(),
+  KeyO: () => keysPreview(),
   Slash: () => showKeys(),
 };
 
@@ -1520,6 +1522,63 @@ function deskKeys(e) {
   document.querySelectorAll(".picker-back").forEach((p) => p.close && p.close());
   act(e);
 }
+
+// ---- the input method, aside while Ctrl+Alt are down
+//
+// On Omarchy fcitx5 is in every box (the chat's, a terminal's), and while a
+// box takes text the compositor gives it the keys before the page: it keeps
+// Ctrl+Alt+H (its word hints: a list under all you type, in every app, until
+// pressed again) and J (one word's), amarchy's both, and P (its preedit):
+// amarchy would never see them, and they'd turn its things on. So as Ctrl and Alt go down together, the box stops taking
+// text (read-only: it keeps the keys, nothing moves), the input method lets
+// go of the keyboard, and the key that comes next is amarchy's, whatever it
+// is (5 ms after them is enough; a person is slower). A box amarchy puts the
+// keys in meanwhile (into a chat, its terminal) steps aside too. They take
+// text again with the next key that isn't the chord (it goes in as typed,
+// past the input method; the next ones through it), a click, or the window
+// left. Ctrl+Alt+Shift stays the input method's (its Unicode entry);
+// amarchy's one there, ?, it lets through. Linux only: elsewhere no input
+// method takes Ctrl+Alt (on Windows it's AltGr, a character).
+// test/input-method-view.py presses them through fcitx5, in Chromium and
+// WebKitGTK (the desktop app's).
+const imAside = {
+  on: /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent),
+  held: false,
+  boxes: new Map(),      // box -> its readOnly before
+};
+
+function imBox(el) {
+  return !!el && el.matches && el.matches("textarea, input:not([type=button]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=range]):not([type=file])");
+}
+
+function imStepAside(el) {
+  if (!imBox(el) || imAside.boxes.has(el)) return;
+  imAside.boxes.set(el, el.readOnly);
+  el.readOnly = true;
+}
+
+function imBack() {
+  imAside.held = false;
+  for (const [el, was] of imAside.boxes) el.readOnly = was;
+  imAside.boxes.clear();
+}
+
+function imKeys(e) {
+  if (!imAside.on) return;
+  const mod = /^(Control|Alt)(Left|Right)$/.test(e.code);
+  const chord = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && !(e.getModifierState && e.getModifierState("AltGraph"));
+  if (chord) {
+    if (mod && !imAside.held) { imAside.held = true; imStepAside(document.activeElement); }
+    return;
+  }
+  if (imAside.held && !mod) imBack();      // typing again (Shift too: Ctrl+Alt+Shift is the input method's)
+}
+
+window.addEventListener("keydown", imKeys, true);
+document.addEventListener("focusin", (e) => { if (imAside.held) imStepAside(e.target); }, true);
+window.addEventListener("pointerdown", () => { if (imAside.held) imBack(); }, true);
+window.addEventListener("blur", () => { if (imAside.held) imBack(); });
+document.addEventListener("visibilitychange", () => { if (imAside.held && document.hidden) imBack(); });
 
 window.addEventListener("keydown", deskKeys, true);
 window.addEventListener("keyup", deskKeysUp, true);
@@ -1569,7 +1628,7 @@ function keysTerminal() {
   toTerminal();
 }
 
-// Ctrl+Alt+P: its preview (of several: which).
+// Ctrl+Alt+O: its preview (of several: which).
 function keysPreview() {
   const s = row(keyedId());
   if (s) uiPreviewGo(s);
@@ -1831,8 +1890,8 @@ function deskMenu() {
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+↵", act: () => boardNew() },
     open ? { label: "Back to the board", icon: "back", key: "Ctrl+Alt+←", act: () => keysBack() } : null,
-    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+P", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
-      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+P", act: () => uiPreviewGo(s) } : null,
+    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+O", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+      : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+O", act: () => uiPreviewGo(s) } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
     !open && boardTabNow() === "chats" && !board.query ? { label: todayUI.needsOnly ? "Show every chat" : "Only what needs you", icon: "waiting", act: () => todayNeedsOnly(!todayUI.needsOnly) } : null,
@@ -1925,7 +1984,7 @@ function showKeys() {
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
       ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H J K L", "The same, as vim's ← ↓ ↑ →"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+P", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
+      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],
