@@ -146,9 +146,9 @@ More in the guide: [On Omarchy](docs/guide.md#on-omarchy).
 
 ## The keys that matter
 
-On a computer, three rules: **Ctrl+Alt + a key does things**, from anywhere, even
-while you type (as Super does on Omarchy); **Esc stops Claude**, as in Claude Code,
-and nothing else; every other key only moves, or types.
+On a computer, four rules: **Ctrl+Alt + a key does things**, from anywhere, even
+while you type (as Super does on Omarchy); **Ctrl twice dictates**; **Esc stops
+Claude**, as in Claude Code, and nothing else; every other key only moves, or types.
 
 | Key | |
 | --- | --- |
@@ -159,7 +159,7 @@ and nothing else; every other key only moves, or types.
 | `Ctrl+Alt+W` | Complete the chat's mission (close it, with Undo) |
 | `Ctrl+Alt+T` | The chat's terminal (again: back to the chat) |
 | `Ctrl+Alt+O` | Open the chat's preview (of several: pick one) |
-| `Ctrl+Alt+D` | Dictate into the chat (hold it, or tap it and tap again) |
+| `Ctrl` twice (or `Ctrl+Alt+D`) | Dictate into the chat (hold the second, or tap it and tap `Ctrl` again) |
 | `Ctrl+Alt+/` | Every key |
 | `Esc` | Stop Claude (on its question: no) |
 | `j` / `k`, `Enter` | Card to card, message to message; open it, press it |

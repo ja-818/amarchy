@@ -557,7 +557,7 @@ yours in the terminal) prints it.
 
 ### Keys
 
-Three rules, the same in every layout:
+Four rules, the same in every layout:
 
 - **`Ctrl+Alt` and a key does things**, from anywhere, even while you type in a
   box or a terminal, as Super does on Omarchy (its keys copy Omarchy's where
@@ -576,6 +576,12 @@ Three rules, the same in every layout:
   taking text for a moment, so the key is amarchy's; the next key you type
   goes in as typed, and the input method is back for the rest. `Ctrl+Alt+Shift`
   stays the input method's (its Unicode entry, `Ctrl+Alt+Shift+U`).
+- **`Ctrl` twice dictates**, the one thing done with a lone modifier, as it's
+  what you do most: tap `Ctrl`, then hold it while you speak, or tap it twice
+  and tap `Ctrl` again when you're done. Only `Ctrl` alone counts (another key
+  or a click between makes it a chord's: `Ctrl+C` twice never dictates), and
+  nothing else has it: not Omarchy, a browser or a terminal; your input method
+  lets it through.
 - **`Esc` stops Claude**, as in Claude Code, and nothing else (see
   [the chat](#in-a-browser-on-your-computer)).
 - **Every other key only moves**, or types.
@@ -589,7 +595,7 @@ Three rules, the same in every layout:
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
 | `Ctrl+Alt+O` | Open the chat's preview (of several: its dropdown, to pick one). |
-| `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold it while you speak, or tap it, and tap again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
+| `Ctrl` twice, or `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold the second `Ctrl` (or `Ctrl+Alt+D`) while you speak, or tap it, and tap `Ctrl` again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
 
@@ -1306,8 +1312,11 @@ line, with what to do: **Set it up** (Settings → Dictation), or **Copy the com
 that installs what's missing.
 
 The keyboard's own dictation (its mic key) works in every box too. On a computer,
-`Ctrl+Alt+D` dictates into the chat's box: hold it, or tap it and tap again (not
-`Alt+Space`: that's Omarchy's own dictation, which types into the box as well). The phone asks for the microphone the first time you dictate, in that
+`Ctrl` twice dictates into the chat's box: tap `Ctrl`, then hold it while you speak
+(let go and it's written down), or tap it twice and tap `Ctrl` again when you're
+done. Only `Ctrl` alone counts: `Ctrl+C` twice never dictates. `Ctrl+Alt+D` does
+the same (not `Alt+Space`: that's Omarchy's own dictation, which types into the box
+as well). The phone asks for the microphone the first time you dictate, in that
 very tap (an iPhone starts the audio only once your finger lifts, so the microphone is
 asked for first, and the audio started on the lift), and a microphone that gives only
 silence once held is opened afresh on the spot. `amarchy dictation log` lists each

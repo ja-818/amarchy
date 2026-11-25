@@ -9,7 +9,8 @@
 //     chat's are lit; the first tap starts the setup on the host and says
 //     so (770 MB, once), the ring fills as the board says how far, a tap
 //     meanwhile says how far, and "Dictation is ready" once it's there;
-//     Ctrl+Alt+D does the same on a computer; Settings offers it too;
+//     Ctrl twice and Ctrl+Alt+D do the same from a keyboard (only Ctrl
+//     alone, twice and close: not Ctrl+C twice); Settings offers it too;
 //   - a processor amarchy has no engine for: dimmed; a tap says the host
 //     needs a speech model, Set it up opens Settings at Dictation, which
 //     says what would do;
@@ -289,17 +290,42 @@ async function run(browser, layout, port) {
   });
   check(where, nm && nm.shown && !nm.cant, `the new chat's mic: there, lit (${JSON.stringify(nm)})`);
 
-  // Ctrl+Alt+D on a computer: the same first tap.
-  if (layout === "wide") {
+  // From the keyboard, Ctrl twice and Ctrl+Alt+D: the same first tap (either
+  // layout: a narrow window on a computer has its keyboard too).
+  const clear = () => p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
+  for (const [how, press] of [
+    ["Ctrl+Alt+D", async () => {
+      await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("KeyD");
+      await p.keyboard.up("Alt"); await p.keyboard.up("Control");
+    }],
+    ["Ctrl twice", async () => { await p.keyboard.press("Control"); await sleep(90); await p.keyboard.press("Control"); }]]) {
     await at(p, "auto");
     posted = 0;
-    await p.evaluate(() => document.querySelectorAll(".toast").forEach((x) => x.remove()));
-    await p.keyboard.down("Control"); await p.keyboard.down("Alt"); await p.keyboard.press("KeyD");
-    await p.keyboard.up("Alt"); await p.keyboard.up("Control");
+    await clear();
+    await sleep(500);       // (past any taps before)
+    await press();
     await sleep(250);
     t = await toastText(p);
-    check(where, posted === 1 && /Getting dictation ready/.test(t), `Ctrl+Alt+D: the same (${posted}, "${t}")`);
+    check(where, posted === 1 && /Getting dictation ready/.test(t), `${how}: the same (${posted}, "${t}")`);
   }
+  // Only Ctrl alone, twice and close: not Ctrl+C twice, two taps far apart, a
+  // long press then a tap, or a tap then Ctrl+Alt+H.
+  await at(p, "auto");
+  posted = 0;
+  await clear();
+  await sleep(500);
+  await p.keyboard.press("Control+KeyC"); await p.keyboard.press("Control+KeyC");
+  await sleep(500);
+  await p.keyboard.press("Control"); await sleep(650); await p.keyboard.press("Control");
+  await sleep(500);
+  await p.keyboard.down("Control"); await sleep(450); await p.keyboard.up("Control"); await sleep(60); await p.keyboard.press("Control");
+  await sleep(500);
+  await p.keyboard.press("Control"); await sleep(60); await p.keyboard.down("Control"); await p.keyboard.down("Alt");
+  await p.keyboard.press("KeyH"); await p.keyboard.up("Alt"); await p.keyboard.up("Control");
+  await sleep(300);
+  t = await toastText(p);
+  check(where, posted === 0 && !/Getting dictation ready/.test(t),
+    `not Ctrl+C twice, two taps far apart, a long press then a tap, or a tap then Ctrl+Alt+H (${posted}, "${t}")`);
 
   // A processor amarchy has no engine for: dimmed, and what would do.
   await at(p, "none");

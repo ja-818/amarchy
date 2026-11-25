@@ -23,6 +23,10 @@ Here, for each browser:
   from the box, fcitx5's hints never come on (what's typed next goes in, the
   box taking text again), Ctrl+Alt+Shift+U is still fcitx5's (its Unicode
   entry) and Ctrl+Alt+? amarchy's;
+- Ctrl twice from the box (a lone Ctrl gets through fcitx5): dictation, the
+  second press held (until let go) or tapped (until Ctrl again, said so);
+  either Ctrl; never Ctrl+C twice, a tap then Ctrl+C, or taps far apart;
+  the box as it was after;
 - and they do amarchy's things from the box: H the board, L the chat again
   (what you wrote still there, the keys in its box), K J Tasks and Chats, /
   the keys (H / L and J / K in them, O the preview), M the menu; Ctrl+Alt held down
@@ -732,6 +736,53 @@ def run(where, name, b, desktop, kb):
         return
     kb.type("half")
     check(where, until(b, f"{box}.value === 'half'", 3000), f"typed through it: {value()!r}")
+
+    # Ctrl twice, from the box (fcitx5 lets a lone Ctrl through): dictation,
+    # held or tapped, and never a chord's. (The chat's dictation stands in:
+    # what it was asked, and what it said.)
+    b.js("""(() => { const t = __chat().talk; window.__talk = [];
+      t.tellWhyNot = () => false;
+      t.start = function () { __talk.push('start'); this.run = { held: true }; };
+      t.stop = function () { __talk.push('stop'); this.run = null; this.locked = false; };
+      t.cancel = function () { __talk.push('cancel'); this.run = null; this.locked = false; };
+      t.say = function (x) { __talk.push('say ' + x); };
+      return true; })()""")
+    talk = lambda: b.js("__talk.splice(0)") or []
+
+    def tap(sym="Control_L", ms=0.06):
+        kb.down(sym)
+        time.sleep(ms)
+        kb.up(sym)
+    tap(); time.sleep(0.1); kb.down("Control_L"); time.sleep(0.8); kb.up("Control_L"); time.sleep(0.3)
+    said = talk()
+    check(where, said == ["start", "stop"], f"Ctrl twice from the box, the second held: it listens until let go ({said})")
+    time.sleep(0.5)
+    tap(); time.sleep(0.1); tap(); time.sleep(0.3)
+    said = talk()
+    check(where, said == ["start", "say Listening… Ctrl when you're done"] and b.js("__chat().talk.locked") is True,
+          f"Ctrl twice tapped: it listens until Ctrl again, and says so ({said})")
+    time.sleep(0.5)
+    tap(); time.sleep(0.3)
+    said = talk()
+    check(where, said == ["stop"], f"and one tap of Ctrl: done ({said})")
+    time.sleep(0.5)
+    tap("Control_R"); time.sleep(0.1); tap("Control_R"); time.sleep(0.3)
+    said = talk()
+    check(where, said[:1] == ["start"], f"the right Ctrl too ({said})")
+    time.sleep(0.5)
+    tap("Control_R"); time.sleep(0.3)
+    talk()
+    time.sleep(0.5)
+    kb.send("key c ctrl"); kb.send("key c ctrl"); time.sleep(0.5)
+    tap(); time.sleep(0.05); kb.send("key c ctrl"); time.sleep(0.5)
+    tap(); time.sleep(0.7); tap(); time.sleep(0.3)
+    said = talk()
+    check(where, said == [], f"never Ctrl+C twice, a tap then Ctrl+C, or two taps far apart ({said})")
+    time.sleep(0.5)
+    kb.type("x")
+    check(where, until(b, f"{box}.value === 'halfx'", 3000) and desktop.im_has_a_box() != "",
+          f"the box as it was, taking text through fcitx5 ({value()!r})")
+    b.js(f"{box}.value = 'half'; __chat().typed(); true")
 
     # Without the stepping aside (as it was): fcitx5 takes H J P in the box; amarchy never sees them.
     b.js("imAside.on = false; __swallow = true; __seen.length = 0; true")

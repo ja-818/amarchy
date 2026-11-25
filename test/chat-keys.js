@@ -302,7 +302,7 @@ async function run(browser, layout, port) {
 
   // Ctrl+Alt+/: the keys, the same on both.
   await p.keyboard.press("Control+Alt+Slash");
-  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H \/ L/.test(document.querySelector(".sheet").innerText) && /J \/ K[\s\S]*Chats \/ Tasks/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, H / L and J / K in them");
+  check(as, await until(p, () => /Ctrl\+Alt\+M\b/.test((document.querySelector(".sheet") || {}).innerText || "") && /H \/ L/.test(document.querySelector(".sheet").innerText) && /J \/ K[\s\S]*Chats \/ Tasks/.test(document.querySelector(".sheet").innerText) && /Ctrl twice\s+or\s+Ctrl\+Alt\+D[\s\S]*Dictate/.test(document.querySelector(".sheet").innerText)), "Ctrl+Alt+/: the keys, H / L, J / K and Ctrl twice (dictate) in them");
   await sleep(500);
   await shot("keys");
   await p.keyboard.press("Escape");

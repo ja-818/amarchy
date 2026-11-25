@@ -173,6 +173,7 @@ class Dictate {
     mics.add(new WeakRef(this));
     this.run = null;          // the dictation under way
     this.locked = false;      // tapped: listening until tapped again
+    this.ends = null;         // what ends it then, in words: the mic, else the key that started it ("Ctrl")
     const el = opts.button;
     el.addEventListener("pointerdown", (e) => {
       e.preventDefault();
@@ -195,7 +196,8 @@ class Dictate {
         if (end === "pointerup" && this.run && this.run.way === "host") micNudge();      // the lift starts the phone's audio
         if (tapped && end === "pointerup" && this.run && this.run.held) {
           this.locked = true;
-          this.say("Listening… tap the mic when you're done");
+          this.ends = null;
+          this.say(this.listening());
           el.classList.add("on");
           return;
         }
@@ -206,6 +208,11 @@ class Dictate {
   }
 
   way() { return dictationWay(); }
+
+  // What it says while it listens; tapped, how it ends.
+  listening() {
+    return this.locked ? `Listening… ${this.ends || "tap the mic"} when you're done` : "Listening…";
+  }
 
   on() { return !!this.run; }
 
@@ -308,6 +315,7 @@ class Dictate {
     if (this.run !== r) return;
     this.run = null;
     this.locked = false;
+    this.ends = null;
     this.opts.button.classList.remove("on");
     this.say(null);
     if (this.opts.changed) this.opts.changed();
@@ -332,7 +340,7 @@ class Dictate {
     this.say("Starting the microphone…");
     const queue = [];
     let ws = null;
-    mic.hears = () => { if (r.held) this.say(this.locked ? "Listening… tap the mic when you're done" : "Listening…"); };
+    mic.hears = () => { if (r.held) this.say(this.listening()); };
     try {
       await micOpen();
     } catch (e) {
@@ -448,7 +456,7 @@ class Dictate {
       }
       this.done(r);
     };
-    rec.onstart = () => { if (!r.cancelled) this.say(this.locked ? "Listening… tap the mic when you're done" : "Listening…"); };
+    rec.onstart = () => { if (!r.cancelled) this.say(this.listening()); };
     // Each time, the whole of it again from what it has (adding to what came
     // before repeats words on iOS, which hands some of them in twice).
     rec.onresult = (e) => {
@@ -553,7 +561,7 @@ function dictationSettings(draw) {
       if (d.fix) kids.push(h("button", { class: "control wide", onclick: () => copyText(d.fix).then(() => toast(`Copied: ${d.fix}`)) }, "Copy the command"));
     }
   }
-  kids.push(h("p", {}, matchMedia("(hover: hover) and (pointer: fine)").matches ? "Ctrl+Alt+D dictates into the chat: hold it, or tap it and tap again. The keyboard's own dictation (its mic key, or Omarchy's Alt+Space) works in every box too."
+  kids.push(h("p", {}, matchMedia("(hover: hover) and (pointer: fine)").matches ? "Ctrl twice dictates into the chat (Ctrl+Alt+D too): hold the second, or tap it and tap Ctrl again. The keyboard's own dictation (its mic key, or Omarchy's Alt+Space) works in every box too."
                                 : "The keyboard's own dictation (its mic key) works in every box too."));
   return kids;
 }

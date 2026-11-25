@@ -1635,44 +1635,149 @@ function keysPreview() {
   if (s) uiPreviewGo(s);
 }
 
-// Ctrl+Alt+D: dictate into the chat's box (or the new chat's), held as its
-// mic is (let go and it's written down), or tapped (it listens until tapped
-// again). (Not Alt+Space: that's Omarchy's own dictation, which types into
-// the box too.)
+// Dictating into the chat's box (or the new chat's), from the keyboard: Ctrl
+// twice, or Ctrl+Alt+D. Held, as its mic is: it listens until let go, and
+// it's written down. Tapped: it listens until Ctrl again (or Ctrl+Alt+D,
+// the mic, Enter). (Not Alt+Space: that's Omarchy's own dictation, which
+// types into the box too.)
 const TALK_KEYS = ["KeyD"];
 
-function talkKey(e) {
-  e.preventDefault();
-  e.stopPropagation();
+// The box dictation goes into now, and its Dictate (dictate.js), or null.
+function talkBox() {
   const c = openChat();
   const fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;     // into the new chat's box
-  if (e.repeat || (!fresh && (!c || !c.dock.contains(c.input)))) return;
-  const t = fresh ? fresh.dictate : c.talk;
+  if (fresh) return { t: fresh.dictate, button: fresh.dictate.opts.button, focus: () => fresh.focus() };
+  if (!c || !c.dock.contains(c.input)) return null;
+  return { t: c.talk, button: c.micBtn, focus: () => c.input.focus({ preventScroll: true }) };
+}
+
+// The key's press: it starts listening (or, listening until tapped again, it's done).
+function talkKey(e, ends = "Ctrl+Alt+D again") {
+  e.preventDefault();
+  e.stopPropagation();
+  const box = talkBox();
+  if (e.repeat || !box) return;
+  const t = box.t;
   if (t.locked) { t.stop(); return; }
   if (t.run) return;
   if (t.tellWhyNot()) return;      // it can't work here: why, and what to do
-  if (fresh) fresh.focus(); else c.input.focus({ preventScroll: true });
+  box.focus();
   desk.talkDown = e.timeStamp;
   desk.talkCode = e.code;
+  desk.talkEnds = ends;
   t.start();
+}
+
+// Its let go: held, it's written down; tapped, it listens until tapped again.
+function talkLetGo(at) {
+  const box = talkBox(), t = box && box.t;
+  const tapped = at - desk.talkDown < DICTATE_TAP;
+  desk.talkDown = null;
+  if (!t || !t.run) return false;
+  if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
+    t.locked = true;
+    t.ends = desk.talkEnds;
+    t.say(t.listening());
+    box.button.classList.add("on");
+    return true;
+  }
+  t.stop();
+  return true;
 }
 
 function deskKeysUp(e) {
   if (e.code !== desk.talkCode || desk.talkDown === undefined || desk.talkDown === null) return;
-  const c = openChat(), fresh = !c && desk.newChat && desk.newChat.el.isConnected ? desk.newChat : null;
-  const t = fresh ? fresh.dictate : c && c.talk;
-  const tapped = e.timeStamp - desk.talkDown < DICTATE_TAP;
+  if (talkLetGo(e.timeStamp)) e.preventDefault();
+}
+
+// Ctrl twice: dictation with one finger (what's done most gets the easiest
+// key). Ctrl alone, tapped, then pressed again within CTRL_TWICE: that
+// second press is the dictation key, held or tapped as above. Only Ctrl
+// alone counts: another key, a click or the wheel in between makes it a
+// chord's (Ctrl+C twice never dictates). The second press waits CTRL_SURE
+// before it listens, so a chord that starts with it (a tap, then Ctrl+Alt+H)
+// is that chord's alone; let go sooner, it's a tap (listening until Ctrl
+// again), and a key a little later still drops what it began to hear. One
+// tap of Ctrl alone ends a dictation listening until tapped again (and
+// isn't the first of two). Nothing else has a lone Ctrl: not Omarchy
+// (Castle's keys neither), not a browser, a terminal or a box; on Omarchy
+// fcitx5 lets it through to the page, and a held one doesn't repeat
+// (test/input-method-view.py presses it there, in Chromium and WebKitGTK).
+const CTRL_TAP = 300;         // ms: Ctrl held longer is a chord's start, not a tap
+const CTRL_TWICE = 400;       // ms from the first tap's let go to the second press
+const CTRL_SURE = 180;        // ms the second press is held, alone, before it listens
+const CTRL_CHORD = 500;       // ms after the second press that a key still makes it a chord's
+const ctrlTwice = { down: null, code: "", tapped: null, pending: null, second: null };
+
+function ctrlCode(code) {
+  return code === "ControlLeft" || code === "ControlRight";
+}
+
+// The second press, sure now: it listens (as from its press).
+function ctrlListen(at, code) {
+  ctrlTwice.second = at;
+  talkKey({ preventDefault() {}, stopPropagation() {}, repeat: false, timeStamp: at, code }, "Ctrl");
+}
+
+function ctrlPendingOff() {
+  const p = ctrlTwice.pending;
+  if (p) clearTimeout(p.timer);
+  ctrlTwice.pending = null;
+  return p;
+}
+
+// Something else pressed (at: when): no tap, and a second press a chord's.
+function ctrlTwiceReset(at) {
+  ctrlTwice.down = ctrlTwice.tapped = null;
+  ctrlPendingOff();
+  const s = ctrlTwice.second;
+  if (s === null || at - s > CTRL_CHORD) return;
+  ctrlTwice.second = null;          // it listened already: what it heard goes
+  if (desk.talkDown === null || desk.talkDown === undefined) return;
   desk.talkDown = null;
-  if (!t || !t.run) return;
-  e.preventDefault();
-  if (tapped && t.run.held) {       // tapped: listening until tapped again, as the mic does
-    t.locked = true;
-    t.say("Listening… Ctrl+Alt+D again when you're done");
-    (fresh ? fresh.dictate.opts.button : c.micBtn).classList.add("on");
+  const box = talkBox();
+  if (box && box.t.run) box.t.cancel();
+}
+
+function ctrlTwiceDown(e) {
+  if (e.repeat) return;
+  if (!ctrlCode(e.code) || e.altKey || e.shiftKey || e.metaKey) return ctrlTwiceReset(e.timeStamp);
+  const twice = ctrlTwice.tapped !== null && e.timeStamp - ctrlTwice.tapped <= CTRL_TWICE;
+  ctrlTwice.tapped = null;
+  ctrlTwice.code = e.code;
+  ctrlTwice.down = twice ? null : e.timeStamp;       // (the second press isn't a first tap of its own)
+  if (!twice) return;
+  const at = e.timeStamp, code = e.code;
+  ctrlTwice.pending = { at, code, timer: setTimeout(() => { if (ctrlPendingOff()) ctrlListen(at, code); }, CTRL_SURE) };
+}
+
+function ctrlTwiceUp(e) {
+  if (!ctrlCode(e.code)) return;
+  const p = ctrlPendingOff();
+  if (p) {                          // the second press, let go before it listened: a tap
+    ctrlListen(p.at, p.code);
+    ctrlTwice.second = null;
+    if (desk.talkDown !== null && desk.talkDown !== undefined) talkLetGo(e.timeStamp);
     return;
   }
-  t.stop();
+  if (ctrlTwice.second !== null) { ctrlTwice.second = null; return; }     // the second press let go (deskKeysUp's)
+  const down = ctrlTwice.down;
+  ctrlTwice.down = null;
+  if (down === null || e.code !== ctrlTwice.code || e.timeStamp - down > CTRL_TAP) return;
+  const box = talkBox();
+  if (box && box.t.locked) { box.t.stop(); return; }        // listening until tapped again: done
+  ctrlTwice.tapped = e.timeStamp;
 }
+
+window.addEventListener("keydown", ctrlTwiceDown, true);
+window.addEventListener("keyup", ctrlTwiceUp, true);
+for (const ev of ["pointerdown", "wheel"]) window.addEventListener(ev, (e) => ctrlTwiceReset(e.timeStamp), { capture: true, passive: true });
+// Gone from the window while it's held (its let go never comes here): let go.
+window.addEventListener("blur", () => {
+  ctrlPendingOff();
+  ctrlTwice.down = ctrlTwice.tapped = ctrlTwice.second = null;
+  if (desk.talkDown !== null && desk.talkDown !== undefined) talkLetGo(Infinity);
+});
 
 // Ctrl+Alt+↑ / ↓ (J / K): the board's tab before or after, Chats then Tasks
 // (from a chat: the board, on that tab). At the first or the last, it stays.
@@ -1979,8 +2084,8 @@ function sessionMenu(s) {
 }
 
 // The keys, three rules: Ctrl+Alt + a key does things from anywhere (as
-// Super does on Omarchy), Esc stops Claude (as in Claude Code), and the
-// rest only move, or type.
+// Super does on Omarchy; and Ctrl twice dictates, what's done most), Esc
+// stops Claude (as in Claude Code), and the rest only move, or type.
 function showKeys() {
   const part = (title, keys) => [h("div", { class: "section" }, title),
     h("div", { class: "keys-table" }, ...keys.map(([k, what]) => h("div", { class: "keys-row" }, h("kbd", {}, k), h("span", {}, what))))];
@@ -1988,7 +2093,7 @@ function showKeys() {
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
       ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H / L", "← / →, as vim's"], ["Ctrl+Alt+J / K", "Chats / Tasks, as the tabs sit"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl+Alt+D", "Dictate: hold, or tap and tap again"], ["Ctrl+Alt+/", "These keys"]]),
+      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl twice  or  Ctrl+Alt+D", "Dictate: hold the second, or tap it and Ctrl again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],
